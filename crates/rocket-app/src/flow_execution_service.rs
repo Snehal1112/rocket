@@ -625,19 +625,16 @@ impl FlowExecutionService {
     ) -> DomainResult<ExecutedNode> {
         match &node.kind {
             FlowNodeKind::Input { value, .. } => {
-                let settings = self.collection_repo.get_settings(&input.collection)?;
-                let mut vars = HashMap::new();
-                for cv in settings.variables.iter().filter(|v| v.enabled) {
-                    let v = if cv.value.is_empty() {
-                        cv.initial_value.clone()
-                    } else {
-                        cv.value.clone()
-                    };
-                    vars.insert(cv.key.clone(), v);
-                }
-                // An unknown `{{name}}` stays as literal text. When the value is
-                // wired into a Request field, `execute` resolves it again with
-                // the full environment scope, so environment variables still work.
+                // Resolve with the scope a request uses (global < collection <
+                // environment), so an If, Switch or Output sees the real value.
+                // An unknown `{{name}}` stays as literal text.
+                let vars = exec.build_variable_context(
+                    input.global_env_name.as_deref(),
+                    Some(&input.collection),
+                    input.environment_name.as_deref(),
+                    None,
+                    external_secrets,
+                );
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
                 Ok(ExecutedNode::plain(CapturedOutput::Value(
                     VariableValue::simple(resolved),
@@ -891,12 +888,18 @@ mod tests {
 
     struct FakeCollectionRepo {
         requests: std::sync::Mutex<HashMap<(String, String), Request>>,
+        settings: CollectionSettings,
     }
     impl FakeCollectionRepo {
         fn new() -> Self {
             Self {
                 requests: std::sync::Mutex::new(HashMap::new()),
+                settings: CollectionSettings::default(),
             }
+        }
+        fn with_settings(mut self, settings: CollectionSettings) -> Self {
+            self.settings = settings;
+            self
         }
         fn with_request(self, collection: &str, path: &str, request: Request) -> Self {
             self.requests
@@ -955,7 +958,7 @@ mod tests {
             unimplemented!()
         }
         fn get_settings(&self, _name: &str) -> DomainResult<CollectionSettings> {
-            Ok(CollectionSettings::default())
+            Ok(self.settings.clone())
         }
         fn save_settings(&self, _name: &str, _settings: &CollectionSettings) -> DomainResult<()> {
             unimplemented!()
@@ -2251,6 +2254,177 @@ mod tests {
             executor.sent_urls(),
             vec!["https://api.example.com/acme".to_string()],
             "the flow-executed request must resolve {{ORG_ID}} against the global environment"
+        );
+    }
+
+    // ---- Input node variable scope ----------------------------------------
+
+    fn env_with(vars: &[(&str, &str)]) -> rocket_environment::Environment {
+        let mut env = rocket_environment::Environment::new("dev");
+        for (k, v) in vars {
+            env.set_variable(rocket_environment::Variable::new(*k, *v));
+        }
+        env
+    }
+
+    fn collection_var(key: &str, value: &str) -> rocket_collection::CollectionVariable {
+        rocket_collection::CollectionVariable {
+            key: key.to_string(),
+            value: value.to_string(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        }
+    }
+
+    /// Execution service with an environment repo, collection variables, and
+    /// a script engine that answers from the response body (routes: whether
+    /// the body equals `acme`).
+    fn scoped_exec(
+        env: rocket_environment::Environment,
+        collection_vars: Vec<rocket_collection::CollectionVariable>,
+    ) -> RequestExecutionService {
+        let settings = CollectionSettings {
+            variables: collection_vars,
+            ..Default::default()
+        };
+        RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            Arc::new(SharedExecutor(RecordingExecutor::new())),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new().with_settings(settings)),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(scripted(vec![
+            (
+                "!!(",
+                Scripted::FromResponse(|r| {
+                    serde_json::json!(r.map(|r| r.body == "acme").unwrap_or(false))
+                }),
+            ),
+            (
+                "response.body",
+                Scripted::FromResponse(|r| {
+                    serde_json::json!(r.map(|r| r.body.clone()).unwrap_or_default())
+                }),
+            ),
+        ]))
+    }
+
+    fn input_node_with(id: &str, v: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Input {
+                label: id.to_string(),
+                value: VariableValue::simple(v),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn output_node_named(id: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Output {
+                label: id.to_string(),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    /// Runs `input -> out` and returns the Output step's value.
+    async fn output_of_input(
+        text: &str,
+        exec: &RequestExecutionService,
+        environment: Option<&str>,
+        global: Option<&str>,
+    ) -> Option<String> {
+        let flow = Flow {
+            name: "scope".to_string(),
+            nodes: vec![input_node_with("in", text), output_node_named("out")],
+            edges: vec![FlowEdge {
+                target_field: "value".to_string(),
+                ..wire("e1", "in", "out")
+            }],
+        };
+        let mut input = run_input("scope");
+        input.environment_name = environment.map(str::to_string);
+        input.global_env_name = global.map(str::to_string);
+        let summary = service_with_flow(flow).run(exec, input).await.expect("run");
+        step_of(&summary, "out").value.clone()
+    }
+
+    #[tokio::test]
+    async fn an_input_resolves_an_environment_variable_for_an_output() {
+        let exec = scoped_exec(env_with(&[("ENV_VAR", "acme")]), Vec::new());
+
+        let value = output_of_input("{{ENV_VAR}}", &exec, Some("dev"), None).await;
+
+        assert_eq!(value.as_deref(), Some("acme"));
+    }
+
+    #[tokio::test]
+    async fn an_input_resolves_a_global_variable_for_an_output() {
+        let exec = scoped_exec(env_with(&[("ORG", "acme")]), Vec::new());
+
+        let value = output_of_input("{{ORG}}", &exec, None, Some("shared")).await;
+
+        assert_eq!(value.as_deref(), Some("acme"));
+    }
+
+    #[tokio::test]
+    async fn an_input_still_resolves_a_collection_variable() {
+        let exec = scoped_exec(env_with(&[]), vec![collection_var("COL", "acme")]);
+
+        let value = output_of_input("{{COL}}", &exec, Some("dev"), None).await;
+
+        assert_eq!(value.as_deref(), Some("acme"));
+    }
+
+    #[tokio::test]
+    async fn an_environment_variable_beats_a_collection_variable_in_an_input() {
+        let exec = scoped_exec(
+            env_with(&[("KEY", "acme")]),
+            vec![collection_var("KEY", "collection")],
+        );
+
+        let value = output_of_input("{{KEY}}", &exec, Some("dev"), None).await;
+
+        assert_eq!(value.as_deref(), Some("acme"));
+    }
+
+    #[tokio::test]
+    async fn an_if_fed_by_an_input_routes_on_the_resolved_environment_value() {
+        let flow = Flow {
+            name: "if-env".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{ENV_VAR}}"),
+                if_node("check", "response.body === 'acme'"),
+                output_node_named("yes"),
+                output_node_named("no"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "check"),
+                trigger_edge("e2", "check", handle::TRUE, "yes"),
+                trigger_edge("e3", "check", handle::FALSE, "no"),
+            ],
+        };
+        let exec = scoped_exec(env_with(&[("ENV_VAR", "acme")]), Vec::new());
+        let mut input = run_input("if-env");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        assert_eq!(
+            step_of(&summary, "check").branch.as_deref(),
+            Some(handle::TRUE)
         );
     }
 
