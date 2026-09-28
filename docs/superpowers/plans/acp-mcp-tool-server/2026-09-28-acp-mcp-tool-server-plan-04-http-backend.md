@@ -42,7 +42,7 @@
 - Modify: `src-tauri/src/lib.rs` (add `pub mod mcp;`)
 
 **Interfaces:**
-- Produces: `rocket_lib::mcp::tool_server::RocketMcpToolServer` (struct, `Clone`, with `pub fn new(app_handle: tauri::AppHandle, session_id: String) -> Self`), implementing `rmcp::ServerHandler`. No `#[tool]` methods yet (Task 2 adds them into the same `#[tool_router]` impl block created here).
+- Produces: `rocket_lib::mcp::tool_server::RocketMcpToolServer<R: tauri::Runtime = tauri::Wry>` (struct, `Clone`, with `pub fn new(app_handle: tauri::AppHandle<R>, session_id: String) -> Self`), implementing `rmcp::ServerHandler`. No `#[tool]` methods yet (Task 2 adds them into the same `#[tool_router]` impl block created here). **Correction, made while implementing Task 1 (see the "`AppHandle` / `MockRuntime` generic parameter" note below): `RocketMcpToolServer` is generic over `R: tauri::Runtime`, defaulted to `tauri::Wry`, not a bare `tauri::AppHandle` as originally sketched here — see that note for why, and for how this propagates into Tasks 2 and 4's code blocks below.**
 - Consumes: nothing from other tasks yet.
 
 - [ ] **Step 1: Verify the real `rmcp` API before writing any handler code**
@@ -138,21 +138,64 @@ mod tauri_tracing_layer;
 
 Create `src-tauri/src/mcp/tool_server.rs`:
 
+**Hygiene correction (post-Task-1-review):** the block below is kept in sync with the
+actual, committed `src-tauri/src/mcp/tool_server.rs` — it already reflects both the
+`rmcp` API corrections (`ContentBlock` not `Content`, `ServerConfig` not `ServerInfo`,
+builder-style construction — see the module doc comment's own "Corrections made here"
+list) and the `AppHandle`/`MockRuntime` generic-runtime fix (see the correction note
+after Step 8 below), including the hand-written (not derived) `Clone` impl a follow-up
+review found necessary. Earlier drafts of this plan showed the original, unverified
+`Content`/`ServerInfo`/bare-`AppHandle`/`#[derive(Clone)]` sketch here; that version never
+compiled and should not be copied from history.
+
 ```rust
 //! The MCP tool server exposed to ACP agents: one `rmcp` `ServerHandler`
 //! wired to `Arc<McpToolService>` (`rocket-app`, Plan 03) via `AppHandle`
 //! managed state, hosted over `rmcp`'s Streamable HTTP transport.
 //!
-//! Every `rmcp` name below was verified against the installed crate version
-//! in Task 1, Step 1. If a future `rmcp` upgrade renames any of these, this
-//! `use` block — and the mirroring one in this module's own tests — are the
-//! only places that should need to change.
-use rmcp::handler::server::tool::{Parameters, ToolRouter};
-use rmcp::model::{
-    CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo,
-};
+//! Every `rmcp` name below was verified against the installed `rmcp 3.5.0` /
+//! `rmcp-macros 3.5.0` source in Task 1, Step 1. If a future `rmcp` upgrade
+//! renames any of these, this `use` block — and the mirroring one in this
+//! module's own tests — are the only places that should need to change.
+//!
+//! Corrections made here vs. the plan's original guess:
+//! - `Parameters<T>` lives at `rmcp::handler::server::wrapper::Parameters`,
+//!   not `...::tool::Parameters`.
+//! - There is no `rmcp::model::Content` type. The content-block union is
+//!   `rmcp::model::ContentBlock`, with `ContentBlock::text(..)` /
+//!   `.as_text()` in place of the plan's guessed `Content::text` / `.as_text`.
+//! - `ServerHandler::get_info`'s return type is `rmcp::model::ServerConfig`
+//!   (`ServerInfo` is a deprecated alias for the same type in 3.5.0).
+//! - `ServerConfig` and `Implementation` are both `#[non_exhaustive]`, so
+//!   neither can be built with a struct literal. `ServerConfig::new(caps)` +
+//!   `.with_server_info(..)` + `.with_instructions(..)` and
+//!   `Implementation::new(name, version)` replace the plan's struct-literal
+//!   sketch.
+//!
+//! ## `AppHandle` / `MockRuntime` generic parameter
+//!
+//! `tauri::AppHandle` is not a concrete type — it is `AppHandle<R: Runtime>`,
+//! and bare `tauri::AppHandle` in production code resolves to `AppHandle<Wry>`
+//! via tauri's `#[default_runtime(crate::Wry, wry)]` macro. `Wry` drives a
+//! real webview/window system, which a headless test environment cannot
+//! construct. Tauri's own answer for headless unit tests,
+//! `tauri::test::mock_builder()` / `mock_context()` / `noop_assets()`, builds
+//! its `App`/`AppHandle` over `tauri::test::MockRuntime` instead — a
+//! different, non-interchangeable type parameter. `RocketMcpToolServer` and
+//! `mcp_tool_service` are therefore generic over `R: tauri::Runtime`, with
+//! `tauri::Wry` as the struct's default type parameter. Production call
+//! sites that pass a plain `tauri::AppHandle` are unaffected by the default;
+//! tests instantiate `RocketMcpToolServer<tauri::test::MockRuntime>`
+//! explicitly.
+use rmcp::handler::server::tool::ToolRouter;
+#[allow(unused_imports)]
+use rmcp::handler::server::wrapper::Parameters;
+#[allow(unused_imports)]
+use rmcp::model::{CallToolResult, ContentBlock};
+use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use std::sync::Arc;
+use tauri::Manager;
 
 use rocket_app::McpToolService;
 
@@ -161,15 +204,22 @@ use rocket_app::McpToolService;
 /// `spawn_mcp_http_server`'s doc comment for why it cannot be a per-call
 /// parameter) and threaded into every `McpToolService` call for that
 /// session's audit trail.
-#[derive(Clone)]
-pub struct RocketMcpToolServer {
-    app_handle: tauri::AppHandle,
+///
+/// `Clone` is implemented by hand, not derived: `#[derive(Clone)]` would add
+/// a blanket `R: Clone` bound on the whole impl, but neither `tauri::Wry`
+/// nor `tauri::test::MockRuntime` implement `Clone` — and neither field
+/// actually needs that bound (`tauri::AppHandle<R>::clone` and `rmcp`'s
+/// `ToolRouter<S>::clone` are both unconditional on their type parameter).
+pub struct RocketMcpToolServer<R: tauri::Runtime = tauri::Wry> {
+    #[allow(dead_code)]
+    app_handle: tauri::AppHandle<R>,
+    #[allow(dead_code)]
     session_id: String,
     tool_router: ToolRouter<Self>,
 }
 
-impl RocketMcpToolServer {
-    pub fn new(app_handle: tauri::AppHandle, session_id: String) -> Self {
+impl<R: tauri::Runtime> RocketMcpToolServer<R> {
+    pub fn new(app_handle: tauri::AppHandle<R>, session_id: String) -> Self {
         Self {
             app_handle,
             session_id,
@@ -178,11 +228,24 @@ impl RocketMcpToolServer {
     }
 }
 
+impl<R: tauri::Runtime> Clone for RocketMcpToolServer<R> {
+    fn clone(&self) -> Self {
+        Self {
+            app_handle: self.app_handle.clone(),
+            session_id: self.session_id.clone(),
+            tool_router: self.tool_router.clone(),
+        }
+    }
+}
+
 /// Looks up the `Arc<McpToolService>` this Tauri app manages. A missing
 /// registration is a wiring bug (Plan 05 must `app.manage(Arc::new(...))` it
 /// before any session can start), not a business-rule refusal, so it is
 /// surfaced as a protocol-level error rather than a tool-result error.
-fn mcp_tool_service(app_handle: &tauri::AppHandle) -> Result<Arc<McpToolService>, McpError> {
+#[allow(dead_code)]
+fn mcp_tool_service<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<Arc<McpToolService>, McpError> {
     match app_handle.try_state::<Arc<McpToolService>>() {
         Some(state) => Ok(Arc::clone(state.inner())),
         None => Err(McpError::internal_error(
@@ -192,27 +255,26 @@ fn mcp_tool_service(app_handle: &tauri::AppHandle) -> Result<Arc<McpToolService>
     }
 }
 
-#[tool_router]
-impl RocketMcpToolServer {
+// `allow_empty`: this impl block has no `#[tool]` methods yet (Task 2 adds
+// the 6 tools here). `rmcp-macros` 3.5.0's `#[tool_router]` hard-errors on
+// an empty block without this.
+#[tool_router(allow_empty)]
+impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     // Task 2 adds the 6 `#[tool]` methods here.
 }
 
-#[tool_handler]
-impl ServerHandler for RocketMcpToolServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: Default::default(),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: "rocket-mcp-tool-server".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            },
-            instructions: Some(
+#[tool_handler(router = self.tool_router.clone())]
+impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                "rocket-mcp-tool-server",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions(
                 "Rocket ACP tool server: run requests, edit scripts, and read/write \
-                 non-secret environment variables for one active session."
-                    .to_string(),
-            ),
-        }
+                 non-secret environment variables for one active session.",
+            )
     }
 }
 
@@ -220,7 +282,7 @@ impl ServerHandler for RocketMcpToolServer {
 mod tests {
     use super::*;
 
-    fn test_app_handle() -> tauri::AppHandle {
+    fn test_app_handle() -> tauri::AppHandle<tauri::test::MockRuntime> {
         tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock tauri app")
@@ -230,9 +292,26 @@ mod tests {
 
     #[test]
     fn get_info_reports_the_rocket_tool_server_identity() {
-        let server = RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
         let info = server.get_info();
         assert_eq!(info.server_info.name, "rocket-mcp-tool-server");
+    }
+
+    /// Exercises the hand-written `Clone` impl on a concrete
+    /// `RocketMcpToolServer<MockRuntime>` — this only compiles because
+    /// `Clone` is implemented by hand rather than derived (`MockRuntime`
+    /// itself does not implement `Clone`). Mirrors `spawn_mcp_http_server`'s
+    /// real per-connection `tool_server.clone()` call (Task 4).
+    #[test]
+    fn rocket_mcp_tool_server_clones_without_requiring_the_runtime_to_be_clone() {
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
+        let cloned = server.clone();
+        assert_eq!(
+            cloned.get_info().server_info.name,
+            server.get_info().server_info.name
+        );
     }
 }
 ```
@@ -240,7 +319,7 @@ mod tests {
 - [ ] **Step 6: Run the skeleton test**
 
 Run: `cargo test -p rocket get_info_reports_the_rocket_tool_server_identity -j4`
-Expected: PASS. If `tauri::test::mock_builder`/`mock_context`/`noop_assets` do not exist under those exact names in the installed `tauri` 2.x version, this is the second (smaller) spot in this plan where a name needs confirming against real source — check `tauri`'s `test` module docs and adjust only this helper function, everywhere it is reused (Task 2 and the Task 4 integration test both reuse the same pattern).
+Expected: PASS. If `tauri::test::mock_builder`/`mock_context`/`noop_assets` do not exist under those exact names in the installed `tauri` 2.x version, this is the second (smaller) spot in this plan where a name needs confirming against real source — check `tauri`'s `test` module docs and adjust only this helper function, everywhere it is reused (Task 2 and the Task 4 integration test both reuse the same pattern). (The skeleton above also carries a second test, `rocket_mcp_tool_server_clones_without_requiring_the_runtime_to_be_clone`, added by a post-Task-1 review to exercise the hand-written `Clone` impl — run `cargo test -p rocket mcp::tool_server::tests -j4` to check both at once.)
 
 - [ ] **Step 7: `cargo check --workspace`**
 
@@ -251,6 +330,34 @@ Expected: clean.
 
 Use the `dev-workflow-skills:1-git-commit` skill (per this repo's global instructions — never a freeform `git commit -m`) to commit `src-tauri/Cargo.toml`, `Cargo.lock`, `src-tauri/src/mcp/mod.rs`, `src-tauri/src/mcp/tool_server.rs`, `src-tauri/src/lib.rs`.
 
+#### Correction found while implementing Task 1: `AppHandle` / `MockRuntime` generic parameter
+
+Step 6's test (`get_info_reports_the_rocket_tool_server_identity`) does not compile as this plan originally sketched it. `tauri::AppHandle` is not a concrete type — it is `AppHandle<R: Runtime>`, and bare `tauri::AppHandle` in production code resolves to `AppHandle<Wry>` via tauri's `#[default_runtime(crate::Wry, wry)]` macro. `Wry` drives a real webview/window system, which a headless test environment cannot construct. Tauri's own answer for headless unit tests, `tauri::test::mock_builder()`/`mock_context()`/`noop_assets()` (used by Step 5's test helper, exactly as this plan already specifies), builds its `App`/`AppHandle` over `tauri::test::MockRuntime` instead — a different, non-interchangeable type parameter, not a subtype or drop-in stand-in for `Wry`. A helper typed to return bare `tauri::AppHandle` (i.e. hard-coded to `AppHandle<Wry>`) cannot return the `AppHandle<MockRuntime>` that `mock_builder()` actually produces — this is the `E0308 mismatched types` error Step 6 hits if implemented exactly as originally written.
+
+**Fix applied:** `RocketMcpToolServer` and `mcp_tool_service` are both made generic over `R: tauri::Runtime`, with `tauri::Wry` as the struct's default type parameter:
+
+```rust
+pub struct RocketMcpToolServer<R: tauri::Runtime = tauri::Wry> {
+    app_handle: tauri::AppHandle<R>,
+    session_id: String,
+    tool_router: ToolRouter<Self>,
+}
+
+impl<R: tauri::Runtime> RocketMcpToolServer<R> {
+    pub fn new(app_handle: tauri::AppHandle<R>, session_id: String) -> Self { /* unchanged body */ }
+}
+
+fn mcp_tool_service<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<Arc<McpToolService>, McpError> { /* unchanged body */ }
+```
+
+Production call sites (Task 4's `spawn_mcp_http_server`, and eventually Plan 05) pass a plain `tauri::AppHandle` — i.e. `AppHandle<Wry>` — and are unaffected by the default type parameter; only test code needs to name `RocketMcpToolServer<tauri::test::MockRuntime>` / `tauri::AppHandle<tauri::test::MockRuntime>` explicitly.
+
+This was verified to work cleanly with `rmcp-macros` 3.5.0's `#[tool_router]` / `#[tool_handler]`: both macros parse whatever generics are already on the `impl` block and re-emit them via `syn`'s `item_impl.generics`/`split_for_impl()` (see `rmcp-macros-3.5.0/src/tool_router.rs`), so `impl<R: tauri::Runtime> RocketMcpToolServer<R>` and `impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R>` expand the same way a concrete, non-generic `impl RocketMcpToolServer` would have — no macro changes needed. `ServerHandler: Sized + Send + Sync + 'static` is satisfied for every `R: tauri::Runtime` because `tauri::Runtime: runtime::Runtime<EventLoopMessage>` already requires `Handle: RuntimeHandle<T>: Send + Sync + 'static`, so `AppHandle<R>`'s fields are `Send + Sync + 'static` for any valid `R`, not only `Wry`. Confirmed with a real `cargo check --workspace -j4` (clean) and `cargo test -p rocket get_info_reports_the_rocket_tool_server_identity -j4` (pass), not just by reasoning about the types.
+
+**This propagates into every later task's code blocks that construct a `RocketMcpToolServer`, call `mcp_tool_service`, or call `spawn_mcp_http_server` from a test.** Every place below still showing a bare `RocketMcpToolServer` / `tauri::AppHandle` in a test context has already been corrected in this document to match; production, non-test code blocks (e.g. `spawn_mcp_http_server`'s own body, which is production code) are unaffected and unchanged, since a bare `tauri::AppHandle` there still resolves to `AppHandle<Wry>` via the struct's default type parameter. `spawn_mcp_http_server` itself is additionally made generic over `R: tauri::Runtime` in Task 4 below (its parameter type, not a default — the argument's type already lets the compiler infer `R`), specifically because Task 4's own integration test (`spawn_test_server`) needs to call it with an `AppHandle<MockRuntime>` the same way Task 1's and Task 2's tests do.
+
 ---
 
 ### Task 2: Implement the 6 tools
@@ -260,11 +367,11 @@ Use the `dev-workflow-skills:1-git-commit` skill (per this repo's global instruc
 
 **Interfaces:**
 - Consumes: `rocket_app::McpToolService`'s 6 methods. **Note: Plan 03 (the plan that actually implements `McpToolService`) found that `get_env_var`/`set_env_var`/`get_test_results` need an explicit `collection: &str` parameter that the plan index's original signatures omitted — environments are resolved per-`(collection, name)` everywhere in this codebase, and the autonomy gate itself needs a collection to check. The real, final signatures (matching `crates/rocket-app/src/mcp_tool_service.rs` as landed by Plan 03) are used below**: `list_collection_requests(&self, session_id: &str, collection: &str) -> DomainResult<Vec<McpRequestEntry>>`, `async fn run_request(&self, session_id: &str, collection: &str, request_path: &str, environment_name: Option<&str>) -> DomainResult<McpRunResult>`, `edit_script(&self, session_id: &str, collection: &str, request_path: &str, phase: rocket_collection::RequestScriptPhase, body: String) -> DomainResult<()>`, `get_env_var(&self, session_id: &str, collection: &str, environment_name: &str, key: &str) -> DomainResult<String>`, `set_env_var(&self, session_id: &str, collection: &str, environment_name: &str, key: &str, value: String) -> DomainResult<()>`, `get_test_results(&self, session_id: &str, collection: &str, request_path: &str) -> DomainResult<Vec<rocket_scripting::TestResult>>`.
-- Produces: the completed `#[tool_router] impl RocketMcpToolServer` block with all 6 tools registered, callable both directly (as plain async methods, for this task's own tests) and via the MCP tool-call protocol (verified in Task 4).
+- Produces: the completed `#[tool_router] impl<R: tauri::Runtime> RocketMcpToolServer<R>` block with all 6 tools registered, callable both directly (as plain async methods, for this task's own tests) and via the MCP tool-call protocol (verified in Task 4).
 
 - [ ] **Step 1: Add the 6 param structs and the `DomainResult` → `CallToolResult` mapping helper**
 
-Insert above the `#[tool_router] impl RocketMcpToolServer` block in `tool_server.rs`:
+Insert above the `#[tool_router] impl<R: tauri::Runtime> RocketMcpToolServer<R>` block in `tool_server.rs`:
 
 ```rust
 use rocket_shared::error::DomainResult;
@@ -328,9 +435,9 @@ fn to_tool_result<T: serde::Serialize>(result: DomainResult<T>) -> CallToolResul
             let text = serde_json::to_string(&value).unwrap_or_else(|e| {
                 format!("{{\"error\":\"failed to serialize tool result: {e}\"}}")
             });
-            CallToolResult::success(vec![Content::text(text)])
+            CallToolResult::success(vec![ContentBlock::text(text)])
         }
-        Err(e) => CallToolResult::error(vec![Content::text(e.to_string())]),
+        Err(e) => CallToolResult::error(vec![ContentBlock::text(e.to_string())]),
     }
 }
 
@@ -343,7 +450,7 @@ fn parse_phase(phase: &str) -> Result<rocket_collection::RequestScriptPhase, Cal
         "pre_request" => Ok(rocket_collection::RequestScriptPhase::PreRequest),
         "post_response" => Ok(rocket_collection::RequestScriptPhase::PostResponse),
         "tests" => Ok(rocket_collection::RequestScriptPhase::Tests),
-        other => Err(CallToolResult::error(vec![Content::text(format!(
+        other => Err(CallToolResult::error(vec![ContentBlock::text(format!(
             "unknown script phase '{other}': expected pre_request, post_response, or tests"
         ))])),
     }
@@ -352,11 +459,11 @@ fn parse_phase(phase: &str) -> Result<rocket_collection::RequestScriptPhase, Cal
 
 - [ ] **Step 2: Implement the 6 `#[tool]` methods**
 
-Replace the empty `#[tool_router] impl RocketMcpToolServer { }` block with:
+Replace the empty `#[tool_router(allow_empty)] impl<R: tauri::Runtime> RocketMcpToolServer<R> { }` block with:
 
 ```rust
 #[tool_router]
-impl RocketMcpToolServer {
+impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     #[tool(description = "List the requests in a Rocket collection (path, name, method, url).")]
     async fn list_collection_requests(
         &self,
@@ -489,7 +596,11 @@ impl HttpExecutor for FakeHttpExecutor {
 /// ("SECRET_TOKEN"), and `agent_autonomy_enabled` set as requested.
 struct TestFixture {
     _tmp: TempDir,
-    app_handle: tauri::AppHandle,
+    // `MockRuntime`, not a bare `tauri::AppHandle` (which would default to
+    // `AppHandle<Wry>`, requiring a real webview/window system this
+    // headless test cannot construct) — see the "AppHandle / MockRuntime
+    // generic parameter" note at the end of Task 1.
+    app_handle: tauri::AppHandle<tauri::test::MockRuntime>,
     session_id: String,
 }
 
@@ -563,7 +674,7 @@ impl TestFixture {
         }
     }
 
-    fn server(&self) -> RocketMcpToolServer {
+    fn server(&self) -> RocketMcpToolServer<tauri::test::MockRuntime> {
         RocketMcpToolServer::new(self.app_handle.clone(), self.session_id.clone())
     }
 }
@@ -711,7 +822,7 @@ async fn run_request_then_get_test_results_round_trips_through_the_session_cache
 - [ ] **Step 5: Run the tests**
 
 Run: `cargo test -p rocket mcp::tool_server -j4`
-Expected: all 6 tests PASS. If `Content::as_text()` or `CallToolResult`'s field names differ from this plan's guess, this is exactly the kind of correction Task 1 Step 1 flagged — fix `tool_text`/`tool_is_error` only.
+Expected: all 8 tests PASS (Task 1's 2 skeleton tests plus this task's 6). If `ContentBlock::as_text()` or `CallToolResult`'s field names differ from this plan's guess, this is exactly the kind of correction Task 1 Step 1 flagged — fix `tool_text`/`tool_is_error` only.
 
 - [ ] **Step 6: `cargo check --workspace`**
 
@@ -900,7 +1011,7 @@ Use `dev-workflow-skills:1-git-commit` for `src-tauri/src/mcp/auth.rs`.
 - Create: `src-tauri/tests/mcp_http_server_integration.rs`
 
 **Interfaces:**
-- Produces: `pub struct McpHttpServerHandle { pub port: u16, pub token: String, /* shutdown handle */ }` with `pub fn shutdown(&self)`; `pub async fn spawn_mcp_http_server(app_handle: tauri::AppHandle, session_id: String) -> std::io::Result<McpHttpServerHandle>`; `pub struct McpServerRegistry` with `pub fn new() -> Self`, `pub fn register(&self, session_id: String, handle: McpHttpServerHandle)`, `pub fn end_session(&self, session_id: &str)`, `pub fn shutdown_all(&self)`. **This registry is the one and only `McpServerRegistry` in this subproject — Plan 05's sweeper (Task 4 of that plan) wraps this exact type via an `Arc` clone rather than defining a second, competing registry. See Plan 05 Task 3/4 for how it is reused.**
+- Produces: `pub struct McpHttpServerHandle { pub port: u16, pub token: String, /* shutdown handle */ }` with `pub fn shutdown(&self)`; `pub async fn spawn_mcp_http_server<R: tauri::Runtime>(app_handle: tauri::AppHandle<R>, session_id: String) -> std::io::Result<McpHttpServerHandle>`; `pub struct McpServerRegistry` with `pub fn new() -> Self`, `pub fn register(&self, session_id: String, handle: McpHttpServerHandle)`, `pub fn end_session(&self, session_id: &str)`, `pub fn shutdown_all(&self)`. **This registry is the one and only `McpServerRegistry` in this subproject — Plan 05's sweeper (Task 4 of that plan) wraps this exact type via an `Arc` clone rather than defining a second, competing registry. See Plan 05 Task 3/4 for how it is reused.** **`spawn_mcp_http_server` is generic over `R: tauri::Runtime` (no default here — a function's type parameter is inferred from the `app_handle` argument's real type, so a default is not needed the way `RocketMcpToolServer<R = tauri::Wry>`'s struct default is): production callers still just pass a plain `tauri::AppHandle` (`AppHandle<Wry>`) and get the same behavior as before, while this task's own integration test calls it with `AppHandle<MockRuntime>`. See Task 1's "`AppHandle` / `MockRuntime` generic parameter" note.**
 - Consumes: `RocketMcpToolServer::new` (Task 1/2), `require_bearer_token` (Task 3).
 
 Note on the locked contract's function signature: the plan index (`00-plan-index.md`) writes `spawn_mcp_http_server(app_handle: tauri::AppHandle) -> ...`, without a `session_id` parameter. This plan adds `session_id: String` as a second parameter, because every `McpToolService` method (locked contract, Plan 03) takes `session_id: &str` as its first argument and `RocketMcpToolServer` needs one fixed at construction — there is no other point after this function returns where a session id could be attached to the running server. This is flagged here rather than silently diverging: whoever writes Plan 05 must resolve *which* identifier is available to pass in at the call site, since the real ACP-protocol session id is only known after the agent handshake completes, but the server's port/token must be included in the handshake's own request. That resolution is explicitly out of this plan's scope (see Next Plan, below).
@@ -1096,8 +1207,8 @@ impl McpHttpServerHandle {
 /// because one HTTP server instance serves exactly one ACP session for its
 /// whole lifetime. See this task's header note on where that identifier
 /// comes from — resolving that call-site question is Plan 05's job.
-pub async fn spawn_mcp_http_server(
-    app_handle: tauri::AppHandle,
+pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
+    app_handle: tauri::AppHandle<R>,
     session_id: String,
 ) -> std::io::Result<McpHttpServerHandle> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -1322,7 +1433,13 @@ impl HttpExecutor for FakeHttpExecutor {
 /// Builds a mock Tauri app with `Arc<McpToolService>` and `McpServerRegistry`
 /// both managed, over a fresh temp-directory "demo" collection with agent
 /// autonomy on, and spawns an MCP HTTP server for `session_id` against it.
-async fn spawn_test_server(session_id: &str) -> (McpHttpServerHandle, tauri::AppHandle, TempDir) {
+async fn spawn_test_server(
+    session_id: &str,
+) -> (
+    McpHttpServerHandle,
+    tauri::AppHandle<tauri::test::MockRuntime>,
+    TempDir,
+) {
     let tmp = TempDir::new().expect("tempdir");
     let ws_path = Arc::new(Mutex::new(tmp.path().to_path_buf()));
     let collections_dir = tmp.path().join("collections");

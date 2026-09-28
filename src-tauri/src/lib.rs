@@ -1,6 +1,7 @@
 mod audit_bridge;
 mod callback_adapter;
 mod commands;
+pub mod mcp;
 mod tauri_event_bus;
 mod tauri_tracing_layer;
 
