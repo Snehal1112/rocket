@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import { FlowCanvas } from '../FlowCanvas';
 
@@ -102,5 +102,107 @@ describe('FlowCanvas with routing nodes', () => {
     });
     expect(screen.getByTestId('switch-node-card')).toBeInTheDocument();
     expect(field.closest('.nokey')).not.toBeNull();
+  });
+  describe('edges after a run', () => {
+    function stubLayout() {
+      // jsdom has no SVG text measuring, which edge labels need.
+      Object.defineProperty(SVGElement.prototype, 'getBBox', {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, width: 20, height: 10 }),
+      });
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80);
+      vi.stubGlobal(
+        'DOMMatrixReadOnly',
+        class {
+          m22 = 1;
+        },
+      );
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private cb: ResizeObserverCallback) {}
+          observe(target: Element) {
+            if (!target.classList.contains('react-flow__node')) return;
+            this.cb([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+          }
+          unobserve() {
+            // Not needed by these tests.
+          }
+          disconnect() {
+            // Not needed by these tests.
+          }
+        },
+      );
+    }
+
+    afterEach(() => {
+      Reflect.deleteProperty(SVGElement.prototype, 'getBBox');
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    const graph: FlowNode[] = [
+      {
+        id: 'if1',
+        position: { x: 0, y: 0 },
+        kind: { kind: 'If', label: 'Logged in?', condition: 'response.status === 200' },
+      },
+      { id: 'yes', position: { x: 300, y: -100 }, kind: { kind: 'Output', label: 'Yes' } },
+      { id: 'no', position: { x: 300, y: 100 }, kind: { kind: 'Output', label: 'No' } },
+    ];
+    const wires: FlowEdge[] = [
+      {
+        id: 'eT',
+        sourceNodeId: 'if1',
+        sourceHandle: 'true',
+        targetNodeId: 'yes',
+        targetField: 'trigger',
+        expression: '',
+      },
+      {
+        id: 'eF',
+        sourceNodeId: 'if1',
+        sourceHandle: 'false',
+        targetNodeId: 'no',
+        targetField: 'trigger',
+        expression: '',
+      },
+    ];
+
+    it('labels routing exits and styles taken vs not-taken edges', () => {
+      stubLayout();
+      render(
+        <FlowCanvas
+          nodes={graph}
+          edges={wires}
+          nodeStatus={{ if1: 'success', yes: 'success', no: 'skipped' }}
+          nodeDetail={{ if1: { branch: 'true' }, no: { skipReason: 'branch_not_taken' } }}
+          onNodesChange={vi.fn()}
+          onEdgesChange={vi.fn()}
+          onConnect={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('rf__edge-eT')).toHaveClass('flow-edge-taken');
+      expect(screen.getByTestId('rf__edge-eF')).toHaveClass('flow-edge-not-taken');
+      expect(screen.getByTestId('rf__edge-eT')).toHaveTextContent('true');
+      expect(screen.getByTestId('rf__edge-eF')).toHaveTextContent('false');
+    });
+
+    it('renders both exits neutral before any run', () => {
+      stubLayout();
+      render(
+        <FlowCanvas
+          nodes={graph}
+          edges={wires}
+          nodeStatus={{}}
+          onNodesChange={vi.fn()}
+          onEdgesChange={vi.fn()}
+          onConnect={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('rf__edge-eT')).not.toHaveClass('flow-edge-taken');
+      expect(screen.getByTestId('rf__edge-eF')).not.toHaveClass('flow-edge-not-taken');
+    });
   });
 });

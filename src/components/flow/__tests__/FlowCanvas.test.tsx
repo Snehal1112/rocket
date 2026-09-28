@@ -252,6 +252,8 @@ describe('FlowCanvas', () => {
             sourceHandle: 'true',
           },
         ],
+        [],
+        {},
         new Set(),
       );
       expect(rf.map((e) => [e.id, e.sourceHandle, e.targetHandle])).toEqual([

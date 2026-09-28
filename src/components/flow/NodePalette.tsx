@@ -1,4 +1,4 @@
-import { ArrowLeftFromLine, ArrowRightToLine, Globe, Plus } from 'lucide-react';
+import { ArrowLeftFromLine, ArrowRightToLine, GitBranch, Globe, Plus, Split } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -69,6 +69,35 @@ export function NodePalette({ onAddNode }: { onAddNode: (node: FlowNode) => void
           >
             <Globe className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
             Inline Request
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              onAddNode({
+                id: newNodeId('if'),
+                kind: { kind: 'If', label: 'New If', condition: 'response.status === 200' },
+                position: defaultPosition,
+              })
+            }
+          >
+            <GitBranch className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
+            If
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              onAddNode({
+                id: newNodeId('switch'),
+                kind: {
+                  kind: 'Switch',
+                  label: 'New Switch',
+                  value: 'response.body.type',
+                  cases: [{ id: crypto.randomUUID(), label: 'Case 1', matches: 'case-1' }],
+                },
+                position: defaultPosition,
+              })
+            }
+          >
+            <Split className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
+            Switch
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

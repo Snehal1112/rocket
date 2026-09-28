@@ -19,6 +19,7 @@ import { RESULT_HANDLE } from '@/lib/flow-handles';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { edgeRunState, exitLabel } from './flowExits';
 import { type FlowNodeActions, FlowNodeActionsContext } from './nodes/FlowNodeActionsContext';
 import { IfNode } from './nodes/IfNode';
 import { InputNode } from './nodes/InputNode';
@@ -93,24 +94,52 @@ function toRfNodes(
   }));
 }
 
-// An edge leaves the source exit named by `sourceHandle`. It is absent for
-// the default `result` exit. The target handle is the first segment of
-// `targetField`, so "headers[Authorization].value" lands on the single
-// `headers` handle.
+const CYCLE_EDGE_STYLE = { stroke: '#ef4444', strokeWidth: 2 };
+const TAKEN_EDGE_STYLE = { stroke: '#22c55e', strokeWidth: 2 };
+const NOT_TAKEN_EDGE_STYLE = { opacity: 0.35, strokeDasharray: '4 4' };
+
+// The source handle is the edge's exit (absent means `result`). The target
+// handle is the first segment of `targetField`, so
+// "headers[Authorization].value" lands on the single `headers` handle.
+// Routing exits get a label, and after a run their taken/not-taken state.
+// A validation (cycle) highlight wins over run styling.
 export function toRfEdges(
   edges: FlowEdge[],
+  nodes: FlowNode[],
+  nodeStatus: Record<string, FlowNodeStatus>,
   selectedIds: ReadonlySet<string>,
+  nodeDetail?: FlowCanvasProps['nodeDetail'],
   cycleEdgeIds?: string[],
 ): Edge[] {
-  return edges.map((e) => ({
-    id: e.id,
-    source: e.sourceNodeId,
-    sourceHandle: e.sourceHandle ?? RESULT_HANDLE,
-    target: e.targetNodeId,
-    targetHandle: e.targetField.split('[')[0],
-    selected: selectedIds.has(e.id),
-    style: cycleEdgeIds?.includes(e.id) ? { stroke: '#ef4444', strokeWidth: 2 } : undefined,
-  }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  return edges.map((e) => {
+    const source = byId.get(e.sourceNodeId);
+    const handle = e.sourceHandle ?? RESULT_HANDLE;
+    const run = edgeRunState(
+      e,
+      source,
+      nodeStatus[e.sourceNodeId],
+      nodeDetail?.[e.sourceNodeId]?.branch,
+    );
+    const isCycle = cycleEdgeIds?.includes(e.id) ?? false;
+    return {
+      id: e.id,
+      source: e.sourceNodeId,
+      sourceHandle: handle,
+      target: e.targetNodeId,
+      targetHandle: e.targetField.split('[')[0],
+      selected: selectedIds.has(e.id),
+      label: source ? exitLabel(source.kind, handle) : undefined,
+      className: run === 'neutral' ? undefined : `flow-edge-${run}`,
+      style: isCycle
+        ? CYCLE_EDGE_STYLE
+        : run === 'taken'
+          ? TAKEN_EDGE_STYLE
+          : run === 'not-taken'
+            ? NOT_TAKEN_EDGE_STYLE
+            : undefined,
+    };
+  });
 }
 
 // Applies select and remove changes to a selection set. It returns the same
@@ -179,8 +208,8 @@ function FlowCanvasInner({
     [nodes, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds],
   );
   const rfEdges = useMemo(
-    () => toRfEdges(edges, selectedEdgeIds, cycleEdgeIds),
-    [edges, selectedEdgeIds, cycleEdgeIds],
+    () => toRfEdges(edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds),
+    [edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds],
   );
   const nodeActions = useMemo<FlowNodeActions>(
     () => ({
