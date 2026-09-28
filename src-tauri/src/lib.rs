@@ -172,7 +172,15 @@ pub fn run() {
 
     let env_filter = EnvFilter::try_from_env("ROCKET_LOG")
         .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
-        .unwrap_or_else(|_| EnvFilter::new("info,git2=warn,reqwest=warn,hyper=warn"));
+        .unwrap_or_else(|_| EnvFilter::new("info,git2=warn,reqwest=warn,hyper=warn"))
+        // agent-client-protocol logs raw JSON-RPC messages (including the MCP
+        // bearer token) at debug/trace. Cap this target at info regardless of
+        // RUST_LOG/ROCKET_LOG so raising verbosity elsewhere never leaks it.
+        .add_directive(
+            "agent_client_protocol=info"
+                .parse()
+                .expect("static directive is valid"),
+        );
 
     let (tauri_layer, reload_handle): (TauriReloadLayer, TauriReloadHandle) =
         reload::Layer::new(None::<tauri_tracing_layer::TauriTracingLayer>);
