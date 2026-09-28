@@ -6,9 +6,11 @@ use tauri::State;
 pub async fn start_agent_session(
     agent_config_id: String,
     cwd: String,
+    collection: Option<String>,
     svc: State<'_, AcpSessionService>,
 ) -> Result<String, DomainError> {
-    svc.start_session(&agent_config_id, &cwd).await
+    svc.start_session(&agent_config_id, &cwd, collection.as_deref())
+        .await
 }
 
 #[tauri::command]

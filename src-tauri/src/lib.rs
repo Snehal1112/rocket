@@ -407,10 +407,21 @@ pub fn run() {
                 acp_agent_config_secret_manager,
             ));
 
+            // A standalone FsCollectionRepo at the same collections_dir the
+            // exec_svc/collection_svc instances below also use — only needed
+            // here for the agent_autonomy_enabled gate check, so a lightweight
+            // fresh instance is simpler than restructuring construction order
+            // to share one Arc (the spec's own reasoning for using AppHandle
+            // lookups elsewhere in this file does not apply to this one
+            // trait-only read).
+            let acp_session_collection_repo: Arc<dyn rocket_collection::CollectionRepository> =
+                Arc::new(FsCollectionRepo::new_standalone(collections_dir.clone()));
+
             let acp_session_svc = rocket_app::AcpSessionService::new(
                 Box::new(rocket_infra::AcpAgentClient::new()),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 acp_agent_config_svc,
+                acp_session_collection_repo,
             );
 
             let websocket_svc = rocket_app::WebSocketService::new(

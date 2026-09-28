@@ -17,6 +17,7 @@ pub struct AcpSessionService {
     session_client: Box<dyn AcpSessionClient>,
     event_publisher: Box<dyn EventPublisher>,
     agent_config_service: Arc<AgentConfigService>,
+    collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     prompt_timeout: Duration,
 }
 
@@ -29,11 +30,13 @@ impl AcpSessionService {
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
         agent_config_service: Arc<AgentConfigService>,
+        collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     ) -> Self {
         Self::with_prompt_timeout(
             session_client,
             event_publisher,
             agent_config_service,
+            collection_repo,
             DEFAULT_PROMPT_TIMEOUT,
         )
     }
@@ -45,12 +48,14 @@ impl AcpSessionService {
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
         agent_config_service: Arc<AgentConfigService>,
+        collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
         prompt_timeout: Duration,
     ) -> Self {
         Self {
             session_client,
             event_publisher,
             agent_config_service,
+            collection_repo,
             prompt_timeout,
         }
     }
@@ -62,22 +67,53 @@ impl AcpSessionService {
     /// propagate unchanged. No event is published on failure, because no
     /// session id exists yet. On success, `AcpSessionStarted` is published
     /// and the new session id is returned.
-    pub async fn start_session(&self, agent_config_id: &str, cwd: &str) -> DomainResult<String> {
+    pub async fn start_session(
+        &self,
+        agent_config_id: &str,
+        cwd: &str,
+        collection: Option<&str>,
+    ) -> DomainResult<String> {
         let config = self.agent_config_service.get(agent_config_id)?;
         let credential = self
             .agent_config_service
             .resolve_credential(agent_config_id)
             .await?;
         let env = vec![(config.credential_env_var.clone(), credential)];
+        let mcp_servers = self.mcp_server_specs_for(collection)?;
         let session_id = self
             .session_client
-            .start_session(&config.command, &config.args, cwd, &env, &[])
+            .start_session(&config.command, &config.args, cwd, &env, &mcp_servers)
             .await?;
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: session_id.clone(),
             });
         Ok(session_id)
+    }
+
+    /// Resolves the MCP servers to attach to a new session. A session with
+    /// no target collection, or whose collection has not opted into agent
+    /// autonomy, gets none — chat-only mode, identical to subproject C's
+    /// existing behavior. No MCP server implementation exists yet (the HTTP
+    /// backend lands in Plan 04, the Stdio shim in Plan 05), so an opted-in
+    /// collection also gets an empty list today — there is nothing yet to
+    /// attach. This still re-checks `get_settings` on every call (not just
+    /// once), matching the design spec's "checked on every call" rule for
+    /// the tools themselves, and still propagates a lookup failure instead
+    /// of silently falling back to chat-only mode, so a broken collection
+    /// name surfaces loudly rather than silently degrading.
+    fn mcp_server_specs_for(
+        &self,
+        collection: Option<&str>,
+    ) -> DomainResult<Vec<rocket_acp::McpServerSpec>> {
+        let Some(collection) = collection else {
+            return Ok(Vec::new());
+        };
+        let settings = self.collection_repo.get_settings(collection)?;
+        if !settings.agent_autonomy_enabled {
+            return Ok(Vec::new());
+        }
+        Ok(Vec::new())
     }
 
     /// Sends one prompt turn and returns the agent's stop reason string.
@@ -180,6 +216,148 @@ mod tests {
     use rocket_environment::secret_store::SecretStore;
     use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
     use tokio::sync::mpsc::UnboundedSender;
+
+    /// Collection repo double for `AcpSessionService` tests. Settings default
+    /// to `agent_autonomy_enabled: false` for any collection not explicitly
+    /// configured via `set_autonomy`, matching `get_settings`'s documented
+    /// "missing settings file" fallback in the real repositories.
+    struct FakeAcpCollectionRepo {
+        settings: Mutex<std::collections::HashMap<String, rocket_collection::CollectionSettings>>,
+        settings_error_for: Mutex<Option<String>>,
+    }
+    impl FakeAcpCollectionRepo {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                settings: Mutex::new(std::collections::HashMap::new()),
+                settings_error_for: Mutex::new(None),
+            })
+        }
+        fn set_autonomy(&self, collection: &str, enabled: bool) {
+            let mut settings = rocket_collection::CollectionSettings::default();
+            settings.agent_autonomy_enabled = enabled;
+            self.settings
+                .lock()
+                .expect("lock")
+                .insert(collection.to_string(), settings);
+        }
+        fn fail_settings_for(&self, collection: &str) {
+            *self.settings_error_for.lock().expect("lock") = Some(collection.to_string());
+        }
+    }
+    impl rocket_collection::CollectionRepository for FakeAcpCollectionRepo {
+        fn list(&self) -> DomainResult<Vec<rocket_collection::CollectionSummary>> {
+            Ok(vec![])
+        }
+        fn get(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
+            Err(DomainError::NotFound(name.into()))
+        }
+        fn get_summaries(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
+            self.get(name)
+        }
+        fn create(&self, _: &str) -> DomainResult<rocket_collection::Collection> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request(&self, _: &str, _: &str) -> DomainResult<rocket_collection::Request> {
+            Err(DomainError::NotFound("stub".into()))
+        }
+        fn save_request(
+            &self,
+            _: &str,
+            path: &str,
+            _: &rocket_collection::Request,
+        ) -> DomainResult<String> {
+            Ok(path.to_string())
+        }
+        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
+            if self.settings_error_for.lock().expect("lock").as_deref() == Some(name) {
+                return Err(DomainError::Internal("settings read failed".into()));
+            }
+            Ok(self
+                .settings
+                .lock()
+                .expect("lock")
+                .get(name)
+                .cloned()
+                .unwrap_or_default())
+        }
+        fn save_settings(
+            &self,
+            _: &str,
+            _: &rocket_collection::CollectionSettings,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_folder_chain_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn get_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_folder_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<rocket_collection::CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn get_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
+            Ok(vec![])
+        }
+        fn save_request_variables(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<rocket_collection::CollectionVariable>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn save_request_script(
+            &self,
+            _: &str,
+            _: &str,
+            _: rocket_collection::RequestScriptPhase,
+            _: String,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+    }
 
     struct FakeAgentConfigRepo(Mutex<Vec<AgentConfig>>);
     impl AgentConfigRepository for FakeAgentConfigRepo {
@@ -443,10 +621,11 @@ mod tests {
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp")
+            .start_session("agent-1", "/tmp", None)
             .await
             .expect("start_session should succeed");
         assert_eq!(session_id, "session-1");
@@ -467,6 +646,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         let stop_reason = service
@@ -507,6 +687,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         service
@@ -523,10 +704,11 @@ mod tests {
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         let err = service
-            .start_session("no-such-agent", "/tmp")
+            .start_session("no-such-agent", "/tmp", None)
             .await
             .expect_err("unknown agent_config_id must error");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -547,10 +729,11 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         let err = service
-            .start_session("agent-1", "/tmp")
+            .start_session("agent-1", "/tmp", None)
             .await
             .expect_err("spawn failure must propagate");
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -569,10 +752,11 @@ mod tests {
             agent_config_service_with(FakeVaultFetcher {
                 secret_value_result: Ok(None),
             }),
+            FakeAcpCollectionRepo::new(),
         );
 
         let err = service
-            .start_session("agent-1", "/tmp")
+            .start_session("agent-1", "/tmp", None)
             .await
             .expect_err("a stale vault secret must fail start_session, not silently proceed");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -593,6 +777,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         let err = service
@@ -623,6 +808,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
             Duration::from_millis(20),
         );
 
@@ -657,6 +843,7 @@ mod tests {
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
+            FakeAcpCollectionRepo::new(),
         );
 
         service
@@ -664,5 +851,90 @@ mod tests {
             .await
             .expect("end_all_sessions should succeed");
         assert!(end_all_sessions_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn start_session_with_no_collection_still_works_exactly_as_before() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+            FakeAcpCollectionRepo::new(),
+        );
+
+        let session_id = service
+            .start_session("agent-1", "/tmp", None)
+            .await
+            .expect("start_session with no collection must keep working");
+        assert_eq!(session_id, "session-1");
+    }
+
+    #[tokio::test]
+    async fn start_session_with_autonomy_disabled_still_succeeds_with_no_mcp_servers() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let collection_repo = FakeAcpCollectionRepo::new();
+        collection_repo.set_autonomy("my-api", false);
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+            collection_repo,
+        );
+
+        let session_id = service
+            .start_session("agent-1", "/tmp", Some("my-api"))
+            .await
+            .expect("a disabled collection must still be able to start a chat-only session");
+        assert_eq!(session_id, "session-1");
+    }
+
+    #[tokio::test]
+    async fn start_session_with_autonomy_enabled_still_succeeds_since_no_mcp_backend_exists_yet()
+    {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let collection_repo = FakeAcpCollectionRepo::new();
+        collection_repo.set_autonomy("my-api", true);
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+            collection_repo,
+        );
+
+        // Plan 03 has no HTTP backend or Stdio shim to attach yet, so an
+        // opted-in collection behaves identically to a disabled one today —
+        // this is this plan's complete, correct behavior (see this plan's
+        // "Deviations from the Plan Index" item 4), not a bug to fix later.
+        let session_id = service
+            .start_session("agent-1", "/tmp", Some("my-api"))
+            .await
+            .expect("an opted-in collection must still start a session");
+        assert_eq!(session_id, "session-1");
+    }
+
+    #[tokio::test]
+    async fn start_session_propagates_a_collection_settings_lookup_failure() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let collection_repo = FakeAcpCollectionRepo::new();
+        collection_repo.fail_settings_for("broken-collection");
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+            collection_repo,
+        );
+
+        let err = service
+            .start_session("agent-1", "/tmp", Some("broken-collection"))
+            .await
+            .expect_err(
+                "a broken collection settings read must fail start_session, not silently degrade to chat-only",
+            );
+        assert!(matches!(err, DomainError::Internal(_)));
+        assert!(
+            publisher.events.lock().expect("lock").is_empty(),
+            "no event should publish when the settings lookup fails before any session starts"
+        );
     }
 }
