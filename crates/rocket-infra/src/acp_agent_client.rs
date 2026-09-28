@@ -10,8 +10,8 @@ use std::sync::{Arc, PoisonError, Weak};
 
 use agent_client_protocol::schema::v1::{
     ClientCapabilities, ContentBlock, EnvVariable, FileSystemCapabilities, HttpHeader,
-    Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerStdio,
-    NewSessionRequest, PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
+    Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerStdio, NewSessionRequest,
+    PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{
@@ -267,36 +267,36 @@ impl AcpSessionClient for AcpAgentClient {
                 .connect_with(transport, move |connection: ConnectionTo<AgentRole>| {
                     let ready_tx = Arc::clone(&ready_tx_for_task);
                     async move {
-                        let handshake = async {
-                            let init_response = connection
-                                .send_request(
-                                    InitializeRequest::new(ProtocolVersion::V1)
-                                        .client_capabilities(
-                                            ClientCapabilities::new().fs(
-                                                FileSystemCapabilities::new()
-                                                    .read_text_file(false)
-                                                    .write_text_file(false),
-                                            ),
-                                        )
-                                        .client_info(Implementation::new(
-                                            "rocket",
-                                            env!("CARGO_PKG_VERSION"),
-                                        )),
-                                )
-                                .block_task()
-                                .await?;
-                            warn_if_http_mcp_server_unsupported(
-                                &mcp_servers_owned,
-                                init_response.agent_capabilities.mcp_capabilities.http,
-                            );
-                            connection
-                                .send_request(
-                                    NewSessionRequest::new(cwd)
-                                        .mcp_servers(mcp_server_specs_to_wire(&mcp_servers_owned)),
-                                )
-                                .block_task()
-                                .await
-                        };
+                        let handshake =
+                            async {
+                                let init_response = connection
+                                    .send_request(
+                                        InitializeRequest::new(ProtocolVersion::V1)
+                                            .client_capabilities(
+                                                ClientCapabilities::new().fs(
+                                                    FileSystemCapabilities::new()
+                                                        .read_text_file(false)
+                                                        .write_text_file(false),
+                                                ),
+                                            )
+                                            .client_info(Implementation::new(
+                                                "rocket",
+                                                env!("CARGO_PKG_VERSION"),
+                                            )),
+                                    )
+                                    .block_task()
+                                    .await?;
+                                let selected_mcp_servers = select_mcp_servers_for_agent(
+                                    &mcp_servers_owned,
+                                    init_response.agent_capabilities.mcp_capabilities.http,
+                                );
+                                connection
+                                    .send_request(NewSessionRequest::new(cwd).mcp_servers(
+                                        mcp_server_specs_to_wire(&selected_mcp_servers),
+                                    ))
+                                    .block_task()
+                                    .await
+                            };
 
                         match handshake.await {
                             Ok(response) => {
@@ -508,12 +508,11 @@ fn mcp_server_specs_to_wire(specs: &[McpServerSpec]) -> Vec<McpServer> {
     specs
         .iter()
         .map(|spec| match spec {
-            McpServerSpec::Http { name, url, token } => McpServer::Http(
-                McpServerHttp::new(name.clone(), url.clone()).headers(vec![HttpHeader::new(
-                    "Authorization",
-                    format!("Bearer {token}"),
-                )]),
-            ),
+            McpServerSpec::Http { name, url, token } => {
+                McpServer::Http(McpServerHttp::new(name.clone(), url.clone()).headers(vec![
+                    HttpHeader::new("Authorization", format!("Bearer {token}")),
+                ]))
+            }
             McpServerSpec::Stdio {
                 name,
                 command,
@@ -532,22 +531,54 @@ fn mcp_server_specs_to_wire(specs: &[McpServerSpec]) -> Vec<McpServer> {
         .collect()
 }
 
-/// Logs (but never blocks on) a negotiation mismatch: the caller asked for an
-/// HTTP MCP server but the agent's `InitializeResponse` never advertised
-/// `mcp_capabilities.http`. Choosing *which* `McpServerSpec` variant to send
-/// is `rocket-app`'s job (Plan 03) -- this only makes a mismatch visible in
-/// logs instead of letting it fail silently deep inside the agent process.
-fn warn_if_http_mcp_server_unsupported(mcp_servers: &[McpServerSpec], agent_supports_http: bool) {
-    if !agent_supports_http
-        && mcp_servers
-            .iter()
-            .any(|spec| matches!(spec, McpServerSpec::Http { .. }))
-    {
+/// Picks which of the caller's `McpServerSpec`s the agent actually receives,
+/// based on its negotiated `mcp_capabilities.http` (design spec, "Capability
+/// negotiation"; plan index, `AcpSessionService` section). `rocket-app` offers
+/// an `Http` and a `Stdio` spec under the same name; this crate chooses:
+/// - agent supports HTTP: keep every `Http` spec, and drop a `Stdio` spec
+///   only when an `Http` spec with the same name already covers it;
+/// - agent lacks HTTP: drop every `Http` spec (ACP clients must not send an
+///   HTTP server the agent never advertised) and keep the `Stdio` fallback,
+///   which every agent must support.
+///
+/// Never blocks the session; a dropped `Http` spec with no `Stdio` fallback is
+/// only logged. The log line never includes the spec itself or its token.
+fn select_mcp_servers_for_agent(
+    specs: &[McpServerSpec],
+    agent_supports_http: bool,
+) -> Vec<McpServerSpec> {
+    let http_names: Vec<&str> = specs
+        .iter()
+        .filter_map(|spec| match spec {
+            McpServerSpec::Http { name, .. } => Some(name.as_str()),
+            McpServerSpec::Stdio { .. } => None,
+        })
+        .collect();
+    let stdio_names: Vec<&str> = specs
+        .iter()
+        .filter_map(|spec| match spec {
+            McpServerSpec::Stdio { name, .. } => Some(name.as_str()),
+            McpServerSpec::Http { .. } => None,
+        })
+        .collect();
+
+    if !agent_supports_http && http_names.iter().any(|name| !stdio_names.contains(name)) {
         tracing::warn!(
-            "requested an HTTP MCP server for this ACP session, but the agent's \
-             InitializeResponse did not advertise mcp_capabilities.http; the agent may refuse it"
+            "requested an HTTP MCP server with no stdio fallback, but the agent's \
+             InitializeResponse did not advertise mcp_capabilities.http; not attaching it"
         );
     }
+
+    specs
+        .iter()
+        .filter(|spec| match spec {
+            McpServerSpec::Http { .. } => agent_supports_http,
+            McpServerSpec::Stdio { name, .. } => {
+                !agent_supports_http || !http_names.contains(&name.as_str())
+            }
+        })
+        .cloned()
+        .collect()
 }
 
 /// Maps the real, `#[non_exhaustive]` `StopReason` (agent-client-protocol-

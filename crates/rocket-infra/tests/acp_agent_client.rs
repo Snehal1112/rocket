@@ -492,10 +492,13 @@ async fn acp_agent_client_start_session_maps_http_mcp_server_spec_into_new_sessi
             &fixture_command(),
             &[],
             "/tmp",
-            &[(
-                "MCP_SERVERS_DUMP_PATH".to_string(),
-                dump_path.display().to_string(),
-            )],
+            &[
+                (
+                    "MCP_SERVERS_DUMP_PATH".to_string(),
+                    dump_path.display().to_string(),
+                ),
+                ("FIXTURE_ADVERTISE_MCP_HTTP".to_string(), "1".to_string()),
+            ],
             &specs,
         )
         .await
@@ -503,12 +506,18 @@ async fn acp_agent_client_start_session_maps_http_mcp_server_spec_into_new_sessi
 
     let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
     assert!(dumped.contains("\"type\":\"http\""), "got: {dumped}");
-    assert!(dumped.contains("\"name\":\"rocket-tools\""), "got: {dumped}");
+    assert!(
+        dumped.contains("\"name\":\"rocket-tools\""),
+        "got: {dumped}"
+    );
     assert!(
         dumped.contains("\"url\":\"http://127.0.0.1:4000/mcp\""),
         "got: {dumped}"
     );
-    assert!(dumped.contains("\"name\":\"Authorization\""), "got: {dumped}");
+    assert!(
+        dumped.contains("\"name\":\"Authorization\""),
+        "got: {dumped}"
+    );
     assert!(
         dumped.contains("\"value\":\"Bearer secret-token\""),
         "got: {dumped}"
@@ -545,7 +554,10 @@ async fn acp_agent_client_start_session_maps_stdio_mcp_server_spec_into_new_sess
     assert!(!dumped.contains("\"type\":\"http\""), "got: {dumped}");
     assert!(dumped.contains("\"command\":\"rocket\""), "got: {dumped}");
     assert!(dumped.contains("--acp-mcp-stdio-bridge"), "got: {dumped}");
-    assert!(dumped.contains("\"name\":\"ROCKET_MCP_PORT\""), "got: {dumped}");
+    assert!(
+        dumped.contains("\"name\":\"ROCKET_MCP_PORT\""),
+        "got: {dumped}"
+    );
     assert!(dumped.contains("\"value\":\"4000\""), "got: {dumped}");
 }
 
@@ -577,9 +589,11 @@ async fn acp_agent_client_start_session_with_no_mcp_servers_sends_an_empty_list(
 async fn acp_agent_client_start_session_still_succeeds_when_agent_lacks_http_mcp_capability() {
     // The fixture agent's InitializeResponse never sets mcp_capabilities.http
     // unless FIXTURE_ADVERTISE_MCP_HTTP=1 is set (see test_acp_agent.rs),
-    // which this test does not set. Deciding which McpServerSpec variant to
-    // send is rocket-app's job (Plan 03); this crate only maps and warns on
-    // a mismatch, it never blocks the session over it.
+    // which this test does not set. A capability mismatch never blocks the
+    // session; the unsupported HTTP server is simply not attached.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("mcp_servers.json");
+
     let client = AcpAgentClient::new();
     let specs = vec![McpServerSpec::Http {
         name: "rocket-tools".to_string(),
@@ -587,10 +601,92 @@ async fn acp_agent_client_start_session_still_succeeds_when_agent_lacks_http_mcp
         token: "secret-token".to_string(),
     }];
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &specs)
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "MCP_SERVERS_DUMP_PATH".to_string(),
+                dump_path.display().to_string(),
+            )],
+            &specs,
+        )
         .await
         .expect("a capability mismatch must not fail start_session");
     assert!(!session_id.is_empty());
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
+    assert_eq!(dumped.trim(), "[]");
+}
+
+fn http_and_stdio_specs_with_same_name() -> Vec<McpServerSpec> {
+    vec![
+        McpServerSpec::Http {
+            name: "rocket".to_string(),
+            url: "http://127.0.0.1:4000/mcp".to_string(),
+            token: "secret-token".to_string(),
+        },
+        McpServerSpec::Stdio {
+            name: "rocket".to_string(),
+            command: "rocket".to_string(),
+            args: vec!["--acp-mcp-stdio-bridge".to_string()],
+            env: vec![("ROCKET_MCP_PORT".to_string(), "4000".to_string())],
+        },
+    ]
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_picks_http_over_stdio_when_agent_advertises_http() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("mcp_servers.json");
+
+    let client = AcpAgentClient::new();
+    client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[
+                (
+                    "MCP_SERVERS_DUMP_PATH".to_string(),
+                    dump_path.display().to_string(),
+                ),
+                ("FIXTURE_ADVERTISE_MCP_HTTP".to_string(), "1".to_string()),
+            ],
+            &http_and_stdio_specs_with_same_name(),
+        )
+        .await
+        .expect("start_session should succeed against the fixture agent");
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
+    assert!(dumped.contains("\"type\":\"http\""), "got: {dumped}");
+    assert!(!dumped.contains("--acp-mcp-stdio-bridge"), "got: {dumped}");
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_falls_back_to_stdio_when_agent_lacks_http() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("mcp_servers.json");
+
+    let client = AcpAgentClient::new();
+    client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "MCP_SERVERS_DUMP_PATH".to_string(),
+                dump_path.display().to_string(),
+            )],
+            &http_and_stdio_specs_with_same_name(),
+        )
+        .await
+        .expect("start_session should succeed against the fixture agent");
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
+    assert!(!dumped.contains("\"type\":\"http\""), "got: {dumped}");
+    assert!(!dumped.contains("secret-token"), "got: {dumped}");
+    assert!(dumped.contains("--acp-mcp-stdio-bridge"), "got: {dumped}");
 }
 
 #[tokio::test]
