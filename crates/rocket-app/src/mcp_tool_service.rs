@@ -20,7 +20,12 @@ use crate::runner_sequence::{build_step_input, folder_dir_name, RunItem};
 /// One request entry in a `list_collection_requests` result. `path` is
 /// relative to the collection root, matching the shape `run_request` and
 /// `edit_script` expect back.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Serialize` (not just the domain-side `Debug`/`Clone`/`PartialEq`) is
+/// needed because `src-tauri/src/mcp/tool_server.rs`'s `to_tool_result`
+/// helper serializes a successful `McpToolService` result straight to the
+/// MCP tool response's JSON text body.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct McpRequestEntry {
     pub path: String,
     pub name: String,
@@ -29,8 +34,9 @@ pub struct McpRequestEntry {
 }
 
 /// Summary of one `run_request` call, enough for an agent to decide what to
-/// do next without re-fetching the full response body.
-#[derive(Debug, Clone, PartialEq)]
+/// do next without re-fetching the full response body. `Serialize` for the
+/// same reason as `McpRequestEntry` above.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct McpRunResult {
     pub status: u16,
     pub duration_ms: u64,

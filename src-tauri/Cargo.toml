@@ -96,3 +96,4 @@ webkit2gtk = { version = "2.0", features = ["v2_34"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tauri = { version = "2", features = ["test"] }
+async-trait.workspace = true
