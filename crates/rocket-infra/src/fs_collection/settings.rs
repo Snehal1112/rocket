@@ -223,6 +223,11 @@ pub(super) fn get_settings(
             sandbox_mode,
             script_context_roots,
             script_flow,
+            // Plan 02 wires this to the extensions.rocketapi.agentAutonomyEnabled
+            // mapping (same pattern as sandbox_mode above); stubbed to the
+            // type's own default here so CollectionSettings compiles with the
+            // new field.
+            agent_autonomy_enabled: false,
         })
     } else {
         Ok(CollectionSettings {

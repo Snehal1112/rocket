@@ -155,6 +155,9 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
             sandbox_mode: SandboxMode::Safe,
             script_context_roots: vec![],
             script_flow: ScriptFlow::default(),
+            // See the matching comment in fs_collection/settings.rs::get_settings —
+            // Plan 02 wires the real extensions mapping.
+            agent_autonomy_enabled: false,
         }
     } else {
         CollectionSettings {

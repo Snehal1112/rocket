@@ -65,6 +65,13 @@ pub struct CollectionSettings {
     /// Persisted at `extensions.bruno.scripts.flow` (Plan 03).
     #[serde(default)]
     pub script_flow: ScriptFlow,
+
+    /// Whether the ACP AI-assist agent may run requests, edit scripts, and
+    /// write non-secret env vars against this collection without further
+    /// per-action confirmation. Defaults to `false` so an imported or freshly
+    /// cloned collection never silently grants agent write access.
+    #[serde(default)]
+    pub agent_autonomy_enabled: bool,
 }
 
 /// Merge a folder ancestor chain into a single deduplicated, sorted variable set.
@@ -220,5 +227,27 @@ mod tests {
             serde_json::from_str(r#"{"headers":[],"variables":[],"sandboxMode":"safe"}"#)
                 .expect("old payload deserializes");
         assert_eq!(old.script_flow, ScriptFlow::Sandwich);
+    }
+
+    #[test]
+    fn agent_autonomy_enabled_defaults_to_false_when_absent_from_json() {
+        let json = r#"{"headers":[],"variables":[]}"#;
+        let settings: CollectionSettings = serde_json::from_str(json).expect("deserialize");
+        assert!(!settings.agent_autonomy_enabled);
+    }
+
+    #[test]
+    fn agent_autonomy_enabled_true_roundtrips_as_camel_case() {
+        let settings = CollectionSettings {
+            agent_autonomy_enabled: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialize");
+        assert!(
+            json.contains(r#""agentAutonomyEnabled":true"#),
+            "expected camelCase agentAutonomyEnabled field, got {json}"
+        );
+        let round: CollectionSettings = serde_json::from_str(&json).expect("deserialize");
+        assert!(round.agent_autonomy_enabled);
     }
 }
