@@ -1,8 +1,5 @@
 //! Builds the masked record of a request a Flow step sent.
 
-// Consumed by the Flow run wiring added in a later task.
-#![allow(dead_code)]
-
 use crate::execution_service::sensitive_auth_label;
 use crate::redaction::{is_sensitive_header, redact_secrets, REDACTED};
 use rocket_http::{HttpRequest, HttpResponse};
@@ -77,10 +74,12 @@ fn auth_line(auth: &Auth) -> Option<FlowDebugHeader> {
         Auth::None | Auth::Inherit => return None,
         Auth::Basic { .. } => ("Authorization".to_string(), format!("Basic {REDACTED}")),
         Auth::Bearer { .. } => ("Authorization".to_string(), format!("Bearer {REDACTED}")),
-        Auth::ApiKey { key, placement, .. } if placement == "query" => {
-            ("Auth".to_string(), format!("API key in query \"{key}\""))
-        }
-        Auth::ApiKey { key, .. } => (key.clone(), REDACTED.to_string()),
+        Auth::ApiKey { key, placement, .. } => match placement.as_str() {
+            "header" => (key.clone(), REDACTED.to_string()),
+            "query" => ("Auth".to_string(), format!("API key in query \"{key}\"")),
+            // The executor sends nothing for an unknown placement.
+            _ => return None,
+        },
         other => (
             "Auth".to_string(),
             sensitive_auth_label(other).unwrap_or("unknown").to_string(),
@@ -240,6 +239,20 @@ mod tests {
             .headers
             .iter()
             .any(|h| h.key == "X-Api" && h.value == "••••••"));
+    }
+
+    #[test]
+    fn shows_no_auth_line_for_an_api_key_with_an_unknown_placement() {
+        let auth = Auth::ApiKey {
+            key: "X-Api".into(),
+            value: "val-123456".into(),
+            placement: "cookie".into(),
+        };
+        let d = build_debug_request(&request(auth), None, None, &HashSet::new());
+        assert!(d
+            .headers
+            .iter()
+            .all(|h| h.key != "X-Api" && h.key != "Auth"));
     }
 
     #[test]

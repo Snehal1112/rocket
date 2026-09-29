@@ -257,6 +257,9 @@ pub enum DomainEvent {
         /// Script console output from this step, oldest first.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         logs: Vec<FlowLogEntry>,
+        /// The request as sent and its response, masked. Only for Request nodes in debug mode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        debug_request: Option<Box<FlowDebugRequest>>,
     },
     /// Emitted once when a Flow run ends, for any reason.
     FlowRunFinished {
@@ -735,6 +738,7 @@ mod tests {
             value: None,
             skip_reason: None,
             branch: None,
+            debug_request: None,
             logs: vec![FlowLogEntry {
                 level: FlowLogLevel::Warn,
                 message: "hi".into(),
@@ -756,10 +760,45 @@ mod tests {
             value: None,
             skip_reason: None,
             branch: None,
+            debug_request: None,
             logs: vec![],
         };
         let json = serde_json::to_string(&without).expect("serialize");
         assert!(!json.contains("logs"), "got {json}");
+    }
+
+    #[test]
+    fn flow_step_completed_carries_a_debug_request_and_omits_it_when_absent() {
+        let debug = FlowDebugRequest {
+            method: "GET".into(),
+            url: "https://x.test/a".into(),
+            headers: vec![],
+            body: None,
+            response: None,
+            error: Some("boom".into()),
+        };
+        let event = |debug_request| DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "n".into(),
+            status: FlowNodeStatus::Failed,
+            status_code: None,
+            duration_ms: None,
+            error: None,
+            value: None,
+            skip_reason: None,
+            branch: None,
+            debug_request,
+            logs: vec![],
+        };
+        let json = serde_json::to_string(&event(Some(Box::new(debug)))).expect("serialize");
+        assert!(
+            json.contains(
+                r#""debug_request":{"method":"GET","url":"https://x.test/a","headers":[],"error":"boom"}"#
+            ),
+            "got {json}"
+        );
+        let json = serde_json::to_string(&event(None)).expect("serialize");
+        assert!(!json.contains("debug_request"), "got {json}");
     }
 
     #[test]
@@ -774,6 +813,7 @@ mod tests {
             value: Some("bob".into()),
             skip_reason: None,
             branch: None,
+            debug_request: None,
             logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
@@ -795,6 +835,7 @@ mod tests {
             value: None,
             skip_reason: Some(FlowSkipReason::UpstreamFailed),
             branch: None,
+            debug_request: None,
             logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
@@ -825,6 +866,7 @@ mod tests {
                 skip_reason,
                 branch,
                 logs,
+                debug_request,
             } => {
                 assert_eq!(run_id, "01J");
                 assert_eq!(node_id, "node-3");
@@ -836,6 +878,7 @@ mod tests {
                 assert_eq!(skip_reason, None);
                 assert_eq!(branch, None);
                 assert!(logs.is_empty());
+                assert_eq!(debug_request, None);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -904,6 +947,7 @@ mod tests {
             value: None,
             skip_reason: Some(FlowSkipReason::BranchNotTaken),
             branch: None,
+            debug_request: None,
             logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
@@ -925,6 +969,7 @@ mod tests {
             value: None,
             skip_reason: None,
             branch: Some("case:01JCASE".into()),
+            debug_request: None,
             logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");

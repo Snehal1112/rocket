@@ -11,6 +11,7 @@ use rocket_shared::VariableValue;
 use crate::execution_service::{
     ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
+use crate::flow_debug::build_debug_request;
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::runner_sequence::{build_step_input, RunItem};
 
@@ -447,7 +448,7 @@ use std::sync::{Arc, Mutex};
 
 use rocket_scripting::{ConsoleEntry, ConsoleLevel};
 use rocket_shared::events::{
-    DomainEvent, FlowLogEntry, FlowLogLevel, FlowNodeStatus, FlowSkipReason,
+    DomainEvent, FlowDebugRequest, FlowLogEntry, FlowLogLevel, FlowNodeStatus, FlowSkipReason,
 };
 use ulid::Ulid;
 
@@ -485,6 +486,9 @@ pub struct FlowStepResult {
     /// Script console output from this step, oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub logs: Vec<FlowLogEntry>,
+    /// The request as sent and its response, masked. Only for Request nodes in debug mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_request: Option<FlowDebugRequest>,
 }
 
 /// Builds the `FlowStepCompleted` event for one recorded step, so the live
@@ -501,6 +505,7 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         skip_reason: step.skip_reason,
         branch: step.branch.clone(),
         logs: step.logs.clone(),
+        debug_request: step.debug_request.clone().map(Box::new),
     }
 }
 
@@ -657,6 +662,7 @@ impl FlowExecutionService {
                     // here is a bug. It fails this node instead of panicking.
                     let node_opt = nodes_by_id.get(node_id.as_str()).copied();
                     let mut node_logs = Vec::new();
+                    let mut node_debug = None;
                     let result = match node_opt {
                         Some(node) => {
                             self.execute_node(
@@ -667,6 +673,7 @@ impl FlowExecutionService {
                                 &captured,
                                 &external_secrets,
                                 &mut node_logs,
+                                &mut node_debug,
                             )
                             .await
                         }
@@ -677,6 +684,7 @@ impl FlowExecutionService {
                     let step = result_to_step(node_id, node_opt, &result);
                     let step = FlowStepResult {
                         logs: node_logs,
+                        debug_request: node_debug,
                         ..step
                     };
                     let outcome = match &result {
@@ -751,7 +759,7 @@ impl FlowExecutionService {
     /// non-trigger edges `decide_fate` selected. Returns the node's captured
     /// output and chosen exit, or an error if the node itself failed.
     // The node needs the run's inputs, captured outputs and secrets, and
-    // `logs` collects the console output.
+    // `logs` collects the console output and `debug` the debug record.
     #[allow(clippy::too_many_arguments)]
     async fn execute_node(
         &self,
@@ -762,6 +770,7 @@ impl FlowExecutionService {
         captured: &HashMap<String, CapturedOutput>,
         external_secrets: &HashMap<String, String>,
         logs: &mut Vec<FlowLogEntry>,
+        debug: &mut Option<FlowDebugRequest>,
     ) -> DomainResult<ExecutedNode> {
         // Script logs redact the same secrets a Request node's script does.
         let secret_values = exec.secret_values(
@@ -816,7 +825,9 @@ impl FlowExecutionService {
                     VariableValue::simple(value),
                 )))
             }
-            FlowNodeKind::Request { .. } => {
+            FlowNodeKind::Request {
+                debug: debug_on, ..
+            } => {
                 let mut request_input = build_execute_request_input(
                     self.collection_repo.as_ref(),
                     &input.collection,
@@ -843,9 +854,22 @@ impl FlowExecutionService {
                 let edges_owned: Vec<FlowEdge> = data_edges.iter().map(|e| (*e).clone()).collect();
                 apply_wired_overrides(&mut request_input, &resolved, &edges_owned)?;
 
-                let output = exec
-                    .execute_with_external_secrets(request_input, external_secrets)
-                    .await?;
+                let mut sent = None;
+                let result = exec
+                    .execute_capturing(request_input, external_secrets, &mut sent)
+                    .await;
+                if *debug_on {
+                    if let Some(sent) = &sent {
+                        let error = result.as_ref().err().map(|e| e.to_string());
+                        *debug = Some(build_debug_request(
+                            sent,
+                            result.as_ref().ok().map(|o| &o.response),
+                            error.as_deref(),
+                            &secret_values,
+                        ));
+                    }
+                }
+                let output = result?;
                 logs.extend(to_flow_logs(output.console_entries.clone()));
                 Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(
                     output,
@@ -967,6 +991,7 @@ fn result_to_step(
         skip_reason: None,
         branch: None,
         logs: Vec::new(),
+        debug_request: None,
     };
     match result {
         Ok(executed) if is_routing => FlowStepResult {
@@ -1016,6 +1041,7 @@ fn skipped_step(node_id: &str, reason: FlowSkipReason) -> FlowStepResult {
         skip_reason: Some(reason),
         branch: None,
         logs: Vec::new(),
+        debug_request: None,
     }
 }
 
@@ -1030,6 +1056,7 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
         skip_reason: None,
         branch: None,
         logs: Vec::new(),
+        debug_request: None,
     }
 }
 
@@ -3055,6 +3082,7 @@ mod tests {
             value: None,
             skip_reason: Some(FlowSkipReason::BranchNotTaken),
             branch: None,
+            debug_request: None,
             logs: Vec::new(),
         };
         let json = serde_json::to_value(&step).expect("serialize");
@@ -4608,5 +4636,130 @@ mod tests {
         assert_eq!(step.logs.len(), 1);
         assert!(step.logs[0].message.contains('x'));
         assert_eq!(completed_logs(&events, "out"), step.logs);
+    }
+
+    // ---- Request debug mode -----------------------------------------------
+
+    fn debug_request_node(debug: bool) -> FlowNode {
+        FlowNode {
+            id: "r".to_string(),
+            kind: FlowNodeKind::Request {
+                debug,
+                label: "Login".to_string(),
+                source: RequestSource::Inline {
+                    request: InlineRequestData {
+                        method: "post".to_string(),
+                        url: "{{base}}/login".to_string(),
+                        headers: vec![InlineHeader {
+                            name: "X-Key".to_string(),
+                            value: "{{secret}}".to_string(),
+                        }],
+                        body: Some(r#"{"k":"{{secret}}"}"#.to_string()),
+                    },
+                },
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    /// Runs one Request node against an environment with a plain `base` and a
+    /// secret `secret` variable. Returns the summary and the recorded events.
+    async fn run_debug_node(
+        debug: bool,
+        base: &str,
+        status: u16,
+    ) -> (FlowRunSummary, Vec<DomainEvent>) {
+        let mut env = rocket_environment::Environment::new("dev");
+        env.set_variable(rocket_environment::Variable::new("base", base));
+        let mut secret = rocket_environment::Variable::new("secret", "sekret-value");
+        secret.secret = true;
+        env.set_variable(secret);
+        let executor = RecordingExecutor::new();
+        executor.set_status("/login", status);
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            Arc::new(SharedExecutor(executor)),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let flow = Flow {
+            name: "dbg".to_string(),
+            nodes: vec![debug_request_node(debug)],
+            edges: Vec::new(),
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let mut input = run_input("dbg");
+        input.environment_name = Some("dev".to_string());
+        let summary = service.run(&exec, input).await.expect("run");
+        (summary, publisher.events())
+    }
+
+    fn completed_debug(events: &[DomainEvent], node: &str) -> Option<Box<FlowDebugRequest>> {
+        events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::FlowStepCompleted {
+                    node_id,
+                    debug_request,
+                    ..
+                } if node_id == node => Some(debug_request.clone()),
+                _ => None,
+            })
+            .expect("FlowStepCompleted for node")
+    }
+
+    #[tokio::test]
+    async fn a_debug_request_node_reports_the_masked_request_on_the_step_and_event() {
+        let (summary, events) = run_debug_node(true, "https://x.test", 200).await;
+        let step = step_of(&summary, "r");
+        let debug = step.debug_request.as_ref().expect("debug record");
+        assert_eq!(debug.url, "https://x.test/login");
+        let key = debug
+            .headers
+            .iter()
+            .find(|h| h.key == "X-Key")
+            .expect("X-Key header");
+        assert_eq!(key.value, "••••••");
+        assert_eq!(debug.body.as_deref(), Some(r#"{"k":"••••••"}"#));
+        assert_eq!(debug.response.as_ref().map(|r| r.status), Some(200));
+        assert_eq!(
+            completed_debug(&events, "r").map(|d| *d),
+            step.debug_request
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_node_without_debug_has_no_debug_record() {
+        let (summary, events) = run_debug_node(false, "https://x.test", 200).await;
+        assert_eq!(step_of(&summary, "r").debug_request, None);
+        assert!(completed_debug(&events, "r").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_debug_request_node_that_fails_to_send_keeps_the_request_and_error() {
+        let (summary, events) = run_debug_node(true, "https://x.test", 0).await;
+        let step = step_of(&summary, "r");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        let debug = step.debug_request.as_ref().expect("debug record");
+        assert_eq!(debug.url, "https://x.test/login");
+        assert!(debug.response.is_none());
+        assert!(
+            debug
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("connection refused")),
+            "got {:?}",
+            debug.error
+        );
+        assert_eq!(
+            completed_debug(&events, "r").map(|d| *d),
+            step.debug_request
+        );
     }
 }
