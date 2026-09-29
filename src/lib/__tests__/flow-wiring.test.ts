@@ -273,3 +273,37 @@ describe('parseGraphErrorMessage', () => {
     expect(parseGraphErrorMessage('Invalid input: flow name is empty')).toBeNull();
   });
 });
+
+describe('Wait for callback wiring', () => {
+  const wait: FlowNode = {
+    id: 'wait',
+    kind: { kind: 'WaitForCallback', label: 'Hook', name: 'payment', timeoutMs: 60000 },
+    position: { x: 0, y: 0 },
+  };
+  const nodes = [requestSource, wait];
+
+  it('a Wait node accepts only a Run when wire', () => {
+    const into = (targetHandle: string) =>
+      isValidFlowConnection(
+        { source: 'node-a', target: 'wait', sourceHandle: 'result', targetHandle },
+        nodes,
+        [],
+      );
+    expect(into('trigger')).toBe(true);
+    expect(into('url')).toBe(false);
+    expect(into('body')).toBe(false);
+    expect(into('value')).toBe(false);
+    expect(into('input')).toBe(false);
+  });
+
+  it('a Wait node exits through result only', () => {
+    const from = (sourceHandle: string) =>
+      isValidFlowConnection(
+        { source: 'wait', target: 'node-a', sourceHandle, targetHandle: 'url' },
+        nodes,
+        [],
+      );
+    expect(from('result')).toBe(true);
+    expect(from('true')).toBe(false);
+  });
+});

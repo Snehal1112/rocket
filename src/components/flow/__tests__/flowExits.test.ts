@@ -83,3 +83,23 @@ describe('edgeRunState', () => {
     expect(edgeRunState(trueEdge, undefined, 'success', 'true')).toBe('neutral');
   });
 });
+
+describe('Wait for callback exits', () => {
+  const wait = {
+    id: 'w',
+    kind: { kind: 'WaitForCallback' as const, label: 'Hook', name: 'payment', timeoutMs: 60000 },
+    position: { x: 0, y: 0 },
+  };
+
+  it('has no exit label and neutral edges, like a Request node', () => {
+    expect(exitLabel(wait.kind, 'result')).toBeUndefined();
+    expect(
+      edgeRunState(
+        { id: 'e', sourceNodeId: 'w', targetNodeId: 'x', targetField: 'url', expression: '' },
+        wait,
+        'success',
+        undefined,
+      ),
+    ).toBe('neutral');
+  });
+});

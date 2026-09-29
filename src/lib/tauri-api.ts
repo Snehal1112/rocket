@@ -1776,7 +1776,16 @@ export type FlowNodeKind =
   | { kind: 'Input'; label: string; value: unknown }
   | { kind: 'Output'; label: string }
   | { kind: 'If'; label: string; condition: string }
-  | { kind: 'Switch'; label: string; value: string; cases: SwitchCase[] };
+  | { kind: 'Switch'; label: string; value: string; cases: SwitchCase[] }
+  | {
+      kind: 'WaitForCallback';
+      label: string;
+      /** Letters, digits and `_`; unique in the flow. Used as `{{callback.<name>}}`. */
+      name: string;
+      timeoutMs: number;
+      /** Optional condition over `request`. Null or absent accepts the first call. */
+      acceptWhen?: string | null;
+    };
 
 export interface FlowNode {
   id: string;
@@ -1798,6 +1807,8 @@ export interface Flow {
   name: string;
   nodes: FlowNode[];
   edges: FlowEdge[];
+  /** Host used in callback URLs. Absent or null means this machine's LAN IP. */
+  callbackHost?: string | null;
 }
 
 export type FlowNodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped';

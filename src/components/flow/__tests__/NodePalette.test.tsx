@@ -57,3 +57,36 @@ describe('NodePalette routing entries', () => {
     });
   });
 });
+
+describe('NodePalette Wait for callback entry', () => {
+  it('adds a Wait for callback node with the first free name', async () => {
+    const onAddNode = vi.fn();
+    render(
+      <NodePalette
+        onAddNode={onAddNode}
+        nodes={[
+          {
+            id: 'w1',
+            kind: { kind: 'WaitForCallback', label: 'Hook', name: 'callback', timeoutMs: 60000 },
+            position: { x: 0, y: 0 },
+          },
+        ]}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Add node/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Wait for callback' }));
+    expect(onAddNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^wait-/),
+        position: { x: 100, y: 100 },
+        kind: {
+          kind: 'WaitForCallback',
+          label: 'Wait for callback',
+          name: 'callback_2',
+          timeoutMs: 60000,
+        },
+      }),
+    );
+  });
+});

@@ -60,6 +60,7 @@ function sourceHandleExists(node: FlowNode, handle: string): boolean {
   switch (node.kind.kind) {
     case 'Request':
     case 'Input':
+    case 'WaitForCallback':
       return handle === RESULT_HANDLE;
     case 'If':
       return handle === TRUE_HANDLE || handle === FALSE_HANDLE;
@@ -85,12 +86,14 @@ function targetAccepts(node: FlowNode, handle: string): boolean {
       return REQUEST_TARGETS.includes(handle);
     case 'Output':
       return OUTPUT_TARGETS.includes(handle);
+    case 'WaitForCallback':
+      return handle === TRIGGER_HANDLE;
     case 'Input':
       return false;
   }
 }
 
-// Client-side copy of rocket_flow::validate rules V1–V5, so obviously
+// Client-side copy of rocket_flow::validate rules V1–V5 and V10, so obviously
 // invalid wires cannot be drawn. Save still runs the real validation, and
 // cycles are left to it.
 export function isValidFlowConnection(

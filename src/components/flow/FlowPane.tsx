@@ -395,7 +395,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               Save
             </Button>
           </div>
-          <NodePalette onAddNode={handleAddNode} />
+          <NodePalette onAddNode={handleAddNode} nodes={tab.nodes} />
           <FlowCanvas
             nodes={tab.nodes}
             edges={tab.edges}

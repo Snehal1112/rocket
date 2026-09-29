@@ -3,6 +3,7 @@ import {
   ArrowRightToLine,
   GitBranch,
   Globe,
+  Hourglass,
   Plus,
   Repeat,
   Split,
@@ -14,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { DEFAULT_CALLBACK_TIMEOUT_MS, nextCallbackName } from '@/lib/flow-callback';
 import { DEFAULT_REPEAT_UNTIL } from '@/lib/flow-repeat';
 import type { FlowNode } from '@/lib/tauri-api';
 
@@ -23,7 +25,14 @@ function newNodeId(prefix: string) {
   return `${prefix}-${Date.now()}-${nextId}`;
 }
 
-export function NodePalette({ onAddNode }: { onAddNode: (node: FlowNode) => void }) {
+export function NodePalette({
+  onAddNode,
+  nodes = [],
+}: {
+  onAddNode: (node: FlowNode) => void;
+  // Existing nodes, so a new Wait for callback node gets a free name.
+  nodes?: FlowNode[];
+}) {
   const defaultPosition = { x: 100, y: 100 };
 
   return (
@@ -127,6 +136,23 @@ export function NodePalette({ onAddNode }: { onAddNode: (node: FlowNode) => void
           >
             <Split className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
             Switch
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              onAddNode({
+                id: newNodeId('wait'),
+                kind: {
+                  kind: 'WaitForCallback',
+                  label: 'Wait for callback',
+                  name: nextCallbackName(nodes),
+                  timeoutMs: DEFAULT_CALLBACK_TIMEOUT_MS,
+                },
+                position: defaultPosition,
+              })
+            }
+          >
+            <Hourglass className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
+            Wait for callback
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
