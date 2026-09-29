@@ -665,3 +665,122 @@ mod tests {
         assert_eq!(executor.sent_urls().len(), 2);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Callback listener
+// ---------------------------------------------------------------------------
+
+use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall};
+use std::sync::atomic::AtomicBool;
+
+/// Flips its flag when dropped, so a test can see that an endpoint closed.
+struct FakeGuard(Arc<AtomicBool>);
+
+impl Drop for FakeGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+struct FakeEndpointState {
+    sender: tokio::sync::mpsc::Sender<ReceivedCall>,
+    closed: Arc<AtomicBool>,
+    host: Option<String>,
+}
+
+/// In-memory `CallbackListener`. Endpoint `i` gets the URL
+/// `http://fake:1/cb/<i>`; tests push calls in with `sender(i)`.
+pub struct FakeCallbackListener {
+    endpoints: Mutex<Vec<FakeEndpointState>>,
+    fail_with: Option<String>,
+    /// Calls put into the next endpoint the moment it opens, so a test can
+    /// deliver a call before its node's turn.
+    queued: Mutex<Vec<ReceivedCall>>,
+}
+
+impl FakeCallbackListener {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            endpoints: Mutex::new(Vec::new()),
+            fail_with: None,
+            queued: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// A listener whose every `open` fails with `message`.
+    pub fn failing(message: &str) -> Arc<Self> {
+        Arc::new(Self {
+            endpoints: Mutex::new(Vec::new()),
+            fail_with: Some(message.to_string()),
+            queued: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Delivers `call` into the next endpoint as soon as it opens.
+    pub fn queue_on_open(&self, call: ReceivedCall) {
+        self.queued.lock().expect("lock").push(call);
+    }
+
+    pub fn sender(&self, index: usize) -> tokio::sync::mpsc::Sender<ReceivedCall> {
+        self.endpoints.lock().expect("lock")[index].sender.clone()
+    }
+
+    pub fn is_closed(&self, index: usize) -> bool {
+        self.endpoints.lock().expect("lock")[index]
+            .closed
+            .load(Ordering::SeqCst)
+    }
+
+    pub fn opened_count(&self) -> usize {
+        self.endpoints.lock().expect("lock").len()
+    }
+
+    pub fn hosts(&self) -> Vec<Option<String>> {
+        self.endpoints
+            .lock()
+            .expect("lock")
+            .iter()
+            .map(|e| e.host.clone())
+            .collect()
+    }
+
+    /// Waits until at least `count` endpoints are open, for up to 2 seconds.
+    pub async fn wait_opened(&self, count: usize) {
+        for _ in 0..400 {
+            if self.opened_count() >= count {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!(
+            "expected {count} open endpoints, found {}",
+            self.opened_count()
+        );
+    }
+}
+
+#[async_trait]
+impl CallbackListener for Arc<FakeCallbackListener> {
+    async fn open(&self, host: Option<&str>) -> DomainResult<CallbackEndpoint> {
+        if let Some(message) = &self.fail_with {
+            return Err(DomainError::Io(message.clone()));
+        }
+        let (sender, calls) = tokio::sync::mpsc::channel(100);
+        for call in self.queued.lock().expect("lock").drain(..) {
+            sender.try_send(call).expect("the fake channel has room");
+        }
+        let closed = Arc::new(AtomicBool::new(false));
+        let mut endpoints = self.endpoints.lock().expect("lock");
+        let index = endpoints.len();
+        endpoints.push(FakeEndpointState {
+            sender,
+            closed: Arc::clone(&closed),
+            host: host.map(str::to_string),
+        });
+        Ok(CallbackEndpoint {
+            url: format!("http://fake:1/cb/{index}"),
+            calls,
+            guard: Box::new(FakeGuard(closed)),
+        })
+    }
+}

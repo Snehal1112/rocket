@@ -585,6 +585,8 @@ pub struct FlowExecutionService {
     /// One cancel handle per in-flight run. `cancel` triggers it, so a node
     /// that is waiting stops at once.
     cancel_handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    /// Opens run-scoped callback endpoints for Wait for callback nodes.
+    callback_listener: Box<dyn crate::callback_listener::CallbackListener>,
 }
 
 impl FlowExecutionService {
@@ -600,7 +602,18 @@ impl FlowExecutionService {
             cancelled: Arc::new(Mutex::new(HashSet::new())),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             cancel_handles: Arc::new(Mutex::new(HashMap::new())),
+            callback_listener: Box::new(crate::callback_listener::NoCallbackListener),
         }
+    }
+
+    /// Replaces the default `NoCallbackListener`. `src-tauri` passes the
+    /// real server; tests pass a `FakeCallbackListener`.
+    pub fn with_callback_listener(
+        mut self,
+        listener: Box<dyn crate::callback_listener::CallbackListener>,
+    ) -> Self {
+        self.callback_listener = listener;
+        self
     }
 
     /// Loads the named flow and validates it into a dependency-ordered node id
@@ -5693,5 +5706,17 @@ mod tests {
             step.error
         );
         assert_eq!(step.attempts, Some(2));
+    }
+
+    #[test]
+    fn with_callback_listener_replaces_the_default_listener() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let _service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new()),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullEventPublisher),
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+        assert_eq!(fake.opened_count(), 0, "building the service opens nothing");
     }
 }
