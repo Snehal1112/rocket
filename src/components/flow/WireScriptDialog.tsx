@@ -75,6 +75,10 @@ export function WireScriptDialog({
       {/* nokey keeps Backspace and Delete in the dialog from deleting canvas items. */}
       <DialogContent
         className='nokey max-w-3xl'
+        onEscapeKeyDown={(event) => {
+          // Escape inside the editor closes its suggest or find widget, not the dialog.
+          if ((event.target as Element | null)?.closest?.('.monaco-editor')) event.preventDefault();
+        }}
         onCloseAutoFocus={(event) => {
           // There is no trigger to focus, so the caller chooses where focus goes.
           if (!onCloseFocus) return;

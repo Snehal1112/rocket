@@ -142,7 +142,8 @@ export function toRfEdges(
       targetHandle: e.targetField.split('[')[0],
       selected: selectedIds.has(e.id),
       label: source ? exitLabel(source.kind, handle) : undefined,
-      className: run === 'neutral' ? undefined : `flow-edge-${run}`,
+      // nopan keeps a double-click on a wire from also zooming the canvas.
+      className: run === 'neutral' ? 'nopan' : `nopan flow-edge-${run}`,
       style: isCycle
         ? CYCLE_EDGE_STYLE
         : run === 'taken'
@@ -348,7 +349,16 @@ function FlowCanvasInner({
           isValidConnection={isValidConnection}
           onNodeClick={handleNodeClick}
           onEdgeClick={focusPane}
-          onEdgeDoubleClick={(_, edge) => onEdgeEdit?.(edge.id)}
+          onEdgeDoubleClick={(_, edge) => {
+            // Editing a wire must not leave it selected, or a later Backspace deletes it.
+            setSelectedEdgeIds((prev) => {
+              if (!prev.has(edge.id)) return prev;
+              const next = new Set(prev);
+              next.delete(edge.id);
+              return next;
+            });
+            onEdgeEdit?.(edge.id);
+          }}
           onPaneClick={focusPane}
           deleteKeyCode={['Backspace', 'Delete']}
           fitView

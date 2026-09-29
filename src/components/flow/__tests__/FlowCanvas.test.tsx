@@ -274,6 +274,24 @@ describe('FlowCanvas', () => {
       fireEvent.doubleClick(edge as Element);
       expect(onEdgeEdit).toHaveBeenCalledWith('e1');
     });
+
+    it('marks wires nopan so a double-click does not zoom the canvas', () => {
+      const rf = toRfEdges(
+        [
+          {
+            id: 'e1',
+            sourceNodeId: 'a',
+            targetNodeId: 'b',
+            targetField: 'url',
+            expression: 'response.body',
+          },
+        ],
+        [],
+        {},
+        new Set(),
+      );
+      expect(rf[0].className).toContain('nopan');
+    });
   });
 
   describe('toRfEdges', () => {

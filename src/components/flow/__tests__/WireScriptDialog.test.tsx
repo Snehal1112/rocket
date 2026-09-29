@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
@@ -6,7 +6,13 @@ import { headerNameFromTarget, WireScriptDialog } from '../WireScriptDialog';
 
 vi.mock('@/components/editor/MonacoWrapper', () => ({
   MonacoWrapper: ({ value, onChange }: { value: string; onChange?: (v: string) => void }) => (
-    <textarea aria-label='Wire script' value={value} onChange={(e) => onChange?.(e.target.value)} />
+    <div className='monaco-editor'>
+      <textarea
+        aria-label='Wire script'
+        value={value}
+        onChange={(e) => onChange?.(e.target.value)}
+      />
+    </div>
   ),
 }));
 
@@ -54,6 +60,20 @@ describe('WireScriptDialog', () => {
     await user.type(editor, 'response.status');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(onCommit).toHaveBeenCalledWith({ ...edge, expression: 'response.status' });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps the dialog open when Escape is pressed inside the editor', async () => {
+    const { onOpenChange } = setup();
+    const editor = await screen.findByLabelText('Wire script');
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('closes the dialog when Escape is pressed outside the editor', async () => {
+    const { onOpenChange } = setup();
+    await screen.findByLabelText('Wire script');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 

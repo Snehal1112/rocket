@@ -149,6 +149,21 @@ describe('FlowPane wire editing', () => {
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
   });
 
+  it('does not delete the edited wire on a Backspace after the dialog closes', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    seed(edgeOf('url'));
+    render(<Harness />);
+    await waitFor(() => expect(document.querySelector('.react-flow__edge')).not.toBeNull());
+    const edgeEl = document.querySelector('.react-flow__edge') as Element;
+    fireEvent.click(edgeEl);
+    fireEvent.doubleClick(edgeEl);
+    await screen.findByLabelText('Wire script');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Wire script')).not.toBeInTheDocument());
+    await user.keyboard('{Backspace}');
+    expect(getEdges()).toHaveLength(1);
+  });
+
   it('opens no dialog for a Run when wire', async () => {
     seed(edgeOf('trigger', ''));
     render(<Harness />);
