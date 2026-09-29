@@ -64,7 +64,8 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
           ✕ {statusCode ?? 'Error'} · {error ?? `${durationMs}ms`}
         </div>
       )}
-      <NodeStatusCaption status={status} skipReason={data.skipReason} />
+      {/* The line above already shows a failure, so the caption covers skips only. */}
+      {status !== 'failed' && <NodeStatusCaption status={status} skipReason={data.skipReason} />}
 
       {/* Every field row, including the data-less "Run when" trigger row, is
           always rendered, even when empty, so each target handle stays

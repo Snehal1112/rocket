@@ -72,6 +72,18 @@ describe('RequestNode', () => {
     expect(screen.getByTestId('request-node-card')).toHaveAttribute('data-status', 'failed');
   });
 
+  it('shows one failure line, not a second generic error caption', () => {
+    renderNode({
+      kind: baseKind,
+      status: 'failed',
+      statusCode: 400,
+      durationMs: 92,
+      error: 'non-2xx response: 400',
+    });
+    expect(screen.getByText(/non-2xx response: 400/)).toBeInTheDocument();
+    expect(screen.queryByTestId('node-error')).not.toBeInTheDocument();
+  });
+
   it('renders running state distinctly from idle', () => {
     renderNode({ kind: baseKind, status: 'running' });
     expect(screen.getByTestId('request-node-card')).toHaveAttribute('data-status', 'running');
