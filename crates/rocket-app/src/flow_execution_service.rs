@@ -291,7 +291,12 @@ impl RequestExecutionService {
             }
         };
         let (result, entries) = self
-            .evaluate_expression_with_logs(collection, &script, &response_json, secret_values.clone())
+            .evaluate_expression_with_logs(
+                collection,
+                &script,
+                &response_json,
+                secret_values.clone(),
+            )
             .await;
         FlowScriptOutcome {
             result: result.map(|value| match value {
@@ -4982,7 +4987,10 @@ mod tests {
                 &HashSet::new(),
             )
             .await;
-        assert!(outcome.result.is_err(), "a thrown TypeError must be an error");
+        assert!(
+            outcome.result.is_err(),
+            "a thrown TypeError must be an error"
+        );
     }
 
     #[tokio::test]
@@ -6149,8 +6157,7 @@ mod tests {
         let err = service
             .run(&exec, run_input("fail"))
             .await
-            .err()
-            .expect("the run must fail");
+            .expect_err("the run must fail");
 
         let message = err.to_string();
         assert!(

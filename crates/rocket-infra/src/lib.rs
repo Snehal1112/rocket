@@ -1,6 +1,6 @@
 pub mod acp_agent_client;
-pub mod callback_server;
 mod atomic_write;
+pub mod callback_server;
 pub mod clone_destination_capabilities;
 pub mod contract_records;
 pub(crate) mod conversions;

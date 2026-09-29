@@ -5,9 +5,10 @@
 //! phase-split refactor changed no behaviour.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall};
 use async_trait::async_trait;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
@@ -641,37 +642,9 @@ impl VaultSecretFetcher for FakeVaultSecretFetcher {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rocket_shared::types::HttpMethod;
-
-    #[tokio::test]
-    async fn recording_executor_reports_registered_status_and_records_urls() {
-        let executor = RecordingExecutor::new();
-        executor.set_status("/boom", 500);
-
-        let ok = executor
-            .execute(&HttpRequest::new(HttpMethod::Get, "https://api.test/ok"))
-            .await
-            .expect("send");
-        let boom = executor
-            .execute(&HttpRequest::new(HttpMethod::Get, "https://api.test/boom"))
-            .await
-            .expect("send");
-
-        assert_eq!(ok.status, 200);
-        assert_eq!(boom.status, 500);
-        assert_eq!(executor.sent_urls().len(), 2);
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Callback listener
 // ---------------------------------------------------------------------------
-
-use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall};
-use std::sync::atomic::AtomicBool;
 
 /// Flips its flag when dropped, so a test can see that an endpoint closed.
 struct FakeGuard(Arc<AtomicBool>);
@@ -799,5 +772,30 @@ impl CallbackListener for Arc<FakeCallbackListener> {
             calls,
             guard: Box::new(FakeGuard(closed)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket_shared::types::HttpMethod;
+
+    #[tokio::test]
+    async fn recording_executor_reports_registered_status_and_records_urls() {
+        let executor = RecordingExecutor::new();
+        executor.set_status("/boom", 500);
+
+        let ok = executor
+            .execute(&HttpRequest::new(HttpMethod::Get, "https://api.test/ok"))
+            .await
+            .expect("send");
+        let boom = executor
+            .execute(&HttpRequest::new(HttpMethod::Get, "https://api.test/boom"))
+            .await
+            .expect("send");
+
+        assert_eq!(ok.status, 200);
+        assert_eq!(boom.status, 500);
+        assert_eq!(executor.sent_urls().len(), 2);
     }
 }
