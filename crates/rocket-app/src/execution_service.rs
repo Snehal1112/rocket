@@ -80,6 +80,10 @@ pub struct ExecuteRequestInput {
     /// later, as a Flow poll does for its final attempt only.
     #[serde(default)]
     pub skip_history: bool,
+    /// Run-scoped variables a Flow run adds, such as `callback.<name>`.
+    /// They resolve like runtime variables. Empty for every other caller.
+    #[serde(default)]
+    pub flow_vars: std::collections::HashMap<String, String>,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -487,13 +491,14 @@ impl RequestExecutionService {
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> DomainResult<HttpRequest> {
         // Build variable map: global_env < collection < env < folder < request.
-        let vars = self.build_variable_context(
+        let mut vars = self.build_variable_context(
             input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
             external_secrets,
         );
+        vars.extend(input.flow_vars.clone());
 
         // Merge collection auth and headers with request-level values.
         let (effective_auth, effective_headers) = if let Some(col) = &input.collection {
@@ -1032,13 +1037,16 @@ impl RequestExecutionService {
         // Build scope-separated variable context for script phases. Scripts read
         // individual scopes via rok.getCollectionVar/getEnvVar/getGlobalEnvVar, so
         // each scope must stay distinct rather than being pre-flattened into one.
-        let var_ctx = self.build_variable_scopes(
+        let mut var_ctx = self.build_variable_scopes(
             input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
             external_secrets,
         );
+        // Flow run variables (e.g. `callback.<name>`) behave like runtime
+        // variables. A script that sets the same key later still wins.
+        var_ctx.runtime.extend(input.flow_vars.clone());
 
         let sandbox_mode = match input.collection.as_deref() {
             Some(col) => match self
@@ -2076,6 +2084,7 @@ mod tests {
     fn sample_input(url: &str, env_name: Option<&str>) -> ExecuteRequestInput {
         ExecuteRequestInput {
             skip_history: false,
+            flow_vars: std::collections::HashMap::new(),
             method: HttpMethod::Get,
             url: url.to_string(),
             headers: vec![],
@@ -5639,6 +5648,150 @@ mod tests {
             last_url,
             Some("https://example.com/acme".to_string()),
             "a global env var must resolve in the sent request URL, not just script scope"
+        );
+    }
+
+    /// Records the whole request the executor was handed.
+    struct CapturingExecutor {
+        sent: Mutex<Option<HttpRequest>>,
+    }
+
+    #[async_trait]
+    impl HttpExecutor for CapturingExecutor {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            *self.sent.lock().expect("lock") = Some(req.clone());
+            Ok(HttpResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![],
+                body: "{}".into(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+                size_bytes: 2,
+            })
+        }
+    }
+
+    fn callback_vars() -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::from([(
+            "callback.payment".to_string(),
+            "http://10.0.0.5:4000/cb/abc".to_string(),
+        )])
+    }
+
+    #[tokio::test]
+    async fn flow_vars_resolve_in_url_header_and_body() {
+        let executor = Arc::new(CapturingExecutor {
+            sent: Mutex::new(None),
+        });
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(Environment::new("unused"))),
+            Arc::clone(&executor) as Arc<dyn HttpExecutor>,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let mut input = sample_input(
+            "https://api.example.com/register?cb={{callback.payment}}",
+            None,
+        );
+        input.headers = vec![rocket_shared::types::Header {
+            key: "X-Callback".to_string(),
+            value: "{{callback.payment}}".to_string(),
+            enabled: true,
+            description: None,
+        }];
+        input.body = Some(rocket_shared::types::Body {
+            mode: rocket_shared::types::BodyMode::Json,
+            content: Some(r#"{"callbackUrl":"{{callback.payment}}"}"#.to_string()),
+            form_data: None,
+            file_path: None,
+        });
+        input.flow_vars = callback_vars();
+
+        svc.execute(input).await.expect("execute");
+
+        let sent = executor
+            .sent
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("a sent request");
+        assert_eq!(
+            sent.url,
+            "https://api.example.com/register?cb=http://10.0.0.5:4000/cb/abc"
+        );
+        assert_eq!(sent.headers[0].value, "http://10.0.0.5:4000/cb/abc");
+        assert_eq!(
+            sent.body.and_then(|b| b.content).as_deref(),
+            Some(r#"{"callbackUrl":"http://10.0.0.5:4000/cb/abc"}"#)
+        );
+    }
+
+    /// Records the runtime scope the pre-request script was given.
+    struct RuntimeCapturingEngine {
+        runtime: Mutex<Option<std::collections::HashMap<String, String>>>,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for RuntimeCapturingEngine {
+        async fn execute(
+            &self,
+            ctx: ScriptContext,
+        ) -> rocket_shared::error::DomainResult<ScriptResult> {
+            if ctx.phase == rocket_scripting::ScriptPhase::BeforeRequest {
+                *self.runtime.lock().expect("lock") = Some(ctx.variables.runtime.clone());
+            }
+            Ok(ScriptResult::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pre_request_script_sees_flow_vars_as_runtime_vars() {
+        let engine = Arc::new(RuntimeCapturingEngine {
+            runtime: Mutex::new(None),
+        });
+        struct SharedEngine(Arc<RuntimeCapturingEngine>);
+        #[async_trait]
+        impl ScriptEngine for SharedEngine {
+            async fn execute(
+                &self,
+                ctx: ScriptContext,
+            ) -> rocket_shared::error::DomainResult<ScriptResult> {
+                self.0.execute(ctx).await
+            }
+        }
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(Environment::new("unused"))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+        let mut input = sample_input("https://api.example.com", None);
+        input.pre_request_script = Some("console.log(1)".to_string());
+        input.flow_vars = callback_vars();
+
+        svc.execute(input).await.expect("execute");
+
+        let runtime = engine
+            .runtime
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("pre-request ran");
+        assert_eq!(
+            runtime.get("callback.payment").map(String::as_str),
+            Some("http://10.0.0.5:4000/cb/abc")
         );
     }
 

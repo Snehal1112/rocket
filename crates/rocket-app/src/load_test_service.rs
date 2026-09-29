@@ -335,6 +335,7 @@ mod tests {
             actions: vec![],
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             skip_history: false,
+            flow_vars: std::collections::HashMap::new(),
         };
 
         // One short Hold phase to keep the test fast.

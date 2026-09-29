@@ -139,6 +139,7 @@ pub fn build_step_input(
         actions: request.actions.clone(),
         request_guard_policy,
         skip_history: false,
+        flow_vars: std::collections::HashMap::new(),
     }
 }
 
