@@ -1,4 +1,5 @@
 pub mod acp_agent_client;
+pub mod callback_server;
 mod atomic_write;
 pub mod clone_destination_capabilities;
 pub mod contract_records;
@@ -30,6 +31,7 @@ pub mod shared_path_flow_repo;
 mod yaml_io;
 pub use acp_agent_client::AcpAgentClient;
 pub use atomic_write::{atomic_write, atomic_write_bulk};
+pub use callback_server::HyperCallbackListener;
 pub use clone_destination_capabilities::{
     CloneDestinationCapabilities, CloneDestinationGrant, DEFAULT_CLONE_DESTINATION_CAPABILITY_TTL,
     DEFAULT_CLONE_DESTINATION_MAX_ENTRIES,

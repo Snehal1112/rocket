@@ -4758,6 +4758,7 @@ dependencies = [
 name = "rocket"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
@@ -4979,12 +4980,16 @@ dependencies = [
  "async-process",
  "async-trait",
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "dashmap",
  "deno_core",
  "deno_error",
  "dirs 5.0.1",
  "futures-lite",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "keyring",
  "notify",
  "reqwest 0.12.28",

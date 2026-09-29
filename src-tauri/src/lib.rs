@@ -1,4 +1,5 @@
 mod audit_bridge;
+mod callback_adapter;
 mod commands;
 mod tauri_event_bus;
 mod tauri_tracing_layer;
@@ -446,7 +447,10 @@ pub fn run() {
                     &active_workspace_path,
                 ))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
-            );
+            )
+            .with_callback_listener(Box::new(callback_adapter::HyperCallbackAdapter(
+                rocket_infra::HyperCallbackListener::new(),
+            )));
 
             let git_svc = GitAppService::new(
                 Box::new(rocket_git::Git2Service::new()),

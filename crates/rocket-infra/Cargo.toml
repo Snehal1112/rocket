@@ -33,6 +33,10 @@ deno_core = "0.400.0"
 deno_error = "=0.7.1"
 thiserror.workspace = true
 url = "2"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 keyring.workspace = true
 agent-client-protocol = "2.2"
 async-process = "2"

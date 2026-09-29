@@ -1,6 +1,7 @@
 //! Port for receiving inbound HTTP callbacks during a Flow run. The
-//! concrete server lives in `rocket-infra` (`HyperCallbackListener`); this
-//! crate only knows the shape of an endpoint and of a received call.
+//! concrete server lives in `rocket-infra` (`HyperCallbackListener`) and is
+//! adapted to this trait by `src-tauri/src/callback_adapter.rs`. This crate
+//! only knows the shape of an endpoint and of a received call.
 
 use async_trait::async_trait;
 use rocket_shared::error::{DomainError, DomainResult};
