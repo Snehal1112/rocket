@@ -1,5 +1,5 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V8). Rules run in table order and the first violation found
+//! §7 (rules V1-V9). Rules run in table order and the first violation found
 //! is returned, so the same file always yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
@@ -51,6 +51,7 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
             .map(|m| format!("more than one case matches '{m}'"))
     })?;
     check_expressions(flow)?;
+    check_repeat_until(flow)?;
 
     Ok(order)
 }
@@ -203,6 +204,46 @@ fn check_expressions(flow: &Flow) -> Result<(), FlowGraphError> {
                 node,
                 format!("the {} node's {field} is empty", kind_name(&node.kind)),
             ));
+        }
+    }
+    Ok(())
+}
+
+/// V9: a Request node's `repeat_until` settings are within their limits.
+fn check_repeat_until(flow: &Flow) -> Result<(), FlowGraphError> {
+    use crate::node::RepeatUntil;
+    for node in &flow.nodes {
+        let FlowNodeKind::Request {
+            repeat_until: Some(r),
+            ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        let reason = if r.condition.trim().is_empty() {
+            Some("the repeat-until condition is empty".to_string())
+        } else if r.interval_ms < RepeatUntil::MIN_INTERVAL_MS {
+            Some(format!(
+                "repeat-until interval must be at least {} ms",
+                RepeatUntil::MIN_INTERVAL_MS
+            ))
+        } else if r.max_attempts < 1 || r.max_attempts > RepeatUntil::MAX_MAX_ATTEMPTS {
+            Some(format!(
+                "repeat-until max attempts must be between 1 and {}",
+                RepeatUntil::MAX_MAX_ATTEMPTS
+            ))
+        } else if r.timeout_ms > RepeatUntil::MAX_TIMEOUT_MS {
+            Some(format!(
+                "repeat-until timeout must be at most {} ms",
+                RepeatUntil::MAX_TIMEOUT_MS
+            ))
+        } else if r.timeout_ms < r.interval_ms {
+            Some("repeat-until timeout must not be shorter than the interval".to_string())
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(invalid_node(node, reason));
         }
     }
     Ok(())
@@ -641,5 +682,110 @@ mod tests {
             reason: "unknown exit".to_string(),
         };
         assert_eq!(edge_err.to_string(), "invalid edge e1: unknown exit");
+    }
+
+    fn polling_request(id: &str, repeat: crate::node::RepeatUntil) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Request {
+                debug: false,
+                label: id.to_string(),
+                source: RequestSource::Saved {
+                    request_path: format!("{id}.yml"),
+                },
+                repeat_until: Some(repeat),
+            },
+        )
+    }
+
+    fn invalid_node_reason(result: Result<Vec<String>, FlowGraphError>) -> String {
+        match result {
+            Err(FlowGraphError::InvalidNode { reason, .. }) => reason,
+            other => panic!("expected InvalidNode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_valid_repeat_until_passes() {
+        let f = flow(vec![polling_request("p", crate::node::RepeatUntil::default())], vec![]);
+        assert!(validate(&f).is_ok());
+    }
+
+    #[test]
+    fn repeat_until_blank_condition_is_rejected() {
+        let repeat = crate::node::RepeatUntil {
+            condition: "  ".to_string(),
+            ..Default::default()
+        };
+        let f = flow(vec![polling_request("p", repeat)], vec![]);
+        assert_eq!(invalid_node_reason(validate(&f)), "the repeat-until condition is empty");
+    }
+
+    #[test]
+    fn repeat_until_short_interval_is_rejected() {
+        let repeat = crate::node::RepeatUntil {
+            interval_ms: 99,
+            ..Default::default()
+        };
+        let f = flow(vec![polling_request("p", repeat)], vec![]);
+        assert_eq!(
+            invalid_node_reason(validate(&f)),
+            "repeat-until interval must be at least 100 ms"
+        );
+    }
+
+    #[test]
+    fn repeat_until_zero_attempts_is_rejected() {
+        let repeat = crate::node::RepeatUntil {
+            max_attempts: 0,
+            ..Default::default()
+        };
+        let f = flow(vec![polling_request("p", repeat)], vec![]);
+        assert_eq!(
+            invalid_node_reason(validate(&f)),
+            "repeat-until max attempts must be between 1 and 1000"
+        );
+    }
+
+    #[test]
+    fn repeat_until_too_many_attempts_is_rejected() {
+        let repeat = crate::node::RepeatUntil {
+            max_attempts: 1001,
+            ..Default::default()
+        };
+        let f = flow(vec![polling_request("p", repeat)], vec![]);
+        assert_eq!(
+            invalid_node_reason(validate(&f)),
+            "repeat-until max attempts must be between 1 and 1000"
+        );
+    }
+
+    #[test]
+    fn repeat_until_long_timeout_is_rejected() {
+        let repeat = crate::node::RepeatUntil {
+            timeout_ms: 3_600_001,
+            ..Default::default()
+        };
+        let f = flow(vec![polling_request("p", repeat)], vec![]);
+        assert_eq!(
+            invalid_node_reason(validate(&f)),
+            "repeat-until timeout must be at most 3600000 ms"
+        );
+    }
+
+    #[test]
+    fn repeat_until_timeout_shorter_than_interval_is_rejected() {
+        let repeat = crate::node::RepeatUntil {
+            interval_ms: 5000,
+            timeout_ms: 1000,
+            ..Default::default()
+        };
+        let f = flow(vec![polling_request("p", repeat.clone())], vec![]);
+        assert_eq!(invalid_node_id(validate(&f)), "p");
+        let f = flow(vec![polling_request("p", repeat)], vec![]);
+        assert_eq!(
+            invalid_node_reason(validate(&f)),
+            "repeat-until timeout must not be shorter than the interval"
+        );
     }
 }
