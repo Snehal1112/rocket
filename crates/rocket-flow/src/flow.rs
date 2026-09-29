@@ -74,6 +74,7 @@ mod tests {
                 FlowNode {
                     id: "node-1".to_string(),
                     kind: FlowNodeKind::Request {
+                        debug: false,
                         label: "Login".to_string(),
                         source: RequestSource::Saved {
                             request_path: "auth/login.yml".to_string(),
@@ -308,5 +309,45 @@ mod tests {
             resaved, phase1_yaml,
             "a Phase 1 file must re-save without any diff"
         );
+    }
+
+    fn single_request_flow(debug: bool) -> Flow {
+        Flow {
+            name: "Debug flow".to_string(),
+            nodes: vec![FlowNode {
+                id: "n1".to_string(),
+                kind: FlowNodeKind::Request {
+                    label: "Login".to_string(),
+                    source: RequestSource::Saved {
+                        request_path: "auth/login.yml".to_string(),
+                    },
+                    debug,
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: vec![],
+        }
+    }
+
+    #[test]
+    fn a_request_node_without_debug_round_trips_without_a_debug_key() {
+        let yaml = serde_yaml::to_string(&single_request_flow(false)).expect("serialize");
+        assert!(!yaml.contains("debug:"), "got {yaml}");
+        let flow: Flow = serde_yaml::from_str(&yaml).expect("old yaml loads");
+        let FlowNodeKind::Request { debug, .. } = &flow.nodes[0].kind else {
+            panic!("request")
+        };
+        assert!(!debug);
+        let out = serde_yaml::to_string(&flow).expect("serialize");
+        assert_eq!(out, yaml);
+    }
+
+    #[test]
+    fn a_debug_request_node_round_trips() {
+        let yaml = serde_yaml::to_string(&single_request_flow(true)).expect("serialize");
+        assert!(yaml.contains("debug: true"), "got {yaml}");
+        let flow: Flow = serde_yaml::from_str(&yaml).expect("loads");
+        let out = serde_yaml::to_string(&flow).expect("serialize");
+        assert!(out.contains("debug: true"), "got {out}");
     }
 }

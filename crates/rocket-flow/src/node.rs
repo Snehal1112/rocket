@@ -12,12 +12,20 @@ pub struct NodePosition {
 /// incoming wires; `Output` nodes display whatever their single incoming
 /// wire resolves to. `If` and `Switch` nodes route execution to one of their
 /// named exits.
+// Keeps `debug: false` out of saved files, so old flows round-trip unchanged.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FlowNodeKind {
     Request {
         label: String,
         source: RequestSource,
+        /// When true, a run reports the request as sent and its response.
+        #[serde(default, skip_serializing_if = "is_false")]
+        debug: bool,
     },
     Input {
         label: String,
@@ -93,6 +101,7 @@ mod tests {
     #[test]
     fn flow_node_kind_request_tagged_roundtrip() {
         let kind = FlowNodeKind::Request {
+            debug: false,
             label: "Get Auth Token".to_string(),
             source: RequestSource::Saved {
                 request_path: "auth/login.yml".to_string(),

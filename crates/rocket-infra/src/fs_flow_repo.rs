@@ -337,6 +337,7 @@ mod tests {
             nodes: vec![FlowNode {
                 id: "node-1".to_string(),
                 kind: FlowNodeKind::Request {
+                    debug: false,
                     label: "Get User".to_string(),
                     source: RequestSource::Saved {
                         request_path: "users/get-user.yml".to_string(),
@@ -359,6 +360,7 @@ mod tests {
             nodes: vec![FlowNode {
                 id: "node-1".to_string(),
                 kind: FlowNodeKind::Request {
+                    debug: false,
                     label: "Ad Hoc Login".to_string(),
                     source: RequestSource::Inline {
                         request: InlineRequestData {
@@ -389,6 +391,7 @@ mod tests {
             nodes: vec![FlowNode {
                 id: "node-1".to_string(),
                 kind: FlowNodeKind::Request {
+                    debug: false,
                     label: "Ping".to_string(),
                     source: RequestSource::Inline {
                         request: InlineRequestData {
@@ -424,6 +427,7 @@ mod tests {
         flow.nodes.push(FlowNode {
             id: "node-2".to_string(),
             kind: FlowNodeKind::Request {
+                debug: false,
                 label: "Call".to_string(),
                 source: RequestSource::Saved {
                     request_path: "call.yml".to_string(),

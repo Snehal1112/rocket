@@ -250,7 +250,7 @@ pub fn build_execute_request_input(
     global_env_name: Option<&str>,
     node: &FlowNode,
 ) -> DomainResult<ExecuteRequestInput> {
-    let FlowNodeKind::Request { label, source } = &node.kind else {
+    let FlowNodeKind::Request { label, source, .. } = &node.kind else {
         return Err(DomainError::InvalidInput(format!(
             "node '{}' is not a Request node",
             node.id
@@ -1587,6 +1587,7 @@ mod tests {
         FlowNode {
             id: id.to_string(),
             kind: FlowNodeKind::Request {
+                debug: false,
                 label: "Get Auth Token".to_string(),
                 source: RequestSource::Saved {
                     request_path: request_path.to_string(),
@@ -1600,6 +1601,7 @@ mod tests {
         FlowNode {
             id: id.to_string(),
             kind: FlowNodeKind::Request {
+                debug: false,
                 label: "Ping".to_string(),
                 source: RequestSource::Inline {
                     request: InlineRequestData {
@@ -2135,6 +2137,7 @@ mod tests {
         FlowNode {
             id: id.to_string(),
             kind: FlowNodeKind::Request {
+                debug: false,
                 label: format!("Node {id}"),
                 source: RequestSource::Inline {
                     request: InlineRequestData {

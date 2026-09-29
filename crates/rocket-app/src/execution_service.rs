@@ -1,4 +1,5 @@
 use crate::env_audit;
+use crate::redaction::MIN_REDACTION_LEN;
 use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
@@ -183,14 +184,6 @@ pub struct RequestExecutionService {
     /// target host.
     vault_fetcher: Arc<dyn VaultSecretFetcher>,
 }
-
-/// Secrets shorter than this are not added to `VariableContext.secret_values`
-/// and are therefore never redacted in console/test-failure output. A
-/// documented, deliberate trade-off (see
-/// docs/superpowers/specs/2026-09-16-secret-aware-variable-context-spec.md
-/// §3.4) — redacting every occurrence of a very short string risks
-/// over-redacting unrelated output.
-const MIN_REDACTION_LEN: usize = 6;
 
 impl RequestExecutionService {
     #[allow(clippy::too_many_arguments)]
@@ -1419,7 +1412,7 @@ impl RequestExecutionService {
         // the dispatched request and the RequestExecuted event below still
         // carry the real, unredacted URL; only the persisted copy is redacted.
         let redacted_url =
-            redact_secrets_in_url(&state.http_request.url, &state.var_ctx.secret_values);
+            crate::redaction::redact_secrets(&state.http_request.url, &state.var_ctx.secret_values);
         let mut entry = HistoryEntry::new(
             input.method.to_string(),
             &redacted_url,
@@ -1744,26 +1737,6 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
         .collect();
     merged.extend(request_headers.iter().cloned());
     merged
-}
-
-/// Strips every known secret value out of a URL before it is persisted to
-/// `rocket-history` (spec §6/AC4). Covers both external-secret values and
-/// pre-existing local `secret: true` variable values, since both flow into
-/// `VariableContext.secret_values`. Redact at the point output is produced,
-/// not at the point secrets are read — this must never touch the URL used
-/// for actual dispatch or the `RequestExecuted` event.
-fn redact_secrets_in_url(url: &str, secret_values: &std::collections::HashSet<String>) -> String {
-    if secret_values.is_empty() {
-        return url.to_string();
-    }
-    let mut out = url.to_string();
-    for value in secret_values {
-        if value.len() < MIN_REDACTION_LEN {
-            continue; // same short-secret exemption already applied when populating secret_values
-        }
-        out = out.replace(value.as_str(), "••••••");
-    }
-    out
 }
 
 #[cfg(test)]

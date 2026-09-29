@@ -18,6 +18,7 @@ pub mod git_service;
 pub mod history_service;
 pub mod load_test_service;
 pub mod oauth2_service;
+pub(crate) mod redaction;
 pub mod request_guard;
 pub mod runner_sequence;
 pub mod secret_manager_service;

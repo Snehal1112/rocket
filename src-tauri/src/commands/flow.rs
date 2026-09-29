@@ -113,6 +113,8 @@ pub enum FlowNodeKindDto {
     Request {
         label: String,
         source: RequestSourceDto,
+        #[serde(default)]
+        debug: bool,
     },
     Input {
         label: String,
@@ -134,9 +136,14 @@ pub enum FlowNodeKindDto {
 impl From<FlowNodeKind> for FlowNodeKindDto {
     fn from(k: FlowNodeKind) -> Self {
         match k {
-            FlowNodeKind::Request { label, source } => FlowNodeKindDto::Request {
+            FlowNodeKind::Request {
+                label,
+                source,
+                debug,
+            } => FlowNodeKindDto::Request {
                 label,
                 source: source.into(),
+                debug,
             },
             FlowNodeKind::Input { label, value } => FlowNodeKindDto::Input { label, value },
             FlowNodeKind::Output { label } => FlowNodeKindDto::Output { label },
@@ -156,9 +163,14 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
 impl From<FlowNodeKindDto> for FlowNodeKind {
     fn from(k: FlowNodeKindDto) -> Self {
         match k {
-            FlowNodeKindDto::Request { label, source } => FlowNodeKind::Request {
+            FlowNodeKindDto::Request {
+                label,
+                source,
+                debug,
+            } => FlowNodeKind::Request {
                 label,
                 source: source.into(),
+                debug,
             },
             FlowNodeKindDto::Input { label, value } => FlowNodeKind::Input { label, value },
             FlowNodeKindDto::Output { label } => FlowNodeKind::Output { label },
