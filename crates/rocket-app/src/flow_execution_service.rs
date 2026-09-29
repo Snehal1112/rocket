@@ -60,11 +60,32 @@ fn captured_output_response_json(output: &CapturedOutput) -> DomainResult<String
         .map_err(|e| DomainError::Internal(format!("failed to serialize captured output: {e}")))
 }
 
+/// Wraps a Flow expression so it can read a plain `response` object.
+///
+/// The script engine only exposes `res` with getter methods, but Flow
+/// expressions are written against `response.status`, `response.body` and
+/// so on. The wrapper builds that object from `res` and binds it as an
+/// arrow-function parameter, so the user expression stays a plain value
+/// expression. This is applied only to the Flow entry points, because the
+/// Vars tab uses the same evaluator with `res.body` syntax.
+fn wrap_with_response_object(expression: &str) -> String {
+    format!(
+        "((response) => ({expression}\n))({{ \
+         status: res.getStatus(), \
+         statusText: res.getStatusText(), \
+         headers: res.getHeaders(), \
+         body: res.getBody(), \
+         duration_ms: res.getResponseTime() }})"
+    )
+}
+
 impl RequestExecutionService {
     /// Evaluates `expression` (a jsonq/JS snippet such as `"response.body"` or
     /// `"response.body.token"`) against `output`, reusing the same
     /// script-engine mechanism `evaluate_var_expression` uses for the Vars
-    /// tab's preview — not a second sandbox invocation path.
+    /// tab's preview — not a second sandbox invocation path. The expression
+    /// sees a `response` object with `status`, `statusText`, `headers`,
+    /// `body` (parsed JSON, else text) and `duration_ms`.
     ///
     /// A string result is returned as-is and other JSON values are
     /// stringified. A `null` or `undefined` result is an `InvalidInput`
@@ -77,7 +98,11 @@ impl RequestExecutionService {
     ) -> DomainResult<String> {
         let response_json = captured_output_response_json(output)?;
         let result = self
-            .evaluate_var_expression(collection, expression, &response_json)
+            .evaluate_var_expression(
+                collection,
+                &wrap_with_response_object(expression),
+                &response_json,
+            )
             .await?;
         match result {
             // A `null` or `undefined` result would wire the literal text "null"
@@ -102,7 +127,11 @@ impl RequestExecutionService {
     ) -> DomainResult<String> {
         let response_json = captured_output_response_json(output)?;
         let result = self
-            .evaluate_var_expression(collection, wrapped_expression, &response_json)
+            .evaluate_var_expression(
+                collection,
+                &wrap_with_response_object(wrapped_expression),
+                &response_json,
+            )
             .await?;
         Ok(match result {
             serde_json::Value::Null => "null".to_string(),
@@ -4003,5 +4032,90 @@ mod tests {
             started,
             vec!["login".to_string(), "check".to_string(), "yes".to_string()]
         );
+    }
+
+    // ---- Real script engine ----------------------------------------------
+    // The scripted fakes above never run JS, so they cannot notice when the
+    // `response` object a Flow expression uses is missing from the engine.
+
+    fn real_engine_service() -> RequestExecutionService {
+        service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(rocket_infra::scripting::DenoScriptEngine::new()),
+        )
+    }
+
+    #[tokio::test]
+    async fn real_engine_route_status_check_sees_response_status() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .evaluate_flow_route_expression("my-api", &output, "!!(response.status === 200)")
+            .await
+            .expect("response.status must be defined");
+
+        assert_eq!(value, "true");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_reads_json_body_field() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.body.token")
+            .await
+            .expect("response.body must be parsed JSON");
+
+        assert_eq!(value, "abc123");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_reads_plain_text_input_value() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("hello"));
+
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.body")
+            .await
+            .expect("a plain-text body must stay a string");
+
+        assert_eq!(value, "hello");
+    }
+
+    #[tokio::test]
+    async fn real_engine_switch_style_string_of_body_field() {
+        let mut out = sample_response_output();
+        out.response.body = r#"{"plan":"pro"}"#.into();
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(out));
+
+        let value = svc
+            .evaluate_flow_route_expression("my-api", &output, "String(response.body.plan)")
+            .await
+            .expect("switch expression must resolve");
+
+        assert_eq!(value, "pro");
+    }
+
+    #[tokio::test]
+    async fn real_engine_exposes_status_text_headers_and_duration() {
+        let mut out = sample_response_output();
+        out.response.headers = vec![Header::new("X-Id", "7")];
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(out));
+
+        let value = svc
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "String(response.statusText + response.duration_ms + JSON.stringify(response.headers))",
+            )
+            .await
+            .expect("all response fields must be defined");
+
+        assert!(value.starts_with("OK10"), "unexpected value: {value}");
+        assert!(value.contains("X-Id"), "unexpected value: {value}");
     }
 }

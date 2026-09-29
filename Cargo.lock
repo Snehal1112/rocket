@@ -4829,6 +4829,7 @@ dependencies = [
  "rocket-git",
  "rocket-history",
  "rocket-http",
+ "rocket-infra",
  "rocket-scripting",
  "rocket-shared",
  "rocket-workspace",
