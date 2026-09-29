@@ -133,16 +133,19 @@ impl RequestExecutionService {
         collection: &str,
         output: &CapturedOutput,
         expression: &str,
-    ) -> DomainResult<String> {
-        let response_json = captured_output_response_json(output)?;
-        let result = self
-            .evaluate_var_expression(
-                collection,
-                &flow_script(expression, FlowCoercion::Raw)?,
-                &response_json,
-            )
-            .await?;
-        match result {
+    ) -> FlowScriptOutcome {
+        let script = match flow_script(expression, FlowCoercion::Raw) {
+            Ok(script) => script,
+            Err(e) => return FlowScriptOutcome::failed(e),
+        };
+        let response_json = match captured_output_response_json(output) {
+            Ok(json) => json,
+            Err(e) => return FlowScriptOutcome::failed(e),
+        };
+        let (result, entries) = self
+            .evaluate_expression_with_logs(collection, &script, &response_json)
+            .await;
+        let result = result.and_then(|value| match value {
             // A `null` or `undefined` result would wire the literal text "null"
             // into the request, so it is an error instead.
             serde_json::Value::Null => Err(DomainError::InvalidInput(format!(
@@ -150,6 +153,10 @@ impl RequestExecutionService {
             ))),
             serde_json::Value::String(s) => Ok(s),
             other => Ok(other.to_string()),
+        });
+        FlowScriptOutcome {
+            result,
+            logs: to_flow_logs(entries),
         }
     }
 
@@ -163,17 +170,58 @@ impl RequestExecutionService {
         output: &CapturedOutput,
         source: &str,
         coercion: FlowCoercion,
-    ) -> DomainResult<String> {
-        let response_json = captured_output_response_json(output)?;
-        let result = self
-            .evaluate_var_expression(collection, &flow_script(source, coercion)?, &response_json)
-            .await?;
-        Ok(match result {
-            serde_json::Value::Null => "null".to_string(),
-            serde_json::Value::String(s) => s,
-            other => other.to_string(),
-        })
+    ) -> FlowScriptOutcome {
+        let script = match flow_script(source, coercion) {
+            Ok(script) => script,
+            Err(e) => return FlowScriptOutcome::failed(e),
+        };
+        let response_json = match captured_output_response_json(output) {
+            Ok(json) => json,
+            Err(e) => return FlowScriptOutcome::failed(e),
+        };
+        let (result, entries) = self
+            .evaluate_expression_with_logs(collection, &script, &response_json)
+            .await;
+        FlowScriptOutcome {
+            result: result.map(|value| match value {
+                serde_json::Value::Null => "null".to_string(),
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            }),
+            logs: to_flow_logs(entries),
+        }
     }
+}
+
+/// The value and console output of one Flow script.
+#[derive(Debug)]
+pub struct FlowScriptOutcome {
+    pub result: DomainResult<String>,
+    pub logs: Vec<FlowLogEntry>,
+}
+
+impl FlowScriptOutcome {
+    /// An outcome for a script that could not be run, so it has no output.
+    fn failed(error: DomainError) -> Self {
+        Self {
+            result: Err(error),
+            logs: Vec::new(),
+        }
+    }
+}
+
+fn to_flow_logs(entries: Vec<ConsoleEntry>) -> Vec<FlowLogEntry> {
+    entries
+        .into_iter()
+        .map(|entry| FlowLogEntry {
+            level: match entry.level {
+                ConsoleLevel::Log => FlowLogLevel::Log,
+                ConsoleLevel::Warn => FlowLogLevel::Warn,
+                ConsoleLevel::Error => FlowLogLevel::Error,
+            },
+            message: entry.message,
+        })
+        .collect()
 }
 
 /// Builds an `ExecuteRequestInput` for a `FlowNodeKind::Request` node, before
@@ -386,7 +434,10 @@ fn apply_header_override(
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rocket_shared::events::{DomainEvent, FlowNodeStatus, FlowSkipReason};
+use rocket_scripting::{ConsoleEntry, ConsoleLevel};
+use rocket_shared::events::{
+    DomainEvent, FlowLogEntry, FlowLogLevel, FlowNodeStatus, FlowSkipReason,
+};
 use ulid::Ulid;
 
 /// Input DTO for `FlowExecutionService::run`.
@@ -420,6 +471,9 @@ pub struct FlowStepResult {
     /// The exit a succeeded If/Switch node took. `None` for every other node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// Script console output from this step, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logs: Vec<FlowLogEntry>,
 }
 
 /// Builds the `FlowStepCompleted` event for one recorded step, so the live
@@ -435,6 +489,7 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         value: step.value.clone(),
         skip_reason: step.skip_reason,
         branch: step.branch.clone(),
+        logs: step.logs.clone(),
     }
 }
 
@@ -590,6 +645,7 @@ impl FlowExecutionService {
                     // `validate` only returns ids from `flow.nodes`, so a miss
                     // here is a bug. It fails this node instead of panicking.
                     let node_opt = nodes_by_id.get(node_id.as_str()).copied();
+                    let mut node_logs = Vec::new();
                     let result = match node_opt {
                         Some(node) => {
                             self.execute_node(
@@ -599,6 +655,7 @@ impl FlowExecutionService {
                                 &data_edges,
                                 &captured,
                                 &external_secrets,
+                                &mut node_logs,
                             )
                             .await
                         }
@@ -607,6 +664,10 @@ impl FlowExecutionService {
                         ))),
                     };
                     let step = result_to_step(node_id, node_opt, &result);
+                    let step = FlowStepResult {
+                        logs: node_logs,
+                        ..step
+                    };
                     let outcome = match &result {
                         Ok(executed) if step.status == FlowNodeStatus::Success => {
                             NodeOutcome::Succeeded {
@@ -678,6 +739,8 @@ impl FlowExecutionService {
     /// Dispatches one node by kind, feeding it only `data_edges` — the live,
     /// non-trigger edges `decide_fate` selected. Returns the node's captured
     /// output and chosen exit, or an error if the node itself failed.
+    // The brief fixes this signature; `logs` collects console output.
+    #[allow(clippy::too_many_arguments)]
     async fn execute_node(
         &self,
         exec: &RequestExecutionService,
@@ -686,6 +749,7 @@ impl FlowExecutionService {
         data_edges: &[&FlowEdge],
         captured: &HashMap<String, CapturedOutput>,
         external_secrets: &HashMap<String, String>,
+        logs: &mut Vec<FlowLogEntry>,
     ) -> DomainResult<ExecutedNode> {
         match &node.kind {
             FlowNodeKind::Input { value, .. } => {
@@ -719,13 +783,15 @@ impl FlowExecutionService {
                     )));
                 }
                 let source_output = captured_source(node, edge, captured)?;
-                let value = exec
+                let outcome = exec
                     .resolve_flow_wire_expression(
                         &input.collection,
                         source_output,
                         &edge.expression,
                     )
-                    .await?;
+                    .await;
+                logs.extend(outcome.logs);
+                let value = outcome.result?;
                 Ok(ExecutedNode::plain(CapturedOutput::Value(
                     VariableValue::simple(value),
                 )))
@@ -742,13 +808,15 @@ impl FlowExecutionService {
                 let mut resolved = HashMap::new();
                 for edge in data_edges {
                     let source_output = captured_source(node, edge, captured)?;
-                    let value = exec
+                    let outcome = exec
                         .resolve_flow_wire_expression(
                             &input.collection,
                             source_output,
                             &edge.expression,
                         )
-                        .await?;
+                        .await;
+                    logs.extend(outcome.logs);
+                    let value = outcome.result?;
                     resolved.insert(edge.id.clone(), value);
                 }
                 let edges_owned: Vec<FlowEdge> = data_edges.iter().map(|e| (*e).clone()).collect();
@@ -757,20 +825,23 @@ impl FlowExecutionService {
                 let output = exec
                     .execute_with_external_secrets(request_input, external_secrets)
                     .await?;
+                logs.extend(to_flow_logs(output.console_entries.clone()));
                 Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(
                     output,
                 ))))
             }
             FlowNodeKind::If { condition, .. } => {
                 let source = single_route_input(node, data_edges, captured)?;
-                let raw = exec
+                let outcome = exec
                     .evaluate_flow_route_expression(
                         &input.collection,
                         source,
                         condition,
                         FlowCoercion::Bool,
                     )
-                    .await?;
+                    .await;
+                logs.extend(outcome.logs);
+                let raw = outcome.result?;
                 let chosen_exit = match raw.as_str() {
                     "true" => handle::TRUE,
                     "false" => handle::FALSE,
@@ -788,14 +859,16 @@ impl FlowExecutionService {
             }
             FlowNodeKind::Switch { value, cases, .. } => {
                 let source = single_route_input(node, data_edges, captured)?;
-                let raw = exec
+                let outcome = exec
                     .evaluate_flow_route_expression(
                         &input.collection,
                         source,
                         value,
                         FlowCoercion::Str,
                     )
-                    .await?;
+                    .await;
+                logs.extend(outcome.logs);
+                let raw = outcome.result?;
                 let chosen_exit = cases
                     .iter()
                     .find(|case| case.matches == raw)
@@ -870,6 +943,7 @@ fn result_to_step(
         value: None,
         skip_reason: None,
         branch: None,
+        logs: Vec::new(),
     };
     match result {
         Ok(executed) if is_routing => FlowStepResult {
@@ -918,6 +992,7 @@ fn skipped_step(node_id: &str, reason: FlowSkipReason) -> FlowStepResult {
         value: None,
         skip_reason: Some(reason),
         branch: None,
+        logs: Vec::new(),
     }
 }
 
@@ -931,6 +1006,7 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
         value: None,
         skip_reason: None,
         branch: None,
+        logs: Vec::new(),
     }
 }
 
@@ -1250,6 +1326,7 @@ mod tests {
                 FlowCoercion::Bool,
             )
             .await
+            .result
             .expect("route expression must resolve");
 
         assert_eq!(value, "true");
@@ -1273,6 +1350,7 @@ mod tests {
                 FlowCoercion::Str,
             )
             .await
+            .result
             .expect("a null route result must not be an error");
 
         assert_eq!(value, "null");
@@ -1296,6 +1374,7 @@ mod tests {
                 FlowCoercion::Str,
             )
             .await
+            .result
             .expect("resolve");
 
         assert_eq!(value, "pro");
@@ -1314,6 +1393,7 @@ mod tests {
         let value = svc
             .evaluate_flow_route_expression("my-api", &output, "response.status", FlowCoercion::Str)
             .await
+            .result
             .expect("resolve");
 
         assert_eq!(value, "200");
@@ -1327,6 +1407,7 @@ mod tests {
         let err = svc
             .evaluate_flow_route_expression("my-api", &output, "nope.nope", FlowCoercion::Bool)
             .await
+            .result
             .expect_err("a throwing route expression must be an Err");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -1380,6 +1461,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body")
             .await
+            .result
             .expect("expression should resolve");
 
         assert_eq!(value, "abc123");
@@ -1398,6 +1480,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body")
             .await
+            .result
             .expect("expression should resolve");
 
         assert_eq!(value, "hello");
@@ -1411,6 +1494,7 @@ mod tests {
         let err = svc
             .resolve_flow_wire_expression("my-api", &output, "response.nope.nope")
             .await
+            .result
             .expect_err("a throwing expression must be an Err, not a panic");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -1429,6 +1513,7 @@ mod tests {
         let err = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body.missing")
             .await
+            .result
             .expect_err("a null result must be an Err, not Ok(\"null\")");
 
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -1447,6 +1532,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.status")
             .await
+            .result
             .expect("a number must resolve");
 
         assert_eq!(value, "42");
@@ -2923,6 +3009,7 @@ mod tests {
             value: None,
             skip_reason: Some(FlowSkipReason::BranchNotTaken),
             branch: None,
+            logs: Vec::new(),
         };
         let json = serde_json::to_value(&step).expect("serialize");
         assert_eq!(json["skipReason"], "branch_not_taken");
@@ -4115,6 +4202,7 @@ mod tests {
                 FlowCoercion::Bool,
             )
             .await
+            .result
             .expect("response.status must be defined");
 
         assert_eq!(value, "true");
@@ -4128,6 +4216,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body.token")
             .await
+            .result
             .expect("response.body must be parsed JSON");
 
         assert_eq!(value, "abc123");
@@ -4141,6 +4230,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body")
             .await
+            .result
             .expect("a plain-text body must stay a string");
 
         assert_eq!(value, "hello");
@@ -4161,6 +4251,7 @@ mod tests {
                 FlowCoercion::Str,
             )
             .await
+            .result
             .expect("switch expression must resolve");
 
         assert_eq!(value, "pro");
@@ -4181,6 +4272,7 @@ mod tests {
                 FlowCoercion::Str,
             )
             .await
+            .result
             .expect("all response fields must be defined");
 
         assert!(value.starts_with("OK10"), "unexpected value: {value}");
@@ -4198,6 +4290,7 @@ mod tests {
                 "const t = response.body.token;\nreturn 'Bearer ' + t;",
             )
             .await
+            .result
             .expect("a body with return must run");
         assert!(value.starts_with("Bearer "), "got {value}");
     }
@@ -4213,6 +4306,7 @@ mod tests {
                 "console.log('ran');\nreturn JSON.parse('not json');",
             )
             .await
+            .result
             .expect_err("a thrown SyntaxError at run time must fail the wire");
         assert!(err.to_string().contains("SyntaxError"), "got {err}");
     }
@@ -4224,6 +4318,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "`a\"b` + '\\n' + \"c'd\"")
             .await
+            .result
             .expect("special characters must survive");
         assert_eq!(value, "a\"b\nc'd");
     }
@@ -4235,6 +4330,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "{ a: 1 }")
             .await
+            .result
             .expect("an object literal is an expression");
         assert_eq!(value, r#"{"a":1}"#);
     }
@@ -4246,6 +4342,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body;")
             .await
+            .result
             .expect("a trailing semicolon must not lose the value");
         assert_eq!(value, "hello");
     }
@@ -4257,6 +4354,7 @@ mod tests {
         let value = svc
             .resolve_flow_wire_expression("my-api", &output, "response.body // note")
             .await
+            .result
             .expect("a trailing comment must not swallow the wrapper");
         assert_eq!(value, "hello");
     }
@@ -4268,6 +4366,7 @@ mod tests {
         let err = svc
             .resolve_flow_wire_expression("my-api", &output, "const a = 1;\nconsole.log(a);")
             .await
+            .result
             .expect_err("a wire body with no return resolves to undefined");
         assert!(err.to_string().contains("null/undefined"), "got {err}");
     }
@@ -4284,6 +4383,7 @@ mod tests {
                 FlowCoercion::Bool,
             )
             .await
+            .result
             .expect("an If body must run");
         assert_eq!(value, "true");
     }
@@ -4300,6 +4400,7 @@ mod tests {
                 FlowCoercion::Str,
             )
             .await
+            .result
             .expect("a Switch body must run");
         assert_eq!(value, "abc123");
     }
@@ -4311,7 +4412,92 @@ mod tests {
         let err = svc
             .resolve_flow_wire_expression("my-api", &output, "return (")
             .await
+            .result
             .expect_err("broken source must fail");
         assert!(err.to_string().contains("SyntaxError"), "got {err}");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_returns_console_logs() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("hello"));
+        let outcome = svc
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "console.log('seen', response.body);\nreturn 1;",
+            )
+            .await;
+        assert_eq!(outcome.result.expect("value"), "1");
+        assert_eq!(outcome.logs.len(), 1);
+        assert_eq!(outcome.logs[0].level, FlowLogLevel::Log);
+        assert!(outcome.logs[0].message.contains("seen"));
+    }
+
+    #[tokio::test]
+    async fn real_engine_keeps_logs_written_before_a_throw() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("hello"));
+        let outcome = svc
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "console.warn('before');\nthrow new Error('boom');",
+            )
+            .await;
+        assert!(outcome.result.is_err());
+        assert_eq!(outcome.logs.len(), 1);
+        assert_eq!(outcome.logs[0].level, FlowLogLevel::Warn);
+    }
+
+    /// Builds `hello -> out` whose edge carries `expression`, runs it with
+    /// the real engine, and returns the summary plus the recorded events.
+    async fn run_scripted_output(expression: &str) -> (FlowRunSummary, Vec<DomainEvent>) {
+        let mut edge = wire("e1", "hello", "out");
+        edge.expression = expression.to_string();
+        let flow = Flow {
+            name: "logs".to_string(),
+            nodes: vec![input_node_with("hello", "hello"), output_node_named("out")],
+            edges: vec![edge],
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let exec = real_engine_service();
+        let summary = service.run(&exec, run_input("logs")).await.expect("run");
+        (summary, publisher.events())
+    }
+
+    fn completed_logs(events: &[DomainEvent], node: &str) -> Vec<FlowLogEntry> {
+        events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::FlowStepCompleted { node_id, logs, .. } if node_id == node => {
+                    Some(logs.clone())
+                }
+                _ => None,
+            })
+            .expect("FlowStepCompleted for node")
+    }
+
+    #[tokio::test]
+    async fn a_run_reports_wire_console_logs_on_the_step_and_its_event() {
+        let (summary, events) =
+            run_scripted_output("console.log('out');\nreturn response.body;").await;
+        let step = step_of(&summary, "out");
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        assert_eq!(step.logs.len(), 1);
+        assert!(step.logs[0].message.contains("out"));
+        assert_eq!(completed_logs(&events, "out"), step.logs);
+    }
+
+    #[tokio::test]
+    async fn a_failed_step_keeps_its_console_logs() {
+        let (summary, events) =
+            run_scripted_output("console.log('x');\nthrow new Error('no');").await;
+        let step = step_of(&summary, "out");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert_eq!(step.logs.len(), 1);
+        assert!(step.logs[0].message.contains('x'));
+        assert_eq!(completed_logs(&events, "out"), step.logs);
     }
 }

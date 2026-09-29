@@ -19,6 +19,22 @@ pub enum FlowSkipReason {
     BranchNotTaken,
 }
 
+/// Severity of one script console line reported by a Flow step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FlowLogLevel {
+    Log,
+    Warn,
+    Error,
+}
+
+/// One script console line captured while a Flow step ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowLogEntry {
+    pub level: FlowLogLevel,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
@@ -203,6 +219,9 @@ pub enum DomainEvent {
         /// `"case:<id>"`. `None` for every other node.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         branch: Option<String>,
+        /// Script console output from this step, oldest first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        logs: Vec<FlowLogEntry>,
     },
     /// Emitted once when a Flow run ends, for any reason.
     FlowRunFinished {
@@ -670,6 +689,45 @@ mod tests {
     }
 
     #[test]
+    fn flow_step_completed_serializes_logs_in_lowercase_and_omits_empty_logs() {
+        let with_logs = DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "n".into(),
+            status: FlowNodeStatus::Success,
+            status_code: None,
+            duration_ms: None,
+            error: None,
+            value: None,
+            skip_reason: None,
+            branch: None,
+            logs: vec![FlowLogEntry {
+                level: FlowLogLevel::Warn,
+                message: "hi".into(),
+            }],
+        };
+        let json = serde_json::to_string(&with_logs).expect("serialize");
+        assert!(
+            json.contains(r#""logs":[{"level":"warn","message":"hi"}]"#),
+            "got {json}"
+        );
+
+        let without = DomainEvent::FlowStepCompleted {
+            run_id: "01J".into(),
+            node_id: "n".into(),
+            status: FlowNodeStatus::Success,
+            status_code: None,
+            duration_ms: None,
+            error: None,
+            value: None,
+            skip_reason: None,
+            branch: None,
+            logs: vec![],
+        };
+        let json = serde_json::to_string(&without).expect("serialize");
+        assert!(!json.contains("logs"), "got {json}");
+    }
+
+    #[test]
     fn flow_step_completed_wire_shape_with_all_fields_present() {
         let event = DomainEvent::FlowStepCompleted {
             run_id: "01J".into(),
@@ -681,6 +739,7 @@ mod tests {
             value: Some("bob".into()),
             skip_reason: None,
             branch: None,
+            logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -701,6 +760,7 @@ mod tests {
             value: None,
             skip_reason: Some(FlowSkipReason::UpstreamFailed),
             branch: None,
+            logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(json.contains(r#""status":"skipped""#));
@@ -729,6 +789,7 @@ mod tests {
                 value,
                 skip_reason,
                 branch,
+                logs,
             } => {
                 assert_eq!(run_id, "01J");
                 assert_eq!(node_id, "node-3");
@@ -739,6 +800,7 @@ mod tests {
                 assert_eq!(value, None);
                 assert_eq!(skip_reason, None);
                 assert_eq!(branch, None);
+                assert!(logs.is_empty());
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -807,6 +869,7 @@ mod tests {
             value: None,
             skip_reason: Some(FlowSkipReason::BranchNotTaken),
             branch: None,
+            logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -827,6 +890,7 @@ mod tests {
             value: None,
             skip_reason: None,
             branch: Some("case:01JCASE".into()),
+            logs: vec![],
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -878,7 +942,10 @@ mod tests {
             session_id: "sess-1".into(),
         };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(json, r#"{"type":"acpSessionStarted","session_id":"sess-1"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"acpSessionStarted","session_id":"sess-1"}"#
+        );
     }
 
     #[test]

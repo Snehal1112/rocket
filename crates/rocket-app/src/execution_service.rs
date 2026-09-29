@@ -1497,13 +1497,40 @@ impl RequestExecutionService {
         expression: &str,
         response_json: &str,
     ) -> DomainResult<serde_json::Value> {
-        let engine = self.script_engine.as_ref().ok_or_else(|| {
-            rocket_shared::error::DomainError::Internal("script engine not configured".into())
-        })?;
+        self.evaluate_expression_with_logs(collection_root, expression, response_json)
+            .await
+            .0
+    }
 
-        let response: HttpResponse = serde_json::from_str(response_json).map_err(|e| {
-            rocket_shared::error::DomainError::InvalidInput(format!("invalid response JSON: {e}"))
-        })?;
+    /// Like `evaluate_var_expression`, but also returns the script's console
+    /// output. The entries include lines logged before a thrown error, and are
+    /// empty when the script never ran.
+    pub async fn evaluate_expression_with_logs(
+        &self,
+        collection_root: &str,
+        expression: &str,
+        response_json: &str,
+    ) -> (DomainResult<serde_json::Value>, Vec<ConsoleEntry>) {
+        let Some(engine) = self.script_engine.as_ref() else {
+            return (
+                Err(rocket_shared::error::DomainError::Internal(
+                    "script engine not configured".into(),
+                )),
+                vec![],
+            );
+        };
+
+        let response: HttpResponse = match serde_json::from_str(response_json) {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    Err(rocket_shared::error::DomainError::InvalidInput(format!(
+                        "invalid response JSON: {e}"
+                    ))),
+                    vec![],
+                )
+            }
+        };
 
         let mut var_ctx = VariableContext::default();
         if let Ok(settings) = self.collection_repo.get_settings(collection_root) {
@@ -1530,15 +1557,23 @@ impl RequestExecutionService {
             vec![],
         );
 
-        let result = engine.execute(ctx).await?;
+        let result = match engine.execute(ctx).await {
+            Ok(r) => r,
+            Err(e) => return (Err(e), vec![]),
+        };
+        let logs = result.console_entries;
         if let Some(err) = result.error {
-            return Err(rocket_shared::error::DomainError::InvalidInput(err));
+            return (
+                Err(rocket_shared::error::DomainError::InvalidInput(err)),
+                logs,
+            );
         }
-        Ok(result
+        let value = result
             .runtime_vars
             .get("__jsonq_result__")
             .cloned()
-            .unwrap_or(serde_json::Value::Null))
+            .unwrap_or(serde_json::Value::Null);
+        (Ok(value), logs)
     }
 }
 
