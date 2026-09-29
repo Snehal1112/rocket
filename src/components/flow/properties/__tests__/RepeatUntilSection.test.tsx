@@ -79,4 +79,50 @@ describe('RepeatUntilSection', () => {
     await userEvent.click(screen.getByRole('switch', { name: 'Repeat until' }));
     expect(onChange).toHaveBeenLastCalledWith(DEFAULT_REPEAT_UNTIL);
   });
+
+  it('commits only the new number after clearing a field', () => {
+    const onChange = vi.fn();
+    render(<RepeatUntilSection value={on} onChange={onChange} />);
+    const field = screen.getByLabelText('Interval (s)');
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.change(field, { target: { value: '5' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ ...on, intervalMs: 5000 });
+    expect(field).toHaveValue(5);
+  });
+
+  it('never commits zero while typing a decimal', () => {
+    const onChange = vi.fn();
+    render(<RepeatUntilSection value={on} onChange={onChange} />);
+    const field = screen.getByLabelText('Interval (s)');
+    fireEvent.change(field, { target: { value: '0' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: '0.5' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ ...on, intervalMs: 500 });
+  });
+
+  it('never commits an empty, zero or negative max attempts', () => {
+    const onChange = vi.fn();
+    render(<RepeatUntilSection value={on} onChange={onChange} />);
+    const field = screen.getByLabelText('Max attempts');
+    for (const v of ['', '0', '-3']) fireEvent.change(field, { target: { value: v } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('restores the stored value when an invalid draft loses focus', () => {
+    const onChange = vi.fn();
+    render(<RepeatUntilSection value={on} onChange={onChange} />);
+    const field = screen.getByLabelText('Timeout (s)');
+    fireEvent.change(field, { target: { value: '0' } });
+    expect(field).toHaveValue(0);
+    fireEvent.blur(field);
+    expect(field).toHaveValue(30);
+  });
+
+  it('follows the stored value when it changes from outside', () => {
+    const { rerender } = render(<RepeatUntilSection value={on} onChange={vi.fn()} />);
+    rerender(<RepeatUntilSection value={{ ...on, maxAttempts: 7 }} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('Max attempts')).toHaveValue(7);
+  });
 });
