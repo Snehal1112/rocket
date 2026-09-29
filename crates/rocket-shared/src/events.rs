@@ -35,6 +35,41 @@ pub struct FlowLogEntry {
     pub message: String,
 }
 
+/// One header line in a Flow debug record, already masked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowDebugHeader {
+    pub key: String,
+    pub value: String,
+}
+
+/// The response half of a Flow debug record, already masked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowDebugResponse {
+    pub status: u16,
+    pub status_text: String,
+    pub duration_ms: u64,
+    pub size_bytes: u64,
+    pub headers: Vec<FlowDebugHeader>,
+    pub body: String,
+}
+
+/// The request a Flow step sent and what came back, already masked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowDebugRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<FlowDebugHeader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<FlowDebugResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {

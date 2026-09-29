@@ -1474,12 +1474,27 @@ impl RequestExecutionService {
         input: ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> DomainResult<ExecuteRequestOutput> {
+        let mut sent = None;
+        self.execute_capturing(input, external_secrets, &mut sent)
+            .await
+    }
+
+    /// Runs the single-send path and records the request as it was handed to
+    /// the executor, after the pre-request script ran. The record survives a
+    /// failed send.
+    pub(crate) async fn execute_capturing(
+        &self,
+        input: ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+        sent: &mut Option<HttpRequest>,
+    ) -> DomainResult<ExecuteRequestOutput> {
         // Every phase runs unconditionally — this is the single-send path. The
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
         let mut state = self.begin_phases(&input, external_secrets)?;
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
+        *sent = Some(state.http_request.clone());
         let response = self.send_request(&state).await?;
         self.run_after_response_phase(&input, ExecutionMode::Standalone, &response, &mut state)
             .await;
@@ -1602,7 +1617,7 @@ impl RequestExecutionService {
 /// Map an `Auth` variant to a short kebab-case label for audit events.
 /// Returns `None` for `Auth::None` and `Auth::Inherit` because those are not
 /// "sensitive auth used" — no credential is actually being sent on the wire.
-fn sensitive_auth_label(auth: &Auth) -> Option<&'static str> {
+pub(crate) fn sensitive_auth_label(auth: &Auth) -> Option<&'static str> {
     match auth {
         Auth::None | Auth::Inherit => None,
         Auth::Basic { .. } => Some("basic"),
@@ -4472,6 +4487,87 @@ mod tests {
             .expect("executor should have received a body");
         assert_eq!(body.mode, BodyMode::Json);
         assert_eq!(body.content.as_deref(), Some(r#"{"injected":true}"#));
+    }
+
+    /// Executor whose send always fails.
+    struct FailingExecutor;
+
+    #[async_trait]
+    impl HttpExecutor for FailingExecutor {
+        async fn execute(&self, _req: &HttpRequest) -> DomainResult<HttpResponse> {
+            Err(DomainError::Internal("connection refused".into()))
+        }
+    }
+
+    fn capturing_svc(
+        executor: Arc<dyn HttpExecutor>,
+        engine: Box<dyn ScriptEngine>,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(engine)
+    }
+
+    #[tokio::test]
+    async fn execute_capturing_records_the_request_after_the_pre_request_script() {
+        use rocket_scripting::{HeaderMutation, RequestMutations, ScriptResult};
+
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                headers: vec![HeaderMutation::Set {
+                    name: "X-Trace".into(),
+                    value: "from-script".into(),
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let svc = capturing_svc(
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockBeforeRequestEngine::returning(result)),
+        );
+        let mut input = sample_input("https://example.com/a", None);
+        input.pre_request_script = Some("// pre".into());
+
+        let mut sent = None;
+        svc.execute_capturing(input, &std::collections::HashMap::new(), &mut sent)
+            .await
+            .expect("execute failed");
+
+        let sent = sent.expect("request should be captured");
+        assert_eq!(sent.url, "https://example.com/a");
+        assert!(sent
+            .headers
+            .iter()
+            .any(|h| h.key == "X-Trace" && h.value == "from-script"));
+    }
+
+    #[tokio::test]
+    async fn execute_capturing_keeps_the_request_when_the_send_fails() {
+        let svc = capturing_svc(
+            Arc::new(FailingExecutor),
+            Box::new(MockBeforeRequestEngine::returning(Default::default())),
+        );
+        let mut sent = None;
+        let result = svc
+            .execute_capturing(
+                sample_input("https://example.com/b", None),
+                &std::collections::HashMap::new(),
+                &mut sent,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert_eq!(sent.expect("captured").url, "https://example.com/b");
     }
 
     #[tokio::test]

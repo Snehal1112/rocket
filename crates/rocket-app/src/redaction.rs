@@ -25,8 +25,6 @@ pub(crate) fn redact_secrets(text: &str, secret_values: &HashSet<String>) -> Str
     out
 }
 
-// Consumed by the debug logging added in a later task.
-#[allow(dead_code)]
 /// Whether a header's value is always masked, whatever it contains.
 pub(crate) fn is_sensitive_header(name: &str) -> bool {
     matches!(
