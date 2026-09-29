@@ -172,13 +172,13 @@ A flow without `repeat_until` saves exactly as before.
 2. For attempt `n` in `1..=max_attempts`:
    1. Publish `FlowStepProgress { attempt: n, max_attempts, message: "attempt n/N" }`.
    2. Send with `execute_capturing`. The attempt runs with `skip_history = true`, so its History entry is returned in `deferred_history` instead of being saved (6.4).
-   3. If the send itself errors (network error, script error), fail the node at once. Only a received response is retried.
+   3. If the send gets no response (for example a network error), fail the node at once. Only a received response is retried. A pre-request or post-response script error is recorded as for a normal Request (`script_error`, console, `ScriptError` event) and does not stop the poll.
    4. Evaluate `condition` with `evaluate_flow_route_expression(…, FlowCoercion::Bool, …)` against the response. A non-2xx response is still evaluated, so `response.status === 200` can wait for a 404 to turn into a 200.
    5. A script error in `condition` saves this attempt to History and fails the node at once with the script error.
    6. If the condition is true, save this attempt to History and succeed. The node's output is this response, as for a normal Request. The node succeeds even when the final response is non-2xx, because the author's condition decides "done" (for example `response.status === 404` to wait for a delete). `result_to_step` gets this case from `ExecutedNode.poll` (`PollStats`) rather than the status code.
    7. If the condition is false and the deadline or the attempt limit is reached, save this attempt to History and fail with `"condition not met after {n} attempts ({elapsed}s)"`.
-   8. Otherwise sleep `interval_ms`, cut short by the deadline, inside `select!` with the cancel signal (5.1). If Stop ends the sleep, save this attempt to History before the node ends as cancelled.
-3. `FlowStepCompleted` carries the last response's status code and total duration. Its `debug_request` is the last attempt's request. `FlowStepResult` gains `attempts: Option<u32>`.
+   8. Otherwise sleep `interval_ms`, cut short by the deadline, inside `select!` with the cancel signal (5.1). If Stop ends the sleep, save this attempt to History before the node ends as cancelled. If Stop lands just after the sleep ends, the next attempt is not sent: the previous attempt is saved to History once and the node ends as cancelled.
+3. `FlowStepCompleted` carries the last response's status code and total duration. Its `debug_request` is the last attempt's request. `FlowStepResult` gains `attempts: Option<u32>`. A failed poll (give-up, condition script error, Stop) still carries the status code, total duration and attempts of the last response, through a side channel next to `logs` and `debug`, while the node still fails and its dependents are skipped as `upstream_failed`. Only a poll whose first send got no response has none of them.
 
 ### 6.4 History
 
@@ -190,7 +190,7 @@ Console output, test results and `RequestExecuted` events are still published fo
 
 - `FlowNodeKindDto::Request` gains `repeat_until: Option<RepeatUntilDto>` (camelCase DTO), mapped both ways. `FlowStepResult` and the completed event gain `attempts`.
 - `src/lib/tauri-api.ts` mirrors both.
-- **Request card:** a row under Body, `↻ until <condition> · <interval>s · max <N>`, with the condition truncated. It has no handle. When a run finishes it shows `✓ 200 · 7 attempts · 14.2s`.
+- **Request card:** a row under Body, `↻ until <condition> · <interval>s · max <N>`, with the condition truncated. It has no handle. When a run finishes it shows `✓ 200 · 7 attempts · 14.2s`. A failed poll shows `✕ 404 · 30 attempts · <error>`.
 - **Properties panel:** a "Repeat until" section with a switch, the condition in the same editor the If node uses, and number fields for interval (seconds), max attempts and timeout (seconds). Turning the switch on fills the defaults.
 - **Palette:** a "Poll request" entry that adds an inline Request node labelled "New Poll" with `repeat_until` set to the defaults (condition `response.status === 200`). The user sets its URL in the properties panel or points it at a saved request there with "Use a saved request…".
 
@@ -303,7 +303,8 @@ A skipped or failed WaitForCallback node keeps its endpoint open only until the 
 |---|---|
 | Poll condition never true | Node fails: "condition not met after N attempts (Ts)" |
 | Poll condition script error | Node fails at once with the script error |
-| Poll send error (network, pre-request script) | Node fails at once, as for a normal Request |
+| Poll send with no response (for example a network error) | Node fails at once, as for a normal Request |
+| Poll pre-request or post-response script error | Recorded as for a normal Request. The poll goes on |
 | Callback listener cannot bind | Run fails before any node, "could not open callback listener: …" |
 | No matching callback in time | Node fails: "no matching callback within Ts (k ignored)" |
 | `accept_when` script error | Node fails at once with the script error |
