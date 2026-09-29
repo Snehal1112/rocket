@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -133,6 +133,7 @@ impl RequestExecutionService {
         collection: &str,
         output: &CapturedOutput,
         expression: &str,
+        secret_values: &HashSet<String>,
     ) -> FlowScriptOutcome {
         let script = match flow_script(expression, FlowCoercion::Raw) {
             Ok(script) => script,
@@ -143,7 +144,12 @@ impl RequestExecutionService {
             Err(e) => return FlowScriptOutcome::failed(e),
         };
         let (result, entries) = self
-            .evaluate_expression_with_logs(collection, &script, &response_json)
+            .evaluate_expression_with_logs(
+                collection,
+                &script,
+                &response_json,
+                secret_values.clone(),
+            )
             .await;
         let result = result.and_then(|value| match value {
             // A `null` or `undefined` result would wire the literal text "null"
@@ -170,6 +176,7 @@ impl RequestExecutionService {
         output: &CapturedOutput,
         source: &str,
         coercion: FlowCoercion,
+        secret_values: &HashSet<String>,
     ) -> FlowScriptOutcome {
         let script = match flow_script(source, coercion) {
             Ok(script) => script,
@@ -180,7 +187,12 @@ impl RequestExecutionService {
             Err(e) => return FlowScriptOutcome::failed(e),
         };
         let (result, entries) = self
-            .evaluate_expression_with_logs(collection, &script, &response_json)
+            .evaluate_expression_with_logs(
+                collection,
+                &script,
+                &response_json,
+                secret_values.clone(),
+            )
             .await;
         FlowScriptOutcome {
             result: result.map(|value| match value {
@@ -431,7 +443,6 @@ fn apply_header_override(
     Ok(())
 }
 
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use rocket_scripting::{ConsoleEntry, ConsoleLevel};
@@ -739,7 +750,8 @@ impl FlowExecutionService {
     /// Dispatches one node by kind, feeding it only `data_edges` — the live,
     /// non-trigger edges `decide_fate` selected. Returns the node's captured
     /// output and chosen exit, or an error if the node itself failed.
-    // The brief fixes this signature; `logs` collects console output.
+    // The node needs the run's inputs, captured outputs and secrets, and
+    // `logs` collects the console output.
     #[allow(clippy::too_many_arguments)]
     async fn execute_node(
         &self,
@@ -751,6 +763,13 @@ impl FlowExecutionService {
         external_secrets: &HashMap<String, String>,
         logs: &mut Vec<FlowLogEntry>,
     ) -> DomainResult<ExecutedNode> {
+        // Script logs redact the same secrets a Request node's script does.
+        let secret_values = exec.secret_values(
+            input.global_env_name.as_deref(),
+            Some(&input.collection),
+            input.environment_name.as_deref(),
+            external_secrets,
+        );
         match &node.kind {
             FlowNodeKind::Input { value, .. } => {
                 // Resolve with the scope a request uses (global < collection <
@@ -788,6 +807,7 @@ impl FlowExecutionService {
                         &input.collection,
                         source_output,
                         &edge.expression,
+                        &secret_values,
                     )
                     .await;
                 logs.extend(outcome.logs);
@@ -813,6 +833,7 @@ impl FlowExecutionService {
                             &input.collection,
                             source_output,
                             &edge.expression,
+                            &secret_values,
                         )
                         .await;
                     logs.extend(outcome.logs);
@@ -838,6 +859,7 @@ impl FlowExecutionService {
                         source,
                         condition,
                         FlowCoercion::Bool,
+                        &secret_values,
                     )
                     .await;
                 logs.extend(outcome.logs);
@@ -865,6 +887,7 @@ impl FlowExecutionService {
                         source,
                         value,
                         FlowCoercion::Str,
+                        &secret_values,
                     )
                     .await;
                 logs.extend(outcome.logs);
@@ -1308,7 +1331,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn route_expression_passes_the_wrapped_expression_verbatim() {
+    async fn route_expression_passes_the_raw_source_and_applies_coercion() {
         let svc = service_with_engine(
             FakeCollectionRepo::new(),
             scripted(vec![(
@@ -1324,6 +1347,7 @@ mod tests {
                 &output,
                 "response.status === 200",
                 FlowCoercion::Bool,
+                &HashSet::new(),
             )
             .await
             .result
@@ -1348,6 +1372,7 @@ mod tests {
                 &output,
                 "response.body.plan",
                 FlowCoercion::Str,
+                &HashSet::new(),
             )
             .await
             .result
@@ -1372,6 +1397,7 @@ mod tests {
                 &output,
                 "response.body.plan",
                 FlowCoercion::Str,
+                &HashSet::new(),
             )
             .await
             .result
@@ -1391,7 +1417,13 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "response.status", FlowCoercion::Str)
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "response.status",
+                FlowCoercion::Str,
+                &HashSet::new(),
+            )
             .await
             .result
             .expect("resolve");
@@ -1405,7 +1437,13 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let err = svc
-            .evaluate_flow_route_expression("my-api", &output, "nope.nope", FlowCoercion::Bool)
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "nope.nope",
+                FlowCoercion::Bool,
+                &HashSet::new(),
+            )
             .await
             .result
             .expect_err("a throwing route expression must be an Err");
@@ -1459,7 +1497,7 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body")
+            .resolve_flow_wire_expression("my-api", &output, "response.body", &HashSet::new())
             .await
             .result
             .expect("expression should resolve");
@@ -1478,7 +1516,7 @@ mod tests {
         let output = CapturedOutput::Value(VariableValue::simple("hello"));
 
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body")
+            .resolve_flow_wire_expression("my-api", &output, "response.body", &HashSet::new())
             .await
             .result
             .expect("expression should resolve");
@@ -1492,7 +1530,7 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let err = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.nope.nope")
+            .resolve_flow_wire_expression("my-api", &output, "response.nope.nope", &HashSet::new())
             .await
             .result
             .expect_err("a throwing expression must be an Err, not a panic");
@@ -1511,7 +1549,12 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let err = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body.missing")
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "response.body.missing",
+                &HashSet::new(),
+            )
             .await
             .result
             .expect_err("a null result must be an Err, not Ok(\"null\")");
@@ -1530,7 +1573,7 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.status")
+            .resolve_flow_wire_expression("my-api", &output, "response.status", &HashSet::new())
             .await
             .result
             .expect("a number must resolve");
@@ -4200,6 +4243,7 @@ mod tests {
                 &output,
                 "response.status === 200",
                 FlowCoercion::Bool,
+                &HashSet::new(),
             )
             .await
             .result
@@ -4214,7 +4258,7 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body.token")
+            .resolve_flow_wire_expression("my-api", &output, "response.body.token", &HashSet::new())
             .await
             .result
             .expect("response.body must be parsed JSON");
@@ -4228,7 +4272,7 @@ mod tests {
         let output = CapturedOutput::Value(VariableValue::simple("hello"));
 
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body")
+            .resolve_flow_wire_expression("my-api", &output, "response.body", &HashSet::new())
             .await
             .result
             .expect("a plain-text body must stay a string");
@@ -4249,6 +4293,7 @@ mod tests {
                 &output,
                 "response.body.plan",
                 FlowCoercion::Str,
+                &HashSet::new(),
             )
             .await
             .result
@@ -4270,6 +4315,7 @@ mod tests {
                 &output,
                 "response.statusText + response.duration_ms + JSON.stringify(response.headers)",
                 FlowCoercion::Str,
+                &HashSet::new(),
             )
             .await
             .result
@@ -4288,6 +4334,7 @@ mod tests {
                 "my-api",
                 &output,
                 "const t = response.body.token;\nreturn 'Bearer ' + t;",
+                &HashSet::new(),
             )
             .await
             .result
@@ -4304,6 +4351,7 @@ mod tests {
                 "my-api",
                 &output,
                 "console.log('ran');\nreturn JSON.parse('not json');",
+                &HashSet::new(),
             )
             .await
             .result
@@ -4316,7 +4364,12 @@ mod tests {
         let svc = real_engine_service();
         let output = CapturedOutput::Value(VariableValue::simple("x"));
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "`a\"b` + '\\n' + \"c'd\"")
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "`a\"b` + '\\n' + \"c'd\"",
+                &HashSet::new(),
+            )
             .await
             .result
             .expect("special characters must survive");
@@ -4328,7 +4381,7 @@ mod tests {
         let svc = real_engine_service();
         let output = CapturedOutput::Value(VariableValue::simple("x"));
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "{ a: 1 }")
+            .resolve_flow_wire_expression("my-api", &output, "{ a: 1 }", &HashSet::new())
             .await
             .result
             .expect("an object literal is an expression");
@@ -4340,7 +4393,7 @@ mod tests {
         let svc = real_engine_service();
         let output = CapturedOutput::Value(VariableValue::simple("hello"));
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body;")
+            .resolve_flow_wire_expression("my-api", &output, "response.body;", &HashSet::new())
             .await
             .result
             .expect("a trailing semicolon must not lose the value");
@@ -4352,7 +4405,12 @@ mod tests {
         let svc = real_engine_service();
         let output = CapturedOutput::Value(VariableValue::simple("hello"));
         let value = svc
-            .resolve_flow_wire_expression("my-api", &output, "response.body // note")
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "response.body // note",
+                &HashSet::new(),
+            )
             .await
             .result
             .expect("a trailing comment must not swallow the wrapper");
@@ -4364,7 +4422,12 @@ mod tests {
         let svc = real_engine_service();
         let output = CapturedOutput::Value(VariableValue::simple("hello"));
         let err = svc
-            .resolve_flow_wire_expression("my-api", &output, "const a = 1;\nconsole.log(a);")
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "const a = 1;\nconsole.log(a);",
+                &HashSet::new(),
+            )
             .await
             .result
             .expect_err("a wire body with no return resolves to undefined");
@@ -4381,6 +4444,7 @@ mod tests {
                 &output,
                 "const ok = response.status === 200;\nreturn ok;",
                 FlowCoercion::Bool,
+                &HashSet::new(),
             )
             .await
             .result
@@ -4398,6 +4462,7 @@ mod tests {
                 &output,
                 "const p = response.body.token;\nreturn p;",
                 FlowCoercion::Str,
+                &HashSet::new(),
             )
             .await
             .result
@@ -4410,7 +4475,7 @@ mod tests {
         let svc = real_engine_service();
         let output = CapturedOutput::Value(VariableValue::simple("x"));
         let err = svc
-            .resolve_flow_wire_expression("my-api", &output, "return (")
+            .resolve_flow_wire_expression("my-api", &output, "return (", &HashSet::new())
             .await
             .result
             .expect_err("broken source must fail");
@@ -4426,6 +4491,7 @@ mod tests {
                 "my-api",
                 &output,
                 "console.log('seen', response.body);\nreturn 1;",
+                &HashSet::new(),
             )
             .await;
         assert_eq!(outcome.result.expect("value"), "1");
@@ -4443,6 +4509,7 @@ mod tests {
                 "my-api",
                 &output,
                 "console.warn('before');\nthrow new Error('boom');",
+                &HashSet::new(),
             )
             .await;
         assert!(outcome.result.is_err());
@@ -4465,6 +4532,45 @@ mod tests {
         let exec = real_engine_service();
         let summary = service.run(&exec, run_input("logs")).await.expect("run");
         (summary, publisher.events())
+    }
+
+    #[tokio::test]
+    async fn a_wire_log_of_a_secret_variable_is_redacted() {
+        let mut env = rocket_environment::Environment::new("dev");
+        let mut token = rocket_environment::Variable::new("TOKEN", "s3cr3t-token-value");
+        token.secret = true;
+        env.set_variable(token);
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            Arc::new(NullExecutor),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
+        let mut edge = wire("e1", "in", "out");
+        edge.expression = "console.log(response.body);\nreturn response.body;".to_string();
+        let flow = Flow {
+            name: "secret".to_string(),
+            nodes: vec![input_node_with("in", "{{TOKEN}}"), output_node_named("out")],
+            edges: vec![edge],
+        };
+        let mut input = run_input("secret");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "out");
+        assert_eq!(step.logs.len(), 1);
+        assert!(!step.logs[0].message.contains("s3cr3t-token-value"));
+        assert!(step.logs[0].message.contains("••••••"));
     }
 
     fn completed_logs(events: &[DomainEvent], node: &str) -> Vec<FlowLogEntry> {

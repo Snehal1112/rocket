@@ -437,6 +437,25 @@ impl RequestExecutionService {
         ctx
     }
 
+    /// Collects the values a run must never print: secret variables from the
+    /// global environment, collection and environment, plus external secrets.
+    pub(crate) fn secret_values(
+        &self,
+        global_env_name: Option<&str>,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashSet<String> {
+        self.build_variable_scopes(
+            global_env_name,
+            collection,
+            environment_name,
+            None,
+            external_secrets,
+        )
+        .secret_values
+    }
+
     /// Builds a flattened variable map from all backend-accessible scopes
     /// (global env, collection, environment, folder-chain, request-level).
     ///
@@ -1497,19 +1516,26 @@ impl RequestExecutionService {
         expression: &str,
         response_json: &str,
     ) -> DomainResult<serde_json::Value> {
-        self.evaluate_expression_with_logs(collection_root, expression, response_json)
-            .await
-            .0
+        self.evaluate_expression_with_logs(
+            collection_root,
+            expression,
+            response_json,
+            std::collections::HashSet::new(),
+        )
+        .await
+        .0
     }
 
     /// Like `evaluate_var_expression`, but also returns the script's console
     /// output. The entries include lines logged before a thrown error, and are
-    /// empty when the script never ran.
+    /// empty when the script never ran. `secret_values` are redacted from the
+    /// console output by the engine.
     pub async fn evaluate_expression_with_logs(
         &self,
         collection_root: &str,
         expression: &str,
         response_json: &str,
+        secret_values: std::collections::HashSet<String>,
     ) -> (DomainResult<serde_json::Value>, Vec<ConsoleEntry>) {
         let Some(engine) = self.script_engine.as_ref() else {
             return (
@@ -1532,7 +1558,10 @@ impl RequestExecutionService {
             }
         };
 
-        let mut var_ctx = VariableContext::default();
+        let mut var_ctx = VariableContext {
+            secret_values,
+            ..Default::default()
+        };
         if let Ok(settings) = self.collection_repo.get_settings(collection_root) {
             for cv in settings.variables.iter().filter(|v| v.enabled) {
                 let val = if cv.value.is_empty() {
