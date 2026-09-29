@@ -31,6 +31,12 @@ function Harness({
   );
 }
 
+const trio: FlowNode[] = [
+  { id: 'a', kind: { kind: 'Output', label: 'Alpha' }, position: { x: 0, y: 0 } },
+  { id: 'b', kind: { kind: 'Output', label: 'Beta' }, position: { x: 300, y: 0 } },
+  { id: 'c', kind: { kind: 'Output', label: 'Gamma' }, position: { x: 600, y: 0 } },
+];
+
 describe('FlowCanvas', () => {
   const nodes: FlowNode[] = [
     { id: 'n1', kind: { kind: 'Output', label: 'Result' }, position: { x: 0, y: 0 } },
@@ -291,6 +297,87 @@ describe('FlowCanvas', () => {
         new Set(),
       );
       expect(rf[0].className).toContain('nopan');
+    });
+  });
+
+  describe('multi-select', () => {
+    // Keeps the selection in state, like FlowPane does, and reports each change.
+    function SelectHarness({ onSelect }: { onSelect: (ids: ReadonlySet<string>) => void }) {
+      const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+      return (
+        <>
+          <input aria-label='outside-field' />
+          <FlowCanvas
+            nodes={trio}
+            edges={[]}
+            nodeStatus={{}}
+            onNodesChange={vi.fn()}
+            onEdgesChange={vi.fn()}
+            onConnect={vi.fn()}
+            selectedNodeIds={selected}
+            onSelectedNodeIdsChange={(ids) => {
+              onSelect(ids);
+              setSelected(ids);
+            }}
+          />
+        </>
+      );
+    }
+
+    const selectedOf = (id: string) =>
+      document.querySelector(`.react-flow__node[data-id="${id}"]`)?.classList.contains('selected');
+
+    it('selects every node on Ctrl+A', async () => {
+      const onSelect = vi.fn();
+      render(<SelectHarness onSelect={onSelect} />);
+      fireEvent.keyDown(screen.getByTestId('flow-canvas'), { key: 'a', ctrlKey: true });
+      await waitFor(() => expect(onSelect).toHaveBeenLastCalledWith(new Set(['a', 'b', 'c'])));
+    });
+
+    it('selects every node on Cmd+A', async () => {
+      const onSelect = vi.fn();
+      render(<SelectHarness onSelect={onSelect} />);
+      fireEvent.keyDown(screen.getByTestId('flow-canvas'), { key: 'a', metaKey: true });
+      await waitFor(() => expect(onSelect).toHaveBeenLastCalledWith(new Set(['a', 'b', 'c'])));
+    });
+
+    it('does not select all when Ctrl+A comes from an input', () => {
+      const onSelect = vi.fn();
+      render(<SelectHarness onSelect={onSelect} />);
+      const input = document.createElement('input');
+      screen.getByTestId('flow-canvas').appendChild(input);
+      fireEvent.keyDown(input, { key: 'a', ctrlKey: true });
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('does not select all when Ctrl+A comes from inside a .nokey element', () => {
+      const onSelect = vi.fn();
+      render(<SelectHarness onSelect={onSelect} />);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'nokey';
+      const inner = document.createElement('span');
+      wrapper.appendChild(inner);
+      screen.getByTestId('flow-canvas').appendChild(wrapper);
+      fireEvent.keyDown(inner, { key: 'a', ctrlKey: true });
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('adds a second node to the selection on Ctrl+click', async () => {
+      const onSelect = vi.fn();
+      render(<SelectHarness onSelect={onSelect} />);
+      fireEvent.click(screen.getByText('Alpha'));
+      await waitFor(() => expect(selectedOf('a')).toBe(true));
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: 'Control', ctrlKey: true });
+      });
+      fireEvent.click(screen.getByText('Beta'), { ctrlKey: true });
+      await waitFor(() => expect(selectedOf('b')).toBe(true));
+      expect(selectedOf('a')).toBe(true);
+    });
+
+    it('shows the selection hint', () => {
+      render(<SelectHarness onSelect={vi.fn()} />);
+      expect(screen.getByText(/Drag to select/)).toBeInTheDocument();
     });
   });
 

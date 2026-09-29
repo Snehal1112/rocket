@@ -7,8 +7,10 @@ import {
   type EdgeChange,
   type Node,
   type NodeChange,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useReactFlow,
 } from '@xyflow/react';
 import { useMemo, useRef, useState } from 'react';
@@ -328,6 +330,14 @@ function FlowCanvasInner({
     });
   };
 
+  // Ctrl+A (Cmd+A on macOS) selects every node, unless a field owns the keys.
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key.toLowerCase() !== 'a' || !(e.ctrlKey || e.metaKey)) return;
+    if (e.target instanceof Element && e.target.closest(EDITABLE_TARGET)) return;
+    e.preventDefault();
+    selectNodes(new Set(nodes.map((n) => n.id)));
+  };
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for sidebar request drag-and-drop
     <div
@@ -337,6 +347,7 @@ function FlowCanvasInner({
       className='h-full w-full outline-none'
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onKeyDown={handleKeyDown}
     >
       <FlowNodeActionsContext.Provider value={nodeActions}>
         <ReactFlow
@@ -360,6 +371,12 @@ function FlowCanvasInner({
             onEdgeEdit?.(edge.id);
           }}
           onPaneClick={focusPane}
+          // Left-drag draws a selection box. Middle and right drag pan instead.
+          selectionOnDrag
+          panOnDrag={[1, 2]}
+          selectionMode={SelectionMode.Partial}
+          panOnScroll
+          onPaneContextMenu={(e) => e.preventDefault()}
           deleteKeyCode={['Backspace', 'Delete']}
           fitView
         >
@@ -371,6 +388,11 @@ function FlowCanvasInner({
             color='hsl(var(--muted-foreground))'
           />
           <Controls />
+          <Panel position='bottom-left' className='pointer-events-none ml-14 mb-3'>
+            <span className='text-[11px] text-muted-foreground/70'>
+              Drag to select · Ctrl+A select all · Right-drag or scroll to pan
+            </span>
+          </Panel>
         </ReactFlow>
       </FlowNodeActionsContext.Provider>
     </div>

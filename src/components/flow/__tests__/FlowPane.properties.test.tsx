@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePaneStore } from '@/stores/pane-store';
@@ -195,7 +195,12 @@ describe('FlowPane node properties panel', () => {
     await userEvent.click(screen.getByLabelText('Edit Result'));
     const pane = container.querySelector('.react-flow__pane');
     if (!pane) throw new Error('Expected the React Flow pane');
-    fireEvent.click(pane);
+    // With drag-select on, React Flow reports a pane click from pointer events.
+    // jsdom pointer events lack isPrimary, which React Flow checks.
+    const down = createEvent.pointerDown(pane, { button: 0, clientX: 5, clientY: 5 });
+    Object.defineProperty(down, 'isPrimary', { value: true });
+    fireEvent(pane, down);
+    fireEvent.pointerUp(pane, { button: 0, clientX: 5, clientY: 5 });
     expect(screen.queryByTestId('node-properties-panel')).not.toBeInTheDocument();
   });
 
