@@ -44,6 +44,11 @@ const baseKind = {
 };
 
 describe('RequestNode', () => {
+  it('shows progress while running', () => {
+    renderNode({ kind: baseKind, status: 'running', progress: 'attempt 2/5' });
+    expect(screen.getByTestId('node-progress')).toHaveTextContent('attempt 2/5');
+  });
+
   it('renders idle state with method badge, label, and field rows', () => {
     renderNode({ kind: baseKind, status: 'idle' });
     expect(screen.getByText('Get Auth Token')).toBeInTheDocument();

@@ -1930,6 +1930,22 @@ export const onFlowStepCompleted = (
 ): Promise<UnlistenFn> =>
   listen<FlowStepCompletedEvent>('flow-step-completed', (e) => handler(e.payload));
 
+export interface FlowStepProgressEvent {
+  type: 'flowStepProgress';
+  run_id: string;
+  node_id: string;
+  /** 1-based attempt number, or null when attempts do not apply. */
+  attempt: number | null;
+  max_attempts: number | null;
+  /** Short text shown on the node, such as "attempt 3/30". */
+  message: string;
+}
+
+export const onFlowStepProgress = (
+  handler: (event: FlowStepProgressEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowStepProgressEvent>('flow-step-progress', (e) => handler(e.payload));
+
 export interface FlowRunFinishedEvent {
   type: 'flowRunFinished';
   run_id: string;

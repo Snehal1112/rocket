@@ -162,6 +162,8 @@ export interface FlowNodeDetail {
   skipReason?: import('@/lib/tauri-api').FlowSkipReason;
   /** Exit a routing node took. */
   branch?: string;
+  /** Progress text of a running node, such as "attempt 3/30". */
+  progress?: string;
 }
 
 export interface FlowTab extends BaseTab {

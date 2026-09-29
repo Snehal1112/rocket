@@ -237,6 +237,7 @@ export interface PaneState {
     status: FlowNodeStatus,
     detail?: FlowNodeDetail,
   ) => void;
+  patchFlowNodeProgress: (tabId: string, nodeId: string, message: string) => void;
   setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
 }
 
@@ -798,6 +799,22 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           ...tab,
           nodeStatus: { ...tab.nodeStatus, [nodeId]: status },
           nodeDetail: detail ? { ...tab.nodeDetail, [nodeId]: detail } : tab.nodeDetail,
+        };
+      }),
+    });
+  },
+
+  // Merges progress into the node's detail and leaves its status alone. The
+  // next status patch with a detail replaces the detail, which clears it.
+  patchFlowNodeProgress(tabId, nodeId, message) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isFlowTab(tab)) return tab;
+        if (!tab.nodes.some((n) => n.id === nodeId)) return tab;
+        const previous = tab.nodeDetail?.[nodeId];
+        return {
+          ...tab,
+          nodeDetail: { ...tab.nodeDetail, [nodeId]: { ...previous, progress: message } },
         };
       }),
     });

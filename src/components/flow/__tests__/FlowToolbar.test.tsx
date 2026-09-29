@@ -15,6 +15,7 @@ vi.mock('@/lib/tauri-api', async () => {
     onFlowRunStarted: vi.fn(),
     onFlowStepStarted: vi.fn(),
     onFlowStepCompleted: vi.fn(),
+    onFlowStepProgress: vi.fn(),
   };
 });
 
@@ -32,6 +33,7 @@ type StepHandler = Parameters<typeof tauriApi.onFlowStepCompleted>[0];
 
 let startedHandler: StartedHandler | undefined;
 let stepHandler: StepHandler | undefined;
+let progressHandler: Parameters<typeof tauriApi.onFlowStepProgress>[0] | undefined;
 let startedStepHandler: Parameters<typeof tauriApi.onFlowStepStarted>[0] | undefined;
 let resolveRun: (summary: tauriApi.FlowRunSummary) => void = () => {
   // Reassigned by beforeEach's mock implementation before use.
@@ -63,6 +65,13 @@ describe('FlowToolbar', () => {
     startedHandler = undefined;
     stepHandler = undefined;
     startedStepHandler = undefined;
+    progressHandler = undefined;
+    vi.mocked(tauriApi.onFlowStepProgress).mockImplementation(async (h) => {
+      progressHandler = h;
+      return () => {
+        // Fake unlisten — no real Tauri listener to tear down in tests.
+      };
+    });
     vi.mocked(tauriApi.onFlowRunStarted).mockImplementation(async (h) => {
       startedHandler = h;
       return () => {
@@ -418,5 +427,65 @@ describe('FlowToolbar', () => {
     started('run-123');
     startedStepHandler?.({ type: 'flowStepStarted', run_id: 'run-123', node_id: 'node-a' });
     expect(onPatchStatus).toHaveBeenCalledWith('node-a', 'running');
+  });
+
+  it('forwards flow-step-progress messages for the active run', async () => {
+    const onPatchProgress = vi.fn();
+    renderToolbar({ onPatchProgress });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(progressHandler).toBeDefined());
+    started('run-123');
+    progressHandler?.({
+      type: 'flowStepProgress',
+      run_id: 'run-123',
+      node_id: 'node-a',
+      attempt: 3,
+      max_attempts: 30,
+      message: 'attempt 3/30',
+    });
+    expect(onPatchProgress).toHaveBeenCalledWith('node-a', 'attempt 3/30');
+  });
+
+  it('ignores flow-step-progress for another run', async () => {
+    const onPatchProgress = vi.fn();
+    renderToolbar({ onPatchProgress });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(progressHandler).toBeDefined());
+    started('run-123');
+    progressHandler?.({
+      type: 'flowStepProgress',
+      run_id: 'other-run',
+      node_id: 'node-a',
+      attempt: null,
+      max_attempts: null,
+      message: 'waiting',
+    });
+    expect(onPatchProgress).not.toHaveBeenCalled();
+  });
+
+  it('a remounted toolbar forwards progress for the resumed run', async () => {
+    const onPatchProgress = vi.fn();
+    render(
+      <FlowToolbar
+        collection='my-collection'
+        flowName='my-flow'
+        environmentName={null}
+        onPatchStatus={onPatchStatus}
+        onPatchProgress={onPatchProgress}
+        onRunStateChange={onRunStateChange}
+        tabRunState='running'
+        tabRunId='run-9'
+      />,
+    );
+    await waitFor(() => expect(progressHandler).toBeDefined());
+    progressHandler?.({
+      type: 'flowStepProgress',
+      run_id: 'run-9',
+      node_id: 'node-a',
+      attempt: 1,
+      max_attempts: 5,
+      message: 'attempt 1/5',
+    });
+    expect(onPatchProgress).toHaveBeenCalledWith('node-a', 'attempt 1/5');
   });
 });

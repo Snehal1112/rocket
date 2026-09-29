@@ -18,6 +18,8 @@ export type SwitchNodeData = {
   kind: Extract<FlowNodeKind, { kind: 'Switch' }>;
   status: FlowNodeStatus;
   error?: string;
+  /** Progress text while running, such as "attempt 3/30". */
+  progress?: string;
   skipReason?: FlowSkipReason;
   /** Exit chosen by the last run: "case:<id>" or "default". */
   branch?: string;
@@ -105,7 +107,12 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
           </Badge>
         </div>
       )}
-      <NodeStatusCaption status={status} skipReason={data.skipReason} error={data.error} />
+      <NodeStatusCaption
+        status={status}
+        skipReason={data.skipReason}
+        error={data.error}
+        progress={data.progress}
+      />
 
       <div className='nodrag nowheel nokey space-y-1 px-2 py-1.5'>
         <span className='text-muted-foreground'>value</span>

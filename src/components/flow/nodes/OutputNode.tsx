@@ -15,6 +15,8 @@ export interface OutputNodeData {
   status: FlowNodeStatus;
   skipReason?: FlowSkipReason;
   error?: string;
+  /** Progress text while running, such as "attempt 3/30". */
+  progress?: string;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
   value?: string;
@@ -59,7 +61,12 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
         <span className='truncate'>{data.kind.label}</span>
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
-      <NodeStatusCaption status={data.status} skipReason={data.skipReason} error={data.error} />
+      <NodeStatusCaption
+        status={data.status}
+        skipReason={data.skipReason}
+        error={data.error}
+        progress={data.progress}
+      />
       {/* Each input sits in a labelled row, like the Request node, so the
           data-less "Run when" gate is not mistaken for the `value` input. */}
       <div className='relative space-y-1 px-2 pt-1.5'>

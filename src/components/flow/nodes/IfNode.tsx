@@ -15,6 +15,8 @@ export type IfNodeData = {
   kind: Extract<FlowNodeKind, { kind: 'If' }>;
   status: FlowNodeStatus;
   error?: string;
+  /** Progress text while running, such as "attempt 3/30". */
+  progress?: string;
   skipReason?: FlowSkipReason;
   /** Exit chosen by the last run: "true" or "false". */
   branch?: string;
@@ -57,7 +59,12 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
           </Badge>
         </div>
       )}
-      <NodeStatusCaption status={status} skipReason={data.skipReason} error={data.error} />
+      <NodeStatusCaption
+        status={status}
+        skipReason={data.skipReason}
+        error={data.error}
+        progress={data.progress}
+      />
 
       {/* nodrag/nowheel/nokey keep typing, selecting text and scrolling in
           the editor from dragging the node or deleting it on Backspace. */}

@@ -11,6 +11,8 @@ export interface InputNodeData {
   status: FlowNodeStatus;
   skipReason?: FlowSkipReason;
   error?: string;
+  /** Progress text while running, such as "attempt 3/30". */
+  progress?: string;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
 }
@@ -32,7 +34,12 @@ export function InputNode({ id, data, isConnectable }: NodeProps & { data: Input
         <span className='truncate'>{data.kind.label}</span>
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
-      <NodeStatusCaption status={data.status} skipReason={data.skipReason} error={data.error} />
+      <NodeStatusCaption
+        status={data.status}
+        skipReason={data.skipReason}
+        error={data.error}
+        progress={data.progress}
+      />
       <div className='truncate px-2 py-1.5 text-muted-foreground'>{display}</div>
       <Handle
         type='source'

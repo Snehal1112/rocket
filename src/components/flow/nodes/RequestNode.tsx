@@ -15,6 +15,8 @@ export interface RequestNodeData {
   statusCode?: number;
   durationMs?: number;
   error?: string;
+  /** Progress text while running, such as "attempt 3/30". */
+  progress?: string;
   headerCount?: number;
   bodyPreview?: string;
   /** Method of a Saved request, when the caller has looked it up. */
@@ -83,7 +85,9 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
         </div>
       )}
       {/* The line above already shows a failure, so the caption covers skips only. */}
-      {status !== 'failed' && <NodeStatusCaption status={status} skipReason={data.skipReason} />}
+      {status !== 'failed' && (
+        <NodeStatusCaption status={status} skipReason={data.skipReason} progress={data.progress} />
+      )}
 
       {/* Every field row, including the data-less "Run when" trigger row, is
           always rendered, even when empty, so each target handle stays

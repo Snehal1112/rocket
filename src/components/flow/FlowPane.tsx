@@ -46,6 +46,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const updateFlowGraph = usePaneStore((s) => s.updateFlowGraph);
   const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
+  const patchFlowNodeProgress = usePaneStore((s) => s.patchFlowNodeProgress);
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
   const markClean = usePaneStore((s) => s.markClean);
   // There is no `activeEnvironmentName` anywhere. The active environment's
@@ -355,6 +356,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               onPatchStatus={(nodeId, status, detail) =>
                 patchFlowNodeStatus(tab.id, nodeId, status as FlowNodeStatus, detail)
               }
+              onPatchProgress={(nodeId, message) => patchFlowNodeProgress(tab.id, nodeId, message)}
               onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
               tabRunState={tab.runState}
               tabRunId={tab.runId}

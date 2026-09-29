@@ -987,6 +987,48 @@ describe('Flow tab actions', () => {
     expect(findFirstFlowTab()?.nodeDetail?.n1).toEqual({ branch: 'true', value: '42' });
   });
 
+  async function flowTabWithNode() {
+    await usePaneStore.getState().openFlowTab('my-collection');
+    const tabId = findFirstFlowTab()?.id;
+    if (!tabId) throw new Error('Expected a flow tab');
+    usePaneStore.setState({
+      root: updateTabInTreeForTest(usePaneStore.getState().root, tabId, (tab) =>
+        tab.tabType === 'flow'
+          ? {
+              ...tab,
+              nodes: [
+                { id: 'n1', kind: { kind: 'Output', label: 'Out' }, position: { x: 0, y: 0 } },
+              ],
+            }
+          : tab,
+      ),
+    });
+    return tabId;
+  }
+
+  it('patchFlowNodeProgress merges progress into the node detail', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'running', { statusCode: 202 });
+    usePaneStore.getState().patchFlowNodeProgress(tabId, 'n1', 'attempt 3/30');
+    const tab = findFirstFlowTab();
+    expect(tab?.nodeStatus.n1).toBe('running');
+    expect(tab?.nodeDetail?.n1).toEqual({ statusCode: 202, progress: 'attempt 3/30' });
+  });
+
+  it('a completed status patch clears the progress text', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().patchFlowNodeProgress(tabId, 'n1', 'attempt 3/30');
+    usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'success', { statusCode: 200 });
+    expect(findFirstFlowTab()?.nodeDetail?.n1).toEqual({ statusCode: 200 });
+  });
+
+  it('patchFlowNodeProgress for an unknown node id is a safe no-op', async () => {
+    const tabId = await flowTabWithNode();
+    const before = findFirstFlowTab();
+    usePaneStore.getState().patchFlowNodeProgress(tabId, 'does-not-exist', 'attempt 1/2');
+    expect(findFirstFlowTab()?.nodeDetail).toEqual(before?.nodeDetail);
+  });
+
   it('setFlowRunState clears the last run results when a new run starts', async () => {
     await usePaneStore.getState().openFlowTab('my-collection');
     const tabId = findFirstFlowTab()?.id;

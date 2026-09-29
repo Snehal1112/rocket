@@ -11,6 +11,7 @@ import {
   type FlowStepResult,
   onFlowRunStarted,
   onFlowStepCompleted,
+  onFlowStepProgress,
   onFlowStepStarted,
   runFlow,
 } from '@/lib/tauri-api';
@@ -21,6 +22,8 @@ interface FlowToolbarProps {
   flowName: string;
   environmentName: string | null;
   onPatchStatus: (nodeId: string, status: string, detail?: FlowNodeDetail) => void;
+  // Receives progress text for a running node, such as "attempt 3/30".
+  onPatchProgress?: (nodeId: string, message: string) => void;
   onRunStateChange: (state: 'running' | 'done', runId?: string) => void;
   // The tab's stored run state. The toolbar unmounts when its tab is hidden,
   // so a remounted toolbar reads an in-progress run from here.
@@ -64,6 +67,7 @@ export function FlowToolbar({
   flowName,
   environmentName,
   onPatchStatus,
+  onPatchProgress,
   onRunStateChange,
   tabRunState,
   tabRunId,
@@ -80,6 +84,8 @@ export function FlowToolbar({
   // subscription below from resubscribing on every status patch.
   const onPatchStatusRef = useRef(onPatchStatus);
   onPatchStatusRef.current = onPatchStatus;
+  const onPatchProgressRef = useRef(onPatchProgress);
+  onPatchProgressRef.current = onPatchProgress;
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   // A ref, not state: `activeRunId` is only set once the `flow-run-started`
   // event round-trips through the backend, so between a click and that
@@ -106,6 +112,7 @@ export function FlowToolbar({
     if (!resumedRunId) return;
     let unlistenStep: UnlistenFn | undefined;
     let unlistenStarted: UnlistenFn | undefined;
+    let unlistenProgress: UnlistenFn | undefined;
     let disposed = false;
     void onFlowStepStarted((event) => {
       if (event.run_id !== resumedRunId) return;
@@ -121,10 +128,18 @@ export function FlowToolbar({
       if (disposed) fn();
       else unlistenStep = fn;
     });
+    void onFlowStepProgress((event) => {
+      if (event.run_id !== resumedRunId) return;
+      onPatchProgressRef.current?.(event.node_id, event.message);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlistenProgress = fn;
+    });
     return () => {
       disposed = true;
       unlistenStarted?.();
       unlistenStep?.();
+      unlistenProgress?.();
     };
   }, [resumedRunId]);
 
@@ -164,7 +179,11 @@ export function FlowToolbar({
       if (runId === null || event.run_id !== runId) return;
       onPatchStatus(event.node_id, event.status, detailFromEvent(event));
     });
-    unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep];
+    const unlistenProgress = await onFlowStepProgress((event) => {
+      if (runId === null || event.run_id !== runId) return;
+      onPatchProgressRef.current?.(event.node_id, event.message);
+    });
+    unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
 
     try {
       // Read fresh at click-time, not from a prop snapshotted at an earlier
