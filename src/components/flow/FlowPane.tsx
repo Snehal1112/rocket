@@ -29,6 +29,7 @@ import {
   listFlows,
   saveFlow,
 } from '@/lib/tauri-api';
+import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
@@ -333,6 +334,17 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               tabRunState={tab.runState}
               tabRunId={tab.runId}
               onBeforeRun={handleBeforeRun}
+              onStepLogs={(nodeId, logs) => {
+                const node = latestFlowTab()?.nodes.find((n) => n.id === nodeId);
+                const label = node?.kind.label ?? nodeId;
+                useConsoleStore.getState().addScriptEntries(
+                  logs.map((l) => ({
+                    level: l.level,
+                    message: l.message,
+                    requestName: `${flowName} › ${label}`,
+                  })),
+                );
+              }}
             />
             <Button size='sm' variant='outline' onClick={() => void handleSave()}>
               Save

@@ -46,7 +46,7 @@ const started = (runId: string, flowName = 'my-flow') =>
     total_nodes: 1,
   });
 
-const renderToolbar = () =>
+const renderToolbar = (extra: Partial<React.ComponentProps<typeof FlowToolbar>> = {}) =>
   render(
     <FlowToolbar
       collection='my-collection'
@@ -54,6 +54,7 @@ const renderToolbar = () =>
       environmentName={null}
       onPatchStatus={onPatchStatus}
       onRunStateChange={onRunStateChange}
+      {...extra}
     />,
   );
 
@@ -97,6 +98,32 @@ describe('FlowToolbar', () => {
     vi.mocked(tauriApi.onFlowStepStarted).mockClear();
     vi.mocked(tauriApi.onFlowStepCompleted).mockClear();
     vi.mocked(tauriApi.runFlow).mockClear();
+  });
+
+  it('hands each summary step with logs to onStepLogs, once, in order', async () => {
+    const onStepLogs = vi.fn();
+    renderToolbar({ onStepLogs });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+    const base = { statusCode: null, durationMs: null, error: null, value: null };
+    resolveRun({
+      runId: 'r1',
+      stoppedReason: 'completed',
+      steps: [
+        { ...base, nodeId: 'a', status: 'success', logs: [{ level: 'log', message: 'one' }] },
+        { ...base, nodeId: 'b', status: 'success' },
+        {
+          ...base,
+          nodeId: 'c',
+          status: 'failed',
+          error: 'x',
+          logs: [{ level: 'error', message: 'two' }],
+        },
+      ],
+    });
+    await waitFor(() => expect(onStepLogs).toHaveBeenCalledTimes(2));
+    expect(onStepLogs).toHaveBeenNthCalledWith(1, 'a', [{ level: 'log', message: 'one' }]);
+    expect(onStepLogs).toHaveBeenNthCalledWith(2, 'c', [{ level: 'error', message: 'two' }]);
   });
 
   it('subscribes before running, takes the run id from flow-run-started, and finishes on resolve', async () => {

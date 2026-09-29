@@ -2,7 +2,17 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
-import { getFlow, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
+import {
+  getFlow,
+  listCollections,
+  listFlows,
+  onFlowRunStarted,
+  onFlowStepCompleted,
+  onFlowStepStarted,
+  runFlow,
+  saveFlow,
+} from '@/lib/tauri-api';
+import { useConsoleStore } from '@/stores/console-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
@@ -18,8 +28,15 @@ vi.mock('@/lib/tauri-api', async () => {
     listFlows: vi.fn(),
     saveFlow: vi.fn(),
     getFlow: vi.fn(),
+    runFlow: vi.fn(),
+    onFlowRunStarted: vi.fn(),
+    onFlowStepStarted: vi.fn(),
+    onFlowStepCompleted: vi.fn(),
   };
 });
+
+// FlowToolbar reads the active global environment from the query cache.
+vi.mock('@/lib/execute-request', () => ({ getActiveGlobalEnvName: vi.fn() }));
 
 // `usePaneStore.setState({ openFlowTab: vi.fn(...) })` in the 'FlowPane
 // picker' tests below replaces the store's `openFlowTab` action permanently
@@ -184,5 +201,64 @@ describe('FlowPane save', () => {
     expect(reopened).toBeDefined();
     expect(reopened && 'nodes' in reopened ? reopened.nodes : undefined).toEqual(flowTab.nodes);
     expect(reopened && 'edges' in reopened ? reopened.edges : undefined).toEqual(flowTab.edges);
+  });
+});
+
+describe('FlowPane run logs', () => {
+  const logTab: FlowTab = {
+    id: 'flow-logs-1',
+    title: 'Flow: login-flow',
+    isDirty: false,
+    tabType: 'flow',
+    collectionName: 'demo',
+    flowName: 'login-flow',
+    nodes: [{ id: 'n1', kind: { kind: 'Output', label: 'Show token' }, position: { x: 0, y: 0 } }],
+    edges: [],
+    nodeStatus: {},
+    runState: 'idle',
+  };
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    useConsoleStore.getState().clearEntries();
+    vi.clearAllMocks();
+    usePaneStore.getState().openTab(logTab);
+    const unlisten = async () => () => {
+      // Fake unlisten.
+    };
+    vi.mocked(onFlowRunStarted).mockImplementation(unlisten);
+    vi.mocked(onFlowStepStarted).mockImplementation(unlisten);
+    vi.mocked(onFlowStepCompleted).mockImplementation(unlisten);
+  });
+
+  it('pushes step logs from the run summary to the Console', async () => {
+    vi.mocked(runFlow).mockResolvedValue({
+      runId: 'r1',
+      stoppedReason: 'completed',
+      steps: [
+        {
+          nodeId: 'n1',
+          status: 'success',
+          statusCode: null,
+          durationMs: null,
+          error: null,
+          value: null,
+          logs: [{ level: 'warn', message: 'hi' }],
+        },
+      ],
+    });
+    render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() =>
+      expect(useConsoleStore.getState().entries).toContainEqual(
+        expect.objectContaining({
+          kind: 'script',
+          level: 'warn',
+          message: 'hi',
+          requestName: 'login-flow › Show token',
+        }),
+      ),
+    );
   });
 });

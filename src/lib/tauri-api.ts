@@ -1805,6 +1805,12 @@ export type FlowRunNodeStatus = Exclude<FlowNodeStatus, 'idle'>;
 /** Why a skipped node did not run. Only set on skipped steps. */
 export type FlowSkipReason = 'upstream_failed' | 'branch_not_taken';
 
+/** One line of script console output captured during a flow step. */
+export interface FlowLogEntry {
+  level: 'log' | 'warn' | 'error';
+  message: string;
+}
+
 /** `run_flow`'s return value. Camel-cased by the Rust IPC DTO. */
 export interface FlowStepResult {
   nodeId: string;
@@ -1816,6 +1822,8 @@ export interface FlowStepResult {
   skipReason?: FlowSkipReason;
   /** Exit a completed If/Switch node took: `true`, `false`, `case:<id>` or `default`. */
   branch?: string;
+  /** Script console output from this step. Omitted when empty. */
+  logs?: FlowLogEntry[];
 }
 
 export interface FlowRunSummary {
@@ -1883,6 +1891,8 @@ export interface FlowStepCompletedEvent {
   value: string | null;
   skip_reason?: FlowSkipReason;
   branch?: string;
+  /** Script console output from this step. Omitted when empty. */
+  logs?: FlowLogEntry[];
 }
 
 export const onFlowStepCompleted = (

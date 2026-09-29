@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import {
   cancelFlowRun,
+  type FlowLogEntry,
   type FlowStepCompletedEvent,
   type FlowStepResult,
   onFlowRunStarted,
@@ -27,6 +28,8 @@ interface FlowToolbarProps {
   // Runs before a new run starts. `run_flow` runs the flow saved on disk, so
   // this saves unsaved canvas edits first. Returning false aborts the run.
   onBeforeRun?: () => Promise<boolean>;
+  // Receives each step's script console output once the run ends.
+  onStepLogs?: (nodeId: string, logs: FlowLogEntry[]) => void;
 }
 
 // Maps a streamed step event (snake_case) to the per-node detail the tab stores.
@@ -62,6 +65,7 @@ export function FlowToolbar({
   tabRunState,
   tabRunId,
   onBeforeRun,
+  onStepLogs,
 }: FlowToolbarProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   // A run started by an earlier mount of this toolbar, still in progress.
@@ -171,6 +175,7 @@ export function FlowToolbar({
       // guaranteed to finish before the command response arrives.
       for (const step of summary.steps) {
         onPatchStatus(step.nodeId, step.status, detailFromStep(step));
+        if (step.logs?.length) onStepLogs?.(step.nodeId, step.logs);
       }
       onRunStateChange('done', summary.runId);
     } catch (err) {
