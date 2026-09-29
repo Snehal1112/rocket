@@ -37,6 +37,11 @@ vi.mock('@/components/editor', () => ({
   ),
 }));
 
+// Radix menus call pointer-capture and scrollIntoView APIs that jsdom lacks.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => undefined;
+Element.prototype.scrollIntoView ??= () => undefined;
+
 // jsdom has no DOMMatrixReadOnly, which React Flow reads when it re-measures nodes.
 vi.stubGlobal(
   'DOMMatrixReadOnly',
@@ -151,6 +156,7 @@ describe('FlowPane node deletion', () => {
     const user = setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Login'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     await user.click(screen.getByRole('button', { name: 'Delete node' }));
     expect(nodeIds()).not.toContain('req1');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -165,6 +171,7 @@ describe('FlowPane node deletion', () => {
     const user = setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Login'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     expect(screen.getByRole('button', { name: 'Delete node' })).toHaveAttribute(
       'title',
       'Removes this node from the flow. The saved request is not deleted.',

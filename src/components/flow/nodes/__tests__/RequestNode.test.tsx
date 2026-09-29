@@ -1,7 +1,14 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ReactFlowProvider } from '@xyflow/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { FlowNodeActionsContext } from '../FlowNodeActionsContext';
 import { RequestNode } from '../RequestNode';
+
+// Radix menus call pointer-capture and scrollIntoView APIs that jsdom lacks.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => undefined;
+Element.prototype.scrollIntoView ??= () => undefined;
 
 type Data = Parameters<typeof RequestNode>[0]['data'];
 
@@ -142,6 +149,58 @@ describe('RequestNode', () => {
   it('outlines the card when it is part of a rejected cycle', () => {
     renderNode({ kind: baseKind, status: 'idle', hasCycleError: true });
     expect(screen.getByTestId('request-node-card').className).toContain('ring-red-500');
+  });
+
+  it('shows a debug badge only while debug mode is on', () => {
+    const { rerender } = renderNode({ kind: { ...baseKind, debug: true }, status: 'idle' });
+    expect(screen.getByTestId('request-node-debug-badge')).toHaveAccessibleName('Debug mode on');
+    rerender(nodeElement({ kind: { ...baseKind, debug: false }, status: 'idle' }));
+    expect(screen.queryByTestId('request-node-debug-badge')).not.toBeInTheDocument();
+    rerender(nodeElement({ kind: baseKind, status: 'idle' }));
+    expect(screen.queryByTestId('request-node-debug-badge')).not.toBeInTheDocument();
+  });
+
+  describe('node menu', () => {
+    function renderWithActions() {
+      const actions = {
+        updateNodeKind: vi.fn(),
+        removeSwitchCase: vi.fn(),
+        openProperties: vi.fn(),
+      };
+      render(
+        <FlowNodeActionsContext.Provider value={actions}>
+          {nodeElement({ kind: baseKind, status: 'idle' })}
+        </FlowNodeActionsContext.Provider>,
+      );
+      return actions;
+    }
+
+    it('offers Edit properties and an unchecked Debug mode item', async () => {
+      const actions = renderWithActions();
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText('Edit Get Auth Token'));
+      expect(screen.getByRole('menuitemcheckbox', { name: 'Debug mode' })).toHaveAttribute(
+        'aria-checked',
+        'false',
+      );
+      await user.click(screen.getByRole('menuitem', { name: 'Edit properties' }));
+      expect(actions.openProperties).toHaveBeenCalledWith('n1');
+    });
+
+    it('turns debug mode on through updateNodeKind', async () => {
+      const actions = renderWithActions();
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText('Edit Get Auth Token'));
+      await user.click(screen.getByRole('menuitemcheckbox', { name: 'Debug mode' }));
+      expect(actions.updateNodeKind).toHaveBeenCalledWith('n1', { ...baseKind, debug: true });
+    });
+
+    it('marks the portalled menu nokey', async () => {
+      renderWithActions();
+      const user = userEvent.setup();
+      await user.click(screen.getByLabelText('Edit Get Auth Token'));
+      expect(screen.getByRole('menu')).toHaveClass('nokey');
+    });
   });
 
   it('captions an upstream-failed skip and a not-taken skip differently', () => {

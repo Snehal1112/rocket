@@ -33,6 +33,11 @@ vi.mock('@/components/editor', () => ({
   ),
 }));
 
+// Radix menus call pointer-capture and scrollIntoView APIs that jsdom lacks.
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.releasePointerCapture ??= () => undefined;
+Element.prototype.scrollIntoView ??= () => undefined;
+
 // jsdom has no DOMMatrixReadOnly, which React Flow reads when it re-measures nodes.
 vi.stubGlobal(
   'DOMMatrixReadOnly',
@@ -254,8 +259,29 @@ describe('FlowPane node properties panel', () => {
     expect(document.activeElement).not.toBe(screen.getByLabelText('Label'));
   });
 
+  it('opens the Request node panel from its menu', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByLabelText('Edit Fetch'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
+    expect(screen.getByTestId('node-properties-panel')).toHaveTextContent('Request · Fetch');
+  });
+
+  it('toggles debug mode from the Request menu, marks the tab dirty and keeps the node', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByLabelText('Edit Fetch'));
+    await screen.findByRole('menu');
+    await user.keyboard('{Backspace}');
+    expect(getFlowTab().nodes.map((n) => n.id)).toContain('req1');
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Debug mode' }));
+    const tab = getFlowTab();
+    const node = tab.nodes.find((n) => n.id === 'req1');
+    expect(node?.kind).toMatchObject({ kind: 'Request', debug: true });
+    expect(tab.isDirty).toBe(true);
+  });
+
   it.each([
-    ['Fetch', 'Request · Fetch'],
     ['Check', 'If · Check'],
     ['Route', 'Switch · Route'],
   ])('opens for the %s node from its menu button', async (label, header) => {

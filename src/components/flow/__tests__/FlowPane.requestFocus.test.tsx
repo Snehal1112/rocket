@@ -164,6 +164,7 @@ describe('FlowPane Request node panel keeps focus', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Filled'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     await user.click(screen.getByRole('button', { name: 'Use a saved request…' }));
     await user.click(await screen.findByRole('button', { name: /Login/ }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -176,6 +177,7 @@ describe('FlowPane Request node panel keeps focus', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Filled'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     await user.click(screen.getByRole('button', { name: 'Remove header 2' }));
     await expectFocusInPanel();
     await user.keyboard('{Backspace}');
@@ -186,6 +188,7 @@ describe('FlowPane Request node panel keeps focus', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Empty'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     await user.click(screen.getByRole('button', { name: 'Use a saved request…' }));
     await user.click(await screen.findByRole('button', { name: /Login/ }));
     expect(await screen.findByTestId('saved-request-path')).toHaveTextContent('login.yml');
@@ -198,6 +201,7 @@ describe('FlowPane Request node panel keeps focus', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Filled'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     const url = screen.getByLabelText('URL');
     await user.click(url);
     await user.keyboard('{Backspace}');
@@ -209,6 +213,7 @@ describe('FlowPane Request node panel keeps focus', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Empty'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     await user.click(screen.getByRole('button', { name: 'Use a saved request…' }));
     const content = document.body.querySelector('[data-slot="popover-content"]');
     expect(content).toHaveClass('nokey');
@@ -218,6 +223,7 @@ describe('FlowPane Request node panel keeps focus', () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByLabelText('Edit Empty'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
     await user.click(screen.getByRole('combobox', { name: 'Method' }));
     await screen.findByRole('option', { name: 'PUT' });
     const content = document.body.querySelector('[data-slot="select-content"]');

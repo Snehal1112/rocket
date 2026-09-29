@@ -99,6 +99,22 @@ describe('RequestNodeEditor', () => {
     vi.mocked(getCollection).mockReset();
   });
 
+  it('reflects debug mode in a switch and toggles it', async () => {
+    const onChange = renderEditor(savedKind);
+    const toggle = screen.getByRole('switch', { name: 'Debug mode' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await userEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith({ ...savedKind, debug: true });
+  });
+
+  it('shows the switch on when debug is set', () => {
+    renderEditor({ ...savedKind, debug: true });
+    expect(screen.getByRole('switch', { name: 'Debug mode' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+  });
+
   it('shows the saved editor for a Saved source and repoints on pick', async () => {
     vi.mocked(getCollection).mockResolvedValue(collection);
     const onChange = renderEditor(savedKind);

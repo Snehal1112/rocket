@@ -1,7 +1,9 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { Bug } from 'lucide-react';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -29,6 +31,7 @@ const methodLabel = (data: RequestNodeData) =>
 
 export function RequestNode({ id, data, isConnectable }: NodeProps & { data: RequestNodeData }) {
   const { kind, status, statusCode, durationMs, error } = data;
+  const { updateNodeKind } = useFlowNodeActions();
   const method = methodLabel(data);
   const url = kind.source.type === 'Inline' ? kind.source.request.url : kind.source.requestPath;
   const headerCount =
@@ -51,7 +54,22 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
           <span className='rounded bg-muted px-1 py-0.5 font-mono text-[10px]'>{method}</span>
           <span className='truncate font-medium'>{kind.label}</span>
         </div>
-        <NodeMenuButton nodeId={id} label={kind.label} />
+        {kind.debug && (
+          <Bug
+            data-testid='request-node-debug-badge'
+            aria-label='Debug mode on'
+            role='img'
+            className='h-3.5 w-3.5 shrink-0 text-amber-500'
+          />
+        )}
+        <NodeMenuButton
+          nodeId={id}
+          label={kind.label}
+          debug={{
+            enabled: kind.debug === true,
+            onToggle: (enabled) => updateNodeKind(id, { ...kind, debug: enabled }),
+          }}
+        />
       </div>
 
       {status === 'success' && (

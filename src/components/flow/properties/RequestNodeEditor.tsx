@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   indexWiresOutOfRange,
   inlineHasContent,
@@ -114,6 +116,19 @@ export function RequestNodeEditor({
   return (
     <div className='space-y-3'>
       <LabelField value={kind.label} onChange={(label) => onChange({ ...kind, label })} />
+      <div className='space-y-1'>
+        <div className='flex items-center justify-between gap-2'>
+          <Label htmlFor='request-debug-mode'>Debug mode</Label>
+          <Switch
+            id='request-debug-mode'
+            checked={kind.debug === true}
+            onCheckedChange={(debug) => onChange({ ...kind, debug })}
+          />
+        </div>
+        <p className='text-xs text-muted-foreground'>
+          Logs the request as sent and its response to the Console on each run. Secrets are masked.
+        </p>
+      </div>
       <p className='text-xs text-muted-foreground'>
         Source: {source.type === 'Saved' ? 'saved request' : 'inline request'}
       </p>
