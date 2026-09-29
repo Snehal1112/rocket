@@ -1757,8 +1757,22 @@ export interface SwitchCase {
   matches: string;
 }
 
+/** Polling settings of a Request node. Mirrors the Rust `RepeatUntilDto`. */
+export interface RepeatUntil {
+  condition: string;
+  intervalMs: number;
+  maxAttempts: number;
+  timeoutMs: number;
+}
+
 export type FlowNodeKind =
-  | { kind: 'Request'; label: string; source: RequestSource; debug?: boolean }
+  | {
+      kind: 'Request';
+      label: string;
+      source: RequestSource;
+      debug?: boolean;
+      repeatUntil?: RepeatUntil | null;
+    }
   | { kind: 'Input'; label: string; value: unknown }
   | { kind: 'Output'; label: string }
   | { kind: 'If'; label: string; condition: string }

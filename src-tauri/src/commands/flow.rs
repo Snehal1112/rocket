@@ -3,7 +3,7 @@ use rocket_app::{
 };
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
-    RequestSource, SwitchCase,
+    RepeatUntil, RequestSource, SwitchCase,
 };
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,35 @@ impl From<InlineRequestDataDto> for InlineRequestData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepeatUntilDto {
+    pub condition: String,
+    pub interval_ms: u64,
+    pub max_attempts: u32,
+    pub timeout_ms: u64,
+}
+impl From<RepeatUntil> for RepeatUntilDto {
+    fn from(r: RepeatUntil) -> Self {
+        Self {
+            condition: r.condition,
+            interval_ms: r.interval_ms,
+            max_attempts: r.max_attempts,
+            timeout_ms: r.timeout_ms,
+        }
+    }
+}
+impl From<RepeatUntilDto> for RepeatUntil {
+    fn from(r: RepeatUntilDto) -> Self {
+        Self {
+            condition: r.condition,
+            interval_ms: r.interval_ms,
+            max_attempts: r.max_attempts,
+            timeout_ms: r.timeout_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum RequestSourceDto {
     Saved { request_path: String },
@@ -115,6 +144,8 @@ pub enum FlowNodeKindDto {
         source: RequestSourceDto,
         #[serde(default)]
         debug: bool,
+        #[serde(default)]
+        repeat_until: Option<RepeatUntilDto>,
     },
     Input {
         label: String,
@@ -140,11 +171,12 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
                 label,
                 source,
                 debug,
-                repeat_until: _,
+                repeat_until,
             } => FlowNodeKindDto::Request {
                 label,
                 source: source.into(),
                 debug,
+                repeat_until: repeat_until.map(Into::into),
             },
             FlowNodeKind::Input { label, value } => FlowNodeKindDto::Input { label, value },
             FlowNodeKind::Output { label } => FlowNodeKindDto::Output { label },
@@ -168,11 +200,12 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
                 label,
                 source,
                 debug,
+                repeat_until,
             } => FlowNodeKind::Request {
                 label,
                 source: source.into(),
                 debug,
-                repeat_until: None,
+                repeat_until: repeat_until.map(Into::into),
             },
             FlowNodeKindDto::Input { label, value } => FlowNodeKind::Input { label, value },
             FlowNodeKindDto::Output { label } => FlowNodeKind::Output { label },
@@ -407,6 +440,7 @@ mod tests {
                             request_path: "auth/login.yml".to_string(),
                         },
                         debug: false,
+                        repeat_until: None,
                     },
                     position: NodePositionDto { x: 0.0, y: 0.0 },
                 },
@@ -462,6 +496,7 @@ mod tests {
                 request_path: "auth/login.yml".to_string(),
             },
             debug: true,
+            repeat_until: None,
         };
         let domain: FlowNodeKind = dto.into();
         assert!(matches!(domain, FlowNodeKind::Request { debug: true, .. }));
@@ -474,6 +509,56 @@ mod tests {
         assert!(matches!(
             parsed,
             FlowNodeKindDto::Request { debug: false, .. }
+        ));
+    }
+
+    #[test]
+    fn request_repeat_until_converts_both_ways_and_defaults_to_none() {
+        let dto = FlowNodeKindDto::Request {
+            label: "Poll".to_string(),
+            source: RequestSourceDto::Saved {
+                request_path: "jobs/get.yml".to_string(),
+            },
+            debug: false,
+            repeat_until: Some(RepeatUntilDto {
+                condition: "response.body.done".to_string(),
+                interval_ms: 500,
+                max_attempts: 4,
+                timeout_ms: 3000,
+            }),
+        };
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(json.contains("\"repeatUntil\""), "got: {json}");
+        assert!(json.contains("\"intervalMs\":500"), "got: {json}");
+        assert!(json.contains("\"maxAttempts\":4"), "got: {json}");
+
+        let domain: FlowNodeKind = dto.into();
+        let FlowNodeKind::Request {
+            repeat_until: Some(r),
+            ..
+        } = &domain
+        else {
+            panic!("repeat_until must survive the conversion, got {domain:?}");
+        };
+        assert_eq!(r.timeout_ms, 3000);
+        let back: FlowNodeKindDto = domain.into();
+        assert!(matches!(
+            back,
+            FlowNodeKindDto::Request {
+                repeat_until: Some(RepeatUntilDto { max_attempts: 4, .. }),
+                ..
+            }
+        ));
+
+        let old =
+            r#"{"kind":"Request","label":"L","source":{"type":"Saved","requestPath":"a.yml"}}"#;
+        let parsed: FlowNodeKindDto = serde_json::from_str(old).expect("deserialize");
+        assert!(matches!(
+            parsed,
+            FlowNodeKindDto::Request {
+                repeat_until: None,
+                ..
+            }
         ));
     }
 
