@@ -75,6 +75,11 @@ pub struct ExecuteRequestInput {
     /// internal/loopback ranges before dispatch. Defaults to fully permissive.
     #[serde(default)]
     pub request_guard_policy: rocket_workspace::RequestGuardPolicy,
+    /// When true, the History entry is not saved. It is returned in
+    /// `ExecuteRequestOutput::deferred_history` so the caller can save it
+    /// later, as a Flow poll does for its final attempt only.
+    #[serde(default)]
+    pub skip_history: bool,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -108,6 +113,8 @@ pub struct ExecuteRequestOutput {
     pub test_results: Vec<TestResult>,
     pub console_entries: Vec<ConsoleEntry>,
     pub script_error: Option<String>,
+    /// The History entry of a request run with `skip_history`, not yet saved.
+    pub deferred_history: Option<HistoryEntry>,
 }
 
 /// Mutable state threaded through the phases of one request execution.
@@ -1423,7 +1430,12 @@ impl RequestExecutionService {
         if let (Some(col), Some(name)) = (&input.collection, &input.request_name) {
             entry = entry.with_collection(col, name);
         }
-        let _ = self.history_repo.save(&entry);
+        let deferred_history = if input.skip_history {
+            Some(entry)
+        } else {
+            let _ = self.history_repo.save(&entry);
+            None
+        };
 
         // Publish domain event.
         self.events.publish(DomainEvent::RequestExecuted {
@@ -1438,7 +1450,15 @@ impl RequestExecutionService {
             test_results: state.test_results.clone(),
             console_entries: state.console.clone(),
             script_error: state.script_error.clone(),
+            deferred_history,
         }
+    }
+
+    /// Saves a History entry returned in `deferred_history`. A failure is
+    /// ignored, like the save in `finish_phases`.
+    #[cfg_attr(not(test), allow(dead_code))] // Used by the poll loop in Task 3.
+    pub(crate) fn save_deferred_history(&self, entry: &HistoryEntry) {
+        let _ = self.history_repo.save(entry);
     }
 
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
@@ -2056,6 +2076,7 @@ mod tests {
 
     fn sample_input(url: &str, env_name: Option<&str>) -> ExecuteRequestInput {
         ExecuteRequestInput {
+            skip_history: false,
             method: HttpMethod::Get,
             url: url.to_string(),
             headers: vec![],
@@ -4515,6 +4536,60 @@ mod tests {
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(engine)
+    }
+
+    fn history_svc() -> (RequestExecutionService, Arc<Mutex<Vec<HistoryEntry>>>) {
+        let history_repo = Box::new(MockHistoryRepo::new());
+        let saved = history_repo.saved_entries_handle();
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(Environment::new("dev"))),
+            Arc::new(MockExecutor::new(200)),
+            history_repo,
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            Arc::new(FakeVaultFetcher::new(vec![])),
+        );
+        (svc, saved)
+    }
+
+    #[tokio::test]
+    async fn execute_capturing_saves_history_by_default() {
+        let (svc, saved) = history_svc();
+        let mut sent = None;
+        let out = svc
+            .execute_capturing(
+                sample_input("https://example.com/a", None),
+                &std::collections::HashMap::new(),
+                &mut sent,
+            )
+            .await
+            .expect("execute");
+        assert_eq!(saved.lock().expect("lock").len(), 1);
+        assert!(out.deferred_history.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_capturing_with_skip_history_defers_the_entry() {
+        let (svc, saved) = history_svc();
+        let mut input = sample_input("https://example.com/a", None);
+        input.skip_history = true;
+        let mut sent = None;
+        let out = svc
+            .execute_capturing(input, &std::collections::HashMap::new(), &mut sent)
+            .await
+            .expect("execute");
+
+        assert_eq!(saved.lock().expect("lock").len(), 0, "nothing saved yet");
+        let entry = out.deferred_history.expect("the entry is handed back");
+        assert_eq!(entry.status, 200);
+
+        svc.save_deferred_history(&entry);
+        assert_eq!(saved.lock().expect("lock").len(), 1);
     }
 
     #[tokio::test]

@@ -138,6 +138,7 @@ pub fn build_step_input(
         assertions: request.assertions.clone(),
         actions: request.actions.clone(),
         request_guard_policy,
+        skip_history: false,
     }
 }
 

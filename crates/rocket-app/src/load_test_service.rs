@@ -334,6 +334,7 @@ mod tests {
             path_params: vec![],
             actions: vec![],
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+            skip_history: false,
         };
 
         // One short Hold phase to keep the test fast.

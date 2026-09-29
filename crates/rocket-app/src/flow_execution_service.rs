@@ -1602,6 +1602,7 @@ mod tests {
             test_results: Vec::new(),
             console_entries: Vec::new(),
             script_error: None,
+            deferred_history: None,
         }
     }
 
