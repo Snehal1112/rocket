@@ -340,7 +340,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               onBeforeRun={handleBeforeRun}
               onStepLogs={(nodeId, logs) => {
                 const node = latestFlowTab()?.nodes.find((n) => n.id === nodeId);
-                const label = node?.kind.label ?? nodeId;
+                const label = node?.kind.label || nodeId;
                 useConsoleStore.getState().addScriptEntries(
                   logs.map((l) => ({
                     level: l.level,

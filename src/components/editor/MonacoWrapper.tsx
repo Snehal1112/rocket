@@ -22,7 +22,7 @@ interface MonacoWrapperProps {
   height?: string;
   variableContext?: Map<string, VariableScopeEntry>;
   phase?: ScriptPhase;
-  /** Extra typings for this editor only. */
+  /** Extra typings, registered globally while this editor is mounted. */
   extraLib?: { content: string; filePath: string };
   onEditorReady?: (editor: monacoNs.editor.IStandaloneCodeEditor) => void;
 }
