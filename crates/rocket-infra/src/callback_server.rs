@@ -18,11 +18,16 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 
 pub const MAX_BODY_BYTES: usize = 1_048_576;
 pub const CHANNEL_CAPACITY: usize = 100;
 pub const TOKEN_LEN: usize = 32;
+/// At most this many connections are served at once.
+pub const MAX_CONNECTIONS: usize = 64;
+
+/// Pause after a failed accept.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(75);
 
 /// A client must send its request headers within this time.
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
@@ -66,7 +71,7 @@ impl HyperCallbackListener {
             .map_err(|e| DomainError::Io(format!("read callback port: {e}")))?
             .port();
         let token = new_token();
-        let host = host.map(str::to_string).unwrap_or_else(detect_lan_ip);
+        let host = url_host(host);
         let url = format!("http://{host}:{port}/cb/{token}");
 
         let (sender, calls) = mpsc::channel(CHANNEL_CAPACITY);
@@ -89,6 +94,21 @@ impl HyperCallbackListener {
 impl Default for HyperCallbackListener {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The host for the URL. A blank host means auto-detect, and an IPv6
+/// literal is bracketed.
+fn url_host(host: Option<&str>) -> String {
+    let host = host
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(detect_lan_ip);
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host
     }
 }
 
@@ -119,13 +139,26 @@ async fn accept_loop(
     sender: mpsc::Sender<ServerCall>,
     mut stop: watch::Receiver<()>,
 ) {
+    let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
         tokio::select! {
             // The guard was dropped: stop accepting. Dropping `listener`
             // at the end of this function closes the port.
             _ = stop.changed() => break,
             accepted = listener.accept() => {
-                let Ok((stream, _)) = accepted else { continue };
+                let Ok((stream, _)) = accepted else {
+                    // A persistent error such as too many open files
+                    // must not spin the CPU.
+                    tokio::select! {
+                        _ = stop.changed() => break,
+                        _ = tokio::time::sleep(ACCEPT_ERROR_BACKOFF) => {}
+                    }
+                    continue;
+                };
+                // Over the cap: drop the stream, which closes it.
+                let Ok(permit) = Arc::clone(&slots).try_acquire_owned() else {
+                    continue;
+                };
                 // Each connection runs in its own task, so a slow client
                 // cannot block the others.
                 tokio::spawn(serve_connection(
@@ -133,6 +166,7 @@ async fn accept_loop(
                     Arc::clone(&path),
                     sender.clone(),
                     stop.clone(),
+                    permit,
                 ));
             }
         }
@@ -144,6 +178,7 @@ async fn serve_connection(
     path: Arc<String>,
     sender: mpsc::Sender<ServerCall>,
     mut stop: watch::Receiver<()>,
+    _permit: OwnedSemaphorePermit,
 ) {
     let service = service_fn(move |req| handle(req, Arc::clone(&path), sender.clone()));
     let connection = http1::Builder::new()
@@ -385,6 +420,85 @@ mod tests {
             result.is_err(),
             "a closed endpoint must refuse the connection"
         );
+    }
+
+    #[tokio::test]
+    async fn blank_host_auto_detects() {
+        for blank in ["", "   "] {
+            let endpoint = HyperCallbackListener::new()
+                .open(Some(blank))
+                .await
+                .expect("open");
+            let expected = format!("http://{}:", detect_lan_ip());
+            assert!(endpoint.url.starts_with(&expected), "url: {}", endpoint.url);
+        }
+    }
+
+    #[tokio::test]
+    async fn ipv6_host_is_bracketed() {
+        let endpoint = HyperCallbackListener::new()
+            .open(Some("::1"))
+            .await
+            .expect("open");
+        assert!(
+            endpoint.url.starts_with("http://[::1]:"),
+            "url: {}",
+            endpoint.url
+        );
+        let endpoint = HyperCallbackListener::new()
+            .open(Some("[::1]"))
+            .await
+            .expect("open");
+        assert!(
+            endpoint.url.starts_with("http://[::1]:"),
+            "url: {}",
+            endpoint.url
+        );
+    }
+
+    #[tokio::test]
+    async fn connections_are_capped_and_a_freed_slot_serves_again() {
+        let endpoint = open_local().await;
+        let addr = endpoint
+            .url
+            .strip_prefix("http://")
+            .and_then(|r| r.split_once("/cb/"))
+            .map(|(a, _)| a.to_string())
+            .expect("address");
+        let mut idle = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            idle.push(
+                tokio::net::TcpStream::connect(&addr)
+                    .await
+                    .expect("connect"),
+            );
+        }
+        // Let the accept loop take every permit.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let mut extra = tokio::net::TcpStream::connect(&addr)
+            .await
+            .expect("connect");
+        let mut buf = [0u8; 1];
+        let read = tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio::io::AsyncReadExt::read(&mut extra, &mut buf),
+        )
+        .await
+        .expect("the extra connection is closed at once");
+        assert!(matches!(read, Ok(0) | Err(_)), "read: {read:?}");
+
+        idle.pop();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let status = reqwest::Client::new()
+            .post(&endpoint.url)
+            .body("x")
+            .send()
+            .await
+            .expect("send")
+            .status()
+            .as_u16();
+        assert_eq!(status, 200);
     }
 
     #[test]
