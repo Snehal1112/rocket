@@ -486,7 +486,8 @@ impl RequestExecutionService {
             (input.auth.clone(), input.headers.clone())
         };
 
-        // Resolve {{placeholders}} in URL and headers.
+        // Resolve {{placeholders}} in auth, URL and headers.
+        let effective_auth = resolve_auth(effective_auth, &vars);
         let resolved_url = resolve(&input.url, &vars).output;
         let resolved_headers: Vec<Header> = effective_headers
             .iter()
@@ -1607,6 +1608,63 @@ fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
     }
 }
 
+/// Resolves `{{placeholders}}` in the credential fields of an auth value.
+/// The Request tab resolves auth on the frontend, but the backend-only paths
+/// (Flow, collection runner) receive the raw collection auth, so it is done here.
+/// OAuth2 flows are left untouched.
+fn resolve_auth(auth: Auth, vars: &std::collections::HashMap<String, String>) -> Auth {
+    let r = |s: String| resolve(&s, vars).output;
+    match auth {
+        Auth::Basic { username, password } => Auth::Basic {
+            username: r(username),
+            password: r(password),
+        },
+        Auth::Bearer { token } => Auth::Bearer { token: r(token) },
+        Auth::ApiKey {
+            key,
+            value,
+            placement,
+        } => Auth::ApiKey {
+            key: r(key),
+            value: r(value),
+            placement,
+        },
+        Auth::Wsse { username, password } => Auth::Wsse {
+            username: r(username),
+            password: r(password),
+        },
+        Auth::Digest { username, password } => Auth::Digest {
+            username: r(username),
+            password: r(password),
+        },
+        Auth::Ntlm {
+            username,
+            password,
+            domain,
+        } => Auth::Ntlm {
+            username: r(username),
+            password: r(password),
+            domain: r(domain),
+        },
+        Auth::AwsSigV4 {
+            access_key,
+            secret_key,
+            region,
+            service,
+            session_token,
+            profile_name,
+        } => Auth::AwsSigV4 {
+            access_key: r(access_key),
+            secret_key: r(secret_key),
+            region: r(region),
+            service: r(service),
+            session_token: session_token.map(&r),
+            profile_name,
+        },
+        other => other,
+    }
+}
+
 /// Merge collection-level headers with request-level headers.
 /// Request headers override collection headers when they share the same key.
 fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> Vec<Header> {
@@ -2657,6 +2715,42 @@ mod tests {
             .resolve_request(&input, &std::collections::HashMap::new())
             .expect("resolve_request");
         assert_eq!(resolved.url, "https://auth.local/api/v1/users");
+    }
+
+    #[tokio::test]
+    async fn resolve_request_resolves_placeholders_in_inherited_collection_auth() {
+        let mut env = Environment::new("local");
+        env.set_variable(Variable::new("token", "jwt-from-env"));
+        let settings = CollectionSettings {
+            auth: Some(Auth::Bearer {
+                token: "{{token}}".into(),
+            }),
+            ..Default::default()
+        };
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::with_settings(settings)),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let mut input = sample_input("https://api.example.com/vaults", Some("local"));
+        input.collection = Some("my-api".into());
+        input.auth = Auth::Inherit;
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        assert_eq!(
+            resolved.auth,
+            Auth::Bearer {
+                token: "jwt-from-env".into()
+            }
+        );
     }
 
     #[tokio::test]
