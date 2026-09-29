@@ -171,18 +171,18 @@ A flow without `repeat_until` saves exactly as before.
 1. Resolve wired URL, header and body values once, before the first attempt. Every attempt uses the same resolved input. Pre-request scripts may still change it per attempt.
 2. For attempt `n` in `1..=max_attempts`:
    1. Publish `FlowStepProgress { attempt: n, max_attempts, message: "attempt n/N" }`.
-   2. Send with `execute_capturing`. History is skipped for this attempt (6.4).
+   2. Send with `execute_capturing`. The attempt runs with `skip_history = true`, so its History entry is returned in `deferred_history` instead of being saved (6.4).
    3. If the send itself errors (network error, script error), fail the node at once. Only a received response is retried.
    4. Evaluate `condition` with `evaluate_flow_route_expression(…, FlowCoercion::Bool, …)` against the response. A non-2xx response is still evaluated, so `response.status === 200` can wait for a 404 to turn into a 200.
-   5. A script error in `condition` fails the node at once with the script error.
-   6. If the condition is true, save this attempt to History and succeed. The node's output is this response, as for a normal Request. The node succeeds even when the final response is non-2xx, because the author's condition decides "done" (for example `response.status === 404` to wait for a delete). `result_to_step` gets this case from a `condition_met` flag rather than the status code.
+   5. A script error in `condition` saves this attempt to History and fails the node at once with the script error.
+   6. If the condition is true, save this attempt to History and succeed. The node's output is this response, as for a normal Request. The node succeeds even when the final response is non-2xx, because the author's condition decides "done" (for example `response.status === 404` to wait for a delete). `result_to_step` gets this case from `ExecutedNode.poll` (`PollStats`) rather than the status code.
    7. If the condition is false and the deadline or the attempt limit is reached, save this attempt to History and fail with `"condition not met after {n} attempts ({elapsed}s)"`.
-   8. Otherwise sleep `interval_ms`, cut short by the deadline, inside `select!` with the cancel signal (5.1).
+   8. Otherwise sleep `interval_ms`, cut short by the deadline, inside `select!` with the cancel signal (5.1). If Stop ends the sleep, save this attempt to History before the node ends as cancelled.
 3. `FlowStepCompleted` carries the last response's status code and total duration. Its `debug_request` is the last attempt's request. `FlowStepResult` gains `attempts: Option<u32>`.
 
 ### 6.4 History
 
-`execute_capturing` gains a `record_history: bool` parameter that is passed to `finish_phases`, which skips `history_repo.save` when it is false. All existing callers pass `true`. The poll loop passes `false` for every attempt and then saves the final attempt's entry itself through a small `RequestExecutionService` method, so History holds one entry per poll.
+`ExecuteRequestInput` gains `skip_history: bool` (serde default `false`). When it is true, `finish_phases` builds the History entry as usual but returns it in `ExecuteRequestOutput::deferred_history` instead of saving it. The poll loop sets it on every attempt and saves only the entry of the attempt that ends the poll, through `RequestExecutionService::save_deferred_history`. Every other caller keeps the default, so History behaves as before.
 
 Console output, test results and `RequestExecuted` events are still published for every attempt, because scripts run on every attempt.
 
