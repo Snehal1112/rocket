@@ -27,6 +27,7 @@ base64.workspace = true
 regex = "1"
 reqwest.workspace = true
 url = "2"
+percent-encoding = "2"
 which = "6"
 tauri = { version = "2" }
 

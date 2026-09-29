@@ -1,7 +1,7 @@
 //! Builds the masked record of a request a Flow step sent.
 
 use crate::execution_service::sensitive_auth_label;
-use crate::redaction::{is_sensitive_header, redact_secrets, REDACTED};
+use crate::redaction::{is_sensitive_header, redact_secrets, redact_url_secrets, REDACTED};
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::events::{FlowDebugHeader, FlowDebugRequest, FlowDebugResponse};
 use rocket_shared::types::{Auth, Body, BodyMode, Header};
@@ -20,7 +20,7 @@ pub(crate) fn build_debug_request(
     }
     FlowDebugRequest {
         method: sent.method.to_string(),
-        url: redact_secrets(&full_url(sent), secret_values),
+        url: redact_url_secrets(&full_url(sent), secret_values),
         headers,
         body: sent.body.as_ref().and_then(|b| body_text(b, secret_values)),
         response: response.map(|r| FlowDebugResponse {
@@ -31,7 +31,7 @@ pub(crate) fn build_debug_request(
             headers: mask_headers(&r.headers, secret_values),
             body: redact_secrets(&r.body, secret_values),
         }),
-        error: error.map(|e| redact_secrets(e, secret_values)),
+        error: error.map(|e| redact_url_secrets(e, secret_values)),
     }
 }
 
@@ -213,6 +213,48 @@ mod tests {
             .expect("auth line");
         assert_eq!(auth.value, "Bearer ••••••");
         assert!(d.headers.iter().all(|h| !h.value.contains("tok-123456")));
+    }
+
+    #[test]
+    fn shows_basic_auth_as_a_masked_line() {
+        let d = build_debug_request(
+            &request(Auth::Basic {
+                username: "user-abc".into(),
+                password: "pw-123456".into(),
+            }),
+            None,
+            None,
+            &HashSet::new(),
+        );
+        let auth = d
+            .headers
+            .iter()
+            .find(|h| h.key == "Authorization")
+            .expect("auth line");
+        assert_eq!(auth.value, "Basic ••••••");
+        assert!(d.headers.iter().all(|h| !h.value.contains("pw-123456")));
+    }
+
+    #[test]
+    fn masks_encoded_secrets_in_the_url_and_the_error() {
+        let secret = "p@ss word é1";
+        let mut r = request(Auth::None);
+        r.url = format!("https://example.com/{secret}/x");
+        r.query_params = vec![rocket_shared::types::QueryParam {
+            key: "q".into(),
+            value: secret.into(),
+            enabled: true,
+            description: None,
+        }];
+        let secrets = secrets(&[secret]);
+        let err = "error sending request for url (https://example.com/p@ss%20word%20%C3%A91/x?q=p%40ss+word+%C3%A91)";
+        let d = build_debug_request(&r, None, Some(err), &secrets);
+        for text in [d.url.as_str(), d.error.as_deref().unwrap_or("")] {
+            assert!(text.contains("••••••"), "{text}");
+            for form in ["p@ss", "%40", "word", "%20", "%C3%A9", "é", "+"] {
+                assert!(!text.contains(form), "{form} in {text}");
+            }
+        }
     }
 
     #[test]
