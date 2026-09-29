@@ -233,6 +233,14 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
                   <span className='text-muted-foreground w-16 shrink-0'>
                     {formatTime(entry.timestamp)}
                   </span>
+                  {entry.requestName && (
+                    <span
+                      data-testid='console-request-name'
+                      className='max-w-48 truncate text-muted-foreground shrink-0'
+                    >
+                      {entry.requestName}
+                    </span>
+                  )}
                   <span className='font-semibold w-12 shrink-0'>{entry.method}</span>
                   <span className='flex-1 truncate text-foreground/80'>{entry.url}</span>
                   <span

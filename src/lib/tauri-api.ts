@@ -1758,7 +1758,7 @@ export interface SwitchCase {
 }
 
 export type FlowNodeKind =
-  | { kind: 'Request'; label: string; source: RequestSource }
+  | { kind: 'Request'; label: string; source: RequestSource; debug?: boolean }
   | { kind: 'Input'; label: string; value: unknown }
   | { kind: 'Output'; label: string }
   | { kind: 'If'; label: string; condition: string }
@@ -1824,6 +1824,34 @@ export interface FlowStepResult {
   branch?: string;
   /** Script console output from this step. Omitted when empty. */
   logs?: FlowLogEntry[];
+  /** Sent request of a debug node. */
+  debugRequest?: FlowDebugRequest;
+}
+
+/** One header line in a debug record, already masked by the backend. */
+export interface FlowDebugHeader {
+  key: string;
+  value: string;
+}
+
+/** The response half of a debug record. */
+export interface FlowDebugResponse {
+  status: number;
+  statusText: string;
+  durationMs: number;
+  sizeBytes: number;
+  headers: FlowDebugHeader[];
+  body: string;
+}
+
+/** The request a debug node sent and what came back. */
+export interface FlowDebugRequest {
+  method: string;
+  url: string;
+  headers: FlowDebugHeader[];
+  body?: string;
+  response?: FlowDebugResponse;
+  error?: string;
 }
 
 export interface FlowRunSummary {
@@ -1893,6 +1921,8 @@ export interface FlowStepCompletedEvent {
   branch?: string;
   /** Script console output from this step. Omitted when empty. */
   logs?: FlowLogEntry[];
+  /** Sent request of a debug node. */
+  debug_request?: FlowDebugRequest;
 }
 
 export const onFlowStepCompleted = (

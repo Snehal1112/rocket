@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import {
   cancelFlowRun,
+  type FlowDebugRequest,
   type FlowLogEntry,
   type FlowStepCompletedEvent,
   type FlowStepResult,
@@ -30,6 +31,8 @@ interface FlowToolbarProps {
   onBeforeRun?: () => Promise<boolean>;
   // Receives each step's script console output once the run ends.
   onStepLogs?: (nodeId: string, logs: FlowLogEntry[]) => void;
+  // Receives each debug node's sent request once the run ends.
+  onStepDebug?: (nodeId: string, debug: FlowDebugRequest) => void;
 }
 
 // Maps a streamed step event (snake_case) to the per-node detail the tab stores.
@@ -66,6 +69,7 @@ export function FlowToolbar({
   tabRunId,
   onBeforeRun,
   onStepLogs,
+  onStepDebug,
 }: FlowToolbarProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   // A run started by an earlier mount of this toolbar, still in progress.
@@ -176,6 +180,7 @@ export function FlowToolbar({
       for (const step of summary.steps) {
         onPatchStatus(step.nodeId, step.status, detailFromStep(step));
         if (step.logs?.length) onStepLogs?.(step.nodeId, step.logs);
+        if (step.debugRequest) onStepDebug?.(step.nodeId, step.debugRequest);
       }
       onRunStateChange('done', summary.runId);
     } catch (err) {

@@ -349,6 +349,24 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                   })),
                 );
               }}
+              onStepDebug={(nodeId, debug) => {
+                const node = latestFlowTab()?.nodes.find((n) => n.id === nodeId);
+                const label = node?.kind.label || nodeId;
+                const response = debug.response;
+                useConsoleStore.getState().addHttpEntry({
+                  requestName: `${flowName} › ${label}`,
+                  method: debug.method,
+                  url: debug.url,
+                  status: response?.status ?? 0,
+                  statusText: response?.statusText ?? 'Error',
+                  durationMs: response?.durationMs ?? 0,
+                  sizeBytes: response?.sizeBytes ?? 0,
+                  requestHeaders: debug.headers,
+                  requestBody: debug.body ?? '',
+                  responseHeaders: response?.headers ?? [],
+                  responseBody: response?.body ?? debug.error ?? '',
+                });
+              }}
             />
             <Button size='sm' variant='outline' onClick={() => void handleSave()}>
               Save

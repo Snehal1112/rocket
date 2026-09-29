@@ -16,6 +16,8 @@ export interface HttpConsoleEntry {
   requestBody: string;
   responseHeaders: { key: string; value: string }[];
   responseBody: string;
+  /** Names the source of the entry, such as a Flow node. */
+  requestName?: string;
 }
 
 export interface ScriptLogEntry {

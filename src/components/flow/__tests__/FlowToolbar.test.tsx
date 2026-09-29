@@ -126,6 +126,25 @@ describe('FlowToolbar', () => {
     expect(onStepLogs).toHaveBeenNthCalledWith(2, 'c', [{ level: 'error', message: 'two' }]);
   });
 
+  it('hands each summary step with a debug request to onStepDebug, once, in order', async () => {
+    const debugA = { method: 'POST', url: 'https://x.test/a', headers: [], body: '{}' };
+    const onStepDebug = vi.fn();
+    renderToolbar({ onStepDebug });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+    const base = { statusCode: 200, durationMs: 5, error: null, value: null };
+    resolveRun({
+      runId: 'r1',
+      stoppedReason: 'completed',
+      steps: [
+        { ...base, nodeId: 'a', status: 'success', debugRequest: debugA },
+        { ...base, nodeId: 'b', status: 'success' },
+      ],
+    });
+    await waitFor(() => expect(onStepDebug).toHaveBeenCalledTimes(1));
+    expect(onStepDebug).toHaveBeenCalledWith('a', debugA);
+  });
+
   it('subscribes before running, takes the run id from flow-run-started, and finishes on resolve', async () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));

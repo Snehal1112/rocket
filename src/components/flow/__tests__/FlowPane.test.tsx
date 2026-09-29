@@ -261,4 +261,73 @@ describe('FlowPane run logs', () => {
       ),
     );
   });
+
+  const runWithDebug = async (debugRequest: object, error: string | null = null) => {
+    vi.mocked(runFlow).mockResolvedValue({
+      runId: 'r1',
+      stoppedReason: 'completed',
+      steps: [
+        {
+          nodeId: 'n1',
+          status: error ? 'failed' : 'success',
+          statusCode: null,
+          durationMs: null,
+          error,
+          value: null,
+          debugRequest,
+        },
+      ],
+    } as never);
+    render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(useConsoleStore.getState().entries).toHaveLength(1));
+    return useConsoleStore.getState().entries[0];
+  };
+
+  it('pushes a debug request from the run summary as a Console HTTP row', async () => {
+    const entry = await runWithDebug({
+      method: 'POST',
+      url: 'https://x.test/login',
+      headers: [{ key: 'Authorization', value: 'Bearer ••••••' }],
+      body: '{"u":"a"}',
+      response: {
+        status: 400,
+        statusText: 'Bad Request',
+        durationMs: 12,
+        sizeBytes: 20,
+        headers: [],
+        body: '{"error":"bad"}',
+      },
+    });
+    expect(entry).toEqual(
+      expect.objectContaining({
+        kind: 'http',
+        method: 'POST',
+        url: 'https://x.test/login',
+        status: 400,
+        requestHeaders: [{ key: 'Authorization', value: 'Bearer ••••••' }],
+        requestBody: '{"u":"a"}',
+        responseBody: '{"error":"bad"}',
+        requestName: 'login-flow › Show token',
+      }),
+    );
+  });
+
+  it('pushes an error row when the debug request has no response', async () => {
+    const entry = await runWithDebug(
+      { method: 'GET', url: 'https://x.test/down', headers: [], error: 'connection refused' },
+      'connection refused',
+    );
+    expect(entry).toEqual(
+      expect.objectContaining({
+        kind: 'http',
+        status: 0,
+        statusText: 'Error',
+        durationMs: 0,
+        sizeBytes: 0,
+        responseHeaders: [],
+        responseBody: 'connection refused',
+      }),
+    );
+  });
 });
