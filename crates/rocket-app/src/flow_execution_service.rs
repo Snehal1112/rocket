@@ -30,6 +30,8 @@ pub enum CapturedOutput {
 pub(crate) struct ExecutedNode {
     pub(crate) output: CapturedOutput,
     pub(crate) chosen_exit: String,
+    /// Set by a repeat-until poll that met its condition.
+    pub(crate) poll: Option<crate::flow_poll::PollStats>,
 }
 
 impl ExecutedNode {
@@ -37,6 +39,7 @@ impl ExecutedNode {
         Self {
             output,
             chosen_exit: handle::RESULT.to_string(),
+            poll: None,
         }
     }
 }
@@ -490,6 +493,9 @@ pub struct FlowStepResult {
     /// The request as sent and its response, masked. Only for Request nodes in debug mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_request: Option<FlowDebugRequest>,
+    /// How many times a repeat-until Request node sent its request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempts: Option<u32>,
 }
 
 /// Builds the `FlowStepCompleted` event for one recorded step, so the live
@@ -507,6 +513,7 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         branch: step.branch.clone(),
         logs: step.logs.clone(),
         debug_request: step.debug_request.clone().map(Box::new),
+        attempts: step.attempts,
     }
 }
 
@@ -993,6 +1000,7 @@ impl FlowExecutionService {
                 Ok(ExecutedNode {
                     output: source.clone(),
                     chosen_exit: chosen_exit.to_string(),
+                    poll: None,
                 })
             }
             FlowNodeKind::Switch { value, cases, .. } => {
@@ -1016,6 +1024,7 @@ impl FlowExecutionService {
                 Ok(ExecutedNode {
                     output: source.clone(),
                     chosen_exit,
+                    poll: None,
                 })
             }
         }
@@ -1084,10 +1093,23 @@ fn result_to_step(
         branch: None,
         logs: Vec::new(),
         debug_request: None,
+        attempts: None,
     };
     match result {
         Ok(executed) if is_routing => FlowStepResult {
             branch: Some(executed.chosen_exit.clone()),
+            ..base
+        },
+        // A poll that met its condition succeeds whatever the final status:
+        // the author's condition decides "done".
+        Ok(ExecutedNode {
+            output: CapturedOutput::Request(out),
+            poll: Some(stats),
+            ..
+        }) => FlowStepResult {
+            status_code: Some(out.response.status),
+            duration_ms: Some(stats.elapsed_ms),
+            attempts: Some(stats.attempts),
             ..base
         },
         Ok(ExecutedNode {
@@ -1134,6 +1156,7 @@ fn skipped_step(node_id: &str, reason: FlowSkipReason) -> FlowStepResult {
         branch: None,
         logs: Vec::new(),
         debug_request: None,
+        attempts: None,
     }
 }
 
@@ -1149,6 +1172,7 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
         branch: None,
         logs: Vec::new(),
         debug_request: None,
+        attempts: None,
     }
 }
 
@@ -3349,6 +3373,55 @@ mod tests {
     }
 
     #[test]
+    fn a_met_poll_is_a_success_even_on_a_non_2xx_response() {
+        let mut out = sample_response_output();
+        out.response.status = 404;
+        let node = request_flow_node("job", "https://api.example.com/job");
+        let executed = ExecutedNode {
+            output: CapturedOutput::Request(Box::new(out)),
+            chosen_exit: handle::RESULT.to_string(),
+            poll: Some(crate::flow_poll::PollStats {
+                attempts: 7,
+                elapsed_ms: 14_200,
+            }),
+        };
+
+        let step = result_to_step("job", Some(&node), &Ok(executed));
+
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        assert_eq!(step.status_code, Some(404));
+        assert_eq!(step.duration_ms, Some(14_200));
+        assert_eq!(step.attempts, Some(7));
+        assert_eq!(step.error, None);
+    }
+
+    #[test]
+    fn a_plain_request_step_has_no_attempts() {
+        let node = request_flow_node("r", "https://api.example.com/r");
+        let executed = ExecutedNode::plain(CapturedOutput::Request(Box::new(
+            sample_response_output(),
+        )));
+        let step = result_to_step("r", Some(&node), &Ok(executed));
+        assert_eq!(step.attempts, None);
+        let json = serde_json::to_value(&step).expect("serialize");
+        assert!(json.get("attempts").is_none(), "None attempts are omitted");
+    }
+
+    #[test]
+    fn step_attempts_serialize_camel_case_and_reach_the_event() {
+        let step = FlowStepResult {
+            attempts: Some(3),
+            ..failed_step("job", "x".into())
+        };
+        let json = serde_json::to_value(&step).expect("serialize");
+        assert_eq!(json["attempts"], 3);
+        match step_completed_event("run", &step) {
+            DomainEvent::FlowStepCompleted { attempts, .. } => assert_eq!(attempts, Some(3)),
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+
+    #[test]
     fn flow_step_result_serializes_skip_reason_camel_key_snake_value() {
         let step = FlowStepResult {
             node_id: "b".into(),
@@ -3360,6 +3433,7 @@ mod tests {
             skip_reason: Some(FlowSkipReason::BranchNotTaken),
             branch: None,
             debug_request: None,
+            attempts: None,
             logs: Vec::new(),
         };
         let json = serde_json::to_value(&step).expect("serialize");

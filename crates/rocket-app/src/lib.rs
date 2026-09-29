@@ -14,6 +14,7 @@ pub mod export_service;
 pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;
+pub(crate) mod flow_poll;
 pub(crate) mod flow_routing;
 pub mod flow_service;
 pub mod git_service;
