@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -1265,11 +1266,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                         Set a limit for the number of redirects to follow
                       </p>
                     </div>
-                    <Input
-                      type='number'
+                    <NumberInput
                       min={0}
                       disabled={!settings.followRedirects}
-                      className='h-8 w-24 text-sm text-right tabular-nums'
+                      containerClassName='w-24'
+                      className='h-8 text-sm text-right tabular-nums'
                       value={settings.maxRedirects}
                       onChange={(e) => {
                         const val = Number(e.target.value);
@@ -1289,10 +1290,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                       </p>
                     </div>
                     <div className='flex items-center gap-1.5'>
-                      <Input
-                        type='number'
+                      <NumberInput
                         min={0}
-                        className='h-8 w-24 text-sm text-right tabular-nums'
+                        containerClassName='w-24'
+                        className='h-8 text-sm text-right tabular-nums'
                         value={settings.timeoutMs}
                         onChange={(e) => {
                           const val = Number(e.target.value);

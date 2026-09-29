@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumberInput } from '@/components/ui/number-input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
@@ -570,14 +571,13 @@ export function NewContractModal({
                 Notice period
               </Label>
               <div className='flex items-center gap-2'>
-                <Input
+                <NumberInput
                   id='nc-noticeDays'
-                  type='number'
                   min={0}
                   max={365}
                   value={form.noticeDays}
                   onChange={setField('noticeDays')}
-                  className='w-20'
+                  containerClassName='w-20'
                 />
                 <span className='text-sm text-muted-foreground'>days</span>
               </div>
@@ -588,15 +588,14 @@ export function NewContractModal({
                 <span className='text-[11px] font-normal text-muted-foreground'>(optional)</span>
               </Label>
               <div className='flex items-center gap-2'>
-                <Input
+                <NumberInput
                   id='nc-uptimeSla'
-                  type='number'
                   min={0}
                   max={100}
                   step={0.1}
                   value={form.uptimeSla}
                   onChange={setField('uptimeSla')}
-                  className='w-24'
+                  containerClassName='w-24'
                   placeholder='99.9'
                   aria-invalid={!!errors.uptimeSla}
                 />

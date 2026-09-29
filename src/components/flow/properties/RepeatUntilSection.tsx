@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SingleLineEditor } from '@/components/editor';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumberInput } from '@/components/ui/number-input';
 import { Switch } from '@/components/ui/switch';
 import { DEFAULT_REPEAT_UNTIL } from '@/lib/flow-repeat';
 import type { RepeatUntil } from '@/lib/tauri-api';
@@ -52,9 +52,8 @@ function NumberField({
       <Label htmlFor={id} className='text-xs'>
         {label}
       </Label>
-      <Input
+      <NumberInput
         id={id}
-        type='number'
         min={min}
         max={max}
         step={step}

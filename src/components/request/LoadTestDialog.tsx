@@ -8,8 +8,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumberInput } from '@/components/ui/number-input';
 import {
   Select,
   SelectContent,
@@ -114,9 +114,8 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
             </div>
             <div className='space-y-1.5'>
               <Label htmlFor='load-test-total'>Total requests</Label>
-              <Input
+              <NumberInput
                 id='load-test-total'
-                type='number'
                 min={1}
                 max={10000}
                 value={totalRequests}
@@ -129,9 +128,8 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
 
           <div className='space-y-1.5'>
             <Label htmlFor='load-test-delay'>Delay between requests (s)</Label>
-            <Input
+            <NumberInput
               id='load-test-delay'
-              type='number'
               min={0}
               max={60}
               step={0.1}

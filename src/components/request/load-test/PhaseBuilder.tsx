@@ -1,8 +1,8 @@
 import { GripVertical, Plus, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumberInput } from '@/components/ui/number-input';
 import {
   Select,
   SelectContent,
@@ -134,8 +134,7 @@ export function PhaseBuilder({ phases, onChange, disabled, unit }: Props) {
               <Label className='text-[10px] uppercase tracking-wider text-muted-foreground'>
                 Duration (s)
               </Label>
-              <Input
-                type='number'
+              <NumberInput
                 min={1}
                 value={phase.durationSecs}
                 onChange={(e) => update(i, { durationSecs: Number(e.target.value) })}
@@ -149,8 +148,7 @@ export function PhaseBuilder({ phases, onChange, disabled, unit }: Props) {
                 {phase.target.kind === 'rps' ? 'Rate' : 'Concurrency'}
               </Label>
               <div className='flex items-center gap-1'>
-                <Input
-                  type='number'
+                <NumberInput
                   min={0}
                   value={phase.target.value}
                   onChange={(e) => {

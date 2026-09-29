@@ -2,8 +2,8 @@ import { Activity, GripVertical, Play, Settings, Square } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumberInput } from '@/components/ui/number-input';
 import { useLoadTestStore } from '@/stores/load-test-store';
 import type { RequestState } from '@/types/pane-types';
 import { ExportMenu } from './ExportMenu';
@@ -53,9 +53,8 @@ function IntegerField({
       <Label htmlFor={id} className='text-xs'>
         {label}
       </Label>
-      <Input
+      <NumberInput
         id={id}
-        type='number'
         step={1}
         min={min}
         value={value ?? ''}
@@ -279,9 +278,8 @@ export function LoadTestTab({ request, tabId }: Props) {
               <Label htmlFor='success-status-below' className='text-xs'>
                 Success if status &lt;
               </Label>
-              <Input
+              <NumberInput
                 id='success-status-below'
-                type='number'
                 min={100}
                 max={600}
                 value={successStatusBelow}
@@ -295,9 +293,8 @@ export function LoadTestTab({ request, tabId }: Props) {
                 <Label htmlFor='ring-buffer-size' className='text-xs'>
                   Request log size
                 </Label>
-                <Input
+                <NumberInput
                   id='ring-buffer-size'
-                  type='number'
                   min={100}
                   max={100000}
                   step={100}
