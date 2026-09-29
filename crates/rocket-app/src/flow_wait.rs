@@ -9,7 +9,7 @@ use rocket_http::HttpResponse;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::FlowLogEntry;
 use rocket_shared::types::Header;
-use tokio::time::{interval, sleep_until, Instant};
+use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 
 use crate::callback_listener::ReceivedCall;
 use crate::execution_service::{ExecuteRequestOutput, RequestExecutionService};
@@ -17,6 +17,11 @@ use crate::flow_callbacks::RunCallbacks;
 use crate::flow_execution_service::{
     CapturedOutput, ExecutedNode, FlowExecutionService, NodeRunContext, RunFlowInput,
 };
+
+/// Whole seconds left, shown as the countdown.
+fn seconds_left(remaining: Duration) -> u64 {
+    u64::try_from(remaining.as_millis().div_ceil(1000)).unwrap_or(u64::MAX)
+}
 
 /// The node's output for an accepted call, shaped like a response so a
 /// downstream wire reads it as `response.body` / `response.headers`.
@@ -73,6 +78,8 @@ impl FlowExecutionService {
         let deadline = started + Duration::from_millis(timeout_ms);
         // The first tick fires at once, so progress shows as soon as the node waits.
         let mut ticker = interval(Duration::from_secs(1));
+        // A late tick is skipped, not replayed in a burst.
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut ignored: u32 = 0;
 
         loop {
@@ -124,7 +131,7 @@ impl FlowExecutionService {
                     ))));
                 }
                 _ = ticker.tick() => {
-                    let left = deadline.saturating_duration_since(Instant::now()).as_secs();
+                    let left = seconds_left(deadline.saturating_duration_since(Instant::now()));
                     self.publish_progress(
                         ctx,
                         None,
@@ -155,7 +162,10 @@ mod tests {
         let out = callback_output(&call, 3100);
 
         assert_eq!(out.response.status, 200);
-        assert_eq!(out.response.status_text, "PUT", "the method is reported here");
+        assert_eq!(
+            out.response.status_text, "PUT",
+            "the method is reported here"
+        );
         assert_eq!(out.response.body, r#"{"orderId":42}"#);
         assert_eq!(out.response.duration_ms, 3100);
         assert_eq!(out.response.size_bytes, 14);
@@ -164,5 +174,18 @@ mod tests {
         assert_eq!(out.response.headers[0].value, "application/json");
         assert!(out.deferred_history.is_none());
         assert!(out.script_error.is_none());
+    }
+}
+
+#[cfg(test)]
+mod countdown_tests {
+    use super::*;
+
+    #[test]
+    fn seconds_left_rounds_up() {
+        assert_eq!(seconds_left(Duration::from_millis(59_990)), 60);
+        assert_eq!(seconds_left(Duration::from_millis(1_001)), 2);
+        assert_eq!(seconds_left(Duration::from_secs(3)), 3);
+        assert_eq!(seconds_left(Duration::ZERO), 0);
     }
 }

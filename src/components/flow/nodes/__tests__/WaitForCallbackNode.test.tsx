@@ -54,6 +54,23 @@ describe('WaitForCallbackNode', () => {
     expect(screen.getByTestId('wait-node-variable')).toHaveTextContent('{{callback.payment}}');
   });
 
+  it('truncates the summary line and keeps the full text in a title', () => {
+    renderNode({
+      kind: {
+        kind: 'WaitForCallback',
+        label: 'Payment done',
+        name: 'a_very_long_callback_name_that_would_overflow',
+        timeoutMs: 60000,
+      },
+    });
+    const summary = screen.getByTestId('wait-node-summary');
+    expect(summary).toHaveAttribute(
+      'title',
+      'Wait for callback · a_very_long_callback_name_that_would_overflow · 60s',
+    );
+    expect(summary).toHaveClass('truncate');
+  });
+
   it('copies the variable', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });

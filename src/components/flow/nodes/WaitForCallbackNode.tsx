@@ -51,6 +51,7 @@ export function WaitForCallbackNode({
   };
 
   const seconds = (ms: number) => `${Math.round(ms / 100) / 10}s`;
+  const summary = `Wait for callback · ${kind.name} · ${Math.round(kind.timeoutMs / 1000)}s`;
 
   return (
     <div
@@ -93,8 +94,12 @@ export function WaitForCallbackNode({
           />
           <span className='text-muted-foreground'>Run when</span>
         </div>
-        <div className='text-muted-foreground'>
-          Wait for callback · {kind.name} · {Math.round(kind.timeoutMs / 1000)}s
+        <div
+          data-testid='wait-node-summary'
+          className='truncate text-muted-foreground'
+          title={summary}
+        >
+          {summary}
         </div>
         <div className='nodrag nokey flex items-center gap-1'>
           <code data-testid='wait-node-variable' className='truncate font-mono text-[11px]'>
