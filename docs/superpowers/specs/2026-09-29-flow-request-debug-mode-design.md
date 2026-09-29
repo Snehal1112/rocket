@@ -32,7 +32,7 @@ A Flow Request node's wire script only shows its value before `{{vars}}` are res
 ### 4.2 Building the debug record
 For a Request node with `debug = true`, the Flow builds a `FlowDebugRequest`:
 - `method`, and `url` = the resolved URL with the enabled query params appended the way the executor does (`reqwest_executor.rs:241-251`).
-- `headers`: the resolved headers, plus one synthesized auth line: `Authorization: Bearer ••••••` (Bearer), `Authorization: Basic ••••••` (Basic), `<key>: ••••••` or `?<key>=••••••` (API key), and `Auth: <type>` for OAuth2, AWS SigV4, WSSE, Digest and NTLM. The auth value is never shown.
+- `headers`: the resolved headers, plus one synthesized auth line: `Authorization: Bearer ••••••` (Bearer), `Authorization: Basic ••••••` (Basic), `<key>: ••••••` (API key in a header) or `Auth: API key in query "<key>"` (API key in the query), and `Auth: <type>` for OAuth2, AWS SigV4, WSSE, Digest and NTLM. The auth value is never shown.
 - `body`: the resolved text body, or form fields as `key=value` lines. No body gives `None`.
 - The response when there is one: `status`, `status_text`, `duration_ms`, `size_bytes`, response `headers` and `body`. A send failure gives no response and the error message.
 
@@ -57,6 +57,7 @@ When the final run summary arrives, each step with `debugRequest` becomes one `a
 ## 6. Out of scope
 - Fixing #43 and #44.
 - Headers the HTTP client adds itself (`User-Agent`, `Content-Length`, a `Content-Type` derived from the body mode). The Console row does not show them; this is a known limit.
+- A debug node whose pre-request script fails produces no record, because nothing was sent.
 - Debug mode for the normal request tab or the collection runner.
 
 ## 7. Testing

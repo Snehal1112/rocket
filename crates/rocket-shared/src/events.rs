@@ -258,6 +258,7 @@ pub enum DomainEvent {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         logs: Vec<FlowLogEntry>,
         /// The request as sent and its response, masked. Only for Request nodes in debug mode.
+        /// The nested `FlowDebugRequest` fields are camelCase inside this snake_case event.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         debug_request: Option<Box<FlowDebugRequest>>,
     },
