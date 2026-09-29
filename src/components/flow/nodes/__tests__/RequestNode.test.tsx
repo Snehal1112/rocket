@@ -223,4 +223,60 @@ describe('RequestNode', () => {
     expect(screen.getByTestId('node-status-caption')).toHaveTextContent('Not taken');
     expect(screen.getByTestId('request-node-card')).toHaveClass('border-dashed');
   });
+
+  const pollingKind = {
+    ...baseKind,
+    repeatUntil: {
+      condition: 'response.body.status === "done"',
+      intervalMs: 2000,
+      maxAttempts: 30,
+      timeoutMs: 60000,
+    },
+  };
+
+  it('shows the repeat-until row for a polling request', () => {
+    renderNode({ kind: pollingKind, status: 'idle' });
+    expect(screen.getByTestId('request-node-repeat-row')).toHaveTextContent(
+      'until response.body.status === "done" · 2s · max 30',
+    );
+  });
+
+  it('shows no repeat row for a plain request', () => {
+    renderNode({ kind: baseKind, status: 'success', statusCode: 200, durationMs: 184 });
+    expect(screen.queryByTestId('request-node-repeat-row')).toBeNull();
+    expect(screen.getByText((_, el) => el?.textContent === '✓ 200 · 184ms')).toBeInTheDocument();
+  });
+
+  it('truncates a long condition and keeps it in the title', () => {
+    const condition = `response.body.${'x'.repeat(200)} === "done"`;
+    renderNode({
+      kind: { ...pollingKind, repeatUntil: { ...pollingKind.repeatUntil, condition } },
+      status: 'idle',
+    });
+    const row = screen.getByTestId('request-node-repeat-row');
+    expect(row).toHaveAttribute('title', condition);
+    expect(row.querySelector('.truncate')).not.toBeNull();
+  });
+
+  it('shows the attempt count and total time after a poll', () => {
+    renderNode({
+      kind: pollingKind,
+      status: 'success',
+      statusCode: 200,
+      durationMs: 14200,
+      attempts: 7,
+    });
+    expect(screen.getByText('✓ 200 · 7 attempts · 14.2s')).toBeInTheDocument();
+  });
+
+  it('says 1 attempt in the singular', () => {
+    renderNode({
+      kind: pollingKind,
+      status: 'success',
+      statusCode: 200,
+      durationMs: 300,
+      attempts: 1,
+    });
+    expect(screen.getByText('✓ 200 · 1 attempt · 0.3s')).toBeInTheDocument();
+  });
 });

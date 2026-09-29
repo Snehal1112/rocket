@@ -1,6 +1,7 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
-import { Bug } from 'lucide-react';
+import { Bug, Repeat } from 'lucide-react';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
+import { msToSecondsLabel } from '@/lib/flow-repeat';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
@@ -17,6 +18,8 @@ export interface RequestNodeData {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
+  /** Attempts a repeat-until run made. Set after a run. */
+  attempts?: number;
   headerCount?: number;
   bodyPreview?: string;
   /** Method of a Saved request, when the caller has looked it up. */
@@ -76,7 +79,9 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
 
       {status === 'success' && (
         <div className='px-2 pt-1 text-green-600'>
-          ✓ {statusCode} · {durationMs}ms
+          {data.attempts === undefined
+            ? `✓ ${statusCode} · ${durationMs}ms`
+            : `✓ ${statusCode} · ${data.attempts} ${data.attempts === 1 ? 'attempt' : 'attempts'} · ${msToSecondsLabel(durationMs ?? 0)}`}
         </div>
       )}
       {status === 'failed' && (
@@ -141,6 +146,20 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
           <span className='text-muted-foreground'>Body</span>
           <span className='truncate'>{bodyPreview}</span>
         </div>
+        {/* Repeat until has no handle: it is a setting, not an input. */}
+        {kind.repeatUntil && (
+          <div
+            data-testid='request-node-repeat-row'
+            title={kind.repeatUntil.condition}
+            className='flex min-w-0 items-center gap-1.5 pl-2 text-muted-foreground'
+          >
+            <Repeat className='h-3 w-3 shrink-0' aria-hidden='true' />
+            <span className='truncate'>
+              until {kind.repeatUntil.condition} · {msToSecondsLabel(kind.repeatUntil.intervalMs)} ·
+              max {kind.repeatUntil.maxAttempts}
+            </span>
+          </div>
+        )}
       </div>
 
       <Handle

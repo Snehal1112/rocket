@@ -47,6 +47,7 @@ function detailFromEvent(event: FlowStepCompletedEvent): FlowNodeDetail {
     value: event.value ?? undefined,
     skipReason: event.skip_reason ?? undefined,
     branch: event.branch ?? undefined,
+    attempts: event.attempts ?? undefined,
   };
 }
 
@@ -59,6 +60,7 @@ function detailFromStep(step: FlowStepResult): FlowNodeDetail {
     value: step.value ?? undefined,
     skipReason: step.skipReason ?? undefined,
     branch: step.branch ?? undefined,
+    attempts: step.attempts ?? undefined,
   };
 }
 

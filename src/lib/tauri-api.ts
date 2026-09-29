@@ -1840,6 +1840,8 @@ export interface FlowStepResult {
   logs?: FlowLogEntry[];
   /** Sent request of a debug node. */
   debugRequest?: FlowDebugRequest;
+  /** How many times a repeat-until Request node sent its request. */
+  attempts?: number;
 }
 
 /** One header line in a debug record, already masked by the backend. */
@@ -1937,6 +1939,8 @@ export interface FlowStepCompletedEvent {
   logs?: FlowLogEntry[];
   /** Sent request of a debug node. */
   debug_request?: FlowDebugRequest;
+  /** How many times a repeat-until Request node sent its request. */
+  attempts?: number;
 }
 
 export const onFlowStepCompleted = (

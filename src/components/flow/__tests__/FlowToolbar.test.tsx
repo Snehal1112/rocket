@@ -224,6 +224,52 @@ describe('FlowToolbar', () => {
     );
   });
 
+  it('forwards attempts from the step event and the summary', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    started('run-123');
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-123',
+      node_id: 'job',
+      status: 'success',
+      status_code: 200,
+      duration_ms: 14200,
+      error: null,
+      value: null,
+      attempts: 7,
+    });
+    expect(onPatchStatus).toHaveBeenCalledWith(
+      'job',
+      'success',
+      expect.objectContaining({ attempts: 7 }),
+    );
+
+    resolveRun({
+      runId: 'run-123',
+      steps: [
+        {
+          nodeId: 'job',
+          status: 'success',
+          statusCode: 200,
+          durationMs: 14200,
+          error: null,
+          value: null,
+          attempts: 7,
+        },
+      ],
+      stoppedReason: 'completed',
+    });
+    await waitFor(() =>
+      expect(onPatchStatus).toHaveBeenLastCalledWith(
+        'job',
+        'success',
+        expect.objectContaining({ attempts: 7 }),
+      ),
+    );
+  });
+
   it('forwards skip_reason and branch from flow-step-completed', async () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));

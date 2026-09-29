@@ -164,6 +164,8 @@ export interface FlowNodeDetail {
   branch?: string;
   /** Progress text of a running node, such as "attempt 3/30". */
   progress?: string;
+  /** Attempts a repeat-until Request node made. */
+  attempts?: number;
 }
 
 export interface FlowTab extends BaseTab {
