@@ -11,6 +11,7 @@ use rocket_shared::VariableValue;
 use crate::execution_service::{
     ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
+use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::build_debug_request;
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::runner_sequence::{build_step_input, RunItem};
@@ -518,6 +519,53 @@ pub struct FlowRunSummary {
     pub stopped_reason: String,
 }
 
+/// What a node needs to know about the run it belongs to.
+pub(crate) struct NodeRunContext {
+    // Read by plans 04 and 08 (polling and callback nodes).
+    #[allow(dead_code)]
+    pub(crate) run_id: String,
+    #[allow(dead_code)]
+    pub(crate) node_id: String,
+    /// Fires when the run is cancelled. A waiting node selects on it.
+    pub(crate) cancel: CancelSignal,
+}
+
+/// Registers a run as in flight and removes every trace of it when dropped,
+/// so no exit path of `run` can leak the run id or its cancel handle.
+struct RunRegistration<'a> {
+    service: &'a FlowExecutionService,
+    run_id: String,
+}
+
+impl<'a> RunRegistration<'a> {
+    fn new(service: &'a FlowExecutionService, run_id: &str) -> (Self, CancelSignal) {
+        let (handle, signal) = cancel_pair();
+        if let Ok(mut handles) = service.cancel_handles.lock() {
+            handles.insert(run_id.to_string(), handle);
+        }
+        if let Ok(mut set) = service.in_flight.lock() {
+            set.insert(run_id.to_string());
+        }
+        let registration = Self {
+            service,
+            run_id: run_id.to_string(),
+        };
+        (registration, signal)
+    }
+}
+
+impl Drop for RunRegistration<'_> {
+    fn drop(&mut self) {
+        self.service.clear_cancellation(&self.run_id);
+        if let Ok(mut set) = self.service.in_flight.lock() {
+            set.remove(&self.run_id);
+        }
+        if let Ok(mut handles) = self.service.cancel_handles.lock() {
+            handles.remove(&self.run_id);
+        }
+    }
+}
+
 /// Orchestrates one Flow run: loads the graph, walks it in dependency order,
 /// and dispatches each node using the building blocks in this same module
 /// (`build_execute_request_input`, `apply_wired_overrides`,
@@ -530,6 +578,9 @@ pub struct FlowExecutionService {
     events: Box<dyn rocket_shared::events::EventPublisher>,
     cancelled: Arc<Mutex<HashSet<String>>>,
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// One cancel handle per in-flight run. `cancel` triggers it, so a node
+    /// that is waiting stops at once.
+    cancel_handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
 }
 
 impl FlowExecutionService {
@@ -544,6 +595,7 @@ impl FlowExecutionService {
             events,
             cancelled: Arc::new(Mutex::new(HashSet::new())),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
+            cancel_handles: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -563,9 +615,11 @@ impl FlowExecutionService {
         Ok((flow, order))
     }
 
-    /// Asks an in-progress run to stop. The run ends before its next node; a
-    /// node already executing finishes first. Cancelling an unknown or
-    /// finished run id is a no-op, mirroring `CollectionRunnerService::cancel`.
+    /// Asks an in-progress run to stop. The run ends after the node that is
+    /// running now. A node that is waiting (a poll or a callback wait) stops
+    /// waiting at once; a request already in flight still finishes.
+    /// Cancelling an unknown or finished run id is a no-op, mirroring
+    /// `CollectionRunnerService::cancel`.
     pub fn cancel(&self, run_id: &str) {
         if let Ok(in_flight) = self.in_flight.lock() {
             if !in_flight.contains(run_id) {
@@ -574,6 +628,11 @@ impl FlowExecutionService {
         }
         if let Ok(mut cancelled) = self.cancelled.lock() {
             cancelled.insert(run_id.to_string());
+        }
+        if let Ok(handles) = self.cancel_handles.lock() {
+            if let Some(handle) = handles.get(run_id) {
+                handle.cancel();
+            }
         }
     }
 
@@ -594,8 +653,8 @@ impl FlowExecutionService {
     /// fate is decided at its turn from its predecessors' outcomes
     /// (`flow_routing::decide_fate`): it runs, is skipped (`upstream_failed`
     /// or `branch_not_taken`), or fails on ambiguous inputs. Cancellation is
-    /// checked before each node, so a cancelled run records no step for the
-    /// nodes it never reached.
+    /// checked before each node and after it, so a cancelled run records the
+    /// node that was running and nothing after it.
     pub async fn run(
         &self,
         exec: &RequestExecutionService,
@@ -613,9 +672,7 @@ impl FlowExecutionService {
             flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
         let run_id = Ulid::new().to_string();
-        if let Ok(mut set) = self.in_flight.lock() {
-            set.insert(run_id.clone());
-        }
+        let (registration, cancel_signal) = RunRegistration::new(self, &run_id);
         self.events.publish(DomainEvent::FlowRunStarted {
             run_id: run_id.clone(),
             flow_name: input.flow_name.clone(),
@@ -663,6 +720,11 @@ impl FlowExecutionService {
                     let node_opt = nodes_by_id.get(node_id.as_str()).copied();
                     let mut node_logs = Vec::new();
                     let mut node_debug = None;
+                    let mut ctx = NodeRunContext {
+                        run_id: run_id.clone(),
+                        node_id: node_id.clone(),
+                        cancel: cancel_signal.clone(),
+                    };
                     let result = match node_opt {
                         Some(node) => {
                             self.execute_node(
@@ -674,6 +736,7 @@ impl FlowExecutionService {
                                 &external_secrets,
                                 &mut node_logs,
                                 &mut node_debug,
+                                &mut ctx,
                             )
                             .await
                         }
@@ -681,7 +744,14 @@ impl FlowExecutionService {
                             "node '{node_id}' is missing from the flow"
                         ))),
                     };
-                    let step = result_to_step(node_id, node_opt, &result);
+                    // A cancel that landed while this node ran turns an error
+                    // into "cancelled". A finished node keeps its real result.
+                    let cancelled_now = ctx.cancel.is_cancelled();
+                    let step = if cancelled_now && result.is_err() {
+                        failed_step(node_id, "cancelled".to_string())
+                    } else {
+                        result_to_step(node_id, node_opt, &result)
+                    };
                     let step = FlowStepResult {
                         logs: node_logs,
                         debug_request: node_debug,
@@ -706,6 +776,12 @@ impl FlowExecutionService {
                     if let Ok(executed) = result {
                         captured.insert(node_id.clone(), executed.output);
                     }
+                    if cancelled_now {
+                        self.events.publish(step_completed_event(&run_id, &step));
+                        steps.push(step);
+                        stopped_reason = "cancelled".to_string();
+                        break;
+                    }
                     (step, outcome)
                 }
             };
@@ -715,10 +791,8 @@ impl FlowExecutionService {
             steps.push(step);
         }
 
-        self.clear_cancellation(&run_id);
-        if let Ok(mut set) = self.in_flight.lock() {
-            set.remove(&run_id);
-        }
+        // Deregister before `FlowRunFinished`, as before this guard existed.
+        drop(registration);
 
         let failed_count = steps
             .iter()
@@ -771,6 +845,8 @@ impl FlowExecutionService {
         external_secrets: &HashMap<String, String>,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
+        // No node waits yet. Plans 04 and 08 rename this to `ctx` and use it.
+        _ctx: &mut NodeRunContext,
     ) -> DomainResult<ExecutedNode> {
         // Script logs redact the same secrets a Request node's script does.
         let secret_values = exec.secret_values(
@@ -2868,6 +2944,147 @@ mod tests {
         assert_eq!(summary.stopped_reason, "cancelled");
         assert_eq!(summary.steps.len(), 1);
         assert_eq!(summary.steps[0].status, FlowNodeStatus::Failed);
+    }
+
+    /// Publisher that triggers the run's cancel handle as soon as `node_id`
+    /// starts, so the cancel lands while that node is executing.
+    struct CancelOnStart {
+        node_id: &'static str,
+        handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    }
+    impl EventPublisher for CancelOnStart {
+        fn publish(&self, event: DomainEvent) {
+            if let DomainEvent::FlowStepStarted { run_id, node_id } = event {
+                if node_id == self.node_id {
+                    if let Some(handle) = self.handles.lock().expect("lock handles").get(&run_id) {
+                        handle.cancel();
+                    }
+                }
+            }
+        }
+    }
+
+    fn service_cancelling_on_start(flow: Flow, node_id: &'static str) -> FlowExecutionService {
+        let handles: Arc<Mutex<HashMap<String, CancelHandle>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let mut service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(CancelOnStart {
+                node_id,
+                handles: Arc::clone(&handles),
+            }),
+        );
+        // Share one handle registry between the service and the canceller.
+        service.cancel_handles = handles;
+        service
+    }
+
+    #[tokio::test]
+    async fn cancel_during_a_node_stops_the_run_after_it() {
+        let flow = Flow {
+            name: "two".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: Vec::new(),
+        };
+        let service = service_cancelling_on_start(flow, "a");
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service.run(&exec, run_input("two")).await.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        assert_eq!(summary.steps.len(), 1, "b must not run after the cancel");
+        assert_eq!(summary.steps[0].node_id, "a");
+        assert_eq!(
+            summary.steps[0].status,
+            FlowNodeStatus::Success,
+            "a request that finished keeps its real result"
+        );
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/a".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_node_that_fails_during_a_cancel_reports_cancelled() {
+        // b's wire script errors while the run is being cancelled.
+        let flow = Flow {
+            name: "wired".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: vec![wire("e1", "a", "b")],
+        };
+        let service = service_cancelling_on_start(flow, "b");
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, Box::new(ErrorJsonqEngine));
+
+        let summary = service.run(&exec, run_input("wired")).await.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        let b = step_of(&summary, "b");
+        assert_eq!(b.status, FlowNodeStatus::Failed);
+        assert_eq!(b.error.as_deref(), Some("cancelled"));
+    }
+
+    #[test]
+    fn cancel_triggers_the_runs_signal() {
+        let service = service_with_flow(Flow {
+            name: "x".to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        });
+        let (handle, signal) = cancel_pair();
+        service
+            .in_flight
+            .lock()
+            .expect("lock in_flight")
+            .insert("r1".to_string());
+        service
+            .cancel_handles
+            .lock()
+            .expect("lock handles")
+            .insert("r1".to_string(), handle);
+
+        service.cancel("r1");
+
+        assert!(signal.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn finished_runs_leave_no_cancel_handle() {
+        let flow = Flow {
+            name: "two".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+            ],
+            edges: Vec::new(),
+        };
+        // One run that completes and one that is cancelled.
+        for cancel_on in [None, Some("a")] {
+            let service = match cancel_on {
+                Some(node) => service_cancelling_on_start(flow.clone(), node),
+                None => service_with_flow(flow.clone()),
+            };
+            let executor = RecordingExecutor::new();
+            let exec = recording_exec(&executor, fixed_wire("x"));
+
+            service.run(&exec, run_input("two")).await.expect("run");
+
+            assert!(
+                service.cancel_handles.lock().expect("lock").is_empty(),
+                "a finished run must drop its cancel handle"
+            );
+            assert!(service.in_flight.lock().expect("lock").is_empty());
+            assert!(service.cancelled.lock().expect("lock").is_empty());
+        }
     }
 
     #[tokio::test]

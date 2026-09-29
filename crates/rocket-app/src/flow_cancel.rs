@@ -124,8 +124,7 @@ mod tests {
     async fn cancelled_never_resolves_after_the_handle_is_dropped() {
         let (handle, mut signal) = cancel_pair();
         drop(handle);
-        let waited =
-            tokio::time::timeout(Duration::from_millis(50), signal.cancelled()).await;
+        let waited = tokio::time::timeout(Duration::from_millis(50), signal.cancelled()).await;
         assert!(waited.is_err(), "a finished run must never look cancelled");
         assert!(!signal.is_cancelled());
     }
