@@ -11,6 +11,7 @@ pub mod env_audit;
 pub mod environment_service;
 pub mod execution_service;
 pub mod export_service;
+pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;
 pub(crate) mod flow_routing;
