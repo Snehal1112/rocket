@@ -60,23 +60,61 @@ fn captured_output_response_json(output: &CapturedOutput) -> DomainResult<String
         .map_err(|e| DomainError::Internal(format!("failed to serialize captured output: {e}")))
 }
 
-/// Wraps a Flow expression so it can read a plain `response` object.
+/// How a Flow script's result is turned into the value the caller needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowCoercion {
+    /// A wire uses the result as is.
+    Raw,
+    /// An If node needs `true` or `false`.
+    Bool,
+    /// A Switch node compares a string.
+    Str,
+}
+
+/// Builds the JS that runs one Flow script against a plain `response` object.
 ///
-/// The script engine only exposes `res` with getter methods, but Flow
-/// expressions are written against `response.status`, `response.body` and
-/// so on. The wrapper builds that object from `res` and binds it as an
-/// arrow-function parameter, so the user expression stays a plain value
-/// expression. This is applied only to the Flow entry points, because the
-/// Vars tab uses the same evaluator with `res.body` syntax.
-fn wrap_with_response_object(expression: &str) -> String {
-    format!(
-        "((response) => ({expression}\n))({{ \
-         status: res.getStatus(), \
-         statusText: res.getStatusText(), \
-         headers: res.getHeaders(), \
-         body: res.getBody(), \
-         duration_ms: res.getResponseTime() }})"
-    )
+/// The user source is embedded as a JSON string literal, so quotes, backticks
+/// and newlines cannot break the wrapper. The real JS parser picks the form,
+/// without running the code: one expression first, then the same without a
+/// trailing `;`, then a script that sends its value with `return`. The chosen
+/// form then runs exactly once. Only the Flow entry points use this. The Vars
+/// tab keeps `res.body` syntax.
+fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
+    let literal = serde_json::to_string(source)
+        .map_err(|e| DomainError::Internal(format!("failed to encode flow script: {e}")))?;
+    // The coercion text keeps the `!!(` and `String(` markers the scripted
+    // test engine matches on.
+    let (open, close) = match coercion {
+        FlowCoercion::Raw => ("(", ")"),
+        FlowCoercion::Bool => ("!!(", ")"),
+        FlowCoercion::Str => ("String(", ")"),
+    };
+    Ok(format!(
+        r#"(() => {{
+  const src = {literal};
+  const isParseError = (e) => e instanceof SyntaxError;
+  let fn = null;
+  const asExpression = (text) => new Function('response', 'return (' + text + '\n)');
+  // 1. One expression. This keeps `{{ a: 1 }}` an object and every saved wire unchanged.
+  try {{ fn = asExpression(src); }}
+  catch (e) {{ if (!isParseError(e)) throw e; }}
+  // 2. One expression with a trailing `;`, such as `response.body;`.
+  if (fn === null) {{
+    try {{ fn = asExpression(src.replace(/;\s*$/, '')); }}
+    catch (e) {{ if (!isParseError(e)) throw e; }}
+  }}
+  // 3. A script that sends its value with `return`. A parse error here is the one reported.
+  if (fn === null) fn = new Function('response', src);
+  const response = {{
+    status: res.getStatus(),
+    statusText: res.getStatusText(),
+    headers: res.getHeaders(),
+    body: res.getBody(),
+    duration_ms: res.getResponseTime(),
+  }};
+  return {open}fn(response){close};
+}})()"#
+    ))
 }
 
 impl RequestExecutionService {
@@ -100,7 +138,7 @@ impl RequestExecutionService {
         let result = self
             .evaluate_var_expression(
                 collection,
-                &wrap_with_response_object(expression),
+                &flow_script(expression, FlowCoercion::Raw)?,
                 &response_json,
             )
             .await?;
@@ -115,23 +153,20 @@ impl RequestExecutionService {
         }
     }
 
-    /// Evaluates an If/Switch routing expression against `output`. The caller
-    /// passes it already wrapped (`!!(…)` for If, `String(…)` for Switch), so
-    /// the result is always a string; a `null` result becomes `"null"` rather
+    /// Evaluates an If/Switch routing script against `output`. Callers pass the
+    /// raw condition or value, and `coercion` is applied to the result, so the
+    /// result is always a string; a `null` result becomes `"null"` rather
     /// than an error, which keeps a missing value routable by a case.
     pub async fn evaluate_flow_route_expression(
         &self,
         collection: &str,
         output: &CapturedOutput,
-        wrapped_expression: &str,
+        source: &str,
+        coercion: FlowCoercion,
     ) -> DomainResult<String> {
         let response_json = captured_output_response_json(output)?;
         let result = self
-            .evaluate_var_expression(
-                collection,
-                &wrap_with_response_object(wrapped_expression),
-                &response_json,
-            )
+            .evaluate_var_expression(collection, &flow_script(source, coercion)?, &response_json)
             .await?;
         Ok(match result {
             serde_json::Value::Null => "null".to_string(),
@@ -732,7 +767,8 @@ impl FlowExecutionService {
                     .evaluate_flow_route_expression(
                         &input.collection,
                         source,
-                        &format!("!!({condition})"),
+                        condition,
+                        FlowCoercion::Bool,
                     )
                     .await?;
                 let chosen_exit = match raw.as_str() {
@@ -756,7 +792,8 @@ impl FlowExecutionService {
                     .evaluate_flow_route_expression(
                         &input.collection,
                         source,
-                        &format!("String({value})"),
+                        value,
+                        FlowCoercion::Str,
                     )
                     .await?;
                 let chosen_exit = cases
@@ -1199,14 +1236,19 @@ mod tests {
         let svc = service_with_engine(
             FakeCollectionRepo::new(),
             scripted(vec![(
-                "!!(response.status === 200)",
+                "response.status === 200",
                 Scripted::Value(serde_json::json!(true)),
             )]),
         );
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "!!(response.status === 200)")
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "response.status === 200",
+                FlowCoercion::Bool,
+            )
             .await
             .expect("route expression must resolve");
 
@@ -1224,7 +1266,12 @@ mod tests {
         let output = CapturedOutput::Value(VariableValue::simple("x"));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "String(response.body.plan)")
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "response.body.plan",
+                FlowCoercion::Str,
+            )
             .await
             .expect("a null route result must not be an error");
 
@@ -1242,7 +1289,12 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "String(response.body.plan)")
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "response.body.plan",
+                FlowCoercion::Str,
+            )
             .await
             .expect("resolve");
 
@@ -1260,7 +1312,7 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "String(response.status)")
+            .evaluate_flow_route_expression("my-api", &output, "response.status", FlowCoercion::Str)
             .await
             .expect("resolve");
 
@@ -1273,7 +1325,7 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let err = svc
-            .evaluate_flow_route_expression("my-api", &output, "!!(nope.nope)")
+            .evaluate_flow_route_expression("my-api", &output, "nope.nope", FlowCoercion::Bool)
             .await
             .expect_err("a throwing route expression must be an Err");
 
@@ -1920,7 +1972,8 @@ mod tests {
             "the Output node must report its captured value"
         );
         assert_eq!(
-            step_for("a").value, None,
+            step_for("a").value,
+            None,
             "an Input node must never report a value, only Output nodes do"
         );
     }
@@ -3132,11 +3185,15 @@ mod tests {
 
         let started_idx = events
             .iter()
-            .position(|e| matches!(e, DomainEvent::FlowStepStarted { node_id, .. } if node_id == "a"))
+            .position(
+                |e| matches!(e, DomainEvent::FlowStepStarted { node_id, .. } if node_id == "a"),
+            )
             .expect("started event for a must exist");
         let completed_idx = events
             .iter()
-            .position(|e| matches!(e, DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "a"))
+            .position(
+                |e| matches!(e, DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "a"),
+            )
             .expect("completed event for a must exist");
         assert!(
             started_idx < completed_idx,
@@ -4051,7 +4108,12 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(sample_response_output()));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "!!(response.status === 200)")
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "response.status === 200",
+                FlowCoercion::Bool,
+            )
             .await
             .expect("response.status must be defined");
 
@@ -4092,7 +4154,12 @@ mod tests {
         let output = CapturedOutput::Request(Box::new(out));
 
         let value = svc
-            .evaluate_flow_route_expression("my-api", &output, "String(response.body.plan)")
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "response.body.plan",
+                FlowCoercion::Str,
+            )
             .await
             .expect("switch expression must resolve");
 
@@ -4110,12 +4177,141 @@ mod tests {
             .evaluate_flow_route_expression(
                 "my-api",
                 &output,
-                "String(response.statusText + response.duration_ms + JSON.stringify(response.headers))",
+                "response.statusText + response.duration_ms + JSON.stringify(response.headers)",
+                FlowCoercion::Str,
             )
             .await
             .expect("all response fields must be defined");
 
         assert!(value.starts_with("OK10"), "unexpected value: {value}");
         assert!(value.contains("X-Id"), "unexpected value: {value}");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_runs_a_multi_line_body_with_return() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+        let value = svc
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "const t = response.body.token;\nreturn 'Bearer ' + t;",
+            )
+            .await
+            .expect("a body with return must run");
+        assert!(value.starts_with("Bearer "), "got {value}");
+    }
+
+    #[tokio::test]
+    async fn real_engine_runtime_syntax_error_is_reported_once() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("x"));
+        let err = svc
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "console.log('ran');\nreturn JSON.parse('not json');",
+            )
+            .await
+            .expect_err("a thrown SyntaxError at run time must fail the wire");
+        assert!(err.to_string().contains("SyntaxError"), "got {err}");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_keeps_quotes_backticks_and_newlines() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("x"));
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "`a\"b` + '\\n' + \"c'd\"")
+            .await
+            .expect("special characters must survive");
+        assert_eq!(value, "a\"b\nc'd");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_object_literal_is_an_expression() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("x"));
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "{ a: 1 }")
+            .await
+            .expect("an object literal is an expression");
+        assert_eq!(value, r#"{"a":1}"#);
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_trailing_semicolon_still_returns_the_value() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("hello"));
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.body;")
+            .await
+            .expect("a trailing semicolon must not lose the value");
+        assert_eq!(value, "hello");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_trailing_line_comment_is_safe() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("hello"));
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.body // note")
+            .await
+            .expect("a trailing comment must not swallow the wrapper");
+        assert_eq!(value, "hello");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_body_without_return_is_an_error() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("hello"));
+        let err = svc
+            .resolve_flow_wire_expression("my-api", &output, "const a = 1;\nconsole.log(a);")
+            .await
+            .expect_err("a wire body with no return resolves to undefined");
+        assert!(err.to_string().contains("null/undefined"), "got {err}");
+    }
+
+    #[tokio::test]
+    async fn real_engine_if_coerces_a_multi_line_body() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+        let value = svc
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "const ok = response.status === 200;\nreturn ok;",
+                FlowCoercion::Bool,
+            )
+            .await
+            .expect("an If body must run");
+        assert_eq!(value, "true");
+    }
+
+    #[tokio::test]
+    async fn real_engine_switch_coerces_a_multi_line_body() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+        let value = svc
+            .evaluate_flow_route_expression(
+                "my-api",
+                &output,
+                "const p = response.body.token;\nreturn p;",
+                FlowCoercion::Str,
+            )
+            .await
+            .expect("a Switch body must run");
+        assert_eq!(value, "abc123");
+    }
+
+    #[tokio::test]
+    async fn real_engine_reports_a_syntax_error_in_both_forms() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("x"));
+        let err = svc
+            .resolve_flow_wire_expression("my-api", &output, "return (")
+            .await
+            .expect_err("broken source must fail");
+        assert!(err.to_string().contains("SyntaxError"), "got {err}");
     }
 }
