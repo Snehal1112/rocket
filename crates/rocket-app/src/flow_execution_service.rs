@@ -724,6 +724,7 @@ impl FlowExecutionService {
                     let node_opt = nodes_by_id.get(node_id.as_str()).copied();
                     let mut node_logs = Vec::new();
                     let mut node_debug = None;
+                    let mut node_poll_stats = None;
                     let mut ctx = NodeRunContext {
                         run_id: run_id.clone(),
                         node_id: node_id.clone(),
@@ -740,6 +741,7 @@ impl FlowExecutionService {
                                 &external_secrets,
                                 &mut node_logs,
                                 &mut node_debug,
+                                &mut node_poll_stats,
                                 &mut ctx,
                             )
                             .await
@@ -760,6 +762,16 @@ impl FlowExecutionService {
                         logs: node_logs,
                         debug_request: node_debug,
                         ..step
+                    };
+                    // A failed poll still shows its last response (§6.3).
+                    let step = match node_poll_stats {
+                        Some(stats) if result.is_err() => FlowStepResult {
+                            status_code: Some(stats.status_code),
+                            duration_ms: Some(stats.elapsed_ms),
+                            attempts: Some(stats.attempts),
+                            ..step
+                        },
+                        _ => step,
                     };
                     let outcome = match &result {
                         Ok(executed) if step.status == FlowNodeStatus::Success => {
@@ -855,7 +867,8 @@ impl FlowExecutionService {
     /// non-trigger edges `decide_fate` selected. Returns the node's captured
     /// output and chosen exit, or an error if the node itself failed.
     // The node needs the run's inputs, captured outputs and secrets, and
-    // `logs` collects the console output and `debug` the debug record.
+    // `logs` collects the console output, `debug` the debug record and
+    // `poll_stats` how a failed poll went.
     #[allow(clippy::too_many_arguments)]
     async fn execute_node(
         &self,
@@ -867,6 +880,7 @@ impl FlowExecutionService {
         external_secrets: &HashMap<String, String>,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
+        poll_stats: &mut Option<crate::flow_poll::FailedPollStats>,
         ctx: &mut NodeRunContext,
     ) -> DomainResult<ExecutedNode> {
         // Script logs redact the same secrets a Request node's script does.
@@ -966,6 +980,7 @@ impl FlowExecutionService {
                             *debug_on,
                             logs,
                             debug,
+                            poll_stats,
                             ctx,
                         )
                         .await;
@@ -5289,6 +5304,10 @@ mod tests {
             "got: {error}"
         );
         assert_eq!(executor.sent_count(), 3);
+        // A failed poll still reports its last response and attempt count.
+        assert_eq!(step.status_code, Some(404));
+        assert!(step.duration_ms.is_some(), "a failed poll has a duration");
+        assert_eq!(step.attempts, Some(3));
     }
 
     #[tokio::test]
@@ -5371,6 +5390,9 @@ mod tests {
         assert_eq!(step.status, FlowNodeStatus::Failed);
         assert!(step.error.as_deref().unwrap_or("").contains("nope"));
         assert_eq!(executor.sent_count(), 1, "a script error is not retried");
+        assert_eq!(step.status_code, Some(200));
+        assert!(step.duration_ms.is_some(), "a failed poll has a duration");
+        assert_eq!(step.attempts, Some(1));
     }
 
     #[tokio::test]
@@ -5408,7 +5430,11 @@ mod tests {
             .await
             .expect("run");
 
-        assert_eq!(step_of(&summary, "job").status, FlowNodeStatus::Failed);
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        // No response came back, so there is nothing to report.
+        assert_eq!(step.status_code, None);
+        assert_eq!(step.attempts, None);
         assert_eq!(executor.sent_count(), 1, "a send error is not retried");
         assert_eq!(
             history.saved_count(),
@@ -5513,11 +5539,109 @@ mod tests {
         assert_eq!(summary.stopped_reason, "cancelled");
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
         assert_eq!(executor.sent_count(), 1);
+        // A stopped poll still reports the response it got.
+        assert_eq!(step.status_code, Some(404));
+        assert!(step.duration_ms.is_some(), "a stopped poll has a duration");
+        assert_eq!(step.attempts, Some(1));
+        let completed = publisher
+            .events()
+            .into_iter()
+            .find_map(|e| match e {
+                DomainEvent::FlowStepCompleted {
+                    node_id,
+                    status_code,
+                    duration_ms,
+                    attempts,
+                    ..
+                } if node_id == "job" => Some((status_code, duration_ms.is_some(), attempts)),
+                _ => None,
+            })
+            .expect("a completed event");
+        assert_eq!(completed, (Some(404), true, Some(1)));
         assert_eq!(
             history.saved_count(),
             1,
             "Stop after a response keeps that attempt"
         );
+    }
+
+    #[tokio::test]
+    async fn poll_keeps_going_after_a_pre_request_script_error() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec_events = RecordingPublisher::new();
+        // The pre-request script throws on every attempt; the condition
+        // holds on a 200.
+        fn is_200(r: Option<&rocket_http::HttpResponse>) -> serde_json::Value {
+            serde_json::json!(r.map(|r| r.status == 200).unwrap_or(false))
+        }
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::clone(&executor) as Arc<dyn HttpExecutor>,
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&exec_events))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(scripted(vec![
+            ("// pre", Scripted::Throw("pre-request boom")),
+            ("!!(", Scripted::FromResponse(is_200)),
+        ]));
+        let mut request = Request::new("Job", HttpMethod::Get, "https://api.example.com/job");
+        request.pre_request_script = Some("// pre".into());
+        let mut node = saved_flow_node("job", "job.yml");
+        if let FlowNodeKind::Request { repeat_until, .. } = &mut node.kind {
+            *repeat_until = Some(repeat("response.status === 200", 100, 5, 10_000));
+        }
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow(
+                "my-api",
+                Flow {
+                    name: "poll".to_string(),
+                    nodes: vec![node],
+                    edges: Vec::new(),
+                },
+            )),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "job.yml", request)),
+            Box::new(NullEventPublisher),
+        );
+
+        let summary = service.run(&exec, run_input("poll")).await.expect("run");
+
+        let script_errors: Vec<String> = exec_events
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::ScriptError { phase, message, .. } if phase == "before-request" => {
+                    Some(message)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            script_errors,
+            vec![
+                "pre-request boom".to_string(),
+                "pre-request boom".to_string()
+            ],
+            "each attempt records its script error"
+        );
+        let step = step_of(&summary, "job");
+        assert_eq!(
+            step.status,
+            FlowNodeStatus::Success,
+            "error: {:?}",
+            step.error
+        );
+        assert_eq!(
+            step.attempts,
+            Some(2),
+            "a script error does not stop the poll"
+        );
+        assert_eq!(executor.sent_count(), 2);
     }
 
     #[tokio::test]

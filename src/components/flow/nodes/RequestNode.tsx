@@ -34,6 +34,9 @@ export interface RequestNodeData {
 const methodLabel = (data: RequestNodeData) =>
   data.kind.source.type === 'Inline' ? data.kind.source.request.method : (data.method ?? 'SAVED');
 
+const attemptsLabel = (attempts: number) =>
+  `${attempts} ${attempts === 1 ? 'attempt' : 'attempts'}`;
+
 export function RequestNode({ id, data, isConnectable }: NodeProps & { data: RequestNodeData }) {
   const { kind, status, statusCode, durationMs, error } = data;
   const { updateNodeKind } = useFlowNodeActions();
@@ -81,12 +84,15 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
         <div className='px-2 pt-1 text-green-600'>
           {data.attempts === undefined
             ? `✓ ${statusCode} · ${durationMs}ms`
-            : `✓ ${statusCode} · ${data.attempts} ${data.attempts === 1 ? 'attempt' : 'attempts'} · ${msToSecondsLabel(durationMs ?? 0)}`}
+            : `✓ ${statusCode} · ${attemptsLabel(data.attempts)} · ${msToSecondsLabel(durationMs ?? 0)}`}
         </div>
       )}
+      {/* A failed poll also shows how many attempts it made. */}
       {status === 'failed' && (
         <div className='px-2 pt-1 text-red-600'>
-          ✕ {statusCode ?? 'Error'} · {error ?? `${durationMs}ms`}
+          {data.attempts === undefined
+            ? `✕ ${statusCode ?? 'Error'} · ${error ?? `${durationMs}ms`}`
+            : `✕ ${statusCode ?? 'Error'} · ${attemptsLabel(data.attempts)} · ${error ?? msToSecondsLabel(durationMs ?? 0)}`}
         </div>
       )}
       {/* The line above already shows a failure, so the caption covers skips only. */}

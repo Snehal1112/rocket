@@ -279,4 +279,16 @@ describe('RequestNode', () => {
     });
     expect(screen.getByText('✓ 200 · 1 attempt · 0.3s')).toBeInTheDocument();
   });
+
+  it('shows the last status and attempt count after a failed poll', () => {
+    renderNode({
+      kind: pollingKind,
+      status: 'failed',
+      statusCode: 404,
+      durationMs: 1200,
+      attempts: 1,
+      error: 'cancelled',
+    });
+    expect(screen.getByText('✕ 404 · 1 attempt · cancelled')).toBeInTheDocument();
+  });
 });

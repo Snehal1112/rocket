@@ -22,11 +22,27 @@ pub(crate) struct PollStats {
     pub(crate) elapsed_ms: u64,
 }
 
+/// How a failed repeat-until poll went. It is set only once an attempt got a
+/// response, so the failed step can still show that response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FailedPollStats {
+    pub(crate) attempts: u32,
+    /// Time from the first send to the end of the poll.
+    pub(crate) elapsed_ms: u64,
+    /// Status code of the last response.
+    pub(crate) status_code: u16,
+}
+
+fn millis(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
 impl FlowExecutionService {
     /// Sends `request_input` until `repeat.condition` is truthy. Each attempt
     /// runs the request's scripts. Only the attempt that ends the poll is
-    /// saved to History. A send error or a condition script error fails at
-    /// once; giving up fails with "condition not met after …".
+    /// saved to History. A send error with no response or a condition script
+    /// error fails at once; giving up fails with "condition not met after …".
+    /// Every failure after a response sets `poll_stats`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run_repeat_until(
         &self,
@@ -39,13 +55,26 @@ impl FlowExecutionService {
         debug_on: bool,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
+        poll_stats: &mut Option<FailedPollStats>,
         ctx: &mut NodeRunContext,
     ) -> DomainResult<ExecutedNode> {
         let started = tokio::time::Instant::now();
         let deadline = started + Duration::from_millis(repeat.timeout_ms);
         let interval = Duration::from_millis(repeat.interval_ms);
         let mut attempt: u32 = 0;
+        // The previous attempt's History entry, not yet saved.
+        let mut pending_history = None;
         loop {
+            // Stop can land after the pause ended. No new request is sent then.
+            if attempt > 0 && ctx.cancel.is_cancelled() {
+                if let Some(entry) = &pending_history {
+                    exec.save_deferred_history(entry);
+                }
+                if let Some(stats) = poll_stats.as_mut() {
+                    stats.elapsed_ms = millis(started.elapsed());
+                }
+                return Err(DomainError::Internal("cancelled".to_string()));
+            }
             attempt += 1;
             self.publish_progress(
                 ctx,
@@ -71,8 +100,19 @@ impl FlowExecutionService {
                     ));
                 }
             }
-            // A send that got no response is not retried.
-            let mut output = result?;
+            // A send that got no response is not retried. A stat set by an
+            // earlier attempt stays, with this attempt counted.
+            let mut output = match result {
+                Ok(output) => output,
+                Err(e) => {
+                    if let Some(stats) = poll_stats.as_mut() {
+                        stats.attempts = attempt;
+                        stats.elapsed_ms = millis(started.elapsed());
+                    }
+                    return Err(e);
+                }
+            };
+            let status_code = output.response.status;
             logs.extend(to_flow_logs(output.console_entries.clone()));
             let history = output.deferred_history.take();
             let captured = CapturedOutput::Request(Box::new(output));
@@ -97,6 +137,11 @@ impl FlowExecutionService {
 
             let now = tokio::time::Instant::now();
             let elapsed = now - started;
+            *poll_stats = Some(FailedPollStats {
+                attempts: attempt,
+                elapsed_ms: millis(elapsed),
+                status_code,
+            });
             let gives_up = attempt >= repeat.max_attempts || now >= deadline;
             let ends_poll = !matches!(verdict, Ok(false)) || gives_up;
             if ends_poll {
@@ -112,7 +157,7 @@ impl FlowExecutionService {
                         chosen_exit: handle::RESULT.to_string(),
                         poll: Some(PollStats {
                             attempts: attempt,
-                            elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+                            elapsed_ms: millis(elapsed),
                         }),
                     })
                 }
@@ -132,8 +177,12 @@ impl FlowExecutionService {
                 if let Some(entry) = &history {
                     exec.save_deferred_history(entry);
                 }
+                if let Some(stats) = poll_stats.as_mut() {
+                    stats.elapsed_ms = millis(started.elapsed());
+                }
                 return Err(DomainError::Internal("cancelled".to_string()));
             }
+            pending_history = history;
         }
     }
 }
