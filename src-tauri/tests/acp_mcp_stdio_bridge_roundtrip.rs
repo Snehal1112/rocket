@@ -129,6 +129,16 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
     );
     let response = read_line(&mut reader);
 
+    // Tear down the child process and the HTTP server before any assertion
+    // that could panic -- otherwise a failing/malformed response would leave
+    // a real `rocket --acp-mcp-stdio-bridge` subprocess and a bound port
+    // orphaned, since the code below never runs after a panic.
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    // shutdown() is synchronous (Plan 04's real McpHttpServerHandle) -- no `.await`.
+    handle.shutdown();
+
     let tool_names: Vec<&str> = response["result"]["tools"]
         .as_array()
         .expect("tools array in tools/list response")
@@ -139,12 +149,6 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
         tool_names.contains(&"list_collection_requests"),
         "expected the real Plan 04 tool set to round-trip through the bridge, got {tool_names:?}"
     );
-
-    drop(stdin);
-    let _ = child.kill();
-    let _ = child.wait();
-    // shutdown() is synchronous (Plan 04's real McpHttpServerHandle) -- no `.await`.
-    handle.shutdown();
 }
 
 fn write_line(stdin: &mut std::process::ChildStdin, value: &serde_json::Value) {
