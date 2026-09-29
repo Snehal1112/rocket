@@ -230,6 +230,50 @@ describe('FlowCanvas', () => {
       const path = screen.getByTestId('rf__edge-e1').querySelector('path');
       expect(path).toHaveStyle({ stroke: '#ef4444' });
     });
+
+    it('reports a double-clicked wire through onEdgeEdit', () => {
+      stubLayout();
+      const graph: FlowNode[] = [
+        { id: 'a', kind: { kind: 'Input', label: 'A', value: 'x' }, position: { x: 0, y: 0 } },
+        {
+          id: 'b',
+          kind: {
+            kind: 'Request',
+            label: 'B',
+            source: {
+              type: 'Inline',
+              request: { method: 'GET', url: '', headers: [], body: undefined },
+            },
+          },
+          position: { x: 200, y: 0 },
+        },
+      ];
+      const graphEdges: FlowEdge[] = [
+        {
+          id: 'e1',
+          sourceNodeId: 'a',
+          targetNodeId: 'b',
+          targetField: 'url',
+          expression: 'response.body',
+        },
+      ];
+      const onEdgeEdit = vi.fn();
+      const { container } = render(
+        <FlowCanvas
+          nodes={graph}
+          edges={graphEdges}
+          nodeStatus={{}}
+          onNodesChange={vi.fn()}
+          onEdgesChange={vi.fn()}
+          onConnect={vi.fn()}
+          onEdgeEdit={onEdgeEdit}
+        />,
+      );
+      const edge = container.querySelector('.react-flow__edge');
+      expect(edge).not.toBeNull();
+      fireEvent.doubleClick(edge as Element);
+      expect(onEdgeEdit).toHaveBeenCalledWith('e1');
+    });
   });
 
   describe('toRfEdges', () => {

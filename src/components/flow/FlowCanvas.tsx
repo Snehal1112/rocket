@@ -42,6 +42,8 @@ export interface FlowCanvasProps {
   onNodesChange: (nodes: FlowNode[]) => void;
   onEdgesChange: (edges: FlowEdge[]) => void;
   onConnect: (connection: Connection) => void;
+  // Called when a wire is double-clicked, to edit its script.
+  onEdgeEdit?: (edgeId: string) => void;
   onAddNode?: (node: FlowNode) => void;
   // The collection the current flow belongs to. A dropped request from a
   // different collection is rejected: `RequestSource.Saved` only carries a
@@ -188,6 +190,7 @@ function FlowCanvasInner({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  onEdgeEdit,
   onAddNode,
   flowCollectionName,
   nodeDetail,
@@ -345,6 +348,7 @@ function FlowCanvasInner({
           isValidConnection={isValidConnection}
           onNodeClick={handleNodeClick}
           onEdgeClick={focusPane}
+          onEdgeDoubleClick={(_, edge) => onEdgeEdit?.(edge.id)}
           onPaneClick={focusPane}
           deleteKeyCode={['Backspace', 'Delete']}
           fitView

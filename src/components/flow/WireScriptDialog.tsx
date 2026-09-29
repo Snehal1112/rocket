@@ -25,6 +25,8 @@ interface WireScriptDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCommit: (edge: FlowEdge) => void;
+  // Called after the dialog closes, so the caller can put focus back on the canvas.
+  onCloseFocus?: () => void;
 }
 
 // Returns the header name of a `headers[Name].value` target, or '' for any other target.
@@ -46,6 +48,7 @@ export function WireScriptDialog({
   open,
   onOpenChange,
   onCommit,
+  onCloseFocus,
 }: WireScriptDialogProps) {
   const [expression, setExpression] = useState(edge.expression);
   const [headerName, setHeaderName] = useState(headerNameFromTarget(edge.targetField));
@@ -70,7 +73,15 @@ export function WireScriptDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* nokey keeps Backspace and Delete in the dialog from deleting canvas items. */}
-      <DialogContent className='nokey max-w-3xl'>
+      <DialogContent
+        className='nokey max-w-3xl'
+        onCloseAutoFocus={(event) => {
+          // There is no trigger to focus, so the caller chooses where focus goes.
+          if (!onCloseFocus) return;
+          event.preventDefault();
+          onCloseFocus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Value from source</DialogTitle>
           <DialogDescription>

@@ -115,6 +115,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     [latestFlowTab, tabId, updateFlowGraph],
   );
 
+  const focusCanvas = useCallback(() => {
+    canvasAreaRef.current?.querySelector<HTMLElement>('[data-testid="flow-canvas"]')?.focus();
+  }, []);
+
   // Removes the node and its wires in one update. It never touches saved
   // requests, and nothing is written until the user saves the flow.
   const handleDeleteNode = useCallback(
@@ -128,9 +132,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       );
       setSelectedNodeIds(new Set());
       // The panel and its focused button unmount, so keep focus on the canvas.
-      canvasAreaRef.current?.querySelector<HTMLElement>('[data-testid="flow-canvas"]')?.focus();
+      focusCanvas();
     },
-    [latestFlowTab, tabId, updateFlowGraph],
+    [focusCanvas, latestFlowTab, tabId, updateFlowGraph],
   );
 
   useEffect(() => {
@@ -368,6 +372,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             selectedNodeIds={selectedNodeIds}
             onSelectedNodeIdsChange={setSelectedNodeIds}
             onOpenProperties={(nodeId) => setPanelFocusRequest({ nodeId })}
+            onEdgeEdit={(edgeId) => {
+              const edge = tab.edges.find((e) => e.id === edgeId);
+              // Run when wires carry no value, so there is nothing to edit.
+              if (edge && shouldPromptForExpression(edge)) setPendingEdge(edge);
+            }}
           />
           {pendingEdge && pendingTargetNode && (
             <WireScriptDialog
@@ -380,6 +389,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               edge={pendingEdge}
               targetNode={pendingTargetNode}
               open={pendingEdge !== null}
+              onCloseFocus={focusCanvas}
               onOpenChange={(open) => {
                 if (open) return;
                 if (isUncommittedHeadersEdge(pendingEdge)) {
