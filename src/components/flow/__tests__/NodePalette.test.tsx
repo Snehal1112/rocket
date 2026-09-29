@@ -35,4 +35,25 @@ describe('NodePalette routing entries', () => {
     expect(node.kind.cases).toHaveLength(1);
     expect(node.kind.cases[0]).toMatchObject({ label: 'Case 1', matches: '' });
   });
+
+  it('adds a Poll request node with repeat-until turned on', async () => {
+    const onAddNode = vi.fn();
+    render(<NodePalette onAddNode={onAddNode} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Add node/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Poll request' }));
+    const node = onAddNode.mock.calls[0][0];
+    expect(node.id).toMatch(/^request-/);
+    expect(node.kind).toEqual({
+      kind: 'Request',
+      label: 'New Poll',
+      source: { type: 'Inline', request: { method: 'GET', url: '', headers: [] } },
+      repeatUntil: {
+        condition: 'response.status === 200',
+        intervalMs: 2000,
+        maxAttempts: 30,
+        timeoutMs: 60000,
+      },
+    });
+  });
 });

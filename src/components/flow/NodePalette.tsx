@@ -1,4 +1,12 @@
-import { ArrowLeftFromLine, ArrowRightToLine, GitBranch, Globe, Plus, Split } from 'lucide-react';
+import {
+  ArrowLeftFromLine,
+  ArrowRightToLine,
+  GitBranch,
+  Globe,
+  Plus,
+  Repeat,
+  Split,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -6,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { DEFAULT_REPEAT_UNTIL } from '@/lib/flow-repeat';
 import type { FlowNode } from '@/lib/tauri-api';
 
 let nextId = 0;
@@ -69,6 +78,26 @@ export function NodePalette({ onAddNode }: { onAddNode: (node: FlowNode) => void
           >
             <Globe className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
             Inline Request
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              onAddNode({
+                id: newNodeId('request'),
+                kind: {
+                  kind: 'Request',
+                  label: 'New Poll',
+                  source: {
+                    type: 'Inline',
+                    request: { method: 'GET', url: '', headers: [] },
+                  },
+                  repeatUntil: { ...DEFAULT_REPEAT_UNTIL },
+                },
+                position: defaultPosition,
+              })
+            }
+          >
+            <Repeat className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
+            Poll request
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() =>

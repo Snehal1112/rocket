@@ -192,7 +192,7 @@ Console output, test results and `RequestExecuted` events are still published fo
 - `src/lib/tauri-api.ts` mirrors both.
 - **Request card:** a row under Body, `↻ until <condition> · <interval>s · max <N>`, with the condition truncated. It has no handle. When a run finishes it shows `✓ 200 · 7 attempts · 14.2s`.
 - **Properties panel:** a "Repeat until" section with a switch, the condition in the same editor the If node uses, and number fields for interval (seconds), max attempts and timeout (seconds). Turning the switch on fills the defaults.
-- **Palette:** a "Poll request" entry that adds a Request node with `repeat_until` set to the defaults and the condition `response.status === 200`, then opens the request picker like the normal Request entry.
+- **Palette:** a "Poll request" entry that adds an inline Request node labelled "New Poll" with `repeat_until` set to the defaults (condition `response.status === 200`). The user sets its URL in the properties panel or points it at a saved request there with "Use a saved request…".
 
 ---
 
