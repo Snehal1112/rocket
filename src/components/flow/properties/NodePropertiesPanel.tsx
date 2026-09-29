@@ -6,6 +6,7 @@ import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
 import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
+import { WaitForCallbackEditor } from './WaitForCallbackEditor';
 
 // Picks the editor for the node's kind. Each editor reports a whole new kind,
 // and the caller applies it with one store update.
@@ -49,6 +50,8 @@ function editorFor(
       );
     case 'Output':
       return <LabelOnlyEditor kind={kind} onChange={onChange} />;
+    case 'WaitForCallback':
+      return <WaitForCallbackEditor kind={kind} onChange={onChange} />;
   }
 }
 

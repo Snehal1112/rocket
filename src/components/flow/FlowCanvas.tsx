@@ -28,6 +28,7 @@ import { InputNode } from './nodes/InputNode';
 import { OutputNode } from './nodes/OutputNode';
 import { RequestNode } from './nodes/RequestNode';
 import { SwitchNode } from './nodes/SwitchNode';
+import { WaitForCallbackNode } from './nodes/WaitForCallbackNode';
 
 const nodeTypes = {
   Request: RequestNode,
@@ -35,6 +36,7 @@ const nodeTypes = {
   Output: OutputNode,
   If: IfNode,
   Switch: SwitchNode,
+  WaitForCallback: WaitForCallbackNode,
 };
 
 export interface FlowCanvasProps {
