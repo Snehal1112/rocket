@@ -62,8 +62,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
   const [cycleNodeIds, setCycleNodeIds] = useState<string[]>([]);
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
-  // UI state only. The panel shows while exactly one node is selected.
+  // UI state only. The panel opens on request and stays while that node is the sole selection.
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The node whose properties panel is open, or null when it is closed.
+  const [panelNodeId, setPanelNodeId] = useState<string | null>(null);
   // Set when a palette add opens the panel, so the Label field takes focus.
   const [labelFocusNodeId, setLabelFocusNodeId] = useState<string | null>(null);
   // Set when a node's menu button opens the panel, so the panel takes focus.
@@ -73,11 +75,28 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: tab.id is the trigger.
   useEffect(() => {
     setSelectedNodeIds(new Set());
+    setPanelNodeId(null);
     setLabelFocusNodeId(null);
     setPanelFocusRequest(null);
   }, [tab.id]);
-  // The panel follows the selection. A node that no longer exists shows nothing.
-  const panelNodeId = selectedNodeIds.size === 1 ? [...selectedNodeIds][0] : null;
+  // Any selection other than exactly the panel's node closes the panel.
+  const handleSelectedNodeIdsChange = useCallback((ids: ReadonlySet<string>) => {
+    setSelectedNodeIds(ids);
+    setPanelNodeId((current) =>
+      current !== null && ids.size === 1 && ids.has(current) ? current : null,
+    );
+  }, []);
+  // Opens the panel for one node and asks it to take focus.
+  const handleOpenProperties = useCallback((nodeId: string) => {
+    setPanelNodeId(nodeId);
+    setPanelFocusRequest({ nodeId });
+  }, []);
+  // A deleted node closes its panel.
+  useEffect(() => {
+    setPanelNodeId((current) =>
+      current !== null && tab.nodes.some((n) => n.id === current) ? current : null,
+    );
+  }, [tab.nodes]);
   // Any other selection ends the focus request, so a later open does not steal focus.
   useEffect(() => {
     setLabelFocusNodeId((current) => (current === panelNodeId ? current : null));
@@ -131,6 +150,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         latest.edges.filter((e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId),
       );
       setSelectedNodeIds(new Set());
+      setPanelNodeId(null);
       // The panel and its focused button unmount, so keep focus on the canvas.
       focusCanvas();
     },
@@ -252,10 +272,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     return null;
   }
 
-  // A new node becomes the only selection, so its properties panel opens.
+  // A new node becomes the only selection, and its properties panel opens.
   const handleAddNode = (node: FlowNode) => {
     updateFlowNodes(tab.id, [...tab.nodes, node]);
     setSelectedNodeIds(new Set([node.id]));
+    setPanelNodeId(node.id);
     setLabelFocusNodeId(node.id);
   };
 
@@ -388,8 +409,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             onNodeKindChange={handleNodeKindChange}
             onRemoveSwitchCase={handleRemoveSwitchCase}
             selectedNodeIds={selectedNodeIds}
-            onSelectedNodeIdsChange={setSelectedNodeIds}
-            onOpenProperties={(nodeId) => setPanelFocusRequest({ nodeId })}
+            onSelectedNodeIdsChange={handleSelectedNodeIdsChange}
+            onOpenProperties={handleOpenProperties}
             onEdgeEdit={(edgeId) => {
               const edge = tab.edges.find((e) => e.id === edgeId);
               // Run when wires carry no value, so there is nothing to edit.
@@ -441,7 +462,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               edges={tab.edges}
               collection={collectionName}
               onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
-              onClose={() => setSelectedNodeIds(new Set())}
+              onClose={() => {
+                setSelectedNodeIds(new Set());
+                setPanelNodeId(null);
+              }}
               onDelete={() => handleDeleteNode(panelNode.id)}
               focusRequest={panelFocusRequest}
               autoFocusLabel={panelNode.id === labelFocusNodeId}

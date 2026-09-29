@@ -67,7 +67,7 @@ export interface FlowCanvasProps {
   // selection, as before. FlowPane passes them to drive the properties panel.
   selectedNodeIds?: ReadonlySet<string>;
   onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
-  // Called when a node's menu button opens its properties.
+  // Called when a node's menu button or a double-click opens its properties.
   onOpenProperties?: (nodeId: string) => void;
 }
 
@@ -241,6 +241,14 @@ function FlowCanvasInner({
     focusPane();
   };
 
+  // A double-click selects the node and opens its properties. Double-clicks in
+  // inline editors only select a word, so they are ignored.
+  const handleNodeDoubleClick = (e: React.MouseEvent, node: { id: string }) => {
+    if (e.target instanceof Element && e.target.closest(EDITABLE_TARGET)) return;
+    selectNodes(new Set([node.id]));
+    onOpenProperties?.(node.id);
+  };
+
   const rfNodes = useMemo(
     () =>
       toRfNodes(nodes, nodeStatus, selectedNodeIds, measuredRef.current, nodeDetail, cycleNodeIds),
@@ -359,6 +367,7 @@ function FlowCanvasInner({
           onConnect={onConnect}
           isValidConnection={isValidConnection}
           onNodeClick={handleNodeClick}
+          onNodeDoubleClick={handleNodeDoubleClick}
           onEdgeClick={focusPane}
           onEdgeDoubleClick={(_, edge) => {
             // Editing a wire must not leave it selected, or a later Backspace deletes it.

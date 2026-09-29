@@ -23,9 +23,14 @@ vi.mock('@/components/editor', () => ({ SingleLineEditor: () => null }));
 // jsdom cannot drive React Flow's multi-select gesture, so the canvas is a
 // stand-in that reports a selection through the same callback.
 let reportSelection: (ids: string[]) => void = () => undefined;
+let openProperties: (id: string) => void = () => undefined;
 vi.mock('../FlowCanvas', () => ({
-  FlowCanvas: (props: { onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void }) => {
+  FlowCanvas: (props: {
+    onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
+    onOpenProperties?: (id: string) => void;
+  }) => {
     reportSelection = (ids) => props.onSelectedNodeIdsChange?.(new Set(ids));
+    openProperties = (id) => props.onOpenProperties?.(id);
     return null;
   },
 }));
@@ -52,15 +57,28 @@ describe('FlowPane multi-selection', () => {
     usePaneStore.getState().openTab(tab);
   });
 
-  it('shows the panel for one selected node and closes it for two', () => {
+  it('shows the panel for the opened node and closes it when two are selected', () => {
+    const { root } = usePaneStore.getState();
+    if (root.type !== 'leaf') throw new Error('Expected root to be a leaf');
+    const stored = root.tabs.find((t) => t.id === tab.id);
+    if (!stored || !isFlowTab(stored)) throw new Error('Expected the seeded flow tab');
+    render(<FlowPane tab={stored} groupId={usePaneStore.getState().activeGroupId} />);
+    act(() => {
+      reportSelection(['a']);
+      openProperties('a');
+    });
+    expect(screen.getByTestId('node-properties-panel')).toHaveTextContent('Output · A');
+    act(() => reportSelection(['a', 'b']));
+    expect(screen.queryByTestId('node-properties-panel')).not.toBeInTheDocument();
+  });
+
+  it('does not open the panel for a selection alone', () => {
     const { root } = usePaneStore.getState();
     if (root.type !== 'leaf') throw new Error('Expected root to be a leaf');
     const stored = root.tabs.find((t) => t.id === tab.id);
     if (!stored || !isFlowTab(stored)) throw new Error('Expected the seeded flow tab');
     render(<FlowPane tab={stored} groupId={usePaneStore.getState().activeGroupId} />);
     act(() => reportSelection(['a']));
-    expect(screen.getByTestId('node-properties-panel')).toHaveTextContent('Output · A');
-    act(() => reportSelection(['a', 'b']));
     expect(screen.queryByTestId('node-properties-panel')).not.toBeInTheDocument();
   });
 });
