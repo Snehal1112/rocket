@@ -1073,6 +1073,12 @@ impl FlowExecutionService {
                     poll: None,
                 })
             }
+            // Plan 08 implements waiting. Until then a run fails this node
+            // with a clear reason instead of doing nothing.
+            FlowNodeKind::WaitForCallback { .. } => Err(DomainError::InvalidInput(format!(
+                "node '{}': Wait for callback nodes cannot run yet",
+                node.id
+            ))),
         }
     }
 }
@@ -2214,6 +2220,7 @@ mod tests {
                 expression: "response.body".to_string(),
                 source_handle: rocket_flow::handle::RESULT.to_string(),
             }],
+            callback_host: None,
         }
     }
 
@@ -2254,6 +2261,7 @@ mod tests {
                     source_handle: rocket_flow::handle::RESULT.to_string(),
                 },
             ],
+            callback_host: None,
         }
     }
 
@@ -2432,6 +2440,7 @@ mod tests {
             name: "empty".to_string(),
             nodes: Vec::new(),
             edges: Vec::new(),
+            callback_host: None,
         });
         let exec = exec_with_status(200);
 
@@ -2457,6 +2466,7 @@ mod tests {
             name: "one-node".to_string(),
             nodes: vec![request_flow_node("a", "https://api.example.com/ping")],
             edges: Vec::new(),
+            callback_host: None,
         });
         let exec = exec_with_status(200);
 
@@ -2511,6 +2521,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: Vec::new(),
+            callback_host: None,
         });
         let exec = exec_with_status(200);
         // Cancel before run() is even called is not directly expressible (run_id
@@ -2554,6 +2565,7 @@ mod tests {
                 expression: "response.body".to_string(),
                 source_handle: rocket_flow::handle::RESULT.to_string(),
             }],
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let exec = exec_failing_for_url("https://api.example.com/a");
@@ -2649,6 +2661,7 @@ mod tests {
             name: "global-env-flow".to_string(),
             nodes: vec![request_flow_node("a", "https://api.example.com/{{ORG_ID}}")],
             edges: Vec::new(),
+            callback_host: None,
         };
         let service = service_with_flow(flow);
 
@@ -2757,6 +2770,7 @@ mod tests {
                 target_field: "value".to_string(),
                 ..wire("e1", "in", "out")
             }],
+            callback_host: None,
         };
         let mut input = run_input("scope");
         input.environment_name = environment.map(str::to_string);
@@ -2819,6 +2833,7 @@ mod tests {
                 trigger_edge("e2", "check", handle::TRUE, "yes"),
                 trigger_edge("e3", "check", handle::FALSE, "no"),
             ],
+            callback_host: None,
         };
         let exec = scoped_exec(env_with(&[("ENV_VAR", "acme")]), Vec::new());
         let mut input = run_input("if-env");
@@ -2909,6 +2924,7 @@ mod tests {
                 name: "empty".to_string(),
                 nodes: Vec::new(),
                 edges: Vec::new(),
+                callback_host: None,
             },
             &publisher,
         );
@@ -2935,6 +2951,7 @@ mod tests {
                 name: "empty".to_string(),
                 nodes: Vec::new(),
                 edges: Vec::new(),
+                callback_host: None,
             },
             &publisher,
         );
@@ -2999,6 +3016,7 @@ mod tests {
                 request_flow_node("c", "https://api.example.com/c"),
             ],
             edges: Vec::new(),
+            callback_host: None,
         };
         let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut service = FlowExecutionService::new(
@@ -3050,6 +3068,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
         };
         let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut service = FlowExecutionService::new(
@@ -3119,6 +3138,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: Vec::new(),
+            callback_host: None,
         };
         let service = service_cancelling_on_start(flow, "a");
         let executor = RecordingExecutor::new();
@@ -3150,6 +3170,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
         };
         let service = service_cancelling_on_start(flow, "b");
         let executor = RecordingExecutor::new();
@@ -3169,6 +3190,7 @@ mod tests {
             name: "x".to_string(),
             nodes: Vec::new(),
             edges: Vec::new(),
+            callback_host: None,
         });
         let (handle, signal) = cancel_pair();
         service
@@ -3196,6 +3218,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: Vec::new(),
+            callback_host: None,
         };
         // One run that completes and one that is cancelled.
         for cancel_on in [None, Some("a")] {
@@ -3229,6 +3252,7 @@ mod tests {
                 request_flow_node("c", "https://api.example.com/c"),
             ],
             edges: vec![wire("e1", "a", "b"), wire("e2", "a", "c")],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3274,6 +3298,7 @@ mod tests {
                 wire("e3", "b", "d"),
                 wire("e4", "c", "d"),
             ],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3314,6 +3339,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3369,6 +3395,7 @@ mod tests {
                 request_flow_node("c", "https://api.example.com/c"),
             ],
             edges: vec![],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3395,6 +3422,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3521,6 +3549,7 @@ mod tests {
                 request_flow_node("d", "https://api.example.com/d"),
             ],
             edges: vec![wire("e1", "a", "b"), wire("e2", "b", "c")],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3590,6 +3619,7 @@ mod tests {
                     ..wire("e2", "y", "out")
                 },
             ],
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
@@ -3622,6 +3652,7 @@ mod tests {
                 edge_from("e1", "a", handle::RESULT, "out", "value", "response.body"),
                 edge_from("e2", "b", handle::RESULT, "out", handle::TRIGGER, ""),
             ],
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
@@ -3684,6 +3715,7 @@ mod tests {
                 request_flow_node("c", &url("c")),
             ],
             edges: Vec::new(),
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let mut input = run_input("secrets");
@@ -3712,6 +3744,7 @@ mod tests {
                 request_flow_node("b", "https://api.example.com/b"),
             ],
             edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = FlowExecutionService::new(
@@ -3811,6 +3844,7 @@ mod tests {
                 wire("e1", "a", "b"),
                 edge_from("e2", "b", handle::RESULT, "d", "body", "response.body"),
             ],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -3853,6 +3887,7 @@ mod tests {
                 handle::TRIGGER,
                 "",
             )],
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
@@ -3887,6 +3922,7 @@ mod tests {
                 handle::TRIGGER,
                 "",
             )],
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
@@ -3916,6 +3952,7 @@ mod tests {
                 request_flow_node("c", "https://api.example.com/c"),
             ],
             edges: vec![wire("e1", "a", "c"), wire("e2", "b", "c")],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -4015,6 +4052,7 @@ mod tests {
                 trigger_edge("e2", "check", handle::TRUE, "yes"),
                 trigger_edge("e3", "check", handle::FALSE, "no"),
             ],
+            callback_host: None,
         }
     }
 
@@ -4267,6 +4305,7 @@ mod tests {
                 input_edge("e1", "in", "check"),
                 edge_from("e2", "check", handle::TRUE, "out", "value", "response.body"),
             ],
+            callback_host: None,
         };
         let service = service_with_flow(flow);
         let executor = RecordingExecutor::new();
@@ -4312,6 +4351,7 @@ mod tests {
                 trigger_edge("e3", "plan", &handle::case_handle("pro"), "p"),
                 trigger_edge("e4", "plan", handle::DEFAULT, "d"),
             ],
+            callback_host: None,
         }
     }
 
@@ -4479,6 +4519,7 @@ mod tests {
                     "response.body",
                 ),
             ],
+            callback_host: None,
         }
     }
 
@@ -4953,6 +4994,7 @@ mod tests {
             name: "logs".to_string(),
             nodes: vec![input_node_with("hello", "hello"), output_node_named("out")],
             edges: vec![edge],
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -4985,6 +5027,7 @@ mod tests {
             name: "secret".to_string(),
             nodes: vec![input_node_with("in", "{{TOKEN}}"), output_node_named("out")],
             edges: vec![edge],
+            callback_host: None,
         };
         let mut input = run_input("secret");
         input.environment_name = Some("dev".to_string());
@@ -5088,6 +5131,7 @@ mod tests {
             name: "dbg".to_string(),
             nodes: vec![debug_request_node(debug)],
             edges: Vec::new(),
+            callback_host: None,
         };
         let publisher = RecordingPublisher::new();
         let service = service_with_publisher(flow, &publisher);
@@ -5255,6 +5299,7 @@ mod tests {
             name: "poll".to_string(),
             nodes: vec![node],
             edges: Vec::new(),
+            callback_host: None,
         }
     }
 
@@ -5616,6 +5661,7 @@ mod tests {
                     name: "poll".to_string(),
                     nodes: vec![node],
                     edges: Vec::new(),
+                    callback_host: None,
                 },
             )),
             Box::new(FakeCollectionRepo::new().with_request("my-api", "job.yml", request)),

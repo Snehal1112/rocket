@@ -60,6 +60,7 @@ mod tests {
             name: name.to_string(),
             nodes: Vec::new(),
             edges: Vec::new(),
+            callback_host: None,
         }
     }
 

@@ -241,6 +241,7 @@ mod tests {
             name: "empty".to_string(),
             nodes: vec![],
             edges: vec![],
+            callback_host: None,
         };
         assert_eq!(topological_sort(&flow), Ok(vec![]));
     }
@@ -251,6 +252,7 @@ mod tests {
             name: "disconnected".to_string(),
             nodes: vec![node("a"), node("b"), node("c")],
             edges: vec![],
+            callback_host: None,
         };
         let mut order = topological_sort(&flow).expect("no cycle");
         order.sort();
@@ -266,6 +268,7 @@ mod tests {
             name: "chain".to_string(),
             nodes: vec![node("a"), node("b"), node("c")],
             edges: vec![edge("e1", "a", "b"), edge("e2", "b", "c")],
+            callback_host: None,
         };
         let order = topological_sort(&flow).expect("no cycle");
         assert_eq!(
@@ -285,6 +288,7 @@ mod tests {
                 edge("e3", "b", "d"),
                 edge("e4", "c", "d"),
             ],
+            callback_host: None,
         };
         let order = topological_sort(&flow).expect("no cycle");
         let pos = |id: &str| order.iter().position(|x| x == id).expect("node present");
@@ -300,6 +304,7 @@ mod tests {
             name: "self-loop".to_string(),
             nodes: vec![node("a")],
             edges: vec![edge("e1", "a", "a")],
+            callback_host: None,
         };
         let err = topological_sort(&flow).expect_err("must detect cycle");
         match err {
@@ -321,6 +326,7 @@ mod tests {
                 edge("e2", "b", "c"),
                 edge("e3", "c", "a"),
             ],
+            callback_host: None,
         };
         let err = topological_sort(&flow).expect_err("must detect cycle");
         match err {
@@ -349,6 +355,7 @@ mod tests {
             name: "bad-source".to_string(),
             nodes: vec![node("a")],
             edges: vec![edge("e1", "ghost", "a")],
+            callback_host: None,
         };
         assert_eq!(
             topological_sort(&flow),
@@ -364,6 +371,7 @@ mod tests {
             name: "bad-target".to_string(),
             nodes: vec![node("a")],
             edges: vec![edge("e1", "a", "ghost")],
+            callback_host: None,
         };
         assert_eq!(
             topological_sort(&flow),
@@ -386,6 +394,7 @@ mod tests {
                 edge("e3", "b", "c"),
                 edge("e4", "c", "d"),
             ],
+            callback_host: None,
         };
         assert_eq!(
             topological_sort(&flow),
@@ -402,6 +411,7 @@ mod tests {
             name: "dup".to_string(),
             nodes: vec![node("a"), node("a"), node("b")],
             edges: vec![edge("e1", "a", "b")],
+            callback_host: None,
         };
         assert_eq!(
             topological_sort(&flow),
@@ -417,6 +427,7 @@ mod tests {
             name: "parallel".to_string(),
             nodes: vec![node("b"), node("a")],
             edges: vec![edge("e1", "a", "b"), edge("e2", "a", "b")],
+            callback_host: None,
         };
         assert_eq!(
             topological_sort(&flow),
@@ -434,7 +445,9 @@ mod tests {
                 .into_iter()
                 .map(|id| FlowNode {
                     id: id.to_string(),
-                    kind: FlowNodeKind::Output { label: id.to_string() },
+                    kind: FlowNodeKind::Output {
+                        label: id.to_string(),
+                    },
                     position: NodePosition { x: 0.0, y: 0.0 },
                 })
                 .collect(),
@@ -444,6 +457,7 @@ mod tests {
                 edge_fixture("e3", "b", "d"),
                 edge_fixture("e4", "c", "d"),
             ],
+            callback_host: None,
         }
     }
 
@@ -463,7 +477,10 @@ mod tests {
         let flow = diamond_flow();
         let mut reached = reachable_from(&flow, "a");
         reached.sort();
-        assert_eq!(reached, vec!["b".to_string(), "c".to_string(), "d".to_string()]);
+        assert_eq!(
+            reached,
+            vec!["b".to_string(), "c".to_string(), "d".to_string()]
+        );
     }
 
     #[test]

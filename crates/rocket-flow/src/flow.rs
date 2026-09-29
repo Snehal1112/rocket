@@ -48,6 +48,9 @@ pub struct Flow {
     pub name: String,
     pub nodes: Vec<FlowNode>,
     pub edges: Vec<FlowEdge>,
+    /// Host used in callback URLs. `None` means this machine's LAN IP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_host: Option<String>,
 }
 
 /// Persistence boundary for `Flow`. No I/O in this crate —
@@ -99,6 +102,7 @@ mod tests {
                 expression: "response.body.token".to_string(),
                 source_handle: crate::handle::RESULT.to_string(),
             }],
+            callback_host: None,
         }
     }
 
@@ -328,6 +332,7 @@ mod tests {
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
             edges: vec![],
+            callback_host: None,
         }
     }
 
@@ -351,5 +356,37 @@ mod tests {
         let flow: Flow = serde_yaml::from_str(&yaml).expect("loads");
         let out = serde_yaml::to_string(&flow).expect("serialize");
         assert!(out.contains("debug: true"), "got {out}");
+    }
+
+    #[test]
+    fn flow_without_callback_host_saves_without_the_key() {
+        let flow = Flow {
+            name: "f".to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let yaml = serde_yaml::to_string(&flow).expect("serialize");
+        assert!(!yaml.contains("callback_host"), "got:\n{yaml}");
+        let old_file = "name: f\nnodes: []\nedges: []\n";
+        let loaded: Flow = serde_yaml::from_str(old_file).expect("an old file still loads");
+        assert_eq!(loaded.callback_host, None);
+    }
+
+    #[test]
+    fn flow_with_callback_host_roundtrips() {
+        let flow = Flow {
+            name: "f".to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            callback_host: Some("host.docker.internal".to_string()),
+        };
+        let yaml = serde_yaml::to_string(&flow).expect("serialize");
+        assert!(
+            yaml.contains("callback_host: host.docker.internal"),
+            "got:\n{yaml}"
+        );
+        let back: Flow = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(back, flow);
     }
 }

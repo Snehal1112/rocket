@@ -11,7 +11,7 @@ pub struct NodePosition {
 /// flow runs; `Input` nodes hold a constant/variable-backed value with no
 /// incoming wires; `Output` nodes display whatever their single incoming
 /// wire resolves to. `If` and `Switch` nodes route execution to one of their
-/// named exits.
+/// named exits. `WaitForCallback` nodes wait for an inbound call on a local URL.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FlowNodeKind {
@@ -45,12 +45,34 @@ pub enum FlowNodeKind {
         value: String,
         cases: Vec<SwitchCase>,
     },
+    /// Waits for an inbound HTTP call on a run-scoped local URL. Requests
+    /// use the URL as `{{callback.<name>}}`. Its output is the received call,
+    /// shaped like a response.
+    WaitForCallback {
+        label: String,
+        /// Letters, digits and `_`. Unique within the flow.
+        name: String,
+        timeout_ms: u64,
+        /// Optional script condition over `request`. Calls that do not
+        /// match are answered and ignored.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        accept_when: Option<String>,
+    },
 }
 
 // Keeps `debug: false` out of saved files, so old flows round-trip unchanged.
 fn is_false(b: &bool) -> bool {
     !*b
 }
+
+/// Default, minimum and maximum `timeout_ms` of a Wait for callback node.
+pub const CALLBACK_DEFAULT_TIMEOUT_MS: u64 = 60_000;
+pub const CALLBACK_MIN_TIMEOUT_MS: u64 = 1000;
+pub const CALLBACK_MAX_TIMEOUT_MS: u64 = 3_600_000;
+
+/// Prefix of the run-scoped variable that holds a callback URL:
+/// `callback.<name>`.
+pub const CALLBACK_VAR_PREFIX: &str = "callback.";
 
 /// One named case of a `Switch` node. Edges address a case by `id`, so
 /// renaming its `label` never breaks a wire.
@@ -339,5 +361,38 @@ mod tests {
         let yaml = "kind: Request\nlabel: P\nsource:\n  type: Saved\n  request_path: a.yml\nrepeat_until:\n  condition: x\n  interval_ms: 100\n  max_attempts: 3\n";
         let err = serde_yaml::from_str::<FlowNodeKind>(yaml).expect_err("timeout_ms is required");
         assert!(err.to_string().contains("timeout_ms"), "got: {err}");
+    }
+
+    #[test]
+    fn flow_node_kind_wait_for_callback_roundtrips_in_yaml() {
+        let kind = FlowNodeKind::WaitForCallback {
+            label: "Payment done".to_string(),
+            name: "payment".to_string(),
+            timeout_ms: 60_000,
+            accept_when: Some("request.body.event === \"payment.completed\"".to_string()),
+        };
+        let yaml = serde_yaml::to_string(&kind).expect("serialize");
+        assert!(yaml.contains("kind: WaitForCallback"), "got:\n{yaml}");
+        assert!(
+            yaml.contains("timeout_ms: 60000"),
+            "snake_case on disk, got:\n{yaml}"
+        );
+        assert!(yaml.contains("accept_when:"), "got:\n{yaml}");
+        let back: FlowNodeKind = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn wait_for_callback_without_accept_when_omits_the_key() {
+        let kind = FlowNodeKind::WaitForCallback {
+            label: "Hook".to_string(),
+            name: "hook".to_string(),
+            timeout_ms: CALLBACK_DEFAULT_TIMEOUT_MS,
+            accept_when: None,
+        };
+        let yaml = serde_yaml::to_string(&kind).expect("serialize");
+        assert!(!yaml.contains("accept_when"), "got:\n{yaml}");
+        let back: FlowNodeKind = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(kind, back);
     }
 }

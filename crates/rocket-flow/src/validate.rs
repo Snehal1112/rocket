@@ -1,11 +1,11 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V9). Rules run in table order and the first violation found
+//! §7 (rules V1-V10). Rules run in table order and the first violation found
 //! is returned, so the same file always yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
 use crate::graph::{topological_sort, FlowGraphError};
 use crate::handle;
-use crate::node::FlowNodeKind;
+use crate::node::{FlowNodeKind, CALLBACK_MAX_TIMEOUT_MS, CALLBACK_MIN_TIMEOUT_MS};
 use std::collections::{HashMap, HashSet};
 
 /// Validates `flow` and returns its node ids in topological order.
@@ -25,11 +25,13 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     check_edges(flow, &kinds, |edge, target, _| {
         let accepts_trigger = matches!(
             target,
-            FlowNodeKind::Request { .. } | FlowNodeKind::Output { .. }
+            FlowNodeKind::Request { .. }
+                | FlowNodeKind::Output { .. }
+                | FlowNodeKind::WaitForCallback { .. }
         );
         (edge.target_field == handle::TRIGGER && !accepts_trigger).then(|| {
             format!(
-                "only Request and Output nodes have a '{}' input",
+                "only Request, Output and Wait for callback nodes have a '{}' input",
                 handle::TRIGGER
             )
         })
@@ -37,6 +39,16 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     check_edges(flow, &kinds, |_, target, _| {
         matches!(target, FlowNodeKind::Input { .. })
             .then(|| "Input nodes cannot receive wires".to_string())
+    })?;
+    check_edges(flow, &kinds, |edge, target, _| {
+        (matches!(target, FlowNodeKind::WaitForCallback { .. })
+            && edge.target_field != handle::TRIGGER)
+            .then(|| {
+                format!(
+                    "Wait for callback nodes only have a '{}' input",
+                    handle::TRIGGER
+                )
+            })
     })?;
     check_edges(flow, &kinds, |edge, _, source| {
         (!source_handle_exists(source, &edge.source_handle))
@@ -52,6 +64,7 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     })?;
     check_expressions(flow)?;
     check_repeat_until(flow)?;
+    check_wait_nodes(flow)?;
 
     Ok(order)
 }
@@ -67,6 +80,7 @@ fn kind_name(kind: &FlowNodeKind) -> &'static str {
         FlowNodeKind::Output { .. } => "Output",
         FlowNodeKind::If { .. } => "If",
         FlowNodeKind::Switch { .. } => "Switch",
+        FlowNodeKind::WaitForCallback { .. } => "Wait for callback",
     }
 }
 
@@ -153,9 +167,9 @@ fn kind_of<'a>(
 /// V5: the exits each node kind has.
 fn source_handle_exists(source: &FlowNodeKind, source_handle: &str) -> bool {
     match source {
-        FlowNodeKind::Request { .. } | FlowNodeKind::Input { .. } => {
-            source_handle == handle::RESULT
-        }
+        FlowNodeKind::Request { .. }
+        | FlowNodeKind::Input { .. }
+        | FlowNodeKind::WaitForCallback { .. } => source_handle == handle::RESULT,
         FlowNodeKind::Output { .. } => false,
         FlowNodeKind::If { .. } => source_handle == handle::TRUE || source_handle == handle::FALSE,
         FlowNodeKind::Switch { cases, .. } => {
@@ -244,6 +258,52 @@ fn check_repeat_until(flow: &Flow) -> Result<(), FlowGraphError> {
         };
         if let Some(reason) = reason {
             return Err(invalid_node(node, reason));
+        }
+    }
+    Ok(())
+}
+
+/// V10: a Wait for callback node has a usable, unique name, a timeout in
+/// range, and no blank `accept_when`.
+fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
+    let mut seen = HashSet::new();
+    for node in &flow.nodes {
+        let FlowNodeKind::WaitForCallback {
+            name,
+            timeout_ms,
+            accept_when,
+            ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        let valid_name =
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !valid_name {
+            return Err(invalid_node(
+                node,
+                format!("the Wait for callback name '{name}' must use only letters, digits and _"),
+            ));
+        }
+        if !seen.insert(name.as_str()) {
+            return Err(invalid_node(
+                node,
+                format!("more than one Wait for callback node is named '{name}'"),
+            ));
+        }
+        if !(CALLBACK_MIN_TIMEOUT_MS..=CALLBACK_MAX_TIMEOUT_MS).contains(timeout_ms) {
+            return Err(invalid_node(
+                node,
+                format!(
+                    "the Wait for callback timeout must be between {CALLBACK_MIN_TIMEOUT_MS} and {CALLBACK_MAX_TIMEOUT_MS} ms"
+                ),
+            ));
+        }
+        if accept_when.as_deref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(invalid_node(
+                node,
+                "the Wait for callback node's accept_when is empty".to_string(),
+            ));
         }
     }
     Ok(())
@@ -341,6 +401,7 @@ mod tests {
             name: "f".to_string(),
             nodes,
             edges,
+            callback_host: None,
         }
     }
 
@@ -707,7 +768,10 @@ mod tests {
 
     #[test]
     fn a_valid_repeat_until_passes() {
-        let f = flow(vec![polling_request("p", crate::node::RepeatUntil::default())], vec![]);
+        let f = flow(
+            vec![polling_request("p", crate::node::RepeatUntil::default())],
+            vec![],
+        );
         assert!(validate(&f).is_ok());
     }
 
@@ -718,7 +782,10 @@ mod tests {
             ..Default::default()
         };
         let f = flow(vec![polling_request("p", repeat)], vec![]);
-        assert_eq!(invalid_node_reason(validate(&f)), "the repeat-until condition is empty");
+        assert_eq!(
+            invalid_node_reason(validate(&f)),
+            "the repeat-until condition is empty"
+        );
     }
 
     #[test]
@@ -787,5 +854,110 @@ mod tests {
             invalid_node_reason(validate(&f)),
             "repeat-until timeout must not be shorter than the interval"
         );
+    }
+
+    fn wait_node(id: &str, name: &str, timeout_ms: u64) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::WaitForCallback {
+                label: id.to_string(),
+                name: name.to_string(),
+                timeout_ms,
+                accept_when: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_wait_node_with_a_run_when_wire_is_valid() {
+        let f = flow(
+            vec![
+                request("register"),
+                wait_node("w", "payment", 60_000),
+                request("use"),
+            ],
+            vec![
+                edge("e1", "register", handle::RESULT, "w", handle::TRIGGER),
+                edge("e2", "w", handle::RESULT, "use", "url"),
+            ],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn a_wait_node_rejects_a_data_input() {
+        let f = flow(
+            vec![request("a"), wait_node("w", "payment", 60_000)],
+            vec![edge("e1", "a", handle::RESULT, "w", "url")],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn a_wait_node_has_only_a_result_exit() {
+        let f = flow(
+            vec![wait_node("w", "payment", 60_000), request("b")],
+            vec![edge("e1", "w", handle::TRUE, "b", handle::TRIGGER)],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn a_wait_node_name_must_use_letters_digits_and_underscores() {
+        for bad in ["", "pay ment", "pay-ment", "päy", "a.b"] {
+            let f = flow(vec![wait_node("w", bad, 60_000)], Vec::new());
+            assert_eq!(
+                invalid_node_id(validate(&f)),
+                "w",
+                "name {bad:?} must be rejected"
+            );
+        }
+        let f = flow(vec![wait_node("w", "Payment_2", 60_000)], Vec::new());
+        assert!(validate(&f).is_ok());
+    }
+
+    #[test]
+    fn wait_node_names_must_be_unique() {
+        let f = flow(
+            vec![
+                wait_node("w1", "payment", 60_000),
+                wait_node("w2", "payment", 60_000),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "w2");
+    }
+
+    #[test]
+    fn a_wait_node_timeout_must_be_between_one_second_and_one_hour() {
+        for bad in [0, 999, 3_600_001] {
+            let f = flow(vec![wait_node("w", "payment", bad)], Vec::new());
+            assert_eq!(
+                invalid_node_id(validate(&f)),
+                "w",
+                "timeout {bad} must be rejected"
+            );
+        }
+        for good in [1000, 3_600_000] {
+            let f = flow(vec![wait_node("w", "payment", good)], Vec::new());
+            assert!(validate(&f).is_ok(), "timeout {good} is allowed");
+        }
+    }
+
+    #[test]
+    fn a_blank_accept_when_is_rejected() {
+        let f = flow(
+            vec![node(
+                "w",
+                FlowNodeKind::WaitForCallback {
+                    label: "w".to_string(),
+                    name: "payment".to_string(),
+                    timeout_ms: 60_000,
+                    accept_when: Some("   ".to_string()),
+                },
+            )],
+            Vec::new(),
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "w");
     }
 }

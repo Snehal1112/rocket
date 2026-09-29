@@ -70,6 +70,7 @@ mod tests {
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
             edges: vec![],
+            callback_host: None,
         }
     }
 
@@ -195,6 +196,7 @@ mod tests {
                     source_handle: rocket_flow::handle::RESULT.to_string(),
                 },
             ],
+            callback_host: None,
         }
     }
 
@@ -280,6 +282,7 @@ mod tests {
                 },
             )],
             edges: vec![],
+            callback_host: None,
         };
         let err = svc
             .save("demo", flow)
@@ -318,6 +321,7 @@ mod tests {
                 expression: "response.body".to_string(),
                 source_handle: rocket_flow::handle::RESULT.to_string(),
             }],
+            callback_host: None,
         };
         let message = svc
             .save("demo", flow)

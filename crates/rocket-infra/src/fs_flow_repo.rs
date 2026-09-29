@@ -176,6 +176,7 @@ mod tests {
                 position: NodePosition { x: 100.0, y: 200.0 },
             }],
             edges: Vec::new(),
+            callback_host: None,
         }
     }
 
@@ -347,6 +348,7 @@ mod tests {
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
             edges: Vec::new(),
+            callback_host: None,
         };
         repo.save("acme", &flow).expect("save");
         let loaded = repo.get("acme", "Saved Source Flow").expect("get");
@@ -379,6 +381,7 @@ mod tests {
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
             edges: Vec::new(),
+            callback_host: None,
         };
         repo.save("acme", &flow).expect("save");
         let loaded = repo.get("acme", "Inline Source Flow").expect("get");
@@ -408,6 +411,7 @@ mod tests {
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
             edges: Vec::new(),
+            callback_host: None,
         };
         repo.save("acme", &flow).expect("save");
         let loaded = repo.get("acme", "No Body Flow").expect("get");
@@ -647,6 +651,7 @@ mod tests {
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
             edges: Vec::new(),
+            callback_host: None,
         };
         repo.save("acme", &flow).expect("save");
         let loaded = repo.get("acme", "Poll Flow").expect("get");
@@ -669,6 +674,43 @@ mod tests {
         assert_eq!(
             resaved, original,
             "a Request without repeat_until must re-save unchanged"
+        );
+    }
+
+    #[test]
+    fn wait_for_callback_node_and_callback_host_roundtrip_on_disk() {
+        let (dir, repo) = setup();
+        let mut flow = sample("Callback Flow");
+        flow.callback_host = Some("host.docker.internal".to_string());
+        flow.nodes.push(FlowNode {
+            id: "wait-1".to_string(),
+            kind: FlowNodeKind::WaitForCallback {
+                label: "Payment done".to_string(),
+                name: "payment".to_string(),
+                timeout_ms: 60_000,
+                accept_when: Some("request.body.ok".to_string()),
+            },
+            position: NodePosition { x: 300.0, y: 200.0 },
+        });
+        repo.save("acme", &flow).expect("save");
+
+        let loaded = repo.get("acme", "Callback Flow").expect("get");
+        assert_eq!(loaded, flow);
+        let raw = fs::read_to_string(
+            dir.path()
+                .join("acme")
+                .join("flows")
+                .join("callback-flow.yml"),
+        )
+        .expect("read saved flow file");
+        assert!(
+            raw.contains("callback_host: host.docker.internal"),
+            "got:\n{raw}"
+        );
+        assert!(raw.contains("kind: WaitForCallback"), "got:\n{raw}");
+        assert!(
+            !raw.contains("timeoutMs"),
+            "no camelCase on disk, got:\n{raw}"
         );
     }
 }

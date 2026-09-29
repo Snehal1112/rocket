@@ -163,6 +163,13 @@ pub enum FlowNodeKindDto {
         value: String,
         cases: Vec<SwitchCaseDto>,
     },
+    WaitForCallback {
+        label: String,
+        name: String,
+        timeout_ms: u64,
+        #[serde(default)]
+        accept_when: Option<String>,
+    },
 }
 impl From<FlowNodeKind> for FlowNodeKindDto {
     fn from(k: FlowNodeKind) -> Self {
@@ -189,6 +196,17 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
                 label,
                 value,
                 cases: cases.into_iter().map(Into::into).collect(),
+            },
+            FlowNodeKind::WaitForCallback {
+                label,
+                name,
+                timeout_ms,
+                accept_when,
+            } => FlowNodeKindDto::WaitForCallback {
+                label,
+                name,
+                timeout_ms,
+                accept_when,
             },
         }
     }
@@ -218,6 +236,17 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
                 label,
                 value,
                 cases: cases.into_iter().map(Into::into).collect(),
+            },
+            FlowNodeKindDto::WaitForCallback {
+                label,
+                name,
+                timeout_ms,
+                accept_when,
+            } => FlowNodeKind::WaitForCallback {
+                label,
+                name,
+                timeout_ms,
+                accept_when,
             },
         }
     }
@@ -323,6 +352,8 @@ pub struct FlowDto {
     pub name: String,
     pub nodes: Vec<FlowNodeDto>,
     pub edges: Vec<FlowEdgeDto>,
+    #[serde(default)]
+    pub callback_host: Option<String>,
 }
 impl From<Flow> for FlowDto {
     fn from(f: Flow) -> Self {
@@ -330,6 +361,7 @@ impl From<Flow> for FlowDto {
             name: f.name,
             nodes: f.nodes.into_iter().map(Into::into).collect(),
             edges: f.edges.into_iter().map(Into::into).collect(),
+            callback_host: f.callback_host,
         }
     }
 }
@@ -339,6 +371,7 @@ impl From<FlowDto> for Flow {
             name: f.name,
             nodes: f.nodes.into_iter().map(Into::into).collect(),
             edges: f.edges.into_iter().map(Into::into).collect(),
+            callback_host: f.callback_host,
         }
     }
 }
@@ -460,6 +493,7 @@ mod tests {
                 expression: "response.body".to_string(),
                 source_handle: "result".to_string(),
             }],
+            callback_host: None,
         }
     }
 
@@ -545,7 +579,10 @@ mod tests {
         assert!(matches!(
             back,
             FlowNodeKindDto::Request {
-                repeat_until: Some(RepeatUntilDto { max_attempts: 4, .. }),
+                repeat_until: Some(RepeatUntilDto {
+                    max_attempts: 4,
+                    ..
+                }),
                 ..
             }
         ));
@@ -664,6 +701,7 @@ mod tests {
                 expression: String::new(),
                 source_handle: "true".to_string(),
             }],
+            callback_host: None,
         }
     }
 
@@ -714,5 +752,35 @@ mod tests {
         assert!(json.contains(r#""sourceHandle":"true""#), "got: {json}");
         let domain: Flow = dto.into();
         assert_eq!(domain.edges[0].source_handle, "true");
+    }
+
+    #[test]
+    fn wait_for_callback_dto_uses_camel_case_json_and_roundtrips() {
+        let json = r#"{
+            "name": "cb",
+            "callbackHost": "host.docker.internal",
+            "nodes": [{
+                "id": "w",
+                "kind": { "kind": "WaitForCallback", "label": "Hook", "name": "payment",
+                          "timeoutMs": 60000, "acceptWhen": "request.body.ok" },
+                "position": { "x": 0, "y": 0 }
+            }],
+            "edges": []
+        }"#;
+        let dto: FlowDto = serde_json::from_str(json).expect("parse");
+        let flow: Flow = dto.into();
+        assert_eq!(flow.callback_host.as_deref(), Some("host.docker.internal"));
+        assert_eq!(
+            flow.nodes[0].kind,
+            FlowNodeKind::WaitForCallback {
+                label: "Hook".to_string(),
+                name: "payment".to_string(),
+                timeout_ms: 60_000,
+                accept_when: Some("request.body.ok".to_string()),
+            }
+        );
+        let back = serde_json::to_string(&FlowDto::from(flow)).expect("serialize");
+        assert!(back.contains("\"timeoutMs\":60000"), "got: {back}");
+        assert!(back.contains("\"callbackHost\""), "got: {back}");
     }
 }
