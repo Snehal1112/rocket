@@ -688,6 +688,14 @@ impl FlowExecutionService {
         let nodes_by_id: HashMap<&str, &FlowNode> =
             flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
+        // Open every callback endpoint before the run is registered or
+        // announced. A failure here ends the call with no events and nothing
+        // left in `in_flight`. `callbacks` lives until `run` returns, so
+        // every endpoint closes on every exit path.
+        let mut callbacks =
+            crate::flow_callbacks::RunCallbacks::open_all(self.callback_listener.as_ref(), &flow)
+                .await?;
+
         let run_id = Ulid::new().to_string();
         let (registration, cancel_signal) = RunRegistration::new(self, &run_id);
         self.events.publish(DomainEvent::FlowRunStarted {
@@ -756,6 +764,7 @@ impl FlowExecutionService {
                                 &mut node_debug,
                                 &mut node_poll_stats,
                                 &mut ctx,
+                                &mut callbacks,
                             )
                             .await
                         }
@@ -895,6 +904,7 @@ impl FlowExecutionService {
         debug: &mut Option<FlowDebugRequest>,
         poll_stats: &mut Option<crate::flow_poll::FailedPollStats>,
         ctx: &mut NodeRunContext,
+        callbacks: &mut crate::flow_callbacks::RunCallbacks,
     ) -> DomainResult<ExecutedNode> {
         // Script logs redact the same secrets a Request node's script does.
         let secret_values = exec.secret_values(
@@ -961,6 +971,9 @@ impl FlowExecutionService {
                     input.global_env_name.as_deref(),
                     node,
                 )?;
+                // Callback URLs (`{{callback.<name>}}`) resolve in every
+                // field and script of every request in the run.
+                request_input.flow_vars = callbacks.vars().clone();
 
                 let mut resolved = HashMap::new();
                 for edge in data_edges {
@@ -2351,6 +2364,26 @@ mod tests {
             },
             position: NodePosition { x: 0.0, y: 0.0 },
         }
+    }
+
+    fn wait_node(id: &str, name: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::WaitForCallback {
+                label: format!("Wait {id}"),
+                name: name.to_string(),
+                timeout_ms: 1000,
+                accept_when: None,
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn service_with_listener(
+        flow: Flow,
+        fake: &Arc<crate::test_doubles::FakeCallbackListener>,
+    ) -> FlowExecutionService {
+        service_with_flow(flow).with_callback_listener(Box::new(Arc::clone(fake)))
     }
 
     struct FixedResponseExecutor {
@@ -5764,5 +5797,162 @@ mod tests {
         )
         .with_callback_listener(Box::new(Arc::clone(&fake)));
         assert_eq!(fake.opened_count(), 0, "building the service opens nothing");
+    }
+
+    #[tokio::test]
+    async fn a_request_url_resolves_the_callback_variable() {
+        let flow = Flow {
+            name: "cb".to_string(),
+            nodes: vec![
+                request_flow_node(
+                    "reg",
+                    "https://api.example.com/register?cb={{callback.payment}}",
+                ),
+                wait_node("w", "payment"),
+            ],
+            edges: vec![trigger_edge("e1", "reg", handle::RESULT, "w")],
+            callback_host: None,
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        service_with_listener(flow, &fake)
+            .run(&exec, run_input("cb"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/register?cb=http://fake:1/cb/0".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn two_wait_nodes_get_their_own_urls() {
+        let flow = Flow {
+            name: "two".to_string(),
+            nodes: vec![
+                wait_node("w1", "first"),
+                wait_node("w2", "second"),
+                request_flow_node(
+                    "reg",
+                    "https://api.example.com/r?a={{callback.first}}&b={{callback.second}}",
+                ),
+            ],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        service_with_listener(flow, &fake)
+            .run(&exec, run_input("two"))
+            .await
+            .expect("run");
+
+        assert_eq!(fake.opened_count(), 2);
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/r?a=http://fake:1/cb/0&b=http://fake:1/cb/1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flow_without_wait_nodes_opens_no_listener() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        service_with_listener(linear_flow(), &fake)
+            .run(&exec, run_input("auth-flow"))
+            .await
+            .expect("run");
+
+        assert_eq!(fake.opened_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_flow_callback_host_is_passed_to_the_listener() {
+        let flow = Flow {
+            name: "host".to_string(),
+            nodes: vec![wait_node("w", "payment")],
+            edges: Vec::new(),
+            callback_host: Some("host.docker.internal".to_string()),
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        service_with_listener(flow, &fake)
+            .run(&exec, run_input("host"))
+            .await
+            .expect("run");
+
+        assert_eq!(fake.hosts(), vec![Some("host.docker.internal".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn every_endpoint_is_closed_when_the_run_ends() {
+        let flow = Flow {
+            name: "close".to_string(),
+            nodes: vec![wait_node("w", "payment")],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        service_with_listener(flow, &fake)
+            .run(&exec, run_input("close"))
+            .await
+            .expect("run");
+
+        assert!(fake.is_closed(0));
+    }
+
+    #[tokio::test]
+    async fn a_listener_failure_fails_the_run_before_it_starts() {
+        let flow = Flow {
+            name: "fail".to_string(),
+            nodes: vec![wait_node("w", "payment")],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::failing("port in use");
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher)
+            .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let err = service
+            .run(&exec, run_input("fail"))
+            .await
+            .err()
+            .expect("the run must fail");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("could not open callback listener"),
+            "got: {message}"
+        );
+        assert!(message.contains("port in use"), "got: {message}");
+        assert!(
+            publisher.events().is_empty(),
+            "no FlowRunStarted or any other event for a run that never started"
+        );
+        assert!(
+            !publisher
+                .events()
+                .iter()
+                .any(|e| matches!(e, DomainEvent::FlowRunStarted { .. })),
+            "a run that never started must not publish FlowRunStarted"
+        );
+        assert!(service.in_flight.lock().expect("lock").is_empty());
+        assert!(service.cancelled.lock().expect("lock").is_empty());
+        assert!(service.cancel_handles.lock().expect("lock").is_empty());
     }
 }
