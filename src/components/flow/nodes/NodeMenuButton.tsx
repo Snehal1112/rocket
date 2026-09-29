@@ -1,4 +1,5 @@
 import { MoreVertical } from 'lucide-react';
+import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -21,6 +22,7 @@ interface NodeMenuButtonProps {
 // the button away from the canvas.
 export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
   const { openProperties } = useFlowNodeActions();
+  const openedProperties = useRef(false);
   const trigger = (
     <Button
       type='button'
@@ -41,8 +43,25 @@ export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       {/* The menu is portalled out of the node, so without `nokey` a Backspace
           inside it would delete the selected node. */}
-      <DropdownMenuContent className='nokey' align='end'>
-        <DropdownMenuItem onSelect={() => openProperties(nodeId)}>Edit properties</DropdownMenuItem>
+      <DropdownMenuContent
+        className='nokey'
+        align='end'
+        onCloseAutoFocus={(event) => {
+          // Radix returns focus to the trigger after this. Open the panel only
+          // now, so its focus request runs last and the trigger cannot steal it.
+          if (!openedProperties.current) return;
+          openedProperties.current = false;
+          event.preventDefault();
+          openProperties(nodeId);
+        }}
+      >
+        <DropdownMenuItem
+          onSelect={() => {
+            openedProperties.current = true;
+          }}
+        >
+          Edit properties
+        </DropdownMenuItem>
         <DropdownMenuCheckboxItem
           checked={debug.enabled}
           onCheckedChange={(value) => debug.onToggle(value === true)}

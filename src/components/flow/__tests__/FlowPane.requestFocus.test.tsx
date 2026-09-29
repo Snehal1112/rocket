@@ -160,6 +160,16 @@ describe('FlowPane Request node panel keeps focus', () => {
     vi.mocked(getCollection).mockResolvedValue(collection);
   });
 
+  it('moves focus into the panel after Edit properties and keeps the node on Backspace', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByLabelText('Edit Filled'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
+    await expectFocusInPanel();
+    await user.keyboard('{Backspace}');
+    expect(nodeIds()).toContain('filled');
+  });
+
   it('keeps the node on Backspace after cancelling a use-saved confirmation', async () => {
     const user = userEvent.setup();
     render(<Harness />);
