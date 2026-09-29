@@ -1,5 +1,9 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
+import { Check, Copy } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { TRIGGER_HANDLE } from '@/lib/flow-handles';
+import { formatOutputValue } from '@/lib/flow-output';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { NodeMenuButton } from './NodeMenuButton';
@@ -16,13 +20,35 @@ export interface OutputNodeData {
   value?: string;
 }
 
+const COPIED_MS = 1500;
+
 export function OutputNode({ id, data, isConnectable }: NodeProps & { data: OutputNodeData }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Clear the pending reset so it cannot fire after unmount.
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const value = data.value;
+
+  const copy = () => {
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(
+      () => {
+        setCopied(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+      },
+      (err) => console.warn('Copy failed', err),
+    );
+  };
+
   return (
     <div
       data-testid='output-node-card'
       data-status={data.status}
       className={cn(
-        'w-48 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
+        'w-max min-w-48 max-w-[28rem] rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         nodeStatusClassName(data.status, data.skipReason),
         data.hasCycleError && 'ring-2 ring-red-500',
       )}
@@ -42,6 +68,7 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
         id='value'
         position={Position.Left}
         isConnectable={isConnectable}
+        style={{ top: 30 }}
         className='!h-2 !w-2'
       />
       <div className='flex items-center gap-1.5 border-b px-2 py-1.5 font-medium'>
@@ -49,7 +76,31 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
       <NodeStatusCaption status={data.status} skipReason={data.skipReason} error={data.error} />
-      <div className='truncate px-2 py-1.5 text-muted-foreground'>{data.value ?? '—'}</div>
+      <div className='flex items-start gap-1 px-2 py-1.5 text-muted-foreground'>
+        {value === undefined ? (
+          <span>—</span>
+        ) : (
+          <pre
+            data-testid='output-node-value'
+            className='nowheel nodrag nokey max-h-80 min-w-0 flex-1 select-text overflow-auto whitespace-pre-wrap font-mono text-[11px] [overflow-wrap:anywhere]'
+          >
+            {value === '' ? <span className='italic'>(empty)</span> : formatOutputValue(value)}
+          </pre>
+        )}
+        {value ? (
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon'
+            className='nodrag nokey h-5 w-5 shrink-0'
+            aria-label='Copy value'
+            title='Copy value'
+            onClick={copy}
+          >
+            {copied ? <Check className='h-3 w-3' /> : <Copy className='h-3 w-3' />}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

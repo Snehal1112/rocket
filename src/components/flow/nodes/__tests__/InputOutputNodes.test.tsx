@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { InputNode } from '../InputNode';
 import { OutputNode } from '../OutputNode';
 
@@ -169,5 +169,77 @@ describe('run status on Input/Output nodes', () => {
       />,
     );
     expect(screen.getByTestId('node-error')).toHaveTextContent('Error');
+  });
+});
+
+describe('OutputNode value display', () => {
+  const props = {
+    selected: false,
+    dragging: false,
+    zIndex: 0,
+    isConnectable: true,
+    draggable: true,
+    selectable: true,
+    deletable: true,
+    positionAbsoluteX: 0,
+    positionAbsoluteY: 0,
+  };
+
+  function renderOutput(value?: string) {
+    return wrap(
+      <OutputNode
+        {...props}
+        id='o1'
+        type='Output'
+        data={{ kind: { kind: 'Output', label: 'Result' }, status: 'success', value }}
+      />,
+    );
+  }
+
+  function mockClipboard(writeText: () => Promise<void>) {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  }
+
+  it('pretty-prints a JSON value', () => {
+    renderOutput('{"token":"abc"}');
+    expect(screen.getByTestId('output-node-value').textContent).toContain('\n  "token": "abc"\n');
+  });
+
+  it('shows (empty) and no copy button for an empty value', () => {
+    renderOutput('');
+    expect(screen.getByText('(empty)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy value' })).toBeNull();
+  });
+
+  it('shows a dash and no copy button for an undefined value', () => {
+    renderOutput(undefined);
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy value' })).toBeNull();
+  });
+
+  it('copies the raw value and shows a check icon', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    renderOutput('{"token":"abc"}');
+    const btn = screen.getByRole('button', { name: 'Copy value' });
+    expect(btn.querySelector('.lucide-copy')).not.toBeNull();
+    fireEvent.click(btn);
+    expect(writeText).toHaveBeenCalledWith('{"token":"abc"}');
+    await waitFor(() => expect(btn.querySelector('.lucide-check')).not.toBeNull());
+  });
+
+  it('does not crash when the clipboard write is rejected', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    mockClipboard(writeText);
+    renderOutput('x');
+    const btn = screen.getByRole('button', { name: 'Copy value' });
+    fireEvent.click(btn);
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(btn.querySelector('.lucide-copy')).not.toBeNull();
+  });
+
+  it('marks the value area for wheel, drag and key isolation', () => {
+    renderOutput('x');
+    expect(screen.getByTestId('output-node-value')).toHaveClass('nowheel', 'nodrag', 'nokey');
   });
 });
