@@ -1076,6 +1076,29 @@ describe('Flow tab actions', () => {
     expect(tab?.edges).toEqual([]);
     expect(tab?.isDirty).toBe(true);
   });
+
+  it('openFlowTab loads the callback host', async () => {
+    vi.mocked(getFlow).mockResolvedValue({
+      name: 'My Flow',
+      nodes: [],
+      edges: [],
+      callbackHost: 'host.docker.internal',
+    });
+    await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
+    expect(findFirstFlowTab()?.callbackHost).toBe('host.docker.internal');
+  });
+
+  it('setFlowCallbackHost stores the host and marks the tab dirty', async () => {
+    vi.mocked(getFlow).mockResolvedValue({ name: 'My Flow', nodes: [], edges: [] });
+    await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
+    const tabId = findFirstFlowTab()?.id ?? '';
+
+    usePaneStore.getState().setFlowCallbackHost(tabId, '10.0.0.5');
+
+    const tab = findFirstFlowTab();
+    expect(tab?.callbackHost).toBe('10.0.0.5');
+    expect(tab?.isDirty).toBe(true);
+  });
 });
 
 describe('Agent chat session actions', () => {

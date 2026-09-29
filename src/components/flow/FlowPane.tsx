@@ -33,6 +33,7 @@ import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
+import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
@@ -44,6 +45,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const closeTab = usePaneStore((s) => s.closeTab);
   const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
   const updateFlowGraph = usePaneStore((s) => s.updateFlowGraph);
+  const setFlowCallbackHost = usePaneStore((s) => s.setFlowCallbackHost);
   const updateFlowEdges = usePaneStore((s) => s.updateFlowEdges);
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
   const patchFlowNodeProgress = usePaneStore((s) => s.patchFlowNodeProgress);
@@ -288,6 +290,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         name: flowName,
         nodes: tab.nodes,
         edges: tab.edges,
+        ...(tab.callbackHost ? { callbackHost: tab.callbackHost } : {}),
       });
       setCycleNodeIds([]);
       setCycleEdgeIds([]);
@@ -349,6 +352,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       <ResizablePanel id='flow-canvas-panel' minSize='40%'>
         <div ref={canvasAreaRef} className='relative h-full'>
           <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
+            {tab.nodes.some((n) => n.kind.kind === 'WaitForCallback') && (
+              <CallbackHostSetting
+                value={tab.callbackHost}
+                onChange={(host) => setFlowCallbackHost(tab.id, host)}
+              />
+            )}
             <FlowToolbar
               collection={collectionName}
               flowName={flowName}

@@ -231,6 +231,7 @@ export interface PaneState {
   updateFlowEdges: (tabId: string, edges: FlowEdge[]) => void;
   /** Replaces nodes and edges together, so dependent edits land in one update. */
   updateFlowGraph: (tabId: string, nodes: FlowNode[], edges: FlowEdge[]) => void;
+  setFlowCallbackHost: (tabId: string, host: string | null) => void;
   patchFlowNodeStatus: (
     tabId: string,
     nodeId: string,
@@ -740,12 +741,14 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   async openFlowTab(collectionName, flowName) {
     let nodes: FlowNode[] = [];
     let edges: FlowEdge[] = [];
+    let callbackHost: string | null = null;
     let resolvedFlowName: string | null = flowName ?? null;
     if (collectionName && flowName) {
       try {
         const flow: Flow = await getFlow(collectionName, flowName);
         nodes = flow.nodes;
         edges = flow.edges;
+        callbackHost = flow.callbackHost ?? null;
       } catch (err) {
         console.error('[pane-store] openFlowTab: failed to load flow', err);
         resolvedFlowName = null;
@@ -760,6 +763,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       flowName: resolvedFlowName,
       nodes,
       edges,
+      callbackHost,
       nodeStatus: {},
       runState: 'idle',
     };
@@ -786,6 +790,14 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
         isFlowTab(tab) ? { ...tab, nodes, edges, isDirty: true } : tab,
+      ),
+    });
+  },
+
+  setFlowCallbackHost(tabId, host) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, callbackHost: host, isDirty: true } : tab,
       ),
     });
   },

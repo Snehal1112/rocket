@@ -207,6 +207,56 @@ describe('FlowPane save', () => {
     expect(reopened && 'nodes' in reopened ? reopened.nodes : undefined).toEqual(flowTab.nodes);
     expect(reopened && 'edges' in reopened ? reopened.edges : undefined).toEqual(flowTab.edges);
   });
+
+  it('saves callbackHost when it is set', async () => {
+    vi.mocked(saveFlow).mockResolvedValue(undefined);
+    const withHost: FlowTab = { ...flowTab, id: 'flow-host', callbackHost: 'host.docker.internal' };
+    usePaneStore.getState().openTab(withHost);
+    render(<FlowPane tab={withHost} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(saveFlow).toHaveBeenCalledWith(
+        'demo',
+        expect.objectContaining({ callbackHost: 'host.docker.internal' }),
+      ),
+    );
+  });
+
+  it('saves exactly name, nodes and edges when no callback host is set', async () => {
+    vi.mocked(saveFlow).mockResolvedValue(undefined);
+    render(<FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveFlow).toHaveBeenCalled());
+    expect(vi.mocked(saveFlow).mock.calls[0][1]).toEqual({
+      name: 'my-flow',
+      nodes: flowTab.nodes,
+      edges: [],
+    });
+  });
+
+  it('shows the callback host setting only when the flow has a Wait node', () => {
+    const { unmount } = render(
+      <FlowPane tab={flowTab} groupId={usePaneStore.getState().activeGroupId} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Callback host' })).toBeNull();
+    unmount();
+
+    const withWait: FlowTab = {
+      ...flowTab,
+      id: 'flow-wait',
+      nodes: [
+        ...flowTab.nodes,
+        {
+          id: 'w',
+          kind: { kind: 'WaitForCallback', label: 'Hook', name: 'payment', timeoutMs: 60000 },
+          position: { x: 0, y: 0 },
+        },
+      ],
+    };
+    usePaneStore.getState().openTab(withWait);
+    render(<FlowPane tab={withWait} groupId={usePaneStore.getState().activeGroupId} />);
+    expect(screen.getByRole('button', { name: 'Callback host' })).toBeInTheDocument();
+  });
 });
 
 describe('FlowPane run logs', () => {

@@ -174,6 +174,8 @@ export interface FlowTab extends BaseTab {
   flowName: string | null;
   nodes: import('@/lib/tauri-api').FlowNode[];
   edges: import('@/lib/tauri-api').FlowEdge[];
+  /** Host used in callback URLs. Null or absent means this machine's LAN IP. */
+  callbackHost?: string | null;
   nodeStatus: Record<string, import('@/lib/tauri-api').FlowNodeStatus>;
   nodeDetail?: Record<string, FlowNodeDetail>;
   runState: 'idle' | 'running' | 'done';
