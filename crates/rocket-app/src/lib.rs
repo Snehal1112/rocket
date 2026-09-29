@@ -13,6 +13,7 @@ pub mod environment_service;
 pub mod execution_service;
 pub mod export_service;
 pub(crate) mod flow_callbacks;
+pub(crate) mod flow_wait;
 pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;

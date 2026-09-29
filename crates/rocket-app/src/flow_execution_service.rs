@@ -122,6 +122,55 @@ fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
     ))
 }
 
+/// Builds the JS that runs an `accept_when` condition against a `request`
+/// object. `res.getBody()` returns the call object built by
+/// `callback_request_json`, parsed. The same three parse forms as
+/// `flow_script` apply, and the result is coerced with `!!(`.
+fn flow_callback_script(source: &str) -> DomainResult<String> {
+    let literal = serde_json::to_string(source)
+        .map_err(|e| DomainError::Internal(format!("failed to encode flow script: {e}")))?;
+    Ok(format!(
+        r#"(() => {{
+  const src = {literal};
+  const isParseError = (e) => e instanceof SyntaxError;
+  let fn = null;
+  const asExpression = (text) => new Function('request', 'return (' + text + '\n)');
+  try {{ fn = asExpression(src); }}
+  catch (e) {{ if (!isParseError(e)) throw e; }}
+  if (fn === null) {{
+    try {{ fn = asExpression(src.replace(/;\s*$/, '')); }}
+    catch (e) {{ if (!isParseError(e)) throw e; }}
+  }}
+  if (fn === null) fn = new Function('request', src);
+  const request = res.getBody();
+  return !!(fn(request));
+}})()"#
+    ))
+}
+
+/// The `request` object an `accept_when` condition sees. Headers and query
+/// become objects (a repeated name keeps its last value); the body is parsed
+/// JSON when it parses, else the raw text.
+fn callback_request_json(call: &crate::callback_listener::ReceivedCall) -> serde_json::Value {
+    let body = serde_json::from_str::<serde_json::Value>(&call.body)
+        .unwrap_or_else(|_| serde_json::Value::String(call.body.clone()));
+    let to_object = |pairs: &[(String, String)]| {
+        serde_json::Value::Object(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect(),
+        )
+    };
+    serde_json::json!({
+        "method": call.method,
+        "path": call.path,
+        "query": to_object(&call.query),
+        "headers": to_object(&call.headers),
+        "body": body,
+    })
+}
+
 impl RequestExecutionService {
     /// Evaluates `expression` (a jsonq/JS snippet such as `"response.body"` or
     /// `"response.body.token"`) against `output`, reusing the same
@@ -202,6 +251,50 @@ impl RequestExecutionService {
         FlowScriptOutcome {
             result: result.map(|value| match value {
                 serde_json::Value::Null => "null".to_string(),
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            }),
+            logs: to_flow_logs(entries),
+        }
+    }
+
+    /// Evaluates a Wait for callback node's `accept_when` against one
+    /// received call. The script sees `request` (see `callback_request_json`)
+    /// and its result is `"true"` or `"false"`.
+    pub async fn evaluate_flow_callback_condition(
+        &self,
+        collection: &str,
+        call: &crate::callback_listener::ReceivedCall,
+        source: &str,
+        secret_values: &HashSet<String>,
+    ) -> FlowScriptOutcome {
+        let script = match flow_callback_script(source) {
+            Ok(script) => script,
+            Err(e) => return FlowScriptOutcome::failed(e),
+        };
+        let body = callback_request_json(call).to_string();
+        let carrier = rocket_http::HttpResponse {
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: Vec::new(),
+            size_bytes: body.len(),
+            body,
+            duration_ms: 0,
+            ttfb_ms: 0,
+        };
+        let response_json = match serde_json::to_string(&carrier) {
+            Ok(json) => json,
+            Err(e) => {
+                return FlowScriptOutcome::failed(DomainError::Internal(format!(
+                    "failed to serialize callback: {e}"
+                )))
+            }
+        };
+        let (result, entries) = self
+            .evaluate_expression_with_logs(collection, &script, &response_json, secret_values.clone())
+            .await;
+        FlowScriptOutcome {
+            result: result.map(|value| match value {
                 serde_json::Value::String(s) => s,
                 other => other.to_string(),
             }),
@@ -4765,6 +4858,81 @@ mod tests {
             .expect("response.body must be parsed JSON");
 
         assert_eq!(value, "abc123");
+    }
+
+    fn payment_call(body: &str) -> crate::callback_listener::ReceivedCall {
+        crate::callback_listener::ReceivedCall {
+            method: "POST".to_string(),
+            path: "/cb/abc".to_string(),
+            query: vec![("id".to_string(), "7".to_string())],
+            headers: vec![("x-event".to_string(), "payment.completed".to_string())],
+            body: body.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn real_engine_callback_condition_sees_method_path_query_headers_and_json_body() {
+        let svc = real_engine_service();
+        let value = svc
+            .evaluate_flow_callback_condition(
+                "my-api",
+                &payment_call(r#"{"event":"payment.completed","orderId":42}"#),
+                "request.method === 'POST' && request.path === '/cb/abc' \
+                 && request.query.id === '7' \
+                 && request.headers['x-event'] === 'payment.completed' \
+                 && request.body.orderId === 42",
+                &HashSet::new(),
+            )
+            .await
+            .result
+            .expect("the condition must evaluate");
+        assert_eq!(value, "true");
+    }
+
+    #[tokio::test]
+    async fn real_engine_callback_condition_is_false_when_it_does_not_match() {
+        let svc = real_engine_service();
+        let value = svc
+            .evaluate_flow_callback_condition(
+                "my-api",
+                &payment_call(r#"{"event":"payment.pending"}"#),
+                "request.body.event === 'payment.completed'",
+                &HashSet::new(),
+            )
+            .await
+            .result
+            .expect("the condition must evaluate");
+        assert_eq!(value, "false");
+    }
+
+    #[tokio::test]
+    async fn real_engine_callback_condition_gets_a_text_body_as_a_string() {
+        let svc = real_engine_service();
+        let value = svc
+            .evaluate_flow_callback_condition(
+                "my-api",
+                &payment_call("status=done&id=7"),
+                "request.body === 'status=done&id=7'",
+                &HashSet::new(),
+            )
+            .await
+            .result
+            .expect("a text body must not break evaluation");
+        assert_eq!(value, "true");
+    }
+
+    #[tokio::test]
+    async fn real_engine_callback_condition_reports_a_script_error() {
+        let svc = real_engine_service();
+        let outcome = svc
+            .evaluate_flow_callback_condition(
+                "my-api",
+                &payment_call("{}"),
+                "request.body.missing.deeper === 1",
+                &HashSet::new(),
+            )
+            .await;
+        assert!(outcome.result.is_err(), "a thrown TypeError must be an error");
     }
 
     #[tokio::test]
