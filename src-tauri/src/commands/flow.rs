@@ -404,6 +404,7 @@ mod tests {
                         source: RequestSourceDto::Saved {
                             request_path: "auth/login.yml".to_string(),
                         },
+                        debug: false,
                     },
                     position: NodePositionDto { x: 0.0, y: 0.0 },
                 },
@@ -449,6 +450,29 @@ mod tests {
             json.contains("\"kind\":\"Request\""),
             "FlowNodeKind tag value must stay 'Request', not be renamed by rename_all_fields, got: {json}"
         );
+    }
+
+    #[test]
+    fn request_debug_flag_converts_both_ways_and_defaults_to_false() {
+        let dto = FlowNodeKindDto::Request {
+            label: "Login".to_string(),
+            source: RequestSourceDto::Saved {
+                request_path: "auth/login.yml".to_string(),
+            },
+            debug: true,
+        };
+        let domain: FlowNodeKind = dto.into();
+        assert!(matches!(domain, FlowNodeKind::Request { debug: true, .. }));
+        let back: FlowNodeKindDto = domain.into();
+        assert!(matches!(back, FlowNodeKindDto::Request { debug: true, .. }));
+
+        let json =
+            r#"{"kind":"Request","label":"L","source":{"type":"Saved","requestPath":"a.yml"}}"#;
+        let parsed: FlowNodeKindDto = serde_json::from_str(json).expect("deserialize");
+        assert!(matches!(
+            parsed,
+            FlowNodeKindDto::Request { debug: false, .. }
+        ));
     }
 
     #[test]
