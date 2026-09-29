@@ -1456,7 +1456,6 @@ impl RequestExecutionService {
 
     /// Saves a History entry returned in `deferred_history`. A failure is
     /// ignored, like the save in `finish_phases`.
-    #[cfg_attr(not(test), allow(dead_code))] // Used by the poll loop in Task 3.
     pub(crate) fn save_deferred_history(&self, entry: &HistoryEntry) {
         let _ = self.history_repo.save(entry);
     }

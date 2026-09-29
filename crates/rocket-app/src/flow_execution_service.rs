@@ -227,7 +227,7 @@ impl FlowScriptOutcome {
     }
 }
 
-fn to_flow_logs(entries: Vec<ConsoleEntry>) -> Vec<FlowLogEntry> {
+pub(crate) fn to_flow_logs(entries: Vec<ConsoleEntry>) -> Vec<FlowLogEntry> {
     entries
         .into_iter()
         .map(|entry| FlowLogEntry {
@@ -833,9 +833,8 @@ impl FlowExecutionService {
         });
     }
 
-    /// Reports progress for the node `ctx` belongs to. Waiting nodes (plans
-    /// 04 and 08) call this; until then only the tests do.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Reports progress for the node `ctx` belongs to. Waiting nodes call
+    /// this.
     pub(crate) fn publish_progress(
         &self,
         ctx: &NodeRunContext,
@@ -868,8 +867,7 @@ impl FlowExecutionService {
         external_secrets: &HashMap<String, String>,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
-        // No node waits yet. Plans 04 and 08 rename this to `ctx` and use it.
-        _ctx: &mut NodeRunContext,
+        ctx: &mut NodeRunContext,
     ) -> DomainResult<ExecutedNode> {
         // Script logs redact the same secrets a Request node's script does.
         let secret_values = exec.secret_values(
@@ -925,7 +923,9 @@ impl FlowExecutionService {
                 )))
             }
             FlowNodeKind::Request {
-                debug: debug_on, ..
+                debug: debug_on,
+                repeat_until,
+                ..
             } => {
                 let mut request_input = build_execute_request_input(
                     self.collection_repo.as_ref(),
@@ -952,6 +952,24 @@ impl FlowExecutionService {
                 }
                 let edges_owned: Vec<FlowEdge> = data_edges.iter().map(|e| (*e).clone()).collect();
                 apply_wired_overrides(&mut request_input, &resolved, &edges_owned)?;
+
+                // Wires were resolved once above; every attempt reuses them.
+                if let Some(repeat) = repeat_until {
+                    return self
+                        .run_repeat_until(
+                            exec,
+                            input,
+                            request_input,
+                            repeat,
+                            external_secrets,
+                            &secret_values,
+                            *debug_on,
+                            logs,
+                            debug,
+                            ctx,
+                        )
+                        .await;
+                }
 
                 let mut sent = None;
                 let result = exec
@@ -3398,9 +3416,8 @@ mod tests {
     #[test]
     fn a_plain_request_step_has_no_attempts() {
         let node = request_flow_node("r", "https://api.example.com/r");
-        let executed = ExecutedNode::plain(CapturedOutput::Request(Box::new(
-            sample_response_output(),
-        )));
+        let executed =
+            ExecutedNode::plain(CapturedOutput::Request(Box::new(sample_response_output())));
         let step = result_to_step("r", Some(&node), &Ok(executed));
         assert_eq!(step.attempts, None);
         let json = serde_json::to_value(&step).expect("serialize");
@@ -5113,5 +5130,444 @@ mod tests {
             completed_debug(&events, "r").map(|d| *d),
             step.debug_request
         );
+    }
+
+    // ---- Repeat until -------------------------------------------------------
+
+    use crate::test_doubles::{InMemoryHistoryRepo, SharedHistoryRepo};
+    use rocket_flow::RepeatUntil;
+
+    /// Answers each send with the next `(status, body)` in `script` and keeps
+    /// answering with the last one after that. Status 0 fails the send.
+    struct SequenceExecutor {
+        script: Vec<(u16, &'static str)>,
+        sent: std::sync::Mutex<usize>,
+    }
+    impl SequenceExecutor {
+        fn new(script: Vec<(u16, &'static str)>) -> Arc<Self> {
+            Arc::new(Self {
+                script,
+                sent: std::sync::Mutex::new(0),
+            })
+        }
+        fn sent_count(&self) -> usize {
+            *self.sent.lock().expect("lock")
+        }
+    }
+    #[async_trait]
+    impl HttpExecutor for SequenceExecutor {
+        async fn execute(&self, _request: &HttpRequest) -> DomainResult<HttpResponse> {
+            let index = {
+                let mut sent = self.sent.lock().expect("lock");
+                *sent += 1;
+                *sent - 1
+            };
+            let (status, body) = self.script[index.min(self.script.len() - 1)];
+            if status == 0 {
+                return Err(DomainError::Http("connection refused".into()));
+            }
+            Ok(HttpResponse {
+                status,
+                status_text: "X".into(),
+                headers: vec![],
+                body: body.into(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+                size_bytes: body.len(),
+            })
+        }
+    }
+
+    fn poll_exec(
+        executor: &Arc<SequenceExecutor>,
+        engine: Box<dyn ScriptEngine>,
+        history: &Arc<InMemoryHistoryRepo>,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::clone(executor) as Arc<dyn HttpExecutor>,
+            Box::new(SharedHistoryRepo(Arc::clone(history))),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(engine)
+    }
+
+    fn repeat(
+        condition: &str,
+        interval_ms: u64,
+        max_attempts: u32,
+        timeout_ms: u64,
+    ) -> RepeatUntil {
+        RepeatUntil {
+            condition: condition.to_string(),
+            interval_ms,
+            max_attempts,
+            timeout_ms,
+        }
+    }
+
+    /// One polling Request node, id `job`.
+    fn poll_flow(repeat_until: RepeatUntil, debug_on: bool) -> Flow {
+        let mut node = request_flow_node("job", "https://api.example.com/job");
+        if let FlowNodeKind::Request {
+            repeat_until: slot,
+            debug,
+            ..
+        } = &mut node.kind
+        {
+            *slot = Some(repeat_until);
+            *debug = debug_on;
+        }
+        Flow {
+            name: "poll".to_string(),
+            nodes: vec![node],
+            edges: Vec::new(),
+        }
+    }
+
+    /// A scripted engine whose Bool conditions are true when the response
+    /// status is `ok_status`.
+    fn status_condition(ok_status: u16) -> Box<dyn ScriptEngine> {
+        // `FromResponse` takes a fn pointer, so each status needs its own fn.
+        fn is_200(r: Option<&rocket_http::HttpResponse>) -> serde_json::Value {
+            serde_json::json!(r.map(|r| r.status == 200).unwrap_or(false))
+        }
+        fn is_404(r: Option<&rocket_http::HttpResponse>) -> serde_json::Value {
+            serde_json::json!(r.map(|r| r.status == 404).unwrap_or(false))
+        }
+        let f = match ok_status {
+            200 => is_200 as fn(Option<&rocket_http::HttpResponse>) -> serde_json::Value,
+            404 => is_404,
+            other => panic!("no condition fn for {other}"),
+        };
+        scripted(vec![("!!(", Scripted::FromResponse(f))])
+    }
+
+    #[tokio::test]
+    async fn poll_succeeds_on_the_attempt_where_the_condition_holds() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        assert_eq!(step.status_code, Some(200));
+        assert_eq!(step.attempts, Some(3));
+        assert_eq!(executor.sent_count(), 3);
+        assert_eq!(history.saved_count(), 1, "only the final attempt is kept");
+    }
+
+    #[tokio::test]
+    async fn poll_gives_up_after_max_attempts() {
+        let executor = SequenceExecutor::new(vec![(404, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 3, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        let error = step.error.clone().expect("an error");
+        // Like every node error, it carries the `DomainError` prefix.
+        assert!(
+            error.contains("condition not met after 3 attempts ("),
+            "got: {error}"
+        );
+        assert_eq!(executor.sent_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn poll_saves_one_history_entry_even_when_it_gives_up() {
+        let executor = SequenceExecutor::new(vec![(404, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 3, 10_000), false);
+
+        service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        assert_eq!(history.saved_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn poll_gives_up_at_the_deadline() {
+        let executor = SequenceExecutor::new(vec![(404, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        // 100 ms apart, 250 ms deadline: sends at about 0, 100, 200 and 250 ms.
+        let flow = poll_flow(repeat("response.status === 200", 100, 1000, 250), false);
+        let started = std::time::Instant::now();
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert!(step
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("condition not met after "));
+        let sent = executor.sent_count();
+        assert!((2..=6).contains(&sent), "sent {sent} times");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(history.saved_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn poll_condition_true_on_a_non_2xx_response_succeeds() {
+        let executor = SequenceExecutor::new(vec![(404, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(404), &history);
+        let flow = poll_flow(repeat("response.status === 404", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        assert_eq!(step.status_code, Some(404));
+        assert_eq!(step.attempts, Some(1));
+    }
+
+    #[tokio::test]
+    async fn poll_condition_script_error_fails_at_once() {
+        let executor = SequenceExecutor::new(vec![(200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Throw("ReferenceError: nope"))]),
+            &history,
+        );
+        let flow = poll_flow(repeat("response.body.done", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert!(step.error.as_deref().unwrap_or("").contains("nope"));
+        assert_eq!(executor.sent_count(), 1, "a script error is not retried");
+    }
+
+    #[tokio::test]
+    async fn poll_condition_script_error_saves_the_attempt_to_history() {
+        let executor = SequenceExecutor::new(vec![(200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Throw("ReferenceError: nope"))]),
+            &history,
+        );
+        let flow = poll_flow(repeat("response.body.done", 100, 5, 10_000), false);
+
+        service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            history.saved_count(),
+            1,
+            "the attempt that got a response is kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_send_error_fails_at_once() {
+        let executor = SequenceExecutor::new(vec![(0, "")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        assert_eq!(step_of(&summary, "job").status, FlowNodeStatus::Failed);
+        assert_eq!(executor.sent_count(), 1, "a send error is not retried");
+        assert_eq!(
+            history.saved_count(),
+            0,
+            "a send without a response saves nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_publishes_progress_for_each_attempt() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            poll_flow(repeat("response.status === 200", 100, 5, 10_000), false),
+            &publisher,
+        );
+
+        service.run(&exec, run_input("poll")).await.expect("run");
+
+        let progress: Vec<(Option<u32>, String)> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepProgress {
+                    node_id,
+                    attempt,
+                    message,
+                    ..
+                } if node_id == "job" => Some((attempt, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            progress,
+            vec![
+                (Some(1), "attempt 1/5".to_string()),
+                (Some(2), "attempt 2/5".to_string()),
+                (Some(3), "attempt 3/5".to_string()),
+            ]
+        );
+
+        // Started comes first, then every progress event, then Completed.
+        let order: Vec<&'static str> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepStarted { node_id, .. } if node_id == "job" => Some("started"),
+                DomainEvent::FlowStepProgress { node_id, .. } if node_id == "job" => {
+                    Some("progress")
+                }
+                DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "job" => {
+                    Some("completed")
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec!["started", "progress", "progress", "progress", "completed"]
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_stops_between_attempts_when_cancelled() {
+        let executor = SequenceExecutor::new(vec![(404, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let publisher = RecordingPublisher::new();
+        // A 30 s interval: without Stop the test would hang for 30 s.
+        let service = service_with_publisher(
+            poll_flow(repeat("response.status === 200", 30_000, 5, 60_000), false),
+            &publisher,
+        );
+        let started = std::time::Instant::now();
+
+        let run = service.run(&exec, run_input("poll"));
+        let stop = async {
+            loop {
+                let events = publisher.events();
+                let run_id = events.iter().find_map(|e| match e {
+                    DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id.clone()),
+                    _ => None,
+                });
+                let polling = events.iter().any(|e| {
+                    matches!(e, DomainEvent::FlowStepProgress { node_id, .. } if node_id == "job")
+                });
+                if let (Some(id), true) = (run_id, polling) {
+                    service.cancel(&id);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        };
+        let (summary, ()) = tokio::join!(run, stop);
+        let summary = summary.expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert_eq!(step.error.as_deref(), Some("cancelled"));
+        assert_eq!(summary.stopped_reason, "cancelled");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(executor.sent_count(), 1);
+        assert_eq!(
+            history.saved_count(),
+            1,
+            "Stop after a response keeps that attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_debug_record_shows_the_last_attempt() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 5, 10_000), true);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let debug = step_of(&summary, "job")
+            .debug_request
+            .clone()
+            .expect("debug record");
+        assert_eq!(debug.response.expect("a response").status, 200);
+    }
+
+    #[tokio::test]
+    async fn real_engine_poll_waits_for_a_body_field() {
+        let executor = SequenceExecutor::new(vec![
+            (200, r#"{"status":"pending"}"#),
+            (200, r#"{"status":"done"}"#),
+        ]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(
+            &executor,
+            Box::new(rocket_infra::scripting::DenoScriptEngine::new()),
+            &history,
+        );
+        let flow = poll_flow(
+            repeat(r#"response.body.status === "done""#, 100, 5, 10_000),
+            false,
+        );
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(
+            step.status,
+            FlowNodeStatus::Success,
+            "error: {:?}",
+            step.error
+        );
+        assert_eq!(step.attempts, Some(2));
     }
 }

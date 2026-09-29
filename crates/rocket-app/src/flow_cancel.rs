@@ -36,15 +36,15 @@ impl CancelHandle {
     }
 }
 
-// Waiting nodes (plans 04 and 08) call `cancelled` and `sleep`. Until then
-// only the tests do, so the release build would warn.
-#[cfg_attr(not(test), allow(dead_code))]
 impl CancelSignal {
     pub(crate) fn is_cancelled(&self) -> bool {
         *self.rx.borrow()
     }
 
     /// Resolves when the run is cancelled. It never resolves otherwise.
+    // Plan 08 is the first caller outside `sleep`. Until then the release
+    // build would warn.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn cancelled(&mut self) {
         // `wait_for` fails only when the handle is gone. The run is then
         // over without a cancel, so this waits forever.
