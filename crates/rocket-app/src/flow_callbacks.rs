@@ -44,8 +44,6 @@ impl RunCallbacks {
         &self.vars
     }
 
-    // Used by plan 08, which waits on the endpoint's calls.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn endpoint_mut(&mut self, node_id: &str) -> Option<&mut CallbackEndpoint> {
         self.endpoints.get_mut(node_id)
     }

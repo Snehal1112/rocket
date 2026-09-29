@@ -35,7 +35,7 @@ pub(crate) struct ExecutedNode {
 }
 
 impl ExecutedNode {
-    fn plain(output: CapturedOutput) -> Self {
+    pub(crate) fn plain(output: CapturedOutput) -> Self {
         Self {
             output,
             chosen_exit: handle::RESULT.to_string(),
@@ -568,10 +568,9 @@ pub struct FlowStepResult {
     pub status_code: Option<u16>,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
-    /// The node's captured output value, populated only for `Output`-kind
-    /// nodes (see `result_to_step`). `None` for a Request node (its result is
-    /// the HTTP response, not a single value), an Input node, or a node that
-    /// never produced output (Skipped/Failed).
+    /// The node's captured output value for `Output` nodes, or the received
+    /// method (e.g. `POST`) for a succeeded Wait for callback node. `None`
+    /// for every other node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     /// Set only when `status` is `Skipped`.
@@ -1179,12 +1178,24 @@ impl FlowExecutionService {
                     poll: None,
                 })
             }
-            // Plan 08 implements waiting. Until then a run fails this node
-            // with a clear reason instead of doing nothing.
-            FlowNodeKind::WaitForCallback { .. } => Err(DomainError::InvalidInput(format!(
-                "node '{}': Wait for callback nodes cannot run yet",
-                node.id
-            ))),
+            FlowNodeKind::WaitForCallback {
+                timeout_ms,
+                accept_when,
+                ..
+            } => {
+                self.wait_for_callback(
+                    exec,
+                    input,
+                    node,
+                    *timeout_ms,
+                    accept_when.as_deref(),
+                    &secret_values,
+                    logs,
+                    ctx,
+                    callbacks,
+                )
+                .await
+            }
         }
     }
 }
@@ -1276,6 +1287,7 @@ fn result_to_step(
         }) => {
             let status = out.response.status;
             let success = out.response.is_success();
+            let is_wait = matches!(kind, Some(FlowNodeKind::WaitForCallback { .. }));
             FlowStepResult {
                 status: if success {
                     FlowNodeStatus::Success
@@ -1285,6 +1297,8 @@ fn result_to_step(
                 status_code: Some(status),
                 duration_ms: Some(out.response.duration_ms),
                 error: (!success).then(|| format!("non-2xx response: {status}")),
+                // A Wait for callback node reports the method it received.
+                value: is_wait.then(|| out.response.status_text.clone()),
                 ..base
             }
         }
@@ -2477,6 +2491,42 @@ mod tests {
         fake: &Arc<crate::test_doubles::FakeCallbackListener>,
     ) -> FlowExecutionService {
         service_with_flow(flow).with_callback_listener(Box::new(Arc::clone(fake)))
+    }
+
+    fn wait_node_with(id: &str, timeout_ms: u64, accept_when: Option<&str>) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::WaitForCallback {
+                label: format!("Wait {id}"),
+                name: "payment".to_string(),
+                timeout_ms,
+                accept_when: accept_when.map(str::to_string),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn event_call(event: &str) -> crate::callback_listener::ReceivedCall {
+        crate::callback_listener::ReceivedCall {
+            method: "POST".to_string(),
+            path: "/cb/0".to_string(),
+            query: Vec::new(),
+            headers: Vec::new(),
+            body: format!(r#"{{"event":"{event}","orderId":42}}"#),
+        }
+    }
+
+    /// `register -> wait (Run when)`.
+    fn register_then_wait(wait: FlowNode) -> Flow {
+        Flow {
+            name: "cb".to_string(),
+            nodes: vec![
+                request_flow_node("reg", "https://api.example.com/register"),
+                wait,
+            ],
+            edges: vec![trigger_edge("e1", "reg", handle::RESULT, "w")],
+            callback_host: None,
+        }
     }
 
     struct FixedResponseExecutor {
@@ -6122,5 +6172,282 @@ mod tests {
         assert!(service.in_flight.lock().expect("lock").is_empty());
         assert!(service.cancelled.lock().expect("lock").is_empty());
         assert!(service.cancel_handles.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_call_before_the_nodes_turn_is_accepted() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        // Delivered when the endpoint opens, before `reg` even runs.
+        fake.queue_on_open(event_call("payment.completed"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary =
+            service_with_listener(register_then_wait(wait_node_with("w", 60_000, None)), &fake)
+                .run(&exec, run_input("cb"))
+                .await
+                .expect("run");
+
+        let step = step_of(&summary, "w");
+        assert_eq!(step.status, FlowNodeStatus::Success, "{:?}", step.error);
+        assert_eq!(step.status_code, Some(200));
+        assert_eq!(step.value.as_deref(), Some("POST"));
+        assert!(fake.is_closed(0), "the endpoint closes after a success");
+    }
+
+    #[tokio::test]
+    async fn a_call_during_the_wait_is_accepted_and_progress_is_reported() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 60_000, None)),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let (summary, ()) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            fake.sender(0)
+                .send(event_call("payment.completed"))
+                .await
+                .expect("send");
+        });
+        let summary = summary.expect("run");
+
+        assert_eq!(status_of(&summary, "w"), FlowNodeStatus::Success);
+        let progress: Vec<String> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepProgress {
+                    node_id, message, ..
+                } if node_id == "w" => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert!(!progress.is_empty(), "the wait reports progress");
+        assert!(
+            progress[0].starts_with("waiting… ") && progress[0].ends_with("0 ignored call(s)"),
+            "got: {progress:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn accept_when_skips_calls_that_do_not_match() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.pending"));
+        fake.queue_on_open(event_call("payment.completed"));
+        let executor = RecordingExecutor::new();
+        // The generated accept_when script contains `const request`; this
+        // rule answers from the carried call body.
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "const request",
+                Scripted::FromResponse(|r| {
+                    serde_json::json!(r.is_some_and(|r| r.body.contains("payment.completed")))
+                }),
+            )]),
+        );
+        let flow = register_then_wait(wait_node_with(
+            "w",
+            60_000,
+            Some("request.body.event === 'payment.completed'"),
+        ));
+
+        let summary = service_with_listener(flow, &fake)
+            .run(&exec, run_input("cb"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "w"), FlowNodeStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn timeout_fails_the_node_and_reports_ignored_calls() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.pending"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "const request",
+                Scripted::Value(serde_json::json!(false)),
+            )]),
+        );
+        let flow = register_then_wait(wait_node_with("w", 1000, Some("request.body.ok")));
+
+        let summary = service_with_listener(flow, &fake)
+            .run(&exec, run_input("cb"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "w");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert_eq!(
+            step.error.as_deref(),
+            Some("Invalid input: no matching callback within 1s (1 ignored)")
+        );
+        assert!(fake.is_closed(0), "the endpoint closes after a failure");
+    }
+
+    #[tokio::test]
+    async fn an_accept_when_script_error_fails_the_node_at_once() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.completed"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "const request",
+                Scripted::Throw("ReferenceError: nope"),
+            )]),
+        );
+        let flow = register_then_wait(wait_node_with("w", 60_000, Some("nope.ok")));
+
+        let started = std::time::Instant::now();
+        let summary = service_with_listener(flow, &fake)
+            .run(&exec, run_input("cb"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "w"), FlowNodeStatus::Failed);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "no 60 s wait"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_during_the_wait_ends_the_run_promptly() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 60_000, None)),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let started = std::time::Instant::now();
+        let (summary, ()) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let run_id = publisher
+                .events()
+                .into_iter()
+                .find_map(|e| match e {
+                    DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id),
+                    _ => None,
+                })
+                .expect("the run started");
+            service.cancel(&run_id);
+        });
+        let summary = summary.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        let step = step_of(&summary, "w");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert_eq!(step.error.as_deref(), Some("cancelled"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert!(fake.is_closed(0), "the endpoint closes after a cancel");
+    }
+
+    #[tokio::test]
+    async fn a_skipped_wait_node_still_closes_its_endpoint() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        executor.set_status("register", 500);
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary =
+            service_with_listener(register_then_wait(wait_node_with("w", 60_000, None)), &fake)
+                .run(&exec, run_input("cb"))
+                .await
+                .expect("run");
+
+        assert_eq!(status_of(&summary, "w"), FlowNodeStatus::Skipped);
+        assert!(fake.is_closed(0));
+    }
+
+    #[tokio::test]
+    async fn a_downstream_wire_reads_the_callback_body() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.completed"));
+        let flow = Flow {
+            name: "cb".to_string(),
+            nodes: vec![wait_node_with("w", 60_000, None), output_node_named("out")],
+            edges: vec![edge_from(
+                "e1",
+                "w",
+                handle::RESULT,
+                "out",
+                "value",
+                "response.body.orderId",
+            )],
+            callback_host: None,
+        };
+
+        let summary = service_with_listener(flow, &fake)
+            .run(&real_engine_service(), run_input("cb"))
+            .await
+            .expect("run");
+
+        assert_eq!(step_of(&summary, "out").value.as_deref(), Some("42"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_second_open_closes_the_first_endpoint() {
+        let flow = Flow {
+            name: "partial".to_string(),
+            nodes: vec![wait_node("w1", "first"), wait_node("w2", "second")],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::failing_after(1, "port in use");
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let err = service_with_listener(flow, &fake)
+            .run(&exec, run_input("partial"))
+            .await
+            .expect_err("the run must fail before it starts");
+
+        assert!(err.to_string().contains("port in use"), "got: {err}");
+        assert_eq!(fake.opened_count(), 1, "the first endpoint opened");
+        assert!(fake.is_closed(0), "the first endpoint closes again");
+        assert!(executor.sent_urls().is_empty(), "no node ran");
+    }
+
+    #[tokio::test]
+    async fn a_closed_endpoint_fails_the_wait_instead_of_spinning() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+        let service =
+            service_with_listener(register_then_wait(wait_node_with("w", 60_000, None)), &fake);
+
+        let started = std::time::Instant::now();
+        let (summary, ()) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            fake.hang_up(0);
+        });
+        let summary = summary.expect("run");
+
+        let step = step_of(&summary, "w");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert!(
+            step.error.as_deref().is_some_and(|e| e.contains("closed")),
+            "got: {:?}",
+            step.error
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "no 60 s wait"
+        );
     }
 }

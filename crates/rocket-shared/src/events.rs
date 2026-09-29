@@ -255,8 +255,9 @@ pub enum DomainEvent {
         /// meaningful duration (Input/Output nodes).
         duration_ms: Option<u64>,
         error: Option<String>,
-        /// The node's captured value, populated only for `Output`-kind
-        /// nodes. See `rocket_app::flow_execution_service::FlowStepResult`.
+        /// The node's captured output value for `Output` nodes, or the
+        /// received method (e.g. `POST`) for a succeeded Wait for callback
+        /// node. `None` for every other node.
         value: Option<String>,
         /// Set only when `status` is `Skipped`.
         #[serde(default, skip_serializing_if = "Option::is_none")]

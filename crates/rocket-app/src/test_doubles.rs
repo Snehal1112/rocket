@@ -692,7 +692,9 @@ struct FakeEndpointState {
 /// `http://fake:1/cb/<i>`; tests push calls in with `sender(i)`.
 pub struct FakeCallbackListener {
     endpoints: Mutex<Vec<FakeEndpointState>>,
-    fail_with: Option<String>,
+    /// Once this many endpoints are open, every further `open` fails with
+    /// the message.
+    fail_with: Option<(usize, String)>,
     /// Calls put into the next endpoint the moment it opens, so a test can
     /// deliver a call before its node's turn.
     queued: Mutex<Vec<ReceivedCall>>,
@@ -709,11 +711,24 @@ impl FakeCallbackListener {
 
     /// A listener whose every `open` fails with `message`.
     pub fn failing(message: &str) -> Arc<Self> {
+        Self::failing_after(0, message)
+    }
+
+    /// A listener that opens `opened` endpoints, then fails every further
+    /// `open` with `message`.
+    pub fn failing_after(opened: usize, message: &str) -> Arc<Self> {
         Arc::new(Self {
             endpoints: Mutex::new(Vec::new()),
-            fail_with: Some(message.to_string()),
+            fail_with: Some((opened, message.to_string())),
             queued: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Drops the fake's sender for endpoint `index`, so the endpoint sees
+    /// its channel close once the queued calls are read.
+    pub fn hang_up(&self, index: usize) {
+        let (sender, _calls) = tokio::sync::mpsc::channel(1);
+        self.endpoints.lock().expect("lock")[index].sender = sender;
     }
 
     /// Delivers `call` into the next endpoint as soon as it opens.
@@ -762,8 +777,10 @@ impl FakeCallbackListener {
 #[async_trait]
 impl CallbackListener for Arc<FakeCallbackListener> {
     async fn open(&self, host: Option<&str>) -> DomainResult<CallbackEndpoint> {
-        if let Some(message) = &self.fail_with {
-            return Err(DomainError::Io(message.clone()));
+        if let Some((opened, message)) = &self.fail_with {
+            if self.opened_count() >= *opened {
+                return Err(DomainError::Io(message.clone()));
+            }
         }
         let (sender, calls) = tokio::sync::mpsc::channel(100);
         for call in self.queued.lock().expect("lock").drain(..) {
