@@ -381,6 +381,60 @@ describe('FlowCanvas', () => {
     });
   });
 
+  describe('Output value wiring', () => {
+    it('tells an Output with only a Run when wire that no value is wired', () => {
+      render(
+        <FlowCanvas
+          nodes={[
+            { id: 'a', kind: { kind: 'Input', label: 'In', value: 'x' }, position: { x: 0, y: 0 } },
+            { id: 'o', kind: { kind: 'Output', label: 'Out' }, position: { x: 300, y: 0 } },
+          ]}
+          edges={[
+            {
+              id: 'e1',
+              sourceNodeId: 'a',
+              targetNodeId: 'o',
+              targetField: 'trigger',
+              expression: '',
+            },
+          ]}
+          nodeStatus={{ a: 'success', o: 'success' }}
+          nodeDetail={{ o: { value: '' } }}
+          onNodesChange={vi.fn()}
+          onEdgesChange={vi.fn()}
+          onConnect={vi.fn()}
+        />,
+      );
+      expect(screen.getByText('(no value wired)')).toBeInTheDocument();
+    });
+
+    it('keeps (empty) for an Output whose value wire returned nothing', () => {
+      render(
+        <FlowCanvas
+          nodes={[
+            { id: 'a', kind: { kind: 'Input', label: 'In', value: '' }, position: { x: 0, y: 0 } },
+            { id: 'o', kind: { kind: 'Output', label: 'Out' }, position: { x: 300, y: 0 } },
+          ]}
+          edges={[
+            {
+              id: 'e1',
+              sourceNodeId: 'a',
+              targetNodeId: 'o',
+              targetField: 'value',
+              expression: 'response.body',
+            },
+          ]}
+          nodeStatus={{ a: 'success', o: 'success' }}
+          nodeDetail={{ o: { value: '' } }}
+          onNodesChange={vi.fn()}
+          onEdgesChange={vi.fn()}
+          onConnect={vi.fn()}
+        />,
+      );
+      expect(screen.getByText('(empty)')).toBeInTheDocument();
+    });
+  });
+
   describe('toRfEdges', () => {
     it('maps a missing sourceHandle to result and keeps a routing exit', () => {
       const rf = toRfEdges(
@@ -409,6 +463,55 @@ describe('FlowCanvas', () => {
         ['e1', 'result', 'headers'],
         ['e2', 'true', 'trigger'],
       ]);
+    });
+
+    it('draws Run when wires dotted and leaves data wires plain', () => {
+      const rf = toRfEdges(
+        [
+          {
+            id: 'data',
+            sourceNodeId: 'a',
+            targetNodeId: 'b',
+            targetField: 'value',
+            expression: 'response.body',
+          },
+          {
+            id: 'gate',
+            sourceNodeId: 'a',
+            targetNodeId: 'b',
+            targetField: 'trigger',
+            expression: '',
+          },
+        ],
+        [],
+        {},
+        new Set(),
+      );
+      const [data, gate] = rf;
+      expect(data.style?.strokeDasharray).toBeUndefined();
+      expect(gate.style?.strokeDasharray).toBeDefined();
+      expect(gate.className).toContain('flow-edge-trigger');
+    });
+
+    it('keeps a taken Run when wire dotted', () => {
+      const rf = toRfEdges(
+        [
+          {
+            id: 'gate',
+            sourceNodeId: 'if1',
+            targetNodeId: 'b',
+            targetField: 'trigger',
+            expression: '',
+            sourceHandle: 'true',
+          },
+        ],
+        [{ id: 'if1', kind: { kind: 'If', label: 'If', condition: '' }, position: { x: 0, y: 0 } }],
+        { if1: 'success' },
+        new Set(),
+        { if1: { branch: 'true' } },
+      );
+      expect(rf[0].style?.stroke).toBe('#22c55e');
+      expect(rf[0].style?.strokeDasharray).toBeDefined();
     });
   });
 });

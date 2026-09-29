@@ -17,7 +17,7 @@ import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
-import { RESULT_HANDLE } from '@/lib/flow-handles';
+import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
@@ -83,6 +83,7 @@ type Measured = { width: number; height: number };
 // Selection lives in canvas-local state, because it is not persisted.
 function toRfNodes(
   nodes: FlowNode[],
+  edges: FlowEdge[],
   nodeStatus: Record<string, FlowNodeStatus>,
   selectedIds: ReadonlySet<string>,
   measured: ReadonlyMap<string, Measured>,
@@ -98,6 +99,9 @@ function toRfNodes(
       status: nodeStatus[n.id] ?? 'idle',
       ...nodeDetail?.[n.id],
       hasCycleError: cycleNodeIds?.includes(n.id) ?? false,
+      ...(n.kind.kind === 'Output' && {
+        hasValueWire: edges.some((e) => e.targetNodeId === n.id && e.targetField === 'value'),
+      }),
     },
     selected: selectedIds.has(n.id),
     measured: measured.get(n.id),
@@ -111,6 +115,8 @@ const EDITABLE_TARGET = '.nokey, input, textarea, [contenteditable]';
 const CYCLE_EDGE_STYLE = { stroke: '#ef4444', strokeWidth: 2 };
 const TAKEN_EDGE_STYLE = { stroke: '#22c55e', strokeWidth: 2 };
 const NOT_TAKEN_EDGE_STYLE = { opacity: 0.35, strokeDasharray: '4 4' };
+// A "Run when" wire carries no data, so it is dotted to read as a gate.
+const TRIGGER_DASH = '1 4';
 
 // The source handle is the edge's exit (absent means `result`). The target
 // handle is the first segment of `targetField`, so
@@ -136,6 +142,17 @@ export function toRfEdges(
       nodeDetail?.[e.sourceNodeId]?.branch,
     );
     const isCycle = cycleEdgeIds?.includes(e.id) ?? false;
+    const isTrigger = e.targetField === TRIGGER_HANDLE;
+    const runStyle = isCycle
+      ? CYCLE_EDGE_STYLE
+      : run === 'taken'
+        ? TAKEN_EDGE_STYLE
+        : run === 'not-taken'
+          ? NOT_TAKEN_EDGE_STYLE
+          : undefined;
+    const classes = ['nopan'];
+    if (run !== 'neutral') classes.push(`flow-edge-${run}`);
+    if (isTrigger) classes.push('flow-edge-trigger');
     return {
       id: e.id,
       source: e.sourceNodeId,
@@ -145,14 +162,12 @@ export function toRfEdges(
       selected: selectedIds.has(e.id),
       label: source ? exitLabel(source.kind, handle) : undefined,
       // nopan keeps a double-click on a wire from also zooming the canvas.
-      className: run === 'neutral' ? 'nopan' : `nopan flow-edge-${run}`,
-      style: isCycle
-        ? CYCLE_EDGE_STYLE
-        : run === 'taken'
-          ? TAKEN_EDGE_STYLE
-          : run === 'not-taken'
-            ? NOT_TAKEN_EDGE_STYLE
-            : undefined,
+      className: classes.join(' '),
+      // A not-taken wire keeps its own dash so its state stays readable.
+      style:
+        isTrigger && run !== 'not-taken'
+          ? { ...runStyle, strokeDasharray: TRIGGER_DASH }
+          : runStyle,
     };
   });
 }
@@ -251,8 +266,16 @@ function FlowCanvasInner({
 
   const rfNodes = useMemo(
     () =>
-      toRfNodes(nodes, nodeStatus, selectedNodeIds, measuredRef.current, nodeDetail, cycleNodeIds),
-    [nodes, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds],
+      toRfNodes(
+        nodes,
+        edges,
+        nodeStatus,
+        selectedNodeIds,
+        measuredRef.current,
+        nodeDetail,
+        cycleNodeIds,
+      ),
+    [nodes, edges, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds],
   );
   const rfEdges = useMemo(
     () => toRfEdges(edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds),

@@ -81,6 +81,31 @@ describe('OutputNode', () => {
     expect(card.querySelectorAll('.react-flow__handle.source')).toHaveLength(0);
     expect(card.querySelector('[data-handleid="trigger"]')?.getAttribute('title')).toBe('Run when');
   });
+
+  it('labels the Run when and Value inputs next to their handles', () => {
+    wrap(
+      <OutputNode
+        id='o1'
+        data={{ kind: { kind: 'Output', label: 'Result' }, status: 'idle' }}
+        selected={false}
+        type='Output'
+        dragging={false}
+        zIndex={0}
+        isConnectable
+        draggable
+        selectable
+        deletable
+        positionAbsoluteX={0}
+        positionAbsoluteY={0}
+      />,
+    );
+    const trigger = screen.getByTestId('output-node-trigger-row');
+    expect(trigger).toHaveTextContent('Run when');
+    expect(trigger.querySelector('[data-handleid="trigger"]')).toBeInTheDocument();
+    const value = screen.getByTestId('output-node-value-row');
+    expect(value).toHaveTextContent('Value');
+    expect(value.querySelector('[data-handleid="value"]')).toBeInTheDocument();
+  });
 });
 
 describe('run status on Input/Output nodes', () => {
@@ -209,6 +234,24 @@ describe('OutputNode value display', () => {
     renderOutput('');
     expect(screen.getByText('(empty)')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy value' })).toBeNull();
+  });
+
+  it('says no value is wired when the Output has no value wire', () => {
+    wrap(
+      <OutputNode
+        {...props}
+        id='o1'
+        type='Output'
+        data={{
+          kind: { kind: 'Output', label: 'Result' },
+          status: 'success',
+          value: '',
+          hasValueWire: false,
+        }}
+      />,
+    );
+    expect(screen.getByText('(no value wired)')).toBeInTheDocument();
+    expect(screen.queryByText('(empty)')).toBeNull();
   });
 
   it('shows a dash and no copy button for an undefined value', () => {

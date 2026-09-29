@@ -18,6 +18,8 @@ export interface OutputNodeData {
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
   value?: string;
+  /** False when no wire feeds `value`, so an empty value is not the wire's result. */
+  hasValueWire?: boolean;
 }
 
 const COPIED_MS = 1500;
@@ -53,29 +55,42 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
         data.hasCycleError && 'ring-2 ring-red-500',
       )}
     >
-      {/* Data-less "Run when" input. It sits at the top so it does not overlap `value`. */}
-      <Handle
-        type='target'
-        id={TRIGGER_HANDLE}
-        title='Run when'
-        position={Position.Left}
-        isConnectable={isConnectable}
-        style={{ top: 10 }}
-        className='!h-2 !w-2'
-      />
-      <Handle
-        type='target'
-        id='value'
-        position={Position.Left}
-        isConnectable={isConnectable}
-        style={{ top: 30 }}
-        className='!h-2 !w-2'
-      />
       <div className='flex items-center gap-1.5 border-b px-2 py-1.5 font-medium'>
         <span className='truncate'>{data.kind.label}</span>
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
       <NodeStatusCaption status={data.status} skipReason={data.skipReason} error={data.error} />
+      {/* Each input sits in a labelled row, like the Request node, so the
+          data-less "Run when" gate is not mistaken for the `value` input. */}
+      <div className='relative space-y-1 px-2 pt-1.5'>
+        <div
+          data-testid='output-node-trigger-row'
+          className='relative flex items-center gap-1.5 pl-2'
+        >
+          <Handle
+            type='target'
+            id={TRIGGER_HANDLE}
+            title='Run when'
+            position={Position.Left}
+            isConnectable={isConnectable}
+            className='!h-2 !w-2'
+          />
+          <span className='text-muted-foreground'>Run when</span>
+        </div>
+        <div
+          data-testid='output-node-value-row'
+          className='relative flex items-center gap-1.5 pl-2'
+        >
+          <Handle
+            type='target'
+            id='value'
+            position={Position.Left}
+            isConnectable={isConnectable}
+            className='!h-2 !w-2'
+          />
+          <span className='text-muted-foreground'>Value</span>
+        </div>
+      </div>
       <div className='flex items-start gap-1 px-2 py-1.5 text-muted-foreground'>
         {value === undefined ? (
           <span>—</span>
@@ -84,7 +99,13 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
             data-testid='output-node-value'
             className='nowheel nodrag nokey max-h-80 min-w-0 flex-1 select-text overflow-auto whitespace-pre-wrap font-mono text-[11px] [overflow-wrap:anywhere]'
           >
-            {value === '' ? <span className='italic'>(empty)</span> : formatOutputValue(value)}
+            {value === '' ? (
+              <span className='italic'>
+                {data.hasValueWire === false ? '(no value wired)' : '(empty)'}
+              </span>
+            ) : (
+              formatOutputValue(value)
+            )}
           </pre>
         )}
         {value ? (
