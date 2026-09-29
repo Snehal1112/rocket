@@ -371,6 +371,10 @@ function FlowCanvasInner({
             onEdgeEdit?.(edge.id);
           }}
           onPaneClick={focusPane}
+          // A box-select does not fire a pane click, so refocus the pane here.
+          onSelectionEnd={focusPane}
+          // Tolerate small jitter so a click is not turned into an empty selection.
+          paneClickDistance={4}
           // Left-drag draws a selection box. Middle and right drag pan instead.
           selectionOnDrag
           panOnDrag={[1, 2]}
@@ -390,7 +394,7 @@ function FlowCanvasInner({
           <Controls />
           <Panel position='bottom-left' className='pointer-events-none ml-14 mb-3'>
             <span className='text-[11px] text-muted-foreground/70'>
-              Drag to select · Ctrl+A select all · Right-drag or scroll to pan
+              Drag to select · Ctrl+A select all · Right-drag or scroll to pan · Ctrl+scroll to zoom
             </span>
           </Panel>
         </ReactFlow>
