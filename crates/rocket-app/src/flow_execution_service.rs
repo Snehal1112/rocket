@@ -521,10 +521,7 @@ pub struct FlowRunSummary {
 
 /// What a node needs to know about the run it belongs to.
 pub(crate) struct NodeRunContext {
-    // Read by plans 04 and 08 (polling and callback nodes).
-    #[allow(dead_code)]
     pub(crate) run_id: String,
-    #[allow(dead_code)]
     pub(crate) node_id: String,
     /// Fires when the run is cancelled. A waiting node selects on it.
     pub(crate) cancel: CancelSignal,
@@ -826,6 +823,25 @@ impl FlowExecutionService {
         self.events.publish(DomainEvent::FlowStepStarted {
             run_id: run_id.to_string(),
             node_id: node_id.to_string(),
+        });
+    }
+
+    /// Reports progress for the node `ctx` belongs to. Waiting nodes (plans
+    /// 04 and 08) call this; until then only the tests do.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn publish_progress(
+        &self,
+        ctx: &NodeRunContext,
+        attempt: Option<u32>,
+        max_attempts: Option<u32>,
+        message: String,
+    ) {
+        self.events.publish(DomainEvent::FlowStepProgress {
+            run_id: ctx.run_id.clone(),
+            node_id: ctx.node_id.clone(),
+            attempt,
+            max_attempts,
+            message,
         });
     }
 
@@ -2835,6 +2851,46 @@ mod tests {
             DomainEvent::FlowRunStarted { total_nodes: 0, .. }
         ));
         assert_eq!(finished_counts(&publisher), (0, 0, 0));
+    }
+
+    #[test]
+    fn publish_progress_sends_the_nodes_ids_and_message() {
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            Flow {
+                name: "empty".to_string(),
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            },
+            &publisher,
+        );
+        let (_handle, cancel) = cancel_pair();
+        let ctx = NodeRunContext {
+            run_id: "run-1".to_string(),
+            node_id: "poll".to_string(),
+            cancel,
+        };
+
+        service.publish_progress(&ctx, Some(3), Some(30), "attempt 3/30".to_string());
+
+        let events = publisher.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DomainEvent::FlowStepProgress {
+                run_id,
+                node_id,
+                attempt,
+                max_attempts,
+                message,
+            } => {
+                assert_eq!(run_id, "run-1");
+                assert_eq!(node_id, "poll");
+                assert_eq!(*attempt, Some(3));
+                assert_eq!(*max_attempts, Some(30));
+                assert_eq!(message, "attempt 3/30");
+            }
+            other => panic!("expected FlowStepProgress, got {other:?}"),
+        }
     }
 
     /// Publisher that marks the run cancelled once `cancel_after` step events

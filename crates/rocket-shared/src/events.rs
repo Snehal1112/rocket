@@ -232,6 +232,17 @@ pub enum DomainEvent {
         run_id: String,
         node_id: String,
     },
+    /// Emitted while a node is still running, to report progress such as a
+    /// poll attempt or a callback wait. It never changes the node's status.
+    FlowStepProgress {
+        run_id: String,
+        node_id: String,
+        /// 1-based attempt number, or `None` when attempts do not apply.
+        attempt: Option<u32>,
+        max_attempts: Option<u32>,
+        /// Short text shown on the node, such as "attempt 3/30".
+        message: String,
+    },
     /// Emitted after every node of a run, in topological execution order.
     FlowStepCompleted {
         run_id: String,
@@ -725,6 +736,35 @@ mod tests {
             json,
             r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"Login Flow","collection":"acme","total_nodes":3}"#
         );
+    }
+
+    #[test]
+    fn flow_step_progress_wire_shape() {
+        let event = DomainEvent::FlowStepProgress {
+            run_id: "01J".into(),
+            node_id: "n".into(),
+            attempt: Some(3),
+            max_attempts: Some(30),
+            message: "attempt 3/30".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowStepProgress","run_id":"01J","node_id":"n","attempt":3,"max_attempts":30,"message":"attempt 3/30"}"#
+        );
+    }
+
+    #[test]
+    fn flow_step_progress_without_attempts_sends_nulls() {
+        let event = DomainEvent::FlowStepProgress {
+            run_id: "01J".into(),
+            node_id: "n".into(),
+            attempt: None,
+            max_attempts: None,
+            message: "waiting… 42s left".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""attempt":null,"max_attempts":null"#), "got {json}");
     }
 
     #[test]
