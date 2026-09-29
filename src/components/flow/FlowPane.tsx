@@ -37,7 +37,7 @@ import { FlowCanvas } from './FlowCanvas';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
 import { NodePropertiesPanel } from './properties/NodePropertiesPanel';
-import { WireExpressionPopover } from './WireExpressionPopover';
+import { WireScriptDialog } from './WireScriptDialog';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const openFlowTab = usePaneStore((s) => s.openFlowTab);
@@ -370,9 +370,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             onOpenProperties={(nodeId) => setPanelFocusRequest({ nodeId })}
           />
           {pendingEdge && pendingTargetNode && (
-            <WireExpressionPopover
+            <WireScriptDialog
               // Keyed by edge id so a second connection made before the first
-              // popover is committed/dismissed remounts this component instead
+              // dialog is committed/dismissed remounts this component instead
               // of reusing it — otherwise its internal `expression`/`headerName`
               // state (initialized once via useState) would leak from the
               // previous edge onto the new one.
@@ -397,10 +397,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                   tab.edges.map((e) => (e.id === updated.id ? updated : e)),
                 );
               }}
-            >
-              {/* Plan 09's edge/handle DOM node the popover anchors to. */}
-              <span />
-            </WireExpressionPopover>
+            />
           )}
         </div>
       </ResizablePanel>

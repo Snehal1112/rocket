@@ -22,6 +22,8 @@ interface MonacoWrapperProps {
   height?: string;
   variableContext?: Map<string, VariableScopeEntry>;
   phase?: ScriptPhase;
+  /** Extra typings for this editor only. */
+  extraLib?: { content: string; filePath: string };
   onEditorReady?: (editor: monacoNs.editor.IStandaloneCodeEditor) => void;
 }
 
@@ -69,6 +71,7 @@ export function MonacoWrapper({
   height = '300px',
   variableContext,
   phase,
+  extraLib,
   onEditorReady,
 }: MonacoWrapperProps) {
   const { themeName } = useMonacoTheme();
@@ -119,6 +122,18 @@ export function MonacoWrapper({
       extraLibDisposableRef.current = null;
     };
   }, [phase]);
+
+  // Caller-supplied typings get their own disposable so they never clash with the phase stubs.
+  const extraLibContent = extraLib?.content;
+  const extraLibPath = extraLib?.filePath;
+  useEffect(() => {
+    if (extraLibContent === undefined || !extraLibPath) return;
+    const disposable = monacoNs.typescript.javascriptDefaults.addExtraLib(
+      extraLibContent,
+      extraLibPath,
+    );
+    return () => disposable.dispose();
+  }, [extraLibContent, extraLibPath]);
 
   // Clean up content-change and hover disposables on unmount; extraLibDisposableRef is cleaned by the phase effect.
   useEffect(() => {
