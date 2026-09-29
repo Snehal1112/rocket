@@ -140,6 +140,7 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
                 label,
                 source,
                 debug,
+                repeat_until: _,
             } => FlowNodeKindDto::Request {
                 label,
                 source: source.into(),
@@ -171,6 +172,7 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
                 label,
                 source: source.into(),
                 debug,
+                repeat_until: None,
             },
             FlowNodeKindDto::Input { label, value } => FlowNodeKind::Input { label, value },
             FlowNodeKindDto::Output { label } => FlowNodeKind::Output { label },

@@ -75,6 +75,7 @@ mod tests {
                     id: "node-1".to_string(),
                     kind: FlowNodeKind::Request {
                         debug: false,
+                        repeat_until: None,
                         label: "Login".to_string(),
                         source: RequestSource::Saved {
                             request_path: "auth/login.yml".to_string(),
@@ -322,6 +323,7 @@ mod tests {
                         request_path: "auth/login.yml".to_string(),
                     },
                     debug,
+                    repeat_until: None,
                 },
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],

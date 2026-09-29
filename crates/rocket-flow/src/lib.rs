@@ -7,6 +7,7 @@ pub mod validate;
 pub use flow::{Flow, FlowEdge, FlowNode, FlowRepository};
 pub use graph::{topological_sort, FlowGraphError};
 pub use node::{
-    FlowNodeKind, InlineHeader, InlineRequestData, NodePosition, RequestSource, SwitchCase,
+    FlowNodeKind, InlineHeader, InlineRequestData, NodePosition, RepeatUntil, RequestSource,
+    SwitchCase,
 };
 pub use validate::validate;

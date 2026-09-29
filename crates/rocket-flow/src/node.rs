@@ -21,6 +21,9 @@ pub enum FlowNodeKind {
         /// When true, a run reports the request as sent and its response.
         #[serde(default, skip_serializing_if = "is_false")]
         debug: bool,
+        /// When set, the request is sent again until `condition` holds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repeat_until: Option<RepeatUntil>,
     },
     Input {
         label: String,
@@ -56,6 +59,39 @@ pub struct SwitchCase {
     pub id: String,
     pub label: String,
     pub matches: String,
+}
+
+/// Polling settings of a Request node. The node sends its request until
+/// `condition` is truthy, pausing `interval_ms` between attempts, and gives
+/// up after `max_attempts` attempts or `timeout_ms` from the first send.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepeatUntil {
+    /// Script condition, evaluated like an If node's condition against `response`.
+    pub condition: String,
+    pub interval_ms: u64,
+    pub max_attempts: u32,
+    pub timeout_ms: u64,
+}
+
+impl RepeatUntil {
+    pub const DEFAULT_CONDITION: &'static str = "response.status === 200";
+    pub const DEFAULT_INTERVAL_MS: u64 = 2000;
+    pub const MIN_INTERVAL_MS: u64 = 100;
+    pub const DEFAULT_MAX_ATTEMPTS: u32 = 30;
+    pub const MAX_MAX_ATTEMPTS: u32 = 1000;
+    pub const DEFAULT_TIMEOUT_MS: u64 = 60_000;
+    pub const MAX_TIMEOUT_MS: u64 = 3_600_000;
+}
+
+impl Default for RepeatUntil {
+    fn default() -> Self {
+        Self {
+            condition: Self::DEFAULT_CONDITION.to_string(),
+            interval_ms: Self::DEFAULT_INTERVAL_MS,
+            max_attempts: Self::DEFAULT_MAX_ATTEMPTS,
+            timeout_ms: Self::DEFAULT_TIMEOUT_MS,
+        }
+    }
 }
 
 /// Where a `Request` node's method/url/headers/body/auth come from.
@@ -102,6 +138,7 @@ mod tests {
     fn flow_node_kind_request_tagged_roundtrip() {
         let kind = FlowNodeKind::Request {
             debug: false,
+            repeat_until: None,
             label: "Get Auth Token".to_string(),
             source: RequestSource::Saved {
                 request_path: "auth/login.yml".to_string(),
@@ -249,5 +286,58 @@ mod tests {
         };
         let json = serde_json::to_string(&case).expect("serialize SwitchCase");
         assert_eq!(json, r#"{"id":"c1","label":"Free","matches":"free"}"#);
+    }
+
+    #[test]
+    fn repeat_until_default_uses_the_spec_values() {
+        let r = RepeatUntil::default();
+        assert_eq!(r.condition, "response.status === 200");
+        assert_eq!(r.interval_ms, 2000);
+        assert_eq!(r.max_attempts, 30);
+        assert_eq!(r.timeout_ms, 60_000);
+    }
+
+    #[test]
+    fn request_without_repeat_until_omits_the_key() {
+        let kind = FlowNodeKind::Request {
+            label: "Get".to_string(),
+            source: RequestSource::Saved {
+                request_path: "a.yml".to_string(),
+            },
+            debug: false,
+            repeat_until: None,
+        };
+        let yaml = serde_yaml::to_string(&kind).expect("serialize");
+        assert!(!yaml.contains("repeat_until"), "got: {yaml}");
+    }
+
+    #[test]
+    fn request_with_repeat_until_roundtrips_in_snake_case() {
+        let kind = FlowNodeKind::Request {
+            label: "Poll job".to_string(),
+            source: RequestSource::Saved {
+                request_path: "jobs/get-job.yml".to_string(),
+            },
+            debug: false,
+            repeat_until: Some(RepeatUntil {
+                condition: "response.body.status === \"done\"".to_string(),
+                interval_ms: 2000,
+                max_attempts: 30,
+                timeout_ms: 60_000,
+            }),
+        };
+        let yaml = serde_yaml::to_string(&kind).expect("serialize");
+        assert!(yaml.contains("repeat_until:"), "got: {yaml}");
+        assert!(yaml.contains("interval_ms: 2000"), "got: {yaml}");
+        assert!(yaml.contains("max_attempts: 30"), "got: {yaml}");
+        let back: FlowNodeKind = serde_yaml::from_str(&yaml).expect("deserialize");
+        assert_eq!(back, kind);
+    }
+
+    #[test]
+    fn repeat_until_missing_a_field_is_rejected() {
+        let yaml = "kind: Request\nlabel: P\nsource:\n  type: Saved\n  request_path: a.yml\nrepeat_until:\n  condition: x\n  interval_ms: 100\n  max_attempts: 3\n";
+        let err = serde_yaml::from_str::<FlowNodeKind>(yaml).expect_err("timeout_ms is required");
+        assert!(err.to_string().contains("timeout_ms"), "got: {err}");
     }
 }

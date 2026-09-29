@@ -1707,6 +1707,7 @@ mod tests {
             id: id.to_string(),
             kind: FlowNodeKind::Request {
                 debug: false,
+                repeat_until: None,
                 label: "Get Auth Token".to_string(),
                 source: RequestSource::Saved {
                     request_path: request_path.to_string(),
@@ -1721,6 +1722,7 @@ mod tests {
             id: id.to_string(),
             kind: FlowNodeKind::Request {
                 debug: false,
+                repeat_until: None,
                 label: "Ping".to_string(),
                 source: RequestSource::Inline {
                     request: InlineRequestData {
@@ -2257,6 +2259,7 @@ mod tests {
             id: id.to_string(),
             kind: FlowNodeKind::Request {
                 debug: false,
+                repeat_until: None,
                 label: format!("Node {id}"),
                 source: RequestSource::Inline {
                     request: InlineRequestData {
@@ -4918,6 +4921,7 @@ mod tests {
             id: "r".to_string(),
             kind: FlowNodeKind::Request {
                 debug,
+                repeat_until: None,
                 label: "Login".to_string(),
                 source: RequestSource::Inline {
                     request: InlineRequestData {

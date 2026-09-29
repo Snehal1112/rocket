@@ -228,6 +228,7 @@ mod tests {
             id,
             FlowNodeKind::Request {
                 debug: false,
+                repeat_until: None,
                 label: id.to_string(),
                 source: RequestSource::Saved {
                     request_path: format!("{id}.yml"),

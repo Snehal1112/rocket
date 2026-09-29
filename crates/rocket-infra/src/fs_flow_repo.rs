@@ -153,7 +153,7 @@ mod tests {
     use super::*;
     use rocket_flow::{
         FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
-        RequestSource, SwitchCase,
+        RepeatUntil, RequestSource, SwitchCase,
     };
     use tempfile::TempDir;
 
@@ -338,6 +338,7 @@ mod tests {
                 id: "node-1".to_string(),
                 kind: FlowNodeKind::Request {
                     debug: false,
+                    repeat_until: None,
                     label: "Get User".to_string(),
                     source: RequestSource::Saved {
                         request_path: "users/get-user.yml".to_string(),
@@ -361,6 +362,7 @@ mod tests {
                 id: "node-1".to_string(),
                 kind: FlowNodeKind::Request {
                     debug: false,
+                    repeat_until: None,
                     label: "Ad Hoc Login".to_string(),
                     source: RequestSource::Inline {
                         request: InlineRequestData {
@@ -392,6 +394,7 @@ mod tests {
                 id: "node-1".to_string(),
                 kind: FlowNodeKind::Request {
                     debug: false,
+                    repeat_until: None,
                     label: "Ping".to_string(),
                     source: RequestSource::Inline {
                         request: InlineRequestData {
@@ -428,6 +431,7 @@ mod tests {
             id: "node-2".to_string(),
             kind: FlowNodeKind::Request {
                 debug: false,
+                repeat_until: None,
                 label: "Call".to_string(),
                 source: RequestSource::Saved {
                     request_path: "call.yml".to_string(),
@@ -617,6 +621,54 @@ mod tests {
         assert_eq!(
             resaved, original,
             "re-saving a Phase 1 file must not change it"
+        );
+    }
+
+    #[test]
+    fn request_node_with_repeat_until_roundtrips() {
+        let (_dir, repo) = setup();
+        let flow = Flow {
+            name: "Poll Flow".to_string(),
+            nodes: vec![FlowNode {
+                id: "node-1".to_string(),
+                kind: FlowNodeKind::Request {
+                    debug: false,
+                    label: "Poll job".to_string(),
+                    source: RequestSource::Saved {
+                        request_path: "jobs/get-job.yml".to_string(),
+                    },
+                    repeat_until: Some(RepeatUntil {
+                        condition: "response.body.status === \"done\"".to_string(),
+                        interval_ms: 500,
+                        max_attempts: 10,
+                        timeout_ms: 5000,
+                    }),
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: Vec::new(),
+        };
+        repo.save("acme", &flow).expect("save");
+        let loaded = repo.get("acme", "Poll Flow").expect("get");
+        assert_eq!(loaded, flow);
+    }
+
+    #[test]
+    fn fs_repo_resaves_request_without_repeat_until_byte_identically() {
+        let (dir, repo) = setup();
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(&flows_dir).expect("create flows dir");
+        let path = flows_dir.join("plain.yml");
+        let original = "name: Plain\nnodes:\n- id: n1\n  kind:\n    kind: Request\n    label: Get\n    source:\n      type: Saved\n      request_path: a.yml\n  position:\n    x: 0.0\n    y: 0.0\nedges: []\n";
+        fs::write(&path, original).expect("write file");
+
+        let loaded = repo.get("acme", "Plain").expect("load");
+        repo.save("acme", &loaded).expect("re-save");
+
+        let resaved = fs::read_to_string(&path).expect("read re-saved file");
+        assert_eq!(
+            resaved, original,
+            "a Request without repeat_until must re-save unchanged"
         );
     }
 }
