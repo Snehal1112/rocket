@@ -238,4 +238,18 @@ describe('RequestNodeEditor', () => {
     expect(screen.queryByRole('button', { name: 'Convert' })).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('turns on repeat until for the node', async () => {
+    const onChange = renderEditor(savedKind);
+    await userEvent.click(screen.getByRole('switch', { name: 'Repeat until' }));
+    expect(onChange).toHaveBeenCalledWith({
+      ...savedKind,
+      repeatUntil: {
+        condition: 'response.status === 200',
+        intervalMs: 2000,
+        maxAttempts: 30,
+        timeoutMs: 60000,
+      },
+    });
+  });
 });

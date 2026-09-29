@@ -17,6 +17,7 @@ import {
 import { InlineSourceEditor } from './InlineSourceEditor';
 import { LabelField } from './LabelField';
 import { focusIsLost, usePanelRefocus } from './panelFocus';
+import { RepeatUntilSection } from './RepeatUntilSection';
 import { RequestPicker } from './RequestPicker';
 import { SavedSourceEditor } from './SavedSourceEditor';
 
@@ -129,6 +130,10 @@ export function RequestNodeEditor({
           Logs the request as sent and its response to the Console on each run. Secrets are masked.
         </p>
       </div>
+      <RepeatUntilSection
+        value={kind.repeatUntil ?? null}
+        onChange={(repeatUntil) => onChange({ ...kind, repeatUntil })}
+      />
       <p className='text-xs text-muted-foreground'>
         Source: {source.type === 'Saved' ? 'saved request' : 'inline request'}
       </p>
