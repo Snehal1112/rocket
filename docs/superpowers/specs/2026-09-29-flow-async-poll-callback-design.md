@@ -267,11 +267,11 @@ The `rocket-infra` implementation:
 
 The URL is `http://<host>:<port>/cb/<token>`. `<host>` is `Flow.callback_host`, or this machine's first non-loopback IPv4 address, or `127.0.0.1` if there is none.
 
-`src-tauri/src/lib.rs` wires the implementation into `FlowExecutionService`. Tests use an in-memory fake.
+`rocket-app` already dev-depends on `rocket-infra`, so `rocket-infra` cannot implement a `rocket-app` trait without a dependency cycle. The server in `rocket-infra/src/callback_server.rs` therefore exposes its own `ServerCall` and `ServerEndpoint` types, and a thin adapter, `src-tauri/src/callback_adapter.rs` (`HyperCallbackAdapter`), implements `CallbackListener` on top of it. `src-tauri/src/lib.rs` wires the adapter into `FlowExecutionService` with `with_callback_listener`. Tests use an in-memory fake.
 
 ### 7.4 Execution
 
-At run start, before the first node:
+At run start, before `FlowRunStarted` and before the run is marked in flight (`crates/rocket-app/src/flow_callbacks.rs`, `RunCallbacks`):
 1. For each WaitForCallback node, call `open(host)`. A failure fails the whole run before any node runs, with a clear error.
 2. Put `callback.<name> = <url>` into a run-scoped variable map. `ExecuteRequestInput` gains `flow_vars: HashMap<String, String>` (serde default, empty for every non-flow caller). `build_execute_request_input` fills it for every Request node, and `begin_phases` merges it into `VariableContext.runtime` before scripts run, so `{{callback.<name>}}` resolves in any field and in scripts. Values set by scripts still win, as runtime merging already works.
 3. Keep each endpoint in the run's state. Endpoints are dropped when `run` returns, on every path.
@@ -281,7 +281,7 @@ When a WaitForCallback node runs (`execute_node`):
 2. Loop: `select!` on the next call, the deadline and the cancel signal.
    - For a call, if `accept_when` is set, evaluate it with the call exposed as `request` (`method`, `path`, `query`, `headers`, `body` parsed as JSON when possible). This uses a sibling of `evaluate_flow_route_expression` that binds `request` instead of `response`, with the same sandbox, timeout and `FlowCoercion::Bool`. A script error fails the node. A false result increments an ignored count and continues.
    - Every second while waiting, publish `FlowStepProgress { message: "waiting… {left}s left · {k} ignored call(s)" }`.
-3. An accepted call succeeds the node. Its output is a `CapturedOutput::Request` whose response has status `200`, the call's headers and body, and `duration_ms` measured from the node's start. Downstream wires use `response.body` and `response.headers` as for a Request node.
+3. An accepted call succeeds the node. Its output is a `CapturedOutput::Request` whose response has status `200`, the call's method as `status_text`, the call's headers and body, and `duration_ms` measured from the node's start. Downstream wires use `response.body` and `response.headers` as for a Request node. The step's `value` is the received method, so the card can show "✓ received POST".
 4. The deadline fails the node with `"no matching callback within {timeout}s ({k} ignored)"`.
 
 A skipped or failed WaitForCallback node keeps its endpoint open only until the run ends. Its calls are answered and discarded.
