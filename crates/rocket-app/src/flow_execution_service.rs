@@ -78,6 +78,8 @@ pub enum FlowCoercion {
     Bool,
     /// A Switch node compares a string.
     Str,
+    /// A Transform node needs any value except `undefined`.
+    Required,
 }
 
 /// Builds the JS that runs one Flow script against a plain `response` object.
@@ -97,6 +99,7 @@ fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
         FlowCoercion::Raw => ("(", ")"),
         FlowCoercion::Bool => ("!!(", ")"),
         FlowCoercion::Str => ("String(", ")"),
+        FlowCoercion::Required => ("__requireValue(", ")"),
     };
     Ok(format!(
         r#"(() => {{
@@ -114,6 +117,10 @@ fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
   }}
   // 3. A script that sends its value with `return`. A parse error here is the one reported.
   if (fn === null) fn = new Function('response', src);
+  const __requireValue = (v) => {{
+    if (v === undefined) throw new Error('script returned no value');
+    return v;
+  }};
   const response = {{
     status: res.getStatus(),
     statusText: res.getStatusText(),
@@ -224,8 +231,8 @@ impl RequestExecutionService {
         }
     }
 
-    /// Evaluates an If/Switch routing script against `output`. Callers pass the
-    /// raw condition or value, and `coercion` is applied to the result, so the
+    /// Evaluates an If/Switch routing script, or a Transform script, against output.
+    /// Callers pass the raw condition or value, and `coercion` is applied to the result, so the
     /// result is always a string; a `null` result becomes `"null"` rather
     /// than an error, which keeps a missing value routable by a case.
     pub async fn evaluate_flow_route_expression(
@@ -260,6 +267,27 @@ impl RequestExecutionService {
             }),
             logs: to_flow_logs(entries),
         }
+    }
+
+    /// Evaluates a Transform node's script against `output`. The script may be
+    /// one expression or a function body that returns a value. Any result
+    /// except `undefined` is accepted, and it comes back as text: a string as
+    /// is, `null` as `"null"`, and anything else as compact JSON.
+    pub async fn evaluate_flow_transform_script(
+        &self,
+        collection: &str,
+        output: &CapturedOutput,
+        source: &str,
+        secret_values: &HashSet<String>,
+    ) -> FlowScriptOutcome {
+        self.evaluate_flow_route_expression(
+            collection,
+            output,
+            source,
+            FlowCoercion::Required,
+            secret_values,
+        )
+        .await
     }
 
     /// Evaluates a Wait for callback node's `accept_when` against one
@@ -6736,5 +6764,71 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(5),
             "no 60 s wait"
         );
+    }
+
+    // ---- Phase 3: Transform ------------------------------------------------
+
+    #[test]
+    fn required_coercion_guards_against_undefined() {
+        let script = flow_script("return response.body;", FlowCoercion::Required).expect("wrapper");
+        assert!(
+            script.contains("return __requireValue(fn(response));"),
+            "got: {script}"
+        );
+        assert!(script.contains("script returned no value"), "got: {script}");
+    }
+
+    #[test]
+    fn other_coercions_do_not_call_the_guard() {
+        for coercion in [FlowCoercion::Raw, FlowCoercion::Bool, FlowCoercion::Str] {
+            let script = flow_script("1", coercion).expect("wrapper");
+            assert!(!script.contains("__requireValue(fn"), "got: {script}");
+        }
+    }
+
+    async fn transform_result(answer: Scripted) -> FlowScriptOutcome {
+        let svc = service_with_engine(
+            FakeCollectionRepo::new(),
+            scripted(vec![("__requireValue(", answer)]),
+        );
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+        svc.evaluate_flow_transform_script("my-api", &output, "return 1;", &HashSet::new())
+            .await
+    }
+
+    #[tokio::test]
+    async fn transform_script_returns_a_string_as_is() {
+        let outcome = transform_result(Scripted::Value(serde_json::json!("abc"))).await;
+        assert_eq!(outcome.result.expect("script result"), "abc");
+    }
+
+    #[tokio::test]
+    async fn transform_script_returns_an_object_as_compact_json() {
+        let outcome =
+            transform_result(Scripted::Value(serde_json::json!({"a": 1, "b": [2]}))).await;
+        assert_eq!(outcome.result.expect("script result"), r#"{"a":1,"b":[2]}"#);
+    }
+
+    #[tokio::test]
+    async fn transform_script_turns_null_into_the_text_null() {
+        let outcome = transform_result(Scripted::Value(serde_json::Value::Null)).await;
+        assert_eq!(outcome.result.expect("script result"), "null");
+    }
+
+    #[tokio::test]
+    async fn transform_script_keeps_zero_and_false() {
+        let zero = transform_result(Scripted::Value(serde_json::json!(0))).await;
+        assert_eq!(zero.result.expect("script result"), "0");
+        let no = transform_result(Scripted::Value(serde_json::json!(false))).await;
+        assert_eq!(no.result.expect("script result"), "false");
+    }
+
+    #[tokio::test]
+    async fn transform_script_reports_a_script_error() {
+        let outcome = transform_result(Scripted::Throw("script returned no value")).await;
+        assert!(matches!(
+            outcome.result,
+            Err(DomainError::InvalidInput(ref m)) if m.contains("script returned no value")
+        ));
     }
 }
