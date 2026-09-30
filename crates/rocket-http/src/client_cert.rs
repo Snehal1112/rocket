@@ -31,6 +31,12 @@ pub fn find_certificate<'a>(
         .find(|c| domain_matches(certificate_domain(c), &host, port))
 }
 
+/// Returns whether `cert` would be chosen for `url`, for checking a redirect target against the
+/// certificate that was picked for the original request.
+pub fn certificate_covers(cert: &ClientCertificate, url: &str) -> bool {
+    find_certificate(std::slice::from_ref(cert), url).is_some()
+}
+
 fn domain_matches(domain: &str, host: &str, port: Option<u16>) -> bool {
     let domain = domain.trim().to_ascii_lowercase();
     let domain = domain
@@ -140,6 +146,17 @@ mod tests {
             found(&certs, "https://api.example.com").as_deref(),
             Some("*.example.com")
         );
+    }
+
+    #[test]
+    fn certificate_covers_follows_the_same_rules_as_find_certificate() {
+        let cert = pkcs12("api.example.com:8443");
+        assert!(certificate_covers(&cert, "https://api.example.com:8443/x"));
+        assert!(!certificate_covers(&cert, "https://api.example.com/x"));
+        assert!(!certificate_covers(
+            &cert,
+            "https://other.example.com:8443/x"
+        ));
     }
 
     #[test]

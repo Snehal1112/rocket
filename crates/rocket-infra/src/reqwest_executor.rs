@@ -233,7 +233,10 @@ impl HttpExecutor for ReqwestExecutor {
             &request.options.client_certificates,
             &request.url,
         ) {
-            Some(cert) => Some(load_identity(cert)?),
+            Some(cert) => Some(ClientIdentity {
+                identity: load_identity(cert)?,
+                certificate: cert.clone(),
+            }),
             None => None,
         };
         let client = if identity.is_some() || request.options.max_redirects.is_some() {
@@ -434,25 +437,47 @@ fn build_client_impl(
     build_client_with_identity(follow_redirects, verify_ssl, max_redirects, None)
 }
 
+/// A loaded TLS identity together with the certificate entry it came from, whose domain says
+/// which hosts may see it.
+struct ClientIdentity {
+    identity: reqwest::Identity,
+    certificate: ClientCertificate,
+}
+
 /// Builds a client, presenting `identity` as the TLS client certificate when there is one.
-/// Note that the identity is offered to any host a followed redirect leads to, if that host asks.
+///
+/// A client offers its identity to every host it connects to, so with an identity the redirect
+/// policy stops at a redirect that leaves the certificate's domain. The 3xx response is then
+/// returned, and the user can send the request to the new host on purpose.
 fn build_client_with_identity(
     follow_redirects: bool,
     verify_ssl: bool,
     max_redirects: Option<u32>,
-    identity: Option<reqwest::Identity>,
+    identity: Option<ClientIdentity>,
 ) -> DomainResult<Client> {
-    let redirect_policy = if follow_redirects {
-        redirect::Policy::limited(max_redirects.unwrap_or(10) as usize)
-    } else {
+    let limit = max_redirects.unwrap_or(10) as usize;
+    let redirect_policy = if !follow_redirects {
         redirect::Policy::none()
+    } else if let Some(scope) = identity.as_ref().map(|i| i.certificate.clone()) {
+        redirect::Policy::custom(move |attempt| {
+            // A custom policy replaces the limit, so it is checked here like `limited` does.
+            if attempt.previous().len() > limit {
+                attempt.error("too many redirects")
+            } else if rocket_http::client_cert::certificate_covers(&scope, attempt.url().as_str()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        })
+    } else {
+        redirect::Policy::limited(limit)
     };
 
     let mut builder = Client::builder()
         .redirect(redirect_policy)
         .danger_accept_invalid_certs(!verify_ssl);
     if let Some(identity) = identity {
-        builder = builder.identity(identity);
+        builder = builder.identity(identity.identity);
     }
     builder
         .build()
@@ -1618,6 +1643,92 @@ mod mtls_tests {
             vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
         let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
         assert_eq!(resp.status, 200);
+    }
+
+    async fn redirecting_to(target: &str) -> MockServer {
+        let server = MockServer::start().await;
+        let target = target.to_string();
+        Mock::given(method("GET"))
+            .respond_with(move |_: &wiremock::Request| {
+                ResponseTemplate::new(302).insert_header("Location", target.as_str())
+            })
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn port_of(server: &MockServer) -> u16 {
+        server.address().port()
+    }
+
+    #[tokio::test]
+    async fn a_redirect_that_leaves_the_certificate_domain_is_not_followed() {
+        let other = ok_server().await;
+        let origin = redirecting_to(&format!("{}/next", other.uri())).await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/start", origin.uri()));
+        // The certificate is scoped to the first server's port only.
+        req.options.client_certificates = vec![p12(
+            &format!("127.0.0.1:{}", port_of(&origin)),
+            fixture("client.p12"),
+            Some("changeit"),
+        )];
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 302, "the redirect response is returned as-is");
+        assert!(
+            resp.headers
+                .iter()
+                .any(|h| h.key.eq_ignore_ascii_case("location")),
+            "the Location header is kept so the user can follow it on purpose"
+        );
+        assert!(other.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_redirect_inside_the_certificate_domain_is_followed() {
+        let other = ok_server().await;
+        let origin = redirecting_to(&format!("{}/next", other.uri())).await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/start", origin.uri()));
+        // No port in the domain, so both servers on 127.0.0.1 are covered.
+        req.options.client_certificates =
+            vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 200);
+        assert_eq!(other.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn without_a_certificate_redirects_are_followed_as_before() {
+        let other = ok_server().await;
+        let origin = redirecting_to(&format!("{}/next", other.uri())).await;
+        let req = HttpRequest::new(HttpMethod::Get, format!("{}/start", origin.uri()));
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 200);
+        assert_eq!(other.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_redirect_limit_still_applies_with_a_certificate() {
+        // Redirect to itself forever.
+        let server = MockServer::start().await;
+        let target = format!("{}/loop", server.uri());
+        Mock::given(method("GET"))
+            .respond_with(move |_: &wiremock::Request| {
+                ResponseTemplate::new(302).insert_header("Location", target.as_str())
+            })
+            .mount(&server)
+            .await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/loop", server.uri()));
+        req.options.max_redirects = Some(3);
+        req.options.client_certificates =
+            vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
+        let err = ReqwestExecutor::new().execute(&req).await.unwrap_err();
+
+        assert!(err.to_string().to_lowercase().contains("redirect"), "{err}");
+        // The first request plus the three allowed redirects.
+        assert_eq!(server.received_requests().await.unwrap().len(), 4);
     }
 
     /// Starts `openssl s_server` so that a client certificate is required, then checks that a
