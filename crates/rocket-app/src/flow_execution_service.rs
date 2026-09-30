@@ -6944,4 +6944,158 @@ mod tests {
             .as_deref()
             .is_some_and(|e| e.contains("script returned no value")));
     }
+
+    #[tokio::test]
+    async fn a_transform_reports_a_secret_masked_but_passes_it_on_raw() {
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        let exec = scoped_exec(env, Vec::new());
+        let flow = Flow {
+            name: "tf-secret".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{apiKey}}"),
+                transform_node("t", "response.body"),
+                output_node_named("out"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "t"),
+                edge_from("e2", "t", handle::RESULT, "out", "value", "response.body"),
+            ],
+            callback_host: None,
+        };
+        let publisher = RecordingPublisher::new();
+        let mut input = run_input("tf-secret");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_publisher(flow, &publisher)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        assert_eq!(
+            step_of(&summary, "t").value.as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        let event_value = publisher.events().iter().find_map(|e| match e {
+            DomainEvent::FlowStepCompleted { node_id, value, .. } if node_id == "t" => {
+                Some(value.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(
+            event_value.flatten().as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        assert_eq!(
+            step_of(&summary, "out").value.as_deref(),
+            Some("sk-live-123456"),
+            "the downstream wire still gets the real value"
+        );
+    }
+
+    /// in -> check(if) -> true: t -> out.
+    fn transform_after_if_flow(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            nodes: vec![
+                input_node_with("in", "pro"),
+                if_node("check", "response.body === 'pro'"),
+                transform_node("t", "return response.body;"),
+                output_node_named("out"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "check"),
+                edge_from("e2", "check", handle::TRUE, "t", handle::INPUT, ""),
+                edge_from("e3", "t", handle::RESULT, "out", "value", "response.body"),
+            ],
+            callback_host: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn transform_after_a_not_taken_branch_is_skipped() {
+        let service = service_with_flow(transform_after_if_flow("tf-branch"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(false)))]),
+        );
+
+        let summary = service
+            .run(&exec, run_input("tf-branch"))
+            .await
+            .expect("run");
+
+        for id in ["t", "out"] {
+            assert_eq!(
+                status_of(&summary, id),
+                FlowNodeStatus::Skipped,
+                "node {id}"
+            );
+            assert_eq!(
+                step_of(&summary, id).skip_reason,
+                Some(FlowSkipReason::BranchNotTaken),
+                "node {id}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn transform_after_a_taken_branch_runs() {
+        let service = service_with_flow(transform_after_if_flow("tf-taken"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![
+                ("!!(", Scripted::Value(serde_json::json!(true))),
+                ("__requireValue(", Scripted::Value(serde_json::json!("PRO"))),
+                (
+                    "response.body",
+                    Scripted::FromResponse(|r| {
+                        serde_json::json!(r.map(|r| r.body.clone()).unwrap_or_default())
+                    }),
+                ),
+            ]),
+        );
+
+        let summary = service
+            .run(&exec, run_input("tf-taken"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "t"), FlowNodeStatus::Success);
+        assert_eq!(step_of(&summary, "out").value.as_deref(), Some("PRO"));
+    }
+
+    #[tokio::test]
+    async fn one_transform_can_feed_two_consumers() {
+        let flow = Flow {
+            name: "tf-fan".to_string(),
+            nodes: vec![
+                input_node_with("in", "pro"),
+                transform_node("t", "return response.body;"),
+                output_node_named("out1"),
+                output_node_named("out2"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "t"),
+                edge_from("e2", "t", handle::RESULT, "out1", "value", "response.body"),
+                edge_from("e3", "t", handle::RESULT, "out2", "value", "response.body"),
+            ],
+            callback_host: None,
+        };
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            transform_engine(Scripted::Value(serde_json::json!("SHARED"))),
+        );
+
+        let summary = service.run(&exec, run_input("tf-fan")).await.expect("run");
+
+        assert_eq!(step_of(&summary, "out1").value.as_deref(), Some("SHARED"));
+        assert_eq!(step_of(&summary, "out2").value.as_deref(), Some("SHARED"));
+    }
 }
