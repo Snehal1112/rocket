@@ -53,6 +53,10 @@ pub struct FlowDebugResponse {
     pub size_bytes: u64,
     pub headers: Vec<FlowDebugHeader>,
     pub body: String,
+    /// True when `body` was cut to the exchange size limit. `size_bytes`
+    /// still holds the full size.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
 }
 
 /// The request a Flow step sent and what came back, already masked.
@@ -276,6 +280,11 @@ pub enum DomainEvent {
         /// How many times a repeat-until Request node sent its request.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<u32>,
+        /// The request this step sent and its response, masked and
+        /// size-capped. Set for every Request node that sent and for an
+        /// accepted Wait for callback, whatever the Debug mode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exchange: Option<Box<FlowDebugRequest>>,
     },
     /// Emitted once when a Flow run ends, for any reason.
     FlowRunFinished {
@@ -768,7 +777,10 @@ mod tests {
             message: "waiting… 42s left".into(),
         };
         let json = serde_json::to_string(&event).expect("serialize");
-        assert!(json.contains(r#""attempt":null,"max_attempts":null"#), "got {json}");
+        assert!(
+            json.contains(r#""attempt":null,"max_attempts":null"#),
+            "got {json}"
+        );
     }
 
     #[test]
@@ -789,6 +801,7 @@ mod tests {
                 level: FlowLogLevel::Warn,
                 message: "hi".into(),
             }],
+            exchange: None,
         };
         let json = serde_json::to_string(&with_logs).expect("serialize");
         assert!(
@@ -809,6 +822,7 @@ mod tests {
             debug_request: None,
             attempts: None,
             logs: vec![],
+            exchange: None,
         };
         let json = serde_json::to_string(&without).expect("serialize");
         assert!(!json.contains("logs"), "got {json}");
@@ -849,6 +863,7 @@ mod tests {
             debug_request,
             attempts: None,
             logs: vec![],
+            exchange: None,
         };
         let json = serde_json::to_string(&event(Some(Box::new(debug)))).expect("serialize");
         assert!(
@@ -876,6 +891,7 @@ mod tests {
             debug_request: None,
             attempts: None,
             logs: vec![],
+            exchange: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -899,6 +915,7 @@ mod tests {
             debug_request: None,
             attempts: None,
             logs: vec![],
+            exchange: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(json.contains(r#""status":"skipped""#));
@@ -930,6 +947,7 @@ mod tests {
                 logs,
                 debug_request,
                 attempts,
+                exchange,
             } => {
                 assert_eq!(run_id, "01J");
                 assert_eq!(node_id, "node-3");
@@ -943,6 +961,7 @@ mod tests {
                 assert!(logs.is_empty());
                 assert_eq!(debug_request, None);
                 assert_eq!(attempts, None);
+                assert_eq!(exchange, None);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1014,6 +1033,7 @@ mod tests {
             debug_request: None,
             attempts: None,
             logs: vec![],
+            exchange: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -1037,6 +1057,7 @@ mod tests {
             debug_request: None,
             attempts: None,
             logs: vec![],
+            exchange: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -1136,5 +1157,73 @@ mod tests {
             json,
             r#"{"type":"acpSessionFailed","session_id":"sess-1","error":"agent process exited unexpectedly"}"#
         );
+    }
+
+    #[test]
+    fn flow_step_completed_without_exchange_still_deserializes() {
+        let json = r#"{"type":"flowStepCompleted","run_id":"r","node_id":"n","status":"success","status_code":200,"duration_ms":5,"error":null,"value":null}"#;
+        let event: DomainEvent = serde_json::from_str(json).expect("old payload");
+        match event {
+            DomainEvent::FlowStepCompleted { exchange, .. } => assert!(exchange.is_none()),
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_response_that_was_not_cut_serializes_without_truncated() {
+        let response = FlowDebugResponse {
+            status: 200,
+            status_text: "OK".into(),
+            duration_ms: 1,
+            size_bytes: 2,
+            headers: Vec::new(),
+            body: "{}".into(),
+            truncated: false,
+        };
+        let json = serde_json::to_string(&response).expect("serialize");
+        assert!(!json.contains("truncated"), "{json}");
+        let old: FlowDebugResponse = serde_json::from_str(
+            r#"{"status":200,"statusText":"OK","durationMs":1,"sizeBytes":2,"headers":[],"body":"{}"}"#,
+        )
+        .expect("old record");
+        assert!(!old.truncated);
+    }
+
+    #[test]
+    fn flow_step_completed_carries_the_exchange_in_camel_case() {
+        let event = DomainEvent::FlowStepCompleted {
+            run_id: "r".into(),
+            node_id: "n".into(),
+            status: FlowNodeStatus::Success,
+            status_code: Some(200),
+            duration_ms: Some(5),
+            error: None,
+            value: None,
+            skip_reason: None,
+            branch: None,
+            logs: Vec::new(),
+            debug_request: None,
+            attempts: None,
+            exchange: Some(Box::new(FlowDebugRequest {
+                method: "GET".into(),
+                url: "https://x.test".into(),
+                headers: Vec::new(),
+                body: None,
+                response: Some(FlowDebugResponse {
+                    status: 200,
+                    status_text: "OK".into(),
+                    duration_ms: 5,
+                    size_bytes: 300_000,
+                    headers: Vec::new(),
+                    body: "x".into(),
+                    truncated: true,
+                }),
+                error: None,
+            })),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(json.contains(r#""exchange":{"method":"GET""#), "{json}");
+        assert!(json.contains(r#""sizeBytes":300000"#), "{json}");
+        assert!(json.contains(r#""truncated":true"#), "{json}");
     }
 }

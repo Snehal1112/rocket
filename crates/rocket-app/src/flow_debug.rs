@@ -30,6 +30,7 @@ pub(crate) fn build_debug_request(
             size_bytes: r.size_bytes as u64,
             headers: mask_headers(&r.headers, secret_values),
             body: redact_secrets(&r.body, secret_values),
+            truncated: false,
         }),
         error: error.map(|e| redact_url_secrets(e, secret_values)),
     }
@@ -109,6 +110,72 @@ fn body_text(body: &Body, secret_values: &HashSet<String>) -> Option<String> {
             .as_ref()
             .map(|c| redact_secrets(c, secret_values)),
     }
+}
+// Used by the step recording in Task 2.
+/// The largest response body an exchange record keeps, in bytes.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const EXCHANGE_BODY_LIMIT: usize = 262_144;
+
+/// Cuts the response body to `EXCHANGE_BODY_LIMIT` bytes at a UTF-8
+/// boundary and marks the record as truncated.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn cap_exchange(mut record: FlowDebugRequest) -> FlowDebugRequest {
+    if let Some(response) = record.response.as_mut() {
+        if response.body.len() > EXCHANGE_BODY_LIMIT {
+            let mut cut = EXCHANGE_BODY_LIMIT;
+            while !response.body.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            response.body.truncate(cut);
+            response.truncated = true;
+        }
+    }
+    record
+}
+
+/// The record of an accepted callback. The call itself is the response,
+/// so a reader sees what arrived; the request side holds its method and
+/// path.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn callback_exchange(
+    call: &crate::callback_listener::ReceivedCall,
+    duration_ms: u64,
+    secret_values: &HashSet<String>,
+) -> FlowDebugRequest {
+    let query: Vec<String> = call.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let url = if query.is_empty() {
+        call.path.clone()
+    } else {
+        format!("{}?{}", call.path, query.join("&"))
+    };
+    let headers = call
+        .headers
+        .iter()
+        .map(|(key, value)| FlowDebugHeader {
+            key: key.clone(),
+            value: if is_sensitive_header(key) {
+                REDACTED.to_string()
+            } else {
+                redact_secrets(value, secret_values)
+            },
+        })
+        .collect();
+    cap_exchange(FlowDebugRequest {
+        method: call.method.clone(),
+        url: redact_url_secrets(&url, secret_values),
+        headers: Vec::new(),
+        body: None,
+        response: Some(FlowDebugResponse {
+            status: 200,
+            status_text: call.method.clone(),
+            duration_ms,
+            size_bytes: call.body.len() as u64,
+            headers,
+            body: redact_secrets(&call.body, secret_values),
+            truncated: false,
+        }),
+        error: None,
+    })
 }
 
 #[cfg(test)]
@@ -355,5 +422,96 @@ mod tests {
         );
         assert!(d.response.is_none());
         assert_eq!(d.error.as_deref(), Some("connection refused"));
+    }
+
+    fn response_record(body: String) -> FlowDebugRequest {
+        FlowDebugRequest {
+            method: "GET".into(),
+            url: "https://x.test".into(),
+            headers: Vec::new(),
+            body: None,
+            response: Some(FlowDebugResponse {
+                status: 200,
+                status_text: "OK".into(),
+                duration_ms: 1,
+                size_bytes: body.len() as u64,
+                headers: Vec::new(),
+                body,
+                truncated: false,
+            }),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn cap_exchange_keeps_a_body_at_the_limit_untouched() {
+        let body = "a".repeat(EXCHANGE_BODY_LIMIT);
+        let capped = cap_exchange(response_record(body.clone()));
+        let response = capped.response.expect("response");
+        assert_eq!(response.body, body);
+        assert!(!response.truncated);
+    }
+
+    #[test]
+    fn cap_exchange_cuts_a_long_body_and_keeps_the_real_size() {
+        let body = "a".repeat(EXCHANGE_BODY_LIMIT + 10);
+        let capped = cap_exchange(response_record(body));
+        let response = capped.response.expect("response");
+        assert_eq!(response.body.len(), EXCHANGE_BODY_LIMIT);
+        assert!(response.truncated);
+        assert_eq!(response.size_bytes, (EXCHANGE_BODY_LIMIT + 10) as u64);
+    }
+
+    #[test]
+    fn cap_exchange_never_splits_a_utf8_character() {
+        // "é" is two bytes. It starts one byte before the limit, so a naive
+        // cut would split it.
+        let mut body = "a".repeat(EXCHANGE_BODY_LIMIT - 1);
+        body.push('é');
+        body.push_str("tail");
+        let capped = cap_exchange(response_record(body));
+        let response = capped.response.expect("response");
+        assert_eq!(response.body.len(), EXCHANGE_BODY_LIMIT - 1);
+        assert!(response.body.chars().all(|c| c == 'a'));
+        assert!(response.truncated);
+    }
+
+    #[test]
+    fn cap_exchange_leaves_a_record_without_a_response_alone() {
+        let mut record = response_record(String::new());
+        record.response = None;
+        record.error = Some("connection refused".into());
+        assert_eq!(cap_exchange(record.clone()), record);
+    }
+
+    #[test]
+    fn callback_exchange_shows_the_call_as_the_response_with_secrets_masked() {
+        let call = crate::callback_listener::ReceivedCall {
+            method: "POST".into(),
+            path: "/cb/abc".into(),
+            query: vec![("event".into(), "paid".into())],
+            headers: vec![
+                ("authorization".into(), "Bearer t".into()),
+                ("x-note".into(), "sekret-token".into()),
+            ],
+            body: r#"{"k":"sekret-token"}"#.into(),
+        };
+        let record = callback_exchange(&call, 42, &secrets(&["sekret-token"]));
+        assert_eq!(record.method, "POST");
+        assert_eq!(record.url, "/cb/abc?event=paid");
+        let response = record.response.expect("response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.status_text, "POST");
+        assert_eq!(response.duration_ms, 42);
+        assert_eq!(response.body, r#"{"k":"••••••"}"#);
+        let value = |key: &str| {
+            response
+                .headers
+                .iter()
+                .find(|h| h.key == key)
+                .map(|h| h.value.clone())
+        };
+        assert_eq!(value("authorization").as_deref(), Some("••••••"));
+        assert_eq!(value("x-note").as_deref(), Some("••••••"));
     }
 }

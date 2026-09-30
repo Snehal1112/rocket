@@ -610,6 +610,7 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         branch: step.branch.clone(),
         logs: step.logs.clone(),
         debug_request: step.debug_request.clone().map(Box::new),
+        exchange: None,
         attempts: step.attempts,
     }
 }
