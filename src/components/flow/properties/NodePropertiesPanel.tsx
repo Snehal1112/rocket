@@ -64,6 +64,9 @@ function editorFor(
       );
     case 'WaitForCallback':
       return <WaitForCallbackEditor kind={kind} onChange={onChange} />;
+    case 'Transform':
+      // Plan 05 replaces this with the script editor.
+      return <LabelOnlyEditor kind={kind} onChange={onChange} />;
   }
 }
 

@@ -307,3 +307,39 @@ describe('Wait for callback wiring', () => {
     expect(from('true')).toBe(false);
   });
 });
+
+describe('Transform wiring', () => {
+  const transform = node('tf', {
+    kind: 'Transform',
+    label: 'Pick',
+    script: 'return response.body;',
+  });
+  const all = [...nodes, transform];
+  const conn = (
+    source: string,
+    sourceHandle: string | null,
+    target: string,
+    targetHandle: string,
+  ) => ({ source, sourceHandle, target, targetHandle });
+
+  it('accepts any node result, and a routing exit, into input', () => {
+    expect(isValidFlowConnection(conn('req', 'result', 'tf', 'input'), all, [])).toBe(true);
+    expect(isValidFlowConnection(conn('inp', null, 'tf', 'input'), all, [])).toBe(true);
+    expect(isValidFlowConnection(conn('iff', 'true', 'tf', 'input'), all, [])).toBe(true);
+    expect(isValidFlowConnection(conn('sw', 'case:c1', 'tf', 'input'), all, [])).toBe(true);
+  });
+
+  it('rejects other fields into a Transform', () => {
+    for (const field of ['url', 'body', 'headers', 'value', 'trigger']) {
+      expect(isValidFlowConnection(conn('req', 'result', 'tf', field), all, [])).toBe(false);
+    }
+  });
+
+  it('a Transform exits through result only', () => {
+    expect(isValidFlowConnection(conn('tf', 'result', 'out', 'value'), all, [])).toBe(true);
+    expect(isValidFlowConnection(conn('tf', null, 'req', 'url'), all, [])).toBe(true);
+    expect(isValidFlowConnection(conn('tf', 'true', 'out', 'value'), all, [])).toBe(false);
+    expect(isValidFlowConnection(conn('tf', 'default', 'out', 'value'), all, [])).toBe(false);
+    expect(isValidFlowConnection(conn('tf', 'case:c1', 'out', 'value'), all, [])).toBe(false);
+  });
+});

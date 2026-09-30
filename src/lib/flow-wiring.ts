@@ -61,6 +61,7 @@ function sourceHandleExists(node: FlowNode, handle: string): boolean {
     case 'Request':
     case 'Input':
     case 'WaitForCallback':
+    case 'Transform':
       return handle === RESULT_HANDLE;
     case 'If':
       return handle === TRUE_HANDLE || handle === FALSE_HANDLE;
@@ -81,6 +82,7 @@ function targetAccepts(node: FlowNode, handle: string): boolean {
   switch (node.kind.kind) {
     case 'If':
     case 'Switch':
+    case 'Transform':
       return handle === INPUT_HANDLE;
     case 'Request':
       return REQUEST_TARGETS.includes(handle);

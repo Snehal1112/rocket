@@ -1786,6 +1786,12 @@ export type FlowNodeKind =
       timeoutMs: number;
       /** Optional condition over `request`. Null or absent accepts the first call. */
       acceptWhen?: string | null;
+    }
+  | {
+      kind: 'Transform';
+      label: string;
+      /** One expression or a function body that returns a value. It reads `response`. */
+      script: string;
     };
 
 export interface FlowNode {
