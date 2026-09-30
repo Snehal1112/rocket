@@ -342,4 +342,26 @@ describe('Transform wiring', () => {
     expect(isValidFlowConnection(conn('tf', 'default', 'out', 'value'), all, [])).toBe(false);
     expect(isValidFlowConnection(conn('tf', 'case:c1', 'out', 'value'), all, [])).toBe(false);
   });
+
+  const edgeInto = (target: string, field: string): FlowEdge => ({
+    id: `e-${target}-${field}`,
+    sourceNodeId: 'req',
+    targetNodeId: target,
+    targetField: field,
+    expression: '',
+  });
+
+  it('rejects a second wire into a Transform input', () => {
+    const edges = [edgeInto('tf', 'input')];
+    expect(isValidFlowConnection(conn('inp', 'result', 'tf', 'input'), all, edges)).toBe(false);
+  });
+
+  it('allows the first wire when only other nodes have wires', () => {
+    const edges = [edgeInto('out', 'value')];
+    expect(isValidFlowConnection(conn('inp', 'result', 'tf', 'input'), all, edges)).toBe(true);
+  });
+
+  it('still refuses an input wire into a Request', () => {
+    expect(isValidFlowConnection(conn('inp', 'result', 'req', 'input'), all, [])).toBe(false);
+  });
 });

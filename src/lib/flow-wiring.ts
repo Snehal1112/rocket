@@ -4,10 +4,10 @@ import {
   DEFAULT_HANDLE,
   FALSE_HANDLE,
   INPUT_HANDLE,
-  isRoutingKind,
   RESULT_HANDLE,
   TRIGGER_HANDLE,
   TRUE_HANDLE,
+  takesSingleInput,
 } from '@/lib/flow-handles';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 
@@ -110,8 +110,9 @@ export function isValidFlowConnection(
   if (!sourceNode || !targetNode) return false;
   if (!sourceHandleExists(sourceNode, connection.sourceHandle ?? RESULT_HANDLE)) return false;
   if (!targetAccepts(targetNode, targetHandle)) return false;
-  // A routing node evaluates exactly one input.
-  if (isRoutingKind(targetNode.kind) && edges.some((e) => e.targetNodeId === target)) return false;
+  // An If, Switch or Transform node evaluates exactly one input.
+  if (takesSingleInput(targetNode.kind) && edges.some((e) => e.targetNodeId === target))
+    return false;
   // An Output has one `value` input. Run-when triggers stay unlimited.
   if (
     targetNode.kind.kind === 'Output' &&

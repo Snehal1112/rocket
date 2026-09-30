@@ -25,3 +25,10 @@ export type RoutingKind = Extract<FlowNodeKind, { kind: 'If' | 'Switch' }>;
 export function isRoutingKind(kind: FlowNodeKind): kind is RoutingKind {
   return kind.kind === 'If' || kind.kind === 'Switch';
 }
+
+export type SingleInputKind = Extract<FlowNodeKind, { kind: 'If' | 'Switch' | 'Transform' }>;
+
+/** True for the kinds that evaluate one upstream value through an `input` handle. */
+export function takesSingleInput(kind: FlowNodeKind): kind is SingleInputKind {
+  return kind.kind === 'If' || kind.kind === 'Switch' || kind.kind === 'Transform';
+}

@@ -10,6 +10,7 @@ import {
   RESULT_HANDLE,
   TRIGGER_HANDLE,
   TRUE_HANDLE,
+  takesSingleInput,
 } from '../flow-handles';
 
 describe('flow handle vocabulary', () => {
@@ -44,5 +45,21 @@ describe('flow handle vocabulary', () => {
       { kind: 'Request', label: 'r', source: { type: 'Saved', requestPath: 'a.yml' } },
     ];
     expect(kinds.map(isRoutingKind)).toEqual([true, true, false, false, false]);
+  });
+
+  it('recognises If, Switch and Transform as single-input kinds', () => {
+    const kinds: FlowNodeKind[] = [
+      { kind: 'If', label: 'i', condition: 'true' },
+      { kind: 'Switch', label: 's', value: 'x', cases: [] },
+      { kind: 'Transform', label: 't', script: 'return 1;' },
+      { kind: 'Output', label: 'o' },
+      { kind: 'Input', label: 'in', value: 'v' },
+      { kind: 'Request', label: 'r', source: { type: 'Saved', requestPath: 'a.yml' } },
+    ];
+    expect(kinds.map(takesSingleInput)).toEqual([true, true, true, false, false, false]);
+  });
+
+  it('does not treat Transform as a routing kind', () => {
+    expect(isRoutingKind({ kind: 'Transform', label: 't', script: 'return 1;' })).toBe(false);
   });
 });
