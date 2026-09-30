@@ -231,10 +231,11 @@ impl RequestExecutionService {
         }
     }
 
-    /// Evaluates an If/Switch routing script, or a Transform script, against output.
-    /// Callers pass the raw condition or value, and `coercion` is applied to the result, so the
-    /// result is always a string; a `null` result becomes `"null"` rather
-    /// than an error, which keeps a missing value routable by a case.
+    /// Evaluates an If/Switch routing script, or a Transform script, against
+    /// `output`. Callers pass the raw condition or value, and `coercion` is
+    /// applied to the result, so the result is always a string; a `null`
+    /// result becomes `"null"` rather than an error, which keeps a missing
+    /// value routable by a case.
     pub async fn evaluate_flow_route_expression(
         &self,
         collection: &str,
@@ -1291,8 +1292,10 @@ fn captured_source<'c>(
     })
 }
 
-/// The captured output feeding a single-input node (If, Switch or Transform) through its one live input edge. `validate` (V1) and `decide_fate` guarantee exactly one;
-/// anything else is reported, never panicked on. The source may be a
+/// The captured output feeding a single-input node (If, Switch or
+/// Transform) through its one live `input` edge. `validate` (V1) and
+/// `decide_fate` guarantee exactly one; anything else is reported, never
+/// panicked on. The source may be a
 /// Request that failed with a non-2xx status (spec §6.3.1): its response
 /// was captured and is used exactly like a successful one.
 fn single_input<'c>(
@@ -7097,5 +7100,89 @@ mod tests {
 
         assert_eq!(step_of(&summary, "out1").value.as_deref(), Some("SHARED"));
         assert_eq!(step_of(&summary, "out2").value.as_deref(), Some("SHARED"));
+    }
+
+    // The fakes above never run JS, so these pin the real guard and wrapper.
+
+    #[tokio::test]
+    async fn real_engine_transform_with_no_return_fails() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let outcome = svc
+            .evaluate_flow_transform_script("my-api", &output, "const x = 1;", &HashSet::new())
+            .await;
+
+        assert!(
+            matches!(
+                outcome.result,
+                Err(DomainError::InvalidInput(ref m)) if m.contains("script returned no value")
+            ),
+            "got: {:?}",
+            outcome.result
+        );
+    }
+
+    #[tokio::test]
+    async fn real_engine_transform_returns_an_object_as_compact_json() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+
+        let value = svc
+            .evaluate_flow_transform_script(
+                "my-api",
+                &output,
+                "return { t: response.body.token, n: 1 };",
+                &HashSet::new(),
+            )
+            .await
+            .result
+            .expect("the transform must evaluate");
+
+        assert_eq!(value, r#"{"t":"abc123","n":1}"#);
+    }
+
+    #[tokio::test]
+    async fn real_engine_transform_keeps_null_and_false() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Request(Box::new(sample_response_output()));
+        for (source, want) in [("null", "null"), ("false", "false"), ("0", "0")] {
+            let value = svc
+                .evaluate_flow_transform_script("my-api", &output, source, &HashSet::new())
+                .await
+                .result
+                .expect("the transform must evaluate");
+            assert_eq!(value, want, "source: {source}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_transform_reports_its_console_logs_on_the_step_and_its_event() {
+        let flow = Flow {
+            name: "tf-logs".to_string(),
+            nodes: vec![
+                input_node_with("in", "pro"),
+                transform_node("t", "console.log('seen');\nreturn response.body;"),
+                output_node_named("out"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "t"),
+                edge_from("e2", "t", handle::RESULT, "out", "value", "response.body"),
+            ],
+            callback_host: None,
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher);
+        let exec = real_engine_service();
+
+        let summary = service.run(&exec, run_input("tf-logs")).await.expect("run");
+
+        let step = step_of(&summary, "t");
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        assert_eq!(step.value.as_deref(), Some("pro"));
+        assert_eq!(step.logs.len(), 1);
+        assert!(step.logs[0].message.contains("seen"));
+        assert_eq!(completed_logs(&publisher.events(), "t"), step.logs);
+        assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
     }
 }
