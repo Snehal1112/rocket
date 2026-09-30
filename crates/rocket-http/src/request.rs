@@ -1,4 +1,4 @@
-use rocket_shared::certificate::ClientCertificate;
+use crate::resolved_certificate::ResolvedClientCertificate;
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 
@@ -28,10 +28,11 @@ pub struct RequestOptions {
     /// Override the maximum number of redirects to follow. `None` uses the executor default (10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<u32>,
-    /// Client certificates of the active environment. The executor picks the one whose
-    /// domain matches the request URL and presents it for mutual TLS.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub client_certificates: Vec<ClientCertificate>,
+    /// Client certificates of the active environment, resolved for this request. The executor
+    /// picks the one whose domain matches the request URL and presents it for mutual TLS. It is
+    /// never serialized: the environment is the only source, and the material can hold key bytes.
+    #[serde(skip)]
+    pub client_certificates: Vec<ResolvedClientCertificate>,
 }
 
 fn default_true() -> bool {
@@ -77,5 +78,28 @@ mod tests {
         assert!(req.options.follow_redirects);
         assert_eq!(req.options.timeout_ms, 30_000);
         assert!(req.options.verify_ssl);
+    }
+
+    #[test]
+    fn client_certificates_never_cross_serde() {
+        use crate::resolved_certificate::{CertificateSource, ResolvedClientCertificate};
+        let options = RequestOptions {
+            client_certificates: vec![ResolvedClientCertificate::pkcs12(
+                "api.example.com",
+                CertificateSource::File("/certs/client.p12".into()),
+                Some("s3cret".into()),
+            )],
+            ..RequestOptions::default()
+        };
+        let json = serde_json::to_string(&options).expect("serialize options");
+        assert!(!json.contains("clientCertificates"), "{json}");
+        assert!(!json.contains("s3cret"), "{json}");
+
+        // The IPC input cannot carry certificates: the environment is the only source.
+        let back: RequestOptions = serde_json::from_str(
+            r#"{"clientCertificates":[{"type":"pkcs12","domain":"evil.example.com","pkcs12FilePath":"/etc/shadow"}]}"#,
+        )
+        .expect("deserialize options");
+        assert!(back.client_certificates.is_empty());
     }
 }

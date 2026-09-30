@@ -12,13 +12,12 @@ use rocket_environment::{
 use rocket_history::{HistoryEntry, HistoryRepository};
 use rocket_http::{
     run_load_test as http_run_load_test, CookieRepository, HttpExecutor, HttpRequest, HttpResponse,
-    LoadTestConfig, LoadTestResult, RequestOptions,
+    LoadTestConfig, LoadTestResult, RequestOptions, ResolvedClientCertificate,
 };
 use rocket_scripting::{
     context::SandboxMode, ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext,
     ScriptEngine, ScriptResult, TestResult, TestStatus,
 };
-use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
@@ -567,7 +566,7 @@ impl RequestExecutionService {
         &self,
         input: &ExecuteRequestInput,
         vars: &std::collections::HashMap<String, String>,
-    ) -> Vec<ClientCertificate> {
+    ) -> Vec<ResolvedClientCertificate> {
         // Relative file paths are relative to the collection folder, so they work for a
         // collection that is shared through git.
         let base = input
@@ -1821,13 +1820,16 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client_certificates::describe_all;
     use async_trait::async_trait;
     use rocket_collection::{
         Collection, CollectionRepository, CollectionSettings, CollectionSummary,
         CollectionVariable, Request as CollectionRequest,
     };
     use rocket_environment::{Environment, Variable};
+    use rocket_http::{CertificateMaterial, CertificateSource};
     use rocket_http::{CookieJar, HttpResponse};
+    use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use rocket_shared::types::HttpMethod;
@@ -2879,22 +2881,18 @@ mod tests {
 
         // Certificates sent by the caller are ignored: the environment is the only source.
         let mut input = sample_input("https://api.example.com/x", Some("dev"));
-        input.options.client_certificates = vec![ClientCertificate::Pkcs12 {
-            domain: "evil.example.com".into(),
-            pkcs12_file_path: "/etc/shadow".into(),
-            passphrase: None,
-        }];
+        input.options.client_certificates = vec![ResolvedClientCertificate::pkcs12(
+            "evil.example.com",
+            CertificateSource::File("/etc/shadow".into()),
+            None,
+        )];
         let resolved = svc
             .resolve_request(&input, &std::collections::HashMap::new())
             .expect("resolve_request");
 
         assert_eq!(
-            resolved.options.client_certificates,
-            vec![ClientCertificate::Pkcs12 {
-                domain: "api.example.com".into(),
-                pkcs12_file_path: "/certs/client.p12".into(),
-                passphrase: Some("s3cret".into()),
-            }]
+            describe_all(&resolved.options.client_certificates),
+            ["pkcs12 api.example.com file:/certs/client.p12 pass:s3cret"]
         );
     }
 
@@ -2926,20 +2924,21 @@ mod tests {
         env
     }
 
-    fn cert_paths(certs: &[ClientCertificate]) -> Vec<String> {
+    fn cert_paths(certs: &[ResolvedClientCertificate]) -> Vec<String> {
+        let path = |s: &CertificateSource| match s {
+            CertificateSource::File(p) => p.clone(),
+            CertificateSource::Inline(_) => "<inline>".to_string(),
+        };
         certs
             .iter()
-            .flat_map(|c| match c {
-                ClientCertificate::Pem {
-                    certificate_file_path,
-                    private_key_file_path,
+            .flat_map(|c| match &c.material {
+                CertificateMaterial::Pem {
+                    certificate,
+                    private_key,
                     ..
-                } => vec![certificate_file_path.clone(), private_key_file_path.clone()],
-                ClientCertificate::Pkcs12 {
-                    pkcs12_file_path, ..
-                } => {
-                    vec![pkcs12_file_path.clone()]
-                }
+                } => vec![path(certificate), path(private_key)],
+                CertificateMaterial::Pkcs12 { bundle, .. } => vec![path(bundle)],
+                CertificateMaterial::Unavailable { .. } => Vec::new(),
             })
             .collect()
     }

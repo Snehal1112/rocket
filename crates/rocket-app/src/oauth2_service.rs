@@ -6,9 +6,9 @@ use rocket_environment::{
     resolve, EnvironmentRepository, EnvironmentRepositoryFactory, VariableContext,
 };
 use rocket_http::{
-    apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken, TokenClientProvider,
+    apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken,
+    ResolvedClientCertificate, TokenClientProvider,
 };
-use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
 
@@ -105,7 +105,7 @@ pub struct ResolvedOAuth2Config {
     pub force_reauth: bool,
     /// The selected environment's client certificates, for a token endpoint that needs mutual
     /// TLS. The token client picks the one whose domain matches the token URL.
-    pub client_certificates: Vec<ClientCertificate>,
+    pub client_certificates: Vec<ResolvedClientCertificate>,
 }
 
 /// Form body params and extra HTTP headers for an OAuth2 token request.
@@ -157,7 +157,7 @@ impl OAuth2Service {
         collection: Option<&str>,
         environment_name: Option<&str>,
         vars: &HashMap<String, String>,
-    ) -> Vec<ClientCertificate> {
+    ) -> Vec<ResolvedClientCertificate> {
         let factory = self.collection_env_repo_factory.as_ref();
         let base = collection.and_then(|c| factory?.collection_dir(c));
         match (factory, collection) {
@@ -184,7 +184,7 @@ impl OAuth2Service {
         &self,
         url: &str,
         verify_ssl: bool,
-        certificates: &[ClientCertificate],
+        certificates: &[ResolvedClientCertificate],
     ) -> DomainResult<reqwest::Client> {
         match &self.token_client_provider {
             Some(provider) => provider.client_for(url, verify_ssl, certificates),
@@ -561,11 +561,13 @@ impl OAuth2Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client_certificates::describe_all;
     use rocket_collection::{
         Collection, CollectionRepository, CollectionSettings, CollectionSummary,
         CollectionVariable, Request as CollectionRequest,
     };
     use rocket_environment::{Environment, EnvironmentRepository, Variable};
+    use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::{DomainError, DomainResult};
 
     // ─── Stub repos ──────────────────────────────────────
@@ -910,7 +912,7 @@ mod tests {
 
     /// Records what the service asks for, then fails, so no request is ever sent.
     struct CapturingProvider {
-        seen: std::sync::Mutex<Vec<(String, bool, Vec<ClientCertificate>)>>,
+        seen: std::sync::Mutex<Vec<(String, bool, Vec<ResolvedClientCertificate>)>>,
     }
 
     impl CapturingProvider {
@@ -926,7 +928,7 @@ mod tests {
             &self,
             token_url: &str,
             verify_ssl: bool,
-            certificates: &[ClientCertificate],
+            certificates: &[ResolvedClientCertificate],
         ) -> DomainResult<reqwest::Client> {
             self.seen.lock().unwrap().push((
                 token_url.to_string(),
@@ -1002,8 +1004,8 @@ mod tests {
         );
         let config = svc.resolve_get_token_request(&get_token_request());
         assert_eq!(
-            config.client_certificates,
-            vec![pkcs12("idp.example.com", "/certs/client.p12")]
+            describe_all(&config.client_certificates),
+            ["pkcs12 idp.example.com file:/certs/client.p12 pass:-"]
         );
     }
 
@@ -1035,7 +1037,10 @@ mod tests {
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].0, "https://idp.example.com/token");
         assert!(!seen[0].1, "verify_ssl false is passed through");
-        assert_eq!(seen[0].2, vec![pkcs12("idp.example.com", "/c.p12")]);
+        assert_eq!(
+            describe_all(&seen[0].2),
+            ["pkcs12 idp.example.com file:/c.p12 pass:-"]
+        );
     }
 
     #[tokio::test]
@@ -1088,8 +1093,8 @@ mod tests {
         );
         let seen = provider.seen.lock().unwrap();
         assert_eq!(
-            seen[0].2,
-            vec![pkcs12("idp.example.com", "/certs/client.p12")]
+            describe_all(&seen[0].2),
+            ["pkcs12 idp.example.com file:/certs/client.p12 pass:-"]
         );
         assert!(seen[0].1, "verify_ssl defaults to true");
     }
@@ -1119,12 +1124,8 @@ mod tests {
 
         assert_eq!(config.client_secret, "s3cret");
         assert_eq!(
-            config.client_certificates,
-            vec![ClientCertificate::Pkcs12 {
-                domain: "idp.example.com".into(),
-                pkcs12_file_path: "/c.p12".into(),
-                passphrase: Some("p4ss".into()),
-            }]
+            describe_all(&config.client_certificates),
+            ["pkcs12 idp.example.com file:/c.p12 pass:p4ss"]
         );
     }
 
@@ -1166,10 +1167,10 @@ mod tests {
         let _ = svc.refresh_token_with_secrets(&req, &vault_secrets()).await;
 
         let seen = provider.seen.lock().unwrap();
-        assert!(matches!(
-            &seen[0].2[0],
-            ClientCertificate::Pkcs12 { passphrase: Some(p), .. } if p == "p4ss"
-        ));
+        assert_eq!(
+            describe_all(&seen[0].2),
+            ["pkcs12 idp.example.com file:/c.p12 pass:p4ss"]
+        );
     }
 
     /// A factory that knows where the collection lives, like the real workspace one.
@@ -1202,11 +1203,8 @@ mod tests {
         req.collection = Some("api".into());
         let config = svc.resolve_get_token_request(&req);
         assert_eq!(
-            config.client_certificates,
-            vec![pkcs12(
-                "idp.example.com",
-                "/ws/collections/api/certs/client.p12"
-            )]
+            describe_all(&config.client_certificates),
+            ["pkcs12 idp.example.com file:/ws/collections/api/certs/client.p12 pass:-"]
         );
     }
 }

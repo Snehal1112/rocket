@@ -5,8 +5,10 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use reqwest::{redirect, Client, Method};
 
-use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
-use rocket_shared::certificate::ClientCertificate;
+use rocket_http::{
+    CertificateMaterial, CertificateSource, HttpExecutor, HttpRequest, HttpResponse,
+    ResolvedClientCertificate,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, OAuth1Auth};
 
@@ -434,23 +436,28 @@ fn build_client_impl(
     build_client_with_identity(follow_redirects, verify_ssl, max_redirects, None)
 }
 
-/// A loaded TLS identity together with the certificate entry it came from, whose domain says
-/// which hosts may see it.
+/// A loaded TLS identity together with the domain scope of the certificate it came from, which
+/// says which hosts may see it.
 struct ClientIdentity {
     identity: reqwest::Identity,
-    certificate: ClientCertificate,
+    /// Only the domain is used, to scope redirects. It carries no key material.
+    certificate: ResolvedClientCertificate,
 }
 
 /// Loads the identity of the certificate chosen for `url`, if one matches. A certificate that
 /// matches but cannot be loaded is an error, so the request is never sent without it.
 fn identity_for_url(
-    certificates: &[ClientCertificate],
+    certificates: &[ResolvedClientCertificate],
     url: &str,
 ) -> DomainResult<Option<ClientIdentity>> {
     match rocket_http::client_cert::find_certificate(certificates, url) {
         Some(cert) => Ok(Some(ClientIdentity {
             identity: load_identity(cert)?,
-            certificate: cert.clone(),
+            // The redirect policy keeps this for the life of the client, so no bytes are copied.
+            certificate: ResolvedClientCertificate::unavailable(
+                cert.domain.clone(),
+                "redirect scope only",
+            ),
         })),
         None => Ok(None),
     }
@@ -465,7 +472,7 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
         &self,
         token_url: &str,
         verify_ssl: bool,
-        certificates: &[ClientCertificate],
+        certificates: &[ResolvedClientCertificate],
     ) -> DomainResult<Client> {
         let identity = identity_for_url(certificates, token_url)?;
         build_client_with_identity(true, verify_ssl, None, identity)
@@ -512,47 +519,75 @@ fn build_client_with_identity(
         .map_err(|e| DomainError::Http(e.to_string()))
 }
 
-/// Reads a client certificate's files and turns them into a TLS identity.
+/// Turns a client certificate's material into a TLS identity.
 ///
 /// The TLS backend is the platform one (native-tls), which loads PKCS12 bundles and
-/// unencrypted PEM keys. An encrypted PEM key is rejected with a hint, since it cannot be loaded.
-fn load_identity(cert: &ClientCertificate) -> DomainResult<reqwest::Identity> {
-    match cert {
-        ClientCertificate::Pkcs12 {
-            pkcs12_file_path,
-            passphrase,
-            ..
-        } => {
-            let der = read_certificate_file(pkcs12_file_path)?;
-            reqwest::Identity::from_pkcs12_der(&der, passphrase.as_deref().unwrap_or("")).map_err(
-                |e| {
-                    DomainError::InvalidInput(format!(
-                        "Cannot load PKCS12 client certificate {pkcs12_file_path}: {e}. \
-                         Check the file and its passphrase."
-                    ))
-                },
-            )
-        }
-        ClientCertificate::Pem {
-            certificate_file_path,
-            private_key_file_path,
-            passphrase,
-            ..
-        } => {
-            let cert_pem = read_certificate_file(certificate_file_path)?;
-            let key_file = zeroize::Zeroizing::new(read_certificate_file(private_key_file_path)?);
-            // An encrypted PKCS#8 key is decrypted in memory, and the key bytes are wiped on drop.
-            let key_pem = crate::pem_key::unencrypted_key_pem(
-                &key_file,
-                passphrase.as_deref(),
-                private_key_file_path,
-            )?;
-            reqwest::Identity::from_pkcs8_pem(&cert_pem, &key_pem).map_err(|e| {
+/// unencrypted PKCS#8 PEM keys. An encrypted PKCS#8 key is decrypted in memory first.
+/// `Unavailable` material fails with its reason, since this certificate was selected.
+fn load_identity(cert: &ResolvedClientCertificate) -> DomainResult<reqwest::Identity> {
+    match &cert.material {
+        CertificateMaterial::Pkcs12 { bundle, passphrase } => {
+            let der = read_der_source(bundle)?;
+            let passphrase = passphrase.as_deref().map_or("", |p| p.as_str());
+            reqwest::Identity::from_pkcs12_der(&der, passphrase).map_err(|e| {
                 DomainError::InvalidInput(format!(
-                    "Cannot load PEM client certificate {certificate_file_path}: {e}"
+                    "Cannot load PKCS12 client certificate {}: {e}. \
+                     Check the file and its passphrase.",
+                    source_name(bundle, &cert.domain)
                 ))
             })
         }
+        CertificateMaterial::Pem {
+            certificate,
+            private_key,
+            passphrase,
+        } => {
+            let cert_pem = read_pem_source(certificate)?;
+            let key_file = read_pem_source(private_key)?;
+            // An encrypted PKCS#8 key is decrypted in memory, and the key bytes are wiped on drop.
+            let key_pem = crate::pem_key::unencrypted_key_pem(
+                &key_file,
+                passphrase.as_deref().map(|p| p.as_str()),
+                &source_name(private_key, &cert.domain),
+            )?;
+            reqwest::Identity::from_pkcs8_pem(&cert_pem, &key_pem).map_err(|e| {
+                DomainError::InvalidInput(format!(
+                    "Cannot load PEM client certificate {}: {e}",
+                    source_name(certificate, &cert.domain)
+                ))
+            })
+        }
+        CertificateMaterial::Unavailable { reason } => {
+            Err(DomainError::InvalidInput(reason.clone()))
+        }
+    }
+}
+
+/// Reads binary material (a PKCS12 bundle). The bytes are wiped on drop.
+fn read_der_source(source: &CertificateSource) -> DomainResult<zeroize::Zeroizing<Vec<u8>>> {
+    match source {
+        CertificateSource::File(path) => Ok(zeroize::Zeroizing::new(read_certificate_file(path)?)),
+        CertificateSource::Inline(_) => Err(inline_not_supported()),
+    }
+}
+
+/// Reads PEM text (a certificate or a private key). The bytes are wiped on drop.
+fn read_pem_source(source: &CertificateSource) -> DomainResult<zeroize::Zeroizing<Vec<u8>>> {
+    match source {
+        CertificateSource::File(path) => Ok(zeroize::Zeroizing::new(read_certificate_file(path)?)),
+        CertificateSource::Inline(_) => Err(inline_not_supported()),
+    }
+}
+
+fn inline_not_supported() -> DomainError {
+    DomainError::InvalidInput("Inline client certificate material is not supported yet".into())
+}
+
+/// Names a piece of material in an error message: its file path, never its bytes.
+fn source_name(source: &CertificateSource, domain: &str) -> String {
+    match source {
+        CertificateSource::File(path) => path.clone(),
+        CertificateSource::Inline(_) => format!("(inline, for {domain})"),
     }
 }
 
@@ -600,7 +635,7 @@ async fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &Auth,
     method: &rocket_shared::types::HttpMethod,
-    certificates: &[ClientCertificate],
+    certificates: &[ResolvedClientCertificate],
 ) -> DomainResult<reqwest::RequestBuilder> {
     match auth {
         Auth::None => {}
@@ -836,7 +871,7 @@ async fn fetch_client_credentials_token(
     credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
     scope: Option<&str>,
     verify_ssl: bool,
-    certificates: &[ClientCertificate],
+    certificates: &[ResolvedClientCertificate],
 ) -> DomainResult<String> {
     // Build a dedicated client for the token request. SSL setting here is independent
     // from the cached executor client (see build_client_impl). The certificate is matched
@@ -1597,25 +1632,29 @@ mod mtls_tests {
         format!("{FIXTURES}/{name}")
     }
 
-    fn p12(domain: &str, path: String, passphrase: Option<&str>) -> ClientCertificate {
-        ClientCertificate::Pkcs12 {
-            domain: domain.into(),
-            pkcs12_file_path: path,
-            passphrase: passphrase.map(String::from),
-        }
+    fn p12(domain: &str, path: String, passphrase: Option<&str>) -> ResolvedClientCertificate {
+        ResolvedClientCertificate::pkcs12(
+            domain,
+            CertificateSource::File(path),
+            passphrase.map(String::from),
+        )
     }
 
-    fn pem(domain: &str, key: &str) -> ClientCertificate {
+    fn pem(domain: &str, key: &str) -> ResolvedClientCertificate {
         pem_with_passphrase(domain, key, None)
     }
 
-    fn pem_with_passphrase(domain: &str, key: &str, passphrase: Option<&str>) -> ClientCertificate {
-        ClientCertificate::Pem {
-            domain: domain.into(),
-            certificate_file_path: fixture("client.pem"),
-            private_key_file_path: fixture(key),
-            passphrase: passphrase.map(String::from),
-        }
+    fn pem_with_passphrase(
+        domain: &str,
+        key: &str,
+        passphrase: Option<&str>,
+    ) -> ResolvedClientCertificate {
+        ResolvedClientCertificate::pem(
+            domain,
+            CertificateSource::File(fixture("client.pem")),
+            CertificateSource::File(fixture(key)),
+            passphrase.map(String::from),
+        )
     }
 
     #[test]
@@ -1682,6 +1721,30 @@ mod mtls_tests {
         assert!(err.contains("/no/such/client.p12"), "{err}");
     }
 
+    #[test]
+    fn inline_material_is_not_supported_yet() {
+        let cert = ResolvedClientCertificate::pkcs12(
+            "x",
+            CertificateSource::Inline(zeroize::Zeroizing::new(vec![1, 2, 3])),
+            None,
+        );
+        let err = load_identity(&cert).unwrap_err().to_string();
+        assert!(
+            err.contains("Inline client certificate material is not supported yet"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_unavailable_certificate_fails_with_its_reason() {
+        let reason = "Client certificate secret vault.clientCertPem was not found.";
+        let err = load_identity(&ResolvedClientCertificate::unavailable("x", reason)).unwrap_err();
+        assert!(
+            matches!(&err, DomainError::InvalidInput(m) if m == reason),
+            "{err:?}"
+        );
+    }
+
     async fn ok_server() -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1698,6 +1761,18 @@ mod mtls_tests {
         // The file does not exist, so loading it would fail the request.
         req.options.client_certificates =
             vec![p12("other.example.com", "/no/such/file.p12".into(), None)];
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+        assert_eq!(resp.status, 200);
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_certificate_for_another_domain_does_not_block_the_request() {
+        let server = ok_server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.options.client_certificates = vec![ResolvedClientCertificate::unavailable(
+            "other.example.com",
+            "Client certificate secret vault.clientCertPem was not found.",
+        )];
         let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
         assert_eq!(resp.status, 200);
     }

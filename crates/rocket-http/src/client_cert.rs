@@ -1,17 +1,11 @@
 //! Client certificate selection for mutual TLS.
 //!
-//! Pure matching only: the executor in `rocket-infra` reads the files of the certificate
+//! Pure matching only: the executor in `rocket-infra` loads the material of the certificate
 //! chosen here.
 
 use reqwest::Url;
-use rocket_shared::certificate::ClientCertificate;
 
-/// Returns the `domain` a certificate is configured for.
-pub fn certificate_domain(cert: &ClientCertificate) -> &str {
-    match cert {
-        ClientCertificate::Pem { domain, .. } | ClientCertificate::Pkcs12 { domain, .. } => domain,
-    }
-}
+use crate::resolved_certificate::ResolvedClientCertificate;
 
 /// Picks the first certificate whose domain matches `url`.
 ///
@@ -20,20 +14,20 @@ pub fn certificate_domain(cert: &ClientCertificate) -> &str {
 /// of characters. A domain with a port only matches that port. An empty domain never matches,
 /// so a half-filled entry cannot send a certificate to every host.
 pub fn find_certificate<'a>(
-    certs: &'a [ClientCertificate],
+    certs: &'a [ResolvedClientCertificate],
     url: &str,
-) -> Option<&'a ClientCertificate> {
+) -> Option<&'a ResolvedClientCertificate> {
     let parsed = Url::parse(url).ok()?;
     let host = parsed.host_str()?.to_ascii_lowercase();
     let port = parsed.port_or_known_default();
     certs
         .iter()
-        .find(|c| domain_matches(certificate_domain(c), &host, port))
+        .find(|c| domain_matches(&c.domain, &host, port))
 }
 
 /// Returns whether `cert` would be chosen for `url`, for checking a redirect target against the
 /// certificate that was picked for the original request.
-pub fn certificate_covers(cert: &ClientCertificate, url: &str) -> bool {
+pub fn certificate_covers(cert: &ResolvedClientCertificate, url: &str) -> bool {
     find_certificate(std::slice::from_ref(cert), url).is_some()
 }
 
@@ -86,17 +80,18 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resolved_certificate::CertificateSource;
 
-    fn pkcs12(domain: &str) -> ClientCertificate {
-        ClientCertificate::Pkcs12 {
-            domain: domain.into(),
-            pkcs12_file_path: format!("/certs/{domain}.p12"),
-            passphrase: None,
-        }
+    fn pkcs12(domain: &str) -> ResolvedClientCertificate {
+        ResolvedClientCertificate::pkcs12(
+            domain,
+            CertificateSource::File(format!("/certs/{domain}.p12")),
+            None,
+        )
     }
 
-    fn found(certs: &[ClientCertificate], url: &str) -> Option<String> {
-        find_certificate(certs, url).map(|c| certificate_domain(c).to_string())
+    fn found(certs: &[ResolvedClientCertificate], url: &str) -> Option<String> {
+        find_certificate(certs, url).map(|c| c.domain.clone())
     }
 
     #[test]
