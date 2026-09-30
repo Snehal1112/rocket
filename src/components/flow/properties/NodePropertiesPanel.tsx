@@ -1,18 +1,24 @@
 import { Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import type { FlowEdge, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowNodeDetail } from '@/types/pane-types';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
 import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
 import { WaitForCallbackEditor } from './WaitForCallbackEditor';
 
+/** The panel's tabs. The selected one is kept by FlowPane across nodes. */
+export type PanelTab = 'settings' | 'last-run' | 'wires';
+
 // Picks the editor for the node's kind. Each editor reports a whole new kind,
 // and the caller applies it with one store update.
 function editorFor(
   node: FlowNode,
   edges: FlowEdge[],
+  _nodes: FlowNode[],
   collection: string,
   onChange: (kind: FlowNodeKind) => void,
 ) {
@@ -58,7 +64,11 @@ function editorFor(
 export function NodePropertiesPanel({
   node,
   edges,
+  nodes,
   collection,
+  saveError,
+  activeTab,
+  onTabChange,
   onChange,
   onClose,
   onDelete,
@@ -67,7 +77,18 @@ export function NodePropertiesPanel({
 }: {
   node: FlowNode;
   edges: FlowEdge[];
+  nodes: FlowNode[];
   collection: string;
+  status: FlowNodeStatus;
+  detail?: FlowNodeDetail;
+  // The full message of the last failed save, when it named this node.
+  saveError?: string;
+  activeTab: PanelTab;
+  onTabChange: (tab: PanelTab) => void;
+  // Opens the script dialog of a wire, as a double-click on the canvas does.
+  onEditWire: (edgeId: string) => void;
+  // Selects another node and shows it in this panel.
+  onSelectNode: (nodeId: string) => void;
   onChange: (kind: FlowNodeKind) => void;
   onClose: () => void;
   onDelete: () => void;
@@ -142,11 +163,32 @@ export function NodePropertiesPanel({
           </Button>
         </div>
       </div>
-      <div key={node.id} className='flex-1 overflow-y-auto p-3'>
-        <PanelFocusProvider value={refocusPanel}>
-          {editorFor(node, edges, collection, onChange)}
-        </PanelFocusProvider>
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => onTabChange(value as PanelTab)}
+        className='flex min-h-0 flex-1 flex-col'
+      >
+        <TabsList className='mx-3 mt-2 self-start'>
+          <TabsTrigger value='settings' className='text-xs'>
+            Settings
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value='settings' className='min-h-0 flex-1 overflow-y-auto p-3'>
+          <div key={node.id} className='space-y-3'>
+            {saveError && (
+              <p
+                data-testid='node-save-error'
+                className='break-words rounded border border-red-500/50 bg-red-500/10 p-2 text-xs text-red-600'
+              >
+                {saveError}
+              </p>
+            )}
+            <PanelFocusProvider value={refocusPanel}>
+              {editorFor(node, edges, nodes, collection, onChange)}
+            </PanelFocusProvider>
+          </div>
+        </TabsContent>
+      </Tabs>
     </aside>
   );
 }

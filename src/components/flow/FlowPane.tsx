@@ -37,7 +37,7 @@ import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
-import { NodePropertiesPanel } from './properties/NodePropertiesPanel';
+import { NodePropertiesPanel, type PanelTab } from './properties/NodePropertiesPanel';
 import { WireScriptDialog } from './WireScriptDialog';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
@@ -65,6 +65,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
   const [cycleNodeIds, setCycleNodeIds] = useState<string[]>([]);
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
+  // The full text of the last failed save. The panel shows it for flagged nodes.
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  // Kept across nodes, so after a run the user can click through Last run.
+  const [panelTab, setPanelTab] = useState<PanelTab>('settings');
   // UI state only. The panel opens on request and stays while that node is the sole selection.
   const [selectedNodeIds, setSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set());
   // The node whose properties panel is open, or null when it is closed.
@@ -283,6 +287,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     setLabelFocusNodeId(node.id);
   };
 
+  // Opens the script dialog of a wire. Run when wires carry no value.
+  const openWireEditor = (edgeId: string) => {
+    const edge = tab.edges.find((e) => e.id === edgeId);
+    if (edge && shouldPromptForExpression(edge)) setPendingEdge(edge);
+  };
+
   // Returns whether the save succeeded, so Run can stop on a failed save.
   const handleSave = async (quiet = false): Promise<boolean> => {
     try {
@@ -294,6 +304,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       });
       setCycleNodeIds([]);
       setCycleEdgeIds([]);
+      setSaveErrorMessage(null);
       markClean(tab.id);
       if (!quiet) toast.success('Flow saved.');
       return true;
@@ -305,6 +316,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       if (parsed) {
         setCycleNodeIds(parsed.nodeIds);
         setCycleEdgeIds(parsed.edgeIds);
+        setSaveErrorMessage(message);
       }
       toast.error(`Could not save flow: ${message}`);
       return false;
@@ -422,11 +434,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             selectedNodeIds={selectedNodeIds}
             onSelectedNodeIdsChange={handleSelectedNodeIdsChange}
             onOpenProperties={handleOpenProperties}
-            onEdgeEdit={(edgeId) => {
-              const edge = tab.edges.find((e) => e.id === edgeId);
-              // Run when wires carry no value, so there is nothing to edit.
-              if (edge && shouldPromptForExpression(edge)) setPendingEdge(edge);
-            }}
+            onEdgeEdit={openWireEditor}
           />
           {pendingEdge && pendingTargetNode && (
             <WireScriptDialog
@@ -471,7 +479,22 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             <NodePropertiesPanel
               node={panelNode}
               edges={tab.edges}
+              nodes={tab.nodes}
               collection={collectionName}
+              status={tab.nodeStatus[panelNode.id] ?? 'idle'}
+              detail={tab.nodeDetail?.[panelNode.id]}
+              saveError={
+                saveErrorMessage && cycleNodeIds.includes(panelNode.id)
+                  ? saveErrorMessage
+                  : undefined
+              }
+              activeTab={panelTab}
+              onTabChange={setPanelTab}
+              onEditWire={openWireEditor}
+              onSelectNode={(nodeId) => {
+                setSelectedNodeIds(new Set([nodeId]));
+                setPanelNodeId(nodeId);
+              }}
               onChange={(kind) => handleNodeKindChange(panelNode.id, kind)}
               onClose={() => {
                 setSelectedNodeIds(new Set());

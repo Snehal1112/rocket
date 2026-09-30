@@ -25,24 +25,57 @@ vi.mock('@/components/editor/MonacoWrapper', () => ({ MonacoWrapper: () => null 
 
 const node = (id: string, kind: FlowNodeKind): FlowNode => ({ id, kind, position: { x: 0, y: 0 } });
 
-function renderPanel(n: FlowNode) {
+function renderPanel(n: FlowNode, extra: Partial<Parameters<typeof NodePropertiesPanel>[0]> = {}) {
   const onChange = vi.fn();
   const onClose = vi.fn();
   const onDelete = vi.fn();
+  const onTabChange = vi.fn();
   render(
     <NodePropertiesPanel
       node={n}
       edges={[]}
+      nodes={[n]}
       collection='demo'
+      status='idle'
+      activeTab='settings'
+      onTabChange={onTabChange}
+      onEditWire={vi.fn()}
+      onSelectNode={vi.fn()}
       onChange={onChange}
       onClose={onClose}
       onDelete={onDelete}
+      {...extra}
     />,
   );
-  return { onChange, onClose, onDelete };
+  return { onChange, onClose, onDelete, onTabChange };
 }
 
 describe('NodePropertiesPanel', () => {
+  it('shows a Settings tab holding the editors', () => {
+    renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('data-state', 'active');
+    expect(screen.getByRole('tabpanel')).toContainElement(screen.getByLabelText('Label'));
+  });
+
+  it('keeps the tab bar inside the nokey panel', () => {
+    renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
+    expect(screen.getByRole('tab', { name: 'Settings' }).closest('.nokey')).not.toBeNull();
+  });
+
+  it('shows the save error only for a flagged node', () => {
+    renderPanel(node('o1', { kind: 'Output', label: 'Out' }), {
+      saveError: 'flow contains a cycle through node(s): o1',
+    });
+    expect(screen.getByTestId('node-save-error')).toHaveTextContent(
+      'flow contains a cycle through node(s): o1',
+    );
+  });
+
+  it('shows no save error box without an error', () => {
+    renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
+    expect(screen.queryByTestId('node-save-error')).not.toBeInTheDocument();
+  });
+
   it('calls onDelete from the Delete node button', async () => {
     const { onDelete } = renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
     await userEvent.click(screen.getByRole('button', { name: 'Delete node' }));
