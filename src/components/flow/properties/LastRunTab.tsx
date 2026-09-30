@@ -317,7 +317,9 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
           Took: <span className='font-mono'>{exitDisplayLabel(node, detail.branch)}</span>
         </p>
       )}
-      {(node.kind.kind === 'Output' || node.kind.kind === 'Input') &&
+      {(node.kind.kind === 'Output' ||
+        node.kind.kind === 'Input' ||
+        node.kind.kind === 'Transform') &&
         detail?.value !== undefined && <ValueSection value={detail.value} />}
       {detail?.logs && detail.logs.length > 0 && <LogsSection logs={detail.logs} />}
     </div>

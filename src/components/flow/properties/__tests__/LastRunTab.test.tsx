@@ -332,3 +332,46 @@ describe('LastRunTab per kind', () => {
     expect(screen.queryByTestId('last-run-logs')).not.toBeInTheDocument();
   });
 });
+
+describe('LastRunTab for a Transform node', () => {
+  const transform = node({ kind: 'Transform', label: 'Pick', script: 'return 1;' });
+
+  it('shows a Transform value pretty-printed', () => {
+    render(<LastRunTab node={transform} status='success' detail={{ value: '{"a":1}' }} />);
+    expect(screen.getByTestId('last-run-value')).toHaveTextContent('"a": 1');
+    expect(screen.getByRole('button', { name: 'Copy value' })).toBeInTheDocument();
+  });
+
+  it('shows a plain text value as is', () => {
+    render(<LastRunTab node={transform} status='success' detail={{ value: 'PRO' }} />);
+    expect(screen.getByTestId('last-run-value')).toHaveTextContent('PRO');
+  });
+
+  it('shows the logs of a failed Transform', () => {
+    render(
+      <LastRunTab
+        node={transform}
+        status='failed'
+        detail={{
+          error: 'script returned no value',
+          logs: [{ level: 'log', message: 'checking token' }],
+        }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-error')).toHaveTextContent('script returned no value');
+    expect(screen.getByText('checking token')).toBeInTheDocument();
+    expect(screen.queryByTestId('last-run-value')).not.toBeInTheDocument();
+  });
+
+  it('explains a skipped Transform without showing a value', () => {
+    render(
+      <LastRunTab
+        node={transform}
+        status='skipped'
+        detail={{ skipReason: 'branch_not_taken' }}
+      />,
+    );
+    expect(screen.getByText(/branch was not taken/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('last-run-value')).not.toBeInTheDocument();
+  });
+});
