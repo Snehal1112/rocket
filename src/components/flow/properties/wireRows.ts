@@ -60,7 +60,7 @@ function exitHandle(edge: FlowEdge): string | null {
 }
 
 // Display label for an exit handle, handling deleted cases.
-function exitDisplayLabel(source: FlowNode | undefined, handle: string): string {
+export function exitDisplayLabel(source: FlowNode | undefined, handle: string): string {
   if (!source) return handle;
   const label = exitLabel(source.kind, handle);
   if (label) return label;

@@ -1881,6 +1881,8 @@ export interface FlowDebugRequest {
   url: string;
   headers: FlowDebugHeader[];
   body?: string;
+  /** True when the request body was cut at 256 KB. */
+  bodyTruncated?: boolean;
   response?: FlowDebugResponse;
   error?: string;
 }

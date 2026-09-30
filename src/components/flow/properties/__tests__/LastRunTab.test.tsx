@@ -202,6 +202,31 @@ describe('LastRunTab exchange', () => {
     expect(screen.queryByLabelText('Body viewer')).not.toBeInTheDocument();
   });
 
+  it('notes a truncated request body under Request as sent', async () => {
+    const cut = { ...exchange, bodyTruncated: true };
+    render(<LastRunTab node={request} status='success' detail={{ exchange: cut }} />);
+    await userEvent.click(screen.getByRole('button', { name: /Request as sent/ }));
+    expect(screen.getByTestId('last-run-request')).toHaveTextContent('Truncated at 256 KB');
+  });
+
+  it('does not note an uncut request body', async () => {
+    render(<LastRunTab node={request} status='success' detail={{ exchange }} />);
+    await userEvent.click(screen.getByRole('button', { name: /Request as sent/ }));
+    expect(screen.getByTestId('last-run-request')).not.toHaveTextContent('Truncated');
+  });
+
+  it('parses the response body once per body', async () => {
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      render(<LastRunTab node={request} status='success' detail={{ exchange }} />);
+      await screen.findByLabelText('Body viewer');
+      const calls = parse.mock.calls.filter(([text]) => text === baseResponse.body);
+      expect(calls).toHaveLength(1);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it('copies the raw response body', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
@@ -227,6 +252,41 @@ describe('LastRunTab per kind', () => {
     });
     render(<LastRunTab node={sw} status='success' detail={{ branch: 'case:c1' }} />);
     expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Took: Admin');
+  });
+
+  it('shows a deleted Switch case as (deleted case)', () => {
+    const sw = node({ kind: 'Switch', label: 'Type', value: 'x', cases: [] });
+    render(<LastRunTab node={sw} status='success' detail={{ branch: 'case:gone' }} />);
+    const took = screen.getByTestId('last-run-branch');
+    expect(took).toHaveTextContent('Took: (deleted case)');
+    expect(took).not.toHaveTextContent('case:gone');
+  });
+
+  it('shows a received callback as the call, without Request as sent', () => {
+    const wait = node({ kind: 'WaitForCallback', label: 'Hook', name: 'hook', timeoutMs: 60000 });
+    const call: FlowDebugRequest = {
+      method: 'POST',
+      url: '/hook?id=7',
+      headers: [],
+      response: { ...baseResponse, statusText: 'POST' },
+    };
+    render(<LastRunTab node={wait} status='success' detail={{ exchange: call }} />);
+    expect(screen.getByTestId('last-run-response')).toHaveTextContent(
+      'Received call · POST /hook?id=7',
+    );
+    expect(screen.queryByText(/^Response ·/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Request as sent/ })).not.toBeInTheDocument();
+  });
+
+  it('lets long log lines wrap anywhere', () => {
+    render(
+      <LastRunTab
+        node={request}
+        status='success'
+        detail={{ logs: [{ level: 'log', message: 'x'.repeat(300) }] }}
+      />,
+    );
+    expect(screen.getByText('x'.repeat(300)).className).toContain('[overflow-wrap:anywhere]');
   });
 
   it('shows an Output value pretty-printed with a copy button', () => {

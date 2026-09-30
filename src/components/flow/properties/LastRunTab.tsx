@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Copy } from 'lucide-react';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -14,7 +14,7 @@ import type {
   FlowNodeStatus,
 } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
-import { exitLabel } from '../flowExits';
+import { exitDisplayLabel } from './wireRows';
 
 interface LastRunTabProps {
   node: FlowNode;
@@ -128,25 +128,30 @@ function HeadersTable({ headers }: { headers: FlowDebugHeader[] }) {
   );
 }
 
-function isJson(body: string): boolean {
+// Parses a body once. Any JSON gets the json language, but only an object or
+// array is re-indented, as formatOutputValue does.
+function parseBody(body: string): { isJson: boolean; pretty: string } {
   try {
-    JSON.parse(body);
-    return true;
+    const parsed: unknown = JSON.parse(body);
+    const pretty =
+      typeof parsed === 'object' && parsed !== null ? JSON.stringify(parsed, null, 2) : body;
+    return { isJson: true, pretty };
   } catch {
-    return false;
+    return { isJson: false, pretty: body };
   }
 }
 
 function BodyViewer({ body }: { body: string }) {
-  if (body === '') return <p className='text-muted-foreground'>No body.</p>;
+  const parsed = useMemo(() => (body === '' ? null : parseBody(body)), [body]);
+  if (parsed === null) return <p className='text-muted-foreground'>No body.</p>;
   return (
     <div className='h-48 overflow-hidden rounded-md border'>
       <Suspense fallback={<div className='p-2 text-muted-foreground'>Loading…</div>}>
         <MonacoWrapper
-          value={formatOutputValue(body)}
+          value={parsed.pretty}
           readOnly
           height='100%'
-          language={isJson(body) ? 'json' : 'plaintext'}
+          language={parsed.isJson ? 'json' : 'plaintext'}
         />
       </Suspense>
     </div>
@@ -156,9 +161,12 @@ function BodyViewer({ body }: { body: string }) {
 function ExchangeSections({
   exchange,
   shownError,
+  received = false,
 }: {
   exchange: FlowDebugRequest;
   shownError?: string;
+  // A callback wait sent nothing. Its record holds the call it received.
+  received?: boolean;
 }) {
   const [sentOpen, setSentOpen] = useState(false);
   const response = exchange.response;
@@ -175,8 +183,10 @@ function ExchangeSections({
       {response && (
         <section data-testid='last-run-response' className='space-y-1.5'>
           <div className='flex items-center justify-between'>
-            <h4 className='font-medium'>
-              Response · {response.status} {response.statusText}
+            <h4 className='min-w-0 font-medium [overflow-wrap:anywhere]'>
+              {received
+                ? `Received call · ${exchange.method} ${exchange.url}`
+                : `Response · ${response.status} ${response.statusText}`}
             </h4>
             <CopyButton text={response.body} label='Copy response body' />
           </div>
@@ -185,31 +195,38 @@ function ExchangeSections({
           {response.truncated && <p className='text-muted-foreground'>Truncated at 256 KB</p>}
         </section>
       )}
-      <Collapsible open={sentOpen} onOpenChange={setSentOpen}>
-        <CollapsibleTrigger asChild>
-          <Button type='button' variant='ghost' size='sm' className='h-6 px-1 text-xs'>
-            <ChevronRight
-              className={
-                sentOpen ? 'h-3 w-3 rotate-90 transition-transform' : 'h-3 w-3 transition-transform'
-              }
-            />
-            Request as sent
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <section data-testid='last-run-request' className='mt-1.5 space-y-1.5'>
-            <p className='select-text font-mono text-[11px] [overflow-wrap:anywhere]'>
-              {exchange.method} {exchange.url}
-            </p>
-            <HeadersTable headers={exchange.headers} />
-            {exchange.body !== undefined && exchange.body !== '' && (
-              <pre className='max-h-48 select-text overflow-auto whitespace-pre-wrap rounded-md border p-2 font-mono text-[11px]'>
-                {exchange.body}
-              </pre>
-            )}
-          </section>
-        </CollapsibleContent>
-      </Collapsible>
+      {!received && (
+        <Collapsible open={sentOpen} onOpenChange={setSentOpen}>
+          <CollapsibleTrigger asChild>
+            <Button type='button' variant='ghost' size='sm' className='h-6 px-1 text-xs'>
+              <ChevronRight
+                className={
+                  sentOpen
+                    ? 'h-3 w-3 rotate-90 transition-transform'
+                    : 'h-3 w-3 transition-transform'
+                }
+              />
+              Request as sent
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <section data-testid='last-run-request' className='mt-1.5 space-y-1.5'>
+              <p className='select-text font-mono text-[11px] [overflow-wrap:anywhere]'>
+                {exchange.method} {exchange.url}
+              </p>
+              <HeadersTable headers={exchange.headers} />
+              {exchange.body !== undefined && exchange.body !== '' && (
+                <pre className='max-h-48 select-text overflow-auto whitespace-pre-wrap rounded-md border p-2 font-mono text-[11px]'>
+                  {exchange.body}
+                </pre>
+              )}
+              {exchange.bodyTruncated && (
+                <p className='text-muted-foreground'>Truncated at 256 KB</p>
+              )}
+            </section>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }
@@ -237,6 +254,8 @@ function ValueSection({ value }: { value: string }) {
   );
 }
 
+const LOG_LINE = 'select-text whitespace-pre-wrap [overflow-wrap:anywhere]';
+
 function LogsSection({ logs }: { logs: FlowLogEntry[] }) {
   return (
     <section data-testid='last-run-logs' className='space-y-1'>
@@ -245,7 +264,7 @@ function LogsSection({ logs }: { logs: FlowLogEntry[] }) {
         {logs.map((entry, i) => (
           // Log lines have no id and can repeat.
           // biome-ignore lint/suspicious/noArrayIndexKey: log order is stable within a run.
-          <p key={i} className={`select-text whitespace-pre-wrap ${logClass[entry.level]}`}>
+          <p key={i} className={`${LOG_LINE} ${logClass[entry.level]}`}>
             {entry.message}
           </p>
         ))}
@@ -290,12 +309,12 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
           <ExchangeSections
             exchange={detail.exchange}
             shownError={status === 'failed' ? detail.error : undefined}
+            received={node.kind.kind === 'WaitForCallback'}
           />
         )}
       {(node.kind.kind === 'If' || node.kind.kind === 'Switch') && detail?.branch && (
         <p data-testid='last-run-branch'>
-          Took:{' '}
-          <span className='font-mono'>{exitLabel(node.kind, detail.branch) ?? detail.branch}</span>
+          Took: <span className='font-mono'>{exitDisplayLabel(node, detail.branch)}</span>
         </p>
       )}
       {(node.kind.kind === 'Output' || node.kind.kind === 'Input') &&
