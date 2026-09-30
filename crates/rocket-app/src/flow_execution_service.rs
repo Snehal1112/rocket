@@ -7185,4 +7185,82 @@ mod tests {
         assert_eq!(completed_logs(&publisher.events(), "t"), step.logs);
         assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
     }
+
+    #[tokio::test]
+    async fn transform_after_a_failed_request_is_skipped_as_upstream_failed() {
+        // Unlike If and Switch, a Transform does not observe a failed response.
+        let flow = Flow {
+            name: "tf-upstream".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                transform_node("t", "return response.body;"),
+                output_node_named("out"),
+            ],
+            edges: vec![
+                input_edge("e1", "a", "t"),
+                edge_from("e2", "t", handle::RESULT, "out", "value", "response.body"),
+            ],
+            callback_host: None,
+        };
+        let service = service_with_flow(flow);
+        let executor = RecordingExecutor::new();
+        executor.set_status("example.com/a", 500);
+        let exec = recording_exec(
+            &executor,
+            transform_engine(Scripted::Value(serde_json::json!("never"))),
+        );
+
+        let summary = service
+            .run(&exec, run_input("tf-upstream"))
+            .await
+            .expect("run");
+
+        assert_eq!(status_of(&summary, "a"), FlowNodeStatus::Failed);
+        for id in ["t", "out"] {
+            assert_eq!(
+                step_of(&summary, id).skip_reason,
+                Some(FlowSkipReason::UpstreamFailed),
+                "node {id}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_reads_an_object_result_without_json_parse() {
+        // `res.getBody()` parses JSON text, so a wire after a Transform that
+        // returns an object reads its fields directly.
+        let flow = Flow {
+            name: "tf-object".to_string(),
+            nodes: vec![
+                input_node_with("in", "pro"),
+                transform_node("t", "return { plan: response.body };"),
+                output_node_named("out"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "t"),
+                edge_from(
+                    "e2",
+                    "t",
+                    handle::RESULT,
+                    "out",
+                    "value",
+                    "response.body.plan",
+                ),
+            ],
+            callback_host: None,
+        };
+        let service = service_with_flow(flow);
+        let exec = real_engine_service();
+
+        let summary = service
+            .run(&exec, run_input("tf-object"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            step_of(&summary, "t").value.as_deref(),
+            Some(r#"{"plan":"pro"}"#)
+        );
+        assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
+    }
 }

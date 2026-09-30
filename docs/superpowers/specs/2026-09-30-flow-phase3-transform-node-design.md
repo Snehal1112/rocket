@@ -98,7 +98,7 @@ A new rule, V-T, mirrors V1 (`check_routing_inputs`):
 
 `decide_fate` and `is_live` need no change: the node is a plain single-exit node.
 
-Downstream wires read the value through `captured_output_response_json`: the returned text is the `response.body`, so `JSON.parse(response.body)` reads an object result.
+Downstream wires read the value through `captured_output_response_json`: the returned text is the `response.body`. The script engine's `res.getBody()` parses JSON text, so an object result is read directly (`response.body.plan`), and number or boolean text arrives as a number or boolean.
 
 ## 8. Events and IPC
 
@@ -135,4 +135,4 @@ Downstream wires read the value through `captured_output_response_json`: the ret
 ## 12. Risks
 
 - A Monaco editor in the properties panel must keep its size and focus while the panel re-renders. It should be built and checked first.
-- Objects come back as JSON text, so consumers parse `response.body` themselves. A typed value is a possible later step.
+- Objects are stored as JSON text. Wires see them parsed, because `res.getBody()` parses JSON text, but a returned string that happens to be valid JSON (such as `"123"`) is parsed too. A typed value is a possible later step.
