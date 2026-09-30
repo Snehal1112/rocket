@@ -85,6 +85,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     setPanelNodeId(null);
     setLabelFocusNodeId(null);
     setPanelFocusRequest(null);
+    setSaveErrorMessage(null);
   }, [tab.id]);
   // Any selection other than exactly the panel's node closes the panel.
   const handleSelectedNodeIdsChange = useCallback((ids: ReadonlySet<string>) => {

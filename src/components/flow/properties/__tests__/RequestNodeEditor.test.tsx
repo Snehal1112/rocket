@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearSavedRequestPreviewCache } from '@/lib/saved-request-preview';
 import {
   type Collection,
   type FlowNodeKind,
@@ -95,6 +96,7 @@ function renderEditor(kind: RequestKind) {
 
 describe('RequestNodeEditor', () => {
   beforeEach(() => {
+    clearSavedRequestPreviewCache();
     vi.mocked(getRequest).mockReset();
     vi.mocked(getCollection).mockReset();
   });

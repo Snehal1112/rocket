@@ -19,6 +19,7 @@ import '@xyflow/react/dist/style.css';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
+import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { edgeRunState, exitLabel } from './flowExits';
@@ -29,6 +30,7 @@ import { OutputNode } from './nodes/OutputNode';
 import { RequestNode } from './nodes/RequestNode';
 import { SwitchNode } from './nodes/SwitchNode';
 import { WaitForCallbackNode } from './nodes/WaitForCallbackNode';
+import { useSavedRequestPreviews } from './properties/useSavedRequestPreview';
 
 const nodeTypes = {
   Request: RequestNode,
@@ -91,23 +93,36 @@ function toRfNodes(
   measured: ReadonlyMap<string, Measured>,
   nodeDetail?: Record<string, FlowNodeDetail>,
   cycleNodeIds?: string[],
+  savedPreviews: Record<string, SavedRequestPreview> = {},
 ): Node[] {
-  return nodes.map((n) => ({
-    id: n.id,
-    type: n.kind.kind,
-    position: n.position,
-    data: {
-      kind: n.kind,
-      status: nodeStatus[n.id] ?? 'idle',
-      ...nodeDetail?.[n.id],
-      hasCycleError: cycleNodeIds?.includes(n.id) ?? false,
-      ...(n.kind.kind === 'Output' && {
-        hasValueWire: edges.some((e) => e.targetNodeId === n.id && e.targetField === 'value'),
-      }),
-    },
-    selected: selectedIds.has(n.id),
-    measured: measured.get(n.id),
-  }));
+  return nodes.map((n) => {
+    const preview =
+      n.kind.kind === 'Request' && n.kind.source.type === 'Saved'
+        ? savedPreviews[n.kind.source.requestPath]
+        : undefined;
+    return {
+      id: n.id,
+      type: n.kind.kind,
+      position: n.position,
+      data: {
+        kind: n.kind,
+        status: nodeStatus[n.id] ?? 'idle',
+        ...nodeDetail?.[n.id],
+        hasCycleError: cycleNodeIds?.includes(n.id) ?? false,
+        ...(n.kind.kind === 'Output' && {
+          hasValueWire: edges.some((e) => e.targetNodeId === n.id && e.targetField === 'value'),
+        }),
+        // A saved request's own method, headers and body, once loaded.
+        ...(preview && {
+          method: preview.method,
+          headerCount: preview.headers.filter((h) => h.enabled).length,
+          bodyPreview: preview.bodyPreview ?? undefined,
+        }),
+      },
+      selected: selectedIds.has(n.id),
+      measured: measured.get(n.id),
+    };
+  });
 }
 
 // Targets inside a node that own their focus: `.nokey` wrappers around
@@ -266,6 +281,19 @@ function FlowCanvasInner({
     onOpenProperties?.(node.id);
   };
 
+  const savedPaths = useMemo(
+    () => [
+      ...new Set(
+        nodes.flatMap((n) =>
+          n.kind.kind === 'Request' && n.kind.source.type === 'Saved'
+            ? [n.kind.source.requestPath]
+            : [],
+        ),
+      ),
+    ],
+    [nodes],
+  );
+  const savedPreviews = useSavedRequestPreviews(flowCollectionName ?? null, savedPaths);
   const rfNodes = useMemo(
     () =>
       toRfNodes(
@@ -276,8 +304,9 @@ function FlowCanvasInner({
         measuredRef.current,
         nodeDetail,
         cycleNodeIds,
+        savedPreviews,
       ),
-    [nodes, edges, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds],
+    [nodes, edges, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds, savedPreviews],
   );
   const rfEdges = useMemo(
     () => toRfEdges(edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds),

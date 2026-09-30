@@ -148,6 +148,24 @@ describe('FlowPane save', () => {
     });
   });
 
+  it('does not show a save error from another flow tab', async () => {
+    vi.mocked(listCollections).mockResolvedValue([]);
+    vi.mocked(listFlows).mockResolvedValue([]);
+    vi.mocked(saveFlow).mockRejectedValue(
+      'Invalid input: flow contains a cycle through node(s): a; edge(s): e1',
+    );
+    const groupId = usePaneStore.getState().activeGroupId;
+    const { rerender } = render(<FlowPane tab={flowTab} groupId={groupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await userEvent.click(screen.getByLabelText('Edit Out a'));
+    expect(await screen.findByTestId('node-save-error')).toBeInTheDocument();
+
+    rerender(<FlowPane tab={{ ...flowTab, id: 'flow-other' }} groupId={groupId} />);
+    await userEvent.click(screen.getByLabelText('Edit Out a'));
+    expect(screen.getByTestId('node-properties-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('node-save-error')).not.toBeInTheDocument();
+  });
+
   it('flags the node named in a non-cycle validation error', async () => {
     vi.mocked(saveFlow).mockRejectedValue(
       'Invalid input: flow is invalid: the If node needs exactly one input wire, found 0 — node(s): b; edge(s): ',

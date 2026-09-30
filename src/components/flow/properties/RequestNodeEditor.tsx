@@ -19,6 +19,7 @@ import { LabelField } from './LabelField';
 import { focusIsLost, usePanelRefocus } from './panelFocus';
 import { RepeatUntilSection } from './RepeatUntilSection';
 import { RequestPicker } from './RequestPicker';
+import { SavedRequestDetails } from './SavedRequestDetails';
 import { SavedSourceEditor } from './SavedSourceEditor';
 
 type RequestKind = Extract<FlowNodeKind, { kind: 'Request' }>;
@@ -139,13 +140,16 @@ export function RequestNodeEditor({
       </p>
 
       {source.type === 'Saved' ? (
-        <SavedSourceEditor
-          requestPath={source.requestPath}
-          collection={collection}
-          onPick={applySaved}
-          onConvertToInline={() => void startConvert()}
-          converting={converting}
-        />
+        <>
+          <SavedSourceEditor
+            requestPath={source.requestPath}
+            collection={collection}
+            onPick={applySaved}
+            onConvertToInline={() => void startConvert()}
+            converting={converting}
+          />
+          <SavedRequestDetails collection={collection} requestPath={source.requestPath} />
+        </>
       ) : (
         <>
           <InlineSourceEditor
