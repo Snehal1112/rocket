@@ -4,6 +4,7 @@ pub mod cookie_repository;
 pub mod executor;
 pub mod jwt;
 pub mod load_test;
+pub mod oauth1_sig;
 pub mod oauth2;
 pub mod pkce;
 pub mod request;

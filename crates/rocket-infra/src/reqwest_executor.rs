@@ -7,7 +7,7 @@ use reqwest::{redirect, Client, Method};
 
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::types::{Auth, Body, BodyMode, Header};
+use rocket_shared::types::{Auth, Body, BodyMode, Header, OAuth1Auth};
 
 pub struct ReqwestExecutor {
     // Cache of reqwest::Clients keyed on (follow_redirects, verify_ssl).
@@ -275,10 +275,17 @@ impl HttpExecutor for ReqwestExecutor {
             builder = builder.timeout(Duration::from_millis(request.options.timeout_ms));
         }
 
-        let response = builder
-            .send()
-            .await
-            .map_err(|e| DomainError::Http(e.to_string()))?;
+        // OAuth1 signs the final request, so it has to wait until the body is applied.
+        let response = if let Auth::OAuth1(oauth) = &request.auth {
+            let mut built = builder.build().map_err(|e| {
+                DomainError::Internal(format!("Cannot build request for signing: {e}"))
+            })?;
+            apply_oauth1(&mut built, &request.method, oauth)?;
+            client.execute(built).await
+        } else {
+            builder.send().await
+        }
+        .map_err(|e| DomainError::Http(e.to_string()))?;
 
         // TTFB: time from request sent to headers received (first byte of response).
         let ttfb_ms = start.elapsed().as_millis() as u64;
@@ -401,7 +408,10 @@ async fn apply_auth(
         Auth::Inherit => {
             // Inherits from parent — resolved before execution.
         }
-        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } | Auth::OAuth1(_) => {
+        Auth::OAuth1(_) => {
+            // Signed in `execute` once the body is known; see `apply_oauth1`.
+        }
+        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } => {
             // Not yet implemented in HTTP executor.
         }
         Auth::AwsSigV4 {
@@ -461,6 +471,104 @@ async fn apply_auth(
         }
     }
     Ok(builder)
+}
+
+/// Signs a built request with OAuth 1.0 and writes the `oauth_*` parameters to the
+/// configured placement (`header` by default, `query` or `body`).
+fn apply_oauth1(
+    req: &mut reqwest::Request,
+    method: &rocket_shared::types::HttpMethod,
+    auth: &OAuth1Auth,
+) -> DomainResult<()> {
+    use rocket_http::oauth1_sig::{authorization_header, generate_nonce, sign, unix_timestamp};
+
+    let is_form = req
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.trim()
+                .to_ascii_lowercase()
+                .starts_with("application/x-www-form-urlencoded")
+        });
+    // Only a form body or a body hash reads the body. A streamed body (multipart) is not
+    // part of the signature, so it is fine to treat it as empty otherwise.
+    let body_bytes: Vec<u8> = match req.body().map(|b| b.as_bytes()) {
+        None => Vec::new(),
+        Some(Some(bytes)) => bytes.to_vec(),
+        Some(None) if is_form || auth.include_body_hash == Some(true) => {
+            return Err(DomainError::InvalidInput(
+                "OAuth1 cannot read a streamed request body".into(),
+            ))
+        }
+        Some(None) => Vec::new(),
+    };
+
+    // Query pairs, plus form body pairs, take part in the signature.
+    let mut params: Vec<(String, String)> = req
+        .url()
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    if is_form {
+        params.extend(
+            url::form_urlencoded::parse(&body_bytes).map(|(k, v)| (k.into_owned(), v.into_owned())),
+        );
+    }
+
+    let oauth = sign(
+        &method.to_string(),
+        req.url().as_str(),
+        &params,
+        &body_bytes,
+        auth,
+        &unix_timestamp(),
+        &generate_nonce(),
+    )
+    .map_err(|e| DomainError::InvalidInput(format!("OAuth1 signing failed: {e}")))?;
+
+    match auth.placement.as_deref().unwrap_or("header") {
+        "header" => {
+            let value = authorization_header(auth.realm.as_deref(), &oauth);
+            let value = reqwest::header::HeaderValue::from_str(&value).map_err(|e| {
+                DomainError::InvalidInput(format!("Invalid OAuth1 header value: {e}"))
+            })?;
+            req.headers_mut()
+                .insert(reqwest::header::AUTHORIZATION, value);
+        }
+        "query" => {
+            let mut pairs = req.url_mut().query_pairs_mut();
+            for (k, v) in &oauth {
+                pairs.append_pair(k, v);
+            }
+        }
+        "body" => {
+            if !is_form {
+                return Err(DomainError::InvalidInput(
+                    "OAuth1 placement `body` needs an application/x-www-form-urlencoded body"
+                        .into(),
+                ));
+            }
+            let mut ser = url::form_urlencoded::Serializer::new(
+                String::from_utf8_lossy(&body_bytes).into_owned(),
+            );
+            for (k, v) in &oauth {
+                ser.append_pair(k, v);
+            }
+            let new_body = ser.finish().into_bytes();
+            req.headers_mut().insert(
+                reqwest::header::CONTENT_LENGTH,
+                reqwest::header::HeaderValue::from(new_body.len()),
+            );
+            *req.body_mut() = Some(reqwest::Body::from(new_body));
+        }
+        other => {
+            return Err(DomainError::InvalidInput(format!(
+                "Unknown OAuth1 placement: {other}"
+            )))
+        }
+    }
+    Ok(())
 }
 
 /// Fetch an access token using the OAuth2 client_credentials grant.
@@ -818,5 +926,142 @@ mod oauth2_tests {
 
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
         assert_eq!(result.unwrap(), "tok123");
+    }
+}
+
+#[cfg(test)]
+mod oauth1_tests {
+    use super::*;
+    use rocket_shared::types::{FormDataEntry, FormDataType, HttpMethod};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn auth(placement: &str) -> OAuth1Auth {
+        OAuth1Auth {
+            consumer_key: Some("ck".into()),
+            consumer_secret: Some("cs".into()),
+            access_token: Some("tok".into()),
+            access_token_secret: Some("ts".into()),
+            signature_method: Some("HMAC-SHA1".into()),
+            placement: Some(placement.into()),
+            ..Default::default()
+        }
+    }
+
+    async fn server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn form_body() -> Body {
+        Body {
+            mode: BodyMode::FormUrlEncoded,
+            content: None,
+            form_data: Some(vec![FormDataEntry {
+                key: "status".into(),
+                value: "hi there".into(),
+                entry_type: FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn header_placement_sends_a_signed_authorization_header() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r?a=1", server.uri()));
+        req.auth = Auth::OAuth1(Box::new(auth("header")));
+        ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        let seen = &server.received_requests().await.unwrap()[0];
+        let header = seen.headers.get("authorization").unwrap().to_str().unwrap();
+        assert!(header.starts_with("OAuth "), "{header}");
+        assert!(header.contains("oauth_consumer_key=\"ck\""), "{header}");
+        assert!(header.contains("oauth_token=\"tok\""), "{header}");
+        assert!(header.contains("oauth_signature="), "{header}");
+        assert_eq!(
+            seen.url.query(),
+            Some("a=1"),
+            "header placement must leave the query untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn query_placement_appends_oauth_params_to_the_url() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r?a=1", server.uri()));
+        req.auth = Auth::OAuth1(Box::new(auth("query")));
+        ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        let seen = &server.received_requests().await.unwrap()[0];
+        let query = seen.url.query().unwrap();
+        assert!(query.starts_with("a=1&"), "{query}");
+        assert!(query.contains("oauth_signature="), "{query}");
+        assert!(seen.headers.get("authorization").is_none());
+    }
+
+    #[tokio::test]
+    async fn body_placement_appends_oauth_params_to_a_form_body() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/r", server.uri()));
+        req.body = Some(form_body());
+        req.auth = Auth::OAuth1(Box::new(auth("body")));
+        ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        let seen = &server.received_requests().await.unwrap()[0];
+        let body = String::from_utf8(seen.body.clone()).unwrap();
+        assert!(body.starts_with("status=hi+there&"), "{body}");
+        assert!(body.contains("oauth_signature="), "{body}");
+    }
+
+    #[tokio::test]
+    async fn form_body_params_are_part_of_the_signature() {
+        let server = server().await;
+        let mut with_form = HttpRequest::new(HttpMethod::Post, format!("{}/r", server.uri()));
+        with_form.body = Some(form_body());
+        let mut a = auth("header");
+        a.timestamp = Some("100".into());
+        a.nonce = Some("n".into());
+        with_form.auth = Auth::OAuth1(Box::new(a.clone()));
+        let mut without = HttpRequest::new(HttpMethod::Post, format!("{}/r", server.uri()));
+        without.auth = Auth::OAuth1(Box::new(a));
+        let exec = ReqwestExecutor::new();
+        exec.execute(&with_form).await.unwrap();
+        exec.execute(&without).await.unwrap();
+
+        let seen = server.received_requests().await.unwrap();
+        let sig = |i: usize| {
+            let h = seen[i]
+                .headers
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            h.split("oauth_signature=").nth(1).unwrap().to_string()
+        };
+        assert_ne!(sig(0), sig(1));
+    }
+
+    #[tokio::test]
+    async fn rsa_method_fails_the_request_instead_of_sending_unsigned() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        let mut a = auth("header");
+        a.signature_method = Some("RSA-SHA256".into());
+        req.auth = Auth::OAuth1(Box::new(a));
+        let err = ReqwestExecutor::new().execute(&req).await.unwrap_err();
+        assert!(err.to_string().contains("RSA-SHA256"), "{err}");
+        assert!(server.received_requests().await.unwrap().is_empty());
     }
 }

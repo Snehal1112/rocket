@@ -58,6 +58,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **OAuth2 client credentials.** `ReqwestExecutor` fetches tokens synchronously as part of `execute()`. Other OAuth2 flows (authorization code, implicit) are not implemented and are silently skipped.
 
+**OAuth1.** `ReqwestExecutor::execute` signs the built request via `apply_oauth1` (after the body is applied, since form bodies are part of the signature). Placement is `header` (default), `query` or `body`. RSA-* signature methods fail the request with an error.
+
 **`OcAuth` serde design.** `OcAuth` is `#[serde(untagged)]`: the string `"inherit"` deserializes to `OcAuth::Inherit`; an object with a `type` field deserializes to `OcAuth::Typed`. New auth variants must go inside `OcAuthTyped` (tagged by `type`), not as new `OcAuth` variants.
 
 **`OcItem` variant ordering.** The `OcItem` enum uses `#[serde(untagged)]`, so serde tries variants top-to-bottom. More specific types (those with a unique required field) must come before less specific ones — `Http` before `Folder`, etc. Changing variant order breaks deserialization of existing YAML files.

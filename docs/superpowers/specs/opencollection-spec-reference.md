@@ -459,7 +459,7 @@ auth:
   placement: "header" | "query" | "body"
   includeBodyHash: bool
 ```
-Rocket parses and persists this losslessly (`OcAuthTyped::OAuth1`, domain `Auth::OAuth1`). Request signing is not implemented in the HTTP executor yet, so the request is sent without an OAuth1 signature.
+Rocket parses and persists this losslessly (`OcAuthTyped::OAuth1`, domain `Auth::OAuth1`). The HTTP executor signs HMAC-SHA1/256/512 and PLAINTEXT requests (`rocket-http` `oauth1_sig`). RSA-* methods return an error instead of sending an unsigned request.
 
 ---
 
