@@ -76,7 +76,7 @@ A new rule, V-T, mirrors V1 (`check_routing_inputs`):
 1. A Transform node has exactly one incoming edge, and it targets `input`.
 2. Its `script` is not blank.
 3. Edges leaving it use the `result` exit only. The existing `source_handle` check already rejects other names once `Transform` is known to have only `result`.
-4. `trigger` edges into a Transform node follow the existing `trigger` rule (Phase 2 V3). The plan must check that rule against this node kind and keep it consistent.
+4. A `trigger` edge into a Transform node is rejected, because rule 1 allows one incoming edge and it must target `input`. This matches If and Switch.
 
 `topological_sort` and cycle detection are unchanged.
 

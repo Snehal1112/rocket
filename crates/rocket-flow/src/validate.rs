@@ -19,8 +19,12 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
 
     check_routing_inputs(flow)?;
     check_edges(flow, &kinds, |edge, target, _| {
-        (edge.target_field == handle::INPUT && !is_routing(target))
-            .then(|| format!("only If and Switch nodes have an '{}' input", handle::INPUT))
+        (edge.target_field == handle::INPUT && !takes_input(target)).then(|| {
+            format!(
+                "only If, Switch and Transform nodes have an '{}' input",
+                handle::INPUT
+            )
+        })
     })?;
     check_edges(flow, &kinds, |edge, target, _| {
         let accepts_trigger = matches!(
@@ -73,6 +77,12 @@ fn is_routing(kind: &FlowNodeKind) -> bool {
     matches!(kind, FlowNodeKind::If { .. } | FlowNodeKind::Switch { .. })
 }
 
+/// True for the node kinds that evaluate one upstream value through an
+/// `input` handle: If, Switch and Transform.
+fn takes_input(kind: &FlowNodeKind) -> bool {
+    is_routing(kind) || matches!(kind, FlowNodeKind::Transform { .. })
+}
+
 fn kind_name(kind: &FlowNodeKind) -> &'static str {
     match kind {
         FlowNodeKind::Request { .. } => "Request",
@@ -92,9 +102,9 @@ fn invalid_node(node: &FlowNode, reason: String) -> FlowGraphError {
     }
 }
 
-/// V1: an If or Switch node has exactly one incoming edge, into `input`.
+/// V1: an If, Switch or Transform node has exactly one incoming edge, into `input`.
 fn check_routing_inputs(flow: &Flow) -> Result<(), FlowGraphError> {
-    for node in flow.nodes.iter().filter(|n| is_routing(&n.kind)) {
+    for node in flow.nodes.iter().filter(|n| takes_input(&n.kind)) {
         let incoming: Vec<&FlowEdge> = flow
             .edges
             .iter()
@@ -202,20 +212,16 @@ fn first_duplicate<'a>(values: impl Iterator<Item = &'a str>) -> Option<&'a str>
     values.into_iter().find(|v| !seen.insert(*v))
 }
 
-/// V8: an If condition and a Switch value must not be blank.
+/// V8: an If condition, a Switch value and a Transform script must not be blank.
 fn check_expressions(flow: &Flow) -> Result<(), FlowGraphError> {
     for node in &flow.nodes {
-        let expression = match &node.kind {
-            FlowNodeKind::If { condition, .. } => condition,
-            FlowNodeKind::Switch { value, .. } => value,
+        let (expression, field) = match &node.kind {
+            FlowNodeKind::If { condition, .. } => (condition, "condition"),
+            FlowNodeKind::Switch { value, .. } => (value, "value"),
+            FlowNodeKind::Transform { script, .. } => (script, "script"),
             _ => continue,
         };
         if expression.trim().is_empty() {
-            let field = if matches!(node.kind, FlowNodeKind::If { .. }) {
-                "condition"
-            } else {
-                "value"
-            };
             return Err(invalid_node(
                 node,
                 format!("the {} node's {field} is empty", kind_name(&node.kind)),
@@ -387,6 +393,16 @@ mod tests {
         )
     }
 
+    fn transform(id: &str, script: &str) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Transform {
+                label: id.to_string(),
+                script: script.to_string(),
+            },
+        )
+    }
+
     fn edge(id: &str, from: &str, exit: &str, to: &str, field: &str) -> FlowEdge {
         FlowEdge {
             id: id.to_string(),
@@ -499,6 +515,114 @@ mod tests {
             vec![edge("e1", "a", handle::RESULT, "if1", "url")],
         );
         assert_eq!(invalid_node_id(validate(&f)), "if1");
+    }
+
+    /// in -> t (input); t -> out (value).
+    fn valid_transform_flow() -> Flow {
+        flow(
+            vec![input("in"), transform("t", "return response.body;"), output("out")],
+            vec![
+                edge("e1", "in", handle::RESULT, "t", handle::INPUT),
+                edge("e2", "t", handle::RESULT, "out", "value"),
+            ],
+        )
+    }
+
+    #[test]
+    fn valid_transform_flow_passes() {
+        let order = validate(&valid_transform_flow()).expect("valid flow");
+        assert_eq!(order, vec!["in", "t", "out"]);
+    }
+
+    #[test]
+    fn vt_transform_without_input_is_rejected() {
+        let f = flow(vec![transform("t", "return 1;")], vec![]);
+        assert_eq!(invalid_node_id(validate(&f)), "t");
+    }
+
+    #[test]
+    fn vt_transform_with_two_inputs_is_rejected() {
+        let f = flow(
+            vec![request("a"), request("b"), transform("t", "return 1;")],
+            vec![
+                edge("e1", "a", handle::RESULT, "t", handle::INPUT),
+                edge("e2", "b", handle::RESULT, "t", handle::INPUT),
+            ],
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "t");
+    }
+
+    #[test]
+    fn vt_transform_input_must_target_the_input_field() {
+        let f = flow(
+            vec![request("a"), transform("t", "return 1;")],
+            vec![edge("e1", "a", handle::RESULT, "t", "url")],
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "t");
+    }
+
+    #[test]
+    fn vt_transform_trigger_is_rejected() {
+        let f = flow(
+            vec![request("a"), transform("t", "return 1;")],
+            vec![edge("e1", "a", handle::RESULT, "t", handle::TRIGGER)],
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "t");
+    }
+
+    #[test]
+    fn vt_blank_script_is_rejected() {
+        let f = flow(
+            vec![input("in"), transform("t", "  \n\t ")],
+            vec![edge("e1", "in", handle::RESULT, "t", handle::INPUT)],
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "t");
+    }
+
+    #[test]
+    fn vt_transform_has_only_the_result_exit() {
+        let f = flow(
+            vec![input("in"), transform("t", "return 1;"), output("out")],
+            vec![
+                edge("e1", "in", handle::RESULT, "t", handle::INPUT),
+                edge("e2", "t", handle::TRUE, "out", "value"),
+            ],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e2");
+    }
+
+    #[test]
+    fn vt_transform_can_feed_several_consumers() {
+        let f = flow(
+            vec![
+                input("in"),
+                transform("t", "return 1;"),
+                output("out1"),
+                output("out2"),
+            ],
+            vec![
+                edge("e1", "in", handle::RESULT, "t", handle::INPUT),
+                edge("e2", "t", handle::RESULT, "out1", "value"),
+                edge("e3", "t", handle::RESULT, "out2", "value"),
+            ],
+        );
+        assert!(validate(&f).is_ok());
+    }
+
+    #[test]
+    fn vt_transform_can_sit_after_a_branch_exit() {
+        let f = flow(
+            vec![
+                request("login"),
+                if_node("if1", "response.status === 200"),
+                transform("t", "return response.body;"),
+            ],
+            vec![
+                edge("e1", "login", handle::RESULT, "if1", handle::INPUT),
+                edge("e2", "if1", handle::TRUE, "t", handle::INPUT),
+            ],
+        );
+        assert!(validate(&f).is_ok());
     }
 
     #[test]
