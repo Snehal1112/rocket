@@ -6,6 +6,7 @@ import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tau
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
+import { IfDetails, OutputDetails, SwitchDetails } from './NodeDetails';
 import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
 import { WaitForCallbackEditor } from './WaitForCallbackEditor';
@@ -18,7 +19,7 @@ export type PanelTab = 'settings' | 'last-run' | 'wires';
 function editorFor(
   node: FlowNode,
   edges: FlowEdge[],
-  _nodes: FlowNode[],
+  nodes: FlowNode[],
   collection: string,
   onChange: (kind: FlowNodeKind) => void,
 ) {
@@ -40,22 +41,25 @@ function editorFor(
       return <InputNodeEditor kind={kind} onChange={onChange} />;
     case 'If':
       return (
-        <LabelOnlyEditor
-          kind={kind}
-          onChange={onChange}
-          note='The condition is edited on the node itself.'
-        />
+        <div className='space-y-3'>
+          <LabelOnlyEditor kind={kind} onChange={onChange} />
+          <IfDetails condition={kind.condition} />
+        </div>
       );
     case 'Switch':
       return (
-        <LabelOnlyEditor
-          kind={kind}
-          onChange={onChange}
-          note='The value and cases are edited on the node itself.'
-        />
+        <div className='space-y-3'>
+          <LabelOnlyEditor kind={kind} onChange={onChange} />
+          <SwitchDetails value={kind.value} cases={kind.cases} />
+        </div>
       );
     case 'Output':
-      return <LabelOnlyEditor kind={kind} onChange={onChange} />;
+      return (
+        <div className='space-y-3'>
+          <LabelOnlyEditor kind={kind} onChange={onChange} />
+          <OutputDetails nodeId={node.id} edges={edges} nodes={nodes} />
+        </div>
+      );
     case 'WaitForCallback':
       return <WaitForCallbackEditor kind={kind} onChange={onChange} />;
   }

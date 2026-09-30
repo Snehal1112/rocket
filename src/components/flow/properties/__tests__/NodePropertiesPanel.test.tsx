@@ -101,9 +101,102 @@ describe('NodePropertiesPanel', () => {
     expect(screen.getByTestId('input-value-readonly')).toHaveTextContent('{"secret":true}');
   });
 
-  it('tells the user where If and Switch details are edited', () => {
-    renderPanel(node('if1', { kind: 'If', label: 'Ok?', condition: 'true' }));
-    expect(screen.getByText('The condition is edited on the node itself.')).toBeInTheDocument();
+  it('shows an If condition read-only with a pointer to the node', () => {
+    renderPanel(node('if1', { kind: 'If', label: 'Ok?', condition: 'response.status === 200' }));
+    expect(screen.getByTestId('if-details-condition')).toHaveTextContent('response.status === 200');
+    expect(screen.getByText('Edit on the node.')).toBeInTheDocument();
+  });
+
+  it('shows a Switch value and each case', () => {
+    renderPanel(
+      node('s1', {
+        kind: 'Switch',
+        label: 'Route',
+        value: 'response.body.type',
+        cases: [
+          { id: 'c1', label: 'Card', matches: 'card' },
+          { id: 'c2', label: 'Cash', matches: 'cash' },
+        ],
+      }),
+    );
+    expect(screen.getByTestId('switch-details-value')).toHaveTextContent('response.body.type');
+    const cases = screen.getAllByTestId('switch-details-case').map((c) => c.textContent);
+    expect(cases).toEqual(['Card = card', 'Cash = cash']);
+  });
+
+  it('shows which wire feeds an Output', () => {
+    const out = node('o1', { kind: 'Output', label: 'Result' });
+    const login = node('r1', {
+      kind: 'Request',
+      label: 'Login',
+      source: { type: 'Saved', requestPath: 'auth/login.yml' },
+    });
+    renderPanel(out, {
+      nodes: [out, login],
+      edges: [
+        {
+          id: 'e1',
+          sourceNodeId: 'r1',
+          targetNodeId: 'o1',
+          targetField: 'value',
+          expression: 'response.body.token',
+        },
+      ],
+    });
+    expect(screen.getByTestId('output-details')).toHaveTextContent('response.body.token');
+    expect(screen.getByTestId('output-details')).toHaveTextContent('Login');
+  });
+
+  it('says when an Output has no value wire', () => {
+    renderPanel(node('o1', { kind: 'Output', label: 'Result' }));
+    expect(screen.getByTestId('output-details')).toHaveTextContent('No value wire.');
+  });
+
+  it('shows "(missing node)" when Output wire source is not in nodes', () => {
+    const out = node('o1', { kind: 'Output', label: 'Result' });
+    renderPanel(out, {
+      nodes: [out],
+      edges: [
+        {
+          id: 'e1',
+          sourceNodeId: 'r1',
+          targetNodeId: 'o1',
+          targetField: 'value',
+          expression: 'response.body.token',
+        },
+      ],
+    });
+    expect(screen.getByTestId('output-details')).toHaveTextContent('(missing node)');
+  });
+
+  it('shows "—" when If condition is empty', () => {
+    renderPanel(node('if1', { kind: 'If', label: 'Check', condition: '' }));
+    expect(screen.getByTestId('if-details-condition')).toHaveTextContent('—');
+  });
+
+  it('shows "No cases." when Switch has zero cases', () => {
+    renderPanel(node('s1', { kind: 'Switch', label: 'Route', value: 'x', cases: [] }));
+    expect(screen.getByText('No cases.')).toBeInTheDocument();
+  });
+
+  it('does not truncate long Switch case lines', () => {
+    renderPanel(
+      node('s1', {
+        kind: 'Switch',
+        label: 'Route',
+        value: 'x',
+        cases: [
+          {
+            id: 'c1',
+            label: 'Very Long Case Label',
+            matches: 'a_very_long_matching_value_that_should_wrap',
+          },
+        ],
+      }),
+    );
+    const caseElement = screen.getByTestId('switch-details-case');
+    expect(caseElement).toHaveClass('break-words');
+    expect(caseElement).not.toHaveClass('truncate');
   });
 
   it('shows the kind and label in its header and closes on ✕', async () => {

@@ -1,8 +1,7 @@
 import type { FlowNodeKind } from '@/lib/tauri-api';
 import { LabelField } from './LabelField';
 
-// Output nodes have only a label. If and Switch nodes edit their condition,
-// value and cases on the card, so the panel offers the label and a pointer.
+// Output, If and Switch nodes edit only their label here. Their details show below it.
 export function LabelOnlyEditor({
   kind,
   onChange,
