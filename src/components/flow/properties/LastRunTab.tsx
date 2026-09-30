@@ -233,7 +233,7 @@ function ExchangeSections({
 
 const logClass: Record<FlowLogEntry['level'], string> = {
   log: '',
-  warn: 'text-amber-600',
+  warn: 'text-amber-600 dark:text-amber-400',
   error: 'text-red-600',
 };
 

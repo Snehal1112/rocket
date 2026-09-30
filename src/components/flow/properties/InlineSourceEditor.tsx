@@ -122,7 +122,7 @@ export function InlineSourceEditor({
           </div>
         ))}
         {positions.length > 0 && (
-          <p role='alert' className='text-xs text-amber-600'>
+          <p role='alert' className='text-xs text-amber-600 dark:text-amber-400'>
             {positions.length === 1
               ? `A wire targets header position ${positions[0]}, which no longer exists.`
               : `Wires target header positions ${positions.join(', ')}, which no longer exist.`}{' '}
