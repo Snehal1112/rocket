@@ -1,5 +1,10 @@
 import { isSensitiveHeader, REDACTED_VALUE } from '@/lib/sensitive-headers';
-import { getRequest, onCollectionChanged, type Request } from '@/lib/tauri-api';
+import {
+  type CollectionChangedEvent,
+  getRequest,
+  onCollectionChanged,
+  type Request,
+} from '@/lib/tauri-api';
 
 /** What the flow shows of a saved request. Secrets are already masked. */
 export interface SavedRequestPreview {
@@ -12,9 +17,11 @@ export interface SavedRequestPreview {
   bodyPreview: string | null;
 }
 
+// A stale ready entry stays on screen while it is loaded again, so a change
+// elsewhere in the collection never flashes the card back to empty.
 export type PreviewEntry =
   | { status: 'loading' }
-  | { status: 'ready'; preview: SavedRequestPreview }
+  | { status: 'ready'; preview: SavedRequestPreview; stale?: boolean }
   | { status: 'error'; error: string };
 
 const BODY_PREVIEW_LINES = 20;
@@ -42,6 +49,9 @@ export function toSavedRequestPreview(request: Request): SavedRequestPreview {
 }
 
 const cache = new Map<string, PreviewEntry>();
+// The token of each load in flight. A clear drops the token, so a result that
+// arrives after it is ignored.
+const inflight = new Map<string, object>();
 const listeners = new Set<() => void>();
 let version = 0;
 let subscribedToChanges = false;
@@ -53,16 +63,32 @@ function notify() {
   for (const listener of listeners) listener();
 }
 
-// A saved request can change in its own tab, so a collection change drops
-// that collection's previews. Tests that mock tauri-api without this
-// listener simply skip it.
+// True when a watcher path is a flow file or the flows folder of the
+// collection. Saving a flow writes there, and no saved request lives there.
+function isFlowPath(collection: string, path: string): boolean {
+  const normalized = path.replace(/\\/g, '/');
+  const dir = `/${collection}/flows`;
+  return normalized.endsWith(dir) || normalized.includes(`${dir}/`);
+}
+
+/**
+ * Refreshes the previews a collection change may affect. A change to a flow
+ * file is ignored. An event without a collection refreshes every preview.
+ */
+export function handleCollectionChanged(event: CollectionChangedEvent): void {
+  const collection = event.collection ?? null;
+  if (collection !== null && event.path && isFlowPath(collection, event.path)) return;
+  refreshSavedRequestPreviews(collection);
+}
+
+// A saved request can change in its own tab, so a collection change refreshes
+// that collection's previews. Tests that mock tauri-api without this listener
+// simply skip it.
 function watchCollectionChanges() {
   if (subscribedToChanges) return;
   subscribedToChanges = true;
   try {
-    onCollectionChanged((event) => clearSavedRequestPreviewCache(event.collection)).catch(
-      () => undefined,
-    );
+    onCollectionChanged(handleCollectionChanged).catch(() => undefined);
   } catch {
     // No event bridge (tests); the cache is cleared explicitly there.
   }
@@ -78,14 +104,21 @@ export function peekSavedRequestPreview(
 export function loadSavedRequestPreview(collection: string, path: string): void {
   watchCollectionChanges();
   const key = keyOf(collection, path);
-  if (cache.has(key)) return;
-  // A clear during the load replaces or drops this placeholder. The result is
-  // then stale, so it is only written while the placeholder is still there.
-  const pending: PreviewEntry = { status: 'loading' };
-  cache.set(key, pending);
-  notify();
+  const current = cache.get(key);
+  const isStale = current?.status === 'ready' && current.stale === true;
+  if ((current && !isStale) || inflight.has(key)) return;
+  const token = {};
+  inflight.set(key, token);
+  // A stale preview stays visible during the load; otherwise show a placeholder.
+  if (!current) {
+    cache.set(key, { status: 'loading' });
+    notify();
+  }
+  // A failed reload replaces a stale preview too, because it usually means
+  // the request was deleted or moved.
   const settle = (entry: PreviewEntry) => {
-    if (cache.get(key) !== pending) return;
+    if (inflight.get(key) !== token) return;
+    inflight.delete(key);
     cache.set(key, entry);
     notify();
   };
@@ -100,11 +133,29 @@ export function loadSavedRequestPreview(collection: string, path: string): void 
     });
 }
 
+const inCollection = (key: string, collection: string | null) =>
+  collection === null || key.startsWith(`${collection}\u0000`);
+
+/** Drops the previews of one collection, or all of them. */
 export function clearSavedRequestPreviewCache(collection?: string): void {
-  if (collection === undefined) cache.clear();
-  else
-    for (const key of [...cache.keys()])
-      if (key.startsWith(`${collection}\u0000`)) cache.delete(key);
+  const scope = collection ?? null;
+  for (const key of [...cache.keys()]) if (inCollection(key, scope)) cache.delete(key);
+  for (const key of [...inflight.keys()]) if (inCollection(key, scope)) inflight.delete(key);
+  notify();
+}
+
+/**
+ * Marks the previews of one collection, or all of them when null, for a
+ * reload. A ready preview stays visible until its reload lands; any other
+ * entry is dropped.
+ */
+export function refreshSavedRequestPreviews(collection: string | null): void {
+  for (const [key, entry] of [...cache.entries()]) {
+    if (!inCollection(key, collection)) continue;
+    inflight.delete(key);
+    if (entry.status === 'ready') cache.set(key, { ...entry, stale: true });
+    else cache.delete(key);
+  }
   notify();
 }
 

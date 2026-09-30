@@ -7,7 +7,10 @@ vi.mock('@/lib/tauri-api', () => ({
   onCollectionChanged: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
-import { clearSavedRequestPreviewCache } from '@/lib/saved-request-preview';
+import {
+  clearSavedRequestPreviewCache,
+  handleCollectionChanged,
+} from '@/lib/saved-request-preview';
 import { SavedRequestDetails } from '../SavedRequestDetails';
 
 describe('SavedRequestDetails', () => {
@@ -55,6 +58,33 @@ describe('SavedRequestDetails', () => {
     act(() => clearSavedRequestPreviewCache('demo'));
     await vi.waitFor(() => expect(getRequest).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('POST')).toBeInTheDocument();
+  });
+
+  it('keeps the old request on screen while a collection change reloads it', async () => {
+    const saved = {
+      uid: 'u',
+      name: 'Login',
+      method: 'POST',
+      url: 'https://x.test/login',
+      headers: [],
+      auth: { authType: 'none' },
+    };
+    getRequest.mockResolvedValueOnce(saved);
+    let resolveNext: (r: typeof saved) => void = () => undefined;
+    getRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveNext = resolve;
+        }),
+    );
+    render(<SavedRequestDetails collection='demo' requestPath='auth/login.yml' />);
+    expect(await screen.findByText('POST')).toBeInTheDocument();
+    act(() => handleCollectionChanged({ type: 'requestSaved', collection: 'demo' }));
+    await vi.waitFor(() => expect(getRequest).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('POST')).toBeInTheDocument();
+    expect(screen.queryByText('Loading request…')).not.toBeInTheDocument();
+    await act(async () => resolveNext({ ...saved, method: 'PUT' }));
+    expect(await screen.findByText('PUT')).toBeInTheDocument();
   });
 
   it('lists repeated header names without key clashes', async () => {

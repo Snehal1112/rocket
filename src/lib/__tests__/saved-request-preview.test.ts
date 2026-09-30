@@ -9,6 +9,7 @@ vi.mock('@/lib/tauri-api', () => ({
 
 import {
   clearSavedRequestPreviewCache,
+  handleCollectionChanged,
   loadSavedRequestPreview,
   peekSavedRequestPreview,
   toSavedRequestPreview,
@@ -118,5 +119,86 @@ describe('the preview cache', () => {
     await new Promise((r) => setTimeout(r, 0));
     const entry = peekSavedRequestPreview('demo', 'a.yml');
     expect(entry?.status === 'ready' && entry.preview.method).toBe('PUT');
+  });
+});
+
+describe('collection changes', () => {
+  const ready = async (collection: string, path: string) =>
+    vi.waitFor(() => expect(peekSavedRequestPreview(collection, path)?.status).toBe('ready'));
+  const methodOf = (collection: string, path: string) => {
+    const entry = peekSavedRequestPreview(collection, path);
+    return entry?.status === 'ready' ? entry.preview.method : undefined;
+  };
+
+  beforeEach(async () => {
+    clearSavedRequestPreviewCache();
+    getRequest.mockReset();
+    getRequest.mockResolvedValue(request({ method: 'GET' }));
+    loadSavedRequestPreview('demo', 'a.yml');
+    await ready('demo', 'a.yml');
+    getRequest.mockClear();
+  });
+
+  it('ignores a change to a flow file', async () => {
+    handleCollectionChanged({
+      type: 'fileChanged',
+      collection: 'demo',
+      path: '/home/u/.rocket-api/collections/demo/flows/login.yml',
+      eventType: 'modify',
+    });
+    loadSavedRequestPreview('demo', 'a.yml');
+    expect(methodOf('demo', 'a.yml')).toBe('GET');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getRequest).not.toHaveBeenCalled();
+  });
+
+  it('ignores a change to the flows folder itself, with Windows separators too', async () => {
+    handleCollectionChanged({
+      type: 'fileChanged',
+      collection: 'demo',
+      path: 'C:\\Users\\u\\.rocket-api\\collections\\demo\\flows',
+    });
+    loadSavedRequestPreview('demo', 'a.yml');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getRequest).not.toHaveBeenCalled();
+  });
+
+  it('refreshes on a request change and keeps the old preview until the new one lands', async () => {
+    let resolveNext: (r: Request) => void = () => undefined;
+    getRequest.mockImplementationOnce(
+      () =>
+        new Promise<Request>((resolve) => {
+          resolveNext = resolve;
+        }),
+    );
+    handleCollectionChanged({
+      type: 'fileChanged',
+      collection: 'demo',
+      path: '/home/u/.rocket-api/collections/demo/a.yml',
+    });
+    expect(methodOf('demo', 'a.yml')).toBe('GET');
+    loadSavedRequestPreview('demo', 'a.yml');
+    loadSavedRequestPreview('demo', 'a.yml');
+    await vi.waitFor(() => expect(getRequest).toHaveBeenCalledTimes(1));
+    expect(methodOf('demo', 'a.yml')).toBe('GET');
+    resolveNext(request({ method: 'PUT' }));
+    await vi.waitFor(() => expect(methodOf('demo', 'a.yml')).toBe('PUT'));
+  });
+
+  it('shows the error when the refresh fails', async () => {
+    getRequest.mockResolvedValueOnce(undefined);
+    handleCollectionChanged({ type: 'requestDeleted', collection: 'demo', path: 'a.yml' });
+    loadSavedRequestPreview('demo', 'a.yml');
+    await vi.waitFor(() => expect(peekSavedRequestPreview('demo', 'a.yml')?.status).toBe('error'));
+  });
+
+  it('refreshes every collection when the event names none', async () => {
+    loadSavedRequestPreview('other', 'b.yml');
+    await ready('other', 'b.yml');
+    getRequest.mockClear();
+    handleCollectionChanged({ type: 'fileChanged', collection: null });
+    loadSavedRequestPreview('demo', 'a.yml');
+    loadSavedRequestPreview('other', 'b.yml');
+    await vi.waitFor(() => expect(getRequest).toHaveBeenCalledTimes(2));
   });
 });

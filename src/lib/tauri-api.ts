@@ -1034,7 +1034,8 @@ export const onFileChange = (handler: (event: FileChangedEvent) => void): Promis
 
 export interface CollectionChangedEvent {
   type: string;
-  collection?: string;
+  /** Null when a watched file is outside any collection. */
+  collection?: string | null;
   name?: string;
   oldName?: string;
   newName?: string;
