@@ -23,6 +23,7 @@ pub(crate) fn build_debug_request(
         url: redact_url_secrets(&full_url(sent), secret_values),
         headers,
         body: sent.body.as_ref().and_then(|b| body_text(b, secret_values)),
+        body_truncated: false,
         response: response.map(|r| FlowDebugResponse {
             status: r.status,
             status_text: r.status_text.clone(),
@@ -115,20 +116,32 @@ fn body_text(body: &Body, secret_values: &HashSet<String>) -> Option<String> {
 /// The largest response body an exchange record keeps, in bytes.
 pub(crate) const EXCHANGE_BODY_LIMIT: usize = 262_144;
 
-/// Cuts the response body to `EXCHANGE_BODY_LIMIT` bytes at a UTF-8
-/// boundary and marks the record as truncated.
+/// Cuts the request and response bodies to `EXCHANGE_BODY_LIMIT` bytes at
+/// a UTF-8 boundary and marks each cut side as truncated.
 pub(crate) fn cap_exchange(mut record: FlowDebugRequest) -> FlowDebugRequest {
+    if let Some(body) = record.body.as_mut() {
+        record.body_truncated = cap_body(body);
+    }
     if let Some(response) = record.response.as_mut() {
-        if response.body.len() > EXCHANGE_BODY_LIMIT {
-            let mut cut = EXCHANGE_BODY_LIMIT;
-            while !response.body.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            response.body.truncate(cut);
+        if cap_body(&mut response.body) {
             response.truncated = true;
         }
     }
     record
+}
+
+/// Cuts `body` to `EXCHANGE_BODY_LIMIT` bytes at a UTF-8 boundary. Returns
+/// true when it cut anything.
+fn cap_body(body: &mut String) -> bool {
+    if body.len() <= EXCHANGE_BODY_LIMIT {
+        return false;
+    }
+    let mut cut = EXCHANGE_BODY_LIMIT;
+    while !body.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    body.truncate(cut);
+    true
 }
 
 /// The record of an accepted callback. The call itself is the response,
@@ -162,6 +175,7 @@ pub(crate) fn callback_exchange(
         url: redact_url_secrets(&url, secret_values),
         headers: Vec::new(),
         body: None,
+        body_truncated: false,
         response: Some(FlowDebugResponse {
             status: 200,
             status_text: call.method.clone(),
@@ -427,6 +441,7 @@ mod tests {
             url: "https://x.test".into(),
             headers: Vec::new(),
             body: None,
+            body_truncated: false,
             response: Some(FlowDebugResponse {
                 status: 200,
                 status_text: "OK".into(),
@@ -471,6 +486,30 @@ mod tests {
         assert_eq!(response.body.len(), EXCHANGE_BODY_LIMIT - 1);
         assert!(response.body.chars().all(|c| c == 'a'));
         assert!(response.truncated);
+    }
+
+    #[test]
+    fn cap_exchange_cuts_a_long_request_body_at_a_utf8_boundary() {
+        let mut body = "a".repeat(EXCHANGE_BODY_LIMIT - 1);
+        body.push('é');
+        body.push_str("tail");
+        let mut record = response_record(String::new());
+        record.body = Some(body);
+        let capped = cap_exchange(record);
+        let sent = capped.body.expect("request body");
+        assert_eq!(sent.len(), EXCHANGE_BODY_LIMIT - 1);
+        assert!(sent.chars().all(|c| c == 'a'));
+        assert!(capped.body_truncated);
+    }
+
+    #[test]
+    fn cap_exchange_keeps_a_request_body_at_the_limit_untouched() {
+        let body = "a".repeat(EXCHANGE_BODY_LIMIT);
+        let mut record = response_record(String::new());
+        record.body = Some(body.clone());
+        let capped = cap_exchange(record);
+        assert_eq!(capped.body.as_deref(), Some(body.as_str()));
+        assert!(!capped.body_truncated);
     }
 
     #[test]

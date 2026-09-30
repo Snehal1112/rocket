@@ -68,6 +68,9 @@ pub struct FlowDebugRequest {
     pub headers: Vec<FlowDebugHeader>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    /// True when `body` was cut to the exchange size limit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub body_truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<FlowDebugResponse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -847,6 +850,7 @@ mod tests {
             url: "https://x.test/a".into(),
             headers: vec![],
             body: None,
+            body_truncated: false,
             response: None,
             error: Some("boom".into()),
         };
@@ -1208,7 +1212,8 @@ mod tests {
                 method: "GET".into(),
                 url: "https://x.test".into(),
                 headers: Vec::new(),
-                body: None,
+                body: Some("sent".into()),
+                body_truncated: true,
                 response: Some(FlowDebugResponse {
                     status: 200,
                     status_text: "OK".into(),
@@ -1225,5 +1230,16 @@ mod tests {
         assert!(json.contains(r#""exchange":{"method":"GET""#), "{json}");
         assert!(json.contains(r#""sizeBytes":300000"#), "{json}");
         assert!(json.contains(r#""truncated":true"#), "{json}");
+        assert!(json.contains(r#""bodyTruncated":true"#), "{json}");
+    }
+
+    #[test]
+    fn a_request_body_flag_is_omitted_when_false_and_defaults_when_missing() {
+        let old: FlowDebugRequest =
+            serde_json::from_str(r#"{"method":"GET","url":"https://x.test","headers":[],"body":"a"}"#)
+                .expect("old record");
+        assert!(!old.body_truncated);
+        let json = serde_json::to_string(&old).expect("serialize");
+        assert!(!json.contains("bodyTruncated"), "{json}");
     }
 }
