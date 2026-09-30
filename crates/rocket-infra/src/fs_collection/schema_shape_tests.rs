@@ -168,6 +168,19 @@ const OAUTH2_PARAMS_AUTH_CODE: &[&str] = &[
     "refreshTokenRequest",
 ];
 const OAUTH2_PARAMS_IMPLICIT: &[&str] = &["authorizationRequest"];
+const CLIENT_CERT_PEM: &[&str] = &[
+    "type",
+    "domain",
+    "certificateFilePath",
+    "privateKeyFilePath",
+    "passphrase",
+];
+const CLIENT_CERT_PKCS12: &[&str] = &["type", "domain", "pkcs12FilePath", "passphrase"];
+/// Rocket extensions outside the OpenCollection `ClientCertificate` schema, like
+/// `externalSecrets`: vault references (`alias.secretName`) for the certificate material.
+/// Other OpenCollection tools do not know them.
+const ROCKET_CLIENT_CERT_PEM_EXTENSIONS: &[&str] = &["certificateSecret", "privateKeySecret"];
+const ROCKET_CLIENT_CERT_PKCS12_EXTENSIONS: &[&str] = &["pkcs12Secret"];
 
 #[derive(Default)]
 struct Violations(Vec<String>);
@@ -788,4 +801,62 @@ fn oauth1_request_file_loads_instead_of_vanishing() {
     let auth = &raw["http"]["auth"];
     assert_eq!(auth["type"].as_str(), Some("oauth1"));
     assert_eq!(auth["consumerSecret"].as_str(), Some("cs"));
+}
+
+#[test]
+fn environment_client_certificates_use_schema_keys_plus_rocket_extensions() {
+    use rocket_environment::{Environment, EnvironmentRepository};
+    use rocket_shared::certificate::ClientCertificate;
+
+    let dir = TempDir::new().expect("tempdir");
+    let repo = crate::fs_environment_repo::FsEnvironmentRepo::new(dir.path().to_path_buf());
+    let mut env = Environment::new("prod");
+    env.client_certificates = vec![
+        ClientCertificate::Pem {
+            domain: "a.example.com".into(),
+            certificate_file_path: "certs/client.pem".into(),
+            private_key_file_path: "certs/client-key.pem".into(),
+            certificate_secret: None,
+            private_key_secret: None,
+            passphrase: Some("{{pass}}".into()),
+        },
+        ClientCertificate::Pem {
+            domain: "b.example.com".into(),
+            certificate_file_path: String::new(),
+            private_key_file_path: String::new(),
+            certificate_secret: Some("vault.clientCertPem".into()),
+            private_key_secret: Some("vault.clientKeyPem".into()),
+            passphrase: None,
+        },
+        ClientCertificate::Pkcs12 {
+            domain: "c.example.com".into(),
+            pkcs12_file_path: "/certs/client.p12".into(),
+            pkcs12_secret: None,
+            passphrase: None,
+        },
+        ClientCertificate::Pkcs12 {
+            domain: "d.example.com".into(),
+            pkcs12_file_path: String::new(),
+            pkcs12_secret: Some("vault.clientBundleB64".into()),
+            passphrase: Some("{{vault.bundlePass}}".into()),
+        },
+    ];
+    repo.save(&env).expect("save environment");
+
+    let doc = read_yaml(&dir.path().join("prod.yml"));
+    assert_eq!(seq(doc.get("clientCertificates")).count(), 4);
+    let mut v = Violations::default();
+    for (i, cert) in seq(doc.get("clientCertificates")).enumerate() {
+        let at = format!("prod.yml clientCertificates[{i}]");
+        let allowed: Vec<&str> = match cert.get("type").and_then(Value::as_str) {
+            Some("pem") => [CLIENT_CERT_PEM, ROCKET_CLIENT_CERT_PEM_EXTENSIONS].concat(),
+            Some("pkcs12") => [CLIENT_CERT_PKCS12, ROCKET_CLIENT_CERT_PKCS12_EXTENSIONS].concat(),
+            other => {
+                v.0.push(format!("{at}: unknown certificate type {other:?}"));
+                continue;
+            }
+        };
+        v.keys("ClientCertificate", &at, cert, &allowed);
+    }
+    assert!(v.0.is_empty(), "{:#?}", v.0);
 }

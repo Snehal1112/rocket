@@ -2864,6 +2864,7 @@ mod tests {
         env.client_certificates = vec![ClientCertificate::Pkcs12 {
             domain: "api.example.com".into(),
             pkcs12_file_path: "{{certDir}}/client.p12".into(),
+            pkcs12_secret: None,
             passphrase: Some("{{p12Pass}}".into()),
         }];
 
@@ -2903,21 +2904,26 @@ mod tests {
                 domain: "a.example.com".into(),
                 certificate_file_path: "certs/client.pem".into(),
                 private_key_file_path: "./certs/client-key.pem".into(),
+                certificate_secret: None,
+                private_key_secret: None,
                 passphrase: None,
             },
             ClientCertificate::Pkcs12 {
                 domain: "b.example.com".into(),
                 pkcs12_file_path: "../outside.p12".into(),
+                pkcs12_secret: None,
                 passphrase: None,
             },
             ClientCertificate::Pkcs12 {
                 domain: "c.example.com".into(),
                 pkcs12_file_path: "/abs/client.p12".into(),
+                pkcs12_secret: None,
                 passphrase: None,
             },
             ClientCertificate::Pkcs12 {
                 domain: "d.example.com".into(),
                 pkcs12_file_path: "~/client.p12".into(),
+                pkcs12_secret: None,
                 passphrase: None,
             },
         ];
@@ -3027,6 +3033,30 @@ mod tests {
             .resolve_request(&input, &std::collections::HashMap::new())
             .expect("resolve_request");
         assert!(resolved.options.client_certificates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_vault_sourced_certificate_is_unavailable_until_references_are_resolved() {
+        let mut env = Environment::new("dev");
+        env.client_certificates = vec![ClientCertificate::Pkcs12 {
+            domain: "api.example.com".into(),
+            pkcs12_file_path: String::new(),
+            pkcs12_secret: Some("vault.clientBundleB64".into()),
+            passphrase: None,
+        }];
+        let svc = service_with(env, None);
+        let input = sample_input("https://api.example.com/x", Some("dev"));
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        assert_eq!(
+            describe_all(&resolved.options.client_certificates),
+            [
+                "unavailable api.example.com Client certificate secret vault.clientBundleB64 \
+              cannot be used yet: certificate material from RocketVault is not supported in \
+              this build."
+            ]
+        );
     }
 
     #[tokio::test]

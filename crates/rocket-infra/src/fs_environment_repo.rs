@@ -209,6 +209,7 @@ mod tests {
     use super::*;
     use rocket_environment::secret_store::SecretStore;
     use rocket_environment::Variable;
+    use rocket_shared::certificate::ClientCertificate;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -709,5 +710,55 @@ mod tests {
 
         repo.delete("prod").expect("delete");
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn an_old_client_certificate_entry_loads_and_round_trips_unchanged() {
+        let (dir, repo) = setup();
+        let old_yaml = "name: prod\nclientCertificates:\n\
+            - type: pem\n  domain: api.example.com\n  certificateFilePath: certs/client.pem\n  privateKeyFilePath: certs/client-key.pem\n\
+            - type: pkcs12\n  domain: '*.internal.example.com'\n  pkcs12FilePath: /certs/client.p12\n  passphrase: '{{vault.bundlePass}}'\n";
+        std::fs::write(dir.path().join("prod.yml"), old_yaml).expect("write prod.yml");
+
+        let env = repo.get("prod").expect("an old file still loads");
+        repo.save(&env).expect("save");
+
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        let saved: serde_yaml::Value = serde_yaml::from_str(&raw).expect("parse saved");
+        let original: serde_yaml::Value = serde_yaml::from_str(old_yaml).expect("parse original");
+        assert_eq!(
+            saved["clientCertificates"], original["clientCertificates"],
+            "{raw}"
+        );
+    }
+
+    #[test]
+    fn a_vault_sourced_certificate_is_saved_as_references_only() {
+        let (dir, repo) = setup();
+        let mut env = Environment::new("prod");
+        env.client_certificates = vec![ClientCertificate::Pem {
+            domain: "api.example.com".into(),
+            certificate_file_path: String::new(),
+            private_key_file_path: String::new(),
+            certificate_secret: Some("vault.clientCertPem".into()),
+            private_key_secret: Some("vault.clientKeyPem".into()),
+            passphrase: Some("{{vault.clientKeyPass}}".into()),
+        }];
+        repo.save(&env).expect("save");
+
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        assert!(
+            raw.contains("certificateSecret: vault.clientCertPem"),
+            "{raw}"
+        );
+        assert!(
+            raw.contains("privateKeySecret: vault.clientKeyPem"),
+            "{raw}"
+        );
+        assert!(!raw.contains("FilePath"), "{raw}");
+        assert_eq!(
+            repo.get("prod").expect("load").client_certificates,
+            env.client_certificates
+        );
     }
 }

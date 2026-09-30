@@ -1,3 +1,4 @@
+pub mod client_certificate_validation;
 pub mod context;
 pub mod dynamic_vars;
 pub mod environment;
@@ -9,6 +10,7 @@ pub mod secret_store;
 pub mod variable;
 pub mod vault_secret_fetcher;
 
+pub use client_certificate_validation::validate_client_certificates;
 pub use context::VariableContext;
 pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};

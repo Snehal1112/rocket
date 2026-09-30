@@ -43,6 +43,10 @@ impl EnvironmentService {
         rocket_environment::external_secret::validate_external_secret_bindings(
             &env.external_secrets,
         )?;
+        rocket_environment::validate_client_certificates(
+            &env.client_certificates,
+            &env.external_secrets,
+        )?;
         // Snapshot previous state so we can detect which secret values actually changed.
         let previous = self.repo.get(&env.name).ok();
         self.repo.save(env)?;
@@ -76,6 +80,8 @@ mod tests {
     use super::*;
     use rocket_audit::event::AuditEventKind;
     use rocket_environment::Variable;
+    use rocket_environment::{ExternalSecretBinding, ExternalSecretRef};
+    use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use std::sync::Mutex;
@@ -194,5 +200,60 @@ mod tests {
                 .any(|k| matches!(k, AuditEventKind::SecretVariableWritten { variable_key, .. } if variable_key == "HOST")),
             "non-secret variables must not emit SecretVariableWritten"
         );
+    }
+
+    // Review Focus 5.
+    #[test]
+    fn save_rejects_pasted_key_text_in_a_certificate() {
+        let svc = make_service();
+        let mut env = Environment::new("prod");
+        env.client_certificates = vec![ClientCertificate::Pem {
+            domain: "api.example.com".into(),
+            certificate_file_path: "/certs/client.pem".into(),
+            private_key_file_path:
+                "-----BEGIN PRIVATE KEY-----\nMIIEvQsecret\n-----END PRIVATE KEY-----".into(),
+            certificate_secret: None,
+            private_key_secret: None,
+            passphrase: None,
+        }];
+        let err = svc
+            .save(&env)
+            .expect_err("pasted key text must be rejected");
+        assert!(err.to_string().contains("privateKeyFilePath"), "{err}");
+        assert!(
+            svc.list().expect("list").is_empty(),
+            "nothing may be written"
+        );
+    }
+
+    #[test]
+    fn save_accepts_a_certificate_that_references_a_bound_secret() {
+        let svc = make_service();
+        let mut env = Environment::new("prod");
+        env.external_secrets = vec![ExternalSecretBinding {
+            alias: "vault".into(),
+            connection_id: "conn-1".into(),
+            vault_name: "prod-vault".into(),
+            secret_names: vec![
+                ExternalSecretRef {
+                    name: "clientCertPem".into(),
+                    secret_id: "id-1".into(),
+                },
+                ExternalSecretRef {
+                    name: "clientKeyPem".into(),
+                    secret_id: "id-2".into(),
+                },
+            ],
+        }];
+        env.client_certificates = vec![ClientCertificate::Pem {
+            domain: "api.example.com".into(),
+            certificate_file_path: String::new(),
+            private_key_file_path: String::new(),
+            certificate_secret: Some("vault.clientCertPem".into()),
+            private_key_secret: Some("vault.clientKeyPem".into()),
+            passphrase: Some("{{vault.clientKeyPass}}".into()),
+        }];
+        svc.save(&env).expect("a bound reference is valid");
+        assert_eq!(svc.get("prod").expect("saved").client_certificates.len(), 1);
     }
 }

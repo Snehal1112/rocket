@@ -1337,6 +1337,8 @@ fn environment_client_certificates_survive_oc_roundtrip() {
         domain: "api.example.com".to_string(),
         certificate_file_path: "/certs/client.pem".to_string(),
         private_key_file_path: "/certs/key.pem".to_string(),
+        certificate_secret: None,
+        private_key_secret: None,
         passphrase: None,
     }];
     let oc: OcEnvironment = env.clone().into();

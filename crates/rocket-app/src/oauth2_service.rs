@@ -945,6 +945,7 @@ mod tests {
         ClientCertificate::Pkcs12 {
             domain: domain.into(),
             pkcs12_file_path: path.into(),
+            pkcs12_secret: None,
             passphrase: None,
         }
     }
@@ -1113,6 +1114,7 @@ mod tests {
             vec![ClientCertificate::Pkcs12 {
                 domain: "idp.example.com".into(),
                 pkcs12_file_path: "/c.p12".into(),
+                pkcs12_secret: None,
                 passphrase: Some("{{vault.certPass}}".into()),
             }],
             &provider,
@@ -1145,6 +1147,7 @@ mod tests {
             vec![ClientCertificate::Pkcs12 {
                 domain: "idp.example.com".into(),
                 pkcs12_file_path: "/c.p12".into(),
+                pkcs12_secret: None,
                 passphrase: Some("{{vault.certPass}}".into()),
             }],
             &provider,

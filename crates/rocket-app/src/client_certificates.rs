@@ -47,21 +47,46 @@ fn resolve_client_certificate(
             domain,
             certificate_file_path,
             private_key_file_path,
+            certificate_secret,
+            private_key_secret,
             passphrase,
-        } => ResolvedClientCertificate::pem(
-            r(domain),
-            file(certificate_file_path),
-            file(private_key_file_path),
-            passphrase.map(&r),
-        ),
+        } => {
+            if let Some(reference) = certificate_secret.or(private_key_secret) {
+                return ResolvedClientCertificate::unavailable(
+                    r(domain),
+                    not_resolved_yet(&reference),
+                );
+            }
+            ResolvedClientCertificate::pem(
+                r(domain),
+                file(certificate_file_path),
+                file(private_key_file_path),
+                passphrase.map(&r),
+            )
+        }
         ClientCertificate::Pkcs12 {
             domain,
             pkcs12_file_path,
+            pkcs12_secret,
             passphrase,
         } => {
+            if let Some(reference) = pkcs12_secret {
+                return ResolvedClientCertificate::unavailable(
+                    r(domain),
+                    not_resolved_yet(&reference),
+                );
+            }
             ResolvedClientCertificate::pkcs12(r(domain), file(pkcs12_file_path), passphrase.map(&r))
         }
     }
+}
+
+/// The error for a vault reference before references are resolved. It names the reference only.
+fn not_resolved_yet(reference: &str) -> String {
+    format!(
+        "Client certificate secret {reference} cannot be used yet: certificate material from \
+         RocketVault is not supported in this build."
+    )
 }
 
 /// Joins a relative certificate file path onto the collection folder `base`.
