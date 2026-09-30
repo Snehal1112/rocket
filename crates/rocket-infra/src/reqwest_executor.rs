@@ -528,6 +528,10 @@ fn load_identity(cert: &ClientCertificate) -> DomainResult<reqwest::Identity> {
 }
 
 /// Reads a certificate file. A leading `~/` is the user's home directory.
+///
+/// A relative path would depend on the working directory of the app. The service turns a
+/// relative path inside the collection folder into an absolute one, so one that is still
+/// relative here could not be resolved and is rejected.
 fn read_certificate_file(path: &str) -> DomainResult<Vec<u8>> {
     let expanded = match path.strip_prefix("~/") {
         Some(rest) => std::env::var_os("HOME")
@@ -536,6 +540,12 @@ fn read_certificate_file(path: &str) -> DomainResult<Vec<u8>> {
             .unwrap_or_else(|| std::path::PathBuf::from(path)),
         None => std::path::PathBuf::from(path),
     };
+    if !expanded.is_absolute() {
+        return Err(DomainError::InvalidInput(format!(
+            "Client certificate path {path} cannot be resolved. Use an absolute path, a ~/ path, \
+             or a path inside the collection folder without `..`."
+        )));
+    }
     std::fs::read(&expanded).map_err(|e| {
         DomainError::InvalidInput(format!(
             "Cannot read client certificate file {}: {e}",
@@ -1595,6 +1605,15 @@ mod mtls_tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("encrypted") && err.contains("PKCS12"), "{err}");
+    }
+
+    #[test]
+    fn a_path_that_is_still_relative_is_rejected_before_any_file_is_read() {
+        for path in ["certs/client.p12", "../client.p12"] {
+            let cert = p12("x", path.into(), None);
+            let err = load_identity(&cert).unwrap_err().to_string();
+            assert!(err.contains(path) && err.contains("absolute"), "{err}");
+        }
     }
 
     #[test]

@@ -33,11 +33,31 @@ impl EnvironmentRepositoryFactory for SharedCollectionEnvironmentRepo {
             .join("environments");
         Box::new(FsEnvironmentRepo::new(base))
     }
+
+    fn collection_dir(&self, collection: &str) -> Option<PathBuf> {
+        Some(
+            self.active_workspace_path
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .join("collections")
+                .join(collection),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collection_dir_is_the_parent_of_the_environments_dir() {
+        let repo = SharedCollectionEnvironmentRepo::new(Arc::new(Mutex::new(PathBuf::from("/ws"))));
+        assert_eq!(
+            repo.collection_dir("api"),
+            Some(PathBuf::from("/ws/collections/api"))
+        );
+    }
+
     use rocket_environment::{Environment, Variable};
     use std::error::Error;
     use tempfile::TempDir;

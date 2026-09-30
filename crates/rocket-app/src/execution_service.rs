@@ -574,9 +574,16 @@ impl RequestExecutionService {
         let Ok(env) = self.regular_env_repo(input.collection.as_deref()).get(name) else {
             return Vec::new();
         };
+        // Relative file paths are relative to the collection folder, so they work for a
+        // collection that is shared through git.
+        let base = input
+            .collection
+            .as_deref()
+            .and_then(|c| self.collection_env_repo_factory.as_ref()?.collection_dir(c));
         env.client_certificates
             .into_iter()
             .map(|c| resolve_client_certificate(c, vars))
+            .map(|c| absolutize_certificate_paths(c, base.as_deref()))
             .collect()
     }
 
@@ -1732,6 +1739,59 @@ fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
     }
 }
 
+/// Joins a relative certificate file path onto the collection folder `base`.
+///
+/// Absolute paths and `~/` paths stay as written. So does a relative path with a `..` in it, so
+/// an environment file cannot point outside the collection folder. The executor rejects any
+/// path that is still relative, with a message that says what is allowed.
+fn absolutize_certificate_paths(
+    cert: ClientCertificate,
+    base: Option<&std::path::Path>,
+) -> ClientCertificate {
+    let Some(base) = base else { return cert };
+    let join = |p: String| -> String {
+        let path = std::path::Path::new(&p);
+        let stays = p.is_empty()
+            || p.starts_with("~/")
+            || path.is_absolute()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir));
+        if stays {
+            p
+        } else {
+            // Drop `.` components so `./certs/a.pem` joins as `certs/a.pem`.
+            let tidy: std::path::PathBuf = path
+                .components()
+                .filter(|c| !matches!(c, std::path::Component::CurDir))
+                .collect();
+            base.join(tidy).to_string_lossy().into_owned()
+        }
+    };
+    match cert {
+        ClientCertificate::Pem {
+            domain,
+            certificate_file_path,
+            private_key_file_path,
+            passphrase,
+        } => ClientCertificate::Pem {
+            domain,
+            certificate_file_path: join(certificate_file_path),
+            private_key_file_path: join(private_key_file_path),
+            passphrase,
+        },
+        ClientCertificate::Pkcs12 {
+            domain,
+            pkcs12_file_path,
+            passphrase,
+        } => ClientCertificate::Pkcs12 {
+            domain,
+            pkcs12_file_path: join(pkcs12_file_path),
+            passphrase,
+        },
+    }
+}
+
 /// Resolves `{{placeholders}}` in a client certificate's domain, file paths and passphrase.
 fn resolve_client_certificate(
     cert: ClientCertificate,
@@ -1962,6 +2022,25 @@ mod tests {
             _collection: &str,
         ) -> Box<dyn rocket_environment::EnvironmentRepository> {
             Box::new(MockEnvRepo::with_env(self.env.clone()))
+        }
+    }
+
+    /// Like `SingleCollectionEnvRepoFactory`, but it also knows where the collection lives.
+    struct DirEnvRepoFactory {
+        env: Environment,
+        dir: std::path::PathBuf,
+    }
+
+    impl rocket_environment::EnvironmentRepositoryFactory for DirEnvRepoFactory {
+        fn for_collection(
+            &self,
+            _collection: &str,
+        ) -> Box<dyn rocket_environment::EnvironmentRepository> {
+            Box::new(MockEnvRepo::with_env(self.env.clone()))
+        }
+
+        fn collection_dir(&self, collection: &str) -> Option<std::path::PathBuf> {
+            Some(self.dir.join(collection))
         }
     }
 
@@ -2903,6 +2982,118 @@ mod tests {
                 pkcs12_file_path: "/certs/client.p12".into(),
                 passphrase: Some("s3cret".into()),
             }]
+        );
+    }
+
+    fn relative_path_env() -> Environment {
+        let mut env = Environment::new("dev");
+        env.client_certificates = vec![
+            ClientCertificate::Pem {
+                domain: "a.example.com".into(),
+                certificate_file_path: "certs/client.pem".into(),
+                private_key_file_path: "./certs/client-key.pem".into(),
+                passphrase: None,
+            },
+            ClientCertificate::Pkcs12 {
+                domain: "b.example.com".into(),
+                pkcs12_file_path: "../outside.p12".into(),
+                passphrase: None,
+            },
+            ClientCertificate::Pkcs12 {
+                domain: "c.example.com".into(),
+                pkcs12_file_path: "/abs/client.p12".into(),
+                passphrase: None,
+            },
+            ClientCertificate::Pkcs12 {
+                domain: "d.example.com".into(),
+                pkcs12_file_path: "~/client.p12".into(),
+                passphrase: None,
+            },
+        ];
+        env
+    }
+
+    fn cert_paths(certs: &[ClientCertificate]) -> Vec<String> {
+        certs
+            .iter()
+            .flat_map(|c| match c {
+                ClientCertificate::Pem {
+                    certificate_file_path,
+                    private_key_file_path,
+                    ..
+                } => vec![certificate_file_path.clone(), private_key_file_path.clone()],
+                ClientCertificate::Pkcs12 {
+                    pkcs12_file_path, ..
+                } => {
+                    vec![pkcs12_file_path.clone()]
+                }
+            })
+            .collect()
+    }
+
+    fn service_with(
+        env: Environment,
+        factory: Option<DirEnvRepoFactory>,
+    ) -> RequestExecutionService {
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        match factory {
+            Some(f) => svc.with_collection_env_repo_factory(Box::new(f)),
+            None => svc,
+        }
+    }
+
+    #[tokio::test]
+    async fn relative_certificate_paths_resolve_against_the_collection_folder() {
+        let env = relative_path_env();
+        let svc = service_with(
+            env.clone(),
+            Some(DirEnvRepoFactory {
+                env,
+                dir: std::path::PathBuf::from("/ws/collections"),
+            }),
+        );
+        let mut input = sample_input("https://a.example.com/x", Some("dev"));
+        input.collection = Some("api".into());
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+
+        assert_eq!(
+            cert_paths(&resolved.options.client_certificates),
+            [
+                "/ws/collections/api/certs/client.pem",
+                "/ws/collections/api/certs/client-key.pem",
+                // A `..` is left as written, so the executor rejects it.
+                "../outside.p12",
+                "/abs/client.p12",
+                "~/client.p12",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_certificate_paths_stay_as_written_without_a_known_collection_folder() {
+        let env = relative_path_env();
+        let svc = service_with(env, None);
+        let mut input = sample_input("https://a.example.com/x", Some("dev"));
+        input.collection = Some("api".into());
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+
+        assert_eq!(
+            cert_paths(&resolved.options.client_certificates)[0],
+            "certs/client.pem"
         );
     }
 

@@ -35,7 +35,7 @@ cargo test -p rocket-environment <test_name>
 - **`Variable` deserialization** handles a legacy `disabled: bool` field alongside the current `enabled: bool`. The rule is `enabled = enabled && !disabled`. Do not break this backward-compat logic when editing `variable.rs`.
 - **Resolver** leaves unresolved `{{placeholders}}` as-is and reports them in `ResolveResult::unresolved` — callers decide how to surface warnings. Whitespace inside `{{ var }}` is trimmed before lookup.
 - **`resolve_with_env`** is the convenience wrapper that pulls only enabled variables from an `Environment`.
-- **`client_certificates`** are consumed by the executor for mutual TLS: `rocket-app` copies them onto the request options and `rocket-infra` loads the matching one. Paths and passphrase may hold `{{placeholders}}`.
+- **`client_certificates`** are consumed by the executor for mutual TLS: `rocket-app` copies them onto the request options and `rocket-infra` loads the matching one. Paths and passphrase may hold `{{placeholders}}`. A relative path is relative to the collection folder, which is the parent of `environments/`; `..` is not allowed, and absolute and `~/` paths are used as written.
 - **`extends` and `dot_env_file_path`** on `Environment` are stored but not acted upon in this crate; inheritance and `.env` loading are handled upstream (in `rocket-app` / `rocket-infra`).
 - All new fields on `Environment` and `Variable` must use `#[serde(default, skip_serializing_if = ...)]` to maintain backward compatibility with persisted JSON files.
 

@@ -17,6 +17,13 @@ pub trait EnvironmentRepository: Send + Sync {
 /// needs to pick the right directory per call instead.
 pub trait EnvironmentRepositoryFactory: Send + Sync {
     fn for_collection(&self, collection: &str) -> Box<dyn EnvironmentRepository>;
+
+    /// The folder that holds one collection, which is the parent of its `environments/`
+    /// directory. It only joins paths and does no I/O. `None` means the factory does not know
+    /// where collections live, so relative file paths in an environment cannot be resolved.
+    fn collection_dir(&self, _collection: &str) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 #[cfg(test)]
