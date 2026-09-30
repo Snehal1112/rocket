@@ -177,10 +177,15 @@ where
         entries.sort_by_key(|e| e.file_name());
     }
 
+    // Only the collection root holds Rocket's flow files, so a nested `flows` folder stays visible.
+    let is_collection_root = current.join("opencollection.yml").exists();
     for entry in entries {
         let path = entry.path();
         let entry_name = entry.file_name().to_string_lossy().to_string();
         if entry_name.starts_with('.') || entry_name == "environments" {
+            continue;
+        }
+        if is_collection_root && entry_name == "flows" {
             continue;
         }
         if path.is_dir() {

@@ -523,6 +523,24 @@ fn environments_dir_not_shown_in_collection_tree() {
 }
 
 #[test]
+fn flows_dir_not_shown_in_collection_tree() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    // Flow files are a Rocket-only extension and are not requests.
+    fs::create_dir_all(dir.path().join("my-api/flows")).unwrap();
+    fs::write(
+        dir.path().join("my-api/flows/my-flow.yml"),
+        "name: my-flow\nnodes: []\n",
+    )
+    .unwrap();
+    let col = repo.get("my-api").unwrap();
+    assert!(
+        !col.root.subfolder_names().contains(&"flows"),
+        "flows/ should not appear in the collection tree"
+    );
+}
+
+#[test]
 fn opencollection_yml_not_counted_as_request() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();
