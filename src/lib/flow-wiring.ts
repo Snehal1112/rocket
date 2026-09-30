@@ -18,7 +18,7 @@ export function defaultExpressionFor(_sourceNode: FlowNode): string {
   return 'response.body';
 }
 
-// An If/Switch `input` and a "Run when" `trigger` carry no wired value, so
+// An If, Switch or Transform `input` and a "Run when" `trigger` carry no wired value, so
 // their edges have no expression to evaluate or edit.
 export function isDataLessTarget(targetHandle: string): boolean {
   return targetHandle === INPUT_HANDLE || targetHandle === TRIGGER_HANDLE;
