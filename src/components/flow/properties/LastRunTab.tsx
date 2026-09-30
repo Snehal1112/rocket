@@ -121,21 +121,50 @@ function HeadersTable({ headers }: { headers: FlowDebugHeader[] }) {
   );
 }
 
+function isJson(body: string): boolean {
+  try {
+    JSON.parse(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function BodyViewer({ body }: { body: string }) {
+  if (body === '') return <p className='text-muted-foreground'>No body.</p>;
   return (
     <div className='h-48 overflow-hidden rounded-md border'>
       <Suspense fallback={<div className='p-2 text-muted-foreground'>Loading…</div>}>
-        <MonacoWrapper value={formatOutputValue(body)} readOnly height='100%' language='json' />
+        <MonacoWrapper
+          value={formatOutputValue(body)}
+          readOnly
+          height='100%'
+          language={isJson(body) ? 'json' : 'plaintext'}
+        />
       </Suspense>
     </div>
   );
 }
 
-function ExchangeSections({ exchange }: { exchange: FlowDebugRequest }) {
+function ExchangeSections({
+  exchange,
+  shownError,
+}: {
+  exchange: FlowDebugRequest;
+  shownError?: string;
+}) {
   const [sentOpen, setSentOpen] = useState(false);
   const response = exchange.response;
   return (
     <div className='space-y-3'>
+      {exchange.error && exchange.error !== shownError && (
+        <div
+          data-testid='last-run-send-error'
+          className='select-text whitespace-pre-wrap break-words rounded-md border border-red-500/40 bg-red-500/5 p-2 text-red-600'
+        >
+          {exchange.error}
+        </div>
+      )}
       {response && (
         <section data-testid='last-run-response' className='space-y-1.5'>
           <div className='flex items-center justify-between'>
@@ -210,7 +239,12 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
       )}
       {status === 'skipped' && <p className='text-muted-foreground'>{skipText(detail)}</p>}
       {(node.kind.kind === 'Request' || node.kind.kind === 'WaitForCallback') &&
-        detail?.exchange && <ExchangeSections exchange={detail.exchange} />}
+        detail?.exchange && (
+          <ExchangeSections
+            exchange={detail.exchange}
+            shownError={status === 'failed' ? detail.error : undefined}
+          />
+        )}
     </div>
   );
 }

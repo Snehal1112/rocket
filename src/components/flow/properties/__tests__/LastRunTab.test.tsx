@@ -6,8 +6,14 @@ import { LastRunTab } from '../LastRunTab';
 
 // Monaco cannot run in jsdom. A read-only textarea stands in for it.
 vi.mock('@/components/editor/MonacoWrapper', () => ({
-  MonacoWrapper: (props: { value: string }) => (
-    <textarea aria-label='Body viewer' readOnly value={props.value} />
+  MonacoWrapper: (props: { value: string; readOnly?: boolean; language?: string }) => (
+    <textarea
+      aria-label='Body viewer'
+      readOnly
+      data-readonly={String(props.readOnly)}
+      data-language={props.language}
+      value={props.value}
+    />
   ),
 }));
 
@@ -116,9 +122,10 @@ describe('LastRunTab exchange', () => {
     expect(await screen.findByLabelText('Body viewer')).toHaveValue('<h1>Hi</h1>');
   });
 
-  it('notes a truncated body', () => {
+  it('notes a truncated body', async () => {
     const cut = { ...exchange, response: { ...baseResponse, truncated: true } };
     render(<LastRunTab node={request} status='success' detail={{ exchange: cut }} />);
+    expect(await screen.findByLabelText('Body viewer')).toBeInTheDocument();
     expect(screen.getByText('Truncated at 256 KB')).toBeInTheDocument();
   });
 
@@ -141,10 +148,65 @@ describe('LastRunTab exchange', () => {
     expect(screen.queryByRole('button', { name: /Request as sent/ })).not.toBeInTheDocument();
   });
 
-  it('shows the send error of an exchange without a response', () => {
+  it('shows the send error of an exchange without a response', async () => {
     const noResponse = { ...exchange, response: undefined, error: 'connection refused' };
     render(<LastRunTab node={request} status='failed' detail={{ exchange: noResponse }} />);
     expect(screen.queryByTestId('last-run-response')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Request as sent/ })).toBeInTheDocument();
+    expect(screen.getByTestId('last-run-send-error')).toHaveTextContent('connection refused');
+    await userEvent.click(screen.getByRole('button', { name: /Request as sent/ }));
+    expect(screen.getByTestId('last-run-request')).toHaveTextContent(
+      'https://api.example.com/login',
+    );
+  });
+
+  it('does not repeat a send error equal to the step error', () => {
+    const noResponse = { ...exchange, response: undefined, error: 'connection refused' };
+    render(
+      <LastRunTab
+        node={request}
+        status='failed'
+        detail={{ error: 'connection refused', exchange: noResponse }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-error')).toHaveTextContent('connection refused');
+    expect(screen.queryByTestId('last-run-send-error')).not.toBeInTheDocument();
+  });
+
+  it('shows a send error next to a response', () => {
+    const both = { ...exchange, error: 'retry failed' };
+    render(<LastRunTab node={request} status='failed' detail={{ exchange: both }} />);
+    expect(screen.getByTestId('last-run-send-error')).toHaveTextContent('retry failed');
+    expect(screen.getByTestId('last-run-response')).toBeInTheDocument();
+  });
+
+  it('opens the response body read-only with the matching language', async () => {
+    render(<LastRunTab node={request} status='success' detail={{ exchange }} />);
+    const viewer = await screen.findByLabelText('Body viewer');
+    expect(viewer).toHaveAttribute('data-readonly', 'true');
+    expect(viewer).toHaveAttribute('data-language', 'json');
+  });
+
+  it('uses plaintext for a body that is not JSON', async () => {
+    const html = { ...exchange, response: { ...baseResponse, body: '<h1>Hi</h1>' } };
+    render(<LastRunTab node={request} status='success' detail={{ exchange: html }} />);
+    expect(await screen.findByLabelText('Body viewer')).toHaveAttribute(
+      'data-language',
+      'plaintext',
+    );
+  });
+
+  it('says so when the response body is empty', () => {
+    const empty = { ...exchange, response: { ...baseResponse, body: '' } };
+    render(<LastRunTab node={request} status='success' detail={{ exchange: empty }} />);
+    expect(screen.getByText('No body.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Body viewer')).not.toBeInTheDocument();
+  });
+
+  it('copies the raw response body', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<LastRunTab node={request} status='success' detail={{ exchange }} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Copy response body' }));
+    expect(writeText).toHaveBeenCalledWith('{"token":"abc"}');
   });
 });
