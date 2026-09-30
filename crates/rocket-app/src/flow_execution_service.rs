@@ -1180,7 +1180,7 @@ impl FlowExecutionService {
                 ))))
             }
             FlowNodeKind::If { condition, .. } => {
-                let source = single_route_input(node, data_edges, captured)?;
+                let source = single_input(node, data_edges, captured)?;
                 let outcome = exec
                     .evaluate_flow_route_expression(
                         &input.collection,
@@ -1210,7 +1210,7 @@ impl FlowExecutionService {
                 })
             }
             FlowNodeKind::Switch { value, cases, .. } => {
-                let source = single_route_input(node, data_edges, captured)?;
+                let source = single_input(node, data_edges, captured)?;
                 let outcome = exec
                     .evaluate_flow_route_expression(
                         &input.collection,
@@ -1253,11 +1253,25 @@ impl FlowExecutionService {
                 )
                 .await
             }
-            // Replaced by the real execution in plan 02.
-            FlowNodeKind::Transform { .. } => Err(DomainError::Internal(format!(
-                "Transform node '{}' is not runnable yet",
-                node.id
-            ))),
+            FlowNodeKind::Transform { script, .. } => {
+                let source = single_input(node, data_edges, captured)?;
+                let outcome = exec
+                    .evaluate_flow_transform_script(
+                        &input.collection,
+                        source,
+                        script,
+                        &secret_values,
+                    )
+                    .await;
+                logs.extend(outcome.logs);
+                let text = outcome.result?;
+                // Wires get the raw text. The step shows it with secrets masked.
+                let reported = crate::redaction::redact_secrets(&text, &secret_values);
+                Ok(ExecutedNode {
+                    reported_value: Some(reported),
+                    ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(text)))
+                })
+            }
         }
     }
 }
@@ -1277,12 +1291,11 @@ fn captured_source<'c>(
     })
 }
 
-/// The captured output feeding a routing node through its single live
-/// `input` edge. `validate` (V1) and `decide_fate` guarantee exactly one;
+/// The captured output feeding a single-input node (If, Switch or Transform) through its one live input edge. `validate` (V1) and `decide_fate` guarantee exactly one;
 /// anything else is reported, never panicked on. The source may be a
 /// Request that failed with a non-2xx status (spec §6.3.1): its response
 /// was captured and is used exactly like a successful one.
-fn single_route_input<'c>(
+fn single_input<'c>(
     node: &FlowNode,
     data_edges: &[&FlowEdge],
     captured: &'c HashMap<String, CapturedOutput>,
@@ -1290,7 +1303,7 @@ fn single_route_input<'c>(
     match data_edges {
         [edge] if edge.target_field == handle::INPUT => captured_source(node, edge, captured),
         _ => Err(DomainError::Internal(format!(
-            "routing node '{}' needs exactly one live '{}' input, found {}",
+            "node '{}' needs exactly one live '{}' input, found {}",
             node.id,
             handle::INPUT,
             data_edges.len()
@@ -1370,11 +1383,13 @@ fn result_to_step(
             reported_value,
             ..
         }) => {
-            // An Input node reports its masked value, an Output node its capture.
+            // An Input or Transform node reports its masked value, an Output node its capture.
             let value = match kind {
-                Some(FlowNodeKind::Input { .. }) => reported_value
-                    .clone()
-                    .or_else(|| Some(v.data().to_string())),
+                Some(FlowNodeKind::Input { .. }) | Some(FlowNodeKind::Transform { .. }) => {
+                    reported_value
+                        .clone()
+                        .or_else(|| Some(v.data().to_string()))
+                }
                 Some(FlowNodeKind::Output { .. }) => Some(v.data().to_string()),
                 _ => None,
             };
@@ -6830,5 +6845,103 @@ mod tests {
             outcome.result,
             Err(DomainError::InvalidInput(ref m)) if m.contains("script returned no value")
         ));
+    }
+
+    fn transform_node(id: &str, script: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Transform {
+                label: id.to_string(),
+                script: script.to_string(),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    /// in("pro") -> t -> out (value).
+    fn transform_flow(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            nodes: vec![
+                input_node_with("in", "pro"),
+                transform_node("t", "return response.body.toUpperCase();"),
+                output_node_named("out"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "t"),
+                edge_from("e2", "t", handle::RESULT, "out", "value", "response.body"),
+            ],
+            callback_host: None,
+        }
+    }
+
+    /// Answers the Transform wrapper with `answer` and any wire from the body.
+    fn transform_engine(answer: Scripted) -> Box<dyn ScriptEngine> {
+        scripted(vec![
+            ("__requireValue(", answer),
+            (
+                "response.body",
+                Scripted::FromResponse(|r| {
+                    serde_json::json!(r.map(|r| r.body.clone()).unwrap_or_default())
+                }),
+            ),
+        ])
+    }
+
+    async fn run_transform(name: &str, answer: Scripted) -> FlowRunSummary {
+        let service = service_with_flow(transform_flow(name));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, transform_engine(answer));
+        service.run(&exec, run_input(name)).await.expect("run")
+    }
+
+    #[tokio::test]
+    async fn transform_reshapes_its_input_for_a_downstream_output() {
+        let summary = run_transform("tf-ok", Scripted::Value(serde_json::json!("PRO"))).await;
+
+        assert_eq!(status_of(&summary, "t"), FlowNodeStatus::Success);
+        assert_eq!(step_of(&summary, "t").value.as_deref(), Some("PRO"));
+        assert_eq!(step_of(&summary, "out").value.as_deref(), Some("PRO"));
+    }
+
+    #[tokio::test]
+    async fn transform_reports_an_object_result_as_compact_json() {
+        let summary = run_transform(
+            "tf-obj",
+            Scripted::Value(serde_json::json!({"plan": "pro"})),
+        )
+        .await;
+
+        assert_eq!(
+            step_of(&summary, "t").value.as_deref(),
+            Some(r#"{"plan":"pro"}"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_throwing_transform_fails_and_skips_its_dependents() {
+        let summary = run_transform("tf-throw", Scripted::Throw("ReferenceError: nope")).await;
+
+        assert_eq!(status_of(&summary, "t"), FlowNodeStatus::Failed);
+        assert!(step_of(&summary, "t")
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("ReferenceError")));
+        assert_eq!(status_of(&summary, "out"), FlowNodeStatus::Skipped);
+        assert_eq!(
+            step_of(&summary, "out").skip_reason,
+            Some(FlowSkipReason::UpstreamFailed)
+        );
+    }
+
+    #[tokio::test]
+    async fn transform_that_returns_nothing_fails_with_a_clear_error() {
+        let summary = run_transform("tf-none", Scripted::Throw("script returned no value")).await;
+
+        assert_eq!(status_of(&summary, "t"), FlowNodeStatus::Failed);
+        assert!(step_of(&summary, "t")
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("script returned no value")));
     }
 }
