@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { FlowEdge, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
+import { PanelFocusProvider } from '../panelFocus';
 import { WiresTab } from '../WiresTab';
 
 const n = (id: string, kind: FlowNodeKind): FlowNode => ({ id, kind, position: { x: 0, y: 0 } });
@@ -102,11 +103,24 @@ describe('WiresTab', () => {
     expect(screen.getByText('(no script)')).toBeInTheDocument();
   });
 
-  it('a node link selects the node without opening the wire', async () => {
-    const { onEditWire, onSelectNode } = renderTab(out);
+  it('a node link selects the node, then refocuses the panel', async () => {
+    const order: string[] = [];
+    const onSelectNode = vi.fn(() => order.push('select'));
+    const refocus = vi.fn(() => order.push('refocus'));
+    render(
+      <PanelFocusProvider value={refocus}>
+        <WiresTab
+          node={out}
+          nodes={nodes}
+          edges={edges}
+          onEditWire={vi.fn()}
+          onSelectNode={onSelectNode}
+        />
+      </PanelFocusProvider>,
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Select node Ok?' }));
     expect(onSelectNode).toHaveBeenCalledWith('check');
-    expect(onEditWire).not.toHaveBeenCalled();
+    expect(order).toEqual(['select', 'refocus']);
   });
 
   it('fades wires the last run did not take', () => {

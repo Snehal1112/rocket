@@ -179,52 +179,53 @@ export function NodePropertiesPanel({
           </Button>
         </div>
       </div>
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => onTabChange(value as PanelTab)}
-        className='flex min-h-0 flex-1 flex-col'
-      >
-        <TabsList className='mx-3 mt-2 self-start'>
-          <TabsTrigger value='settings' className='text-xs'>
-            Settings
-          </TabsTrigger>
-          <TabsTrigger value='last-run' className='text-xs'>
-            Last run
-          </TabsTrigger>
-          <TabsTrigger value='wires' className='text-xs'>
-            Wires
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value='settings' className='min-h-0 flex-1 overflow-y-auto p-3'>
-          <div key={node.id} className='space-y-3'>
-            {saveError && (
-              <p
-                data-testid='node-save-error'
-                className='break-words rounded border border-red-500/50 bg-red-500/10 p-2 text-xs text-red-600'
-              >
-                {saveError}
-              </p>
-            )}
-            <PanelFocusProvider value={refocusPanel}>
+      {/* Every tab can remove a focused control, so each one gets the refocus helper. */}
+      <PanelFocusProvider value={refocusPanel}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => onTabChange(value as PanelTab)}
+          className='flex min-h-0 flex-1 flex-col'
+        >
+          <TabsList className='mx-3 mt-2 self-start'>
+            <TabsTrigger value='settings' className='text-xs'>
+              Settings
+            </TabsTrigger>
+            <TabsTrigger value='last-run' className='text-xs'>
+              Last run
+            </TabsTrigger>
+            <TabsTrigger value='wires' className='text-xs'>
+              Wires
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value='settings' className='min-h-0 flex-1 overflow-y-auto p-3'>
+            <div key={node.id} className='space-y-3'>
+              {saveError && (
+                <p
+                  data-testid='node-save-error'
+                  className='break-words rounded border border-red-500/50 bg-red-500/10 p-2 text-xs text-red-600'
+                >
+                  {saveError}
+                </p>
+              )}
               {editorFor(node, edges, nodes, collection, onChange)}
-            </PanelFocusProvider>
-          </div>
-        </TabsContent>
-        <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
-          <LastRunTab node={node} status={status} detail={detail} />
-        </TabsContent>
-        <TabsContent value='wires' className='min-h-0 flex-1 overflow-y-auto p-3'>
-          <WiresTab
-            node={node}
-            nodes={nodes}
-            edges={edges}
-            nodeStatus={nodeStatus}
-            nodeDetail={nodeDetail}
-            onEditWire={onEditWire}
-            onSelectNode={onSelectNode}
-          />
-        </TabsContent>
-      </Tabs>
+            </div>
+          </TabsContent>
+          <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
+            <LastRunTab node={node} status={status} detail={detail} />
+          </TabsContent>
+          <TabsContent value='wires' className='min-h-0 flex-1 overflow-y-auto p-3'>
+            <WiresTab
+              node={node}
+              nodes={nodes}
+              edges={edges}
+              nodeStatus={nodeStatus}
+              nodeDetail={nodeDetail}
+              onEditWire={onEditWire}
+              onSelectNode={onSelectNode}
+            />
+          </TabsContent>
+        </Tabs>
+      </PanelFocusProvider>
     </aside>
   );
 }

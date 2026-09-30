@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { usePanelRefocus } from './panelFocus';
 import { incomingRows, outgoingGroups, type WireRow } from './wireRows';
 
 interface WiresTabProps {
@@ -17,6 +18,7 @@ interface WiresTabProps {
 }
 
 function NodeLink({ row, onSelectNode }: { row: WireRow; onSelectNode: (id: string) => void }) {
+  const refocusPanel = usePanelRefocus();
   if (row.otherLabel === null) {
     return <span className='italic text-muted-foreground'>(missing node)</span>;
   }
@@ -27,10 +29,11 @@ function NodeLink({ row, onSelectNode }: { row: WireRow; onSelectNode: (id: stri
       className='h-auto min-w-0 max-w-full truncate p-0 text-xs'
       title={row.otherLabel}
       aria-label={`Select node ${row.otherLabel}`}
-      // The row itself may open the wire, so the link must not bubble up.
-      onClick={(e) => {
-        e.stopPropagation();
+      // Selecting another node re-renders the tab and drops this button, so
+      // focus goes back to the panel instead of the body.
+      onClick={() => {
         onSelectNode(row.otherNodeId);
+        refocusPanel();
       }}
     >
       {row.otherLabel}

@@ -336,6 +336,54 @@ describe('FlowPane node properties panel', () => {
     expect(screen.getByTestId('wires-outgoing')).toBeInTheDocument();
   });
 
+  it('keeps the newly selected node on Backspace after a Wires node link', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    await userEvent.click(screen.getByRole('tab', { name: 'Wires' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Select node User' }));
+    expect(document.activeElement).toBe(screen.getByTestId('node-properties-panel'));
+    await userEvent.keyboard('{Backspace}');
+    expect(getFlowTab().nodes.map((n) => n.id)).toContain('in1');
+  });
+
+  it.each([
+    ['the Copy button', 'Copy response body'],
+    ['the Request as sent trigger', /Request as sent/],
+  ])('keeps the node on Backspace with focus on %s in Last run', async (_, name) => {
+    usePaneStore.getState().reset();
+    usePaneStore.getState().openTab({
+      ...baseTab,
+      nodeStatus: { req1: 'success' },
+      nodeDetail: {
+        req1: {
+          statusCode: 200,
+          exchange: {
+            method: 'GET',
+            url: 'https://x.test',
+            headers: [],
+            response: {
+              status: 200,
+              statusText: 'OK',
+              durationMs: 1,
+              sizeBytes: 2,
+              headers: [],
+              body: '{}',
+            },
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByLabelText('Edit Fetch'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit properties' }));
+    await user.click(screen.getByRole('tab', { name: 'Last run' }));
+    const button = screen.getByRole('button', { name });
+    act(() => button.focus());
+    await user.keyboard('{Backspace}');
+    expect(getFlowTab().nodes.map((n) => n.id)).toContain('req1');
+  });
+
   it('opens the wire script dialog from the Wires tab pencil', async () => {
     render(<Harness />);
     await userEvent.click(screen.getByLabelText('Edit Result'));
