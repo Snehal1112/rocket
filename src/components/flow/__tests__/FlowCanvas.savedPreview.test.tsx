@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FlowNode } from '@/lib/tauri-api';
 
@@ -9,7 +9,10 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   onCollectionChanged: vi.fn(() => Promise.resolve(() => undefined)),
 }));
 
-import { clearSavedRequestPreviewCache } from '@/lib/saved-request-preview';
+import {
+  clearSavedRequestPreviewCache,
+  peekSavedRequestPreview,
+} from '@/lib/saved-request-preview';
 import { FlowCanvas } from '../FlowCanvas';
 
 const saved = (id: string): FlowNode => ({
@@ -78,7 +81,28 @@ describe('saved Request cards', () => {
   it('keeps the SAVED fallback when the request cannot be loaded', async () => {
     getRequest.mockRejectedValue('file not found');
     renderCanvas([saved('n1')]);
-    await vi.waitFor(() => expect(getRequest).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(peekSavedRequestPreview('demo', 'auth/login.yml')?.status).toBe('error'),
+    );
     expect(screen.getByText('SAVED')).toBeInTheDocument();
+    expect(screen.getByTestId('request-node-headers-row')).toHaveTextContent('0 set');
+    expect(screen.getByTestId('request-node-card')).toHaveTextContent('—');
+  });
+
+  it('reloads the card data after the collection cache is cleared', async () => {
+    getRequest.mockResolvedValue({
+      uid: 'u',
+      name: 'Login',
+      method: 'PATCH',
+      url: 'https://x.test',
+      headers: [{ key: 'A', value: '1', enabled: true }],
+      auth: { authType: 'none' },
+    });
+    renderCanvas([saved('n1')]);
+    expect(await screen.findByText('PATCH')).toBeInTheDocument();
+    act(() => clearSavedRequestPreviewCache('demo'));
+    await vi.waitFor(() => expect(getRequest).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('PATCH')).toBeInTheDocument();
+    expect(screen.getByTestId('request-node-headers-row')).toHaveTextContent('1 set');
   });
 });

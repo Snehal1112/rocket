@@ -99,4 +99,24 @@ describe('the preview cache', () => {
     expect(peekSavedRequestPreview('demo', 'a.yml')).toBeUndefined();
     expect(peekSavedRequestPreview('other', 'a.yml')?.status).toBe('ready');
   });
+
+  it('ignores a load that finishes after the cache was cleared', async () => {
+    let resolveFirst: (r: Request) => void = () => undefined;
+    getRequest.mockImplementationOnce(
+      () =>
+        new Promise<Request>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    getRequest.mockResolvedValueOnce(request({ method: 'PUT' }));
+    loadSavedRequestPreview('demo', 'a.yml');
+    await vi.waitFor(() => expect(getRequest).toHaveBeenCalledTimes(1));
+    clearSavedRequestPreviewCache('demo');
+    loadSavedRequestPreview('demo', 'a.yml');
+    await vi.waitFor(() => expect(peekSavedRequestPreview('demo', 'a.yml')?.status).toBe('ready'));
+    resolveFirst(request({ method: 'GET' }));
+    await new Promise((r) => setTimeout(r, 0));
+    const entry = peekSavedRequestPreview('demo', 'a.yml');
+    expect(entry?.status === 'ready' && entry.preview.method).toBe('PUT');
+  });
 });

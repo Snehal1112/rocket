@@ -42,8 +42,9 @@ export function SavedRequestDetails({
         {headers.length === 0 ? (
           <p className='text-muted-foreground'>None</p>
         ) : (
-          headers.map((h) => (
-            <p key={h.key} className='truncate font-mono' title={`${h.key}: ${h.value}`}>
+          headers.map((h, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: headers may share names, so the index keeps keys unique.
+            <p key={`${i}-${h.key}`} className='truncate font-mono' title={`${h.key}: ${h.value}`}>
               {h.key}: {h.value}
             </p>
           ))

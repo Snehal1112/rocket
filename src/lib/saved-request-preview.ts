@@ -79,18 +79,25 @@ export function loadSavedRequestPreview(collection: string, path: string): void 
   watchCollectionChanges();
   const key = keyOf(collection, path);
   if (cache.has(key)) return;
-  cache.set(key, { status: 'loading' });
+  // A clear during the load replaces or drops this placeholder. The result is
+  // then stale, so it is only written while the placeholder is still there.
+  const pending: PreviewEntry = { status: 'loading' };
+  cache.set(key, pending);
   notify();
+  const settle = (entry: PreviewEntry) => {
+    if (cache.get(key) !== pending) return;
+    cache.set(key, entry);
+    notify();
+  };
   Promise.resolve()
     .then(() => getRequest(collection, path))
     .then((request) => {
       if (!request) throw new Error('request not found');
-      cache.set(key, { status: 'ready', preview: toSavedRequestPreview(request) });
+      settle({ status: 'ready', preview: toSavedRequestPreview(request) });
     })
     .catch((err) => {
-      cache.set(key, { status: 'error', error: err instanceof Error ? err.message : String(err) });
-    })
-    .finally(notify);
+      settle({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+    });
 }
 
 export function clearSavedRequestPreviewCache(collection?: string): void {
