@@ -58,7 +58,7 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **OAuth2 client credentials.** `ReqwestExecutor` fetches tokens synchronously as part of `execute()`. Other OAuth2 flows (authorization code, implicit) are not implemented and are silently skipped.
 
-**WSSE, Digest, NTLM.** WSSE is signed in `apply_auth` (`rocket-http` `wsse_sig`: `Authorization: WSSE profile="UsernameToken"` plus `X-WSSE`). Digest and NTLM are not implemented yet, so `apply_auth` returns an `InvalidInput` error instead of sending the request unauthenticated.
+**WSSE, Digest, NTLM.** WSSE is signed in `apply_auth` (`rocket-http` `wsse_sig`: `Authorization: WSSE profile="UsernameToken"` plus `X-WSSE`). Digest is challenge-response: `execute` sends the request unauthenticated, and on a 401 with a Digest `WWW-Authenticate` challenge rebuilds the request and retries with the header from `rocket-http` `digest_sig` (one retry, plus one more for `stale=true`; a plain 401 after that is returned as-is). NTLM is not implemented yet, so `apply_auth` returns an `InvalidInput` error instead of sending the request unauthenticated.
 
 **OAuth1.** `ReqwestExecutor::execute` signs the built request via `apply_oauth1` (after the body is applied, since form bodies are part of the signature). Placement is `header` (default), `query` or `body`. RSA-* signature methods fail the request with an error.
 

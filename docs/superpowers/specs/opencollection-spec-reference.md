@@ -345,6 +345,8 @@ auth:
   password: string
 ```
 
+Rocket answers Digest challenges in the HTTP executor (`rocket-http` `digest_sig`). The first request goes out unauthenticated and a 401 with a `Digest` challenge is retried once, plus once more for `stale=true`.
+
 ### 3.6 NTLM
 ```yaml
 auth:

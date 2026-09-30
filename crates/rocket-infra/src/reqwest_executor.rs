@@ -253,30 +253,40 @@ impl HttpExecutor for ReqwestExecutor {
             }
         }
 
-        let mut builder = client.request(method, url);
-
-        // Add enabled headers.
-        for header in request.headers.iter().filter(|h| h.enabled) {
-            builder = builder.header(&header.key, &header.value);
-        }
         let has_explicit_content_type = request
             .headers
             .iter()
             .any(|h| h.enabled && h.key.eq_ignore_ascii_case("content-type"));
 
+        // Digest sends the request twice, because the second send answers the server's
+        // challenge. So the request is built from two reusable steps, with the async auth
+        // step in between for the first send only.
+        let start_builder = |url: reqwest::Url| {
+            let mut builder = client.request(method.clone(), url);
+            // Add enabled headers.
+            for header in request.headers.iter().filter(|h| h.enabled) {
+                builder = builder.header(&header.key, &header.value);
+            }
+            builder
+        };
+        let finish_builder =
+            |builder: reqwest::RequestBuilder| -> DomainResult<reqwest::RequestBuilder> {
+                // Apply request body.
+                let mut builder =
+                    self.apply_body(builder, &request.body, has_explicit_content_type)?;
+                // Per-request timeout: 0 means no timeout (unlimited).
+                if request.options.timeout_ms > 0 {
+                    builder = builder.timeout(Duration::from_millis(request.options.timeout_ms));
+                }
+                Ok(builder)
+            };
+
         // Apply authentication.
-        builder = apply_auth(builder, &request.auth, &request.method).await?;
-
-        // Apply request body.
-        builder = self.apply_body(builder, &request.body, has_explicit_content_type)?;
-
-        // Per-request timeout: 0 means no timeout (unlimited).
-        if request.options.timeout_ms > 0 {
-            builder = builder.timeout(Duration::from_millis(request.options.timeout_ms));
-        }
+        let builder = apply_auth(start_builder(url), &request.auth, &request.method).await?;
+        let builder = finish_builder(builder)?;
 
         // OAuth1 signs the final request, so it has to wait until the body is applied.
-        let response = if let Auth::OAuth1(oauth) = &request.auth {
+        let mut response = if let Auth::OAuth1(oauth) = &request.auth {
             let mut built = builder.build().map_err(|e| {
                 DomainError::Internal(format!("Cannot build request for signing: {e}"))
             })?;
@@ -286,6 +296,79 @@ impl HttpExecutor for ReqwestExecutor {
             builder.send().await
         }
         .map_err(|e| DomainError::Http(e.to_string()))?;
+
+        // Digest is challenge-response: the first request goes out unauthenticated, and a 401
+        // with a Digest challenge is answered by a second request. A stale nonce gets one more
+        // try. A plain 401 after that means bad credentials, so it is returned as-is.
+        if let Auth::Digest { username, password } = &request.auth {
+            let mut attempts = 0;
+            while response.status() == reqwest::StatusCode::UNAUTHORIZED && attempts < 2 {
+                let values: Vec<String> = response
+                    .headers()
+                    .get_all(reqwest::header::WWW_AUTHENTICATE)
+                    .iter()
+                    .filter_map(|v| v.to_str().ok().map(str::to_string))
+                    .collect();
+                let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+                let Some(challenge) = rocket_http::digest_sig::select_challenge(&refs) else {
+                    break;
+                };
+                if attempts > 0 && !challenge.stale {
+                    break;
+                }
+
+                // Answer against the URL that issued the challenge, which differs from the
+                // request URL when a redirect was followed on the way.
+                let mut retry = finish_builder(start_builder(response.url().clone()))?
+                    .build()
+                    .map_err(|e| {
+                        DomainError::Internal(format!("Cannot build request for Digest retry: {e}"))
+                    })?;
+                let uri = match retry.url().query() {
+                    Some(q) => format!("{}?{q}", retry.url().path()),
+                    None => retry.url().path().to_string(),
+                };
+                let body: Vec<u8> = match retry.body().map(|b| b.as_bytes()) {
+                    None => Vec::new(),
+                    Some(Some(bytes)) => bytes.to_vec(),
+                    // A streamed (multipart) body can only be hashed for auth-int.
+                    Some(None)
+                        if challenge.qop.iter().any(|q| q == "auth")
+                            || challenge.qop.is_empty() =>
+                    {
+                        Vec::new()
+                    }
+                    Some(None) => {
+                        return Err(DomainError::InvalidInput(
+                            "Digest auth-int cannot hash a multipart request body".into(),
+                        ))
+                    }
+                };
+                let header = rocket_http::digest_sig::authorize(
+                    &challenge,
+                    username,
+                    password,
+                    retry.method().as_str(),
+                    &uri,
+                    &body,
+                    1,
+                    &rocket_http::digest_sig::generate_cnonce(),
+                )
+                .map_err(|e| DomainError::InvalidInput(format!("Digest auth failed: {e}")))?;
+                let value = reqwest::header::HeaderValue::from_str(&header).map_err(|e| {
+                    DomainError::InvalidInput(format!("Invalid Digest header value: {e}"))
+                })?;
+                retry
+                    .headers_mut()
+                    .insert(reqwest::header::AUTHORIZATION, value);
+
+                response = client
+                    .execute(retry)
+                    .await
+                    .map_err(|e| DomainError::Http(e.to_string()))?;
+                attempts += 1;
+            }
+        }
 
         // TTFB: time from request sent to headers received (first byte of response).
         let ttfb_ms = start.elapsed().as_millis() as u64;
@@ -420,12 +503,10 @@ async fn apply_auth(
                 .header("Authorization", headers.authorization)
                 .header("X-WSSE", headers.x_wsse);
         }
-        // Fail loudly rather than send the request unauthenticated.
         Auth::Digest { .. } => {
-            return Err(DomainError::InvalidInput(
-                "Digest authentication is not supported yet".into(),
-            ));
+            // Answered in `execute` once the server's challenge is known.
         }
+        // Fail loudly rather than send the request unauthenticated.
         Auth::Ntlm { .. } => {
             return Err(DomainError::InvalidInput(
                 "NTLM authentication is not supported yet".into(),
@@ -1124,31 +1205,174 @@ mod wsse_and_unsupported_auth_tests {
     }
 
     #[tokio::test]
-    async fn digest_and_ntlm_fail_instead_of_sending_unauthenticated() {
+    async fn ntlm_fails_instead_of_sending_unauthenticated() {
         let server = server().await;
-        let exec = ReqwestExecutor::new();
-        for (auth, name) in [
-            (
-                Auth::Digest {
-                    username: "u".into(),
-                    password: "p".into(),
-                },
-                "Digest",
-            ),
-            (
-                Auth::Ntlm {
-                    username: "u".into(),
-                    password: "p".into(),
-                    domain: "d".into(),
-                },
-                "NTLM",
-            ),
-        ] {
-            let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
-            req.auth = auth;
-            let err = exec.execute(&req).await.unwrap_err();
-            assert!(err.to_string().contains(name), "{err}");
-        }
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.auth = Auth::Ntlm {
+            username: "u".into(),
+            password: "p".into(),
+            domain: "d".into(),
+        };
+        let err = ReqwestExecutor::new().execute(&req).await.unwrap_err();
+        assert!(err.to_string().contains("NTLM"), "{err}");
         assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod digest_tests {
+    use super::*;
+    use rocket_shared::types::HttpMethod;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn digest_auth() -> Auth {
+        Auth::Digest {
+            username: "Mufasa".into(),
+            password: "Circle Of Life".into(),
+        }
+    }
+
+    fn challenge(nonce: &str, extra: &str) -> ResponseTemplate {
+        ResponseTemplate::new(401).insert_header(
+            "WWW-Authenticate",
+            format!("Digest realm=\"testrealm@host.com\", qop=\"auth\", nonce=\"{nonce}\"{extra}")
+                .as_str(),
+        )
+    }
+
+    /// Answers with `respond(n, had_authorization)` where `n` counts requests from 0.
+    async fn server(
+        respond: impl Fn(usize, bool) -> ResponseTemplate + Send + Sync + 'static,
+    ) -> MockServer {
+        let server = MockServer::start().await;
+        let count = Arc::new(AtomicUsize::new(0));
+        Mock::given(wiremock::matchers::any())
+            .respond_with(move |req: &wiremock::Request| {
+                let n = count.fetch_add(1, Ordering::SeqCst);
+                respond(n, req.headers.contains_key("authorization"))
+            })
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn auth_header(seen: &wiremock::Request) -> String {
+        seen.headers
+            .get("authorization")
+            .expect("authorization header")
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn answers_a_401_challenge_and_returns_the_final_response() {
+        let server = server(|_, has_auth| {
+            if has_auth {
+                ResponseTemplate::new(200).set_body_string("secret")
+            } else {
+                challenge("n1", "")
+            }
+        })
+        .await;
+        let mut req = HttpRequest::new(
+            HttpMethod::Get,
+            format!("{}/dir/index.html?a=1", server.uri()),
+        );
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.body, "secret");
+        let seen = server.received_requests().await.unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(!seen[0].headers.contains_key("authorization"));
+        let header = auth_header(&seen[1]);
+        assert!(header.starts_with("Digest username=\"Mufasa\""), "{header}");
+        assert!(header.contains("uri=\"/dir/index.html?a=1\""), "{header}");
+        assert!(header.contains("nonce=\"n1\""), "{header}");
+        assert!(header.contains("nc=00000001"), "{header}");
+    }
+
+    #[tokio::test]
+    async fn wrong_credentials_are_retried_once_then_returned_as_401() {
+        let server = server(|_, _| challenge("n1", "")).await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 401);
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_stale_nonce_gets_one_more_retry_with_the_new_nonce() {
+        let server = server(|n, _| match n {
+            0 => challenge("old", ""),
+            1 => challenge("fresh", ", stale=true"),
+            _ => ResponseTemplate::new(200),
+        })
+        .await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 200);
+        let seen = server.received_requests().await.unwrap();
+        assert_eq!(seen.len(), 3);
+        assert!(auth_header(&seen[1]).contains("nonce=\"old\""));
+        assert!(auth_header(&seen[2]).contains("nonce=\"fresh\""));
+    }
+
+    #[tokio::test]
+    async fn a_401_without_a_digest_challenge_is_returned_without_a_retry() {
+        let server = server(|_, _| ResponseTemplate::new(401)).await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 401);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_non_401_first_response_is_returned_unchanged() {
+        let server = server(|_, _| ResponseTemplate::new(200)).await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 200);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_request_body_is_sent_again_on_the_retry() {
+        let server = server(|_, has_auth| {
+            if has_auth {
+                ResponseTemplate::new(200)
+            } else {
+                challenge("n1", "")
+            }
+        })
+        .await;
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/r", server.uri()));
+        req.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some("{\"a\":1}".into()),
+            form_data: None,
+            file_path: None,
+        });
+        req.auth = digest_auth();
+        ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        let seen = server.received_requests().await.unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].body, b"{\"a\":1}");
+        assert_eq!(seen[1].body, b"{\"a\":1}");
+        assert_eq!(seen[1].method.as_str(), "POST");
     }
 }

@@ -1,5 +1,6 @@
 pub mod aws_sig;
 pub mod cookie;
+pub mod digest_sig;
 pub mod cookie_repository;
 pub mod executor;
 pub mod jwt;
