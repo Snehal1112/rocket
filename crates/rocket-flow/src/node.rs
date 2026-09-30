@@ -12,6 +12,7 @@ pub struct NodePosition {
 /// incoming wires; `Output` nodes display whatever their single incoming
 /// wire resolves to. `If` and `Switch` nodes route execution to one of their
 /// named exits. `WaitForCallback` nodes wait for an inbound call on a local URL.
+/// `Transform` nodes reshape their one input with a script.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FlowNodeKind {
