@@ -32,6 +32,9 @@ pub(crate) struct ExecutedNode {
     pub(crate) chosen_exit: String,
     /// Set by a repeat-until poll that met its condition.
     pub(crate) poll: Option<crate::flow_poll::PollStats>,
+    /// The value the step reports, masked, when it differs from the raw
+    /// captured value. Set by an Input node.
+    pub(crate) reported_value: Option<String>,
 }
 
 impl ExecutedNode {
@@ -40,6 +43,7 @@ impl ExecutedNode {
             output,
             chosen_exit: handle::RESULT.to_string(),
             poll: None,
+            reported_value: None,
         }
     }
 }
@@ -1034,9 +1038,12 @@ impl FlowExecutionService {
                     external_secrets,
                 );
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
-                Ok(ExecutedNode::plain(CapturedOutput::Value(
-                    VariableValue::simple(resolved),
-                )))
+                // Wires get the raw value. The step shows it with secrets masked.
+                let reported = crate::redaction::redact_secrets(&resolved, &secret_values);
+                Ok(ExecutedNode {
+                    reported_value: Some(reported),
+                    ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(resolved)))
+                })
             }
             FlowNodeKind::Output { .. } => {
                 let Some(edge) = data_edges.first() else {
@@ -1171,6 +1178,7 @@ impl FlowExecutionService {
                     output: source.clone(),
                     chosen_exit: chosen_exit.to_string(),
                     poll: None,
+                    reported_value: None,
                 })
             }
             FlowNodeKind::Switch { value, cases, .. } => {
@@ -1195,6 +1203,7 @@ impl FlowExecutionService {
                     output: source.clone(),
                     chosen_exit,
                     poll: None,
+                    reported_value: None,
                 })
             }
             FlowNodeKind::WaitForCallback {
@@ -1325,16 +1334,18 @@ fn result_to_step(
         }
         Ok(ExecutedNode {
             output: CapturedOutput::Value(v),
+            reported_value,
             ..
         }) => {
-            let reports_value = matches!(
-                kind,
-                Some(FlowNodeKind::Output { .. }) | Some(FlowNodeKind::Input { .. })
-            );
-            FlowStepResult {
-                value: reports_value.then(|| v.data().to_string()),
-                ..base
-            }
+            // An Input node reports its masked value, an Output node its capture.
+            let value = match kind {
+                Some(FlowNodeKind::Input { .. }) => reported_value
+                    .clone()
+                    .or_else(|| Some(v.data().to_string())),
+                Some(FlowNodeKind::Output { .. }) => Some(v.data().to_string()),
+                _ => None,
+            };
+            FlowStepResult { value, ..base }
         }
         Err(e) => failed_step(node_id, e.to_string()),
     }
@@ -3660,6 +3671,7 @@ mod tests {
                 attempts: 7,
                 elapsed_ms: 14_200,
             }),
+            reported_value: None,
         };
 
         let step = result_to_step("job", Some(&node), &Ok(executed));
@@ -5549,7 +5561,145 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn routing_and_output_steps_have_no_exchange() {
+    async fn an_if_step_has_no_exchange() {
+        let flow = Flow {
+            name: "if-env".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{ENV_VAR}}"),
+                if_node("check", "response.body === 'acme'"),
+                output_node_named("yes"),
+                output_node_named("no"),
+            ],
+            edges: vec![
+                input_edge("e1", "in", "check"),
+                trigger_edge("e2", "check", handle::TRUE, "yes"),
+                trigger_edge("e3", "check", handle::FALSE, "no"),
+            ],
+            callback_host: None,
+        };
+        let exec = scoped_exec(env_with(&[("ENV_VAR", "acme")]), Vec::new());
+        let mut input = run_input("if-env");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        let check = step_of(&summary, "check");
+        assert_eq!(check.branch.as_deref(), Some(handle::TRUE));
+        assert!(check.exchange.is_none(), "an If step has no exchange");
+    }
+
+    #[tokio::test]
+    async fn a_given_up_poll_reports_the_last_attempts_exchange() {
+        let executor = SequenceExecutor::new(vec![
+            (404, r#"{"n":1}"#),
+            (404, r#"{"n":2}"#),
+            (404, r#"{"n":3}"#),
+        ]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 3, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        let response = step
+            .exchange
+            .clone()
+            .and_then(|e| e.response)
+            .expect("exchange response");
+        assert_eq!(response.status, 404);
+        assert_eq!(response.body, r#"{"n":3}"#);
+    }
+
+    #[tokio::test]
+    async fn debug_mode_keeps_a_full_debug_record_and_a_capped_exchange() {
+        let limit = crate::flow_debug::EXCHANGE_BODY_LIMIT;
+        let body: &'static str = Box::leak("a".repeat(limit + 10).into_boxed_str());
+        let executor = SequenceExecutor::new(vec![(200, body)]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 3, 10_000), true);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        let debug = step
+            .debug_request
+            .clone()
+            .and_then(|d| d.response)
+            .expect("debug response");
+        assert_eq!(debug.body.len(), limit + 10, "debug_request is not capped");
+        assert!(!debug.truncated);
+        let exchange = step
+            .exchange
+            .clone()
+            .and_then(|e| e.response)
+            .expect("exchange response");
+        assert_eq!(exchange.body.len(), limit);
+        assert!(exchange.truncated);
+    }
+
+    #[tokio::test]
+    async fn an_input_reports_a_secret_masked_but_passes_it_on_raw() {
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        let exec = scoped_exec(env, Vec::new());
+        let flow = Flow {
+            name: "scope".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{apiKey}}"),
+                output_node_named("out"),
+            ],
+            edges: vec![FlowEdge {
+                target_field: "value".to_string(),
+                ..wire("e1", "in", "out")
+            }],
+            callback_host: None,
+        };
+        let publisher = RecordingPublisher::new();
+        let mut input = run_input("scope");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_publisher(flow, &publisher)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        assert_eq!(
+            step_of(&summary, "in").value.as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        let event_value = publisher.events().iter().find_map(|e| match e {
+            DomainEvent::FlowStepCompleted { node_id, value, .. } if node_id == "in" => {
+                Some(value.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(
+            event_value.flatten().as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        assert_eq!(
+            step_of(&summary, "out").value.as_deref(),
+            Some("sk-live-123456"),
+            "the downstream wire still gets the real value"
+        );
+    }
+
+    #[tokio::test]
+    async fn input_and_output_steps_have_no_exchange() {
         let service = service_with_flow(linear_flow());
         let exec = service_with_engine(
             FakeCollectionRepo::new(),

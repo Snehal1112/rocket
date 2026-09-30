@@ -163,6 +163,7 @@ impl FlowExecutionService {
                             attempts: attempt,
                             elapsed_ms: millis(elapsed),
                         }),
+                        reported_value: None,
                     })
                 }
                 Ok(false) if gives_up => {
