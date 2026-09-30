@@ -528,6 +528,30 @@ mod tests {
     }
 
     #[test]
+    fn transform_node_roundtrips_a_multiline_script() {
+        let (_dir, repo) = setup();
+        let mut flow = sample("Transform Flow");
+        flow.nodes.push(FlowNode {
+            id: "t1".to_string(),
+            kind: FlowNodeKind::Transform {
+                label: "Pick token".to_string(),
+                script: "const t = response.body.token;\n\n\treturn \"a\" + 'b' + t;".to_string(),
+            },
+            position: NodePosition { x: 200.0, y: 0.0 },
+        });
+        flow.edges.push(FlowEdge {
+            id: "e1".to_string(),
+            source_node_id: "node-1".to_string(),
+            target_node_id: "t1".to_string(),
+            target_field: rocket_flow::handle::INPUT.to_string(),
+            expression: String::new(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
+        });
+        repo.save("acme", &flow).expect("save");
+        assert_eq!(repo.get("acme", "Transform Flow").expect("get"), flow);
+    }
+
+    #[test]
     fn if_and_switch_nodes_with_routed_edges_roundtrip() {
         let (_dir, repo) = setup();
         let mut flow = sample("Routing Flow");

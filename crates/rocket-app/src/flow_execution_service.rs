@@ -1225,6 +1225,11 @@ impl FlowExecutionService {
                 )
                 .await
             }
+            // Replaced by the real execution in plan 02.
+            FlowNodeKind::Transform { .. } => Err(DomainError::Internal(format!(
+                "Transform node '{}' is not runnable yet",
+                node.id
+            ))),
         }
     }
 }

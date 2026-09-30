@@ -170,6 +170,10 @@ pub enum FlowNodeKindDto {
         #[serde(default)]
         accept_when: Option<String>,
     },
+    Transform {
+        label: String,
+        script: String,
+    },
 }
 impl From<FlowNodeKind> for FlowNodeKindDto {
     fn from(k: FlowNodeKind) -> Self {
@@ -208,6 +212,9 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
                 timeout_ms,
                 accept_when,
             },
+            FlowNodeKind::Transform { label, script } => {
+                FlowNodeKindDto::Transform { label, script }
+            }
         }
     }
 }
@@ -248,6 +255,9 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
                 timeout_ms,
                 accept_when,
             },
+            FlowNodeKindDto::Transform { label, script } => {
+                FlowNodeKind::Transform { label, script }
+            }
         }
     }
 }
@@ -729,6 +739,38 @@ mod tests {
             FlowNodeKind::Switch { cases, .. } => assert_eq!(cases[0].matches, "pro"),
             other => panic!("expected a Switch node, got {other:?}"),
         }
+        let back: FlowDto = domain.into();
+        let a = serde_json::to_value(&dto).expect("to_value dto");
+        let b = serde_json::to_value(&back).expect("to_value back");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn transform_node_dto_keeps_tag_and_roundtrips() {
+        let dto = FlowDto {
+            name: "Transform".to_string(),
+            nodes: vec![FlowNodeDto {
+                id: "t1".to_string(),
+                kind: FlowNodeKindDto::Transform {
+                    label: "Pick token".to_string(),
+                    script: "return response.body.token;".to_string(),
+                },
+                position: NodePositionDto { x: 0.0, y: 0.0 },
+            }],
+            edges: vec![],
+            callback_host: None,
+        };
+        let json = serde_json::to_string(&dto).expect("serialize FlowDto");
+        assert!(json.contains(r#""kind":"Transform""#), "got: {json}");
+        assert!(
+            json.contains(r#""script":"return response.body.token;""#),
+            "got: {json}"
+        );
+        let domain: Flow = dto.clone().into();
+        assert!(matches!(
+            domain.nodes[0].kind,
+            FlowNodeKind::Transform { .. }
+        ));
         let back: FlowDto = domain.into();
         let a = serde_json::to_value(&dto).expect("to_value dto");
         let b = serde_json::to_value(&back).expect("to_value back");
