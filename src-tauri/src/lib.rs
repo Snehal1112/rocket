@@ -414,7 +414,13 @@ pub fn run() {
                     env_secret_store(),
                 )),
                 Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
-            );
+            )
+            // Client certificates live on a collection's own environment, and a token
+            // endpoint that needs mutual TLS gets the matching one.
+            .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
+                Arc::clone(&active_workspace_path),
+            )))
+            .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider));
 
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows

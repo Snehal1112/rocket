@@ -4,6 +4,7 @@ pub mod acp_session_service;
 pub mod agent_config_service;
 pub mod assertion_evaluator;
 pub mod callback_listener;
+pub(crate) mod client_certificates;
 pub mod collection_runner_service;
 pub mod collection_service;
 pub mod contract_service;

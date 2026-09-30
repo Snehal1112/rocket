@@ -11,6 +11,7 @@ pub mod oauth2;
 pub mod pkce;
 pub mod request;
 pub mod response;
+pub mod token_client;
 pub mod wsse_sig;
 
 pub use aws_sig::{sign_request, AwsCredentials, SignedHeaders};
@@ -30,3 +31,4 @@ pub use oauth2::{
 pub use pkce::{generate_pkce, PkcePair};
 pub use request::{HttpRequest, RequestOptions};
 pub use response::HttpResponse;
+pub use token_client::TokenClientProvider;

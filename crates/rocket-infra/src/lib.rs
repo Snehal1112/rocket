@@ -51,7 +51,7 @@ pub use fs_secret_manager_repo::FsSecretManagerRepo;
 pub use fs_template_repo::FsTemplateRepo;
 pub use fs_workspace_config_repo::FsWorkspaceConfigRepo;
 pub use fs_workspace_repo::FsWorkspaceRepo;
-pub use reqwest_executor::ReqwestExecutor;
+pub use reqwest_executor::{ReqwestExecutor, ReqwestTokenClientProvider};
 pub use rocketvault::ReqwestVaultSecretFetcher;
 pub use secret_store::KeyringSecretStore;
 pub use shared_collection_environment_repo::SharedCollectionEnvironmentRepo;

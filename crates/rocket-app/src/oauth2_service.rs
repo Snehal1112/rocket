@@ -1,8 +1,14 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use rocket_collection::CollectionRepository;
-use rocket_environment::{resolve, EnvironmentRepository, VariableContext};
-use rocket_http::{apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken};
+use rocket_environment::{
+    resolve, EnvironmentRepository, EnvironmentRepositoryFactory, VariableContext,
+};
+use rocket_http::{
+    apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken, TokenClientProvider,
+};
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
 
@@ -97,6 +103,9 @@ pub struct ResolvedOAuth2Config {
     pub token_params: Vec<AdditionalParam>,
     pub refresh_params: Vec<AdditionalParam>,
     pub force_reauth: bool,
+    /// The selected environment's client certificates, for a token endpoint that needs mutual
+    /// TLS. The token client picks the one whose domain matches the token URL.
+    pub client_certificates: Vec<ClientCertificate>,
 }
 
 /// Form body params and extra HTTP headers for an OAuth2 token request.
@@ -107,6 +116,12 @@ type FormAndHeaders = (Vec<(String, String)>, Vec<(String, String)>);
 pub struct OAuth2Service {
     env_repo: Box<dyn EnvironmentRepository>,
     collection_repo: Box<dyn CollectionRepository>,
+    /// Picks a collection's own environments, which is where client certificates live.
+    /// Without it, `env_repo` is used for every collection.
+    collection_env_repo_factory: Option<Box<dyn EnvironmentRepositoryFactory>>,
+    /// Builds the client for token requests. Without it, a plain client is used and client
+    /// certificates are not presented.
+    token_client_provider: Option<Arc<dyn TokenClientProvider>>,
 }
 
 impl OAuth2Service {
@@ -117,6 +132,66 @@ impl OAuth2Service {
         Self {
             env_repo,
             collection_repo,
+            collection_env_repo_factory: None,
+            token_client_provider: None,
+        }
+    }
+
+    pub fn with_collection_env_repo_factory(
+        mut self,
+        factory: Box<dyn EnvironmentRepositoryFactory>,
+    ) -> Self {
+        self.collection_env_repo_factory = Some(factory);
+        self
+    }
+
+    pub fn with_token_client_provider(mut self, provider: Arc<dyn TokenClientProvider>) -> Self {
+        self.token_client_provider = Some(provider);
+        self
+    }
+
+    /// The client certificates of the named environment, with placeholders and relative paths
+    /// resolved the same way request execution does.
+    fn client_certificates(
+        &self,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        vars: &HashMap<String, String>,
+    ) -> Vec<ClientCertificate> {
+        let factory = self.collection_env_repo_factory.as_ref();
+        let base = collection.and_then(|c| factory?.collection_dir(c));
+        match (factory, collection) {
+            (Some(f), Some(col)) => {
+                let repo = f.for_collection(col);
+                crate::client_certificates::environment_client_certificates(
+                    repo.as_ref(),
+                    environment_name,
+                    base.as_deref(),
+                    vars,
+                )
+            }
+            _ => crate::client_certificates::environment_client_certificates(
+                self.env_repo.as_ref(),
+                environment_name,
+                base.as_deref(),
+                vars,
+            ),
+        }
+    }
+
+    /// The client for a token request to `url`.
+    fn token_client(
+        &self,
+        url: &str,
+        verify_ssl: bool,
+        certificates: &[ClientCertificate],
+    ) -> DomainResult<reqwest::Client> {
+        match &self.token_client_provider {
+            Some(provider) => provider.client_for(url, verify_ssl, certificates),
+            None => reqwest::ClientBuilder::new()
+                .danger_accept_invalid_certs(!verify_ssl)
+                .build()
+                .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}"))),
         }
     }
 
@@ -221,16 +296,11 @@ impl OAuth2Service {
     /// Shared HTTP dispatch for all OAuth2 token endpoint POSTs.
     /// Builds the reqwest client, posts the form, and parses the OAuthToken response.
     async fn post_token_request(
+        client: &reqwest::Client,
         url: &str,
         form: &[(String, String)],
         extra_headers: &[(String, String)],
-        verify_ssl: bool,
     ) -> DomainResult<OAuthToken> {
-        let client = reqwest::ClientBuilder::new()
-            .danger_accept_invalid_certs(!verify_ssl)
-            .build()
-            .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}")))?;
-
         let mut request = client.post(url).form(form);
         for (key, value) in extra_headers {
             request = request.header(key, value);
@@ -266,7 +336,8 @@ impl OAuth2Service {
         let (form, extra_headers) = Self::build_token_request_parts(config);
         // Apply queryparam-type extra token params to the URL (body-type were added to `form`).
         let url = apply_params_to_url(&config.token_url, &config.token_params);
-        Self::post_token_request(&url, &form, &extra_headers, config.verify_ssl).await
+        let client = self.token_client(&url, config.verify_ssl, &config.client_certificates)?;
+        Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
     /// Refreshes an OAuth2 token.
@@ -327,7 +398,13 @@ impl OAuth2Service {
         apply_params_to_body(&mut form, &refresh_params);
         let url = apply_params_to_url(&refresh_url, &refresh_params);
 
-        Self::post_token_request(&url, &form, &extra_headers, verify_ssl).await
+        let certificates = self.client_certificates(
+            req.collection.as_deref(),
+            req.environment_name.as_deref(),
+            &vars,
+        );
+        let client = self.token_client(&url, verify_ssl, &certificates)?;
+        Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
     /// Builds the form body for exchanging an authorization code for a token.
@@ -389,7 +466,8 @@ impl OAuth2Service {
             ));
         }
 
-        Self::post_token_request(&url, &form, &extra_headers, config.verify_ssl).await
+        let client = self.token_client(&url, config.verify_ssl, &config.client_certificates)?;
+        Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
     /// Resolves all {{variables}} in the get-token request fields.
@@ -444,6 +522,11 @@ impl OAuth2Service {
             token_params: resolve_params(&req.token_params),
             refresh_params: resolve_params(&req.refresh_params),
             force_reauth: req.force_reauth.unwrap_or(false),
+            client_certificates: self.client_certificates(
+                req.collection.as_deref(),
+                req.environment_name.as_deref(),
+                &vars,
+            ),
         }
     }
 }
@@ -660,6 +743,7 @@ mod tests {
             }],
             refresh_params: vec![],
             force_reauth: false,
+            client_certificates: Vec::new(),
         }
     }
 
@@ -735,6 +819,7 @@ mod tests {
             }],
             refresh_params: vec![],
             force_reauth: false,
+            client_certificates: Vec::new(),
         };
         let form = OAuth2Service::build_code_exchange_form(
             &config,
@@ -783,6 +868,7 @@ mod tests {
             token_params: vec![],
             refresh_params: vec![],
             force_reauth: false,
+            client_certificates: Vec::new(),
         };
         let form =
             OAuth2Service::build_code_exchange_form(&config, "CODE", "http://localhost/cb", None);
@@ -791,5 +877,231 @@ mod tests {
         // Header auth: client_id/secret NOT in form.
         assert!(!form.iter().any(|(k, _)| k == "client_id"));
         assert!(!form.iter().any(|(k, _)| k == "client_secret"));
+    }
+
+    // ─── Client certificates (mTLS) for token requests ──────
+
+    /// Records what the service asks for, then fails, so no request is ever sent.
+    struct CapturingProvider {
+        seen: std::sync::Mutex<Vec<(String, bool, Vec<ClientCertificate>)>>,
+    }
+
+    impl CapturingProvider {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                seen: std::sync::Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    impl TokenClientProvider for CapturingProvider {
+        fn client_for(
+            &self,
+            token_url: &str,
+            verify_ssl: bool,
+            certificates: &[ClientCertificate],
+        ) -> DomainResult<reqwest::Client> {
+            self.seen.lock().unwrap().push((
+                token_url.to_string(),
+                verify_ssl,
+                certificates.to_vec(),
+            ));
+            Err(DomainError::InvalidInput(
+                "certificate cannot be loaded".into(),
+            ))
+        }
+    }
+
+    fn pkcs12(domain: &str, path: &str) -> ClientCertificate {
+        ClientCertificate::Pkcs12 {
+            domain: domain.into(),
+            pkcs12_file_path: path.into(),
+            passphrase: None,
+        }
+    }
+
+    fn env_with_certificates(certs: Vec<ClientCertificate>) -> Environment {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("certDir", "/certs"));
+        env.client_certificates = certs;
+        env
+    }
+
+    fn service_with_certificates(
+        certs: Vec<ClientCertificate>,
+        provider: &Arc<CapturingProvider>,
+    ) -> OAuth2Service {
+        OAuth2Service::new(
+            Box::new(StubEnvRepo {
+                env: Some(env_with_certificates(certs)),
+            }),
+            Box::new(StubCollectionRepo),
+        )
+        .with_token_client_provider(provider.clone())
+    }
+
+    fn get_token_request() -> OAuth2GetTokenRequest {
+        OAuth2GetTokenRequest {
+            grant_type: "client_credentials".into(),
+            authorization_url: None,
+            token_url: Some("https://idp.example.com/token".into()),
+            callback_url: None,
+            client_id: "id".into(),
+            client_secret: Some("secret".into()),
+            scope: None,
+            state: None,
+            username: None,
+            password: None,
+            client_authentication: None,
+            use_pkce: None,
+            use_system_browser: None,
+            verify_ssl: Some(false),
+            auth_params: None,
+            token_params: None,
+            refresh_params: None,
+            collection: None,
+            environment_name: Some("dev".into()),
+            request_path: None,
+            force_reauth: None,
+        }
+    }
+
+    #[test]
+    fn resolving_a_get_token_request_carries_the_environment_certificates() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(
+            vec![pkcs12("idp.example.com", "{{certDir}}/client.p12")],
+            &provider,
+        );
+        let config = svc.resolve_get_token_request(&get_token_request());
+        assert_eq!(
+            config.client_certificates,
+            vec![pkcs12("idp.example.com", "/certs/client.p12")]
+        );
+    }
+
+    #[test]
+    fn no_environment_means_no_certificates() {
+        let svc = make_service();
+        let mut req = get_token_request();
+        req.environment_name = None;
+        assert!(svc
+            .resolve_get_token_request(&req)
+            .client_certificates
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_direct_grant_asks_the_provider_for_a_client_with_the_certificates() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(vec![pkcs12("idp.example.com", "/c.p12")], &provider);
+        let config = svc.resolve_get_token_request(&get_token_request());
+
+        let err = svc.get_token_direct(&config).await.unwrap_err();
+
+        // The provider failed, so the error is returned and nothing is sent.
+        assert!(
+            err.to_string().contains("certificate cannot be loaded"),
+            "{err}"
+        );
+        let seen = provider.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "https://idp.example.com/token");
+        assert!(!seen[0].1, "verify_ssl false is passed through");
+        assert_eq!(seen[0].2, vec![pkcs12("idp.example.com", "/c.p12")]);
+    }
+
+    #[tokio::test]
+    async fn the_code_exchange_uses_the_same_client_source() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(vec![pkcs12("idp.example.com", "/c.p12")], &provider);
+        let mut req = get_token_request();
+        req.grant_type = "authorization_code".into();
+        let config = svc.resolve_get_token_request(&req);
+
+        let err = svc
+            .exchange_code_for_token(&config, "code", "https://app/cb", None)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("certificate cannot be loaded"),
+            "{err}"
+        );
+        assert_eq!(provider.seen.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_resolves_certificates_from_its_own_environment() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(
+            vec![pkcs12("idp.example.com", "{{certDir}}/client.p12")],
+            &provider,
+        );
+        let req = OAuth2RefreshRequest {
+            refresh_token: "r".into(),
+            token_url: "https://idp.example.com/token".into(),
+            refresh_token_url: None,
+            client_id: "id".into(),
+            client_secret: None,
+            scope: None,
+            client_authentication: None,
+            verify_ssl: None,
+            refresh_params: None,
+            collection: None,
+            environment_name: Some("dev".into()),
+            request_path: None,
+        };
+
+        let err = svc.refresh_token(&req).await.unwrap_err();
+
+        assert!(
+            err.to_string().contains("certificate cannot be loaded"),
+            "{err}"
+        );
+        let seen = provider.seen.lock().unwrap();
+        assert_eq!(
+            seen[0].2,
+            vec![pkcs12("idp.example.com", "/certs/client.p12")]
+        );
+        assert!(seen[0].1, "verify_ssl defaults to true");
+    }
+
+    /// A factory that knows where the collection lives, like the real workspace one.
+    struct DirFactory {
+        env: Environment,
+    }
+
+    impl EnvironmentRepositoryFactory for DirFactory {
+        fn for_collection(&self, _: &str) -> Box<dyn EnvironmentRepository> {
+            Box::new(StubEnvRepo {
+                env: Some(self.env.clone()),
+            })
+        }
+
+        fn collection_dir(&self, collection: &str) -> Option<std::path::PathBuf> {
+            Some(std::path::PathBuf::from("/ws/collections").join(collection))
+        }
+    }
+
+    #[test]
+    fn a_collection_environment_is_used_and_relative_paths_join_its_folder() {
+        let provider = CapturingProvider::new();
+        // The fixed repo has no certificates, so they can only come from the factory.
+        let svc = OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(StubCollectionRepo))
+            .with_token_client_provider(provider)
+            .with_collection_env_repo_factory(Box::new(DirFactory {
+                env: env_with_certificates(vec![pkcs12("idp.example.com", "certs/client.p12")]),
+            }));
+        let mut req = get_token_request();
+        req.collection = Some("api".into());
+        let config = svc.resolve_get_token_request(&req);
+        assert_eq!(
+            config.client_certificates,
+            vec![pkcs12(
+                "idp.example.com",
+                "/ws/collections/api/certs/client.p12"
+            )]
+        );
     }
 }

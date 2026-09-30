@@ -229,16 +229,7 @@ impl HttpExecutor for ReqwestExecutor {
     async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
         // Mutual TLS: a certificate whose domain matches the URL is loaded up front, so a bad
         // file fails the request instead of being sent without the certificate.
-        let identity = match rocket_http::client_cert::find_certificate(
-            &request.options.client_certificates,
-            &request.url,
-        ) {
-            Some(cert) => Some(ClientIdentity {
-                identity: load_identity(cert)?,
-                certificate: cert.clone(),
-            }),
-            None => None,
-        };
+        let identity = identity_for_url(&request.options.client_certificates, &request.url)?;
         let client = if identity.is_some() || request.options.max_redirects.is_some() {
             // The shared client cache is keyed without an identity, so this gets its own client.
             build_client_with_identity(
@@ -300,7 +291,13 @@ impl HttpExecutor for ReqwestExecutor {
         let requested_origin = url.origin();
 
         // Apply authentication.
-        let builder = apply_auth(start_builder(url), &request.auth, &request.method).await?;
+        let builder = apply_auth(
+            start_builder(url),
+            &request.auth,
+            &request.method,
+            &request.options.client_certificates,
+        )
+        .await?;
         let builder = finish_builder(builder)?;
 
         // OAuth1 signs the final request, so it has to wait until the body is applied.
@@ -444,6 +441,37 @@ struct ClientIdentity {
     certificate: ClientCertificate,
 }
 
+/// Loads the identity of the certificate chosen for `url`, if one matches. A certificate that
+/// matches but cannot be loaded is an error, so the request is never sent without it.
+fn identity_for_url(
+    certificates: &[ClientCertificate],
+    url: &str,
+) -> DomainResult<Option<ClientIdentity>> {
+    match rocket_http::client_cert::find_certificate(certificates, url) {
+        Some(cert) => Ok(Some(ClientIdentity {
+            identity: load_identity(cert)?,
+            certificate: cert.clone(),
+        })),
+        None => Ok(None),
+    }
+}
+
+/// Builds the client for OAuth2 token requests. A token endpoint that requires mutual TLS
+/// gets the matching environment certificate, like the request itself does.
+pub struct ReqwestTokenClientProvider;
+
+impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
+    fn client_for(
+        &self,
+        token_url: &str,
+        verify_ssl: bool,
+        certificates: &[ClientCertificate],
+    ) -> DomainResult<Client> {
+        let identity = identity_for_url(certificates, token_url)?;
+        build_client_with_identity(true, verify_ssl, None, identity)
+    }
+}
+
 /// Builds a client, presenting `identity` as the TLS client certificate when there is one.
 ///
 /// A client offers its identity to every host it connects to, so with an identity the redirect
@@ -571,6 +599,7 @@ async fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &Auth,
     method: &rocket_shared::types::HttpMethod,
+    certificates: &[ClientCertificate],
 ) -> DomainResult<reqwest::RequestBuilder> {
     match auth {
         Auth::None => {}
@@ -608,6 +637,7 @@ async fn apply_auth(
                         credentials,
                         scope.as_deref(),
                         verify_ssl,
+                        certificates,
                     )
                     .await?;
                     builder = builder.bearer_auth(&token);
@@ -805,12 +835,13 @@ async fn fetch_client_credentials_token(
     credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
     scope: Option<&str>,
     verify_ssl: bool,
+    certificates: &[ClientCertificate],
 ) -> DomainResult<String> {
     // Build a dedicated client for the token request. SSL setting here is independent
-    // from the cached executor client (see build_client_impl).
-    let client = Client::builder()
-        .danger_accept_invalid_certs(!verify_ssl)
-        .build()
+    // from the cached executor client (see build_client_impl). The certificate is matched
+    // against the token URL, which can be a different host than the request.
+    let identity = identity_for_url(certificates, access_token_url)?;
+    let client = build_client_with_identity(true, verify_ssl, None, identity)
         .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
     let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
     if let Some(s) = scope {
@@ -1056,6 +1087,7 @@ mod oauth2_tests {
             },
             Some("read write"),
             true,
+            &[],
         )
         .await
         .unwrap();
@@ -1086,6 +1118,7 @@ mod oauth2_tests {
             },
             None,
             true,
+            &[],
         )
         .await
         .unwrap();
@@ -1115,6 +1148,7 @@ mod oauth2_tests {
             },
             None,
             true,
+            &[],
         )
         .await;
 
@@ -1149,6 +1183,7 @@ mod oauth2_tests {
             },
             None,
             true,
+            &[],
         )
         .await;
 
@@ -1662,6 +1697,86 @@ mod mtls_tests {
             vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
         let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
         assert_eq!(resp.status, 200);
+    }
+
+    async fn token_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "token_type": "bearer",
+                "expires_in": 3600
+            })))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn client_credentials() -> rocket_shared::oauth2::OAuth2ClientCredentials {
+        rocket_shared::oauth2::OAuth2ClientCredentials {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            placement: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_token_request_fails_when_a_matching_certificate_cannot_be_loaded() {
+        let server = token_server().await;
+        let url = format!("{}/token", server.uri());
+        let certs = vec![p12("127.0.0.1", "/no/such/file.p12".into(), None)];
+        let err = fetch_client_credentials_token(&url, &client_credentials(), None, true, &certs)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("/no/such/file.p12"), "{err}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_token_request_uses_a_matching_valid_certificate() {
+        let server = token_server().await;
+        let url = format!("{}/token", server.uri());
+        let certs = vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
+        let token = fetch_client_credentials_token(&url, &client_credentials(), None, true, &certs)
+            .await
+            .unwrap();
+        assert_eq!(token, "tok");
+    }
+
+    #[tokio::test]
+    async fn a_token_request_ignores_a_certificate_for_another_domain() {
+        let server = token_server().await;
+        let url = format!("{}/token", server.uri());
+        // Matched against the token URL, not the API host, so this one does not apply.
+        let certs = vec![p12("api.example.com", "/no/such/file.p12".into(), None)];
+        let token = fetch_client_credentials_token(&url, &client_credentials(), None, true, &certs)
+            .await
+            .unwrap();
+        assert_eq!(token, "tok");
+    }
+
+    #[test]
+    fn the_token_client_provider_builds_a_client_and_fails_on_a_bad_matching_certificate() {
+        use rocket_http::TokenClientProvider;
+        let provider = ReqwestTokenClientProvider;
+        assert!(provider
+            .client_for("https://idp.example.com/token", true, &[])
+            .is_ok());
+        assert!(provider
+            .client_for(
+                "https://idp.example.com/token",
+                true,
+                &[p12(
+                    "idp.example.com",
+                    fixture("client.p12"),
+                    Some("changeit")
+                )]
+            )
+            .is_ok());
+        let bad = [p12("idp.example.com", "/no/such/file.p12".into(), None)];
+        assert!(provider
+            .client_for("https://idp.example.com/token", true, &bad)
+            .is_err());
     }
 
     async fn redirecting_to(target: &str) -> MockServer {

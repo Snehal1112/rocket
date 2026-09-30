@@ -30,6 +30,7 @@ cargo test -p rocket-http <test_name>
 | `pkce` | `generate_pkce()` → `PkcePair` (verifier + challenge per RFC 7636) |
 | `oauth1_sig` | `sign()` → `oauth_*` params, `authorization_header()` — OAuth 1.0 (RFC 5849) signing for HMAC-SHA1/256/512 and PLAINTEXT. RSA-* returns an error. |
 | `client_cert` | `find_certificate()` picks the environment client certificate whose `domain` matches a URL (host, optional scheme and port, `*` wildcard; an empty domain never matches). `certificate_covers()` checks one certificate against a URL, for redirect targets. |
+| `token_client` | `TokenClientProvider` trait: builds the client for an OAuth2 token request, presenting the matching environment certificate. Implemented by `ReqwestTokenClientProvider` in `rocket-infra`. |
 | `digest_sig` | `select_challenge()` parses `WWW-Authenticate`, `authorize()` builds the Digest `Authorization` value (RFC 7616: MD5, SHA-256, SHA-512-256 and `-sess`, qop auth/auth-int, legacy no-qop form). |
 | `wsse_sig` | `wsse_headers()` → `Authorization` and `X-WSSE` header values (SHA-1 password digest over nonce + created + password). |
 | `aws_sig` | `sign_request()` → `SignedHeaders` — full AWS Signature Version 4 HMAC chain |
