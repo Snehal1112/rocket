@@ -1,4 +1,6 @@
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { lazy, Suspense, useState } from 'react';
+import { SingleLineEditor } from '@/components/editor';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -54,6 +56,9 @@ export function WireScriptDialog({
   const [headerName, setHeaderName] = useState(headerNameFromTarget(edge.targetField));
   const isHeadersTarget = edge.targetField === 'headers' || edge.targetField.startsWith('headers[');
   const existingHeaders = targetHeaderNames(targetNode);
+  // Header wires start compact unless the saved script already spans several lines.
+  const [expanded, setExpanded] = useState(!isHeadersTarget || edge.expression.includes('\n'));
+  const multiline = expression.includes('\n');
 
   const handleSave = () => {
     let targetField = edge.targetField;
@@ -89,8 +94,10 @@ export function WireScriptDialog({
         <DialogHeader>
           <DialogTitle>Value from source</DialogTitle>
           <DialogDescription>
-            Write one expression, or several lines that end with return value. The source result is
-            available as response. console.log output appears in the Console.
+            {isHeadersTarget
+              ? 'Write one expression, or expand for several lines that end with return value. '
+              : 'Write one expression, or several lines that end with return value. '}
+            The source result is available as response. console.log output appears in the Console.
           </DialogDescription>
         </DialogHeader>
         {isHeadersTarget && (
@@ -104,17 +111,49 @@ export function WireScriptDialog({
             />
           </div>
         )}
-        <div className='h-80 overflow-hidden rounded border'>
-          <Suspense fallback={<div className='h-full animate-pulse bg-muted' />}>
-            <MonacoWrapper
+        {expanded ? (
+          <div className='h-80 overflow-hidden rounded border'>
+            <Suspense fallback={<div className='h-full animate-pulse bg-muted' />}>
+              <MonacoWrapper
+                value={expression}
+                onChange={setExpression}
+                language='javascript'
+                height='100%'
+                extraLib={EXTRA_LIB}
+              />
+            </Suspense>
+          </div>
+        ) : (
+          <div className='rounded border px-2 py-1.5'>
+            <SingleLineEditor
+              aria-label='Wire script'
               value={expression}
               onChange={setExpression}
-              language='javascript'
-              height='100%'
-              extraLib={EXTRA_LIB}
+              onSubmit={handleSave}
+              placeholder='response.body.token'
             />
-          </Suspense>
-        </div>
+          </div>
+        )}
+        {isHeadersTarget && (
+          <div className='flex justify-end'>
+            {expanded ? (
+              <Button
+                variant='ghost'
+                size='sm'
+                disabled={multiline}
+                onClick={() => setExpanded(false)}
+              >
+                <Minimize2 className='mr-1 h-3.5 w-3.5' />
+                Collapse
+              </Button>
+            ) : (
+              <Button variant='ghost' size='sm' onClick={() => setExpanded(true)}>
+                <Maximize2 className='mr-1 h-3.5 w-3.5' />
+                Expand
+              </Button>
+            )}
+          </div>
+        )}
         <DialogFooter>
           <Button variant='outline' onClick={() => onOpenChange(false)}>
             Cancel

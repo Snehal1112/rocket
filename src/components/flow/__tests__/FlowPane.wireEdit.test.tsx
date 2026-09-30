@@ -13,6 +13,18 @@ vi.mock('@/components/editor/MonacoWrapper', () => ({
   ),
 }));
 
+vi.mock('@/components/editor', () => ({
+  SingleLineEditor: ({
+    value,
+    onChange,
+    'aria-label': ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    'aria-label'?: string;
+  }) => <input aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} />,
+}));
+
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
   return {
