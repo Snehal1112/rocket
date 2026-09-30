@@ -520,7 +520,11 @@ mod tests {
     /// in -> t (input); t -> out (value).
     fn valid_transform_flow() -> Flow {
         flow(
-            vec![input("in"), transform("t", "return response.body;"), output("out")],
+            vec![
+                input("in"),
+                transform("t", "return response.body;"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "in", handle::RESULT, "t", handle::INPUT),
                 edge("e2", "t", handle::RESULT, "out", "value"),
