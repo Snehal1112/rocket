@@ -519,7 +519,7 @@ fn build_client_with_identity(
         .map_err(|e| DomainError::Http(e.to_string()))
 }
 
-/// Turns a client certificate's material into a TLS identity.
+/// Turns a client certificate's material, from a file or held in memory, into a TLS identity.
 ///
 /// The TLS backend is the platform one (native-tls), which loads PKCS12 bundles and
 /// unencrypted PKCS#8 PEM keys. An encrypted PKCS#8 key is decrypted in memory first.
@@ -567,20 +567,30 @@ fn load_identity(cert: &ResolvedClientCertificate) -> DomainResult<reqwest::Iden
 fn read_der_source(source: &CertificateSource) -> DomainResult<zeroize::Zeroizing<Vec<u8>>> {
     match source {
         CertificateSource::File(path) => Ok(zeroize::Zeroizing::new(read_certificate_file(path)?)),
-        CertificateSource::Inline(_) => Err(inline_not_supported()),
+        CertificateSource::Inline(bytes) => Ok(zeroize::Zeroizing::new(bytes.to_vec())),
     }
 }
 
 /// Reads PEM text (a certificate or a private key). The bytes are wiped on drop.
+///
+/// Inline text from a vault secret is normalised first, because a secret can come back with
+/// CRLF line endings or blank lines, and the TLS backend needs the key to start exactly with
+/// its `-----BEGIN` line.
 fn read_pem_source(source: &CertificateSource) -> DomainResult<zeroize::Zeroizing<Vec<u8>>> {
     match source {
         CertificateSource::File(path) => Ok(zeroize::Zeroizing::new(read_certificate_file(path)?)),
-        CertificateSource::Inline(_) => Err(inline_not_supported()),
+        CertificateSource::Inline(bytes) => Ok(normalise_pem(bytes)),
     }
 }
 
-fn inline_not_supported() -> DomainError {
-    DomainError::InvalidInput("Inline client certificate material is not supported yet".into())
+/// Turns CRLF line endings into LF, trims whitespace around the text and ends it with one LF.
+fn normalise_pem(text: &[u8]) -> zeroize::Zeroizing<Vec<u8>> {
+    let trimmed = text.trim_ascii();
+    // Sized up front so the vector never reallocates and leaves a copy behind.
+    let mut out = zeroize::Zeroizing::new(Vec::with_capacity(trimmed.len() + 1));
+    out.extend(trimmed.iter().copied().filter(|b| *b != b'\r'));
+    out.push(b'\n');
+    out
 }
 
 /// Names a piece of material in an error message: its file path, never its bytes.
@@ -1632,6 +1642,23 @@ mod mtls_tests {
         format!("{FIXTURES}/{name}")
     }
 
+    fn fixture_bytes(name: &str) -> Vec<u8> {
+        std::fs::read(fixture(name)).expect("read fixture")
+    }
+
+    /// Fixture bytes held in memory, as a vault secret delivers them.
+    fn inline(name: &str) -> CertificateSource {
+        CertificateSource::Inline(zeroize::Zeroizing::new(fixture_bytes(name)))
+    }
+
+    /// Fixture text with CRLF line endings and blank lines around it, like a secret that went
+    /// through a Windows editor or a CSV export.
+    fn inline_crlf(name: &str) -> CertificateSource {
+        let text = String::from_utf8(fixture_bytes(name)).expect("fixture is text");
+        let crlf = format!("\r\n{}\r\n\r\n", text.trim_end().replace('\n', "\r\n"));
+        CertificateSource::Inline(zeroize::Zeroizing::new(crlf.into_bytes()))
+    }
+
     fn p12(domain: &str, path: String, passphrase: Option<&str>) -> ResolvedClientCertificate {
         ResolvedClientCertificate::pkcs12(
             domain,
@@ -1722,20 +1749,6 @@ mod mtls_tests {
     }
 
     #[test]
-    fn inline_material_is_not_supported_yet() {
-        let cert = ResolvedClientCertificate::pkcs12(
-            "x",
-            CertificateSource::Inline(zeroize::Zeroizing::new(vec![1, 2, 3])),
-            None,
-        );
-        let err = load_identity(&cert).unwrap_err().to_string();
-        assert!(
-            err.contains("Inline client certificate material is not supported yet"),
-            "{err}"
-        );
-    }
-
-    #[test]
     fn an_unavailable_certificate_fails_with_its_reason() {
         let reason = "Client certificate secret vault.clientCertPem was not found.";
         let err = load_identity(&ResolvedClientCertificate::unavailable("x", reason)).unwrap_err();
@@ -1743,6 +1756,128 @@ mod mtls_tests {
             matches!(&err, DomainError::InvalidInput(m) if m == reason),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn loads_an_inline_pem_identity() {
+        let cert = ResolvedClientCertificate::pem(
+            "x",
+            inline("client.pem"),
+            inline("client-key.pem"),
+            None,
+        );
+        load_identity(&cert).expect("inline PEM loads");
+    }
+
+    #[test]
+    fn loads_an_inline_encrypted_pem_identity_with_its_passphrase() {
+        let cert = ResolvedClientCertificate::pem(
+            "x",
+            inline("client.pem"),
+            inline("client-key-encrypted.pem"),
+            Some("changeit".into()),
+        );
+        load_identity(&cert).expect("inline encrypted PEM loads");
+    }
+
+    #[test]
+    fn a_wrong_inline_pem_passphrase_names_the_domain_and_never_the_key_or_passphrase() {
+        let cert = ResolvedClientCertificate::pem(
+            "api.example.com",
+            inline("client.pem"),
+            inline("client-key-encrypted.pem"),
+            Some("nope-nope".into()),
+        );
+        let err = load_identity(&cert).unwrap_err().to_string();
+        assert!(
+            err.contains("wrong passphrase") && err.contains("(inline, for api.example.com)"),
+            "{err}"
+        );
+        assert!(!err.contains("nope-nope") && !err.contains("BEGIN"), "{err}");
+    }
+
+    #[test]
+    fn loads_an_inline_pkcs12_identity() {
+        let cert =
+            ResolvedClientCertificate::pkcs12("x", inline("client.p12"), Some("changeit".into()));
+        load_identity(&cert).expect("inline PKCS12 loads");
+    }
+
+    #[test]
+    fn a_wrong_inline_pkcs12_passphrase_names_the_domain() {
+        let cert = ResolvedClientCertificate::pkcs12(
+            "api.example.com",
+            inline("client.p12"),
+            Some("nope".into()),
+        );
+        let err = load_identity(&cert).unwrap_err().to_string();
+        assert!(
+            err.contains("PKCS12") && err.contains("(inline, for api.example.com)"),
+            "{err}"
+        );
+    }
+
+    // Review Focus 2.
+    #[test]
+    fn inline_pem_with_crlf_line_endings_and_a_trailing_newline_loads() {
+        let plain = ResolvedClientCertificate::pem(
+            "x",
+            inline_crlf("client.pem"),
+            inline_crlf("client-key.pem"),
+            None,
+        );
+        load_identity(&plain).expect("CRLF PEM loads");
+        let encrypted = ResolvedClientCertificate::pem(
+            "x",
+            inline_crlf("client.pem"),
+            inline_crlf("client-key-encrypted.pem"),
+            Some("changeit".into()),
+        );
+        load_identity(&encrypted).expect("CRLF encrypted PEM loads");
+    }
+
+    #[test]
+    fn normalise_pem_turns_crlf_into_lf_and_trims_surrounding_whitespace() {
+        let out = normalise_pem(b"\r\n  -----BEGIN X-----\r\nAB\r\n-----END X-----\r\n\r\n");
+        assert_eq!(out.as_slice(), b"-----BEGIN X-----\nAB\n-----END X-----\n");
+    }
+
+    #[tokio::test]
+    async fn a_matching_inline_certificate_builds_a_client_and_sends_the_request() {
+        let server = ok_server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.options.client_certificates = vec![ResolvedClientCertificate::pkcs12(
+            "127.0.0.1",
+            inline("client.p12"),
+            Some("changeit".into()),
+        )];
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+        assert_eq!(resp.status, 200);
+    }
+
+    #[test]
+    fn the_token_client_provider_presents_inline_material() {
+        use rocket_http::TokenClientProvider;
+        let provider = ReqwestTokenClientProvider;
+        let certs = [
+            ResolvedClientCertificate::pkcs12(
+                "idp.example.com",
+                inline("client.p12"),
+                Some("changeit".into()),
+            ),
+            ResolvedClientCertificate::pem(
+                "pem-idp.example.com",
+                inline("client.pem"),
+                inline("client-key-encrypted.pem"),
+                Some("changeit".into()),
+            ),
+        ];
+        assert!(provider
+            .client_for("https://idp.example.com/token", true, &certs)
+            .is_ok());
+        assert!(provider
+            .client_for("https://pem-idp.example.com/token", true, &certs)
+            .is_ok());
     }
 
     async fn ok_server() -> MockServer {
@@ -2027,6 +2162,27 @@ mod mtls_tests {
         )];
         let allowed_encrypted_pem = exec.execute(&with_encrypted_pem).await;
 
+        let mut with_inline_pem =
+            HttpRequest::new(HttpMethod::Get, format!("https://127.0.0.1:{port}/"));
+        with_inline_pem.options.verify_ssl = false;
+        with_inline_pem.options.client_certificates = vec![ResolvedClientCertificate::pem(
+            "127.0.0.1",
+            inline("client.pem"),
+            inline("client-key.pem"),
+            None,
+        )];
+        let allowed_inline_pem = exec.execute(&with_inline_pem).await;
+
+        let mut with_inline_p12 =
+            HttpRequest::new(HttpMethod::Get, format!("https://127.0.0.1:{port}/"));
+        with_inline_p12.options.verify_ssl = false;
+        with_inline_p12.options.client_certificates = vec![ResolvedClientCertificate::pkcs12(
+            "127.0.0.1",
+            inline("client.p12"),
+            Some("changeit".into()),
+        )];
+        let allowed_inline_p12 = exec.execute(&with_inline_p12).await;
+
         let _ = server.kill();
         let _ = server.wait();
         assert!(
@@ -2038,6 +2194,18 @@ mod mtls_tests {
         assert_eq!(
             allowed_encrypted_pem
                 .expect("encrypted PEM identity accepted")
+                .status,
+            200
+        );
+        assert_eq!(
+            allowed_inline_pem
+                .expect("inline PEM identity accepted")
+                .status,
+            200
+        );
+        assert_eq!(
+            allowed_inline_p12
+                .expect("inline PKCS12 identity accepted")
                 .status,
             200
         );
