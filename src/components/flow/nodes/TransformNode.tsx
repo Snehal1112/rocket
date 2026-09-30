@@ -27,6 +27,11 @@ export function TransformNode({
   const { kind, status } = data;
   // The script is edited in the properties panel, so the node shows one line.
   const preview = scriptPreview(kind.script);
+  // The hover title shows the whole first line, which the card may cut off.
+  const firstLine = kind.script
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line !== '');
 
   return (
     <div
@@ -61,7 +66,11 @@ export function TransformNode({
 
       <div className='px-2 py-1.5'>
         <span className='text-muted-foreground'>script</span>
-        <p data-testid='transform-script-preview' className='truncate font-mono'>
+        <p
+          data-testid='transform-script-preview'
+          title={firstLine}
+          className={cn('truncate font-mono', preview === null && 'text-muted-foreground')}
+        >
           {preview ?? '(empty)'}
         </p>
       </div>

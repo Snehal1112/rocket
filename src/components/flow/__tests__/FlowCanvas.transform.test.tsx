@@ -70,6 +70,7 @@ describe('FlowCanvas with a Transform node', () => {
       tf: { branch: 'true' },
     });
     const outOf = rf.find((e) => e.id === 'e2');
+    expect(outOf?.className).toContain('nopan');
     expect(outOf?.className).not.toMatch(/flow-edge-(taken|not-taken)/);
   });
 });

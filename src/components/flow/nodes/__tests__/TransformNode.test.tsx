@@ -32,7 +32,6 @@ function renderTransform(data: TransformNodeData) {
       </FlowNodeActionsContext.Provider>
     </ReactFlowProvider>,
   );
-  return actions;
 }
 
 describe('TransformNode', () => {
@@ -57,9 +56,20 @@ describe('TransformNode', () => {
     expect(screen.queryByText(/return token/)).not.toBeInTheDocument();
   });
 
+  it('puts the whole first line in the preview title', () => {
+    const long = `const token = ${'x'.repeat(80)};`;
+    renderTransform({ kind: { ...kind, script: `${long}\nreturn token;` }, status: 'idle' });
+    const preview = screen.getByTestId('transform-script-preview');
+    expect(preview).toHaveAttribute('title', long);
+    expect(preview.textContent).not.toBe(long);
+  });
+
   it('shows a placeholder for an empty script', () => {
     renderTransform({ kind: { ...kind, script: '  \n ' }, status: 'idle' });
-    expect(screen.getByTestId('transform-script-preview')).toHaveTextContent('(empty)');
+    const preview = screen.getByTestId('transform-script-preview');
+    expect(preview).toHaveTextContent('(empty)');
+    expect(preview).toHaveClass('text-muted-foreground');
+    expect(preview).not.toHaveAttribute('title');
   });
 
   it('says Not taken for a skipped branch', () => {
