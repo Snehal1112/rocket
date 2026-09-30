@@ -1,6 +1,7 @@
 import {
   ArrowLeftFromLine,
   ArrowRightToLine,
+  Code,
   GitBranch,
   Globe,
   Hourglass,
@@ -17,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { DEFAULT_CALLBACK_TIMEOUT_MS, nextCallbackName } from '@/lib/flow-callback';
 import { DEFAULT_REPEAT_UNTIL } from '@/lib/flow-repeat';
+import { DEFAULT_TRANSFORM_SCRIPT } from '@/lib/flow-transform';
 import type { FlowNode } from '@/lib/tauri-api';
 
 let nextId = 0;
@@ -136,6 +138,22 @@ export function NodePalette({
           >
             <Split className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
             Switch
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              onAddNode({
+                id: newNodeId('transform'),
+                kind: {
+                  kind: 'Transform',
+                  label: 'New Transform',
+                  script: DEFAULT_TRANSFORM_SCRIPT,
+                },
+                position: defaultPosition,
+              })
+            }
+          >
+            <Code className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
+            Transform
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() =>

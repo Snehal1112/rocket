@@ -29,6 +29,7 @@ import { InputNode } from './nodes/InputNode';
 import { OutputNode } from './nodes/OutputNode';
 import { RequestNode } from './nodes/RequestNode';
 import { SwitchNode } from './nodes/SwitchNode';
+import { TransformNode } from './nodes/TransformNode';
 import { WaitForCallbackNode } from './nodes/WaitForCallbackNode';
 import { useSavedRequestPreviews } from './properties/useSavedRequestPreview';
 
@@ -38,6 +39,7 @@ const nodeTypes = {
   Output: OutputNode,
   If: IfNode,
   Switch: SwitchNode,
+  Transform: TransformNode,
   WaitForCallback: WaitForCallbackNode,
 };
 

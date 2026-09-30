@@ -90,3 +90,20 @@ describe('NodePalette Wait for callback entry', () => {
     );
   });
 });
+
+describe('NodePalette Transform entry', () => {
+  it('adds a Transform node with the default script', async () => {
+    const onAddNode = vi.fn();
+    render(<NodePalette onAddNode={onAddNode} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Add node/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Transform' }));
+    expect(onAddNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^transform-/),
+        position: { x: 100, y: 100 },
+        kind: { kind: 'Transform', label: 'New Transform', script: 'return response.body;' },
+      }),
+    );
+  });
+});
