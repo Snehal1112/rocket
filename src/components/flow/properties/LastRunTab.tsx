@@ -6,8 +6,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { formatOutputValue } from '@/lib/flow-output';
 import { msToSecondsLabel } from '@/lib/flow-repeat';
-import type { FlowDebugHeader, FlowDebugRequest, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
+import type {
+  FlowDebugHeader,
+  FlowDebugRequest,
+  FlowLogEntry,
+  FlowNode,
+  FlowNodeStatus,
+} from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { exitLabel } from '../flowExits';
 
 interface LastRunTabProps {
   node: FlowNode;
@@ -207,6 +214,46 @@ function ExchangeSections({
   );
 }
 
+const logClass: Record<FlowLogEntry['level'], string> = {
+  log: '',
+  warn: 'text-amber-600',
+  error: 'text-red-600',
+};
+
+function ValueSection({ value }: { value: string }) {
+  return (
+    <section className='space-y-1'>
+      <div className='flex items-center justify-between'>
+        <h4 className='font-medium'>Value</h4>
+        {value !== '' && <CopyButton text={value} label='Copy value' />}
+      </div>
+      <pre
+        data-testid='last-run-value'
+        className='max-h-80 select-text overflow-auto whitespace-pre-wrap rounded-md border p-2 font-mono text-[11px] [overflow-wrap:anywhere]'
+      >
+        {value === '' ? <span className='italic'>(empty)</span> : formatOutputValue(value)}
+      </pre>
+    </section>
+  );
+}
+
+function LogsSection({ logs }: { logs: FlowLogEntry[] }) {
+  return (
+    <section data-testid='last-run-logs' className='space-y-1'>
+      <h4 className='font-medium'>Logs</h4>
+      <div className='max-h-48 space-y-0.5 overflow-auto rounded-md border p-2 font-mono text-[11px]'>
+        {logs.map((entry, i) => (
+          // Log lines have no id and can repeat.
+          // biome-ignore lint/suspicious/noArrayIndexKey: log order is stable within a run.
+          <p key={i} className={`select-text whitespace-pre-wrap ${logClass[entry.level]}`}>
+            {entry.message}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function LastRunTab({ node, status, detail }: LastRunTabProps) {
   if (status === 'idle') {
     return (
@@ -245,6 +292,15 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
             shownError={status === 'failed' ? detail.error : undefined}
           />
         )}
+      {(node.kind.kind === 'If' || node.kind.kind === 'Switch') && detail?.branch && (
+        <p data-testid='last-run-branch'>
+          Took:{' '}
+          <span className='font-mono'>{exitLabel(node.kind, detail.branch) ?? detail.branch}</span>
+        </p>
+      )}
+      {(node.kind.kind === 'Output' || node.kind.kind === 'Input') &&
+        detail?.value !== undefined && <ValueSection value={detail.value} />}
+      {detail?.logs && detail.logs.length > 0 && <LogsSection logs={detail.logs} />}
     </div>
   );
 }

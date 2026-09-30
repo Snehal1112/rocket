@@ -210,3 +210,65 @@ describe('LastRunTab exchange', () => {
     expect(writeText).toHaveBeenCalledWith('{"token":"abc"}');
   });
 });
+
+describe('LastRunTab per kind', () => {
+  it('shows the branch an If took', () => {
+    const ifNode = node({ kind: 'If', label: 'Ok?', condition: 'response.status === 200' });
+    render(<LastRunTab node={ifNode} status='success' detail={{ branch: 'true' }} />);
+    expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Took: true');
+  });
+
+  it('shows the case label a Switch took', () => {
+    const sw = node({
+      kind: 'Switch',
+      label: 'Type',
+      value: 'response.body.type',
+      cases: [{ id: 'c1', label: 'Admin', matches: 'admin' }],
+    });
+    render(<LastRunTab node={sw} status='success' detail={{ branch: 'case:c1' }} />);
+    expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Took: Admin');
+  });
+
+  it('shows an Output value pretty-printed with a copy button', () => {
+    const out = node({ kind: 'Output', label: 'Token' });
+    render(<LastRunTab node={out} status='success' detail={{ value: '{"a":1}' }} />);
+    expect(screen.getByTestId('last-run-value')).toHaveTextContent('"a": 1');
+    expect(screen.getByRole('button', { name: 'Copy value' })).toBeInTheDocument();
+  });
+
+  it('shows an Input value', () => {
+    const input = node({ kind: 'Input', label: 'User', value: '{{user}}' });
+    render(<LastRunTab node={input} status='success' detail={{ value: 'ada' }} />);
+    expect(screen.getByTestId('last-run-value')).toHaveTextContent('ada');
+  });
+
+  it('shows (empty) for an empty value', () => {
+    const out = node({ kind: 'Output', label: 'Token' });
+    render(<LastRunTab node={out} status='success' detail={{ value: '' }} />);
+    expect(screen.getByTestId('last-run-value')).toHaveTextContent('(empty)');
+  });
+
+  it('lists the node logs with their level', () => {
+    render(
+      <LastRunTab
+        node={request}
+        status='success'
+        detail={{
+          logs: [
+            { level: 'log', message: 'wire data: {}' },
+            { level: 'error', message: 'boom' },
+          ],
+        }}
+      />,
+    );
+    const logs = screen.getByTestId('last-run-logs');
+    expect(logs).toHaveTextContent('wire data: {}');
+    expect(logs).toHaveTextContent('boom');
+    expect(screen.getByText('boom').className).toContain('text-red-600');
+  });
+
+  it('shows no logs section without logs', () => {
+    render(<LastRunTab node={request} status='success' detail={{ statusCode: 200 }} />);
+    expect(screen.queryByTestId('last-run-logs')).not.toBeInTheDocument();
+  });
+});
