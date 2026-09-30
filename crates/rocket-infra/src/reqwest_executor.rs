@@ -536,16 +536,17 @@ fn load_identity(cert: &ClientCertificate) -> DomainResult<reqwest::Identity> {
         ClientCertificate::Pem {
             certificate_file_path,
             private_key_file_path,
+            passphrase,
             ..
         } => {
             let cert_pem = read_certificate_file(certificate_file_path)?;
-            let key_pem = read_certificate_file(private_key_file_path)?;
-            if key_pem.windows(9).any(|w| w == b"ENCRYPTED") {
-                return Err(DomainError::InvalidInput(format!(
-                    "The private key {private_key_file_path} is encrypted, which is not supported \
-                     for PEM client certificates. Decrypt the key, or use a PKCS12 bundle."
-                )));
-            }
+            let key_file = zeroize::Zeroizing::new(read_certificate_file(private_key_file_path)?);
+            // An encrypted PKCS#8 key is decrypted in memory, and the key bytes are wiped on drop.
+            let key_pem = crate::pem_key::unencrypted_key_pem(
+                &key_file,
+                passphrase.as_deref(),
+                private_key_file_path,
+            )?;
             reqwest::Identity::from_pkcs8_pem(&cert_pem, &key_pem).map_err(|e| {
                 DomainError::InvalidInput(format!(
                     "Cannot load PEM client certificate {certificate_file_path}: {e}"
@@ -1605,11 +1606,15 @@ mod mtls_tests {
     }
 
     fn pem(domain: &str, key: &str) -> ClientCertificate {
+        pem_with_passphrase(domain, key, None)
+    }
+
+    fn pem_with_passphrase(domain: &str, key: &str, passphrase: Option<&str>) -> ClientCertificate {
         ClientCertificate::Pem {
             domain: domain.into(),
             certificate_file_path: fixture("client.pem"),
             private_key_file_path: fixture(key),
-            passphrase: None,
+            passphrase: passphrase.map(String::from),
         }
     }
 
@@ -1635,11 +1640,30 @@ mod mtls_tests {
     }
 
     #[test]
-    fn an_encrypted_pem_key_is_rejected_with_a_hint() {
+    fn loads_an_encrypted_pem_identity_with_its_passphrase() {
+        let cert = pem_with_passphrase("x", "client-key-encrypted.pem", Some("changeit"));
+        assert!(load_identity(&cert).is_ok());
+    }
+
+    #[test]
+    fn an_encrypted_pem_key_without_its_passphrase_asks_for_it() {
         let err = load_identity(&pem("x", "client-key-encrypted.pem"))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("encrypted") && err.contains("PKCS12"), "{err}");
+        assert!(
+            err.contains("is encrypted") && err.contains("passphrase"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_pem_passphrase_is_an_error_that_does_not_echo_it() {
+        let cert = pem_with_passphrase("x", "client-key-encrypted.pem", Some("nope-nope"));
+        let err = load_identity(&cert).unwrap_err().to_string();
+        assert!(
+            err.contains("wrong passphrase") && !err.contains("nope-nope"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1918,6 +1942,16 @@ mod mtls_tests {
         with_pem.options.client_certificates = vec![pem("127.0.0.1", "client-key.pem")];
         let allowed_pem = exec.execute(&with_pem).await;
 
+        let mut with_encrypted_pem =
+            HttpRequest::new(HttpMethod::Get, format!("https://127.0.0.1:{port}/"));
+        with_encrypted_pem.options.verify_ssl = false;
+        with_encrypted_pem.options.client_certificates = vec![pem_with_passphrase(
+            "127.0.0.1",
+            "client-key-encrypted.pem",
+            Some("changeit"),
+        )];
+        let allowed_encrypted_pem = exec.execute(&with_encrypted_pem).await;
+
         let _ = server.kill();
         let _ = server.wait();
         assert!(
@@ -1926,5 +1960,11 @@ mod mtls_tests {
         );
         assert_eq!(allowed.expect("PKCS12 identity accepted").status, 200);
         assert_eq!(allowed_pem.expect("PEM identity accepted").status, 200);
+        assert_eq!(
+            allowed_encrypted_pem
+                .expect("encrypted PEM identity accepted")
+                .status,
+            200
+        );
     }
 }

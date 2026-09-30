@@ -38,6 +38,10 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 keyring.workspace = true
+# Decrypts `BEGIN ENCRYPTED PRIVATE KEY` client keys in memory. `3des` and `sha1-insecure` are
+# only for reading old keys the user already has, never for writing.
+pkcs8 = { version = "0.10", features = ["encryption", "pem", "std", "3des", "sha1-insecure"] }
+zeroize = "1"
 agent-client-protocol = "2.2"
 async-process = "2"
 futures-lite = "2"

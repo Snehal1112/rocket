@@ -21,6 +21,7 @@ pub mod fs_workspace_config_repo;
 pub mod fs_workspace_repo;
 pub(crate) mod migration;
 pub(crate) mod oc;
+mod pem_key;
 pub mod reqwest_executor;
 pub mod rocketvault;
 pub mod scripting;

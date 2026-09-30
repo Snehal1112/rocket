@@ -494,7 +494,7 @@ type: pkcs12             # REQUIRED
 pkcs12FilePath: string   # REQUIRED
 passphrase: string
 ```
-Rocket resolves a relative certificate file path against the collection folder (the parent of `environments/`) and rejects one with `..`. Absolute and `~/` paths are used as written. Rocket presents the first certificate whose `domain` matches the request URL (host, optional scheme and port, `*` wildcard). PKCS12 and unencrypted PEM keys work; an encrypted PEM key returns an error. A matching certificate that cannot be loaded fails the request. A redirect that leaves the certificate's domain is not followed, so the certificate is not offered to another host; the 3xx response is returned. OAuth2 token requests use the same certificate, matched against the token URL.
+Rocket resolves a relative certificate file path against the collection folder (the parent of `environments/`) and rejects one with `..`. Absolute and `~/` paths are used as written. Rocket presents the first certificate whose `domain` matches the request URL (host, optional scheme and port, `*` wildcard). PKCS12 bundles and PEM keys work. A PKCS#8 PEM key may be encrypted (`BEGIN ENCRYPTED PRIVATE KEY`) when `passphrase` is set. Old OpenSSL `Proc-Type: 4,ENCRYPTED` keys and PBES1 keys return an error that says how to convert them. A matching certificate that cannot be loaded fails the request. A redirect that leaves the certificate's domain is not followed, so the certificate is not offered to another host; the 3xx response is returned. OAuth2 token requests use the same certificate, matched against the token URL.
 
 ---
 
