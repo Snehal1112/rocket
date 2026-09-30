@@ -33,7 +33,7 @@ cargo check -p rocket-shared
 - `HttpMethod` — enum for GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD; implements `Display` and `FromStr` (case-insensitive).
 - `Header`, `QueryParam`, `PathParam` — keyed, enabled-flag structures with optional `Description`.
 - `Body` / `BodyMode` — request body with modes: `none`, `json`, `xml`, `text`, `sparql`, `formurlencoded`, `formdata`, `binary`.
-- `Auth` — tagged enum covering `None`, `Basic`, `Bearer`, `ApiKey`, `OAuth2`, `AwsSigV4`, `Wsse`, `Digest`, `Ntlm`, `Inherit`. Tag field is `authType` with kebab-case values.
+- `Auth` — tagged enum covering `None`, `Basic`, `Bearer`, `ApiKey`, `OAuth2`, `AwsSigV4`, `Wsse`, `Digest`, `Ntlm`, `OAuth1`, `Inherit`. Tag field is `authType` with kebab-case values.
 - `RequestSettings` / `RequestSettingValue<T>` — per-request execution settings (timeout, redirects, URL encoding), each value is either a concrete value or `"inherit"`.
 
 ### Descriptions and documentation

@@ -56,6 +56,8 @@ pub enum OcAuthTyped {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         profile_name: Option<String>,
     },
+    #[serde(rename = "oauth1")]
+    OAuth1(OcOAuth1),
     #[serde(rename = "oauth2", rename_all = "camelCase")]
     OAuth2 {
         flow: String,
@@ -84,6 +86,49 @@ pub enum OcAuthTyped {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<OAuth2Settings>,
     },
+}
+
+/// OAuth1 auth fields as persisted on disk (spec `AuthOAuth1`, minus the `type` tag).
+/// A dedicated type so the on-disk shape stays independent of the domain type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OcOAuth1 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_key: Option<OcOAuth1PrivateKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_body_hash: Option<bool>,
+}
+
+/// OAuth1 private key: `{ type: "text" | "file", value }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcOAuth1PrivateKey {
+    #[serde(rename = "type")]
+    pub key_type: String,
+    pub value: String,
 }
 
 /// OAuth2 client credentials.

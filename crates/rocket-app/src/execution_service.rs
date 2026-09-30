@@ -1655,6 +1655,7 @@ pub(crate) fn sensitive_auth_label(auth: &Auth) -> Option<&'static str> {
         Auth::Wsse { .. } => Some("wsse"),
         Auth::Digest { .. } => Some("digest"),
         Auth::Ntlm { .. } => Some("ntlm"),
+        Auth::OAuth1(_) => Some("oauth1"),
     }
 }
 
@@ -1745,6 +1746,15 @@ fn resolve_auth(auth: Auth, vars: &std::collections::HashMap<String, String>) ->
             password: r(password),
             domain: r(domain),
         },
+        Auth::OAuth1(mut a) => {
+            a.consumer_key = a.consumer_key.map(&r);
+            a.consumer_secret = a.consumer_secret.map(&r);
+            a.access_token = a.access_token.map(&r);
+            a.access_token_secret = a.access_token_secret.map(&r);
+            a.callback_url = a.callback_url.map(&r);
+            a.verifier = a.verifier.map(&r);
+            Auth::OAuth1(a)
+        }
         Auth::AwsSigV4 {
             access_key,
             secret_key,

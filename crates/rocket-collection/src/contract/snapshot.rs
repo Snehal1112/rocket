@@ -105,6 +105,7 @@ fn auth_type_name(auth: &Auth) -> String {
         Auth::Wsse { .. } => "wsse",
         Auth::Digest { .. } => "digest",
         Auth::Ntlm { .. } => "ntlm",
+        Auth::OAuth1(_) => "oauth1",
     }
     .to_string()
 }
@@ -130,6 +131,7 @@ fn auth_detail(auth: &Auth) -> String {
         | Auth::Wsse { username, .. }
         | Auth::Digest { username, .. }
         | Auth::Ntlm { username, .. } => username.clone(),
+        Auth::OAuth1(a) => a.consumer_key.clone().unwrap_or_default(),
         Auth::Bearer { token } => {
             if token.len() > 8 {
                 format!("{}…", token.chars().take(8).collect::<String>())

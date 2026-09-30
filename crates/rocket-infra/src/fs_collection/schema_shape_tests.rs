@@ -16,8 +16,8 @@ use rocket_shared::oauth2::{
     OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE, OAuth2ResourceOwner, OAuth2Settings,
 };
 use rocket_shared::types::{
-    Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam, QueryParam,
-    RequestSettingValue, RequestSettings,
+    Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, OAuth1Auth,
+    OAuth1PrivateKey, PathParam, QueryParam, RequestSettingValue, RequestSettings,
 };
 use serde_yaml::Value;
 use tempfile::TempDir;
@@ -78,6 +78,23 @@ const AUTH_USER_PASS: &[&str] = &["type", "username", "password"];
 const AUTH_BEARER: &[&str] = &["type", "token"];
 const AUTH_APIKEY: &[&str] = &["type", "key", "value", "placement"];
 const AUTH_NTLM: &[&str] = &["type", "username", "password", "domain"];
+const AUTH_OAUTH1: &[&str] = &[
+    "type",
+    "consumerKey",
+    "consumerSecret",
+    "accessToken",
+    "accessTokenSecret",
+    "callbackUrl",
+    "verifier",
+    "signatureMethod",
+    "privateKey",
+    "timestamp",
+    "nonce",
+    "version",
+    "realm",
+    "placement",
+    "includeBodyHash",
+];
 const AUTH_AWSV4: &[&str] = &[
     "type",
     "accessKeyId",
@@ -182,6 +199,7 @@ fn auth_keys(auth_type: &str, flow: Option<&str>) -> Option<&'static [&'static s
         ("apikey", _) => Some(AUTH_APIKEY),
         ("ntlm", _) => Some(AUTH_NTLM),
         ("awsv4", _) => Some(AUTH_AWSV4),
+        ("oauth1", _) => Some(AUTH_OAUTH1),
         ("oauth2", Some("client_credentials")) => Some(OAUTH2_CLIENT_CREDENTIALS_FLOW),
         ("oauth2", Some("resource_owner_password_credentials")) => Some(OAUTH2_PASSWORD_FLOW),
         ("oauth2", Some("authorization_code")) => Some(OAUTH2_AUTH_CODE_FLOW),
@@ -489,6 +507,28 @@ fn sample_auths() -> Vec<(&'static str, Auth)> {
             },
         ),
         (
+            "oauth1",
+            Auth::OAuth1(Box::new(OAuth1Auth {
+                consumer_key: Some("ck".into()),
+                consumer_secret: Some("cs".into()),
+                access_token: Some("at".into()),
+                access_token_secret: Some("ats".into()),
+                callback_url: Some("oob".into()),
+                verifier: Some("v".into()),
+                signature_method: Some("RSA-SHA256".into()),
+                private_key: Some(OAuth1PrivateKey {
+                    key_type: "text".into(),
+                    value: "pem".into(),
+                }),
+                timestamp: Some("1".into()),
+                nonce: Some("n".into()),
+                version: Some("1.0".into()),
+                realm: Some("r".into()),
+                placement: Some("header".into()),
+                include_body_hash: Some(true),
+            })),
+        ),
+        (
             "awsv4",
             Auth::AwsSigV4 {
                 access_key: "AKIA".into(),
@@ -606,6 +646,8 @@ fn full_request(name: &str, body: Body, auth: Auth) -> Request {
     req
 }
 
+const OAUTH1_FIXTURE: &str = "info:\n  name: Signed\n  type: http\nhttp:\n  method: GET\n  url: https://api.example.com/me\n  auth:\n    type: oauth1\n    consumerKey: ck\n    consumerSecret: cs\n    signatureMethod: HMAC-SHA1\n    placement: header\n";
+
 const GRAPHQL_FIXTURE: &str = "info:\n  name: List Users\n  type: graphql\n  seq: 3\ngraphql:\n  method: POST\n  url: https://api.example.com/graphql\n  headers:\n  - name: Accept\n    value: application/json\n  body:\n    query: '{ users { id } }'\n    variables: '{\"first\": 10}'\n  auth:\n    type: bearer\n    token: t\nsettings:\n  timeout: 1000\ndocs: GraphQL docs\n";
 
 const WEBSOCKET_FIXTURE: &str = "info:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: wss://chat.example.com/ws\n  headers:\n  - name: Origin\n    value: https://example.com\n  message:\n    type: json\n    data: '{\"hello\": true}'\nsettings:\n  timeout: 5000\n  keepAliveInterval: 30000\ndocs: WS docs\n";
@@ -722,4 +764,28 @@ fn checker_flags_known_bad_shapes() {
     );
     // Legacy folder: `name` and `type` (2). Plus none auth, legacy pkce and implicit secret (1 each).
     assert_eq!(v.0.len(), 5, "{:#?}", v.0);
+}
+
+#[test]
+fn oauth1_request_file_loads_instead_of_vanishing() {
+    let (dir, repo) = setup();
+    repo.create("api").unwrap();
+    fs::write(dir.path().join("api/signed.yml"), OAUTH1_FIXTURE).unwrap();
+
+    let tree = repo.get("api").unwrap();
+    assert_eq!(tree.root.items.len(), 1, "oauth1 request dropped from tree");
+
+    let loaded = repo.get_request("api", "signed.yml").unwrap();
+    let Auth::OAuth1(auth) = &loaded.auth else {
+        panic!("expected OAuth1 auth, got {:?}", loaded.auth);
+    };
+    assert_eq!(auth.consumer_key.as_deref(), Some("ck"));
+    assert_eq!(auth.signature_method.as_deref(), Some("HMAC-SHA1"));
+
+    // Saving keeps the oauth1 block intact.
+    repo.save_request("api", "signed.yml", &loaded).unwrap();
+    let raw = read_yaml(&dir.path().join("api/signed.yml"));
+    let auth = &raw["http"]["auth"];
+    assert_eq!(auth["type"].as_str(), Some("oauth1"));
+    assert_eq!(auth["consumerSecret"].as_str(), Some("cs"));
 }

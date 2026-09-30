@@ -219,6 +219,53 @@ pub enum Auth {
         password: String,
         domain: String,
     },
+    OAuth1(Box<OAuth1Auth>),
+}
+
+/// OAuth 1.0 configuration. Every field is optional, matching the OpenCollection `AuthOAuth1` shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuth1Auth {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier: Option<String>,
+    /// One of `HMAC-SHA1`, `HMAC-SHA256`, `HMAC-SHA512`, `RSA-SHA1`, `RSA-SHA256`,
+    /// `RSA-SHA512` or `PLAINTEXT`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_key: Option<OAuth1PrivateKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realm: Option<String>,
+    /// `header`, `query` or `body`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_body_hash: Option<bool>,
+}
+
+/// PEM private key for the RSA signature methods.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuth1PrivateKey {
+    /// `text` for an inline key, `file` for a file path.
+    #[serde(rename = "type")]
+    pub key_type: String,
+    pub value: String,
 }
 
 // ============================================================

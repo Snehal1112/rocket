@@ -440,6 +440,29 @@ auth:
 
 ---
 
+### 3.13 OAuth 1.0
+```yaml
+auth:
+  type: oauth1                 # REQUIRED; every other field is optional
+  consumerKey: string
+  consumerSecret: string
+  accessToken: string
+  accessTokenSecret: string
+  callbackUrl: string          # "oob" for out-of-band
+  verifier: string
+  signatureMethod: "HMAC-SHA1" | "HMAC-SHA256" | "HMAC-SHA512" | "RSA-SHA1" | "RSA-SHA256" | "RSA-SHA512" | "PLAINTEXT"
+  privateKey: { type: "file" | "text", value: string }   # RSA-* methods
+  timestamp: string
+  nonce: string
+  version: string              # defaults to "1.0"
+  realm: string
+  placement: "header" | "query" | "body"
+  includeBodyHash: bool
+```
+Rocket parses and persists this losslessly (`OcAuthTyped::OAuth1`, domain `Auth::OAuth1`). Request signing is not implemented in the HTTP executor yet, so the request is sent without an OAuth1 signature.
+
+---
+
 ## 4. Environment Type
 
 ```yaml

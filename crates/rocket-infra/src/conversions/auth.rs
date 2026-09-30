@@ -3,7 +3,7 @@ use rocket_shared::oauth2::{
     OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE,
     OAuth2ResourceOwner, OAuth2Settings, OAuth2TokenConfig,
 };
-use rocket_shared::types::Auth;
+use rocket_shared::types::{Auth, OAuth1Auth, OAuth1PrivateKey};
 
 impl From<OcAuth> for Auth {
     fn from(oc: OcAuth) -> Self {
@@ -41,6 +41,7 @@ impl From<OcAuthTyped> for Auth {
                 domain,
             },
             OcAuthTyped::Wsse { username, password } => Auth::Wsse { username, password },
+            OcAuthTyped::OAuth1(oc) => Auth::OAuth1(Box::new(oc.into())),
             OcAuthTyped::AwsV4 {
                 access_key_id,
                 secret_access_key,
@@ -182,6 +183,7 @@ impl From<Auth> for OcAuth {
             Auth::Wsse { username, password } => {
                 OcAuth::Typed(Box::new(OcAuthTyped::Wsse { username, password }))
             }
+            Auth::OAuth1(a) => OcAuth::Typed(Box::new(OcAuthTyped::OAuth1((*a).into()))),
             Auth::AwsSigV4 {
                 access_key,
                 secret_key,
@@ -388,5 +390,53 @@ fn domain_ro_to_oc(r: OAuth2ResourceOwner) -> OcOAuth2ResourceOwner {
     OcOAuth2ResourceOwner {
         username: r.username,
         password: r.password,
+    }
+}
+
+impl From<OcOAuth1> for OAuth1Auth {
+    fn from(v: OcOAuth1) -> Self {
+        OAuth1Auth {
+            consumer_key: v.consumer_key,
+            consumer_secret: v.consumer_secret,
+            access_token: v.access_token,
+            access_token_secret: v.access_token_secret,
+            callback_url: v.callback_url,
+            verifier: v.verifier,
+            signature_method: v.signature_method,
+            timestamp: v.timestamp,
+            nonce: v.nonce,
+            version: v.version,
+            realm: v.realm,
+            placement: v.placement,
+            include_body_hash: v.include_body_hash,
+            private_key: v.private_key.map(|k| OAuth1PrivateKey {
+                key_type: k.key_type,
+                value: k.value,
+            }),
+        }
+    }
+}
+
+impl From<OAuth1Auth> for OcOAuth1 {
+    fn from(v: OAuth1Auth) -> Self {
+        OcOAuth1 {
+            consumer_key: v.consumer_key,
+            consumer_secret: v.consumer_secret,
+            access_token: v.access_token,
+            access_token_secret: v.access_token_secret,
+            callback_url: v.callback_url,
+            verifier: v.verifier,
+            signature_method: v.signature_method,
+            timestamp: v.timestamp,
+            nonce: v.nonce,
+            version: v.version,
+            realm: v.realm,
+            placement: v.placement,
+            include_body_hash: v.include_body_hash,
+            private_key: v.private_key.map(|k| OcOAuth1PrivateKey {
+                key_type: k.key_type,
+                value: k.value,
+            }),
+        }
     }
 }

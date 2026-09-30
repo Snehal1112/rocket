@@ -401,7 +401,7 @@ async fn apply_auth(
         Auth::Inherit => {
             // Inherits from parent — resolved before execution.
         }
-        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } => {
+        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } | Auth::OAuth1(_) => {
             // Not yet implemented in HTTP executor.
         }
         Auth::AwsSigV4 {
