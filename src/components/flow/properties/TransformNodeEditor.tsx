@@ -24,7 +24,8 @@ export function TransformNodeEditor({
           Write one expression, or several lines that end with return value. The upstream value is
           available as response. console.log output appears in Last run.
         </p>
-        <div className='h-64 overflow-hidden rounded border'>
+        {/* biome-ignore lint/a11y/useSemanticElements: a fieldset is a form control group; div role=group labels the Monaco editor, which has no aria-label prop */}
+        <div role='group' aria-label='Script' className='h-64 overflow-hidden rounded border'>
           <MonacoWrapper
             value={kind.script}
             onChange={(script) => onChange({ ...kind, script })}
@@ -34,7 +35,7 @@ export function TransformNodeEditor({
           />
         </div>
         {kind.script.trim() === '' && (
-          <p role='alert' className='text-xs text-amber-600'>
+          <p role='alert' className='text-xs text-amber-600 dark:text-amber-400'>
             The script is empty, so the flow cannot be saved.
           </p>
         )}

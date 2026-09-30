@@ -31,6 +31,12 @@ describe('TransformNodeEditor', () => {
     expect(editor).toHaveAttribute('data-language', 'javascript');
   });
 
+  it('names the editor area Script for assistive tech', () => {
+    render(<TransformNodeEditor kind={kind} onChange={vi.fn()} />);
+    const group = screen.getByRole('group', { name: 'Script' });
+    expect(group).toContainElement(screen.getByLabelText('Script editor'));
+  });
+
   it('reports the whole node when the script changes', async () => {
     const onChange = vi.fn();
     render(<TransformNodeEditor kind={kind} onChange={onChange} />);
