@@ -1,3 +1,4 @@
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,10 @@ pub struct RequestOptions {
     /// Override the maximum number of redirects to follow. `None` uses the executor default (10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<u32>,
+    /// Client certificates of the active environment. The executor picks the one whose
+    /// domain matches the request URL and presents it for mutual TLS.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub client_certificates: Vec<ClientCertificate>,
 }
 
 fn default_true() -> bool {
@@ -43,6 +48,7 @@ impl Default for RequestOptions {
             timeout_ms: 30_000,
             verify_ssl: true,
             max_redirects: None,
+            client_certificates: Vec::new(),
         }
     }
 }

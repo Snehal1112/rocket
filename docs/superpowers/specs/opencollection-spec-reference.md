@@ -494,6 +494,7 @@ type: pkcs12             # REQUIRED
 pkcs12FilePath: string   # REQUIRED
 passphrase: string
 ```
+Rocket presents the first certificate whose `domain` matches the request URL (host, optional scheme and port, `*` wildcard). PKCS12 and unencrypted PEM keys work; an encrypted PEM key returns an error. A matching certificate that cannot be loaded fails the request.
 
 ---
 

@@ -18,6 +18,7 @@ use rocket_scripting::{
     context::SandboxMode, ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext,
     ScriptEngine, ScriptResult, TestResult, TestStatus,
 };
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
@@ -545,6 +546,10 @@ impl RequestExecutionService {
             body
         });
 
+        // The selected environment decides which client certificates the executor may present.
+        let mut options = input.options.clone();
+        options.client_certificates = self.environment_client_certificates(input, &vars);
+
         Ok(HttpRequest {
             method: input.method,
             url: resolved_url,
@@ -552,8 +557,27 @@ impl RequestExecutionService {
             query_params: input.query_params.clone(),
             body: resolved_body,
             auth: effective_auth,
-            options: input.options.clone(),
+            options,
         })
+    }
+
+    /// Returns the selected environment's client certificates with `{{placeholders}}` resolved.
+    /// A missing environment means no certificates, like it means no variables.
+    fn environment_client_certificates(
+        &self,
+        input: &ExecuteRequestInput,
+        vars: &std::collections::HashMap<String, String>,
+    ) -> Vec<ClientCertificate> {
+        let Some(name) = input.environment_name.as_deref() else {
+            return Vec::new();
+        };
+        let Ok(env) = self.regular_env_repo(input.collection.as_deref()).get(name) else {
+            return Vec::new();
+        };
+        env.client_certificates
+            .into_iter()
+            .map(|c| resolve_client_certificate(c, vars))
+            .collect()
     }
 
     /// Applies the persistent and in-memory side effects from a `ScriptResult`.
@@ -1708,6 +1732,36 @@ fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
     }
 }
 
+/// Resolves `{{placeholders}}` in a client certificate's domain, file paths and passphrase.
+fn resolve_client_certificate(
+    cert: ClientCertificate,
+    vars: &std::collections::HashMap<String, String>,
+) -> ClientCertificate {
+    let r = |s: String| resolve(&s, vars).output;
+    match cert {
+        ClientCertificate::Pem {
+            domain,
+            certificate_file_path,
+            private_key_file_path,
+            passphrase,
+        } => ClientCertificate::Pem {
+            domain: r(domain),
+            certificate_file_path: r(certificate_file_path),
+            private_key_file_path: r(private_key_file_path),
+            passphrase: passphrase.map(&r),
+        },
+        ClientCertificate::Pkcs12 {
+            domain,
+            pkcs12_file_path,
+            passphrase,
+        } => ClientCertificate::Pkcs12 {
+            domain: r(domain),
+            pkcs12_file_path: r(pkcs12_file_path),
+            passphrase: passphrase.map(&r),
+        },
+    }
+}
+
 /// Resolves `{{placeholders}}` in the credential fields of an auth value.
 /// The Request tab resolves auth on the frontend, but the backend-only paths
 /// (Flow, collection runner) receive the raw collection auth, so it is done here.
@@ -2806,6 +2860,70 @@ mod tests {
             .resolve_request(&input, &std::collections::HashMap::new())
             .expect("resolve_request");
         assert_eq!(resolved.url, "https://auth.local/api/v1/users");
+    }
+
+    #[tokio::test]
+    async fn resolve_request_carries_the_environment_client_certificates() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("certDir", "/certs"));
+        env.set_variable(Variable::new("p12Pass", "s3cret"));
+        env.client_certificates = vec![ClientCertificate::Pkcs12 {
+            domain: "api.example.com".into(),
+            pkcs12_file_path: "{{certDir}}/client.p12".into(),
+            passphrase: Some("{{p12Pass}}".into()),
+        }];
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        // Certificates sent by the caller are ignored: the environment is the only source.
+        let mut input = sample_input("https://api.example.com/x", Some("dev"));
+        input.options.client_certificates = vec![ClientCertificate::Pkcs12 {
+            domain: "evil.example.com".into(),
+            pkcs12_file_path: "/etc/shadow".into(),
+            passphrase: None,
+        }];
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+
+        assert_eq!(
+            resolved.options.client_certificates,
+            vec![ClientCertificate::Pkcs12 {
+                domain: "api.example.com".into(),
+                pkcs12_file_path: "/certs/client.p12".into(),
+                passphrase: Some("s3cret".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_request_has_no_client_certificates_without_an_environment() {
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(Environment::new("dev"))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let input = sample_input("https://api.example.com/x", None);
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        assert!(resolved.options.client_certificates.is_empty());
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Client certificate — PEM or PKCS12 format, discriminated by `type` field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientCertificate {
     #[serde(rename = "pem", rename_all = "camelCase")]
@@ -22,9 +22,52 @@ pub enum ClientCertificate {
     },
 }
 
+// Hand-written so a `{:?}` of a request or environment never prints a passphrase.
+impl std::fmt::Debug for ClientCertificate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redact = |p: &Option<String>| p.as_ref().map(|_| "<redacted>");
+        match self {
+            ClientCertificate::Pem {
+                domain,
+                certificate_file_path,
+                private_key_file_path,
+                passphrase,
+            } => f
+                .debug_struct("Pem")
+                .field("domain", domain)
+                .field("certificate_file_path", certificate_file_path)
+                .field("private_key_file_path", private_key_file_path)
+                .field("passphrase", &redact(passphrase))
+                .finish(),
+            ClientCertificate::Pkcs12 {
+                domain,
+                pkcs12_file_path,
+                passphrase,
+            } => f
+                .debug_struct("Pkcs12")
+                .field("domain", domain)
+                .field("pkcs12_file_path", pkcs12_file_path)
+                .field("passphrase", &redact(passphrase))
+                .finish(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_output_never_contains_the_passphrase() {
+        let cert = ClientCertificate::Pkcs12 {
+            domain: "a.example.com".into(),
+            pkcs12_file_path: "/c.p12".into(),
+            passphrase: Some("hunter2".into()),
+        };
+        let shown = format!("{cert:?}");
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert!(shown.contains("<redacted>"), "{shown}");
+    }
 
     #[test]
     fn pem_certificate_serde() {

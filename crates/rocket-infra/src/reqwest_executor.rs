@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use reqwest::{redirect, Client, Method};
 
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, OAuth1Auth};
 
@@ -226,11 +227,22 @@ impl Default for ReqwestExecutor {
 #[async_trait]
 impl HttpExecutor for ReqwestExecutor {
     async fn execute(&self, request: &HttpRequest) -> DomainResult<HttpResponse> {
-        let client = if let Some(n) = request.options.max_redirects {
-            build_client_impl(
+        // Mutual TLS: a certificate whose domain matches the URL is loaded up front, so a bad
+        // file fails the request instead of being sent without the certificate.
+        let identity = match rocket_http::client_cert::find_certificate(
+            &request.options.client_certificates,
+            &request.url,
+        ) {
+            Some(cert) => Some(load_identity(cert)?),
+            None => None,
+        };
+        let client = if identity.is_some() || request.options.max_redirects.is_some() {
+            // The shared client cache is keyed without an identity, so this gets its own client.
+            build_client_with_identity(
                 request.options.follow_redirects,
                 request.options.verify_ssl,
-                Some(n),
+                request.options.max_redirects,
+                identity,
             )?
         } else {
             self.get_or_build_client(request.options.follow_redirects, request.options.verify_ssl)?
@@ -411,17 +423,92 @@ fn build_client_impl(
     verify_ssl: bool,
     max_redirects: Option<u32>,
 ) -> DomainResult<Client> {
+    build_client_with_identity(follow_redirects, verify_ssl, max_redirects, None)
+}
+
+/// Builds a client, presenting `identity` as the TLS client certificate when there is one.
+/// Note that the identity is offered to any host a followed redirect leads to, if that host asks.
+fn build_client_with_identity(
+    follow_redirects: bool,
+    verify_ssl: bool,
+    max_redirects: Option<u32>,
+    identity: Option<reqwest::Identity>,
+) -> DomainResult<Client> {
     let redirect_policy = if follow_redirects {
         redirect::Policy::limited(max_redirects.unwrap_or(10) as usize)
     } else {
         redirect::Policy::none()
     };
 
-    Client::builder()
+    let mut builder = Client::builder()
         .redirect(redirect_policy)
-        .danger_accept_invalid_certs(!verify_ssl)
+        .danger_accept_invalid_certs(!verify_ssl);
+    if let Some(identity) = identity {
+        builder = builder.identity(identity);
+    }
+    builder
         .build()
         .map_err(|e| DomainError::Http(e.to_string()))
+}
+
+/// Reads a client certificate's files and turns them into a TLS identity.
+///
+/// The TLS backend is the platform one (native-tls), which loads PKCS12 bundles and
+/// unencrypted PEM keys. An encrypted PEM key is rejected with a hint, since it cannot be loaded.
+fn load_identity(cert: &ClientCertificate) -> DomainResult<reqwest::Identity> {
+    match cert {
+        ClientCertificate::Pkcs12 {
+            pkcs12_file_path,
+            passphrase,
+            ..
+        } => {
+            let der = read_certificate_file(pkcs12_file_path)?;
+            reqwest::Identity::from_pkcs12_der(&der, passphrase.as_deref().unwrap_or("")).map_err(
+                |e| {
+                    DomainError::InvalidInput(format!(
+                        "Cannot load PKCS12 client certificate {pkcs12_file_path}: {e}. \
+                         Check the file and its passphrase."
+                    ))
+                },
+            )
+        }
+        ClientCertificate::Pem {
+            certificate_file_path,
+            private_key_file_path,
+            ..
+        } => {
+            let cert_pem = read_certificate_file(certificate_file_path)?;
+            let key_pem = read_certificate_file(private_key_file_path)?;
+            if key_pem.windows(9).any(|w| w == b"ENCRYPTED") {
+                return Err(DomainError::InvalidInput(format!(
+                    "The private key {private_key_file_path} is encrypted, which is not supported \
+                     for PEM client certificates. Decrypt the key, or use a PKCS12 bundle."
+                )));
+            }
+            reqwest::Identity::from_pkcs8_pem(&cert_pem, &key_pem).map_err(|e| {
+                DomainError::InvalidInput(format!(
+                    "Cannot load PEM client certificate {certificate_file_path}: {e}"
+                ))
+            })
+        }
+    }
+}
+
+/// Reads a certificate file. A leading `~/` is the user's home directory.
+fn read_certificate_file(path: &str) -> DomainResult<Vec<u8>> {
+    let expanded = match path.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(|home| std::path::PathBuf::from(home).join(rest))
+            .unwrap_or_else(|| std::path::PathBuf::from(path)),
+        None => std::path::PathBuf::from(path),
+    };
+    std::fs::read(&expanded).map_err(|e| {
+        DomainError::InvalidInput(format!(
+            "Cannot read client certificate file {}: {e}",
+            expanded.display()
+        ))
+    })
 }
 
 fn map_method(method: &rocket_shared::types::HttpMethod) -> Method {
@@ -1225,7 +1312,6 @@ mod digest_tests {
     use rocket_shared::types::HttpMethod;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn digest_auth() -> Auth {
@@ -1374,5 +1460,176 @@ mod digest_tests {
         assert_eq!(seen[0].body, b"{\"a\":1}");
         assert_eq!(seen[1].body, b"{\"a\":1}");
         assert_eq!(seen[1].method.as_str(), "POST");
+    }
+}
+
+#[cfg(test)]
+mod mtls_tests {
+    use super::*;
+    use rocket_shared::types::HttpMethod;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/test-fixtures/mtls");
+
+    fn fixture(name: &str) -> String {
+        format!("{FIXTURES}/{name}")
+    }
+
+    fn p12(domain: &str, path: String, passphrase: Option<&str>) -> ClientCertificate {
+        ClientCertificate::Pkcs12 {
+            domain: domain.into(),
+            pkcs12_file_path: path,
+            passphrase: passphrase.map(String::from),
+        }
+    }
+
+    fn pem(domain: &str, key: &str) -> ClientCertificate {
+        ClientCertificate::Pem {
+            domain: domain.into(),
+            certificate_file_path: fixture("client.pem"),
+            private_key_file_path: fixture(key),
+            passphrase: None,
+        }
+    }
+
+    #[test]
+    fn loads_a_pkcs12_identity_with_its_passphrase() {
+        let cert = p12("x", fixture("client.p12"), Some("changeit"));
+        assert!(load_identity(&cert).is_ok());
+    }
+
+    #[test]
+    fn a_wrong_pkcs12_passphrase_is_an_error_that_names_the_file() {
+        let cert = p12("x", fixture("client.p12"), Some("nope"));
+        let err = load_identity(&cert).unwrap_err().to_string();
+        assert!(
+            err.contains("PKCS12") && err.contains("client.p12"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn loads_a_pem_identity() {
+        assert!(load_identity(&pem("x", "client-key.pem")).is_ok());
+    }
+
+    #[test]
+    fn an_encrypted_pem_key_is_rejected_with_a_hint() {
+        let err = load_identity(&pem("x", "client-key-encrypted.pem"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("encrypted") && err.contains("PKCS12"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_that_names_the_path() {
+        let cert = p12("x", "/no/such/client.p12".into(), None);
+        let err = load_identity(&cert).unwrap_err().to_string();
+        assert!(err.contains("/no/such/client.p12"), "{err}");
+    }
+
+    async fn ok_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn a_certificate_for_another_domain_is_not_loaded() {
+        let server = ok_server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        // The file does not exist, so loading it would fail the request.
+        req.options.client_certificates =
+            vec![p12("other.example.com", "/no/such/file.p12".into(), None)];
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+        assert_eq!(resp.status, 200);
+    }
+
+    #[tokio::test]
+    async fn a_matching_certificate_that_cannot_be_loaded_fails_the_request() {
+        let server = ok_server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.options.client_certificates = vec![p12("127.0.0.1", "/no/such/file.p12".into(), None)];
+        let err = ReqwestExecutor::new().execute(&req).await.unwrap_err();
+        assert!(err.to_string().contains("/no/such/file.p12"), "{err}");
+        // Nothing was sent, so it cannot have gone out without the certificate.
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_matching_valid_certificate_builds_a_client_and_sends_the_request() {
+        let server = ok_server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.options.client_certificates =
+            vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+        assert_eq!(resp.status, 200);
+    }
+
+    /// Starts `openssl s_server` so that a client certificate is required, then checks that a
+    /// request with the certificate gets through and one without it does not.
+    #[tokio::test]
+    #[ignore = "needs the openssl CLI; run with --ignored"]
+    async fn mutual_tls_handshake_against_openssl_s_server() {
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let mut server = std::process::Command::new("openssl")
+            .args([
+                "s_server",
+                "-accept",
+                &port.to_string(),
+                "-cert",
+                &fixture("server.pem"),
+                "-key",
+                &fixture("server-key.pem"),
+                "-Verify",
+                "1",
+                "-CAfile",
+                &fixture("client.pem"),
+                "-www",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("openssl s_server starts");
+        for _ in 0..50 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        let url = format!("https://127.0.0.1:{port}/");
+        let exec = ReqwestExecutor::new();
+
+        let mut without = HttpRequest::new(HttpMethod::Get, url.clone());
+        without.options.verify_ssl = false;
+        let denied = exec.execute(&without).await;
+
+        let mut with = HttpRequest::new(HttpMethod::Get, url);
+        with.options.verify_ssl = false;
+        with.options.client_certificates =
+            vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
+        let allowed = exec.execute(&with).await;
+
+        let mut with_pem = HttpRequest::new(HttpMethod::Get, format!("https://127.0.0.1:{port}/"));
+        with_pem.options.verify_ssl = false;
+        with_pem.options.client_certificates = vec![pem("127.0.0.1", "client-key.pem")];
+        let allowed_pem = exec.execute(&with_pem).await;
+
+        let _ = server.kill();
+        let _ = server.wait();
+        assert!(
+            denied.is_err(),
+            "server must reject a client without a certificate"
+        );
+        assert_eq!(allowed.expect("PKCS12 identity accepted").status, 200);
+        assert_eq!(allowed_pem.expect("PEM identity accepted").status, 200);
     }
 }
