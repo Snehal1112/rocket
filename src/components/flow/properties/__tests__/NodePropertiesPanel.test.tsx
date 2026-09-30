@@ -283,4 +283,22 @@ describe('Wires tab in the panel', () => {
     await userEvent.click(screen.getByRole('button', { name: /Edit wire into value/i }));
     expect(onEditWire).toHaveBeenCalledWith('w1');
   });
+
+  it('shows the label and script sections for a Transform node', () => {
+    renderPanel(node('t1', { kind: 'Transform', label: 'Pick', script: 'return 1;' }));
+    expect(screen.getByLabelText('Label')).toHaveValue('Pick');
+    expect(screen.getByText('Script')).toBeInTheDocument();
+  });
+
+  it('edits the label of a Transform node', async () => {
+    const { onChange } = renderPanel(
+      node('t1', { kind: 'Transform', label: 'Pick', script: 'return 1;' }),
+    );
+    await userEvent.type(screen.getByLabelText('Label'), 'x');
+    expect(onChange).toHaveBeenLastCalledWith({
+      kind: 'Transform',
+      label: 'Pickx',
+      script: 'return 1;',
+    });
+  });
 });

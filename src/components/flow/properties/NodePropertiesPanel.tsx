@@ -10,6 +10,7 @@ import { LastRunTab } from './LastRunTab';
 import { IfDetails, OutputDetails, SwitchDetails } from './NodeDetails';
 import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
+import { TransformNodeEditor } from './TransformNodeEditor';
 import { WaitForCallbackEditor } from './WaitForCallbackEditor';
 import { WiresTab } from './WiresTab';
 
@@ -65,8 +66,7 @@ function editorFor(
     case 'WaitForCallback':
       return <WaitForCallbackEditor kind={kind} onChange={onChange} />;
     case 'Transform':
-      // Plan 05 replaces this with the script editor.
-      return <LabelOnlyEditor kind={kind} onChange={onChange} />;
+      return <TransformNodeEditor kind={kind} onChange={onChange} />;
   }
 }
 
