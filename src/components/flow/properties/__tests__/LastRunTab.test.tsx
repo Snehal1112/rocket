@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { FlowNode, FlowNodeKind } from '@/lib/tauri-api';
+import type { FlowDebugRequest, FlowDebugResponse, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
 import { LastRunTab } from '../LastRunTab';
 
 // Monaco cannot run in jsdom. A read-only textarea stands in for it.
@@ -77,5 +78,73 @@ describe('LastRunTab status', () => {
     );
     expect(screen.getByTestId('last-run-status')).toHaveTextContent('Not taken');
     expect(screen.getByText('Its branch was not taken.')).toBeInTheDocument();
+  });
+});
+
+const baseResponse: FlowDebugResponse = {
+  status: 200,
+  statusText: 'OK',
+  durationMs: 184,
+  sizeBytes: 15,
+  headers: [{ key: 'content-type', value: 'application/json' }],
+  body: '{"token":"abc"}',
+};
+
+const exchange: FlowDebugRequest = {
+  method: 'POST',
+  url: 'https://api.example.com/login',
+  headers: [
+    { key: 'Content-Type', value: 'application/json' },
+    { key: 'Authorization', value: '[REDACTED]' },
+  ],
+  body: '{"user":"ada"}',
+  response: baseResponse,
+};
+
+describe('LastRunTab exchange', () => {
+  it('shows the response headers and a pretty body', async () => {
+    render(<LastRunTab node={request} status='success' detail={{ statusCode: 200, exchange }} />);
+    const response = screen.getByTestId('last-run-response');
+    expect(response).toHaveTextContent('content-type');
+    expect(response).toHaveTextContent('application/json');
+    expect(await screen.findByLabelText('Body viewer')).toHaveValue('{\n  "token": "abc"\n}');
+  });
+
+  it('shows a text body unchanged', async () => {
+    const html = { ...exchange, response: { ...baseResponse, body: '<h1>Hi</h1>' } };
+    render(<LastRunTab node={request} status='success' detail={{ exchange: html }} />);
+    expect(await screen.findByLabelText('Body viewer')).toHaveValue('<h1>Hi</h1>');
+  });
+
+  it('notes a truncated body', () => {
+    const cut = { ...exchange, response: { ...baseResponse, truncated: true } };
+    render(<LastRunTab node={request} status='success' detail={{ exchange: cut }} />);
+    expect(screen.getByText('Truncated at 256 KB')).toBeInTheDocument();
+  });
+
+  it('shows the request as sent when expanded', async () => {
+    render(<LastRunTab node={request} status='success' detail={{ exchange }} />);
+    expect(screen.queryByTestId('last-run-request')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Request as sent/ }));
+    const sent = screen.getByTestId('last-run-request');
+    expect(sent).toHaveTextContent('POST');
+    expect(sent).toHaveTextContent('https://api.example.com/login');
+    expect(sent).toHaveTextContent('[REDACTED]');
+    expect(sent).toHaveTextContent('{"user":"ada"}');
+  });
+
+  it('shows no exchange sections when nothing was sent', () => {
+    render(
+      <LastRunTab node={request} status='failed' detail={{ error: 'could not resolve host' }} />,
+    );
+    expect(screen.queryByTestId('last-run-response')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Request as sent/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the send error of an exchange without a response', () => {
+    const noResponse = { ...exchange, response: undefined, error: 'connection refused' };
+    render(<LastRunTab node={request} status='failed' detail={{ exchange: noResponse }} />);
+    expect(screen.queryByTestId('last-run-response')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Request as sent/ })).toBeInTheDocument();
   });
 });

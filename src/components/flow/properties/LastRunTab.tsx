@@ -1,6 +1,12 @@
+import { Check, ChevronRight, Copy } from 'lucide-react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { formatOutputValue } from '@/lib/flow-output';
 import { msToSecondsLabel } from '@/lib/flow-repeat';
-import type { FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
+import type { FlowDebugHeader, FlowDebugRequest, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 
 interface LastRunTabProps {
@@ -59,6 +65,119 @@ function skipText(detail?: FlowNodeDetail): string {
     : 'An earlier node failed.';
 }
 
+const MonacoWrapper = lazy(() =>
+  import('@/components/editor/MonacoWrapper').then((m) => ({ default: m.MonacoWrapper })),
+);
+
+const COPIED_MS = 1500;
+
+// Copies text and shows a check for a moment, like the Output card.
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = () => {
+    navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), COPIED_MS);
+      },
+      (err) => console.warn('Copy failed', err),
+    );
+  };
+  return (
+    <Button
+      type='button'
+      variant='ghost'
+      size='icon'
+      className='h-5 w-5'
+      aria-label={label}
+      title={label}
+      onClick={copy}
+    >
+      {copied ? <Check className='h-3 w-3' /> : <Copy className='h-3 w-3' />}
+    </Button>
+  );
+}
+
+function HeadersTable({ headers }: { headers: FlowDebugHeader[] }) {
+  if (headers.length === 0) return <p className='text-muted-foreground'>No headers.</p>;
+  return (
+    <Table>
+      <TableBody>
+        {headers.map((h, i) => (
+          // Headers can repeat, so the index keeps keys unique.
+          // biome-ignore lint/suspicious/noArrayIndexKey: header order is stable within a record.
+          <TableRow key={`${h.key}-${i}`}>
+            <TableCell className='w-1/3 py-1 font-mono text-[11px]'>{h.key}</TableCell>
+            <TableCell className='select-text py-1 font-mono text-[11px] [overflow-wrap:anywhere]'>
+              {h.value}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function BodyViewer({ body }: { body: string }) {
+  return (
+    <div className='h-48 overflow-hidden rounded-md border'>
+      <Suspense fallback={<div className='p-2 text-muted-foreground'>Loading…</div>}>
+        <MonacoWrapper value={formatOutputValue(body)} readOnly height='100%' language='json' />
+      </Suspense>
+    </div>
+  );
+}
+
+function ExchangeSections({ exchange }: { exchange: FlowDebugRequest }) {
+  const [sentOpen, setSentOpen] = useState(false);
+  const response = exchange.response;
+  return (
+    <div className='space-y-3'>
+      {response && (
+        <section data-testid='last-run-response' className='space-y-1.5'>
+          <div className='flex items-center justify-between'>
+            <h4 className='font-medium'>
+              Response · {response.status} {response.statusText}
+            </h4>
+            <CopyButton text={response.body} label='Copy response body' />
+          </div>
+          <HeadersTable headers={response.headers} />
+          <BodyViewer body={response.body} />
+          {response.truncated && <p className='text-muted-foreground'>Truncated at 256 KB</p>}
+        </section>
+      )}
+      <Collapsible open={sentOpen} onOpenChange={setSentOpen}>
+        <CollapsibleTrigger asChild>
+          <Button type='button' variant='ghost' size='sm' className='h-6 px-1 text-xs'>
+            <ChevronRight
+              className={
+                sentOpen ? 'h-3 w-3 rotate-90 transition-transform' : 'h-3 w-3 transition-transform'
+              }
+            />
+            Request as sent
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <section data-testid='last-run-request' className='mt-1.5 space-y-1.5'>
+            <p className='select-text font-mono text-[11px] [overflow-wrap:anywhere]'>
+              {exchange.method} {exchange.url}
+            </p>
+            <HeadersTable headers={exchange.headers} />
+            {exchange.body !== undefined && exchange.body !== '' && (
+              <pre className='max-h-48 select-text overflow-auto whitespace-pre-wrap rounded-md border p-2 font-mono text-[11px]'>
+                {exchange.body}
+              </pre>
+            )}
+          </section>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
 export function LastRunTab({ node, status, detail }: LastRunTabProps) {
   if (status === 'idle') {
     return (
@@ -90,6 +209,8 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
         </div>
       )}
       {status === 'skipped' && <p className='text-muted-foreground'>{skipText(detail)}</p>}
+      {(node.kind.kind === 'Request' || node.kind.kind === 'WaitForCallback') &&
+        detail?.exchange && <ExchangeSections exchange={detail.exchange} />}
     </div>
   );
 }
