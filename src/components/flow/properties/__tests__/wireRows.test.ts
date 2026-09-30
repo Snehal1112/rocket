@@ -44,6 +44,11 @@ describe('scriptPreview', () => {
     expect(scriptPreview('   ')).toBeNull();
     expect(scriptPreview('')).toBeNull();
   });
+
+  it('skips blank lines to find the first non-blank line', () => {
+    expect(scriptPreview('\n\nconst x = 1;')).toBe('const x = 1;');
+    expect(scriptPreview('  \n  return t;')).toBe('return t;');
+  });
 });
 
 describe('incomingRows', () => {
@@ -163,9 +168,143 @@ describe('outgoingGroups', () => {
     const groups = outgoingGroups(login, [login, users], edges);
     expect(groups).toEqual([
       {
+        handle: null,
         exit: null,
         rows: [expect.objectContaining({ edgeId: 'e1', otherLabel: 'List Users', field: 'URL' })],
       },
     ]);
+  });
+
+  it('separates Switch cases with the same label into different groups', () => {
+    const switchNode = n('sw', {
+      kind: 'Switch',
+      label: 'Route',
+      value: 'response.status',
+      cases: [
+        { id: 'c1', label: 'OK', matches: '200' },
+        { id: 'c2', label: 'OK', matches: '201' },
+      ],
+    });
+    const edges = [
+      edge({
+        id: 'e1',
+        sourceNodeId: 'sw',
+        targetNodeId: 'out',
+        targetField: 'value',
+        sourceHandle: 'case:c1',
+        expression: 'body',
+      }),
+      edge({
+        id: 'e2',
+        sourceNodeId: 'sw',
+        targetNodeId: 'out',
+        targetField: 'input',
+        sourceHandle: 'case:c2',
+        expression: 'body',
+      }),
+    ];
+    const groups = outgoingGroups(switchNode, [switchNode, out], edges);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].handle).toBe('case:c1');
+    expect(groups[1].handle).toBe('case:c2');
+    expect(groups[0].exit).toBe('OK');
+    expect(groups[1].exit).toBe('OK');
+  });
+
+  it('does not merge a case labelled default with the real default exit', () => {
+    const switchNode = n('sw', {
+      kind: 'Switch',
+      label: 'Route',
+      value: 'response.status',
+      cases: [{ id: 'c1', label: 'default', matches: '404' }],
+    });
+    const edges = [
+      edge({
+        id: 'e1',
+        sourceNodeId: 'sw',
+        targetNodeId: 'out',
+        targetField: 'value',
+        sourceHandle: 'case:c1',
+      }),
+      edge({
+        id: 'e2',
+        sourceNodeId: 'sw',
+        targetNodeId: 'out',
+        targetField: 'input',
+        sourceHandle: 'default',
+      }),
+    ];
+    const groups = outgoingGroups(switchNode, [switchNode, out], edges);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].handle).toBe('case:c1');
+    expect(groups[1].handle).toBe('default');
+  });
+
+  it('shows deleted case and orders it before default', () => {
+    const switchNode = n('sw', {
+      kind: 'Switch',
+      label: 'Route',
+      value: 'response.status',
+      cases: [{ id: 'c1', label: 'OK', matches: '200' }],
+    });
+    const edges = [
+      edge({
+        id: 'e1',
+        sourceNodeId: 'sw',
+        targetNodeId: 'out',
+        targetField: 'value',
+        sourceHandle: 'case:deleted-id',
+      }),
+      edge({
+        id: 'e2',
+        sourceNodeId: 'sw',
+        targetNodeId: 'out',
+        targetField: 'input',
+        sourceHandle: 'default',
+      }),
+    ];
+    const groups = outgoingGroups(switchNode, [switchNode, out], edges);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].exit).toBe('(deleted case)');
+    expect(groups[1].exit).toBe('default');
+  });
+
+  it('marks a missing target node in outgoing rows', () => {
+    const edges = [
+      edge({
+        id: 'e1',
+        sourceNodeId: 'check',
+        targetNodeId: 'missing',
+        targetField: 'url',
+        sourceHandle: 'true',
+      }),
+    ];
+    const groups = outgoingGroups(check, [check], edges);
+    expect(groups[0].rows[0]).toEqual(
+      expect.objectContaining({
+        otherLabel: null,
+        editable: false,
+      }),
+    );
+  });
+
+  it('marks not-taken wires in outgoing groups', () => {
+    const edges = [
+      edge({
+        id: 'e1',
+        sourceNodeId: 'check',
+        targetNodeId: 'users',
+        targetField: 'trigger',
+        sourceHandle: 'true',
+      }),
+    ];
+    const groups = outgoingGroups(
+      check,
+      [check, users],
+      edges,
+      { check: 'success' },
+      { check: { branch: 'false' } },
+    );
+    expect(groups[0].rows[0].notTaken).toBe(true);
   });
 });

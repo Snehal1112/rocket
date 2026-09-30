@@ -1,4 +1,9 @@
-import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
+import {
+  caseIdFromHandle,
+  DEFAULT_HANDLE,
+  RESULT_HANDLE,
+  TRIGGER_HANDLE,
+} from '@/lib/flow-handles';
 import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { edgeRunState, exitLabel } from '../flowExits';
@@ -15,6 +20,7 @@ export interface WireRow {
 }
 
 export interface OutgoingGroup {
+  handle: string | null;
   exit: string | null;
   rows: WireRow[];
 }
@@ -47,11 +53,20 @@ export function scriptPreview(expression: string): string | null {
   return firstLine.length > PREVIEW_MAX ? `${firstLine.slice(0, PREVIEW_MAX)}…` : firstLine;
 }
 
-// The exit name of an edge's source, or null for the default exit.
-function exitName(edge: FlowEdge, source: FlowNode | undefined): string | null {
+// The exit handle of an edge, or null for the default exit.
+function exitHandle(edge: FlowEdge): string | null {
   const handle = edge.sourceHandle ?? RESULT_HANDLE;
-  if (handle === RESULT_HANDLE) return null;
-  return (source && exitLabel(source.kind, handle)) ?? handle;
+  return handle === RESULT_HANDLE ? null : handle;
+}
+
+// Display label for an exit handle, handling deleted cases.
+function exitDisplayLabel(source: FlowNode | undefined, handle: string): string {
+  if (!source) return handle;
+  const label = exitLabel(source.kind, handle);
+  if (label) return label;
+  // Handle is not recognized. Check if it's a deleted case.
+  if (handle.startsWith('case:')) return '(deleted case)';
+  return handle;
 }
 
 function isNotTaken(
@@ -79,12 +94,14 @@ function row(
 ): WireRow {
   const isTrigger = edge.targetField === TRIGGER_HANDLE;
   const preview = isTrigger ? null : scriptPreview(edge.expression);
+  const handle = exitHandle(edge);
+  const exitLabel = handle === null ? null : exitDisplayLabel(source, handle);
   return {
     edgeId: edge.id,
     field: fieldLabel(edge.targetField),
     otherNodeId: other?.id ?? '',
     otherLabel: other?.kind.label ?? null,
-    exit: exitName(edge, source),
+    exit: exitLabel,
     preview,
     // A Run when wire has no script, and a wire to a missing node cannot be edited.
     editable: !isTrigger && other !== undefined,
@@ -116,26 +133,44 @@ export function outgoingGroups(
   nodeDetail?: Record<string, FlowNodeDetail>,
 ): OutgoingGroup[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const groups: OutgoingGroup[] = [];
+  const groups: Map<string | null, OutgoingGroup> = new Map();
   for (const e of edges.filter((edge) => edge.sourceNodeId === node.id)) {
     const r = row(e, byId.get(e.targetNodeId), node, nodeStatus, nodeDetail);
-    const group = groups.find((g) => g.exit === r.exit);
-    if (group) group.rows.push(r);
-    else groups.push({ exit: r.exit, rows: [r] });
+    const handle = exitHandle(e);
+    const groupKey = handle === null ? '__result__' : handle;
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        handle,
+        exit: r.exit,
+        rows: [],
+      });
+    }
+    const group = groups.get(groupKey);
+    if (group) {
+      group.rows.push(r);
+    }
   }
-  return groups.sort((a, b) => exitOrder(node, a.exit) - exitOrder(node, b.exit));
+  return Array.from(groups.values()).sort(
+    (a, b) => exitOrder(node, a.handle) - exitOrder(node, b.handle),
+  );
 }
 
-// Orders exits as the node draws them: result, true, false, cases in order, default.
-function exitOrder(node: FlowNode, exit: string | null): number {
-  if (exit === null) return 0;
+// Orders exits as the node draws them: result, true, false, cases in order, deleted cases, default.
+function exitOrder(node: FlowNode, handle: string | null): number {
+  if (handle === null) return 0;
   const kind = node.kind;
-  if (kind.kind === 'If') return exit === 'true' ? 1 : 2;
+  if (kind.kind === 'If') {
+    if (handle === 'true') return 1;
+    if (handle === 'false') return 2;
+    return 999;
+  }
   if (kind.kind === 'Switch') {
-    const index = kind.cases.findIndex(
-      (c, i) => exitLabel(kind, `case:${c.id}`) === exit || `Case ${i + 1}` === exit,
-    );
-    return index < 0 ? kind.cases.length + 1 : index + 1;
+    if (handle === DEFAULT_HANDLE) return kind.cases.length + 2;
+    const caseId = caseIdFromHandle(handle);
+    if (!caseId) return 999;
+    const index = kind.cases.findIndex((c) => c.id === caseId);
+    if (index < 0) return kind.cases.length + 1; // Deleted case.
+    return index + 1;
   }
   return 1;
 }
