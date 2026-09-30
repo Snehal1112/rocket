@@ -364,4 +364,24 @@ describe('Transform wiring', () => {
   it('still refuses an input wire into a Request', () => {
     expect(isValidFlowConnection(conn('inp', 'result', 'req', 'input'), all, [])).toBe(false);
   });
+
+  it('does not prompt for an expression on a Transform input wire', () => {
+    const edge = buildEdgeFromConnection(
+      { source: 'req', sourceHandle: 'result', target: 'tf', targetHandle: 'input' },
+      req,
+    );
+    expect(edge).not.toBeNull();
+    expect(edge?.expression).toBe('');
+    expect(edge && shouldPromptForExpression(edge)).toBe(false);
+  });
+
+  it('omits the result exit on a Transform wire', () => {
+    const edge = buildEdgeFromConnection(
+      { source: 'tf', sourceHandle: 'result', target: 'out', targetHandle: 'value' },
+      transform,
+    );
+    expect(edge).not.toBeNull();
+    expect(edge?.sourceHandle).toBeUndefined();
+    expect(edge?.expression).toBe('response.body');
+  });
 });
