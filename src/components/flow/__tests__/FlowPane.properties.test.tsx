@@ -325,4 +325,22 @@ describe('FlowPane node properties panel', () => {
     expect(faded[0]).toHaveTextContent('User');
     expect(faded[0]).toHaveTextContent('not taken');
   });
+
+  it('selects the wired node from the Wires tab and stays on Wires', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    await userEvent.click(screen.getByRole('tab', { name: 'Wires' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Select node User' }));
+    expect(screen.getByTestId('node-properties-panel')).toHaveTextContent('Input · User');
+    expect(screen.getByRole('tab', { name: 'Wires' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('wires-outgoing')).toBeInTheDocument();
+  });
+
+  it('opens the wire script dialog from the Wires tab pencil', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    await userEvent.click(screen.getByRole('tab', { name: 'Wires' }));
+    await userEvent.click(screen.getByRole('button', { name: /Edit wire into/i }));
+    expect(await screen.findByText('Value from source')).toBeInTheDocument();
+  });
 });
