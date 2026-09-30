@@ -103,3 +103,23 @@ describe('Wait for callback exits', () => {
     ).toBe('neutral');
   });
 });
+
+describe('edgeRunState for a Transform source', () => {
+  const transform: FlowNode = {
+    id: 'tf',
+    position: { x: 0, y: 0 },
+    kind: { kind: 'Transform', label: 'T', script: 'return 1;' },
+  };
+  const edge: FlowEdge = {
+    id: 'e1',
+    sourceNodeId: 'tf',
+    targetNodeId: 'out',
+    targetField: 'value',
+    expression: '',
+  };
+
+  it('is always neutral, even when a branch is reported', () => {
+    expect(edgeRunState(edge, transform, 'success', 'true')).toBe('neutral');
+    expect(edgeRunState(edge, transform, 'success', 'result')).toBe('neutral');
+  });
+});
