@@ -1,5 +1,5 @@
 import { defaultKeymap } from '@codemirror/commands';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Prec } from '@codemirror/state';
 import { placeholder as cmPlaceholder, EditorView, keymap, tooltips } from '@codemirror/view';
 import { type ReactPortal, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -137,16 +137,19 @@ export function SingleLineEditor({
     }
 
     if (onSubmit) {
+      // High precedence so the default Enter (insert newline) does not swallow it.
       exts.push(
-        keymap.of([
-          {
-            key: 'Enter',
-            run: () => {
-              onSubmitRef.current?.();
-              return true;
+        Prec.high(
+          keymap.of([
+            {
+              key: 'Enter',
+              run: () => {
+                onSubmitRef.current?.();
+                return true;
+              },
             },
-          },
-        ]),
+          ]),
+        ),
       );
     }
 

@@ -124,15 +124,13 @@ export function WireScriptDialog({
             </Suspense>
           </div>
         ) : (
-          <div className='rounded border px-2 py-1.5'>
-            <SingleLineEditor
-              aria-label='Wire script'
-              value={expression}
-              onChange={setExpression}
-              onSubmit={handleSave}
-              placeholder='response.body.token'
-            />
-          </div>
+          <SingleLineEditor
+            aria-label='Wire script'
+            value={expression}
+            onChange={setExpression}
+            onSubmit={handleSave}
+            placeholder='response.body.token'
+          />
         )}
         {isHeadersTarget && (
           <div className='flex justify-end'>
