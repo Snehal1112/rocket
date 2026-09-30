@@ -81,6 +81,7 @@ fn kind_name(kind: &FlowNodeKind) -> &'static str {
         FlowNodeKind::If { .. } => "If",
         FlowNodeKind::Switch { .. } => "Switch",
         FlowNodeKind::WaitForCallback { .. } => "Wait for callback",
+        FlowNodeKind::Transform { .. } => "Transform",
     }
 }
 
@@ -169,7 +170,8 @@ fn source_handle_exists(source: &FlowNodeKind, source_handle: &str) -> bool {
     match source {
         FlowNodeKind::Request { .. }
         | FlowNodeKind::Input { .. }
-        | FlowNodeKind::WaitForCallback { .. } => source_handle == handle::RESULT,
+        | FlowNodeKind::WaitForCallback { .. }
+        | FlowNodeKind::Transform { .. } => source_handle == handle::RESULT,
         FlowNodeKind::Output { .. } => false,
         FlowNodeKind::If { .. } => source_handle == handle::TRUE || source_handle == handle::FALSE,
         FlowNodeKind::Switch { cases, .. } => {

@@ -58,6 +58,12 @@ pub enum FlowNodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         accept_when: Option<String>,
     },
+    /// Reshapes its single input with a script. The script reads `response`
+    /// (the upstream value, response-shaped) and returns the node's output.
+    Transform {
+        label: String,
+        script: String,
+    },
 }
 
 // Keeps `debug: false` out of saved files, so old flows round-trip unchanged.
@@ -73,6 +79,9 @@ pub const CALLBACK_MAX_TIMEOUT_MS: u64 = 3_600_000;
 /// Prefix of the run-scoped variable that holds a callback URL:
 /// `callback.<name>`.
 pub const CALLBACK_VAR_PREFIX: &str = "callback.";
+
+/// The script a new Transform node starts with.
+pub const TRANSFORM_DEFAULT_SCRIPT: &str = "return response.body;";
 
 /// One named case of a `Switch` node. Edges address a case by `id`, so
 /// renaming its `label` never breaks a wire.
@@ -297,6 +306,24 @@ mod tests {
         assert!(json.contains("\"kind\":\"Switch\""), "got: {json}");
         let back: FlowNodeKind = serde_json::from_str(&json).expect("deserialize FlowNodeKind");
         assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn flow_node_kind_transform_tagged_roundtrip() {
+        let kind = FlowNodeKind::Transform {
+            label: "Pick token".to_string(),
+            script: "return response.body.token;".to_string(),
+        };
+        let json = serde_json::to_string(&kind).expect("serialize FlowNodeKind");
+        assert!(json.contains("\"kind\":\"Transform\""), "got: {json}");
+        assert!(json.contains("\"script\""), "got: {json}");
+        let back: FlowNodeKind = serde_json::from_str(&json).expect("deserialize FlowNodeKind");
+        assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn transform_default_script_returns_the_body() {
+        assert_eq!(TRANSFORM_DEFAULT_SCRIPT, "return response.body;");
     }
 
     #[test]
