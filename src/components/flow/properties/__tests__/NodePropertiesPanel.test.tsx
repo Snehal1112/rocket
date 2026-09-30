@@ -51,6 +51,18 @@ function renderPanel(n: FlowNode, extra: Partial<Parameters<typeof NodePropertie
 }
 
 describe('NodePropertiesPanel', () => {
+  it('asks for the Last run tab when it is clicked', async () => {
+    const { onTabChange } = renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Last run' }));
+    expect(onTabChange).toHaveBeenCalledWith('last-run');
+  });
+
+  it('renders the Last run tab when it is active', () => {
+    renderPanel(node('o1', { kind: 'Output', label: 'Out' }), { activeTab: 'last-run' });
+    expect(screen.getByRole('tab', { name: 'Last run' })).toHaveAttribute('data-state', 'active');
+    expect(screen.getByText('Not run yet. Run the flow to see results here.')).toBeInTheDocument();
+  });
+
   it('shows a Settings tab holding the editors', () => {
     renderPanel(node('o1', { kind: 'Output', label: 'Out' }));
     expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('data-state', 'active');

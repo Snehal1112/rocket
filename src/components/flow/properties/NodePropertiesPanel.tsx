@@ -6,6 +6,7 @@ import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tau
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
+import { LastRunTab } from './LastRunTab';
 import { IfDetails, OutputDetails, SwitchDetails } from './NodeDetails';
 import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
@@ -70,6 +71,8 @@ export function NodePropertiesPanel({
   edges,
   nodes,
   collection,
+  status,
+  detail,
   saveError,
   activeTab,
   onTabChange,
@@ -176,6 +179,9 @@ export function NodePropertiesPanel({
           <TabsTrigger value='settings' className='text-xs'>
             Settings
           </TabsTrigger>
+          <TabsTrigger value='last-run' className='text-xs'>
+            Last run
+          </TabsTrigger>
         </TabsList>
         <TabsContent value='settings' className='min-h-0 flex-1 overflow-y-auto p-3'>
           <div key={node.id} className='space-y-3'>
@@ -191,6 +197,9 @@ export function NodePropertiesPanel({
               {editorFor(node, edges, nodes, collection, onChange)}
             </PanelFocusProvider>
           </div>
+        </TabsContent>
+        <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
+          <LastRunTab node={node} status={status} detail={detail} />
         </TabsContent>
       </Tabs>
     </aside>
