@@ -7,7 +7,7 @@ use std::time::Duration;
 use rocket_flow::FlowNode;
 use rocket_http::HttpResponse;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::FlowLogEntry;
+use rocket_shared::events::{FlowDebugRequest, FlowLogEntry};
 use rocket_shared::types::Header;
 use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 
@@ -68,6 +68,7 @@ impl FlowExecutionService {
         accept_when: Option<&str>,
         secret_values: &HashSet<String>,
         logs: &mut Vec<FlowLogEntry>,
+        exchange: &mut Option<FlowDebugRequest>,
         ctx: &mut NodeRunContext,
         callbacks: &mut RunCallbacks,
     ) -> DomainResult<ExecutedNode> {
@@ -126,6 +127,11 @@ impl FlowExecutionService {
                         }
                     }
                     let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    *exchange = Some(crate::flow_debug::callback_exchange(
+                        &call,
+                        duration_ms,
+                        secret_values,
+                    ));
                     return Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(
                         callback_output(&call, duration_ms),
                     ))));

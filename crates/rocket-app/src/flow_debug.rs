@@ -111,14 +111,12 @@ fn body_text(body: &Body, secret_values: &HashSet<String>) -> Option<String> {
             .map(|c| redact_secrets(c, secret_values)),
     }
 }
-// Used by the step recording in Task 2.
+
 /// The largest response body an exchange record keeps, in bytes.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const EXCHANGE_BODY_LIMIT: usize = 262_144;
 
 /// Cuts the response body to `EXCHANGE_BODY_LIMIT` bytes at a UTF-8
 /// boundary and marks the record as truncated.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn cap_exchange(mut record: FlowDebugRequest) -> FlowDebugRequest {
     if let Some(response) = record.response.as_mut() {
         if response.body.len() > EXCHANGE_BODY_LIMIT {
@@ -136,7 +134,6 @@ pub(crate) fn cap_exchange(mut record: FlowDebugRequest) -> FlowDebugRequest {
 /// The record of an accepted callback. The call itself is the response,
 /// so a reader sees what arrived; the request side holds its method and
 /// path.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn callback_exchange(
     call: &crate::callback_listener::ReceivedCall,
     duration_ms: u64,
@@ -513,5 +510,22 @@ mod tests {
         };
         assert_eq!(value("authorization").as_deref(), Some("••••••"));
         assert_eq!(value("x-note").as_deref(), Some("••••••"));
+    }
+
+    #[test]
+    fn callback_exchange_masks_a_secret_in_the_query_plain_or_encoded() {
+        let secret = "p@ss word é1";
+        let call = crate::callback_listener::ReceivedCall {
+            method: "GET".into(),
+            path: "/cb/abc".into(),
+            query: vec![
+                ("plain".into(), secret.into()),
+                ("enc".into(), "p%40ss%20word%20%C3%A91".into()),
+            ],
+            headers: Vec::new(),
+            body: String::new(),
+        };
+        let record = callback_exchange(&call, 1, &secrets(&[secret]));
+        assert_eq!(record.url, "/cb/abc?plain=••••••&enc=••••••");
     }
 }

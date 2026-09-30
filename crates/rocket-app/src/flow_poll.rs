@@ -8,7 +8,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{FlowDebugRequest, FlowLogEntry};
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
-use crate::flow_debug::build_debug_request;
+use crate::flow_debug::{build_debug_request, cap_exchange};
 use crate::flow_execution_service::{
     to_flow_logs, CapturedOutput, ExecutedNode, FlowCoercion, FlowExecutionService, NodeRunContext,
     RunFlowInput,
@@ -55,6 +55,7 @@ impl FlowExecutionService {
         debug_on: bool,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
+        exchange: &mut Option<FlowDebugRequest>,
         poll_stats: &mut Option<FailedPollStats>,
         ctx: &mut NodeRunContext,
     ) -> DomainResult<ExecutedNode> {
@@ -89,16 +90,19 @@ impl FlowExecutionService {
             let result = exec
                 .execute_capturing(attempt_input, external_secrets, &mut sent)
                 .await;
-            if debug_on {
-                if let Some(sent) = &sent {
-                    let error = result.as_ref().err().map(|e| e.to_string());
-                    *debug = Some(build_debug_request(
-                        sent,
-                        result.as_ref().ok().map(|o| &o.response),
-                        error.as_deref(),
-                        secret_values,
-                    ));
+            // Each attempt overwrites the record, so the step keeps the last one.
+            if let Some(sent) = &sent {
+                let error = result.as_ref().err().map(|e| e.to_string());
+                let record = build_debug_request(
+                    sent,
+                    result.as_ref().ok().map(|o| &o.response),
+                    error.as_deref(),
+                    secret_values,
+                );
+                if debug_on {
+                    *debug = Some(record.clone());
                 }
+                *exchange = Some(cap_exchange(record));
             }
             // A send that got no response is not retried. A stat set by an
             // earlier attempt stays, with this attempt counted.

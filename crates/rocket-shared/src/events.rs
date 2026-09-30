@@ -259,7 +259,7 @@ pub enum DomainEvent {
         /// meaningful duration (Input/Output nodes).
         duration_ms: Option<u64>,
         error: Option<String>,
-        /// The node's captured output value for `Output` nodes, or the
+        /// The node's captured output value for Output and Input nodes, or the
         /// received method (e.g. `POST`) for a succeeded Wait for callback
         /// node. `None` for every other node.
         value: Option<String>,

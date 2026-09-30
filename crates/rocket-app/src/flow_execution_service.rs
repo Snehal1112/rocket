@@ -12,7 +12,7 @@ use crate::execution_service::{
     ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
-use crate::flow_debug::build_debug_request;
+use crate::flow_debug::{build_debug_request, cap_exchange};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::runner_sequence::{build_step_input, RunItem};
 
@@ -573,9 +573,9 @@ pub struct FlowStepResult {
     pub status_code: Option<u16>,
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
-    /// The node's captured output value for `Output` nodes, or the received
-    /// method (e.g. `POST`) for a succeeded Wait for callback node. `None`
-    /// for every other node.
+    /// The node's captured output value for Output and Input nodes, or the
+    /// received method (e.g. `POST`) for a succeeded Wait for callback node.
+    /// `None` for every other node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     /// Set only when `status` is `Skipped`.
@@ -593,6 +593,11 @@ pub struct FlowStepResult {
     /// How many times a repeat-until Request node sent its request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempts: Option<u32>,
+    /// The request this step sent and its response, masked and size-capped.
+    /// Set for every Request node that sent and for an accepted Wait for
+    /// callback, whatever the Debug mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exchange: Option<FlowDebugRequest>,
 }
 
 /// Builds the `FlowStepCompleted` event for one recorded step, so the live
@@ -610,7 +615,7 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         branch: step.branch.clone(),
         logs: step.logs.clone(),
         debug_request: step.debug_request.clone().map(Box::new),
-        exchange: None,
+        exchange: step.exchange.clone().map(Box::new),
         attempts: step.attempts,
     }
 }
@@ -843,6 +848,7 @@ impl FlowExecutionService {
                     let node_opt = nodes_by_id.get(node_id.as_str()).copied();
                     let mut node_logs = Vec::new();
                     let mut node_debug = None;
+                    let mut node_exchange = None;
                     let mut node_poll_stats = None;
                     let mut ctx = NodeRunContext {
                         run_id: run_id.clone(),
@@ -860,6 +866,7 @@ impl FlowExecutionService {
                                 &external_secrets,
                                 &mut node_logs,
                                 &mut node_debug,
+                                &mut node_exchange,
                                 &mut node_poll_stats,
                                 &mut ctx,
                                 &mut callbacks,
@@ -881,6 +888,7 @@ impl FlowExecutionService {
                     let step = FlowStepResult {
                         logs: node_logs,
                         debug_request: node_debug,
+                        exchange: node_exchange,
                         ..step
                     };
                     // A failed poll still shows its last response (§6.3).
@@ -987,8 +995,9 @@ impl FlowExecutionService {
     /// non-trigger edges `decide_fate` selected. Returns the node's captured
     /// output and chosen exit, or an error if the node itself failed.
     // The node needs the run's inputs, captured outputs and secrets, and
-    // `logs` collects the console output, `debug` the debug record and
-    // `poll_stats` how a failed poll went.
+    // `logs` collects the console output, `debug` the debug record,
+    // `exchange` the capped exchange record and `poll_stats` how a failed
+    // poll went.
     #[allow(clippy::too_many_arguments)]
     async fn execute_node(
         &self,
@@ -1000,6 +1009,7 @@ impl FlowExecutionService {
         external_secrets: &HashMap<String, String>,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
+        exchange: &mut Option<FlowDebugRequest>,
         poll_stats: &mut Option<crate::flow_poll::FailedPollStats>,
         ctx: &mut NodeRunContext,
         callbacks: &mut crate::flow_callbacks::RunCallbacks,
@@ -1104,6 +1114,7 @@ impl FlowExecutionService {
                             *debug_on,
                             logs,
                             debug,
+                            exchange,
                             poll_stats,
                             ctx,
                         )
@@ -1114,16 +1125,18 @@ impl FlowExecutionService {
                 let result = exec
                     .execute_capturing(request_input, external_secrets, &mut sent)
                     .await;
-                if *debug_on {
-                    if let Some(sent) = &sent {
-                        let error = result.as_ref().err().map(|e| e.to_string());
-                        *debug = Some(build_debug_request(
-                            sent,
-                            result.as_ref().ok().map(|o| &o.response),
-                            error.as_deref(),
-                            &secret_values,
-                        ));
+                if let Some(sent) = &sent {
+                    let error = result.as_ref().err().map(|e| e.to_string());
+                    let record = build_debug_request(
+                        sent,
+                        result.as_ref().ok().map(|o| &o.response),
+                        error.as_deref(),
+                        &secret_values,
+                    );
+                    if *debug_on {
+                        *debug = Some(record.clone());
                     }
+                    *exchange = Some(cap_exchange(record));
                 }
                 let output = result?;
                 logs.extend(to_flow_logs(output.console_entries.clone()));
@@ -1197,6 +1210,7 @@ impl FlowExecutionService {
                     accept_when.as_deref(),
                     &secret_values,
                     logs,
+                    exchange,
                     ctx,
                     callbacks,
                 )
@@ -1269,6 +1283,7 @@ fn result_to_step(
         logs: Vec::new(),
         debug_request: None,
         attempts: None,
+        exchange: None,
     };
     match result {
         Ok(executed) if is_routing => FlowStepResult {
@@ -1312,9 +1327,12 @@ fn result_to_step(
             output: CapturedOutput::Value(v),
             ..
         }) => {
-            let is_output = matches!(kind, Some(FlowNodeKind::Output { .. }));
+            let reports_value = matches!(
+                kind,
+                Some(FlowNodeKind::Output { .. }) | Some(FlowNodeKind::Input { .. })
+            );
             FlowStepResult {
-                value: is_output.then(|| v.data().to_string()),
+                value: reports_value.then(|| v.data().to_string()),
                 ..base
             }
         }
@@ -1335,6 +1353,7 @@ fn skipped_step(node_id: &str, reason: FlowSkipReason) -> FlowStepResult {
         logs: Vec::new(),
         debug_request: None,
         attempts: None,
+        exchange: None,
     }
 }
 
@@ -1351,6 +1370,7 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
         logs: Vec::new(),
         debug_request: None,
         attempts: None,
+        exchange: None,
     }
 }
 
@@ -2402,7 +2422,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_run_reports_the_output_nodes_captured_value_but_not_the_input_nodes() {
+    async fn a_run_reports_the_captured_value_of_output_and_input_nodes() {
         let service = service_with_flow(linear_flow());
         let exec = service_with_engine(
             FakeCollectionRepo::new(),
@@ -2429,9 +2449,9 @@ mod tests {
             "the Output node must report its captured value"
         );
         assert_eq!(
-            step_for("a").value,
-            None,
-            "an Input node must never report a value, only Output nodes do"
+            step_for("a").value.as_deref(),
+            Some("bob"),
+            "an Input node reports its resolved value"
         );
     }
 
@@ -3689,6 +3709,7 @@ mod tests {
             branch: None,
             debug_request: None,
             attempts: None,
+            exchange: None,
             logs: Vec::new(),
         };
         let json = serde_json::to_value(&step).expect("serialize");
@@ -5440,6 +5461,109 @@ mod tests {
         let (summary, events) = run_debug_node(false, "https://x.test", 200).await;
         assert_eq!(step_of(&summary, "r").debug_request, None);
         assert!(completed_debug(&events, "r").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_request_without_debug_still_reports_a_masked_exchange() {
+        let (summary, events) = run_debug_node(false, "https://x.test", 200).await;
+        let step = step_of(&summary, "r");
+        assert_eq!(
+            step.debug_request, None,
+            "Debug mode still owns debug_request"
+        );
+        let exchange = step.exchange.as_ref().expect("exchange record");
+        assert_eq!(exchange.url, "https://x.test/login");
+        let key = exchange
+            .headers
+            .iter()
+            .find(|h| h.key == "X-Key")
+            .expect("X-Key header");
+        assert_eq!(key.value, "••••••");
+        assert_eq!(exchange.body.as_deref(), Some(r#"{"k":"••••••"}"#));
+        assert_eq!(exchange.response.as_ref().map(|r| r.status), Some(200));
+        let event_exchange = events.iter().find_map(|e| match e {
+            DomainEvent::FlowStepCompleted {
+                node_id, exchange, ..
+            } if node_id == "r" => Some(exchange.clone()),
+            _ => None,
+        });
+        assert_eq!(event_exchange.flatten().map(|b| *b), step.exchange);
+    }
+
+    #[tokio::test]
+    async fn a_request_that_fails_to_send_reports_its_exchange_with_the_error() {
+        let (summary, _) = run_debug_node(false, "https://x.test", 0).await;
+        let exchange = step_of(&summary, "r").exchange.clone().expect("exchange");
+        assert!(exchange.response.is_none());
+        assert!(
+            exchange
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("connection refused")),
+            "got {:?}",
+            exchange.error
+        );
+    }
+
+    #[tokio::test]
+    async fn a_polled_request_reports_the_last_attempts_exchange() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, r#"{"ok":1}"#)]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.debug_request, None);
+        let response = step
+            .exchange
+            .clone()
+            .and_then(|e| e.response)
+            .expect("exchange response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, r#"{"ok":1}"#);
+    }
+
+    #[tokio::test]
+    async fn an_accepted_callback_reports_the_call_as_its_exchange() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.completed"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary =
+            service_with_listener(register_then_wait(wait_node_with("w", 60_000, None)), &fake)
+                .run(&exec, run_input("cb"))
+                .await
+                .expect("run");
+
+        let exchange = step_of(&summary, "w").exchange.clone().expect("exchange");
+        assert_eq!(exchange.method, "POST");
+        assert_eq!(exchange.url, "/cb/0");
+        let response = exchange.response.expect("response");
+        assert!(response.body.contains("payment.completed"));
+    }
+
+    #[tokio::test]
+    async fn routing_and_output_steps_have_no_exchange() {
+        let service = service_with_flow(linear_flow());
+        let exec = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("bob"),
+            }),
+        );
+        let summary = service
+            .run(&exec, run_input("auth-flow"))
+            .await
+            .expect("run");
+        for step in &summary.steps {
+            assert!(step.exchange.is_none(), "{} has an exchange", step.node_id);
+        }
     }
 
     #[tokio::test]
