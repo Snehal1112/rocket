@@ -365,11 +365,7 @@ describe('LastRunTab for a Transform node', () => {
 
   it('explains a skipped Transform without showing a value', () => {
     render(
-      <LastRunTab
-        node={transform}
-        status='skipped'
-        detail={{ skipReason: 'branch_not_taken' }}
-      />,
+      <LastRunTab node={transform} status='skipped' detail={{ skipReason: 'branch_not_taken' }} />,
     );
     expect(screen.getByText(/branch was not taken/i)).toBeInTheDocument();
     expect(screen.queryByTestId('last-run-value')).not.toBeInTheDocument();
