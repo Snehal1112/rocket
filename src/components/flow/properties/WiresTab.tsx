@@ -24,7 +24,8 @@ function NodeLink({ row, onSelectNode }: { row: WireRow; onSelectNode: (id: stri
     <Button
       type='button'
       variant='link'
-      className='h-auto p-0 text-xs'
+      className='h-auto min-w-0 max-w-full truncate p-0 text-xs'
+      title={row.otherLabel}
       aria-label={`Select node ${row.otherLabel}`}
       // The row itself may open the wire, so the link must not bubble up.
       onClick={(e) => {

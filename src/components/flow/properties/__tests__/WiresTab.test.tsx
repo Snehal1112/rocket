@@ -143,4 +143,29 @@ describe('WiresTab', () => {
     expect(screen.getByText('(missing node)')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit wire/ })).not.toBeInTheDocument();
   });
+
+  it('truncates a long node name and keeps the full label in a title', () => {
+    const long = n('long', { kind: 'Input', label: 'A very long node label', value: '' });
+    const target = n('t', { kind: 'Output', label: 'T' });
+    render(
+      <WiresTab
+        node={target}
+        nodes={[long, target]}
+        edges={[
+          {
+            id: 'e',
+            sourceNodeId: 'long',
+            targetNodeId: 't',
+            targetField: 'value',
+            expression: '',
+          },
+        ]}
+        onEditWire={vi.fn()}
+        onSelectNode={vi.fn()}
+      />,
+    );
+    const link = screen.getByRole('button', { name: 'Select node A very long node label' });
+    expect(link).toHaveAttribute('title', 'A very long node label');
+    expect(link).toHaveClass('truncate', 'min-w-0', 'max-w-full');
+  });
 });

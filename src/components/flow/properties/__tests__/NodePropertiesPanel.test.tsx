@@ -259,3 +259,28 @@ describe('Wait for callback editor', () => {
     expect(screen.getByText(/reachable from your local network/)).toBeInTheDocument();
   });
 });
+
+describe('Wires tab in the panel', () => {
+  it('lists the wires of the selected node and opens one', async () => {
+    const outNode = node('out', { kind: 'Output', label: 'Result' });
+    const src = node('src', { kind: 'Input', label: 'Token', value: 'x' });
+    const onEditWire = vi.fn();
+    renderPanel(outNode, {
+      nodes: [src, outNode],
+      edges: [
+        {
+          id: 'w1',
+          sourceNodeId: 'src',
+          targetNodeId: 'out',
+          targetField: 'value',
+          expression: 'response.body',
+        },
+      ],
+      activeTab: 'wires',
+      onEditWire,
+    });
+    expect(screen.getByText('Token')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Edit wire into value/i }));
+    expect(onEditWire).toHaveBeenCalledWith('w1');
+  });
+});

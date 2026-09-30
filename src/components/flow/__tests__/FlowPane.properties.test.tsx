@@ -289,4 +289,40 @@ describe('FlowPane node properties panel', () => {
     await userEvent.click(screen.getByLabelText(`Edit ${label}`));
     expect(screen.getByTestId('node-properties-panel')).toHaveTextContent(header);
   });
+
+  it('fades the wire of the exit not taken on the Wires tab', async () => {
+    usePaneStore.getState().reset();
+    usePaneStore.getState().openTab({
+      ...baseTab,
+      edges: [
+        {
+          id: 'wt',
+          sourceNodeId: 'if1',
+          targetNodeId: 'out1',
+          targetField: 'value',
+          expression: '',
+          sourceHandle: 'true',
+        },
+        {
+          id: 'wf',
+          sourceNodeId: 'if1',
+          targetNodeId: 'in1',
+          targetField: 'value',
+          expression: '',
+          sourceHandle: 'false',
+        },
+      ],
+      nodeStatus: { if1: 'success' },
+      nodeDetail: { if1: { branch: 'true' } },
+    });
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Check'));
+    await userEvent.click(screen.getByRole('tab', { name: 'Wires' }));
+    const rows = screen.getAllByTestId('wire-row');
+    expect(rows).toHaveLength(2);
+    const faded = rows.filter((r) => r.className.includes('opacity-50'));
+    expect(faded).toHaveLength(1);
+    expect(faded[0]).toHaveTextContent('User');
+    expect(faded[0]).toHaveTextContent('not taken');
+  });
 });

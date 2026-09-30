@@ -11,6 +11,7 @@ import { IfDetails, OutputDetails, SwitchDetails } from './NodeDetails';
 import { PanelFocusProvider } from './panelFocus';
 import { RequestNodeEditor } from './RequestNodeEditor';
 import { WaitForCallbackEditor } from './WaitForCallbackEditor';
+import { WiresTab } from './WiresTab';
 
 /** The panel's tabs. The selected one is kept by FlowPane across nodes. */
 export type PanelTab = 'settings' | 'last-run' | 'wires';
@@ -73,9 +74,13 @@ export function NodePropertiesPanel({
   collection,
   status,
   detail,
+  nodeStatus,
+  nodeDetail,
   saveError,
   activeTab,
   onTabChange,
+  onEditWire,
+  onSelectNode,
   onChange,
   onClose,
   onDelete,
@@ -88,6 +93,10 @@ export function NodePropertiesPanel({
   collection: string;
   status: FlowNodeStatus;
   detail?: FlowNodeDetail;
+  /** Every node's last-run status, so the Wires tab can fade wires not taken. */
+  nodeStatus?: Record<string, FlowNodeStatus>;
+  /** Every node's last-run detail; the Wires tab reads each routing node's branch. */
+  nodeDetail?: Record<string, FlowNodeDetail>;
   // The full message of the last failed save, when it named this node.
   saveError?: string;
   activeTab: PanelTab;
@@ -182,6 +191,9 @@ export function NodePropertiesPanel({
           <TabsTrigger value='last-run' className='text-xs'>
             Last run
           </TabsTrigger>
+          <TabsTrigger value='wires' className='text-xs'>
+            Wires
+          </TabsTrigger>
         </TabsList>
         <TabsContent value='settings' className='min-h-0 flex-1 overflow-y-auto p-3'>
           <div key={node.id} className='space-y-3'>
@@ -200,6 +212,17 @@ export function NodePropertiesPanel({
         </TabsContent>
         <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
           <LastRunTab node={node} status={status} detail={detail} />
+        </TabsContent>
+        <TabsContent value='wires' className='min-h-0 flex-1 overflow-y-auto p-3'>
+          <WiresTab
+            node={node}
+            nodes={nodes}
+            edges={edges}
+            nodeStatus={nodeStatus}
+            nodeDetail={nodeDetail}
+            onEditWire={onEditWire}
+            onSelectNode={onSelectNode}
+          />
         </TabsContent>
       </Tabs>
     </aside>

@@ -484,6 +484,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               collection={collectionName}
               status={tab.nodeStatus[panelNode.id] ?? 'idle'}
               detail={tab.nodeDetail?.[panelNode.id]}
+              nodeStatus={tab.nodeStatus}
+              nodeDetail={tab.nodeDetail}
               saveError={
                 saveErrorMessage && cycleNodeIds.includes(panelNode.id)
                   ? saveErrorMessage
