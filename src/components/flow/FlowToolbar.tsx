@@ -48,6 +48,8 @@ function detailFromEvent(event: FlowStepCompletedEvent): FlowNodeDetail {
     skipReason: event.skip_reason ?? undefined,
     branch: event.branch ?? undefined,
     attempts: event.attempts ?? undefined,
+    exchange: event.exchange ?? undefined,
+    logs: event.logs?.length ? event.logs : undefined,
   };
 }
 
@@ -61,6 +63,8 @@ function detailFromStep(step: FlowStepResult): FlowNodeDetail {
     skipReason: step.skipReason ?? undefined,
     branch: step.branch ?? undefined,
     attempts: step.attempts ?? undefined,
+    exchange: step.exchange ?? undefined,
+    logs: step.logs?.length ? step.logs : undefined,
   };
 }
 

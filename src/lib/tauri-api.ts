@@ -1851,6 +1851,8 @@ export interface FlowStepResult {
   logs?: FlowLogEntry[];
   /** Sent request of a debug node. */
   debugRequest?: FlowDebugRequest;
+  /** Masked request and response of a step that sent. */
+  exchange?: FlowDebugRequest;
   /** How many times a repeat-until Request node sent its request. */
   attempts?: number;
 }
@@ -1869,6 +1871,8 @@ export interface FlowDebugResponse {
   sizeBytes: number;
   headers: FlowDebugHeader[];
   body: string;
+  /** True when the body was cut at 256 KB. */
+  truncated?: boolean;
 }
 
 /** The request a debug node sent and what came back. */
@@ -1950,6 +1954,8 @@ export interface FlowStepCompletedEvent {
   logs?: FlowLogEntry[];
   /** Sent request of a debug node. */
   debug_request?: FlowDebugRequest;
+  /** Masked request and response of a step that sent. */
+  exchange?: FlowDebugRequest;
   /** How many times a repeat-until Request node sent its request. */
   attempts?: number;
 }

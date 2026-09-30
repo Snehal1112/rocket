@@ -166,6 +166,10 @@ export interface FlowNodeDetail {
   progress?: string;
   /** Attempts a repeat-until Request node made. */
   attempts?: number;
+  /** Masked request and response of the last run, for Request and Wait nodes. */
+  exchange?: import('@/lib/tauri-api').FlowDebugRequest;
+  /** Script console output of the last run. */
+  logs?: import('@/lib/tauri-api').FlowLogEntry[];
 }
 
 export interface FlowTab extends BaseTab {

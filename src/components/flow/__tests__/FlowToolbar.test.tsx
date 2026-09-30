@@ -270,6 +270,68 @@ describe('FlowToolbar', () => {
     );
   });
 
+  it('stores the exchange and logs from the step event and the summary', async () => {
+    const exchange = {
+      method: 'GET',
+      url: 'https://x.test',
+      headers: [],
+      response: {
+        status: 200,
+        statusText: 'OK',
+        durationMs: 5,
+        sizeBytes: 2,
+        headers: [],
+        body: '{}',
+      },
+    };
+    const logs = [{ level: 'log' as const, message: 'hi' }];
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    started('run-123');
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-123',
+      node_id: 'r',
+      status: 'success',
+      status_code: 200,
+      duration_ms: 5,
+      error: null,
+      value: null,
+      logs,
+      exchange,
+    });
+    expect(onPatchStatus).toHaveBeenCalledWith(
+      'r',
+      'success',
+      expect.objectContaining({ exchange, logs }),
+    );
+
+    resolveRun({
+      runId: 'run-123',
+      steps: [
+        {
+          nodeId: 'r',
+          status: 'success',
+          statusCode: 200,
+          durationMs: 5,
+          error: null,
+          value: null,
+          logs,
+          exchange,
+        },
+      ],
+      stoppedReason: 'completed',
+    });
+    await waitFor(() =>
+      expect(onPatchStatus).toHaveBeenLastCalledWith(
+        'r',
+        'success',
+        expect.objectContaining({ exchange, logs }),
+      ),
+    );
+  });
+
   it('forwards skip_reason and branch from flow-step-completed', async () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
