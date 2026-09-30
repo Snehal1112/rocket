@@ -411,8 +411,25 @@ async fn apply_auth(
         Auth::OAuth1(_) => {
             // Signed in `execute` once the body is known; see `apply_oauth1`.
         }
-        Auth::Wsse { .. } | Auth::Digest { .. } | Auth::Ntlm { .. } => {
-            // Not yet implemented in HTTP executor.
+        Auth::Wsse { username, password } => {
+            use rocket_http::wsse_sig::{created_now, generate_nonce, wsse_headers};
+
+            let headers = wsse_headers(username, password, &generate_nonce(), &created_now())
+                .map_err(|e| DomainError::InvalidInput(format!("WSSE auth failed: {e}")))?;
+            builder = builder
+                .header("Authorization", headers.authorization)
+                .header("X-WSSE", headers.x_wsse);
+        }
+        // Fail loudly rather than send the request unauthenticated.
+        Auth::Digest { .. } => {
+            return Err(DomainError::InvalidInput(
+                "Digest authentication is not supported yet".into(),
+            ));
+        }
+        Auth::Ntlm { .. } => {
+            return Err(DomainError::InvalidInput(
+                "NTLM authentication is not supported yet".into(),
+            ));
         }
         Auth::AwsSigV4 {
             access_key,
@@ -1062,6 +1079,76 @@ mod oauth1_tests {
         req.auth = Auth::OAuth1(Box::new(a));
         let err = ReqwestExecutor::new().execute(&req).await.unwrap_err();
         assert!(err.to_string().contains("RSA-SHA256"), "{err}");
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod wsse_and_unsupported_auth_tests {
+    use super::*;
+    use rocket_shared::types::HttpMethod;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn wsse_sends_authorization_and_x_wsse_headers() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+        req.auth = Auth::Wsse {
+            username: "bob".into(),
+            password: "pw".into(),
+        };
+        ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        let seen = &server.received_requests().await.unwrap()[0];
+        let auth = seen.headers.get("authorization").unwrap().to_str().unwrap();
+        assert_eq!(auth, "WSSE profile=\"UsernameToken\"");
+        let wsse = seen.headers.get("x-wsse").unwrap().to_str().unwrap();
+        assert!(
+            wsse.starts_with("UsernameToken Username=\"bob\", PasswordDigest=\""),
+            "{wsse}"
+        );
+        assert!(
+            wsse.contains("Nonce=\"") && wsse.contains("Created=\""),
+            "{wsse}"
+        );
+    }
+
+    #[tokio::test]
+    async fn digest_and_ntlm_fail_instead_of_sending_unauthenticated() {
+        let server = server().await;
+        let exec = ReqwestExecutor::new();
+        for (auth, name) in [
+            (
+                Auth::Digest {
+                    username: "u".into(),
+                    password: "p".into(),
+                },
+                "Digest",
+            ),
+            (
+                Auth::Ntlm {
+                    username: "u".into(),
+                    password: "p".into(),
+                    domain: "d".into(),
+                },
+                "NTLM",
+            ),
+        ] {
+            let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+            req.auth = auth;
+            let err = exec.execute(&req).await.unwrap_err();
+            assert!(err.to_string().contains(name), "{err}");
+        }
         assert!(server.received_requests().await.unwrap().is_empty());
     }
 }

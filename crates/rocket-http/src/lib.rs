@@ -9,6 +9,7 @@ pub mod oauth2;
 pub mod pkce;
 pub mod request;
 pub mod response;
+pub mod wsse_sig;
 
 pub use aws_sig::{sign_request, AwsCredentials, SignedHeaders};
 pub use cookie::{Cookie, CookieJar};
