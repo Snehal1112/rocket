@@ -203,9 +203,14 @@ impl OAuth2Service {
         collection: Option<&str>,
         environment_name: Option<&str>,
         request_path: Option<&str>,
+        external_secrets: &HashMap<String, String>,
     ) -> HashMap<String, String> {
         // Precedence (lowest → highest): collection < env < folder < request.
-        let mut ctx = VariableContext::default();
+        // RocketVault values, keyed `alias.secretName`, are fetched by the caller.
+        let mut ctx = VariableContext {
+            external_secrets: external_secrets.clone(),
+            ..VariableContext::default()
+        };
 
         let effective_val = |cv: &rocket_collection::CollectionVariable| -> String {
             if cv.value.is_empty() {
@@ -342,10 +347,21 @@ impl OAuth2Service {
 
     /// Refreshes an OAuth2 token.
     pub async fn refresh_token(&self, req: &OAuth2RefreshRequest) -> DomainResult<OAuthToken> {
+        self.refresh_token_with_secrets(req, &HashMap::new()).await
+    }
+
+    /// Refreshes an OAuth2 token, resolving `{{alias.secretName}}` references with the
+    /// RocketVault values in `external_secrets`.
+    pub async fn refresh_token_with_secrets(
+        &self,
+        req: &OAuth2RefreshRequest,
+        external_secrets: &HashMap<String, String>,
+    ) -> DomainResult<OAuthToken> {
         let vars = self.build_variable_context(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
             req.request_path.as_deref(),
+            external_secrets,
         );
         let r = |s: &str| resolve(s, &vars).output;
 
@@ -472,10 +488,21 @@ impl OAuth2Service {
 
     /// Resolves all {{variables}} in the get-token request fields.
     pub fn resolve_get_token_request(&self, req: &OAuth2GetTokenRequest) -> ResolvedOAuth2Config {
+        self.resolve_get_token_request_with_secrets(req, &HashMap::new())
+    }
+
+    /// Resolves all {{variables}} in the get-token request fields, including
+    /// `{{alias.secretName}}` references to RocketVault secrets in `external_secrets`.
+    pub fn resolve_get_token_request_with_secrets(
+        &self,
+        req: &OAuth2GetTokenRequest,
+        external_secrets: &HashMap<String, String>,
+    ) -> ResolvedOAuth2Config {
         let vars = self.build_variable_context(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
             req.request_path.as_deref(),
+            external_secrets,
         );
         let r = |s: &str| resolve(s, &vars).output;
 
@@ -1065,6 +1092,84 @@ mod tests {
             vec![pkcs12("idp.example.com", "/certs/client.p12")]
         );
         assert!(seen[0].1, "verify_ssl defaults to true");
+    }
+
+    fn vault_secrets() -> HashMap<String, String> {
+        HashMap::from([
+            ("vault.clientSecret".to_string(), "s3cret".to_string()),
+            ("vault.certPass".to_string(), "p4ss".to_string()),
+        ])
+    }
+
+    #[test]
+    fn vault_references_resolve_in_a_get_token_request_when_secrets_are_given() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(
+            vec![ClientCertificate::Pkcs12 {
+                domain: "idp.example.com".into(),
+                pkcs12_file_path: "/c.p12".into(),
+                passphrase: Some("{{vault.certPass}}".into()),
+            }],
+            &provider,
+        );
+        let mut req = get_token_request();
+        req.client_secret = Some("{{vault.clientSecret}}".into());
+
+        let config = svc.resolve_get_token_request_with_secrets(&req, &vault_secrets());
+
+        assert_eq!(config.client_secret, "s3cret");
+        assert_eq!(
+            config.client_certificates,
+            vec![ClientCertificate::Pkcs12 {
+                domain: "idp.example.com".into(),
+                pkcs12_file_path: "/c.p12".into(),
+                passphrase: Some("p4ss".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn without_secrets_a_vault_reference_stays_unresolved() {
+        let svc = make_service();
+        let mut req = get_token_request();
+        req.client_secret = Some("{{vault.clientSecret}}".into());
+        let config = svc.resolve_get_token_request(&req);
+        assert_eq!(config.client_secret, "{{vault.clientSecret}}");
+    }
+
+    #[tokio::test]
+    async fn a_refresh_resolves_a_vault_passphrase_for_the_certificate() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(
+            vec![ClientCertificate::Pkcs12 {
+                domain: "idp.example.com".into(),
+                pkcs12_file_path: "/c.p12".into(),
+                passphrase: Some("{{vault.certPass}}".into()),
+            }],
+            &provider,
+        );
+        let req = OAuth2RefreshRequest {
+            refresh_token: "r".into(),
+            token_url: "https://idp.example.com/token".into(),
+            refresh_token_url: None,
+            client_id: "id".into(),
+            client_secret: None,
+            scope: None,
+            client_authentication: None,
+            verify_ssl: None,
+            refresh_params: None,
+            collection: None,
+            environment_name: Some("dev".into()),
+            request_path: None,
+        };
+
+        let _ = svc.refresh_token_with_secrets(&req, &vault_secrets()).await;
+
+        let seen = provider.seen.lock().unwrap();
+        assert!(matches!(
+            &seen[0].2[0],
+            ClientCertificate::Pkcs12 { passphrase: Some(p), .. } if p == "p4ss"
+        ));
     }
 
     /// A factory that knows where the collection lives, like the real workspace one.

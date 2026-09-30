@@ -5,6 +5,7 @@ use std::time::Duration;
 use rocket_app::oauth2_service::{
     OAuth2GetTokenRequest, OAuth2RefreshRequest, OAuth2Service, ResolvedOAuth2Config,
 };
+use rocket_app::RequestExecutionService;
 use rocket_http::{
     acquire_token, apply_params_to_url, decode_jwt, generate_pkce, JwtClaims, OAuthConfig,
     OAuthToken, PkcePair,
@@ -264,9 +265,18 @@ pub fn oauth2_decode_jwt(token: String) -> Result<JwtClaims, DomainError> {
 #[tauri::command]
 pub async fn oauth2_refresh_token(
     svc: State<'_, OAuth2Service>,
+    exec: State<'_, RequestExecutionService>,
     request: OAuth2RefreshRequest,
 ) -> Result<OAuthToken, DomainError> {
-    svc.refresh_token(&request).await
+    // RocketVault values for the environment's bindings, so `{{alias.secretName}}` resolves.
+    // An environment without bindings needs no vault access.
+    let secrets = exec
+        .resolve_external_secrets(
+            request.collection.as_deref(),
+            request.environment_name.as_deref(),
+        )
+        .await?;
+    svc.refresh_token_with_secrets(&request, &secrets).await
 }
 
 /// Unified OAuth2 token acquisition for all grant types.
@@ -278,6 +288,7 @@ pub async fn oauth2_refresh_token(
 pub async fn oauth2_get_token(
     app: AppHandle,
     svc: State<'_, OAuth2Service>,
+    exec: State<'_, RequestExecutionService>,
     mut request: OAuth2GetTokenRequest,
 ) -> Result<OAuthToken, DomainError> {
     // Apply the OS-specific default only when the user has not explicitly chosen.
@@ -288,7 +299,15 @@ pub async fn oauth2_get_token(
     if request.use_system_browser.is_none() {
         request.use_system_browser = Some(cfg!(any(target_os = "macos", target_os = "windows")));
     }
-    let config = svc.resolve_get_token_request(&request);
+    // RocketVault values for the environment's bindings, so `{{alias.secretName}}` resolves.
+    // An environment without bindings needs no vault access.
+    let secrets = exec
+        .resolve_external_secrets(
+            request.collection.as_deref(),
+            request.environment_name.as_deref(),
+        )
+        .await?;
+    let config = svc.resolve_get_token_request_with_secrets(&request, &secrets);
 
     match config.grant_type.as_str() {
         "client_credentials" | "password" => svc.get_token_direct(&config).await,
