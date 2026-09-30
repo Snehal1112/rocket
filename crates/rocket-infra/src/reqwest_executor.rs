@@ -293,6 +293,9 @@ impl HttpExecutor for ReqwestExecutor {
                 Ok(builder)
             };
 
+        // Kept so a Digest challenge can be checked against the origin that was asked.
+        let requested_origin = url.origin();
+
         // Apply authentication.
         let builder = apply_auth(start_builder(url), &request.auth, &request.method).await?;
         let builder = finish_builder(builder)?;
@@ -312,9 +315,14 @@ impl HttpExecutor for ReqwestExecutor {
         // Digest is challenge-response: the first request goes out unauthenticated, and a 401
         // with a Digest challenge is answered by a second request. A stale nonce gets one more
         // try. A plain 401 after that means bad credentials, so it is returned as-is.
+        // A challenge from another origin, reached through a redirect, is never answered: reqwest
+        // drops credentials on such a hop, and answering would hand a password hash to that host.
         if let Auth::Digest { username, password } = &request.auth {
             let mut attempts = 0;
             while response.status() == reqwest::StatusCode::UNAUTHORIZED && attempts < 2 {
+                if response.url().origin() != requested_origin {
+                    break;
+                }
                 let values: Vec<String> = response
                     .headers()
                     .get_all(reqwest::header::WWW_AUTHENTICATE)
@@ -1433,6 +1441,48 @@ mod digest_tests {
 
         assert_eq!(resp.status, 200);
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_challenge_from_another_origin_after_a_redirect_is_not_answered() {
+        // `other` is a different origin (port), and it asks for Digest credentials.
+        let other = server(|_, _| challenge("n1", "")).await;
+        let location = format!("{}/login", other.uri());
+        let origin = server(move |_, _| {
+            ResponseTemplate::new(302).insert_header("Location", location.as_str())
+        })
+        .await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/start", origin.uri()));
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 401);
+        let seen = other.received_requests().await.unwrap();
+        assert_eq!(seen.len(), 1, "the challenge must not be answered");
+        assert!(!seen[0].headers.contains_key("authorization"));
+    }
+
+    #[tokio::test]
+    async fn a_challenge_after_a_same_origin_redirect_is_answered_at_the_final_url() {
+        // `/start` redirects to `/final` on the same origin, and `/final` wants Digest.
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(|req: &wiremock::Request| match req.url.path() {
+                "/start" => ResponseTemplate::new(302).insert_header("Location", "/final"),
+                _ if req.headers.contains_key("authorization") => ResponseTemplate::new(200),
+                _ => challenge("n1", ""),
+            })
+            .mount(&server)
+            .await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/start", server.uri()));
+        req.auth = digest_auth();
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 200);
+        let seen = server.received_requests().await.unwrap();
+        let paths: Vec<&str> = seen.iter().map(|r| r.url.path()).collect();
+        assert_eq!(paths, ["/start", "/final", "/final"]);
+        assert!(auth_header(&seen[2]).contains("uri=\"/final\""));
     }
 
     #[tokio::test]
