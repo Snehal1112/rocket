@@ -1,7 +1,7 @@
 # Flow Phase 3 — Transform (Script) Node — Design Spec
 
 **Date:** 2026-09-30
-**Status:** Approved in brainstorming — pending written-spec review
+**Status:** Implemented (plans 01-05 in `docs/superpowers/plans/flow-phase3-transform-node/`). Manual check of the real script engine is pending, see the plan 05 hand-off.
 **Tracks:** GitHub issue #32
 **Builds on:** `docs/superpowers/specs/2026-09-27-flow-visual-workflow-builder-design.md` (Phase 1, which deferred this work) and `docs/superpowers/specs/2026-09-28-flow-phase2-branching-design.md` (If/Switch routing nodes, whose single-input pattern this node copies).
 
@@ -84,8 +84,8 @@ A new rule, V-T, mirrors V1 (`check_routing_inputs`):
 
 `execute_node` gains a `Transform` arm:
 
-1. Take the single upstream captured output, as `single_route_input` does for If.
-2. Add `evaluate_flow_transform_script`. It follows `evaluate_flow_route_expression`, calls `flow_script` with `FlowCoercion::Raw`, and returns the JSON value plus console entries.
+1. Take the single upstream captured output, as `single_input` does for If.
+2. Add `evaluate_flow_transform_script`. It follows `evaluate_flow_route_expression`, calls `flow_script` with `FlowCoercion::Required`, which guards against an `undefined` result (error `script returned no value`) and accepts any other value, including `null`, and returns the JSON value plus console entries.
 3. Convert the result to a string:
    - A string is used as is.
    - A number or boolean becomes its text.
