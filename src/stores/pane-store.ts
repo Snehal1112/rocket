@@ -548,6 +548,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     set(
       updateTabEverywhere(get(), tabId, (tab) => {
         if (!isRequestTab(tab) || !tab.agentSession) return tab;
+        // Ignore late failures for a session that already ended or a reply that already settled.
+        if (tab.agentSession.status !== 'active') return tab;
+        if (!tab.agentSession.messages.some((m) => m.id === messageId && m.streaming)) return tab;
         return {
           ...tab,
           agentSession: {

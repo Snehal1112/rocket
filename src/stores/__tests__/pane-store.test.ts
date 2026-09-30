@@ -1262,6 +1262,22 @@ describe('Agent chat session actions', () => {
     });
   });
 
+  it('failAgentChatMessage is a no-op once the session has ended', () => {
+    const leaf = setupWithTab();
+    const tabId = leaf.tabs[0].id;
+    usePaneStore.getState().beginAgentSession(tabId, 'agent-1');
+    usePaneStore.getState().activateAgentSession(tabId, 'session-1');
+    usePaneStore
+      .getState()
+      .appendAgentChatMessage(tabId, { id: 'm2', role: 'agent', text: 'partial', streaming: true });
+    usePaneStore.getState().markAgentSessionEnded(tabId);
+    usePaneStore.getState().failAgentChatMessage(tabId, 'm2', 'process killed');
+    const tab = getRequestTab();
+    expect(tab.agentSession?.status).toBe('ended');
+    expect(tab.agentSession?.error).toBeUndefined();
+    expect(tab.agentSession?.messages[0].text).toBe('partial');
+  });
+
   it('markAgentSessionEnded sets status ended', () => {
     const leaf = setupWithTab();
     const tabId = leaf.tabs[0].id;
