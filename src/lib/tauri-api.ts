@@ -41,7 +41,11 @@ export type Auth =
   | { authType: 'bearer'; token: string }
   | { authType: 'api-key'; key: string; value: string; placement: 'header' | 'query' }
   | { authType: 'o-auth2'; [key: string]: unknown }
-  | { authType: 'aws-sig-v4'; [key: string]: unknown };
+  | { authType: 'aws-sig-v4'; [key: string]: unknown }
+  | { authType: 'digest'; username: string; password: string }
+  | { authType: 'wsse'; username: string; password: string }
+  | { authType: 'ntlm'; username: string; password: string; domain: string }
+  | { authType: 'o-auth1'; [key: string]: unknown };
 
 export interface RequestOptions {
   followRedirects: boolean;

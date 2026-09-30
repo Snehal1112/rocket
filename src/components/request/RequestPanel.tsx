@@ -34,6 +34,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
+import { withCurrentAuthType } from '@/lib/auth-type-options';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
@@ -102,10 +103,12 @@ export const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
 const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
   { label: 'None', value: 'none' },
   { label: 'Basic', value: 'basic' },
+  { label: 'Digest', value: 'digest' },
   { label: 'Bearer', value: 'bearer' },
   { label: 'API Key', value: 'api-key' },
   { label: 'OAuth 2.0', value: 'oauth2' },
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
+  { label: 'WSSE', value: 'wsse' },
 ];
 
 const INHERIT_AUTH_OPTION = {
@@ -504,9 +507,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     requestVariables,
   ]);
 
+  const currentAuthType = request.auth.authType;
   const authTypeOptions = useMemo(
-    () => (tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES),
-    [tab.source],
+    () =>
+      withCurrentAuthType(
+        tab.source ? [INHERIT_AUTH_OPTION, ...BASE_AUTH_TYPES] : BASE_AUTH_TYPES,
+        currentAuthType,
+      ),
+    [tab.source, currentAuthType],
   );
 
   const handleAuthTypeChange = useCallback(
@@ -514,6 +522,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       const prev = request.auth;
       const next: AuthState = { authType };
       if (authType === 'basic') next.basic = prev.basic ?? { username: '', password: '' };
+      if (authType === 'digest') next.digest = prev.digest ?? { username: '', password: '' };
+      if (authType === 'wsse') next.wsse = prev.wsse ?? { username: '', password: '' };
       if (authType === 'bearer') next.bearer = prev.bearer ?? { token: '' };
       if (authType === 'api-key')
         next.apiKey = prev.apiKey ?? { key: '', value: '', addTo: 'header' };

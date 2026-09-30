@@ -288,8 +288,24 @@ export interface OAuth2JwtClaims {
 }
 
 export interface AuthState {
-  authType: 'inherit' | 'none' | 'basic' | 'bearer' | 'api-key' | 'oauth2' | 'aws-sig-v4';
+  authType:
+    | 'inherit'
+    | 'none'
+    | 'basic'
+    | 'bearer'
+    | 'api-key'
+    | 'oauth2'
+    | 'aws-sig-v4'
+    | 'digest'
+    | 'wsse'
+    | 'ntlm'
+    | 'oauth1';
   basic?: { username: string; password: string };
+  digest?: { username: string; password: string };
+  wsse?: { username: string; password: string };
+  ntlm?: { username: string; password: string; domain: string };
+  // OAuth 1.0 has no editor yet. The persisted fields are kept as they are, so a save does not drop them.
+  oauth1?: Record<string, unknown>;
   bearer?: { token: string };
   apiKey?: { key: string; value: string; addTo: 'header' | 'query' };
   oauth2?: {

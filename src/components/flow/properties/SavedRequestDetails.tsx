@@ -9,6 +9,10 @@ const AUTH_LABELS: Record<string, string> = {
   'api-key': 'API key',
   'o-auth2': 'OAuth 2.0',
   'aws-sig-v4': 'AWS Signature v4',
+  digest: 'Digest',
+  wsse: 'WSSE',
+  ntlm: 'NTLM',
+  'o-auth1': 'OAuth 1.0',
 };
 
 // Read-only summary of a saved request. Its content is edited in its own tab.

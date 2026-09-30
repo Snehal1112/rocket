@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useSaveButton } from '@/hooks/use-save-button';
+import { withCurrentAuthType } from '@/lib/auth-type-options';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import {
@@ -88,10 +89,12 @@ function toKeyValueEntries(
 const COLLECTION_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
   { label: 'None', value: 'none' },
   { label: 'Basic', value: 'basic' },
+  { label: 'Digest', value: 'digest' },
   { label: 'Bearer', value: 'bearer' },
   { label: 'API Key', value: 'api-key' },
   { label: 'OAuth 2.0', value: 'oauth2' },
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
+  { label: 'WSSE', value: 'wsse' },
 ];
 
 const TABS: { label: string; value: CollectionSection }[] = [
@@ -274,6 +277,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     (authType: AuthState['authType']) => {
       const next: AuthState = { authType };
       if (authType === 'basic') next.basic = auth.basic ?? { username: '', password: '' };
+      if (authType === 'digest') next.digest = auth.digest ?? { username: '', password: '' };
+      if (authType === 'wsse') next.wsse = auth.wsse ?? { username: '', password: '' };
       if (authType === 'bearer') next.bearer = auth.bearer ?? { token: '' };
       if (authType === 'api-key')
         next.apiKey = auth.apiKey ?? { key: '', value: '', addTo: 'header' };
@@ -505,7 +510,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {COLLECTION_AUTH_TYPES.map((t) => (
+                          {withCurrentAuthType(COLLECTION_AUTH_TYPES, auth.authType).map((t) => (
                             <SelectItem key={t.value} value={t.value} className='text-sm'>
                               {t.label}
                             </SelectItem>

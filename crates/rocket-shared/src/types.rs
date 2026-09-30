@@ -485,6 +485,26 @@ mod tests {
     }
 
     #[test]
+    fn auth_oauth1_serializes_as_a_flat_o_auth1_object() {
+        // The frontend reads and writes this exact shape, so pin it.
+        let auth = Auth::OAuth1(Box::new(OAuth1Auth {
+            consumer_key: Some("ck".into()),
+            signature_method: Some("HMAC-SHA1".into()),
+            ..Default::default()
+        }));
+        let json = serde_json::to_value(&auth).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "authType": "o-auth1",
+                "consumerKey": "ck",
+                "signatureMethod": "HMAC-SHA1",
+            })
+        );
+        assert_eq!(serde_json::from_value::<Auth>(json).unwrap(), auth);
+    }
+
+    #[test]
     fn auth_wsse_serde() {
         let auth = Auth::Wsse {
             username: "user".into(),

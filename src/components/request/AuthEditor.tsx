@@ -14,6 +14,60 @@ import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { AuthState } from '@/types/pane-types';
 import { OAuth2AuthEditor } from './oauth2/OAuth2AuthEditor';
 
+interface UserPasswordCardProps {
+  username: string;
+  password: string;
+  onChange: (patch: { username?: string; password?: string }) => void;
+  variableContext?: Map<string, VariableScopeEntry>;
+  onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
+}
+
+function UserPasswordCard({
+  username,
+  password,
+  onChange,
+  variableContext,
+  onNavigateToSource,
+}: UserPasswordCardProps) {
+  return (
+    <Card>
+      <CardContent className='space-y-3 p-4'>
+        <div className='space-y-1.5'>
+          <div className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+            <User className='h-3 w-3' />
+            Username
+          </div>
+          <SingleLineEditor
+            placeholder='Username'
+            aria-label='Username'
+            className=''
+            value={username}
+            onChange={(newVal) => onChange({ username: newVal })}
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
+          />
+        </div>
+        <div className='space-y-1.5'>
+          <div className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+            <Lock className='h-3 w-3' />
+            Password
+          </div>
+          <SingleLineEditor
+            placeholder='Password'
+            aria-label='Password'
+            isSecret
+            className='text-sm border-input'
+            value={password}
+            onChange={(newVal) => onChange({ password: newVal })}
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 interface AuthEditorProps {
   auth: AuthState;
   onChange: (auth: AuthState) => void;
@@ -114,6 +168,60 @@ export function AuthEditor({
                 onNavigateToSource={onNavigateToSource}
               />
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {auth.authType === 'digest' && auth.digest && (
+        <UserPasswordCard
+          username={auth.digest.username}
+          password={auth.digest.password}
+          onChange={(patch) =>
+            onChange({
+              ...auth,
+              digest: { ...auth.digest, ...patch } as NonNullable<AuthState['digest']>,
+            })
+          }
+          variableContext={variableContext}
+          onNavigateToSource={onNavigateToSource}
+        />
+      )}
+
+      {auth.authType === 'wsse' && auth.wsse && (
+        <UserPasswordCard
+          username={auth.wsse.username}
+          password={auth.wsse.password}
+          onChange={(patch) =>
+            onChange({
+              ...auth,
+              wsse: { ...auth.wsse, ...patch } as NonNullable<AuthState['wsse']>,
+            })
+          }
+          variableContext={variableContext}
+          onNavigateToSource={onNavigateToSource}
+        />
+      )}
+
+      {auth.authType === 'ntlm' && (
+        <Card className='bg-muted/50'>
+          <CardContent className='px-3 py-2.5'>
+            <p className='text-xs text-muted-foreground'>
+              NTLM authentication is not supported yet, so sending this request fails with an error.
+              The NTLM settings in the request file are kept unchanged. Select a different auth type
+              above to replace them.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {auth.authType === 'oauth1' && (
+        <Card className='bg-muted/50'>
+          <CardContent className='px-3 py-2.5'>
+            <p className='text-xs text-muted-foreground'>
+              OAuth 1.0 settings come from the request file and cannot be edited here yet. They are
+              kept when you save, and the request is signed when it is sent. Select a different auth
+              type above to replace them.
+            </p>
           </CardContent>
         </Card>
       )}

@@ -212,7 +212,7 @@ describe('fromPersistedAuth', () => {
   });
 
   it('falls back to the given fallback for an unrecognized authType', () => {
-    const persisted = { authType: 'wsse' } as unknown as Auth;
+    const persisted = { authType: 'kerberos' } as unknown as Auth;
     expect(fromPersistedAuth(persisted, 'inherit')).toEqual({ authType: 'inherit' });
   });
 
@@ -234,6 +234,19 @@ describe('round-trip: toPersistedAuth(fromPersistedAuth(x)) is stable', () => {
     { authType: 'inherit' } as Auth,
     { authType: 'basic', username: 'u', password: 'p' },
     { authType: 'bearer', token: 't' },
+    { authType: 'digest', username: 'u', password: 'p' },
+    { authType: 'wsse', username: 'u', password: 'p' },
+    { authType: 'ntlm', username: 'u', password: 'p', domain: 'CORP' },
+    {
+      authType: 'o-auth1',
+      consumerKey: 'ck',
+      consumerSecret: 'cs',
+      accessToken: 'at',
+      accessTokenSecret: 'ats',
+      signatureMethod: 'HMAC-SHA1',
+      privateKey: { type: 'text', value: 'pem' },
+      includeBodyHash: true,
+    },
     { authType: 'api-key', key: 'k', value: 'v', placement: 'header' },
     {
       authType: 'aws-sig-v4',
@@ -252,4 +265,46 @@ describe('round-trip: toPersistedAuth(fromPersistedAuth(x)) is stable', () => {
       expect(toPersistedAuth(state)).toEqual(persisted);
     });
   }
+});
+
+describe('digest, wsse, ntlm and oauth1 are kept, not reset to none', () => {
+  it('reads digest and wsse into their own editor state', () => {
+    expect(fromPersistedAuth({ authType: 'digest', username: 'u', password: 'p' })).toEqual({
+      authType: 'digest',
+      digest: { username: 'u', password: 'p' },
+    });
+    expect(fromPersistedAuth({ authType: 'wsse', username: 'u', password: 'p' })).toEqual({
+      authType: 'wsse',
+      wsse: { username: 'u', password: 'p' },
+    });
+  });
+
+  it('reads ntlm with its domain', () => {
+    expect(
+      fromPersistedAuth({ authType: 'ntlm', username: 'u', password: 'p', domain: 'CORP' }),
+    ).toEqual({ authType: 'ntlm', ntlm: { username: 'u', password: 'p', domain: 'CORP' } });
+  });
+
+  it('keeps every oauth1 field, including ones the UI does not know', () => {
+    const persisted = {
+      authType: 'o-auth1',
+      consumerKey: 'ck',
+      someFutureField: 42,
+    } as unknown as Auth;
+    const state = fromPersistedAuth(persisted);
+    expect(state.authType).toBe('oauth1');
+    expect(state.oauth1).toEqual({ consumerKey: 'ck', someFutureField: 42 });
+    expect(toPersistedAuth(state)).toEqual(persisted);
+  });
+
+  it('defensively also accepts a bare oauth1 tag and writes the backend tag back', () => {
+    const state = fromPersistedAuth({ authType: 'oauth1', consumerKey: 'ck' } as unknown as Auth);
+    expect(state.authType).toBe('oauth1');
+    expect(toPersistedAuth(state).authType).toBe('o-auth1');
+  });
+
+  it('saving a loaded digest request does not turn it into none', () => {
+    const loaded = fromPersistedAuth({ authType: 'digest', username: 'u', password: 'p' });
+    expect(toPersistedAuth(loaded)).toEqual({ authType: 'digest', username: 'u', password: 'p' });
+  });
 });

@@ -30,7 +30,11 @@ vi.mock('@/lib/query-client', () => ({
   getQueryClient: () => ({ getQueryData: () => undefined }),
 }));
 
-import { getEnvInvalidationKeys, resolveRequestFieldsForPath } from '@/lib/execute-request';
+import {
+  getEnvInvalidationKeys,
+  resolveRequestFieldsForPath,
+  toApiAuth,
+} from '@/lib/execute-request';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 
 function baseRequest(): RequestState {
@@ -126,5 +130,49 @@ describe('getEnvInvalidationKeys', () => {
   it('returns an empty list when neither is set', () => {
     const keys = getEnvInvalidationKeys(undefined, undefined);
     expect(keys).toHaveLength(0);
+  });
+});
+
+describe('toApiAuth for digest, wsse, ntlm and oauth1', () => {
+  const resolve = (s: string) => s.replace('{{pw}}', 'secret');
+
+  it('sends digest and wsse credentials with variables resolved', () => {
+    expect(
+      toApiAuth({ authType: 'digest', digest: { username: 'u', password: '{{pw}}' } }, resolve),
+    ).toEqual({ authType: 'digest', username: 'u', password: 'secret' });
+    expect(
+      toApiAuth({ authType: 'wsse', wsse: { username: 'u', password: '{{pw}}' } }, resolve),
+    ).toEqual({ authType: 'wsse', username: 'u', password: 'secret' });
+  });
+
+  it('sends ntlm with its domain', () => {
+    expect(
+      toApiAuth(
+        { authType: 'ntlm', ntlm: { username: 'u', password: '{{pw}}', domain: 'CORP' } },
+        resolve,
+      ),
+    ).toEqual({ authType: 'ntlm', username: 'u', password: 'secret', domain: 'CORP' });
+  });
+
+  it('sends oauth1 under the backend tag and resolves only its credential fields', () => {
+    const sent = toApiAuth(
+      {
+        authType: 'oauth1',
+        oauth1: { consumerSecret: '{{pw}}', signatureMethod: '{{pw}}', includeBodyHash: true },
+      },
+      resolve,
+    );
+    expect(sent).toEqual({
+      authType: 'o-auth1',
+      consumerSecret: 'secret',
+      signatureMethod: '{{pw}}',
+      includeBodyHash: true,
+    });
+  });
+
+  it('does not send none for these types any more', () => {
+    for (const authType of ['digest', 'wsse', 'ntlm', 'oauth1'] as const) {
+      expect(toApiAuth({ authType }).authType).not.toBe('none');
+    }
   });
 });

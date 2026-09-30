@@ -1,0 +1,54 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import type { AuthState } from '@/types/pane-types';
+
+// CodeMirror does not run in jsdom, so the variable-aware field is replaced by a plain input.
+vi.mock('@/components/editor', () => ({
+  SingleLineEditor: ({
+    value,
+    onChange,
+    'aria-label': label,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    'aria-label'?: string;
+  }) => <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />,
+}));
+vi.mock('../oauth2/OAuth2AuthEditor', () => ({ OAuth2AuthEditor: () => null }));
+
+import { AuthEditor } from '../AuthEditor';
+
+describe('AuthEditor for digest, wsse, ntlm and oauth1', () => {
+  it.each(['digest', 'wsse'] as const)('edits the %s username and password', (authType) => {
+    const auth: AuthState = { authType, [authType]: { username: 'u', password: 'p' } };
+    const onChange = vi.fn();
+    render(<AuthEditor auth={auth} onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'bob' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      authType,
+      [authType]: { username: 'bob', password: 'p' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      authType,
+      [authType]: { username: 'u', password: 'pw' },
+    });
+  });
+
+  it('shows a read-only note for ntlm and does not offer fields', () => {
+    const auth: AuthState = {
+      authType: 'ntlm',
+      ntlm: { username: 'u', password: 'p', domain: 'CORP' },
+    };
+    render(<AuthEditor auth={auth} onChange={vi.fn()} />);
+    expect(screen.getByText(/NTLM authentication is not supported yet/)).toBeTruthy();
+    expect(screen.queryByLabelText('Username')).toBeNull();
+  });
+
+  it('shows a read-only note for oauth1 that says the settings are kept', () => {
+    render(<AuthEditor auth={{ authType: 'oauth1', oauth1: {} }} onChange={vi.fn()} />);
+    expect(screen.getByText(/kept when you save/)).toBeTruthy();
+  });
+});

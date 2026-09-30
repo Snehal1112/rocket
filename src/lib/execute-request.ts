@@ -78,6 +78,16 @@ export function authToConsoleHeaders(auth: Auth): { key: string; value: string }
   }
 }
 
+// Credential fields of an OAuth 1.0 block that may hold {{variables}}.
+const OAUTH1_RESOLVED_FIELDS = [
+  'consumerKey',
+  'consumerSecret',
+  'accessToken',
+  'accessTokenSecret',
+  'callbackUrl',
+  'verifier',
+];
+
 export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
     case 'inherit':
@@ -98,6 +108,27 @@ export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
         value: resolve(auth.apiKey?.value ?? ''),
         placement: auth.apiKey?.addTo ?? 'header',
       };
+    case 'digest':
+    case 'wsse':
+      return {
+        authType: auth.authType,
+        username: resolve(auth[auth.authType]?.username ?? ''),
+        password: resolve(auth[auth.authType]?.password ?? ''),
+      };
+    case 'ntlm':
+      return {
+        authType: 'ntlm',
+        username: resolve(auth.ntlm?.username ?? ''),
+        password: resolve(auth.ntlm?.password ?? ''),
+        domain: resolve(auth.ntlm?.domain ?? ''),
+      };
+    case 'oauth1': {
+      const fields: Record<string, unknown> = { ...(auth.oauth1 ?? {}) };
+      for (const key of OAUTH1_RESOLVED_FIELDS) {
+        if (typeof fields[key] === 'string') fields[key] = resolve(fields[key] as string);
+      }
+      return { ...fields, authType: 'o-auth1' };
+    }
     case 'oauth2':
       // For execution, send the stored access token as a bearer token.
       return {

@@ -69,6 +69,33 @@ export function fromPersistedAuth(
     return { authType: 'bearer', bearer: { token: (a.token as string) ?? '' } };
   }
 
+  if (authType === 'digest' || authType === 'wsse') {
+    return {
+      authType,
+      [authType]: {
+        username: (a.username as string) ?? '',
+        password: (a.password as string) ?? '',
+      },
+    };
+  }
+
+  if (authType === 'ntlm') {
+    return {
+      authType: 'ntlm',
+      ntlm: {
+        username: (a.username as string) ?? '',
+        password: (a.password as string) ?? '',
+        domain: (a.domain as string) ?? '',
+      },
+    };
+  }
+
+  // The backend emits 'o-auth1' (kebab-case tag); tolerate a bare 'oauth1' like oauth2 above.
+  if (authType === 'o-auth1' || authType === 'oauth1') {
+    const { authType: _tag, ...fields } = a;
+    return { authType: 'oauth1', oauth1: fields };
+  }
+
   if (authType === 'api-key') {
     return {
       authType: 'api-key',
@@ -105,6 +132,22 @@ export function toPersistedAuth(auth: AuthState): Auth {
         value: auth.apiKey?.value ?? '',
         placement: auth.apiKey?.addTo ?? 'header',
       };
+    case 'digest':
+    case 'wsse':
+      return {
+        authType: auth.authType,
+        username: auth[auth.authType]?.username ?? '',
+        password: auth[auth.authType]?.password ?? '',
+      };
+    case 'ntlm':
+      return {
+        authType: 'ntlm',
+        username: auth.ntlm?.username ?? '',
+        password: auth.ntlm?.password ?? '',
+        domain: auth.ntlm?.domain ?? '',
+      };
+    case 'oauth1':
+      return { ...(auth.oauth1 ?? {}), authType: 'o-auth1' };
     case 'oauth2':
       if (!auth.oauth2) return { authType: 'none' };
       return oauth2StateToApiAuth(auth.oauth2) as Auth;
