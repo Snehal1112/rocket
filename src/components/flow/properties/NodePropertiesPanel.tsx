@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { AuthNodeEditor } from './AuthNodeEditor';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
 import { LastRunTab } from './LastRunTab';
@@ -24,6 +25,7 @@ function editorFor(
   edges: FlowEdge[],
   nodes: FlowNode[],
   collection: string,
+  flowName: string,
   onChange: (kind: FlowNodeKind) => void,
 ) {
   const kind = node.kind;
@@ -68,8 +70,17 @@ function editorFor(
     case 'Transform':
       return <TransformNodeEditor kind={kind} onChange={onChange} />;
     case 'Auth':
-      // Replaced by flow-auth-node plan 05 (frontend node).
-      return <LabelOnlyEditor kind={kind} onChange={onChange} />;
+      return (
+        <AuthNodeEditor
+          // Keyed by node, so one node's editor state never carries to another.
+          key={node.id}
+          kind={kind}
+          nodeId={node.id}
+          collection={collection}
+          flowName={flowName}
+          onChange={onChange}
+        />
+      );
   }
 }
 
@@ -78,6 +89,7 @@ export function NodePropertiesPanel({
   edges,
   nodes,
   collection,
+  flowName = '',
   status,
   detail,
   nodeStatus,
@@ -97,6 +109,7 @@ export function NodePropertiesPanel({
   edges: FlowEdge[];
   nodes: FlowNode[];
   collection: string;
+  flowName?: string;
   status: FlowNodeStatus;
   detail?: FlowNodeDetail;
   /** Every node's last-run status, so the Wires tab can fade wires not taken. */
@@ -213,7 +226,7 @@ export function NodePropertiesPanel({
                   {saveError}
                 </p>
               )}
-              {editorFor(node, edges, nodes, collection, onChange)}
+              {editorFor(node, edges, nodes, collection, flowName, onChange)}
             </div>
           </TabsContent>
           <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
