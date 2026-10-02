@@ -133,6 +133,24 @@ function endActiveSessions(tabs: Tab[]): void {
   }
 }
 
+// Clears the in-memory Auth tokens of every flow shown by a dropped tab, unless
+// a remaining tab still shows the same flow.
+function clearFlowAuthForDroppedTabs(dropped: Tab[], remaining: Tab[] = []): void {
+  const shown = (t: Tab) => (isFlowTab(t) && t.collectionName && t.flowName ? t : null);
+  const kept = new Set(
+    remaining.flatMap((t) => {
+      const f = shown(t);
+      return f ? [`${f.collectionName}\u0000${f.flowName}`] : [];
+    }),
+  );
+  for (const tab of dropped) {
+    const f = shown(tab);
+    if (!f?.collectionName || !f.flowName) continue;
+    if (kept.has(`${f.collectionName}\u0000${f.flowName}`)) continue;
+    useFlowAuthStore.getState().clearFlow(f.collectionName, f.flowName);
+  }
+}
+
 // Recursively finds a split node by id and updates its sizes.
 function updateSplitSizes(node: PaneNode, splitId: string, sizes: [number, number]): PaneNode {
   if (node.type === 'leaf') return node;
@@ -318,26 +336,21 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Best-effort session cleanup for the tab being closed.
     if (found) endSessionIfActive(found.tab);
 
-    // A flow's in-memory Auth tokens go with its last open tab. Another tab
-    // of the same flow keeps them.
-    if (found && isFlowTab(found.tab) && found.tab.collectionName && found.tab.flowName) {
-      const { collectionName, flowName } = found.tab;
-      const stillOpen = collectAllTabs(root).some(
-        (t) =>
-          t.id !== tabId &&
-          isFlowTab(t) &&
-          t.collectionName === collectionName &&
-          t.flowName === flowName,
-      );
-      if (!stillOpen) useFlowAuthStore.getState().clearFlow(collectionName, flowName);
-    }
-
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
       return result.groupId === groupId ? result : null;
     })();
 
     if (!leaf) return;
+
+    // A flow's in-memory Auth tokens go with its last open tab. Another tab
+    // of the same flow keeps them.
+    if (found) {
+      clearFlowAuthForDroppedTabs(
+        [found.tab],
+        collectAllTabs(root).filter((t) => t.id !== tabId),
+      );
+    }
 
     // Remove the tab from the leaf.
     const remaining = leaf.tabs.filter((t) => t.id !== tabId);
@@ -888,6 +901,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       // With no active collection there is no snapshot to keep the active
       // leaf's tabs, so they are dropped. End their agent sessions first.
       endActiveSessions(activeLeaf.tabs);
+      clearFlowAuthForDroppedTabs(activeLeaf.tabs);
     }
 
     // Restore target collection's tabs (or empty if never visited).
@@ -947,7 +961,12 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Every other tab in the pane tree is dropped below. End its agent
     // session so no credentialed backend process is left orphaned.
-    endActiveSessions(collectAllTabs(root).filter((tab) => !preservedTabIds.has(tab.id)));
+    const droppedTabs = collectAllTabs(root).filter((tab) => !preservedTabIds.has(tab.id));
+    endActiveSessions(droppedTabs);
+    clearFlowAuthForDroppedTabs(
+      droppedTabs,
+      collectAllTabs(root).filter((tab) => preservedTabIds.has(tab.id)),
+    );
 
     // Flush dirty tabs before resetting the pane tree.
     const flush = (node: PaneNode): void => {
@@ -1023,6 +1042,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       .filter(([key]) => key !== activeCollection)
       .flatMap(([, entry]) => entry.tabs);
     endActiveSessions([...collectAllTabs(root), ...snapshotTabs]);
+    clearFlowAuthForDroppedTabs([...collectAllTabs(root), ...snapshotTabs]);
     set(buildInitialState());
   },
 

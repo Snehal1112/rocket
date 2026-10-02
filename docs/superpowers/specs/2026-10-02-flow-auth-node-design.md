@@ -222,5 +222,5 @@ the Low and Info findings are accepted, deliberate, or deferred as noted below.
 - F2: redact every step error (`redact_url_secrets` in the run loop; consider `reqwest::Error::without_url()`).
 - F3: truncate provider error bodies and redact echoed credentials.
 - F6: send a config hash with each supplied token and reject a mismatch.
-- F7: clear tokens on workspace, environment and flow delete or rename events; add the workspace id to the key.
+- F7 (partial): in-memory tokens are cleared on node removal and tab close; flow delete/rename have no UI yet — call `clearFlow` when they are added. Still open: clear on workspace and environment delete or rename events; add the workspace id to the key.
 - F8: use `redact_url_secrets` for the history URL.

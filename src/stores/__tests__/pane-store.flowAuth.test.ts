@@ -49,3 +49,29 @@ describe('closing a flow tab clears its Auth tokens', () => {
     expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([key('g')]);
   });
 });
+
+describe('bulk tab drops', () => {
+  const auth = { authType: 'bearer' } as AuthState;
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    useFlowAuthStore.setState({ auths: { [key('f')]: { auth }, [key('g')]: { auth } } });
+    usePaneStore.getState().openTab(flowTab('t1', 'f'));
+    usePaneStore.getState().openTab(flowTab('t3', 'g'));
+  });
+
+  it('closeAll clears the tokens of flow tabs', () => {
+    usePaneStore.getState().closeAll();
+    expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([]);
+  });
+
+  it('reset clears the tokens of flow tabs', () => {
+    usePaneStore.getState().reset();
+    expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([]);
+  });
+
+  it('switchCollection snapshots the tabs and does not clear', () => {
+    usePaneStore.setState({ activeCollection: 'c' });
+    usePaneStore.getState().switchCollection('d');
+    expect(Object.keys(useFlowAuthStore.getState().auths)).toHaveLength(2);
+  });
+});

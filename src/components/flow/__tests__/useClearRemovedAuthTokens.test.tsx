@@ -37,11 +37,50 @@ describe('useClearRemovedAuthTokens', () => {
     expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([keyB]);
   });
 
-  it('keeps entries when the list changes but the Auth nodes stay', () => {
+  const entries = () => Object.keys(useFlowAuthStore.getState().auths);
+  const other = (id: string): FlowNode =>
+    ({ id, position: { x: 0, y: 0 }, kind: { kind: 'Input', label: id } }) as unknown as FlowNode;
+
+  it('keeps the token when a node is replaced by one with the same id', () => {
     const { rerender } = renderHook(({ nodes }) => useClearRemovedAuthTokens('c', 'f', nodes), {
       initialProps: { nodes: [authNode('a1'), authNode('a2')] },
     });
+    rerender({ nodes: [{ ...authNode('a1') }, authNode('a2')] });
+    expect(entries()).toHaveLength(2);
+  });
+
+  it('clears nothing when a non-Auth node leaves', () => {
+    const { rerender } = renderHook(({ nodes }) => useClearRemovedAuthTokens('c', 'f', nodes), {
+      initialProps: { nodes: [authNode('a1'), authNode('a2'), other('i1')] },
+    });
     rerender({ nodes: [authNode('a1'), authNode('a2')] });
-    expect(Object.keys(useFlowAuthStore.getState().auths)).toHaveLength(2);
+    expect(entries()).toHaveLength(2);
+  });
+
+  it('clears the token when an Auth node becomes another kind with the same id', () => {
+    const { rerender } = renderHook(({ nodes }) => useClearRemovedAuthTokens('c', 'f', nodes), {
+      initialProps: { nodes: [authNode('a1'), authNode('a2')] },
+    });
+    rerender({ nodes: [other('a1'), authNode('a2')] });
+    expect(entries()).toEqual([keyB]);
+  });
+
+  it('does not clear when the flow or collection changes', () => {
+    const { rerender } = renderHook(({ c, f, nodes }) => useClearRemovedAuthTokens(c, f, nodes), {
+      initialProps: { c: 'c', f: 'f', nodes: [authNode('a1'), authNode('a2')] },
+    });
+    rerender({ c: 'c', f: 'g', nodes: [] });
+    rerender({ c: 'x', f: 'g', nodes: [] });
+    expect(entries()).toHaveLength(2);
+  });
+
+  it('is safe without a collection or flow', () => {
+    const { rerender } = renderHook(
+      ({ c, nodes }: { c: string | null | undefined; nodes: FlowNode[] }) =>
+        useClearRemovedAuthTokens(c, 'f', nodes),
+      { initialProps: { c: null as string | null | undefined, nodes: [authNode('a1')] } },
+    );
+    rerender({ c: undefined, nodes: [] });
+    expect(entries()).toHaveLength(2);
   });
 });
