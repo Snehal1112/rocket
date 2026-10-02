@@ -547,7 +547,7 @@ impl RequestExecutionService {
 
         // The selected environment decides which client certificates the executor may present.
         let mut options = input.options.clone();
-        options.client_certificates = self.environment_client_certificates(input, &vars);
+        options.client_certificates = self.environment_client_certificates(input, &vars, external_secrets);
 
         Ok(HttpRequest {
             method: input.method,
@@ -560,12 +560,13 @@ impl RequestExecutionService {
         })
     }
 
-    /// Returns the selected environment's client certificates with `{{placeholders}}` resolved.
-    /// A missing environment means no certificates, like it means no variables.
+    /// Returns the selected environment's client certificates, with `{{placeholders}}`, relative
+    /// paths and RocketVault references resolved. A missing environment means no certificates, like it means no variables.
     fn environment_client_certificates(
         &self,
         input: &ExecuteRequestInput,
         vars: &std::collections::HashMap<String, String>,
+        external_secrets: &std::collections::HashMap<String, String>,
     ) -> Vec<ResolvedClientCertificate> {
         // Relative file paths are relative to the collection folder, so they work for a
         // collection that is shared through git.
@@ -579,6 +580,7 @@ impl RequestExecutionService {
             input.environment_name.as_deref(),
             base.as_deref(),
             vars,
+            external_secrets,
         )
     }
 
@@ -3036,7 +3038,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_vault_sourced_certificate_is_unavailable_until_references_are_resolved() {
+    async fn a_vault_sourced_certificate_without_a_fetched_secret_is_unavailable() {
         let mut env = Environment::new("dev");
         env.client_certificates = vec![ClientCertificate::Pkcs12 {
             domain: "api.example.com".into(),
@@ -3053,10 +3055,302 @@ mod tests {
             describe_all(&resolved.options.client_certificates),
             [
                 "unavailable api.example.com Client certificate secret vault.clientBundleB64 \
-              cannot be used yet: certificate material from RocketVault is not supported in \
-              this build."
+              was not found. Check the External Secrets binding and fetch the secret names."
             ]
         );
+    }
+
+    /// Tests for vault-backed client certificate material (Plan C). The helpers are `pub(super)`
+    /// so the hygiene module of Task C2 can reuse them.
+    mod vault_certificates {
+        use super::*;
+        use base64::Engine as _;
+        use rocket_http::{CertificateMaterial, CertificateSource, ResolvedClientCertificate};
+
+        pub(super) const CERT_PEM: &str =
+            "-----BEGIN CERTIFICATE-----\r\nMIIBcertbody0123\r\n-----END CERTIFICATE-----\r\n";
+        pub(super) const KEY_PEM: &str =
+            "-----BEGIN PRIVATE KEY-----\nMIIEkeybody0123\n-----END PRIVATE KEY-----\n";
+
+        pub(super) fn vault_pem(
+            domain: &str,
+            cert_ref: &str,
+            key_ref: &str,
+            passphrase: Option<&str>,
+        ) -> ClientCertificate {
+            ClientCertificate::Pem {
+                domain: domain.into(),
+                certificate_file_path: String::new(),
+                private_key_file_path: String::new(),
+                certificate_secret: Some(cert_ref.into()),
+                private_key_secret: Some(key_ref.into()),
+                passphrase: passphrase.map(String::from),
+            }
+        }
+
+        pub(super) fn vault_p12(domain: &str, reference: &str) -> ClientCertificate {
+            ClientCertificate::Pkcs12 {
+                domain: domain.into(),
+                pkcs12_file_path: String::new(),
+                pkcs12_secret: Some(reference.into()),
+                passphrase: None,
+            }
+        }
+
+        pub(super) fn secrets(
+            pairs: &[(&str, &str)],
+        ) -> std::collections::HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        }
+
+        /// Resolves `certs` through `resolve_request` for an environment named `dev`.
+        pub(super) fn resolve_certificates(
+            certs: Vec<ClientCertificate>,
+            secrets: &std::collections::HashMap<String, String>,
+        ) -> Vec<ResolvedClientCertificate> {
+            let mut env = Environment::new("dev");
+            env.client_certificates = certs;
+            let svc = service_with(env, None);
+            svc.resolve_request(&sample_input("https://a.example.com/x", Some("dev")), secrets)
+                .expect("resolve_request")
+                .options
+                .client_certificates
+        }
+
+        pub(super) fn source_bytes(source: &CertificateSource) -> Vec<u8> {
+            match source {
+                CertificateSource::Inline(bytes) => bytes.to_vec(),
+                CertificateSource::File(path) => {
+                    panic!("expected inline material, got file {path}")
+                }
+            }
+        }
+
+        pub(super) fn unavailable_reason(cert: &ResolvedClientCertificate) -> String {
+            match &cert.material {
+                CertificateMaterial::Unavailable { reason } => reason.clone(),
+                _ => panic!("expected an unavailable certificate for {}", cert.domain),
+            }
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_pem_references_resolve_to_inline_bytes_unchanged() {
+            let certs = resolve_certificates(
+                vec![vault_pem(
+                    "a.example.com",
+                    "vault.certPem",
+                    "vault.keyPem",
+                    Some("{{vault.keyPass}}"),
+                )],
+                &secrets(&[
+                    ("vault.certPem", CERT_PEM),
+                    ("vault.keyPem", KEY_PEM),
+                    ("vault.keyPass", "p4ss-word"),
+                ]),
+            );
+            assert_eq!(certs.len(), 1);
+            assert_eq!(certs[0].domain, "a.example.com");
+            let CertificateMaterial::Pem {
+                certificate,
+                private_key,
+                passphrase,
+            } = &certs[0].material
+            else {
+                panic!("expected a PEM certificate");
+            };
+            // Byte for byte, including the CRLF line endings.
+            assert_eq!(source_bytes(certificate), CERT_PEM.as_bytes());
+            assert_eq!(source_bytes(private_key), KEY_PEM.as_bytes());
+            assert_eq!(passphrase.as_ref().map(|p| p.as_str()), Some("p4ss-word"));
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_pkcs12_secret_is_base64_decoded() {
+            let certs = resolve_certificates(
+                vec![vault_p12("a.example.com", "vault.bundle")],
+                &secrets(&[("vault.bundle", "AQIDBAU=")]),
+            );
+            let CertificateMaterial::Pkcs12 { bundle, .. } = &certs[0].material else {
+                panic!("expected a PKCS12 certificate");
+            };
+            assert_eq!(source_bytes(bundle), vec![1u8, 2, 3, 4, 5]);
+        }
+
+        // Review Focus item 3.
+        #[tokio::test]
+        async fn vault_certificates_wrapped_base64_pkcs12_secret_decodes() {
+            let bundle: Vec<u8> = (0u8..=200).collect();
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&bundle);
+            // Wrapped at 64 columns with CRLF and an indent on every line, plus a trailing newline.
+            let wrapped = format!(
+                "{}\r\n",
+                encoded
+                    .as_bytes()
+                    .chunks(64)
+                    .map(|c| format!("  {}", std::str::from_utf8(c).expect("ascii")))
+                    .collect::<Vec<_>>()
+                    .join("\r\n")
+            );
+            assert!(wrapped.matches("\r\n").count() > 2, "the fixture must wrap");
+
+            let certs = resolve_certificates(
+                vec![vault_p12("a.example.com", "vault.bundle")],
+                &secrets(&[("vault.bundle", wrapped.as_str())]),
+            );
+            let CertificateMaterial::Pkcs12 { bundle: got, .. } = &certs[0].material else {
+                panic!("expected a PKCS12 certificate");
+            };
+            assert_eq!(source_bytes(got), bundle);
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_bad_base64_is_unavailable_and_never_echoes_the_value() {
+            let certs = resolve_certificates(
+                vec![vault_p12("a.example.com", "vault.bundle")],
+                &secrets(&[("vault.bundle", "this is !!! not base64")]),
+            );
+            let reason = unavailable_reason(&certs[0]);
+            assert_eq!(
+                reason,
+                "Client certificate secret vault.bundle is not valid base64."
+            );
+            assert!(!reason.contains("!!!"), "{reason}");
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_missing_secret_uses_the_spec_message() {
+            let certs = resolve_certificates(
+                vec![vault_pem("a.example.com", "vault.clientCertPem", "vault.k", None)],
+                &secrets(&[("vault.k", KEY_PEM)]),
+            );
+            assert_eq!(
+                unavailable_reason(&certs[0]),
+                "Client certificate secret vault.clientCertPem was not found. \
+                 Check the External Secrets binding and fetch the secret names."
+            );
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_empty_secret_is_unavailable() {
+            let certs = resolve_certificates(
+                vec![vault_p12("a.example.com", "vault.bundle")],
+                &secrets(&[("vault.bundle", "  \r\n")]),
+            );
+            assert_eq!(
+                unavailable_reason(&certs[0]),
+                "Client certificate secret vault.bundle is empty."
+            );
+        }
+
+        // Review Focus item 1, at the resolution level.
+        #[tokio::test]
+        async fn vault_certificates_missing_secret_on_another_domain_leaves_the_selected_certificate_usable(
+        ) {
+            let certs = resolve_certificates(
+                vec![
+                    vault_p12("a.example.com", "vault.ok"),
+                    vault_p12("b.example.com", "vault.missing"),
+                ],
+                &secrets(&[("vault.ok", "AQIDBAU=")]),
+            );
+            let first = rocket_http::client_cert::find_certificate(&certs, "https://a.example.com/x")
+                .expect("the first certificate is selected");
+            assert!(matches!(
+                first.material,
+                CertificateMaterial::Pkcs12 {
+                    bundle: CertificateSource::Inline(_),
+                    ..
+                }
+            ));
+            let second =
+                rocket_http::client_cert::find_certificate(&certs, "https://b.example.com/x")
+                    .expect("the second certificate is selected");
+            assert!(unavailable_reason(second).contains("vault.missing"));
+            assert!(
+                rocket_http::client_cert::find_certificate(&certs, "https://c.example.com/x")
+                    .is_none()
+            );
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_a_piece_needs_exactly_one_source() {
+            let both = ClientCertificate::Pkcs12 {
+                domain: "a.example.com".into(),
+                pkcs12_file_path: "/abs/client.p12".into(),
+                pkcs12_secret: Some("vault.bundle".into()),
+                passphrase: None,
+            };
+            let neither = ClientCertificate::Pkcs12 {
+                domain: "b.example.com".into(),
+                pkcs12_file_path: String::new(),
+                pkcs12_secret: None,
+                passphrase: None,
+            };
+            let certs =
+                resolve_certificates(vec![both, neither], &secrets(&[("vault.bundle", "AQIDBAU=")]));
+            let both_reason = unavailable_reason(&certs[0]);
+            assert!(
+                both_reason.contains("a.example.com") && both_reason.contains("only one"),
+                "{both_reason}"
+            );
+            let neither_reason = unavailable_reason(&certs[1]);
+            assert!(
+                neither_reason.contains("b.example.com") && neither_reason.contains("neither"),
+                "{neither_reason}"
+            );
+        }
+
+        // An empty or whitespace-only reference counts as absent, like in the save validator.
+        #[tokio::test]
+        async fn vault_certificates_blank_reference_counts_as_absent() {
+            let blank = |reference: &str| ClientCertificate::Pkcs12 {
+                domain: "a.example.com".into(),
+                pkcs12_file_path: "/abs/client.p12".into(),
+                pkcs12_secret: Some(reference.into()),
+                passphrase: None,
+            };
+            let no_source = |reference: &str| ClientCertificate::Pkcs12 {
+                domain: "b.example.com".into(),
+                pkcs12_file_path: String::new(),
+                pkcs12_secret: Some(reference.into()),
+                passphrase: None,
+            };
+            let certs = resolve_certificates(
+                vec![blank(""), blank("  \t"), no_source(" ")],
+                &secrets(&[]),
+            );
+            for cert in &certs[..2] {
+                assert!(matches!(
+                    &cert.material,
+                    CertificateMaterial::Pkcs12 {
+                        bundle: CertificateSource::File(p),
+                        ..
+                    } if p == "/abs/client.p12"
+                ));
+            }
+            assert!(unavailable_reason(&certs[2]).contains("neither"));
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_file_paths_stay_file_sources() {
+            let file = ClientCertificate::Pkcs12 {
+                domain: "a.example.com".into(),
+                pkcs12_file_path: "/abs/client.p12".into(),
+                pkcs12_secret: None,
+                passphrase: Some("changeit".into()),
+            };
+            let certs = resolve_certificates(vec![file], &secrets(&[]));
+            assert!(matches!(
+                &certs[0].material,
+                CertificateMaterial::Pkcs12 {
+                    bundle: CertificateSource::File(p),
+                    ..
+                } if p == "/abs/client.p12"
+            ));
+        }
     }
 
     #[tokio::test]

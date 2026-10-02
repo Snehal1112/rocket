@@ -2013,6 +2013,76 @@ mod mtls_tests {
             .is_err());
     }
 
+    mod unavailable_certificates {
+        use super::*;
+        use rocket_http::{CertificateSource, ResolvedClientCertificate, TokenClientProvider};
+
+        const MISSING: &str = "Client certificate secret vault.missing was not found. \
+                               Check the External Secrets binding and fetch the secret names.";
+
+        fn valid(domain: &str) -> ResolvedClientCertificate {
+            ResolvedClientCertificate::pkcs12(
+                domain,
+                CertificateSource::File(fixture("client.p12")),
+                Some("changeit".into()),
+            )
+        }
+
+        fn unavailable(domain: &str) -> ResolvedClientCertificate {
+            ResolvedClientCertificate::unavailable(domain, MISSING)
+        }
+
+        // Review Focus item 1.
+        #[tokio::test]
+        async fn unavailable_certificate_for_another_domain_does_not_affect_the_request() {
+            let server = ok_server().await;
+            for certs in [
+                vec![valid("127.0.0.1"), unavailable("other.example.com")],
+                vec![unavailable("other.example.com"), valid("127.0.0.1")],
+            ] {
+                let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+                req.options.client_certificates = certs;
+                let resp = ReqwestExecutor::new()
+                    .execute(&req)
+                    .await
+                    .expect("request succeeds");
+                assert_eq!(resp.status, 200);
+            }
+        }
+
+        #[tokio::test]
+        async fn unavailable_certificate_that_is_selected_fails_the_request_without_a_fallback() {
+            let server = ok_server().await;
+            let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+            // The valid certificate for the same domain comes second and must not be used.
+            req.options.client_certificates = vec![unavailable("127.0.0.1"), valid("127.0.0.1")];
+            let err = ReqwestExecutor::new()
+                .execute(&req)
+                .await
+                .expect_err("a selected unavailable certificate fails");
+            assert!(err.to_string().contains("vault.missing"), "{err}");
+            assert!(server
+                .received_requests()
+                .await
+                .expect("requests recorded")
+                .is_empty());
+        }
+
+        #[test]
+        fn unavailable_certificate_fails_the_token_client_only_when_selected() {
+            let provider = ReqwestTokenClientProvider;
+            let certs = [unavailable("idp.example.com")];
+            assert!(provider
+                .client_for("https://other.example.com/token", true, &certs)
+                .is_ok());
+            let err = provider
+                .client_for("https://idp.example.com/token", true, &certs)
+                .expect_err("a selected unavailable certificate is an error")
+                .to_string();
+            assert!(err.contains("vault.missing"), "{err}");
+        }
+    }
+
     async fn redirecting_to(target: &str) -> MockServer {
         let server = MockServer::start().await;
         let target = target.to_string();

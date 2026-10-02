@@ -150,13 +150,14 @@ impl OAuth2Service {
         self
     }
 
-    /// The client certificates of the named environment, with placeholders and relative paths
-    /// resolved the same way request execution does.
+    /// The client certificates of the named environment, with placeholders, relative paths and
+    /// RocketVault references resolved the same way request execution does.
     fn client_certificates(
         &self,
         collection: Option<&str>,
         environment_name: Option<&str>,
         vars: &HashMap<String, String>,
+        external_secrets: &HashMap<String, String>,
     ) -> Vec<ResolvedClientCertificate> {
         let factory = self.collection_env_repo_factory.as_ref();
         let base = collection.and_then(|c| factory?.collection_dir(c));
@@ -168,6 +169,7 @@ impl OAuth2Service {
                     environment_name,
                     base.as_deref(),
                     vars,
+                    external_secrets,
                 )
             }
             _ => crate::client_certificates::environment_client_certificates(
@@ -175,6 +177,7 @@ impl OAuth2Service {
                 environment_name,
                 base.as_deref(),
                 vars,
+                external_secrets,
             ),
         }
     }
@@ -418,6 +421,7 @@ impl OAuth2Service {
             req.collection.as_deref(),
             req.environment_name.as_deref(),
             &vars,
+            external_secrets,
         );
         let client = self.token_client(&url, verify_ssl, &certificates)?;
         Self::post_token_request(&client, &url, &form, &extra_headers).await
@@ -553,6 +557,7 @@ impl OAuth2Service {
                 req.collection.as_deref(),
                 req.environment_name.as_deref(),
                 &vars,
+                external_secrets,
             ),
         }
     }
@@ -1174,6 +1179,131 @@ mod tests {
             describe_all(&seen[0].2),
             ["pkcs12 idp.example.com file:/c.p12 pass:p4ss"]
         );
+    }
+
+    mod vault_certificates {
+        use super::*;
+        use rocket_http::{CertificateMaterial, CertificateSource};
+
+        fn vault_p12(domain: &str, reference: &str) -> ClientCertificate {
+            ClientCertificate::Pkcs12 {
+                domain: domain.into(),
+                pkcs12_file_path: String::new(),
+                pkcs12_secret: Some(reference.into()),
+                passphrase: None,
+            }
+        }
+
+        fn secrets(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        }
+
+        #[test]
+        fn vault_certificates_a_get_token_request_carries_inline_material_from_the_vault() {
+            let provider = CapturingProvider::new();
+            let svc = service_with_certificates(
+                vec![vault_p12("idp.example.com", "vault.bundle")],
+                &provider,
+            );
+            let config = svc.resolve_get_token_request_with_secrets(
+                &get_token_request(),
+                &secrets(&[("vault.bundle", "AQIDBAU=")]),
+            );
+            let CertificateMaterial::Pkcs12 {
+                bundle: CertificateSource::Inline(bytes),
+                ..
+            } = &config.client_certificates[0].material
+            else {
+                panic!("expected inline PKCS12 material");
+            };
+            assert_eq!(&bytes[..], &[1u8, 2, 3, 4, 5][..]);
+        }
+
+        #[tokio::test]
+        async fn vault_certificates_a_refresh_resolves_inline_material_for_the_provider() {
+            let provider = CapturingProvider::new();
+            let svc = service_with_certificates(
+                vec![vault_p12("idp.example.com", "vault.bundle")],
+                &provider,
+            );
+            let req = OAuth2RefreshRequest {
+                refresh_token: "r".into(),
+                token_url: "https://idp.example.com/token".into(),
+                refresh_token_url: None,
+                client_id: "id".into(),
+                client_secret: None,
+                scope: None,
+                client_authentication: None,
+                verify_ssl: None,
+                refresh_params: None,
+                collection: None,
+                environment_name: Some("dev".into()),
+                request_path: None,
+            };
+
+            // The capturing provider fails on purpose, so only what it saw matters.
+            let _ = svc
+                .refresh_token_with_secrets(&req, &secrets(&[("vault.bundle", "AQIDBAU=")]))
+                .await;
+
+            let seen = provider.seen.lock().expect("lock");
+            assert!(matches!(
+                &seen[0].2[0].material,
+                CertificateMaterial::Pkcs12 {
+                    bundle: CertificateSource::Inline(_),
+                    ..
+                }
+            ));
+        }
+
+        // Review Focus item 1, for OAuth2 token requests.
+        #[test]
+        fn vault_certificates_oauth_missing_secret_on_another_domain_leaves_the_selected_certificate_usable(
+        ) {
+            let provider = CapturingProvider::new();
+            let svc = service_with_certificates(
+                vec![
+                    vault_p12("idp.example.com", "vault.ok"),
+                    vault_p12("other.example.com", "vault.missing"),
+                ],
+                &provider,
+            );
+            let config = svc.resolve_get_token_request_with_secrets(
+                &get_token_request(),
+                &secrets(&[("vault.ok", "AQIDBAU=")]),
+            );
+            let selected = rocket_http::client_cert::find_certificate(
+                &config.client_certificates,
+                "https://idp.example.com/token",
+            )
+            .expect("the certificate for the token host is selected");
+            assert!(matches!(
+                selected.material,
+                CertificateMaterial::Pkcs12 {
+                    bundle: CertificateSource::Inline(_),
+                    ..
+                }
+            ));
+        }
+
+        #[test]
+        fn vault_certificates_without_secrets_a_reference_is_unavailable_not_a_panic() {
+            let provider = CapturingProvider::new();
+            let svc = service_with_certificates(
+                vec![vault_p12("idp.example.com", "vault.bundle")],
+                &provider,
+            );
+            let config = svc.resolve_get_token_request(&get_token_request());
+            let CertificateMaterial::Unavailable { reason } =
+                &config.client_certificates[0].material
+            else {
+                panic!("expected an unavailable certificate");
+            };
+            assert!(reason.contains("vault.bundle"), "{reason}");
+        }
     }
 
     /// A factory that knows where the collection lives, like the real workspace one.
