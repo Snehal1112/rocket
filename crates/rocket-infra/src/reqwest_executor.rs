@@ -96,7 +96,8 @@ impl ReqwestExecutor {
         verify_ssl: bool,
     ) -> DomainResult<Client> {
         let key = (follow_redirects, verify_ssl);
-        let mut cache = self.clients.lock().unwrap();
+        // The cache only holds clients, so a poisoned lock is safe to recover.
+        let mut cache = self.clients.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = cache.get(&key) {
             // reqwest::Client::clone is cheap — internally Arc.
             return Ok(c.clone());
@@ -976,6 +977,20 @@ mod tests {
         let _c2 = exec.get_or_build_client(true, true).unwrap();
         // Same options → only one cached client.
         assert_eq!(exec.cache_len(), 1);
+    }
+
+    #[test]
+    fn executor_keeps_working_after_a_panic_poisons_the_cache_lock() {
+        let exec = std::sync::Arc::new(ReqwestExecutor::new());
+        let poisoner = std::sync::Arc::clone(&exec);
+        // A thread that panics while holding the lock poisons it.
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.clients.lock();
+            panic!("poison the client cache lock");
+        })
+        .join();
+        assert!(exec.clients.is_poisoned(), "the lock should be poisoned");
+        assert!(exec.get_or_build_client(true, true).is_ok());
     }
 
     #[test]
