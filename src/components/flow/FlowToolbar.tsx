@@ -197,9 +197,11 @@ export function FlowToolbar({
       });
       abandonPrepareRef.current = abandon;
       setPreparing(true);
-      const pending = onPrepareAuth();
-      // A late rejection after abandoning must not surface as unhandled.
-      pending.catch(() => undefined);
+      // Called synchronously; a sync throw becomes a rejection handled below.
+      // Promise.race also handles a late rejection after abandoning.
+      const pending = new Promise<Record<string, FlowAuthToken> | null>((resolve) =>
+        resolve(onPrepareAuth()),
+      );
       try {
         const prepared = await Promise.race([pending, abandonPromise]);
         if (prepared === abandoned) {

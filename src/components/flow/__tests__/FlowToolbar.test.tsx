@@ -728,6 +728,8 @@ describe('FlowToolbar', () => {
     });
 
     it('ignores an abandoned sign-in that rejects later, without an error toast', async () => {
+      // Detects only rejections Node reports as unhandled; the race itself
+      // already handles the late rejection.
       const unhandled = vi.fn();
       process.on('unhandledRejection', unhandled);
       try {
@@ -766,6 +768,45 @@ describe('FlowToolbar', () => {
       await new Promise((r) => setTimeout(r, 20));
       expect(tauriApi.runFlow).not.toHaveBeenCalled();
       expect(tauriApi.onFlowRunStarted).not.toHaveBeenCalled();
+    });
+
+    it('recovers when onPrepareAuth throws synchronously', async () => {
+      const second = pendingAuth();
+      const onPrepareAuth = vi
+        .fn()
+        .mockImplementationOnce(() => {
+          throw new Error('boom');
+        })
+        .mockReturnValueOnce(second.promise);
+      renderToolbar({ onPrepareAuth });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+      expect(await screen.findByRole('button', { name: 'Run' })).toBeEnabled();
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      expect(onPrepareAuth).toHaveBeenCalledTimes(2);
+    });
+
+    it('an abandoned attempt resolving after a newer attempt started does not run', async () => {
+      const first = pendingAuth();
+      const second = pendingAuth();
+      const onPrepareAuth = vi
+        .fn()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      renderToolbar({ onPrepareAuth });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      first.resolve({ a: { accessToken: 'tok-123456' } });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+      expect(onPrepareAuth).toHaveBeenCalledTimes(2);
+      second.resolve({});
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
     });
   });
 });
