@@ -408,29 +408,34 @@ pub fn run() {
 
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Uses its own repo instances pointed at the same paths as the exec service.
-            let oauth2_svc = rocket_app::oauth2_service::OAuth2Service::new(
-                Box::new(FsEnvironmentRepo::with_secret_store(
-                    environments_dir,
-                    env_secret_store(),
-                )),
-                Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
-            )
-            // Client certificates live on a collection's own environment, and a token
-            // endpoint that needs mutual TLS gets the matching one.
-            .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
-                Arc::clone(&active_workspace_path),
-            )))
-            .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider))
-            // A RocketVault certificate selected for a token URL is fetched at send time. It
-            // reads the same connection file and shares the fetcher (and so the token and id
-            // caches) above.
-            .with_vault_access(
-                Box::new(rocket_infra::FsSecretManagerRepo::new(
-                    data_dir.join("secret_managers.yml"),
-                )),
-                Arc::clone(&vault_connection_secret_store),
-                Arc::clone(&vault_fetcher),
-            );
+            // A factory, because the Flow runner needs a second instance for its
+            // token fetcher and `OAuth2Service` is not `Clone`.
+            let make_oauth2_service = || {
+                rocket_app::oauth2_service::OAuth2Service::new(
+                    Box::new(FsEnvironmentRepo::with_secret_store(
+                        environments_dir.clone(),
+                        env_secret_store(),
+                    )),
+                    Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
+                )
+                // Client certificates live on a collection's own environment, and a token
+                // endpoint that needs mutual TLS gets the matching one.
+                .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
+                    Arc::clone(&active_workspace_path),
+                )))
+                .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider))
+                // A RocketVault certificate selected for a token URL is fetched at send time. It
+                // reads the same connection file and shares the fetcher (and so the token and id
+                // caches) above.
+                .with_vault_access(
+                    Box::new(rocket_infra::FsSecretManagerRepo::new(
+                        data_dir.join("secret_managers.yml"),
+                    )),
+                    Arc::clone(&vault_connection_secret_store),
+                    Arc::clone(&vault_fetcher),
+                )
+            };
+            let oauth2_svc = make_oauth2_service();
 
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows
@@ -466,7 +471,12 @@ pub fn run() {
             )
             .with_callback_listener(Box::new(callback_adapter::HyperCallbackAdapter(
                 rocket_infra::HyperCallbackListener::new(),
-            )));
+            )))
+            // Auth nodes fetch client-credentials and password tokens through the
+            // same OAuth2 stack as the Authentication tab.
+            .with_token_fetcher(Box::new(
+                rocket_app::flow_auth::OAuth2ServiceFetcher::new(make_oauth2_service()),
+            ));
 
             let git_svc = GitAppService::new(
                 Box::new(rocket_git::Git2Service::new()),
