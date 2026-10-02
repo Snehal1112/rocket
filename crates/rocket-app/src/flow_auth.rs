@@ -2,6 +2,7 @@
 //! `docs/superpowers/specs/2026-10-02-flow-auth-node-design.md`.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use rocket_flow::{Flow, FlowNodeKind};
@@ -135,6 +136,20 @@ impl FlowCredentials {
     }
 }
 
+/// How long a run-start token fetch may take. The fetch runs before the run
+/// is registered, so Stop cannot reach it; without a bound, a token endpoint
+/// that never answers would hang the run forever.
+pub(crate) const TOKEN_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `30s` for whole seconds, `50ms` below a second.
+fn describe_duration(d: Duration) -> String {
+    if d.as_secs() >= 1 {
+        format!("{}s", d.as_secs())
+    } else {
+        format!("{}ms", d.as_millis())
+    }
+}
+
 fn is_non_interactive(flow: &OAuth2Flow) -> bool {
     matches!(
         flow,
@@ -155,7 +170,7 @@ fn wire_value_of(credential: &Auth, vars: &HashMap<String, String>) -> Option<St
 /// Resolves every Auth node of `flow` into a credential, before the run starts.
 ///
 /// Order per OAuth2 node: a supplied token wins; otherwise a non-interactive
-/// grant is fetched; otherwise the run cannot start. Other auth types pass
+/// grant is fetched, bounded by `fetch_timeout`; otherwise the run cannot start. Other auth types pass
 /// through with their `{{variables}}` intact, because the request resolves
 /// them at send time with its own scopes.
 pub(crate) async fn resolve_flow_credentials(
@@ -163,6 +178,7 @@ pub(crate) async fn resolve_flow_credentials(
     supplied: &FlowAuthTokens,
     fetcher: &dyn FlowTokenFetcher,
     ctx: &FetchContext,
+    fetch_timeout: Duration,
 ) -> DomainResult<FlowCredentials> {
     let mut creds = FlowCredentials::default();
     for node in &flow.nodes {
@@ -188,9 +204,17 @@ pub(crate) async fn resolve_flow_credentials(
                 {
                     Some(token) => token.to_string(),
                     None if is_non_interactive(oauth) => {
-                        fetcher.fetch_token(oauth, ctx).await.map_err(|e| {
-                            DomainError::InvalidInput(format!("Auth node \"{label}\": {e}"))
-                        })?
+                        tokio::time::timeout(fetch_timeout, fetcher.fetch_token(oauth, ctx))
+                            .await
+                            .map_err(|_| {
+                                DomainError::InvalidInput(format!(
+                                    "Auth node \"{label}\": the token request timed out after {}",
+                                    describe_duration(fetch_timeout)
+                                ))
+                            })?
+                            .map_err(|e| {
+                                DomainError::InvalidInput(format!("Auth node \"{label}\": {e}"))
+                            })?
                     }
                     None => {
                         return Err(DomainError::InvalidInput(format!(
@@ -445,6 +469,20 @@ pub(crate) mod test_support {
         }
     }
 
+    /// A fetcher whose token endpoint accepts the request and never answers.
+    pub(crate) struct HangingFetcher;
+
+    #[async_trait]
+    impl FlowTokenFetcher for HangingFetcher {
+        async fn fetch_token(
+            &self,
+            _flow: &OAuth2Flow,
+            _ctx: &FetchContext,
+        ) -> DomainResult<String> {
+            std::future::pending::<DomainResult<String>>().await
+        }
+    }
+
     /// Hands one `Arc<FakeFetcher>` to a service expecting a `Box<dyn FlowTokenFetcher>`.
     pub(crate) struct SharedFetcher(pub(crate) Arc<FakeFetcher>);
 
@@ -504,6 +542,70 @@ mod tests {
         )])
     }
 
+    /// `resolve_flow_credentials` with the production fetch timeout.
+    async fn resolve(
+        flow: &Flow,
+        supplied: &FlowAuthTokens,
+        fetcher: &dyn FlowTokenFetcher,
+        ctx: &FetchContext,
+    ) -> DomainResult<FlowCredentials> {
+        resolve_flow_credentials(flow, supplied, fetcher, ctx, TOKEN_FETCH_TIMEOUT).await
+    }
+
+    #[tokio::test]
+    async fn a_token_fetch_that_never_answers_times_out_and_names_the_node() {
+        use super::test_support::HangingFetcher;
+
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::OAuth2(Box::new(client_credentials())),
+            true,
+        )]);
+
+        // The outer guard turns a missing timeout into a failure, not a hang.
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            resolve_flow_credentials(
+                &flow,
+                &HashMap::new(),
+                &HangingFetcher,
+                &ctx(),
+                Duration::from_millis(50),
+            ),
+        )
+        .await
+        .expect("the fetch must be bounded by the token fetch timeout");
+
+        let message = result.expect_err("a hanging fetch must fail").to_string();
+        assert!(
+            message.contains("Auth a") && message.contains("timed out"),
+            "got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fast_fetch_is_unaffected_by_the_timeout() {
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::OAuth2(Box::new(client_credentials())),
+            true,
+        )]);
+        let fetcher = FakeFetcher::ok("fetched-token-999");
+
+        let creds = resolve_flow_credentials(
+            &flow,
+            &HashMap::new(),
+            fetcher.as_ref(),
+            &ctx(),
+            Duration::from_millis(50),
+        )
+        .await
+        .expect("a fast fetch resolves");
+
+        assert_eq!(creds.wire_value("a"), Some("fetched-token-999"));
+        assert_eq!(TOKEN_FETCH_TIMEOUT, Duration::from_secs(30));
+    }
+
     #[tokio::test]
     async fn a_static_bearer_passes_through_and_resolves_its_wire_value() {
         let flow = flow_with(vec![auth_node(
@@ -515,7 +617,7 @@ mod tests {
         )]);
         let fetcher = FakeFetcher::ok("unused");
 
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("static auth resolves");
 
@@ -539,7 +641,7 @@ mod tests {
         )]);
         let fetcher = FakeFetcher::ok("fetched-token-999");
 
-        let creds = resolve_flow_credentials(
+        let creds = resolve(
             &flow,
             &supplied("a", "supplied-token-123"),
             fetcher.as_ref(),
@@ -566,7 +668,7 @@ mod tests {
         )]);
         let fetcher = FakeFetcher::ok("fetched-token-999");
 
-        let creds = resolve_flow_credentials(&flow, &supplied("a", "  "), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &supplied("a", "  "), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
 
@@ -583,7 +685,7 @@ mod tests {
         )]);
         let fetcher = FakeFetcher::ok("fetched-token-999");
 
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
 
@@ -605,7 +707,7 @@ mod tests {
         )]);
         let fetcher = FakeFetcher::ok("fetched-token-999");
 
-        let err = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let err = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect_err("must fail");
 
@@ -626,7 +728,7 @@ mod tests {
         )]);
         let fetcher = FakeFetcher::err("invalid_client");
 
-        let err = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let err = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect_err("must fail");
 
@@ -642,7 +744,7 @@ mod tests {
         for auth in [Auth::None, Auth::Inherit] {
             let flow = flow_with(vec![auth_node("a", auth, false)]);
             let fetcher = FakeFetcher::ok("x");
-            let err = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+            let err = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
                 .await
                 .expect_err("must fail");
             assert!(err.to_string().contains("Auth a"), "got: {err}");
@@ -669,7 +771,7 @@ mod tests {
             ),
         ]);
         let fetcher = FakeFetcher::ok("x");
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
 
@@ -707,7 +809,7 @@ mod tests {
             true,
         )]);
         let fetcher = FakeFetcher::ok("x");
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
         let bearer = Auth::Bearer {
@@ -744,7 +846,7 @@ mod tests {
             false,
         )]);
         let fetcher = FakeFetcher::ok("x");
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
         let mut auth = Auth::None;
@@ -762,7 +864,7 @@ mod tests {
             false,
         )]);
         let fetcher = FakeFetcher::ok("x");
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
 
@@ -779,7 +881,7 @@ mod tests {
             true,
         )]);
         let fetcher = FakeFetcher::ok("fetched-token-999");
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
             .await
             .expect("resolves");
 
@@ -805,7 +907,7 @@ mod tests {
             )]),
             ..FetchContext::default()
         };
-        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &context)
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &context)
             .await
             .expect("resolves");
         let supplied = SuppliedToken {

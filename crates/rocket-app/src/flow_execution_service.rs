@@ -731,6 +731,8 @@ pub struct FlowExecutionService {
     callback_listener: Box<dyn crate::callback_listener::CallbackListener>,
     /// Fetches non-interactive OAuth2 tokens for Auth nodes at run start.
     token_fetcher: Box<dyn FlowTokenFetcher>,
+    /// Upper bound on each run-start token fetch (`TOKEN_FETCH_TIMEOUT`).
+    token_fetch_timeout: std::time::Duration,
 }
 
 impl FlowExecutionService {
@@ -748,6 +750,7 @@ impl FlowExecutionService {
             cancel_handles: Arc::new(Mutex::new(HashMap::new())),
             callback_listener: Box::new(crate::callback_listener::NoCallbackListener),
             token_fetcher: Box::new(NoTokenFetcher),
+            token_fetch_timeout: crate::flow_auth::TOKEN_FETCH_TIMEOUT,
         }
     }
 
@@ -765,6 +768,13 @@ impl FlowExecutionService {
     /// `OAuth2ServiceFetcher`; tests pass a `FakeFetcher`.
     pub fn with_token_fetcher(mut self, fetcher: Box<dyn FlowTokenFetcher>) -> Self {
         self.token_fetcher = fetcher;
+        self
+    }
+
+    /// Replaces the default 30 s bound on each run-start token fetch.
+    /// Tests use a few milliseconds.
+    pub fn with_token_fetch_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.token_fetch_timeout = timeout;
         self
     }
 
@@ -863,9 +873,14 @@ impl FlowExecutionService {
             ),
             external_secrets: external_secrets.clone(),
         };
-        let credentials =
-            resolve_flow_credentials(&flow, &auth_tokens, self.token_fetcher.as_ref(), &fetch_ctx)
-                .await?;
+        let credentials = resolve_flow_credentials(
+            &flow,
+            &auth_tokens,
+            self.token_fetcher.as_ref(),
+            &fetch_ctx,
+            self.token_fetch_timeout,
+        )
+        .await?;
         for (node_id, secret) in credentials.secrets() {
             external_secrets.insert(format!("flow-auth.{node_id}"), secret.to_string());
         }
@@ -3107,6 +3122,39 @@ mod tests {
             .expect("the run starts");
 
         assert_eq!(fetcher.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_token_fetch_that_never_answers_fails_the_run_before_any_event() {
+        use crate::flow_auth::test_support::{client_credentials, HangingFetcher};
+        use rocket_shared::types::Auth;
+
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            auth_flow(Auth::OAuth2(Box::new(client_credentials()))),
+            &publisher,
+        )
+        .with_token_fetcher(Box::new(HangingFetcher))
+        .with_token_fetch_timeout(std::time::Duration::from_millis(50));
+        let exec = exec_with_status(200);
+
+        // The outer guard turns a missing timeout into a failure, not a hang.
+        let err = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            service.run(&exec, run_input("auth-flow")),
+        )
+        .await
+        .expect("the run must not hang on the token fetch")
+        .expect_err("the run must not start");
+
+        assert!(
+            err.to_string().contains("Sign in") && err.to_string().contains("timed out"),
+            "got: {err}"
+        );
+        assert!(
+            publisher.events().is_empty(),
+            "a run whose token fetch times out emits no events"
+        );
     }
 
     #[tokio::test]
