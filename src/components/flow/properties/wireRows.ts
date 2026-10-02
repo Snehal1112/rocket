@@ -1,4 +1,5 @@
 import {
+  AUTH_HANDLE,
   caseIdFromHandle,
   DEFAULT_HANDLE,
   RESULT_HANDLE,
@@ -30,6 +31,7 @@ const FIELD_LABELS: Record<string, string> = {
   body: 'Body',
   headers: 'Headers',
   [TRIGGER_HANDLE]: 'Run when',
+  [AUTH_HANDLE]: 'Auth',
   value: 'Value',
   input: 'Input',
 };
@@ -92,8 +94,9 @@ function row(
   nodeStatus?: Record<string, FlowNodeStatus>,
   nodeDetail?: Record<string, FlowNodeDetail>,
 ): WireRow {
-  const isTrigger = edge.targetField === TRIGGER_HANDLE;
-  const preview = isTrigger ? null : scriptPreview(edge.expression);
+  // Run when and auth wires carry no script to preview or edit.
+  const noScript = edge.targetField === TRIGGER_HANDLE || edge.targetField === AUTH_HANDLE;
+  const preview = noScript ? null : scriptPreview(edge.expression);
   const handle = exitHandle(edge);
   const exitLabel = handle === null ? null : exitDisplayLabel(source, handle);
   return {
@@ -103,8 +106,8 @@ function row(
     otherLabel: other?.kind.label ?? null,
     exit: exitLabel,
     preview,
-    // A Run when wire has no script, and a wire to a missing node cannot be edited.
-    editable: !isTrigger && other !== undefined,
+    // A wire with no script, or to a missing node, cannot be edited.
+    editable: !noScript && other !== undefined,
     notTaken: isNotTaken(edge, source, nodeStatus, nodeDetail),
   };
 }

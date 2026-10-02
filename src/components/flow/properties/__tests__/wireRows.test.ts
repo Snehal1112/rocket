@@ -33,6 +33,10 @@ describe('fieldLabel', () => {
     expect(fieldLabel('headers')).toBe('Headers');
     expect(fieldLabel('custom')).toBe('custom');
   });
+
+  it('names the auth field', () => {
+    expect(fieldLabel('auth')).toBe('Auth');
+  });
 });
 
 describe('scriptPreview', () => {
@@ -306,5 +310,41 @@ describe('outgoingGroups', () => {
       { check: { branch: 'false' } },
     );
     expect(groups[0].rows[0].notTaken).toBe(true);
+  });
+});
+
+describe('auth wires', () => {
+  const signIn = n('signin', {
+    kind: 'Auth',
+    label: 'Sign in',
+    auth: { authType: 'bearer', token: 't' },
+    applyToInherit: true,
+  });
+  const authEdge = edge({
+    id: 'ea',
+    sourceNodeId: 'signin',
+    targetNodeId: 'users',
+    targetField: 'auth',
+    expression: 'response.body',
+  });
+
+  it('shows an incoming auth wire as Auth, with no preview, and not editable', () => {
+    const rows = incomingRows(users, [signIn, users], [authEdge]);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        edgeId: 'ea',
+        field: 'Auth',
+        otherLabel: 'Sign in',
+        preview: null,
+        editable: false,
+      }),
+    ]);
+  });
+
+  it('shows an outgoing auth wire as not editable', () => {
+    const groups = outgoingGroups(signIn, [signIn, users], [authEdge]);
+    expect(groups[0].rows[0]).toEqual(
+      expect.objectContaining({ field: 'Auth', preview: null, editable: false }),
+    );
   });
 });
