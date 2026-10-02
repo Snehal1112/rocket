@@ -22,8 +22,23 @@ const oauth = (flow: string): Auth =>
 
 describe('flowAuthKey', () => {
   it('joins collection, flow and node so tokens never cross flows', () => {
-    expect(flowAuthKey('api', 'login', 'n1')).toBe('api::login::n1');
-    expect(flowAuthKey('api', 'login', 'n1')).not.toBe(flowAuthKey('api', 'other', 'n1'));
+    expect(flowAuthKey('api', 'login', 'n1', 'dev')).toBe('api::login::dev::n1');
+    expect(flowAuthKey('api', 'login', 'n1', null)).toBe('api::login::::n1');
+    expect(flowAuthKey('api', 'login', 'n1', 'dev')).not.toBe(
+      flowAuthKey('api', 'other', 'n1', 'dev'),
+    );
+  });
+
+  it('differs by environment, and between no environment and a named one', () => {
+    expect(flowAuthKey('api', 'login', 'n1', 'prod')).not.toBe(
+      flowAuthKey('api', 'login', 'n1', 'staging'),
+    );
+    expect(flowAuthKey('api', 'login', 'n1', null)).not.toBe(
+      flowAuthKey('api', 'login', 'n1', 'prod'),
+    );
+    expect(flowAuthKey('api', 'login', 'n1', undefined)).toBe(
+      flowAuthKey('api', 'login', 'n1', null),
+    );
   });
 });
 

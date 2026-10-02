@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { AuthState } from '@/types/pane-types';
 
 // In-memory only. Holds each Auth node's full AuthState, including any fetched
-// OAuth2 token, keyed by `flowAuthKey(collection, flow, node)`. Nothing here is
+// OAuth2 token, keyed by `flowAuthKey(collection, flow, node, environment)`. Nothing here is
 // persisted: no `persist` middleware, no storage, lost on reload by design.
 interface FlowAuthStore {
   auths: Record<string, AuthState>;

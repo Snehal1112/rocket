@@ -24,9 +24,14 @@ const TYPE_LABELS: Record<string, string> = {
 
 const asRecord = (auth: Auth) => auth as unknown as Record<string, unknown>;
 
-/** Key of one Auth node's in-memory state. Includes the flow, so a duplicated flow never shares tokens. */
-export function flowAuthKey(collection: string, flowName: string, nodeId: string): string {
-  return `${collection}::${flowName}::${nodeId}`;
+/** Key of one Auth node's in-memory state. Includes the flow, so a duplicated flow never shares tokens, and the environment, so a token fetched for one environment is never sent to another. */
+export function flowAuthKey(
+  collection: string,
+  flowName: string,
+  nodeId: string,
+  environmentName: string | null | undefined,
+): string {
+  return `${collection}::${flowName}::${environmentName ?? ''}::${nodeId}`;
 }
 
 export function isOAuth2(auth: Auth): boolean {

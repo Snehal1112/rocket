@@ -82,7 +82,7 @@ export async function collectFlowAuthTokens(
   };
 
   for (const node of nodes) {
-    const key = flowAuthKey(input.collection, input.flowName, node.id);
+    const key = flowAuthKey(input.collection, input.flowName, node.id, input.environmentName);
     const store = useFlowAuthStore.getState();
     // The in-memory entry can be stale if the persisted auth changed outside
     // the editor (undo, reload); use it only while it still matches the node.

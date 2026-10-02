@@ -25,10 +25,11 @@ export function AuthNodeEditor({
   flowName: string;
   nodeId: string;
 }) {
-  const key = flowAuthKey(collection, flowName, nodeId);
+  const activeEnvId = useEnvStore((s) => s.activeEnvId);
+  const key = flowAuthKey(collection, flowName, nodeId, activeEnvId);
   const stored = useFlowAuthStore((s) => s.auths[key]);
   const setAuth = useFlowAuthStore((s) => s.setAuth);
-  const environmentName = useEnvStore((s) => s.activeEnvId) ?? undefined;
+  const environmentName = activeEnvId ?? undefined;
 
   // The store holds the full state, including a fetched token. A node that was
   // never edited in this session falls back to its persisted configuration.

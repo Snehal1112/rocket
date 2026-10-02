@@ -81,7 +81,7 @@ describe('AuthNodeEditor', () => {
       />,
     );
     await userEvent.click(screen.getByRole('button', { name: 'make bearer' }));
-    const stored = useFlowAuthStore.getState().getAuth(flowAuthKey('api', 'login', 'n1'));
+    const stored = useFlowAuthStore.getState().getAuth(flowAuthKey('api', 'login', 'n1', null));
     expect(stored?.authType).toBe('bearer');
   });
 

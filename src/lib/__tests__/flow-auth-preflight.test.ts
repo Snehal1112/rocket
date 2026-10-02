@@ -32,7 +32,8 @@ const authNode = (id: string, auth: Auth, label = 'Sign in'): FlowNode => ({
 });
 
 const input = (nodes: FlowNode[]) => ({ collection: 'api', flowName: 'login', nodes });
-const key = (nodeId: string) => flowAuthKey('api', 'login', nodeId);
+const key = (nodeId: string, env: string | null | undefined = undefined) =>
+  flowAuthKey('api', 'login', nodeId, env);
 
 const result = (over: Partial<tauriApi.OAuth2TokenResult> = {}): tauriApi.OAuth2TokenResult => ({
   access_token: 'new-access-123456',
@@ -43,13 +44,18 @@ const result = (over: Partial<tauriApi.OAuth2TokenResult> = {}): tauriApi.OAuth2
 });
 
 /** Seeds the in-memory store with a token state for `nodeId`. */
-function seed(nodeId: string, auth: Auth, patch: Record<string, unknown>) {
+function seed(
+  nodeId: string,
+  auth: Auth,
+  patch: Record<string, unknown>,
+  env: string | undefined = undefined,
+) {
   const base = fromPersistedAuth(auth);
   const state: AuthState = {
     ...base,
     oauth2: { ...(base.oauth2 as NonNullable<AuthState['oauth2']>), ...patch },
   };
-  useFlowAuthStore.getState().setAuth(key(nodeId), state);
+  useFlowAuthStore.getState().setAuth(key(nodeId, env), state);
 }
 
 describe('collectFlowAuthTokens', () => {
@@ -87,7 +93,7 @@ describe('collectFlowAuthTokens', () => {
         environmentName: 'dev',
       }),
     );
-    expect(useFlowAuthStore.getState().getAuth(key('a'))?.oauth2?.accessToken).toBe(
+    expect(useFlowAuthStore.getState().getAuth(key('a', 'dev'))?.oauth2?.accessToken).toBe(
       'new-access-123456',
     );
   });
@@ -123,6 +129,37 @@ describe('collectFlowAuthTokens', () => {
     expect(tauriApi.oauth2GetToken).toHaveBeenCalledWith(
       expect.objectContaining({ clientId: 'client-B' }),
     );
+  });
+
+  it('does not reuse a token fetched under another environment', async () => {
+    const auth = oauthAuth('authorization_code');
+    seed(
+      'a',
+      auth,
+      {
+        accessToken: 'prod-token-123456',
+        expiresIn: 3600,
+        tokenAcquiredAt: Math.floor(Date.now() / 1000),
+      },
+      'prod',
+    );
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(
+      result({ access_token: 'staging-token-123456' }),
+    );
+
+    const staging = await collectFlowAuthTokens({
+      ...input([authNode('a', auth)]),
+      environmentName: 'staging',
+    });
+    expect(staging).toEqual({ a: { accessToken: 'staging-token-123456' } });
+    expect(tauriApi.oauth2GetToken).toHaveBeenCalledTimes(1);
+
+    const prod = await collectFlowAuthTokens({
+      ...input([authNode('a', auth)]),
+      environmentName: 'prod',
+    });
+    expect(prod).toEqual({ a: { accessToken: 'prod-token-123456' } });
+    expect(tauriApi.oauth2GetToken).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes an expired token that has a refresh token, without prompting', async () => {
