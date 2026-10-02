@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import {
@@ -391,6 +392,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                   // Read at click time, after onBeforeRun saved unsaved edits.
                   nodes: latestFlowTab()?.nodes ?? tab.nodes,
                   environmentName: activeEnvironmentName ?? undefined,
+                  globalEnvName: getActiveGlobalEnvName(),
                 })
               }
               onStepLogs={(nodeId, logs) => {

@@ -11,7 +11,12 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { AUTH_NODE_TYPE_OPTIONS, authStateForType } from '@/lib/auth-type-defaults';
 import { withCurrentAuthType } from '@/lib/auth-type-options';
-import { flowAuthKey, pickAuthState, resetTokenOnConfigChange } from '@/lib/flow-auth';
+import {
+  fingerprintFor,
+  flowAuthKey,
+  flowAuthState,
+  resetTokenOnConfigChange,
+} from '@/lib/flow-auth';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import {
   useEnvironments,
@@ -19,14 +24,25 @@ import {
   useGlobalEnvironmentName,
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
-import { type CollectionVariable, type FlowNodeKind, getCollectionSettings } from '@/lib/tauri-api';
+import {
+  type CollectionVariable,
+  type Environment,
+  type FlowNodeKind,
+  getCollectionSettings,
+} from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
+import { resolveWithContext } from '@/lib/variable-context';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
 import { LabelField } from './LabelField';
 
 type AuthKind = Extract<FlowNodeKind, { kind: 'Auth' }>;
+
+// Stable defaults while a query has no data, so the variable context (and the
+// token check that depends on it) is not rebuilt on every render.
+const NO_ENVIRONMENTS: Environment[] = [];
+const NO_PROCESS_ENV: Record<string, string> = {};
 
 export function AuthNodeEditor({
   kind,
@@ -42,15 +58,17 @@ export function AuthNodeEditor({
   nodeId: string;
 }) {
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
-  const key = flowAuthKey(collection, flowName, nodeId, activeEnvId);
+  // The same query-cache entry getActiveGlobalEnvName() reads for the pre-run
+  // step, so the editor and the preflight build the same key.
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const key = flowAuthKey(collection, flowName, nodeId, activeEnvId, globalEnvName);
   const stored = useFlowAuthStore((s) => s.auths[key]);
   const setAuth = useFlowAuthStore((s) => s.setAuth);
   const environmentName = activeEnvId ?? undefined;
   const activeCollection = useEnvStore((s) => s.activeCollection);
-  const { data: environments = [] } = useEnvironments(activeCollection);
-  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: environments = NO_ENVIRONMENTS } = useEnvironments(activeCollection);
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = NO_PROCESS_ENV } = useProcessEnvVars();
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
 
   useEffect(() => {
@@ -89,20 +107,31 @@ export function AuthNodeEditor({
     });
   }, [activeEnvId, environments, globalEnv, processEnvVars, collectionVars]);
 
+  // Resolves {{vars}} the way the OAuth2 editor does before "Get New Access
+  // Token", so a token's fingerprint describes the values it was fetched with.
+  const rv = useMemo(() => {
+    const ctx = Object.fromEntries([...variableContext.entries()].map(([k, e]) => [k, e.value]));
+    return (s: string) => resolveWithContext(s, ctx);
+  }, [variableContext]);
+
   // The store holds the full state, including a fetched token. It is used only
   // while it matches the persisted configuration; otherwise (never edited, or
-  // changed by undo or a reload) the editor shows the persisted auth.
-  const state: AuthState = useMemo(() => pickAuthState(stored, kind.auth), [stored, kind.auth]);
+  // changed by undo or a reload) the editor shows the persisted auth. A token
+  // fetched for other variable values is shown as no token.
+  const state: AuthState = useMemo(
+    () => flowAuthState(stored, kind.auth, rv),
+    [stored, kind.auth, rv],
+  );
 
   const handleAuthChange = useCallback(
     (next: AuthState) => {
       // A token fetched for the old configuration must not outlive an edit to it.
       const safe = resetTokenOnConfigChange(state, next);
-      setAuth(key, safe);
+      setAuth(key, safe, fingerprintFor(safe, rv));
       // Only the configuration is persisted: toPersistedAuth has no token field.
       onChange({ ...kind, auth: toPersistedAuth(safe) });
     },
-    [key, kind, onChange, setAuth, state],
+    [key, kind, onChange, rv, setAuth, state],
   );
 
   return (

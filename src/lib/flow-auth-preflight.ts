@@ -1,10 +1,11 @@
 import { buildOAuth2VarContext } from '@/lib/execute-request';
 import {
   flowAuthKey,
+  flowAuthState,
   isInteractiveGrant,
   isOAuth2,
   isTokenExpired,
-  pickAuthState,
+  oauth2Fingerprint,
 } from '@/lib/flow-auth';
 import {
   buildGetTokenRequest,
@@ -30,6 +31,8 @@ export interface FlowAuthPreflightInput {
   flowName: string;
   nodes: FlowNode[];
   environmentName?: string;
+  /** The active global environment; part of the token key, like `environmentName`. */
+  globalEnvName?: string;
 }
 
 const isAuthNode = (node: FlowNode): node is AuthNode => node.kind.kind === 'Auth';
@@ -87,11 +90,18 @@ export async function collectFlowAuthTokens(
   };
 
   for (const node of nodes) {
-    const key = flowAuthKey(input.collection, input.flowName, node.id, input.environmentName);
+    const key = flowAuthKey(
+      input.collection,
+      input.flowName,
+      node.id,
+      input.environmentName,
+      input.globalEnvName,
+    );
     const store = useFlowAuthStore.getState();
     // The in-memory entry can be stale if the persisted auth changed outside
-    // the editor (undo, reload); use it only while it still matches the node.
-    const state = pickAuthState(store.getAuth(key), node.kind.auth);
+    // the editor (undo, reload), and its token stale if a variable behind the
+    // configuration changed value; it is used only while both still match.
+    const state = flowAuthState(store.getEntry(key), node.kind.auth, rv);
     const oauth = state.oauth2;
     if (!oauth) continue;
 
@@ -102,7 +112,7 @@ export async function collectFlowAuthTokens(
     }
 
     const remember = (next: OAuth2State) => {
-      store.setAuth(key, { ...state, oauth2: next });
+      store.setAuth(key, { ...state, oauth2: next }, oauth2Fingerprint(next, rv));
       const token = pickToken(next);
       if (token) tokens[node.id] = { accessToken: token };
     };

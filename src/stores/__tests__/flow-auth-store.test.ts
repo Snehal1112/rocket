@@ -15,6 +15,15 @@ describe('flow-auth-store', () => {
     expect(useFlowAuthStore.getState().getAuth('missing')).toBeUndefined();
   });
 
+  it('keeps the fingerprint of the configuration a token was fetched for next to the state', () => {
+    const { setAuth, getEntry } = useFlowAuthStore.getState();
+    setAuth('k1', { authType: 'none' }, 'fp-1');
+    expect(getEntry('k1')).toEqual({ auth: { authType: 'none' }, fingerprint: 'fp-1' });
+    setAuth('k1', { authType: 'none' });
+    expect(getEntry('k1')?.fingerprint).toBeUndefined();
+    expect(getEntry('missing')).toBeUndefined();
+  });
+
   it('clears one key without touching the others', () => {
     const { setAuth, clearAuth, getAuth } = useFlowAuthStore.getState();
     setAuth('k1', { authType: 'none' });

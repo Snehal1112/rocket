@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getActiveGlobalEnvName } from '@/lib/execute-request';
+import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import {
   getFlow,
@@ -39,6 +41,11 @@ vi.mock('@/lib/tauri-api', async () => {
 
 // FlowToolbar reads the active global environment from the query cache.
 vi.mock('@/lib/execute-request', () => ({ getActiveGlobalEnvName: vi.fn() }));
+
+// The Auth pre-run step is covered by its own tests; here only its input matters.
+vi.mock('@/lib/flow-auth-preflight', () => ({
+  collectFlowAuthTokens: vi.fn(async () => ({})),
+}));
 
 // `usePaneStore.setState({ openFlowTab: vi.fn(...) })` in the 'FlowPane
 // picker' tests below replaces the store's `openFlowTab` action permanently
@@ -370,6 +377,19 @@ describe('FlowPane run logs', () => {
           message: 'hi',
           requestName: 'login-flow › Show token',
         }),
+      ),
+    );
+  });
+
+  it('passes the active global environment to the Auth pre-run step', async () => {
+    vi.mocked(getActiveGlobalEnvName).mockReturnValue('g1');
+    vi.mocked(runFlow).mockResolvedValue({ runId: 'r1', stoppedReason: 'completed', steps: [] });
+    render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() =>
+      expect(collectFlowAuthTokens).toHaveBeenCalledWith(
+        expect.objectContaining({ flowName: 'login-flow', globalEnvName: 'g1' }),
       ),
     );
   });

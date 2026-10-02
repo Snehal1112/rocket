@@ -1,9 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { flowAuthKey } from '@/lib/flow-auth';
-import type { FlowNodeKind } from '@/lib/tauri-api';
+import { flowAuthKey, oauth2Fingerprint } from '@/lib/flow-auth';
+import { fromPersistedAuth } from '@/lib/persisted-auth';
+import type { Auth, FlowNodeKind } from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
+import { resolveWithContext } from '@/lib/variable-context';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
@@ -15,6 +17,8 @@ import { AuthNodeEditor } from '../AuthNodeEditor';
 const authEditorProps = vi.hoisted(() => ({
   last: null as null | { variableContext?: Map<string, VariableScopeEntry> },
 }));
+// The active global environment name the editor sees.
+const globalEnvState = vi.hoisted(() => ({ name: 'global' as string | null }));
 
 vi.mock('@/components/request/AuthEditor', () => ({
   AuthEditor: (props: {
@@ -26,6 +30,19 @@ vi.mock('@/components/request/AuthEditor', () => ({
     return (
       <div>
         <span data-testid='auth-type'>{props.auth.authType}</span>
+        <span data-testid='access-token'>{props.auth.oauth2?.accessToken ?? ''}</span>
+        <button
+          type='button'
+          onClick={() =>
+            props.auth.oauth2 &&
+            props.onChange({
+              ...props.auth,
+              oauth2: { ...props.auth.oauth2, accessToken: 'fetched-token-123456' },
+            })
+          }
+        >
+          fetch token
+        </button>
         <button
           type='button'
           onClick={() =>
@@ -56,7 +73,7 @@ vi.mock('@/lib/queries/environment-queries', () => ({
           ]
         : [],
   }),
-  useGlobalEnvironmentName: () => ({ data: 'global' }),
+  useGlobalEnvironmentName: () => ({ data: globalEnvState.name }),
   useGlobalEnvironment: () => ({
     data: {
       name: 'global',
@@ -106,6 +123,7 @@ describe('AuthNodeEditor', () => {
     useFlowAuthStore.setState({ auths: {} });
     useEnvStore.setState({ activeEnvId: null, activeCollection: null });
     authEditorProps.last = null;
+    globalEnvState.name = 'global';
   });
 
   it('shows the label and loads the persisted auth into the editor', () => {
@@ -151,7 +169,9 @@ describe('AuthNodeEditor', () => {
       />,
     );
     await userEvent.click(screen.getByRole('button', { name: 'make bearer' }));
-    const stored = useFlowAuthStore.getState().getAuth(flowAuthKey('api', 'login', 'n1', null));
+    const stored = useFlowAuthStore
+      .getState()
+      .getAuth(flowAuthKey('api', 'login', 'n1', null, 'global'));
     expect(stored?.authType).toBe('bearer');
   });
 
@@ -187,7 +207,7 @@ describe('AuthNodeEditor', () => {
 
   it('shows the persisted auth when the stored state is for an older configuration', () => {
     // Stored state for config A (bearer); the node now holds config B (basic).
-    useFlowAuthStore.getState().setAuth(flowAuthKey('api', 'login', 'n1', null), {
+    useFlowAuthStore.getState().setAuth(flowAuthKey('api', 'login', 'n1', null, 'global'), {
       authType: 'bearer',
       bearer: { token: 'stale-token-123456' },
     });
@@ -261,5 +281,122 @@ describe('AuthNodeEditor', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'Auth type' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Basic' }));
     expect((onChange.mock.lastCall?.[0] as AuthKind).auth.authType).toBe('basic');
+  });
+
+  describe('OAuth2 tokens', () => {
+    const oauthKind: AuthKind = {
+      ...kind,
+      auth: {
+        authType: 'o-auth2',
+        flow: 'client_credentials',
+        accessTokenUrl: '{{tokenUrl}}',
+        credentials: { clientId: '{{clientId}}', clientSecret: 's' },
+      } as unknown as Auth,
+    };
+    // The values the editor resolves with: 'dev' environment + collection variables.
+    const devVars = { clientId: 'dev-client', tokenUrl: 'https://idp/token', tenant: 'acme' };
+    const withToken = (): AuthState => {
+      const base = fromPersistedAuth(oauthKind.auth);
+      return {
+        ...base,
+        oauth2: {
+          ...(base.oauth2 as NonNullable<AuthState['oauth2']>),
+          accessToken: 'stored-token-123456',
+          expiresIn: 3600,
+          tokenAcquiredAt: Math.floor(Date.now() / 1000),
+        },
+      };
+    };
+    const fingerprintFor = (state: AuthState, vars: Record<string, string>) =>
+      oauth2Fingerprint(state.oauth2 as NonNullable<AuthState['oauth2']>, (s) =>
+        resolveWithContext(s, vars),
+      );
+    const renderEditor = () =>
+      render(
+        <AuthNodeEditor
+          kind={oauthKind}
+          onChange={vi.fn()}
+          collection='api'
+          flowName='login'
+          nodeId='n1'
+        />,
+      );
+
+    beforeEach(() => {
+      useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'api' });
+    });
+
+    it('shows a stored token fetched with the current variable values', async () => {
+      const state = withToken();
+      useFlowAuthStore
+        .getState()
+        .setAuth(
+          flowAuthKey('api', 'login', 'n1', 'dev', 'global'),
+          state,
+          fingerprintFor(state, devVars),
+        );
+      renderEditor();
+      await waitFor(() =>
+        expect(screen.getByTestId('access-token')).toHaveTextContent('stored-token-123456'),
+      );
+    });
+
+    it('does not show a stored token fetched with other variable values', async () => {
+      const state = withToken();
+      useFlowAuthStore
+        .getState()
+        .setAuth(
+          flowAuthKey('api', 'login', 'n1', 'dev', 'global'),
+          state,
+          fingerprintFor(state, { ...devVars, clientId: 'prod-client' }),
+        );
+      renderEditor();
+      // Wait for the collection variables to load, then the token is still hidden.
+      await waitFor(() =>
+        expect(authEditorProps.last?.variableContext?.get('tokenUrl')?.value).toBe(
+          'https://idp/token',
+        ),
+      );
+      expect(screen.getByTestId('access-token')).toHaveTextContent('');
+    });
+
+    it('does not show a token stored under another global environment', async () => {
+      const state = withToken();
+      useFlowAuthStore
+        .getState()
+        .setAuth(
+          flowAuthKey('api', 'login', 'n1', 'dev', 'other-global'),
+          state,
+          fingerprintFor(state, devVars),
+        );
+      renderEditor();
+      await waitFor(() =>
+        expect(authEditorProps.last?.variableContext?.get('tokenUrl')?.value).toBe(
+          'https://idp/token',
+        ),
+      );
+      expect(screen.getByTestId('access-token')).toHaveTextContent('');
+    });
+
+    it('keys the stored state by the global environment and remembers the fingerprint of a fetched token', async () => {
+      globalEnvState.name = null;
+      renderEditor();
+      await waitFor(() =>
+        expect(authEditorProps.last?.variableContext?.get('tokenUrl')?.value).toBe(
+          'https://idp/token',
+        ),
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'fetch token' }));
+      const entry = useFlowAuthStore
+        .getState()
+        .getEntry(flowAuthKey('api', 'login', 'n1', 'dev', ''));
+      expect(entry?.auth.oauth2?.accessToken).toBe('fetched-token-123456');
+      expect(entry?.fingerprint).toBe(
+        fingerprintFor(entry?.auth as AuthState, {
+          clientId: 'dev-client',
+          tokenUrl: 'https://idp/token',
+        }),
+      );
+    });
   });
 });

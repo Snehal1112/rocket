@@ -1,6 +1,7 @@
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import type { Auth } from '@/lib/tauri-api';
-import type { AuthState } from '@/types/pane-types';
+import type { FlowAuthEntry } from '@/stores/flow-auth-store';
+import type { AuthState, OAuth2AdditionalParam } from '@/types/pane-types';
 
 type OAuth2State = NonNullable<AuthState['oauth2']>;
 
@@ -24,14 +25,20 @@ const TYPE_LABELS: Record<string, string> = {
 
 const asRecord = (auth: Auth) => auth as unknown as Record<string, unknown>;
 
-/** Key of one Auth node's in-memory state. Includes the flow, so a duplicated flow never shares tokens, and the environment, so a token fetched for one environment is never sent to another. */
+/**
+ * Key of one Auth node's in-memory state. Includes the flow, so a duplicated
+ * flow never shares tokens, and the environment and the global environment, so
+ * a token fetched for one environment is never sent to another. A missing
+ * environment (null, undefined or '') is always the same key part.
+ */
 export function flowAuthKey(
   collection: string,
   flowName: string,
   nodeId: string,
   environmentName: string | null | undefined,
+  globalEnvironmentName: string | null | undefined,
 ): string {
-  return `${collection}::${flowName}::${environmentName ?? ''}::${nodeId}`;
+  return `${collection}::${flowName}::${environmentName || ''}::${globalEnvironmentName || ''}::${nodeId}`;
 }
 
 export function isOAuth2(auth: Auth): boolean {
@@ -68,6 +75,98 @@ const EMPTY_TOKEN = {
   accessTokenClaims: null,
 } as const;
 
+/** `state` with any fetched OAuth2 token, refresh token and lifetime cleared. */
+export function withoutToken(state: AuthState): AuthState {
+  if (!state.oauth2) return state;
+  return { ...state, oauth2: { ...state.oauth2, ...EMPTY_TOKEN } };
+}
+
+const hasToken = (oauth: OAuth2State): boolean =>
+  Boolean(oauth.accessToken || oauth.idToken || oauth.refreshToken);
+
+// {{$dynamic}} placeholders produce a new value on every resolution. They are
+// kept as written, so a fingerprint stays stable across calls.
+const DYNAMIC_VAR = /(\{\{\s*\$[\w.-]+\s*\}\})/;
+
+// cyrb53: a small, fast 53-bit string hash. Not a security measure; it only
+// keeps resolved secrets (client secret, password) out of the fingerprint text.
+function hash53(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * Identifies the configuration a token is fetched for, after variable
+ * resolution: grant, URLs, client, credentials, scope, token source and the
+ * additional parameters. Equal fingerprints mean a stored token was fetched
+ * for the same values; a changed variable behind any of those fields changes
+ * it. `rv` must be the same resolution the sign-in uses. Hashed, so it can sit
+ * in memory next to the token without carrying resolved secrets; never log it.
+ */
+export function oauth2Fingerprint(oauth: OAuth2State, rv: (s: string) => string): string {
+  const r = (s: string | undefined) =>
+    (s ?? '')
+      .split(DYNAMIC_VAR)
+      .map((part, i) => (i % 2 === 1 ? part : rv(part)))
+      .join('');
+  const params = (list: OAuth2AdditionalParam[] | undefined) =>
+    (list ?? []).map((p) => [r(p.key), r(p.value), p.sendIn, p.enabled]);
+  return hash53(
+    JSON.stringify([
+      oauth.grantType,
+      r(oauth.authorizationUrl),
+      r(oauth.tokenUrl),
+      r(oauth.refreshTokenUrl),
+      r(oauth.callbackUrl),
+      r(oauth.clientId),
+      r(oauth.clientSecret),
+      r(oauth.scope),
+      r(oauth.username),
+      r(oauth.password),
+      oauth.clientAuthentication,
+      oauth.tokenSource,
+      params(oauth.authParams),
+      params(oauth.tokenParams),
+      params(oauth.refreshParams),
+    ]),
+  );
+}
+
+/**
+ * The state an Auth node uses right now: `pickAuthState`, and a held OAuth2
+ * token only while the resolved configuration still matches the fingerprint
+ * stored with it. Otherwise (a variable value or the environment changed, or
+ * no fingerprint) the token is cleared. `rv` is the current variable resolution.
+ */
+export function flowAuthState(
+  entry: FlowAuthEntry | undefined,
+  persisted: Auth,
+  rv: (s: string) => string,
+): AuthState {
+  const state = pickAuthState(entry?.auth, persisted);
+  if (!state.oauth2 || !hasToken(state.oauth2)) return state;
+  if (entry?.fingerprint && entry.fingerprint === oauth2Fingerprint(state.oauth2, rv)) {
+    return state;
+  }
+  return withoutToken(state);
+}
+
+/**
+ * The fingerprint to store with `state`: set only when it holds an OAuth2
+ * token, which was fetched for the configuration as `rv` resolves it now.
+ */
+export function fingerprintFor(state: AuthState, rv: (s: string) => string): string | undefined {
+  return state.oauth2 && hasToken(state.oauth2) ? oauth2Fingerprint(state.oauth2, rv) : undefined;
+}
+
 /**
  * Returns `next`, with any fetched OAuth2 token cleared when the persisted
  * configuration differs from `prev`. A token fetched for one client id, URL or
@@ -77,7 +176,7 @@ export function resetTokenOnConfigChange(prev: AuthState | undefined, next: Auth
   if (!prev || !next.oauth2) return next;
   const same = JSON.stringify(toPersistedAuth(prev)) === JSON.stringify(toPersistedAuth(next));
   if (same) return next;
-  return { ...next, oauth2: { ...next.oauth2, ...EMPTY_TOKEN } };
+  return withoutToken(next);
 }
 
 /**
