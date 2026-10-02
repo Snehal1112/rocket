@@ -121,6 +121,89 @@ pub struct ExecuteRequestOutput {
     pub deferred_history: Option<HistoryEntry>,
 }
 
+/// What `apply_script_side_effects` needs to keep vault secrets off disk.
+pub(crate) struct VaultGuard<'a> {
+    /// Masked forms of the RocketVault values.
+    pub forms: &'a [String],
+    /// Where the warning for a held-back write goes.
+    pub console: &'a mut Vec<ConsoleEntry>,
+}
+
+/// Holds back a value that holds a RocketVault secret, and returns whether it did.
+///
+/// Such a value must never reach disk. It is kept as a runtime variable instead, and a warning
+/// that names the scope and the key, never the value, goes to the log and the script console. A
+/// key that itself matches a vault value is shown as a placeholder. The check is best-effort: it
+/// misses encodings such as base64 or URL-encoding, slices of a secret, and secrets shorter than
+/// `MIN_REDACTION_LEN`.
+fn hold_back_text_if_vault_secret(
+    scope: &str,
+    key: &str,
+    text: &str,
+    vault_forms: &[String],
+    var_ctx: &mut VariableContext,
+    console: &mut Vec<ConsoleEntry>,
+) -> bool {
+    if !crate::redaction::contains_secret(text, vault_forms) {
+        return false;
+    }
+    var_ctx.runtime.insert(key.to_string(), text.to_string());
+    let shown = if crate::redaction::contains_secret(key, vault_forms) {
+        "<redacted key>"
+    } else {
+        key
+    };
+    tracing::warn!(key = %shown, scope = %scope, "write holds a vault secret, kept in memory only");
+    console.push(ConsoleEntry {
+        level: ConsoleLevel::Warn,
+        message: format!(
+            "Variable \"{shown}\" ({scope}) was not saved because it contains a vault secret. \
+             It is kept in memory for this run only."
+        ),
+    });
+    true
+}
+
+/// Like `hold_back_text_if_vault_secret`, for a JSON write value.
+///
+/// It checks the same text that would be persisted: the string itself, or the JSON text of any
+/// other non-null value, so an object that wraps a secret is caught too. `null` deletes a
+/// variable and is never held back.
+fn hold_back_if_vault_secret(
+    scope: &str,
+    key: &str,
+    value: &serde_json::Value,
+    vault_forms: &[String],
+    var_ctx: &mut VariableContext,
+    console: &mut Vec<ConsoleEntry>,
+) -> bool {
+    if value.is_null() {
+        return false;
+    }
+    let text = value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| value.to_string());
+    hold_back_text_if_vault_secret(scope, key, &text, vault_forms, var_ctx, console)
+}
+
+/// Returns the writes that may be persisted, holding back those with a vault secret.
+fn hold_back_vault_writes(
+    writes: &[rocket_scripting::EnvVarWrite],
+    scope: &str,
+    vault_forms: &[String],
+    var_ctx: &mut VariableContext,
+    console: &mut Vec<ConsoleEntry>,
+) -> Vec<rocket_scripting::EnvVarWrite> {
+    writes
+        .iter()
+        .filter(|w| {
+            !hold_back_if_vault_secret(scope, &w.key, &w.value, vault_forms, var_ctx, console)
+        })
+        .cloned()
+        .collect()
+}
+
 /// Mutable state threaded through the phases of one request execution.
 ///
 /// `RequestExecutionService::execute()` and `CollectionRunnerService` both drive
@@ -144,6 +227,8 @@ pub(crate) struct PhaseState {
     /// Set by a before-request script calling `rok.runner.skipRequest()`.
     /// Only the Collection Runner reads this; `execute()` always sends.
     pub skip_request: bool,
+    /// Masked forms of the RocketVault values. A script write holding one is never persisted.
+    pub vault_forms: Vec<String>,
     /// Resolved once in `begin_phases` from the collection's `sandbox_mode`
     /// setting, applied to every phase's `ScriptContext`.
     pub sandbox_mode: SandboxMode,
@@ -585,10 +670,15 @@ impl RequestExecutionService {
 
     /// Applies the persistent and in-memory side effects from a `ScriptResult`.
     ///
-    /// - `env_var_writes` → always read-modify-write via `env_repo` (always persisted)
+    /// - `env_var_writes` → read-modify-write via `env_repo` (persisted unless it holds a vault secret)
     /// - `collection_var_writes` → read-modify-write via `collection_repo.save_settings`
     /// - `global_env_var_writes` → same repo, keyed by `global_env_name`
     /// - `runtime_vars` → merged into `var_ctx.runtime` for the next script phase
+    ///
+    /// A write whose value holds a RocketVault secret is not persisted in any scope. It goes to
+    /// `var_ctx.runtime` instead, with a console warning. This is best-effort: encodings such as
+    /// base64 or URL-encoding, slices of a secret and secrets shorter than `MIN_REDACTION_LEN`
+    /// are not caught.
     ///
     /// Non-fatal: individual repo errors are logged but do not abort the response.
     fn apply_script_side_effects(
@@ -598,12 +688,24 @@ impl RequestExecutionService {
         global_env_name: Option<&str>,
         collection: Option<&str>,
         var_ctx: &mut rocket_environment::VariableContext,
+        guard: VaultGuard<'_>,
     ) {
+        let VaultGuard {
+            forms: vault_forms,
+            console,
+        } = guard;
         // Apply active-environment writes (always persisted).
         if !result.env_var_writes.is_empty() {
             if let Some(name) = env_name {
                 let repo = self.regular_env_repo(collection);
-                self.apply_env_writes(repo.as_ref(), name, &result.env_var_writes, true);
+                let writes = hold_back_vault_writes(
+                    &result.env_var_writes,
+                    "environment",
+                    vault_forms,
+                    var_ctx,
+                    console,
+                );
+                self.apply_env_writes(repo.as_ref(), name, &writes, true);
             } else {
                 tracing::warn!(
                     "rok.setEnvVar write(s) queued but no active environment is selected — write(s) dropped"
@@ -614,12 +716,14 @@ impl RequestExecutionService {
         // Apply global-environment writes (always persisted — modifying a shared env).
         if !result.global_env_var_writes.is_empty() {
             if let Some(name) = global_env_name {
-                self.apply_env_writes(
-                    self.env_repo.as_ref(),
-                    name,
+                let writes = hold_back_vault_writes(
                     &result.global_env_var_writes,
-                    true,
+                    "global environment",
+                    vault_forms,
+                    var_ctx,
+                    console,
                 );
+                self.apply_env_writes(self.env_repo.as_ref(), name, &writes, true);
             } else {
                 tracing::warn!(
                     "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
@@ -636,6 +740,16 @@ impl RequestExecutionService {
                         .as_str()
                         .map(str::to_owned)
                         .unwrap_or_else(|| write.value.to_string());
+                    if hold_back_if_vault_secret(
+                        "collection variable",
+                        &write.key,
+                        &write.value,
+                        vault_forms,
+                        var_ctx,
+                        console,
+                    ) {
+                        continue;
+                    }
                     if let Err(e) = self.apply_collection_var_write(col, &write.key, &str_val) {
                         tracing::warn!(error = %e, key = %write.key, "failed to persist collection var write");
                     }
@@ -682,7 +796,9 @@ impl RequestExecutionService {
     /// `EnvVarWrite.persist` is preserved for wire/API compatibility but
     /// currently has no effect — both call sites in `apply_script_side_effects`
     /// and the `runtime.actions` "environment" scope branch always pass
-    /// `force_persist: true`, so every write here is unconditionally persisted.
+    /// `force_persist: true`, so every write that reaches here is persisted. The callers hold
+    /// back writes that contain a RocketVault secret before this point (best-effort, see
+    /// `hold_back_text_if_vault_secret`).
     ///
     /// Existing variable metadata (`enabled`, `secret`, `description`, `secret_type`)
     /// is preserved across a script-driven write — only `value` (and, for a
@@ -851,7 +967,12 @@ impl RequestExecutionService {
         var_ctx: &mut VariableContext,
         tags: &[String],
         path_params: &[rocket_shared::types::PathParam],
+        guard: VaultGuard<'_>,
     ) {
+        let VaultGuard {
+            forms: vault_forms,
+            console,
+        } = guard;
         let Some(engine) = self.script_engine.as_ref() else {
             return;
         };
@@ -915,6 +1036,21 @@ impl RequestExecutionService {
                 .map(str::to_owned)
                 .unwrap_or_else(|| value.to_string());
             let var_name = &action.variable.name;
+
+            // A value with a vault secret is never saved to any persistent scope.
+            if matches!(
+                action.variable.scope.as_str(),
+                "environment" | "collection" | "folder" | "request"
+            ) && hold_back_text_if_vault_secret(
+                &action.variable.scope,
+                var_name,
+                &str_val,
+                vault_forms,
+                var_ctx,
+                console,
+            ) {
+                continue;
+            }
 
             match action.variable.scope.as_str() {
                 "runtime" => {
@@ -1096,6 +1232,7 @@ impl RequestExecutionService {
             test_results: Vec::new(),
             next_request: None,
             skip_request: false,
+            vault_forms: crate::redaction::secret_forms(external_secrets.values()),
             sandbox_mode,
         })
     }
@@ -1223,6 +1360,10 @@ impl RequestExecutionService {
                     input.global_env_name.as_deref(),
                     input.collection.as_deref(),
                     &mut state.var_ctx,
+                    VaultGuard {
+                        forms: &state.vault_forms,
+                        console: &mut state.console,
+                    },
                 );
 
                 if result.error.is_some() {
@@ -1254,6 +1395,10 @@ impl RequestExecutionService {
             &mut state.var_ctx,
             &input.tags,
             &input.path_params,
+            VaultGuard {
+                forms: &state.vault_forms,
+                console: &mut state.console,
+            },
         )
         .await;
 
@@ -1314,6 +1459,10 @@ impl RequestExecutionService {
                     input.global_env_name.as_deref(),
                     input.collection.as_deref(),
                     &mut state.var_ctx,
+                    VaultGuard {
+                        forms: &state.vault_forms,
+                        console: &mut state.console,
+                    },
                 );
                 if result.error.is_some() && state.script_error.is_none() {
                     state.script_error = result.error;
@@ -1359,6 +1508,10 @@ impl RequestExecutionService {
                     input.global_env_name.as_deref(),
                     input.collection.as_deref(),
                     &mut state.var_ctx,
+                    VaultGuard {
+                        forms: &state.vault_forms,
+                        console: &mut state.console,
+                    },
                 );
                 state.test_results.extend(result.test_results.clone());
                 if result.error.is_some() && state.script_error.is_none() {
@@ -1419,6 +1572,10 @@ impl RequestExecutionService {
             &mut state.var_ctx,
             &input.tags,
             &input.path_params,
+            VaultGuard {
+                forms: &state.vault_forms,
+                console: &mut state.console,
+            },
         )
         .await;
 
@@ -4145,6 +4302,7 @@ mod tests {
     struct RecordingCollectionRepo {
         settings: Mutex<CollectionSettings>,
         saved_settings: Mutex<Vec<CollectionSettings>>,
+        saved_scoped_vars: Mutex<Vec<(String, Vec<CollectionVariable>)>>,
     }
 
     impl RecordingCollectionRepo {
@@ -4152,7 +4310,17 @@ mod tests {
             Arc::new(Self {
                 settings: Mutex::new(settings),
                 saved_settings: Mutex::new(vec![]),
+                saved_scoped_vars: Mutex::new(vec![]),
             })
+        }
+        fn saved_scoped_vars(&self, scope: &str) -> Vec<Vec<CollectionVariable>> {
+            self.saved_scoped_vars
+                .lock()
+                .expect("lock")
+                .iter()
+                .filter(|(s, _)| s == scope)
+                .map(|(_, v)| v.clone())
+                .collect()
         }
         fn last_saved_settings(&self) -> Option<CollectionSettings> {
             self.saved_settings.lock().expect("lock").last().cloned()
@@ -4226,8 +4394,12 @@ mod tests {
             &self,
             _: &str,
             _: &str,
-            _: Vec<CollectionVariable>,
+            v: Vec<CollectionVariable>,
         ) -> DomainResult<()> {
+            self.saved_scoped_vars
+                .lock()
+                .expect("lock")
+                .push(("folder".into(), v));
             Ok(())
         }
         fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
@@ -4237,8 +4409,12 @@ mod tests {
             &self,
             _: &str,
             _: &str,
-            _: Vec<CollectionVariable>,
+            v: Vec<CollectionVariable>,
         ) -> DomainResult<()> {
+            self.saved_scoped_vars
+                .lock()
+                .expect("lock")
+                .push(("request".into(), v));
             Ok(())
         }
     }
@@ -4887,6 +5063,318 @@ mod tests {
             .last_saved()
             .expect("env_repo.save() should have been called for global env write");
         assert_eq!(saved.get_value("API_KEY"), Some("new-key"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Vault secrets written by a script are never persisted
+    // -------------------------------------------------------------------------
+
+    const VAULT_TOKEN: &str = "vault-token-value-123";
+
+    fn vault_forms_of(values: &[&str]) -> Vec<String> {
+        let owned: Vec<String> = values.iter().map(|v| v.to_string()).collect();
+        crate::redaction::secret_forms(&owned)
+    }
+
+    fn env_write(key: &str, value: &str) -> EnvVarWrite {
+        EnvVarWrite {
+            key: key.into(),
+            value: serde_json::json!(value),
+            persist: true,
+        }
+    }
+
+    fn assert_console_names_key_not_value(console: &[ConsoleEntry], key: &str, secret: &str) {
+        assert_eq!(console.len(), 1, "expected one warning, got {console:?}");
+        assert_eq!(console[0].level, ConsoleLevel::Warn);
+        assert!(console[0].message.contains(key), "{}", console[0].message);
+        assert!(console[0].message.contains("not saved"));
+        assert!(
+            !console[0].message.contains(secret),
+            "{}",
+            console[0].message
+        );
+    }
+
+    #[test]
+    fn env_write_with_a_vault_value_is_not_saved_but_kept_in_runtime_vars() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("TOKEN", "old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            env_var_writes: vec![env_write("TOKEN", VAULT_TOKEN)],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        assert!(env_repo.last_saved().is_none(), "vault value was persisted");
+        assert_eq!(
+            var_ctx.runtime.get("TOKEN").map(String::as_str),
+            Some(VAULT_TOKEN)
+        );
+        assert_console_names_key_not_value(&console, "TOKEN", VAULT_TOKEN);
+    }
+
+    #[test]
+    fn env_write_with_a_vault_value_keeps_the_other_writes_of_the_batch() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("TOKEN", "old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            env_var_writes: vec![env_write("TOKEN", VAULT_TOKEN), env_write("PLAIN", "hello")],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        let saved = env_repo.last_saved().expect("plain write must persist");
+        assert_eq!(saved.get_value("PLAIN"), Some("hello"));
+        assert_eq!(saved.get_value("TOKEN"), Some("old"));
+    }
+
+    #[test]
+    fn env_write_containing_one_pem_line_is_not_saved() {
+        let pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkq\nhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n";
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            env_var_writes: vec![env_write("KEY_LINE", "prefix MIIEvQIBADANBgkq")],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[pem]),
+                console: &mut console,
+            },
+        );
+        assert!(env_repo.last_saved().is_none());
+        assert!(var_ctx.runtime.contains_key("KEY_LINE"));
+        assert_console_names_key_not_value(&console, "KEY_LINE", "MIIEvQIBADANBgkq");
+    }
+
+    #[test]
+    fn non_vault_env_write_still_persists_without_a_warning() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            env_var_writes: vec![env_write("TOKEN", "plain-value")],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        let saved = env_repo.last_saved().expect("must persist");
+        assert_eq!(saved.get_value("TOKEN"), Some("plain-value"));
+        assert!(console.is_empty());
+        assert!(!var_ctx.runtime.contains_key("TOKEN"));
+    }
+
+    #[test]
+    fn short_vault_value_never_triggers_the_guard() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            env_var_writes: vec![env_write("PIN", "1234")],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&["1234"]),
+                console: &mut console,
+            },
+        );
+        assert_eq!(
+            env_repo
+                .last_saved()
+                .expect("must persist")
+                .get_value("PIN"),
+            Some("1234")
+        );
+        assert!(console.is_empty());
+    }
+
+    #[test]
+    fn global_env_write_with_a_vault_value_is_not_saved() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("global-prod"));
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            global_env_var_writes: vec![env_write("API_KEY", VAULT_TOKEN)],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            None,
+            Some("global-prod"),
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        assert!(env_repo.last_saved().is_none());
+        assert_eq!(
+            var_ctx.runtime.get("API_KEY").map(String::as_str),
+            Some(VAULT_TOKEN)
+        );
+        assert_console_names_key_not_value(&console, "API_KEY", VAULT_TOKEN);
+    }
+
+    #[test]
+    fn collection_var_write_with_a_vault_value_is_not_saved() {
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        );
+        let result = ScriptResult {
+            collection_var_writes: vec![
+                CollectionVarWrite {
+                    key: "SECRET".into(),
+                    value: serde_json::json!(VAULT_TOKEN),
+                },
+                CollectionVarWrite {
+                    key: "PLAIN".into(),
+                    value: serde_json::json!("hello"),
+                },
+            ],
+            ..Default::default()
+        };
+        let mut var_ctx = rocket_environment::VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            None,
+            None,
+            Some("my-api"),
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        let saved = col_repo
+            .last_saved_settings()
+            .expect("plain write must persist");
+        assert!(saved.variables.iter().all(|v| v.key != "SECRET"));
+        assert!(saved.variables.iter().any(|v| v.key == "PLAIN"));
+        assert_eq!(
+            var_ctx.runtime.get("SECRET").map(String::as_str),
+            Some(VAULT_TOKEN)
+        );
+        assert_console_names_key_not_value(&console, "SECRET", VAULT_TOKEN);
+    }
+
+    #[tokio::test]
+    async fn execute_reports_the_vault_write_warning_without_the_value() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let result = ScriptResult {
+            env_var_writes: vec![env_write("TOKEN", VAULT_TOKEN)],
+            ..Default::default()
+        };
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        let secrets =
+            std::collections::HashMap::from([("vault.token".to_string(), VAULT_TOKEN.to_string())]);
+        let out = svc
+            .execute_with_external_secrets(input, &secrets)
+            .await
+            .expect("execute failed");
+        assert!(env_repo.last_saved().is_none());
+        assert_console_names_key_not_value(&out.console_entries, "TOKEN", VAULT_TOKEN);
     }
 
     #[tokio::test]
@@ -6014,6 +6502,10 @@ mod tests {
             &mut var_ctx,
             &[],
             &[],
+            VaultGuard {
+                forms: &[],
+                console: &mut Vec::new(),
+            },
         )
         .await;
 
@@ -6053,6 +6545,10 @@ mod tests {
             &mut var_ctx,
             &[],
             &[],
+            VaultGuard {
+                forms: &[],
+                console: &mut Vec::new(),
+            },
         )
         .await;
 
@@ -6090,6 +6586,10 @@ mod tests {
             &mut var_ctx,
             &[],
             &[],
+            VaultGuard {
+                forms: &[],
+                console: &mut Vec::new(),
+            },
         )
         .await;
 
@@ -6131,6 +6631,10 @@ mod tests {
             &mut var_ctx,
             &[],
             &[],
+            VaultGuard {
+                forms: &[],
+                console: &mut Vec::new(),
+            },
         )
         .await;
 
@@ -6169,6 +6673,10 @@ mod tests {
             &mut var_ctx,
             &[],
             &[],
+            VaultGuard {
+                forms: &[],
+                console: &mut Vec::new(),
+            },
         )
         .await;
 
@@ -6176,6 +6684,192 @@ mod tests {
             col_repo.last_saved_settings().is_none(),
             "wrong-phase action must not run"
         );
+    }
+
+    // Vault secrets in values written by declarative actions or object values.
+
+    async fn run_vault_action(
+        svc: &RequestExecutionService,
+        scope: &str,
+        forms: &[String],
+        env: Option<&str>,
+    ) -> (VariableContext, Vec<ConsoleEntry>) {
+        let actions = vec![stub_action(scope, "after-response", false)];
+        let http_request = HttpRequest::new(HttpMethod::Get, "https://example.com");
+        let response = stub_action_response();
+        let mut var_ctx = VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_actions(
+            &actions,
+            "after-response",
+            "Get User",
+            &http_request,
+            Some(&response),
+            env,
+            Some("my-api"),
+            Some("folder/req.yml"),
+            &mut var_ctx,
+            &[],
+            &[],
+            VaultGuard {
+                forms,
+                console: &mut console,
+            },
+        )
+        .await;
+        (var_ctx, console)
+    }
+
+    fn action_svc(
+        env_repo: &Arc<RecordingEnvRepo>,
+        col_repo: &Arc<RecordingCollectionRepo>,
+        value: serde_json::Value,
+    ) -> RequestExecutionService {
+        build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(env_repo))),
+            Box::new(SharedCollectionRepo(Arc::clone(col_repo))),
+            Box::new(FixedJsonqEngine { value }),
+        )
+    }
+
+    #[tokio::test]
+    async fn action_with_a_vault_value_is_not_persisted_in_any_scope() {
+        for scope in ["environment", "collection", "folder", "request"] {
+            let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+            let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+            let value = serde_json::json!(format!("Bearer {VAULT_TOKEN}"));
+            let svc = action_svc(&env_repo, &col_repo, value.clone());
+            let (var_ctx, console) =
+                run_vault_action(&svc, scope, &vault_forms_of(&[VAULT_TOKEN]), Some("dev")).await;
+            assert!(env_repo.last_saved().is_none(), "{scope}: env persisted");
+            assert!(col_repo.last_saved_settings().is_none(), "{scope}");
+            assert!(col_repo.saved_scoped_vars("folder").is_empty(), "{scope}");
+            assert!(col_repo.saved_scoped_vars("request").is_empty(), "{scope}");
+            assert_eq!(
+                var_ctx.runtime.get("extracted").map(String::as_str),
+                Some(format!("Bearer {VAULT_TOKEN}").as_str()),
+                "{scope}"
+            );
+            assert_console_names_key_not_value(&console, "extracted", VAULT_TOKEN);
+        }
+    }
+
+    #[tokio::test]
+    async fn action_with_a_plain_value_still_persists_in_every_scope() {
+        for scope in ["environment", "collection", "folder", "request"] {
+            let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+            let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+            let value = serde_json::json!("plain-value");
+            let svc = action_svc(&env_repo, &col_repo, value.clone());
+            let (var_ctx, console) =
+                run_vault_action(&svc, scope, &vault_forms_of(&[VAULT_TOKEN]), Some("dev")).await;
+            let persisted = match scope {
+                "environment" => env_repo.last_saved().is_some(),
+                "collection" => col_repo.last_saved_settings().is_some(),
+                other => !col_repo.saved_scoped_vars(other).is_empty(),
+            };
+            assert!(persisted, "{scope}: plain value must persist");
+            assert!(console.is_empty());
+            assert!(!var_ctx.runtime.contains_key("extracted"));
+        }
+    }
+
+    #[test]
+    fn object_value_containing_a_vault_secret_is_not_persisted() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = action_svc(&env_repo, &col_repo, serde_json::Value::Null);
+        let object = serde_json::json!({ "token": VAULT_TOKEN });
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "AUTH".into(),
+                value: object.clone(),
+                persist: true,
+            }],
+            collection_var_writes: vec![CollectionVarWrite {
+                key: "AUTH".into(),
+                value: object.clone(),
+            }],
+            ..Default::default()
+        };
+        let mut var_ctx = VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            Some("my-api"),
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        assert!(env_repo.last_saved().is_none());
+        assert!(col_repo.last_saved_settings().is_none());
+        assert_eq!(
+            var_ctx.runtime.get("AUTH").map(String::as_str),
+            Some(object.to_string().as_str())
+        );
+        assert_eq!(console.len(), 2);
+        assert!(console.iter().all(|c| !c.message.contains(VAULT_TOKEN)));
+    }
+
+    #[test]
+    fn a_null_write_is_never_held_back() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = action_svc(&env_repo, &col_repo, serde_json::Value::Null);
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "GONE".into(),
+                value: serde_json::Value::Null,
+                persist: true,
+            }],
+            ..Default::default()
+        };
+        let mut var_ctx = VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        assert!(env_repo.last_saved().is_some());
+        assert!(console.is_empty());
+    }
+
+    #[test]
+    fn a_key_that_matches_a_vault_value_is_not_echoed_in_the_warning() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let svc = action_svc(&env_repo, &col_repo, serde_json::Value::Null);
+        let result = ScriptResult {
+            env_var_writes: vec![env_write(VAULT_TOKEN, VAULT_TOKEN)],
+            ..Default::default()
+        };
+        let mut var_ctx = VariableContext::default();
+        let mut console = Vec::new();
+        svc.apply_script_side_effects(
+            &result,
+            Some("dev"),
+            None,
+            None,
+            &mut var_ctx,
+            VaultGuard {
+                forms: &vault_forms_of(&[VAULT_TOKEN]),
+                console: &mut console,
+            },
+        );
+        assert_eq!(console.len(), 1);
+        assert!(!console[0].message.contains(VAULT_TOKEN));
+        assert!(console[0].message.contains("<redacted key>"));
     }
 
     // Environment repo backed by a map, so a test can look up both the active

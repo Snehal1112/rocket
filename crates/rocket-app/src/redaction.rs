@@ -52,6 +52,26 @@ pub(crate) fn redaction_forms(value: &str) -> Vec<String> {
     forms
 }
 
+/// Collects the `redaction_forms` of every secret value, without duplicates.
+pub(crate) fn secret_forms<'a>(values: impl IntoIterator<Item = &'a String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for value in values {
+        for form in redaction_forms(value) {
+            if !out.contains(&form) {
+                out.push(form);
+            }
+        }
+    }
+    out
+}
+
+/// Whether `text` equals or contains any of the secret `forms`.
+///
+/// `forms` come from `secret_forms`, so they are already at least `MIN_REDACTION_LEN` long.
+pub(crate) fn contains_secret(text: &str, forms: &[String]) -> bool {
+    forms.iter().any(|form| text.contains(form.as_str()))
+}
+
 // The sets below mirror the ones the `url` crate applies per component.
 const QUERY_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'#').add(b'<').add(b'>');
 const PATH_SET: &AsciiSet = &QUERY_SET.add(b'?').add(b'`').add(b'{').add(b'}');
@@ -128,6 +148,31 @@ mod tests {
             redact_url_secrets(encoded, &secrets),
             "https://h/••••••?q=••••••"
         );
+    }
+
+    #[test]
+    fn contains_secret_matches_equal_and_embedded_values() {
+        let forms = secret_forms(&["tok-abcdef".to_string()]);
+        assert!(contains_secret("tok-abcdef", &forms));
+        assert!(contains_secret("Bearer tok-abcdef!", &forms));
+        assert!(!contains_secret("tok-abcde", &forms));
+    }
+
+    #[test]
+    fn contains_secret_matches_a_single_pem_line() {
+        let pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkq\nhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n";
+        let forms = secret_forms(&[pem.to_string()]);
+        assert!(contains_secret("MIIEvQIBADANBgkq", &forms));
+        assert!(contains_secret(pem, &forms));
+        assert!(!contains_secret("-----BEGIN PRIVATE KEY-----", &forms));
+    }
+
+    #[test]
+    fn contains_secret_ignores_values_below_the_floor() {
+        let forms = secret_forms(&["12345".to_string()]);
+        assert!(forms.is_empty());
+        assert!(!contains_secret("12345", &forms));
+        assert!(!contains_secret("anything", &[]));
     }
 
     #[test]
