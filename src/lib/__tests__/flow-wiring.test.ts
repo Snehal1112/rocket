@@ -427,4 +427,33 @@ describe('Auth node wiring', () => {
       ),
     ).toBe(false);
   });
+
+  it('rejects a non-Auth source wired to the auth handle', () => {
+    const otherRequest: FlowNode = { ...requestNode, id: 'r2' };
+    expect(
+      isValidFlowConnection(
+        { source: 'r2', target: 'r', sourceHandle: 'result', targetHandle: AUTH_HANDLE },
+        [authNode, requestNode, otherRequest],
+        [],
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a second auth wire into the same Request', () => {
+    const secondAuth: FlowNode = { ...authNode, id: 'a2' };
+    const existing: FlowEdge = {
+      id: 'e1',
+      sourceNodeId: 'a',
+      targetNodeId: 'r',
+      targetField: AUTH_HANDLE,
+      expression: '',
+    };
+    expect(
+      isValidFlowConnection(
+        { source: 'a2', target: 'r', sourceHandle: 'result', targetHandle: AUTH_HANDLE },
+        [authNode, secondAuth, requestNode],
+        [existing],
+      ),
+    ).toBe(false);
+  });
 });
