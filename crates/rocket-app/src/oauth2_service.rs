@@ -618,7 +618,7 @@ impl OAuth2Service {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::client_certificates::describe_all;
     use rocket_collection::{
@@ -747,8 +747,9 @@ mod tests {
         }
     }
 
-    #[allow(dead_code)]
-    fn make_service() -> OAuth2Service {
+    /// A service over empty stub repos. Also used by the Flow Auth real-fetch
+    /// tests (`flow_auth.rs`, `flow_execution_service.rs`).
+    pub(crate) fn make_service() -> OAuth2Service {
         OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(StubCollectionRepo))
     }
 

@@ -8416,6 +8416,97 @@ mod tests {
         assert_eq!(fetcher.calls(), 1, "one fetch per run, not per request");
     }
 
+    /// End to end through the real `OAuth2ServiceFetcher` and `OAuth2Service`:
+    /// the client-credentials token comes from a fake token endpoint
+    /// (wiremock), is fetched once, and is what both requests send.
+    #[tokio::test]
+    async fn a_real_client_credentials_fetch_supplies_the_bearer_every_request_sends() {
+        use crate::flow_auth::OAuth2ServiceFetcher;
+        use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
+        use rocket_shared::types::Auth;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let token = "tok-abc-123456";
+        let idp = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": 3600
+            })))
+            .expect(1)
+            .mount(&idp)
+            .await;
+        let auth_node = FlowNode {
+            id: "a".to_string(),
+            kind: FlowNodeKind::Auth {
+                label: "Sign in".to_string(),
+                auth: Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
+                    access_token_url: format!("{}/token", idp.uri()),
+                    refresh_token_url: None,
+                    credentials: OAuth2ClientCredentials {
+                        client_id: "cid-e2e".to_string(),
+                        client_secret: "sec-e2e-secret-1".to_string(),
+                        placement: Some("basic_auth_header".to_string()),
+                    },
+                    scope: Some("read".to_string()),
+                    additional_parameters: None,
+                    token_config: None,
+                    settings: None,
+                })),
+                apply_to_inherit: true,
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        };
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![
+                auth_node,
+                saved_flow_node("r1", "req.yml"),
+                saved_flow_node("r2", "req.yml"),
+            ],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let service = service_with_saved_request(flow, Auth::Inherit).with_token_fetcher(Box::new(
+            OAuth2ServiceFetcher::new(crate::oauth2_service::tests::make_service()),
+        ));
+
+        let summary = service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        let bearer = Auth::Bearer {
+            token: token.to_string(),
+        };
+        assert_eq!(executor.sent_auths(), vec![bearer.clone(), bearer]);
+        let received = idp.received_requests().await.expect("recording is on");
+        assert_eq!(received.len(), 1, "one token fetch per run");
+        let basic = {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode("cid-e2e:sec-e2e-secret-1")
+        };
+        assert_eq!(
+            received[0]
+                .headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok()),
+            Some(format!("Basic {basic}").as_str()),
+            "the node's client credentials reach the token endpoint"
+        );
+        let everything = serde_json::to_string(&summary).expect("serialize summary");
+        assert!(
+            !everything.contains(token),
+            "the token leaked into run output: {everything}"
+        );
+        idp.verify().await;
+    }
+
     #[tokio::test]
     async fn an_unauthenticated_interactive_node_sends_no_request() {
         use crate::flow_auth::test_support::authorization_code;

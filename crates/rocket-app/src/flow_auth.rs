@@ -1296,3 +1296,386 @@ mod tests {
         }
     }
 }
+
+/// The real `OAuth2ServiceFetcher` over a real `OAuth2Service`, against a fake
+/// token endpoint (wiremock). Every other fetch test uses `FakeFetcher`.
+#[cfg(test)]
+mod real_fetch_tests {
+    use std::collections::HashMap;
+
+    use base64::Engine;
+    use rocket_shared::oauth2::{
+        OAuth2AdditionalParameter, OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow,
+        OAuth2ResourceOwner, OAuth2TokenConfig,
+    };
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::{FetchContext, FlowTokenFetcher, OAuth2ServiceFetcher};
+
+    const CLIENT_ID: &str = "cid-real-1";
+    const CLIENT_SECRET: &str = "sec-real-very-secret-9";
+
+    fn fetcher() -> OAuth2ServiceFetcher {
+        OAuth2ServiceFetcher::new(crate::oauth2_service::tests::make_service())
+    }
+
+    fn ctx() -> FetchContext {
+        FetchContext {
+            collection: "my-api".to_string(),
+            environment_name: Some("dev".to_string()),
+            vars: HashMap::from([
+                ("clientId".to_string(), CLIENT_ID.to_string()),
+                ("clientSecret".to_string(), CLIENT_SECRET.to_string()),
+            ]),
+            ..FetchContext::default()
+        }
+    }
+
+    fn token_response(body: serde_json::Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(body)
+    }
+
+    fn ok_token() -> ResponseTemplate {
+        token_response(serde_json::json!({
+            "access_token": "tok-abc-123456",
+            "token_type": "Bearer",
+            "expires_in": 3600
+        }))
+    }
+
+    async fn server_answering(response: ResponseTemplate) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(response)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn client_credentials(
+        server: &MockServer,
+        placement: Option<&str>,
+        params: Option<Vec<OAuth2AdditionalParameter>>,
+    ) -> OAuth2Flow {
+        OAuth2Flow::ClientCredentials {
+            access_token_url: format!("{}/token", server.uri()),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "{{clientId}}".to_string(),
+                client_secret: "{{clientSecret}}".to_string(),
+                placement: placement.map(str::to_string),
+            },
+            scope: Some("read write".to_string()),
+            additional_parameters: params.map(|list| OAuth2AdditionalParameters {
+                authorization_request: None,
+                access_token_request: Some(list),
+                refresh_token_request: None,
+            }),
+            token_config: None,
+            settings: None,
+        }
+    }
+
+    fn param(name: &str, value: &str, placement: &str, enabled: bool) -> OAuth2AdditionalParameter {
+        OAuth2AdditionalParameter {
+            name: name.to_string(),
+            value: value.to_string(),
+            placement: Some(placement.to_string()),
+            enabled,
+        }
+    }
+
+    /// The single request the token endpoint received.
+    async fn only_request(server: &MockServer) -> wiremock::Request {
+        let mut received = server
+            .received_requests()
+            .await
+            .expect("request recording is on");
+        assert_eq!(received.len(), 1, "exactly one token request");
+        received.remove(0)
+    }
+
+    fn form(request: &wiremock::Request) -> HashMap<String, String> {
+        url::form_urlencoded::parse(&request.body)
+            .into_owned()
+            .collect()
+    }
+
+    fn query(request: &wiremock::Request) -> HashMap<String, String> {
+        request.url.query_pairs().into_owned().collect()
+    }
+
+    fn header<'r>(request: &'r wiremock::Request, name: &str) -> Option<&'r str> {
+        request.headers.get(name).and_then(|v| v.to_str().ok())
+    }
+
+    #[tokio::test]
+    async fn header_client_auth_sends_basic_credentials_and_no_secret_in_the_body() {
+        let server = server_answering(ok_token()).await;
+        let flow = client_credentials(&server, Some("basic_auth_header"), None);
+
+        let token = fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect("token fetched");
+
+        assert_eq!(token, "tok-abc-123456");
+        let request = only_request(&server).await;
+        let expected = base64::engine::general_purpose::STANDARD
+            .encode(format!("{CLIENT_ID}:{CLIENT_SECRET}"));
+        assert_eq!(
+            header(&request, "authorization"),
+            Some(format!("Basic {expected}").as_str())
+        );
+        let body = form(&request);
+        assert_eq!(
+            body.get("grant_type").map(String::as_str),
+            Some("client_credentials")
+        );
+        assert_eq!(body.get("scope").map(String::as_str), Some("read write"));
+        assert!(!body.contains_key("client_secret"), "got: {body:?}");
+        assert!(!body.contains_key("client_id"), "got: {body:?}");
+        let raw_body = String::from_utf8_lossy(&request.body);
+        assert!(!raw_body.contains(CLIENT_SECRET), "got: {raw_body}");
+    }
+
+    #[tokio::test]
+    async fn body_client_auth_and_additional_params_reach_the_token_endpoint() {
+        let server = server_answering(ok_token()).await;
+        let flow = client_credentials(
+            &server,
+            None,
+            Some(vec![
+                param("audience", "https://api.example.com", "body", true),
+                param("tenant", "t-{{clientId}}", "query", true),
+                param("off_body", "x", "body", false),
+                param("off_query", "y", "query", false),
+            ]),
+        );
+
+        fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect("token fetched");
+
+        let request = only_request(&server).await;
+        assert_eq!(header(&request, "authorization"), None);
+        let body = form(&request);
+        assert_eq!(body.get("client_id").map(String::as_str), Some(CLIENT_ID));
+        assert_eq!(
+            body.get("client_secret").map(String::as_str),
+            Some(CLIENT_SECRET)
+        );
+        assert_eq!(
+            body.get("audience").map(String::as_str),
+            Some("https://api.example.com")
+        );
+        assert!(
+            !body.contains_key("tenant"),
+            "query param in body: {body:?}"
+        );
+        assert!(
+            !body.contains_key("off_body"),
+            "disabled param sent: {body:?}"
+        );
+        assert!(
+            !body.contains_key("off_query"),
+            "disabled param sent: {body:?}"
+        );
+        let query = query(&request);
+        assert_eq!(
+            query.get("tenant").map(String::as_str),
+            Some(format!("t-{CLIENT_ID}").as_str())
+        );
+        assert!(!query.contains_key("off_query"), "got: {query:?}");
+        assert!(!query.contains_key("audience"), "got: {query:?}");
+    }
+
+    // KNOWN LIMITATION (review B4): an additional parameter with placement
+    // `header` is not sent as an HTTP header; `build_get_token_request` maps
+    // every non-`query` placement to `body`, so it lands in the form body.
+    // This test documents the current behaviour; it is not the intended one.
+    #[tokio::test]
+    async fn a_header_placement_param_is_sent_in_the_form_body() {
+        let server = server_answering(ok_token()).await;
+        let flow = client_credentials(
+            &server,
+            None,
+            Some(vec![param("X-Tenant", "acme", "header", true)]),
+        );
+
+        fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect("token fetched");
+
+        let request = only_request(&server).await;
+        assert_eq!(header(&request, "x-tenant"), None);
+        assert_eq!(
+            form(&request).get("X-Tenant").map(String::as_str),
+            Some("acme")
+        );
+    }
+
+    #[tokio::test]
+    async fn variable_templates_are_resolved_from_the_run_variables() {
+        let server = server_answering(ok_token()).await;
+        let flow = client_credentials(&server, None, None);
+        let context = FetchContext {
+            vars: HashMap::from([
+                ("clientId".to_string(), "run-cid-42".to_string()),
+                ("clientSecret".to_string(), "run-secret-4242".to_string()),
+            ]),
+            ..ctx()
+        };
+
+        fetcher()
+            .fetch_token(&flow, &context)
+            .await
+            .expect("token fetched");
+
+        let request = only_request(&server).await;
+        let body = form(&request);
+        assert_eq!(
+            body.get("client_id").map(String::as_str),
+            Some("run-cid-42")
+        );
+        assert_eq!(
+            body.get("client_secret").map(String::as_str),
+            Some("run-secret-4242")
+        );
+        let raw_body = String::from_utf8_lossy(&request.body);
+        assert!(!raw_body.contains("{{"), "a template was sent: {raw_body}");
+        assert!(
+            !raw_body.contains("%7B%7B"),
+            "a template was sent: {raw_body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_id_token_is_returned_when_the_token_config_asks_for_it() {
+        let server = server_answering(token_response(serde_json::json!({
+            "access_token": "tok-abc-123456",
+            "token_type": "Bearer",
+            "id_token": "id-tok-777777"
+        })))
+        .await;
+        let mut flow = client_credentials(&server, None, None);
+        if let OAuth2Flow::ClientCredentials { token_config, .. } = &mut flow {
+            *token_config = Some(OAuth2TokenConfig {
+                id: None,
+                source: Some("idToken".to_string()),
+                placement: None,
+            });
+        }
+
+        let token = fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect("token fetched");
+
+        assert_eq!(token, "id-tok-777777");
+    }
+
+    #[tokio::test]
+    async fn a_response_without_an_access_token_is_an_error_without_the_secret() {
+        let server = server_answering(token_response(serde_json::json!({
+            "token_type": "Bearer"
+        })))
+        .await;
+        let flow = client_credentials(&server, None, None);
+
+        let message = fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect_err("no access token")
+            .to_string();
+
+        assert!(
+            message.contains("Failed to parse token response"),
+            "got: {message}"
+        );
+        assert!(!message.contains(CLIENT_SECRET), "secret leaked: {message}");
+    }
+
+    #[tokio::test]
+    async fn a_blank_access_token_is_an_error() {
+        let server = server_answering(token_response(serde_json::json!({
+            "access_token": "  ",
+            "token_type": "Bearer"
+        })))
+        .await;
+        let flow = client_credentials(&server, None, None);
+
+        let message = fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect_err("blank access token")
+            .to_string();
+
+        assert!(message.contains("empty access token"), "got: {message}");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_client_answer_is_an_error_without_the_secret() {
+        let server =
+            server_answering(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": "invalid_client"
+            })))
+            .await;
+        for placement in [None, Some("basic_auth_header")] {
+            let flow = client_credentials(&server, placement, None);
+
+            let message = fetcher()
+                .fetch_token(&flow, &ctx())
+                .await
+                .expect_err("401 must fail")
+                .to_string();
+
+            assert!(
+                message.contains("401") && message.contains("invalid_client"),
+                "got: {message}"
+            );
+            assert!(!message.contains(CLIENT_SECRET), "secret leaked: {message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_password_grant_sends_the_resource_owner() {
+        let server = server_answering(ok_token()).await;
+        let flow = OAuth2Flow::ResourceOwnerPassword {
+            access_token_url: format!("{}/token", server.uri()),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "{{clientId}}".to_string(),
+                client_secret: "{{clientSecret}}".to_string(),
+                placement: None,
+            },
+            resource_owner: Some(OAuth2ResourceOwner {
+                username: "alice".to_string(),
+                password: "{{clientSecret}}-pw".to_string(),
+            }),
+            scope: None,
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        };
+
+        let token = fetcher()
+            .fetch_token(&flow, &ctx())
+            .await
+            .expect("token fetched");
+
+        assert_eq!(token, "tok-abc-123456");
+        let body = form(&only_request(&server).await);
+        assert_eq!(body.get("grant_type").map(String::as_str), Some("password"));
+        assert_eq!(body.get("username").map(String::as_str), Some("alice"));
+        assert_eq!(
+            body.get("password").map(String::as_str),
+            Some(format!("{CLIENT_SECRET}-pw").as_str())
+        );
+        assert!(!body.contains_key("scope"), "no scope configured: {body:?}");
+    }
+}
