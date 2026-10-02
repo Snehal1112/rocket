@@ -687,6 +687,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_script_write_with_a_vault_secret_is_held_back_in_runner_mode() {
+        // The vault write guard runs in `begin_phases`, which the runner shares with `execute`.
+        let mut collection = Collection::new("my-api");
+        let mut first = req_with_secret_ref("First", "first.yml");
+        first.pre_request_script = Some("// pre".into());
+        collection.root.add_request(first);
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "before-request",
+            ScriptResult {
+                collection_var_writes: vec![rocket_scripting::CollectionVarWrite {
+                    key: "AUTH".into(),
+                    value: serde_json::json!("Bearer sk-test-secret-value"),
+                }],
+                ..Default::default()
+            },
+        );
+        let mut values = HashMap::new();
+        values.insert("sec-1".to_string(), "sk-test-secret-value".to_string());
+        let publisher = RecordingPublisher::new();
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(environment_with_one_external_secret_binding())),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(FakeSecretManagerRepo(fake_connection())),
+            Arc::new(FakeSecretStore("client-secret-xyz".to_string())),
+            FakeVaultSecretFetcher::new(values) as Arc<dyn rocket_environment::VaultSecretFetcher>,
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+        );
+        let mut input = sample_run_input();
+        input.environment_name = Some("prod".to_string());
+
+        runner.run(&exec, input).await.expect("run");
+
+        let warnings: Vec<String> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => Some(entries),
+                _ => None,
+            })
+            .flatten()
+            .filter(|e| e["level"] == "warn")
+            .map(|e| e["message"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("AUTH"), "{warnings:?}");
+        assert!(warnings[0].contains("collection variable"), "{warnings:?}");
+        assert!(
+            !warnings[0].contains("sk-test-secret-value"),
+            "{warnings:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn resolves_external_secrets_through_the_collection_scoped_env_repo_not_the_global_one() {
         // Regression guard for the exact bug class Plan 06's final review found
         // at the single-send (execute()) level -- see

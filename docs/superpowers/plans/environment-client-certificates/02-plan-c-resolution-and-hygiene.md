@@ -1515,7 +1515,7 @@ Expected: PASS.
 
 - [ ] **Step 9: Mutation check of the leak tests**
 
-Temporarily change the `Debug` impl in `crates/rocket-http/src/resolved_certificate.rs` (Plan B1) to print the raw bytes (for example replace the `inline <n> bytes` arm with `format!("{bytes:?}")`), run `cargo test -j4 -p rocket-http certificate_leaks`, and confirm at least three tests FAIL. Then revert the change with `git checkout -- crates/rocket-http/src/resolved_certificate.rs` (the file is committed by Plan B, so this restores it). A leak test that cannot fail is not a test.
+Temporarily change the `Debug` impl in `crates/rocket-http/src/resolved_certificate.rs` (Plan B1) to print the raw bytes (for example replace the `inline <n> bytes` arm with `format!("{bytes:?}")`), run `cargo test -j4 -p rocket-http certificate_leaks`, and confirm two tests FAIL (the two Debug tests; the serde tests are guarded by the compiler instead, because the type has no `Serialize`). Then revert the change with `git checkout -- crates/rocket-http/src/resolved_certificate.rs` (the file is committed by Plan B, so this restores it). A leak test that cannot fail is not a test.
 
 - [ ] **Step 10: Clippy and workspace check**
 

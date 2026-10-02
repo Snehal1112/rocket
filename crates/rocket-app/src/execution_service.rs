@@ -1037,18 +1037,23 @@ impl RequestExecutionService {
                 .unwrap_or_else(|| value.to_string());
             let var_name = &action.variable.name;
 
-            // A value with a vault secret is never saved to any persistent scope.
-            if matches!(
-                action.variable.scope.as_str(),
-                "environment" | "collection" | "folder" | "request"
-            ) && hold_back_text_if_vault_secret(
-                &action.variable.scope,
-                var_name,
-                &str_val,
-                vault_forms,
-                var_ctx,
-                console,
-            ) {
+            // A value with a vault secret is never saved to any persistent scope. Without an
+            // active environment nothing would be saved for that scope, so there is no warning.
+            let persistent = match action.variable.scope.as_str() {
+                "environment" => env_name.is_some(),
+                "collection" | "folder" | "request" => true,
+                _ => false,
+            };
+            if persistent
+                && hold_back_text_if_vault_secret(
+                    &action.variable.scope,
+                    var_name,
+                    &str_val,
+                    vault_forms,
+                    var_ctx,
+                    console,
+                )
+            {
                 continue;
             }
 
@@ -3622,6 +3627,9 @@ mod tests {
                 "BEGIN PRIVATE KEY",
                 "BEGIN CERTIFICATE",
                 "p4ss-word",
+                // Decimal bytes, as a derived `Debug` of `Vec<u8>` prints "MIIE" and "-----BEGIN".
+                "77, 73, 73, 69",
+                "45, 45, 45, 45, 45, 66, 69",
             ];
             let json = serde_json::to_string(&request).expect("serialize");
             for shown in [format!("{request:?}"), format!("{request:#?}"), json.clone()] {
@@ -6752,6 +6760,19 @@ mod tests {
             );
             assert_console_names_key_not_value(&console, "extracted", VAULT_TOKEN);
         }
+    }
+
+    #[tokio::test]
+    async fn action_with_a_vault_value_and_no_active_environment_does_not_warn() {
+        let env_repo = RecordingEnvRepo::with_env(Environment::new("dev"));
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        let value = serde_json::json!(format!("Bearer {VAULT_TOKEN}"));
+        let svc = action_svc(&env_repo, &col_repo, value);
+        let (var_ctx, console) =
+            run_vault_action(&svc, "environment", &vault_forms_of(&[VAULT_TOKEN]), None).await;
+        assert!(console.is_empty(), "{console:?}");
+        assert!(env_repo.last_saved().is_none());
+        assert!(!var_ctx.runtime.contains_key("extracted"));
     }
 
     #[tokio::test]

@@ -90,7 +90,8 @@ mod tests {
 
         /// Things that appear in the output if bytes or passphrases are printed. The decimal lists
         /// are what a derived `Debug` of `Vec<u8>` prints for `cert-leak-check-body` and `SUPER`.
-        const NEEDLES: [&str; 7] = [
+        /// `SUPER` is the plain-text form of the PKCS12 bundle bytes, as a lossy UTF-8 print shows.
+        const NEEDLES: [&str; 8] = [
             "MIIEleakcheckbody",
             "cert-leak-check-body",
             "BEGIN PRIVATE KEY",
@@ -98,6 +99,7 @@ mod tests {
             "p12-passphrase",
             "99, 101, 114",
             "83, 85, 80",
+            "SUPER",
         ];
 
         fn request_with_certificates() -> HttpRequest {

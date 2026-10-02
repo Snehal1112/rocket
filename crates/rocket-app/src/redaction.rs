@@ -34,15 +34,17 @@ pub(crate) fn redact_secrets(text: &str, secret_values: &HashSet<String>) -> Str
 /// `redact_secrets`.
 pub(crate) fn redaction_forms(value: &str) -> Vec<String> {
     let mut forms: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let mut add = |s: &str| {
-        if s.len() >= MIN_REDACTION_LEN && !forms.iter().any(|f| f == s) {
+        if s.len() >= MIN_REDACTION_LEN && seen.insert(s.to_string()) {
             forms.push(s.to_string());
         }
     };
     add(value);
     add(value.trim());
     if value.contains('\n') || value.contains('\r') {
-        for line in value.lines() {
+        // Split on both, so a value with lone CR line endings gets per-line forms too.
+        for line in value.split(['\r', '\n']) {
             let line = line.trim();
             if !line.starts_with("-----") {
                 add(line);
@@ -52,12 +54,21 @@ pub(crate) fn redaction_forms(value: &str) -> Vec<String> {
     forms
 }
 
-/// Collects the `redaction_forms` of every secret value, without duplicates.
+/// Collects the forms of every secret value that the vault write guard looks for.
+///
+/// These are the `redaction_forms` plus the percent-encoded whole value, so a value written
+/// through `encodeURIComponent` is caught too. The result has no duplicates and keeps the order
+/// in which forms were first seen.
 pub(crate) fn secret_forms<'a>(values: impl IntoIterator<Item = &'a String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     for value in values {
-        for form in redaction_forms(value) {
-            if !out.contains(&form) {
+        let encoded = utf8_percent_encode(value, NON_ALPHANUMERIC).to_string();
+        let forms = redaction_forms(value)
+            .into_iter()
+            .chain(std::iter::once(encoded));
+        for form in forms {
+            if form.len() >= MIN_REDACTION_LEN && seen.insert(form.clone()) {
                 out.push(form);
             }
         }
@@ -249,5 +260,53 @@ mod tests {
             redact_secrets("-----BEGIN CERTIFICATE-----", &set),
             "-----BEGIN CERTIFICATE-----"
         );
+    }
+
+    #[test]
+    fn lone_cr_values_are_masked_line_by_line_too() {
+        let cr = PEM.replace('\n', "\r");
+        let set = forms(&cr);
+        assert!(set.contains("MIIEvQIBADANBgkqhkiG9w0B"));
+        assert!(set.contains("AQEFAASCBKcwggSjAgEAAoIB"));
+        assert!(!set
+            .iter()
+            .any(|f| f.starts_with("-----") && !f.contains('\r')));
+        assert_eq!(
+            redact_secrets("x AQEFAASCBKcwggSjAgEAAoIB x", &set),
+            format!("x {REDACTED} x")
+        );
+    }
+
+    #[test]
+    fn secret_forms_keep_first_seen_order_without_duplicates() {
+        let values = vec![
+            "alpha-secret".to_string(),
+            "alpha-secret".to_string(),
+            "beta-secret".to_string(),
+        ];
+        assert_eq!(
+            secret_forms(&values),
+            vec![
+                "alpha-secret".to_string(),
+                "alpha%2Dsecret".to_string(),
+                "beta-secret".to_string(),
+                "beta%2Dsecret".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn secret_forms_include_the_percent_encoded_value_only_for_the_guard() {
+        let secret = "p@ss word/é1";
+        let forms = secret_forms(&[secret.to_string()]);
+        let encoded = "p%40ss%20word%2F%C3%A91";
+        assert!(forms.iter().any(|f| f == encoded));
+        assert!(contains_secret(&format!("x={encoded}"), &forms));
+        // Masking is unchanged: the encoded form is not part of `redaction_forms`.
+        assert!(!redaction_forms(secret).iter().any(|f| f == encoded));
+        assert_eq!(redact_secrets(encoded, &set(&[secret])), encoded);
+        // A value that encodes to itself adds nothing, and short values stay out.
+        assert_eq!(secret_forms(&["abcdef123".to_string()]).len(), 1);
+        assert!(secret_forms(&["a-b".to_string()]).is_empty());
     }
 }
