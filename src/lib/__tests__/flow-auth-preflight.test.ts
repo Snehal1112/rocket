@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildOAuth2VarContext } from '@/lib/execute-request';
 import { flowAuthKey, oauth2Fingerprint } from '@/lib/flow-auth';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
-import { fromPersistedAuth } from '@/lib/persisted-auth';
+import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import type { Auth, FlowNode } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { resolveWithContext } from '@/lib/variable-context';
@@ -228,6 +228,30 @@ describe('collectFlowAuthTokens', () => {
     expect(tokens).toEqual({ a: { accessToken: 'stored-123456' } });
     expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
     expect(tauriApi.oauth2RefreshToken).not.toHaveBeenCalled();
+  });
+
+  it('reuses a stored token whose header prefix is empty', async () => {
+    // An empty prefix does not survive the persisted round trip unchanged; the
+    // stored state must still match the node's persisted auth.
+    const base = fromPersistedAuth(oauthAuth('authorization_code'));
+    const oauth2 = {
+      ...(base.oauth2 as NonNullable<AuthState['oauth2']>),
+      headerPrefix: '',
+      accessToken: 'stored-123456',
+      expiresIn: 3600,
+      tokenAcquiredAt: Math.floor(Date.now() / 1000),
+    };
+    const state: AuthState = { ...base, oauth2 };
+    useFlowAuthStore.getState().setAuth(
+      key('a'),
+      state,
+      oauth2Fingerprint(oauth2, (s) => resolveWithContext(s, DEFAULT_VARS)),
+    );
+
+    const tokens = await collectFlowAuthTokens(input([authNode('a', toPersistedAuth(state))]));
+
+    expect(tokens).toEqual({ a: { accessToken: 'stored-123456' } });
+    expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
   });
 
   it('ignores a stored token when the node persisted auth changed since', async () => {

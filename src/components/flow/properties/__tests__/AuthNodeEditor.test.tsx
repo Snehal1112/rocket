@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flowAuthKey, oauth2Fingerprint } from '@/lib/flow-auth';
 import { fromPersistedAuth } from '@/lib/persisted-auth';
@@ -31,6 +32,16 @@ vi.mock('@/components/request/AuthEditor', () => ({
       <div>
         <span data-testid='auth-type'>{props.auth.authType}</span>
         <span data-testid='access-token'>{props.auth.oauth2?.accessToken ?? ''}</span>
+        <span data-testid='header-prefix'>{props.auth.oauth2?.headerPrefix ?? ''}</span>
+        <button
+          type='button'
+          onClick={() =>
+            props.auth.oauth2 &&
+            props.onChange({ ...props.auth, oauth2: { ...props.auth.oauth2, headerPrefix: '' } })
+          }
+        >
+          clear prefix
+        </button>
         <button
           type='button'
           onClick={() =>
@@ -397,6 +408,39 @@ describe('AuthNodeEditor', () => {
           tokenUrl: 'https://idp/token',
         }),
       );
+    });
+
+    it('keeps an emptied header prefix and the token once the node saves it', async () => {
+      const state = withToken();
+      useFlowAuthStore
+        .getState()
+        .setAuth(
+          flowAuthKey('api', 'login', 'n1', 'dev', 'global'),
+          state,
+          fingerprintFor(state, devVars),
+        );
+      // Feeds each reported node back in, as the flow pane does.
+      function Harness() {
+        const [current, setCurrent] = useState<AuthKind>(oauthKind);
+        return (
+          <AuthNodeEditor
+            kind={current}
+            onChange={(k) => setCurrent(k as AuthKind)}
+            collection='api'
+            flowName='login'
+            nodeId='n1'
+          />
+        );
+      }
+      render(<Harness />);
+      await waitFor(() =>
+        expect(screen.getByTestId('access-token')).toHaveTextContent('stored-token-123456'),
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'clear prefix' }));
+
+      expect(screen.getByTestId('header-prefix')).toHaveTextContent(/^$/);
+      expect(screen.getByTestId('access-token')).toHaveTextContent('stored-token-123456');
     });
   });
 });

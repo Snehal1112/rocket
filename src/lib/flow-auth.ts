@@ -174,7 +174,9 @@ export function fingerprintFor(state: AuthState, rv: (s: string) => string): str
  */
 export function resetTokenOnConfigChange(prev: AuthState | undefined, next: AuthState): AuthState {
   if (!prev || !next.oauth2) return next;
-  const same = JSON.stringify(toPersistedAuth(prev)) === JSON.stringify(toPersistedAuth(next));
+  // Canonical forms, as in pickAuthState: two states that persist the same
+  // configuration once settled (an empty header prefix and "Bearer") are the same.
+  const same = canonicalAuth(toPersistedAuth(prev)) === canonicalAuth(toPersistedAuth(next));
   if (same) return next;
   return withoutToken(next);
 }
@@ -188,8 +190,27 @@ export function resetTokenOnConfigChange(prev: AuthState | undefined, next: Auth
 export function pickAuthState(stored: AuthState | undefined, persisted: Auth): AuthState {
   const fresh = fromPersistedAuth(persisted);
   if (!stored) return fresh;
-  const same = JSON.stringify(toPersistedAuth(stored)) === JSON.stringify(toPersistedAuth(fresh));
-  return same ? stored : fresh;
+  return canonicalAuth(toPersistedAuth(stored)) === canonicalAuth(persisted) ? stored : fresh;
+}
+
+// Upper bound on read/write round trips; the mapping settles after one or two.
+const MAX_CANONICAL_ROUNDS = 4;
+
+/**
+ * A persisted auth in canonical form, as JSON: read back and written again
+ * until it stops changing. The persisted mapping is not idempotent (an empty
+ * OAuth2 header prefix is written as "Bearer", which then reads back and
+ * writes as no token config), so two forms of the same configuration are
+ * compared only after both have settled.
+ */
+function canonicalAuth(auth: Auth): string {
+  let json = JSON.stringify(auth);
+  for (let i = 0; i < MAX_CANONICAL_ROUNDS; i++) {
+    const next = JSON.stringify(toPersistedAuth(fromPersistedAuth(JSON.parse(json) as Auth)));
+    if (next === json) break;
+    json = next;
+  }
+  return json;
 }
 
 /**

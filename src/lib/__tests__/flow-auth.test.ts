@@ -11,7 +11,7 @@ import {
   pickAuthState,
   resetTokenOnConfigChange,
 } from '@/lib/flow-auth';
-import { fromPersistedAuth } from '@/lib/persisted-auth';
+import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import type { Auth } from '@/lib/tauri-api';
 import type { AuthState } from '@/types/pane-types';
 
@@ -265,6 +265,15 @@ describe('resetTokenOnConfigChange', () => {
     expect(result.oauth2?.clientId).toBe('other-client');
   });
 
+  it('keeps a token when the header prefix is emptied (same persisted configuration)', () => {
+    const prev = withToken('cid');
+    const next = {
+      ...prev,
+      oauth2: { ...(prev.oauth2 as NonNullable<AuthState['oauth2']>), headerPrefix: '' },
+    };
+    expect(resetTokenOnConfigChange(prev, next).oauth2?.accessToken).toBe('tok-123456');
+  });
+
   it('passes through when there was no previous state or no OAuth2', () => {
     const next = withToken('cid');
     expect(resetTokenOnConfigChange(undefined, next)).toBe(next);
@@ -309,5 +318,48 @@ describe('pickAuthState', () => {
   it('drops a stored state whose configuration no longer matches', () => {
     const stored = fromPersistedAuth({ authType: 'bearer', token: 'old' });
     expect(pickAuthState(stored, persisted)).toEqual(fromPersistedAuth(persisted));
+  });
+  it('matches a stored state with an empty header prefix against its own persisted form', () => {
+    // The persisted mapping is not idempotent here: an empty prefix persists as
+    // "Bearer", which reads back as "Bearer" and then persists with no token config.
+    const base = fromPersistedAuth(oauth('authorization_code'));
+    const stored: AuthState = {
+      ...base,
+      oauth2: {
+        ...(base.oauth2 as NonNullable<AuthState['oauth2']>),
+        headerPrefix: '',
+        tokenSource: 'accessToken',
+        tokenId: '',
+        addTokenTo: 'header',
+        accessToken: 'tok-123456',
+      },
+    };
+    expect(pickAuthState(stored, toPersistedAuth(stored))).toBe(stored);
+  });
+
+  it('matches stored states against their persisted form across grants, prefixes and placements', () => {
+    const grants = ['client_credentials', 'password', 'authorization_code', 'implicit'];
+    for (const grant of grants)
+      for (const headerPrefix of ['', 'Bearer', 'Token'])
+        for (const addTokenTo of ['header', 'queryParams'] as const)
+          for (const tokenSource of ['accessToken', 'idToken'] as const)
+            for (const tokenId of ['', 'tid']) {
+              const base = fromPersistedAuth(oauth(grant));
+              const stored: AuthState = {
+                ...base,
+                oauth2: {
+                  ...(base.oauth2 as NonNullable<AuthState['oauth2']>),
+                  headerPrefix,
+                  addTokenTo,
+                  tokenSource,
+                  tokenId,
+                  accessToken: 'tok-123456',
+                },
+              };
+              expect(
+                pickAuthState(stored, toPersistedAuth(stored)),
+                `${grant}/${headerPrefix}/${addTokenTo}/${tokenSource}/${tokenId}`,
+              ).toBe(stored);
+            }
   });
 });
