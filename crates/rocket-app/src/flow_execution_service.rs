@@ -11,6 +11,9 @@ use rocket_shared::VariableValue;
 use crate::execution_service::{
     ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
+use crate::flow_auth::{
+    resolve_flow_credentials, FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher,
+};
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
@@ -723,6 +726,8 @@ pub struct FlowExecutionService {
     cancel_handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
     /// Opens run-scoped callback endpoints for Wait for callback nodes.
     callback_listener: Box<dyn crate::callback_listener::CallbackListener>,
+    /// Fetches non-interactive OAuth2 tokens for Auth nodes at run start.
+    token_fetcher: Box<dyn FlowTokenFetcher>,
 }
 
 impl FlowExecutionService {
@@ -739,6 +744,7 @@ impl FlowExecutionService {
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             cancel_handles: Arc::new(Mutex::new(HashMap::new())),
             callback_listener: Box::new(crate::callback_listener::NoCallbackListener),
+            token_fetcher: Box::new(NoTokenFetcher),
         }
     }
 
@@ -749,6 +755,13 @@ impl FlowExecutionService {
         listener: Box<dyn crate::callback_listener::CallbackListener>,
     ) -> Self {
         self.callback_listener = listener;
+        self
+    }
+
+    /// Replaces the default `NoTokenFetcher`. `src-tauri` passes an
+    /// `OAuth2ServiceFetcher`; tests pass a `FakeFetcher`.
+    pub fn with_token_fetcher(mut self, fetcher: Box<dyn FlowTokenFetcher>) -> Self {
+        self.token_fetcher = fetcher;
         self
     }
 
@@ -802,25 +815,57 @@ impl FlowExecutionService {
         }
     }
 
+    /// Runs a flow with no UI-supplied tokens. Same as `run_with_auth` with an empty map.
+    pub async fn run(
+        &self,
+        exec: &RequestExecutionService,
+        input: RunFlowInput,
+    ) -> DomainResult<FlowRunSummary> {
+        self.run_with_auth(exec, input, FlowAuthTokens::new()).await
+    }
+
     /// Runs every node of `input.flow_name` in dependency order. Each node's
     /// fate is decided at its turn from its predecessors' outcomes
     /// (`flow_routing::decide_fate`): it runs, is skipped (`upstream_failed`
     /// or `branch_not_taken`), or fails on ambiguous inputs. Cancellation is
     /// checked before each node and after it, so a cancelled run records the
     /// node that was running and nothing after it.
-    pub async fn run(
+    pub async fn run_with_auth(
         &self,
         exec: &RequestExecutionService,
         input: RunFlowInput,
+        auth_tokens: FlowAuthTokens,
     ) -> DomainResult<FlowRunSummary> {
         let (flow, order) = self.load_ordered_nodes(&input.collection, &input.flow_name)?;
 
         // Fetch every External Secret value once for the whole run. Each
         // Request node reuses this map, so a run of N requests makes one
         // vault round-trip per secret instead of N.
-        let external_secrets = exec
+        let mut external_secrets = exec
             .resolve_external_secrets(Some(&input.collection), input.environment_name.as_deref())
             .await?;
+        // Resolve every Auth node before anything is announced, so a run that
+        // cannot authenticate fails with no events, like a callback that
+        // cannot open. Every credential secret joins `external_secrets`, so the
+        // existing redaction masks it in step output, history and logs.
+        let fetch_ctx = FetchContext {
+            collection: input.collection.clone(),
+            environment_name: input.environment_name.clone(),
+            vars: exec.build_variable_context(
+                input.global_env_name.as_deref(),
+                Some(&input.collection),
+                input.environment_name.as_deref(),
+                None,
+                &external_secrets,
+            ),
+            external_secrets: external_secrets.clone(),
+        };
+        let credentials =
+            resolve_flow_credentials(&flow, &auth_tokens, self.token_fetcher.as_ref(), &fetch_ctx)
+                .await?;
+        for (node_id, secret) in credentials.secrets() {
+            external_secrets.insert(format!("flow-auth.{node_id}"), secret.to_string());
+        }
         let nodes_by_id: HashMap<&str, &FlowNode> =
             flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
@@ -2929,6 +2974,102 @@ mod tests {
             environment_name: None,
             global_env_name: None,
         }
+    }
+
+    fn auth_flow(auth: rocket_shared::types::Auth) -> Flow {
+        Flow {
+            name: "auth-flow".to_string(),
+            nodes: vec![FlowNode {
+                id: "a".to_string(),
+                kind: FlowNodeKind::Auth {
+                    label: "Sign in".to_string(),
+                    auth,
+                    apply_to_inherit: true,
+                },
+                position: NodePosition { x: 0.0, y: 0.0 },
+            }],
+            edges: Vec::new(),
+            callback_host: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_interactive_auth_node_fails_the_run_before_any_event() {
+        use crate::flow_auth::test_support::authorization_code;
+        use rocket_shared::types::Auth;
+
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            auth_flow(Auth::OAuth2(Box::new(authorization_code()))),
+            &publisher,
+        );
+        let exec = exec_with_status(200);
+
+        let err = service
+            .run(&exec, run_input("auth-flow"))
+            .await
+            .expect_err("the run must not start");
+
+        assert!(
+            err.to_string().contains("needs you to authenticate first"),
+            "got: {err}"
+        );
+        assert!(
+            publisher.events().is_empty(),
+            "a run that cannot start emits no events"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_supplied_token_lets_the_run_start() {
+        use crate::flow_auth::test_support::authorization_code;
+        use crate::flow_auth::{FlowAuthTokens, SuppliedToken};
+        use rocket_shared::types::Auth;
+
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            auth_flow(Auth::OAuth2(Box::new(authorization_code()))),
+            &publisher,
+        );
+        let exec = exec_with_status(200);
+        let tokens: FlowAuthTokens = HashMap::from([(
+            "a".to_string(),
+            SuppliedToken {
+                access_token: "supplied-token-123".to_string(),
+            },
+        )]);
+
+        service
+            .run_with_auth(&exec, run_input("auth-flow"), tokens)
+            .await
+            .expect("a supplied token lets the run start");
+
+        assert!(publisher
+            .events()
+            .iter()
+            .any(|e| matches!(e, DomainEvent::FlowRunStarted { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_non_interactive_auth_node_is_fetched_by_the_fetcher() {
+        use crate::flow_auth::test_support::{client_credentials, FakeFetcher, SharedFetcher};
+        use rocket_shared::types::Auth;
+
+        let fetcher = FakeFetcher::ok("fetched-token-999");
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            auth_flow(Auth::OAuth2(Box::new(client_credentials()))),
+            &publisher,
+        )
+        .with_token_fetcher(Box::new(SharedFetcher(Arc::clone(&fetcher))));
+        let exec = exec_with_status(200);
+
+        service
+            .run(&exec, run_input("auth-flow"))
+            .await
+            .expect("the run starts");
+
+        assert_eq!(fetcher.calls(), 1);
     }
 
     #[tokio::test]
