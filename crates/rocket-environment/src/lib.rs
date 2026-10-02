@@ -19,4 +19,6 @@ pub use resolver::{resolve, resolve_with_env, ResolveResult};
 pub use secret_manager::{SecretManagerConnection, SecretManagerRepository};
 pub use secret_store::{NullSecretStore, SecretStore};
 pub use variable::Variable;
-pub use vault_secret_fetcher::{NullVaultSecretFetcher, VaultSecretFetcher};
+pub use vault_secret_fetcher::{
+    NullVaultSecretFetcher, VaultCertificateMaterial, VaultCertificateSummary, VaultSecretFetcher,
+};

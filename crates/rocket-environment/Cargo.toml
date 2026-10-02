@@ -12,6 +12,7 @@ uuid.workspace = true
 chrono.workspace = true
 fake = "3"
 rand = "0.8"
+zeroize = "1"
 
 [dev-dependencies]
 tokio.workspace = true

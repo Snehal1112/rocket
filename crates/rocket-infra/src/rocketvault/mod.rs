@@ -5,6 +5,10 @@ use rocket_environment::SecretManagerConnection;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
 
+// The certificate contract. Its export half is first used in Task B3, which removes this allow.
+#[allow(dead_code)]
+mod certificate_api;
+
 /// Minimum token TTL enforced client-side, even when the server reports
 /// `expires_in: 0` — mirrors the reference Go client's floor in
 /// `ensureToken` (rocketvault/internal/vaultclient/client.go).
