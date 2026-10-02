@@ -12,6 +12,10 @@ use rocket_http::{CertificateSource, ResolvedClientCertificate};
 use rocket_shared::certificate::ClientCertificate;
 use zeroize::Zeroizing;
 
+/// The largest vault secret accepted as certificate material. A PKCS12 bundle as base64 is tens
+/// of KiB, so this only stops a wrong secret (a large file, a dump) from being copied around.
+pub(crate) const MAX_INLINE_SECRET_BYTES: usize = 1024 * 1024;
+
 /// Returns the named environment's client certificates, ready for the executor: `{{placeholders}}`
 /// resolved with `vars`, relative file paths joined onto `collection_dir`, and each RocketVault
 /// reference replaced by the bytes found under `alias.secretName` in `external_secrets`.
@@ -235,6 +239,12 @@ fn inline_from_secret(
              Check the External Secrets binding and fetch the secret names."
         ));
     };
+    if value.len() > MAX_INLINE_SECRET_BYTES {
+        return Err(format!(
+            "Client certificate secret {reference} is larger than 1 MiB. \
+             Check that it holds a certificate and not another file."
+        ));
+    }
     if value.trim().is_empty() {
         return Err(format!("Client certificate secret {reference} is empty."));
     }

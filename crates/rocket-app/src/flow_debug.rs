@@ -242,6 +242,22 @@ mod tests {
     }
 
     #[test]
+    fn the_debug_record_never_carries_client_certificate_material() {
+        use rocket_http::{CertificateSource, ResolvedClientCertificate};
+        let mut req = request(Auth::None);
+        req.options.client_certificates = vec![ResolvedClientCertificate::pem(
+            "api.example.com",
+            CertificateSource::Inline(zeroize::Zeroizing::new(b"PEM-BODY-LEAK-CHECK".to_vec())),
+            CertificateSource::Inline(zeroize::Zeroizing::new(b"KEY-BODY-LEAK-CHECK".to_vec())),
+            Some("pass-LEAK-CHECK".into()),
+        )];
+        let record = build_debug_request(&req, None, None, &secrets(&[]));
+        let json = serde_json::to_string(&record).expect("serialize");
+        assert!(!json.contains("LEAK-CHECK"), "{json}");
+        assert!(!json.contains("clientCertificates"), "{json}");
+    }
+
+    #[test]
     fn masks_secrets_everywhere_and_appends_enabled_query_params() {
         let d = build_debug_request(
             &request(Auth::None),

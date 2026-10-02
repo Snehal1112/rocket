@@ -80,6 +80,96 @@ mod tests {
         assert!(req.options.verify_ssl);
     }
 
+    mod certificate_leaks {
+        use super::*;
+        use crate::{CertificateSource, ResolvedClientCertificate};
+        use zeroize::Zeroizing;
+
+        const KEY_TEXT: &str =
+            "-----BEGIN PRIVATE KEY-----\nMIIEleakcheckbody\n-----END PRIVATE KEY-----\n";
+
+        /// Things that appear in the output if bytes or passphrases are printed. The decimal lists
+        /// are what a derived `Debug` of `Vec<u8>` prints for `cert-leak-check-body` and `SUPER`.
+        const NEEDLES: [&str; 7] = [
+            "MIIEleakcheckbody",
+            "cert-leak-check-body",
+            "BEGIN PRIVATE KEY",
+            "hunter2-passphrase",
+            "p12-passphrase",
+            "99, 101, 114",
+            "83, 85, 80",
+        ];
+
+        fn request_with_certificates() -> HttpRequest {
+            let mut req = HttpRequest::new(HttpMethod::Get, "https://api.example.com");
+            req.options.client_certificates = vec![
+                ResolvedClientCertificate::pem(
+                    "api.example.com",
+                    CertificateSource::Inline(Zeroizing::new(b"cert-leak-check-body".to_vec())),
+                    CertificateSource::Inline(Zeroizing::new(KEY_TEXT.as_bytes().to_vec())),
+                    Some("hunter2-passphrase".into()),
+                ),
+                ResolvedClientCertificate::pkcs12(
+                    "b.example.com",
+                    CertificateSource::Inline(Zeroizing::new(vec![0x53, 0x55, 0x50, 0x45, 0x52])),
+                    Some("p12-passphrase".into()),
+                ),
+            ];
+            req
+        }
+
+        fn assert_clean(shown: &str) {
+            for needle in NEEDLES {
+                assert!(!shown.contains(needle), "{needle} leaked into {shown}");
+            }
+        }
+
+        #[test]
+        fn debug_of_a_resolved_certificate_never_prints_bytes_or_passphrases() {
+            for cert in request_with_certificates().options.client_certificates {
+                assert_clean(&format!("{cert:?}"));
+                assert_clean(&format!("{cert:#?}"));
+            }
+            let shown = format!("{:?}", request_with_certificates().options.client_certificates);
+            assert!(shown.contains("inline 20 bytes"), "{shown}");
+            assert!(shown.contains("<redacted>"), "{shown}");
+        }
+
+        #[test]
+        fn debug_of_request_options_and_http_request_never_prints_key_material() {
+            let req = request_with_certificates();
+            for shown in [
+                format!("{:?}", req.options),
+                format!("{:#?}", req.options),
+                format!("{req:?}"),
+                format!("{req:#?}"),
+            ] {
+                assert_clean(&shown);
+            }
+        }
+
+        #[test]
+        fn serializing_options_or_a_request_never_contains_certificates() {
+            let req = request_with_certificates();
+            for json in [
+                serde_json::to_string(&req.options).expect("options"),
+                serde_json::to_string(&req).expect("request"),
+            ] {
+                assert_clean(&json);
+                assert!(!json.contains("clientCertificates"), "{json}");
+            }
+        }
+
+        #[test]
+        fn certificates_in_ipc_input_are_ignored() {
+            let options: RequestOptions = serde_json::from_str(
+                r#"{"clientCertificates":[{"type":"pkcs12","domain":"x","pkcs12FilePath":"/etc/shadow"}]}"#,
+            )
+            .expect("unknown keys are ignored");
+            assert!(options.client_certificates.is_empty());
+        }
+    }
+
     #[test]
     fn client_certificates_never_cross_serde() {
         use crate::resolved_certificate::{CertificateSource, ResolvedClientCertificate};

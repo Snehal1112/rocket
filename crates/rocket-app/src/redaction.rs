@@ -26,6 +26,32 @@ pub(crate) fn redact_secrets(text: &str, secret_values: &HashSet<String>) -> Str
     out
 }
 
+/// Every form of a secret value that must be masked.
+///
+/// The whole value, its trimmed form, and, for a multi-line value such as a PEM, each line on its
+/// own, so one printed line is masked too. `-----BEGIN` and `-----END` armor lines are not secret
+/// and are skipped. Forms shorter than `MIN_REDACTION_LEN` are left out, like in
+/// `redact_secrets`.
+pub(crate) fn redaction_forms(value: &str) -> Vec<String> {
+    let mut forms: Vec<String> = Vec::new();
+    let mut add = |s: &str| {
+        if s.len() >= MIN_REDACTION_LEN && !forms.iter().any(|f| f == s) {
+            forms.push(s.to_string());
+        }
+    };
+    add(value);
+    add(value.trim());
+    if value.contains('\n') || value.contains('\r') {
+        for line in value.lines() {
+            let line = line.trim();
+            if !line.starts_with("-----") {
+                add(line);
+            }
+        }
+    }
+    forms
+}
+
 // The sets below mirror the ones the `url` crate applies per component.
 const QUERY_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'#').add(b'<').add(b'>');
 const PATH_SET: &AsciiSet = &QUERY_SET.add(b'?').add(b'`').add(b'{').add(b'}');
@@ -121,5 +147,62 @@ mod tests {
             assert!(is_sensitive_header(name), "{name}");
         }
         assert!(!is_sensitive_header("Content-Type"));
+    }
+
+    const PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\nAQEFAASCBKcwggSjAgEAAoIB\n-----END PRIVATE KEY-----\n";
+
+    fn forms(value: &str) -> HashSet<String> {
+        redaction_forms(value).into_iter().collect()
+    }
+
+    #[test]
+    fn a_single_line_value_has_one_form() {
+        assert_eq!(redaction_forms("sk-live-abcdef123"), vec!["sk-live-abcdef123"]);
+        assert!(redaction_forms("abc").is_empty(), "below the floor");
+    }
+
+    #[test]
+    fn a_multi_line_value_is_masked_whole_and_line_by_line() {
+        let set = forms(PEM);
+        // Whole: nothing is left behind.
+        assert_eq!(redact_secrets(PEM, &set), REDACTED);
+        // One line on its own, for example from a script or an echoing server.
+        assert_eq!(
+            redact_secrets("leaked: AQEFAASCBKcwggSjAgEAAoIB", &set),
+            format!("leaked: {REDACTED}")
+        );
+        // The trimmed form, without the final newline.
+        assert_eq!(redact_secrets(PEM.trim(), &set), REDACTED);
+    }
+
+    #[test]
+    fn crlf_values_are_masked_line_by_line_too() {
+        let crlf = PEM.replace('\n', "\r\n");
+        let set = forms(&crlf);
+        assert_eq!(redact_secrets(&crlf, &set), REDACTED);
+        assert_eq!(
+            redact_secrets("x MIIEvQIBADANBgkqhkiG9w0B x", &set),
+            format!("x {REDACTED} x")
+        );
+        // Also the same PEM printed with LF only.
+        assert_eq!(
+            redact_secrets("a\nMIIEvQIBADANBgkqhkiG9w0B\nb", &set),
+            format!("a\n{REDACTED}\nb")
+        );
+    }
+
+    #[test]
+    fn pem_armor_lines_and_short_lines_are_not_secret() {
+        let set = forms("-----BEGIN CERTIFICATE-----\nabc\n1234567890\n-----END CERTIFICATE-----\n");
+        // The whole value starts with armor on purpose. No single line of armor is a form.
+        assert!(!set
+            .iter()
+            .any(|f| !f.contains('\n') && f.starts_with("-----")));
+        assert!(!set.contains("abc"));
+        assert!(set.contains("1234567890"));
+        assert_eq!(
+            redact_secrets("-----BEGIN CERTIFICATE-----", &set),
+            "-----BEGIN CERTIFICATE-----"
+        );
     }
 }

@@ -433,9 +433,8 @@ impl RequestExecutionService {
 
         ctx.external_secrets = external_secrets.clone();
         for value in external_secrets.values() {
-            if value.len() >= MIN_REDACTION_LEN {
-                ctx.secret_values.insert(value.clone());
-            }
+            ctx.secret_values
+                .extend(crate::redaction::redaction_forms(value));
         }
 
         ctx
@@ -3350,6 +3349,130 @@ mod tests {
                     ..
                 } if p == "/abs/client.p12"
             ));
+        }
+    }
+
+    /// Hygiene tests for vault-backed certificate material (Plan C, Task C2).
+    mod vault_certificate_hygiene {
+        use super::vault_certificates::{
+            resolve_certificates, secrets, source_bytes, unavailable_reason, vault_p12,
+            vault_pem, CERT_PEM, KEY_PEM,
+        };
+        use super::*;
+        use rocket_http::CertificateMaterial;
+
+        #[tokio::test]
+        async fn vault_certificate_hygiene_multi_line_values_are_masked_whole_and_by_line() {
+            let svc = service_with(Environment::new("dev"), None);
+            let values = svc.secret_values(
+                None,
+                None,
+                Some("dev"),
+                &secrets(&[("vault.keyPem", KEY_PEM)]),
+            );
+            assert!(values.contains(KEY_PEM), "the whole value");
+            assert!(values.contains("MIIEkeybody0123"), "the body line");
+            assert!(
+                !values
+                    .iter()
+                    .any(|v| !v.contains('\n') && v.starts_with("-----")),
+                "armor lines on their own are not secret"
+            );
+            assert_eq!(
+                crate::redaction::redact_secrets("log: MIIEkeybody0123", &values),
+                "log: ••••••"
+            );
+            assert_eq!(crate::redaction::redact_secrets(KEY_PEM, &values), "••••••");
+        }
+
+        #[tokio::test]
+        async fn vault_certificate_hygiene_short_secret_is_still_skipped() {
+            let svc = service_with(Environment::new("dev"), None);
+            let values = svc.secret_values(
+                None,
+                None,
+                Some("dev"),
+                &secrets(&[("vault.short", "abc")]),
+            );
+            assert!(values.is_empty());
+        }
+
+        #[tokio::test]
+        async fn vault_certificate_hygiene_inline_material_over_the_cap_is_unavailable() {
+            let cap = crate::client_certificates::MAX_INLINE_SECRET_BYTES;
+            assert_eq!(cap, 1024 * 1024);
+
+            let too_big = "A".repeat(cap + 1);
+            let certs = resolve_certificates(
+                vec![vault_p12("a.example.com", "vault.bundle")],
+                &secrets(&[("vault.bundle", too_big.as_str())]),
+            );
+            assert_eq!(
+                unavailable_reason(&certs[0]),
+                "Client certificate secret vault.bundle is larger than 1 MiB. \
+                 Check that it holds a certificate and not another file."
+            );
+
+            // Exactly at the cap is accepted (base64 of zeros, so it decodes).
+            let at_cap = "A".repeat(cap);
+            let certs = resolve_certificates(
+                vec![vault_p12("a.example.com", "vault.bundle")],
+                &secrets(&[("vault.bundle", at_cap.as_str())]),
+            );
+            let CertificateMaterial::Pkcs12 { bundle, .. } = &certs[0].material else {
+                panic!("a secret at the cap must resolve");
+            };
+            assert_eq!(source_bytes(bundle).len(), cap / 4 * 3);
+        }
+
+        #[tokio::test]
+        async fn vault_certificate_hygiene_resolve_request_keeps_key_text_out_of_debug_and_json() {
+            let mut env = Environment::new("dev");
+            env.client_certificates = vec![vault_pem(
+                "api.example.com",
+                "vault.certPem",
+                "vault.keyPem",
+                Some("{{vault.keyPass}}"),
+            )];
+            let svc = service_with(env, None);
+            let request = svc
+                .resolve_request(
+                    &sample_input("https://api.example.com/x", Some("dev")),
+                    &secrets(&[
+                        ("vault.certPem", CERT_PEM),
+                        ("vault.keyPem", KEY_PEM),
+                        ("vault.keyPass", "p4ss-word"),
+                    ]),
+                )
+                .expect("resolve_request");
+
+            // The resolved request carries inline bytes.
+            let CertificateMaterial::Pem {
+                certificate,
+                private_key,
+                ..
+            } = &request.options.client_certificates[0].material
+            else {
+                panic!("expected a PEM certificate");
+            };
+            assert_eq!(source_bytes(certificate), CERT_PEM.as_bytes());
+            assert_eq!(source_bytes(private_key), KEY_PEM.as_bytes());
+
+            // Nothing printable or serializable contains the PEM, its body or the passphrase.
+            let needles = [
+                "MIIEkeybody0123",
+                "MIIBcertbody0123",
+                "BEGIN PRIVATE KEY",
+                "BEGIN CERTIFICATE",
+                "p4ss-word",
+            ];
+            let json = serde_json::to_string(&request).expect("serialize");
+            for shown in [format!("{request:?}"), format!("{request:#?}"), json.clone()] {
+                for needle in needles {
+                    assert!(!shown.contains(needle), "{needle} leaked into {shown}");
+                }
+            }
+            assert!(!json.contains("clientCertificates"), "{json}");
         }
     }
 

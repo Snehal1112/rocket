@@ -513,6 +513,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn console_log_redacts_a_single_line_of_a_multi_line_vault_value() {
+        let pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\nAQEFAASCBKcwggSjAgEAAoIB\n-----END PRIVATE KEY-----\n";
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.external_secrets.insert("vault.key".into(), pem.into());
+        // The app layer adds the whole value and each body line (`redaction_forms`).
+        // The script layer masks every member of the set on its own.
+        vars.secret_values.insert(pem.into());
+        vars.secret_values.insert("MIIEvQIBADANBgkqhkiG9w0B".into());
+        vars.secret_values.insert("AQEFAASCBKcwggSjAgEAAoIB".into());
+        let mut ctx = minimal_ctx(
+            "const pem = rok.getSecretVar('vault.key'); \
+             console.log(pem); \
+             console.log(pem.split('\\n')[1]); \
+             console.log('line2=' + pem.split('\\n')[2]);",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.console_entries.len(), 3);
+        assert_eq!(result.console_entries[0].message, "••••••");
+        assert_eq!(result.console_entries[1].message, "••••••");
+        assert_eq!(result.console_entries[2].message, "line2=••••••");
+    }
+
+    #[tokio::test]
     async fn console_log_redacts_value_copied_to_different_scope_key() {
         // Redaction is content-based, not name/scope-based: a secret value
         // placed in the runtime scope under a *different* key from where it
