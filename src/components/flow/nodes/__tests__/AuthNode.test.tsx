@@ -1,8 +1,11 @@
 import { render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { FlowNodeKind } from '@/lib/tauri-api';
 import { AuthNode, type AuthNodeData } from '../AuthNode';
 import { FlowNodeActionsContext } from '../FlowNodeActionsContext';
+
+type FlowAuth = Extract<FlowNodeKind, { kind: 'Auth' }>['auth'];
 
 const kind = {
   kind: 'Auth' as const,
@@ -58,11 +61,66 @@ describe('AuthNode', () => {
     expect(screen.queryByTestId('auth-node-applies')).not.toBeInTheDocument();
   });
 
-  it('never renders token or secret values', () => {
-    renderAuth({
-      kind: { ...kind, auth: { authType: 'bearer', token: 'super-secret-token' } },
-      status: 'idle',
+  describe('never renders a secret value', () => {
+    // Checks the whole card, text and attributes, not just text nodes.
+    const cases: [string, FlowAuth, string[]][] = [
+      ['Bearer', { authType: 'bearer', token: 'SECRET-bearer-1' }, ['SECRET-bearer-1']],
+      [
+        'Basic',
+        { authType: 'basic', username: 'alice', password: 'SECRET-basic-2' },
+        ['SECRET-basic-2'],
+      ],
+      [
+        'API key',
+        { authType: 'api-key', key: 'X-Key', value: 'SECRET-apikey-3', placement: 'header' },
+        ['SECRET-apikey-3'],
+      ],
+      [
+        'OAuth2',
+        {
+          authType: 'o-auth2',
+          flow: 'client_credentials',
+          accessTokenUrl: 'https://idp.test/token',
+          credentials: { clientId: 'cid', clientSecret: 'SECRET-oauth-4', placement: 'body' },
+        },
+        ['SECRET-oauth-4'],
+      ],
+      [
+        'AWS',
+        {
+          authType: 'aws-sig-v4',
+          accessKey: 'AKIAEXAMPLE',
+          secretKey: 'SECRET-aws-5',
+          sessionToken: 'SECRET-aws-session-6',
+          region: 'us-east-1',
+          service: 's3',
+        },
+        ['SECRET-aws-5', 'SECRET-aws-session-6'],
+      ],
+      [
+        'NTLM',
+        { authType: 'ntlm', username: 'bob', password: 'SECRET-ntlm-7', domain: 'CORP' },
+        ['SECRET-ntlm-7'],
+      ],
+      [
+        'Digest',
+        { authType: 'digest', username: 'carol', password: 'SECRET-digest-8' },
+        ['SECRET-digest-8'],
+      ],
+      [
+        'WSSE',
+        { authType: 'wsse', username: 'dave', password: 'SECRET-wsse-9' },
+        ['SECRET-wsse-9'],
+      ],
+    ];
+
+    it.each(cases)('%s', (_name, auth, secrets) => {
+      renderAuth({ kind: { ...kind, auth }, status: 'idle' });
+      const card = screen.getByTestId('auth-node-card');
+      for (const secret of secrets) {
+        expect(card.textContent).not.toContain(secret);
+        expect(card.innerHTML).not.toContain(secret);
+      }
     });
-    expect(screen.queryByText(/super-secret-token/)).not.toBeInTheDocument();
   });
 });
