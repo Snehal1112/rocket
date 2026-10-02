@@ -422,7 +422,8 @@ pub fn run() {
             )))
             .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider))
             // A RocketVault certificate selected for a token URL is fetched at send time. It
-            // shares the connection store and fetcher (and so the token and id caches) above.
+            // reads the same connection file and shares the fetcher (and so the token and id
+            // caches) above.
             .with_vault_access(
                 Box::new(rocket_infra::FsSecretManagerRepo::new(
                     data_dir.join("secret_managers.yml"),

@@ -230,8 +230,9 @@ impl ReqwestVaultSecretFetcher {
             #[serde(default)]
             expires_in: u64,
         }
-        let parsed: TokenResponse = resp.json().await.map_err(|e| {
-            DomainError::Http(format!("failed to decode RocketVault token response: {e}"))
+        // The decode error is dropped on purpose, because it can quote the token.
+        let parsed: TokenResponse = resp.json().await.map_err(|_| {
+            DomainError::Http("failed to decode RocketVault token response".to_string())
         })?;
 
         if parsed.access_token.is_empty() {
@@ -374,6 +375,10 @@ struct RawSecretListResponse {
 
 #[async_trait::async_trait]
 impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
+    fn forget_connection(&self, connection_id: &str) {
+        self.forget_connection_ids(connection_id);
+    }
+
     async fn list_secrets(
         &self,
         connection: &SecretManagerConnection,
@@ -414,8 +419,11 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
             )));
         }
 
-        let raw: RawSecretListResponse = resp.json().await.map_err(|e| {
-            DomainError::Http(format!("failed to decode RocketVault secret list: {e}"))
+        let raw: RawSecretListResponse = resp.json().await.map_err(|_| {
+            // The decoder's text can quote server strings, so it is not shown.
+            DomainError::Http(
+                "RocketVault returned a secret list that could not be decoded.".to_string(),
+            )
         })?;
 
         Ok(raw
@@ -477,8 +485,9 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
             #[serde(default)]
             value: String,
         }
-        let parsed: RawSecretValue = resp.json().await.map_err(|e| {
-            DomainError::Http(format!("failed to decode RocketVault secret value: {e}"))
+        // The decode error is dropped on purpose, because it can quote the secret value.
+        let parsed: RawSecretValue = resp.json().await.map_err(|_| {
+            DomainError::Http("failed to decode RocketVault secret value".to_string())
         })?;
         Ok(Some(parsed.value))
     }

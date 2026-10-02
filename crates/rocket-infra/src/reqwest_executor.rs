@@ -532,9 +532,16 @@ fn load_identity(cert: &ResolvedClientCertificate) -> DomainResult<reqwest::Iden
             let der = read_der_source(bundle)?;
             let passphrase = passphrase.as_deref().map_or("", |p| p.as_str());
             reqwest::Identity::from_pkcs12_der(&der, passphrase).map_err(|e| {
+                let hint = if matches!(bundle, CertificateSource::Inline(_)) {
+                    " An inline bundle may also be an old-style (legacy RC2 or 3DES) \
+                     bundle that this system's TLS library cannot read. Export it as PEM, \
+                     or use a modern PKCS12 bundle."
+                } else {
+                    ""
+                };
                 DomainError::InvalidInput(format!(
                     "Cannot load PKCS12 client certificate {}: {e}. \
-                     Check the file and its passphrase.",
+                     Check the file and its passphrase.{hint}",
                     source_name(bundle, &cert.domain)
                 ))
             })
@@ -1821,7 +1828,10 @@ mod mtls_tests {
             err.contains("wrong passphrase") && err.contains("(inline, for api.example.com)"),
             "{err}"
         );
-        assert!(!err.contains("nope-nope") && !err.contains("BEGIN"), "{err}");
+        assert!(
+            !err.contains("nope-nope") && !err.contains("BEGIN"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1843,6 +1853,8 @@ mod mtls_tests {
             err.contains("PKCS12") && err.contains("(inline, for api.example.com)"),
             "{err}"
         );
+        assert!(err.contains("legacy") && err.contains("PEM"), "{err}");
+        assert!(!err.contains("nope"), "{err}");
     }
 
     // Review Focus 2.
@@ -2113,7 +2125,9 @@ mod mtls_tests {
 
     mod deferred_certificates {
         use super::*;
-        use rocket_http::{ResolvedClientCertificate, TokenClientProvider, VaultCertificateBinding};
+        use rocket_http::{
+            ResolvedClientCertificate, TokenClientProvider, VaultCertificateBinding,
+        };
         use rocket_shared::certificate::VaultCertificateFormat;
 
         fn deferred(domain: &str) -> ResolvedClientCertificate {

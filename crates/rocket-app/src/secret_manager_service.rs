@@ -71,7 +71,9 @@ impl SecretManagerService {
                 }
             }
         }
-        self.repo.save(&connection)
+        self.repo.save(&connection)?;
+        self.fetcher.forget_connection(&connection.id);
+        Ok(())
     }
 
     /// Deletes the connection record, then best-effort deletes its keychain
@@ -83,6 +85,7 @@ impl SecretManagerService {
     /// precedent that delete-path keychain failures are non-fatal.
     pub fn delete(&self, id: &str) -> DomainResult<()> {
         self.repo.delete(id)?;
+        self.fetcher.forget_connection(id);
         if let Err(err) = self.secret_store.delete(VAULT_CONNECTION_SCOPE, id) {
             tracing::warn!(error = %err, id = %id, "failed to delete keychain entry for vault connection");
         }
@@ -471,6 +474,59 @@ mod tests {
                 .expect("get keychain entry after delete"),
             None
         );
+    }
+
+    struct ForgetRecorder(std::sync::Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl VaultSecretFetcher for ForgetRecorder {
+        async fn list_secrets(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<Vec<ExternalSecretRef>> {
+            Ok(Vec::new())
+        }
+        async fn get_secret_value(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+            _secret_id: &str,
+        ) -> DomainResult<Option<String>> {
+            Ok(None)
+        }
+        async fn test_connection(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn forget_connection(&self, connection_id: &str) {
+            if let Ok(mut seen) = self.0.lock() {
+                seen.push(connection_id.to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn save_and_delete_tell_the_fetcher_to_forget_the_connection() {
+        let recorder = Arc::new(ForgetRecorder(std::sync::Mutex::new(Vec::new())));
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            Arc::new(FakeSecretStore::new()),
+            Arc::clone(&recorder) as Arc<dyn VaultSecretFetcher>,
+        );
+        service
+            .save(sample_connection("conn-1"), Some("shh".to_string()))
+            .expect("save");
+        service.delete("conn-1").expect("delete");
+
+        let seen = recorder.0.lock().expect("lock").clone();
+        assert_eq!(seen, vec!["conn-1".to_string(), "conn-1".to_string()]);
     }
 
     #[test]

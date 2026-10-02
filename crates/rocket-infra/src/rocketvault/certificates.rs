@@ -120,6 +120,13 @@ impl ReqwestVaultSecretFetcher {
         Ok(found.id)
     }
 
+    /// Drops every cached certificate id of `connection_id`.
+    pub(super) fn forget_connection_ids(&self, connection_id: &str) {
+        let prefix = format!("{connection_id}\u{1f}");
+        self.certificate_ids
+            .retain(|key, _| !key.starts_with(&prefix));
+    }
+
     /// Drops the cached id of `name`, for a certificate that is gone.
     pub(super) fn forget_certificate_id(
         &self,
@@ -480,6 +487,40 @@ mod tests {
             .await
             .expect("cached");
         assert_eq!(cached, "new-id");
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_connection_drops_only_its_cached_ids() {
+        let server = MockServer::start().await;
+        mount_token(&server).await;
+        mount_page(
+            &server,
+            0,
+            page_of(vec![entry("id-1", "client-a")], Some(1)),
+            1,
+        )
+        .await;
+
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let c = conn(server.uri());
+        let mut other = conn(server.uri());
+        other.id = "conn-other".to_string();
+        fetcher
+            .certificate_id(&c, "shh", "prod-vault", "client-a", false)
+            .await
+            .expect("id");
+        fetcher.certificate_ids.insert(
+            super::certificate_id_key(&other, "v", "n"),
+            "keep".to_string(),
+        );
+        assert_eq!(fetcher.certificate_ids.len(), 2);
+
+        VaultSecretFetcher::forget_connection(&fetcher, &c.id);
+
+        assert_eq!(fetcher.certificate_ids.len(), 1);
+        assert!(fetcher
+            .certificate_ids
+            .contains_key(&super::certificate_id_key(&other, "v", "n")));
     }
 
     #[tokio::test]

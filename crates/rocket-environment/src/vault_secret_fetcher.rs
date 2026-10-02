@@ -152,6 +152,10 @@ pub trait VaultSecretFetcher: Send + Sync {
         ))
     }
 
+    /// Drops anything cached for `connection_id`. Called when the connection is edited or
+    /// deleted. The default does nothing, for fetchers that cache nothing.
+    fn forget_connection(&self, _connection_id: &str) {}
+
     /// Exports the certificate named `certificate_name` in `format`. A PKCS12 export uses a
     /// fresh random password, returned with the bundle and never stored. Nothing is cached.
     /// The default refuses, like `list_certificates`.
@@ -342,7 +346,13 @@ mod tests {
             .expect_err("the default refuses");
         assert!(matches!(err, DomainError::Internal(_)), "{err:?}");
         let err = fetcher
-            .fetch_certificate(&conn, "shh", "prod-vault", "client-a", VaultCertificateFormat::Pem)
+            .fetch_certificate(
+                &conn,
+                "shh",
+                "prod-vault",
+                "client-a",
+                VaultCertificateFormat::Pem,
+            )
             .await
             .expect_err("the default refuses");
         assert!(matches!(err, DomainError::Internal(_)), "{err:?}");
@@ -362,7 +372,13 @@ mod tests {
         );
         assert_eq!(
             fetcher
-                .fetch_certificate(&conn, "shh", "prod-vault", "client-a", VaultCertificateFormat::Pkcs12)
+                .fetch_certificate(
+                    &conn,
+                    "shh",
+                    "prod-vault",
+                    "client-a",
+                    VaultCertificateFormat::Pkcs12
+                )
                 .await
                 .expect_err("null fetcher must error"),
             expected
@@ -377,8 +393,14 @@ mod tests {
             key_algorithm: "RSA-2048".into(),
         };
         let shown = format!("{pem:?}");
-        assert!(shown.contains("bytes") && shown.contains("RSA-2048"), "{shown}");
-        assert!(!shown.contains("BEGIN") && !shown.contains("c2VjcmV0"), "{shown}");
+        assert!(
+            shown.contains("bytes") && shown.contains("RSA-2048"),
+            "{shown}"
+        );
+        assert!(
+            !shown.contains("BEGIN") && !shown.contains("c2VjcmV0"),
+            "{shown}"
+        );
 
         let p12 = VaultCertificateMaterial::Pkcs12 {
             bundle: Zeroizing::new(vec![0x30, 0x82, 0x01]),
@@ -386,7 +408,10 @@ mod tests {
             key_algorithm: "EC-P256".into(),
         };
         let shown = format!("{p12:#?}");
-        assert!(shown.contains("3 bytes") && shown.contains("<redacted>"), "{shown}");
+        assert!(
+            shown.contains("3 bytes") && shown.contains("<redacted>"),
+            "{shown}"
+        );
         assert!(!shown.contains("one-time-pass-123"), "{shown}");
         // A byte vector would print as `[48, 130, 1]`.
         assert!(!shown.contains('['), "{shown}");

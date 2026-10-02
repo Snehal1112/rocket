@@ -105,12 +105,13 @@ pub(super) struct CertificatePage {
     pub total: Option<usize>,
 }
 
-/// Decodes a list page. A list never carries key material, so the decoder's message is kept.
+/// Decodes a list page. The decoder's message is dropped, because it can quote strings that
+/// the server sent.
 pub(super) fn parse_certificate_page(body: &[u8]) -> DomainResult<CertificatePage> {
-    let raw: RawCertificatePage = serde_json::from_slice(body).map_err(|e| {
-        DomainError::Http(format!(
-            "failed to decode RocketVault certificate list: {e}"
-        ))
+    let raw: RawCertificatePage = serde_json::from_slice(body).map_err(|_| {
+        DomainError::Http(
+            "RocketVault returned a certificate list that could not be decoded.".to_string(),
+        )
     })?;
     Ok(CertificatePage {
         certificates: raw
@@ -158,7 +159,9 @@ struct ExportRequest<'a> {
 }
 
 /// The body of an export. PEM sends only the format. PKCS12 sends the one-time password and
-/// `compat: legacy`, which every platform TLS stack can open. The bytes are wiped on drop.
+/// `compat: legacy`. That bundle may use algorithms (such as RC2 or 3DES) that OpenSSL 3
+/// refuses to read, so only the ignored live test can confirm it loads. The bytes are wiped on
+/// drop.
 pub(super) fn export_request_body(
     format: VaultCertificateFormat,
     password: Option<&str>,
@@ -370,6 +373,17 @@ mod tests {
             br#"{"format":"pkcs12","password":"pw-123","compat":"legacy"}"#
         );
         assert!(export_request_body(VaultCertificateFormat::Pkcs12, None).is_err());
+    }
+
+    #[test]
+    fn a_list_decode_error_never_quotes_the_server_text() {
+        let body = br#"{"certificates":"SERVER-TEXT-INJECTED"}"#;
+        let err = match parse_certificate_page(body) {
+            Ok(_) => panic!("must fail"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("RocketVault"), "{err}");
+        assert!(!err.contains("SERVER-TEXT-INJECTED"), "{err}");
     }
 
     #[test]
