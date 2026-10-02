@@ -148,7 +148,8 @@ mod tests {
     fn delete_of_missing_id_is_a_no_op() {
         let (_dir, repo) = setup();
         repo.save(&sample("conn-1")).expect("save");
-        repo.delete("no-such-id").expect("delete of missing id must not error");
+        repo.delete("no-such-id")
+            .expect("delete of missing id must not error");
         assert_eq!(repo.list().expect("list").len(), 1);
     }
 

@@ -1694,12 +1694,15 @@ fn spec_folder_yml_with_object_docs_loads_and_keeps_its_identity() {
     // Saving folder variables keeps the object-form docs intact.
     repo.save_folder_variables("my-api", "auth", Vec::new())
         .expect("save vars");
-    let raw: serde_yaml::Value = serde_yaml::from_str(
-        &fs::read_to_string(folder_dir.join("folder.yml")).expect("read"),
-    )
-    .expect("yaml");
+    let raw: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(folder_dir.join("folder.yml")).expect("read"))
+            .expect("yaml");
     assert_eq!(raw["docs"]["content"].as_str(), Some("# Auth"), "{raw:?}");
-    assert_eq!(raw["docs"]["type"].as_str(), Some("text/markdown"), "{raw:?}");
+    assert_eq!(
+        raw["docs"]["type"].as_str(),
+        Some("text/markdown"),
+        "{raw:?}"
+    );
 }
 
 #[test]

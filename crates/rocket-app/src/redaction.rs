@@ -47,7 +47,10 @@ const USERINFO_SET: &AsciiSet = &PATH_SET
 /// (or in an error that quotes it) in an encoded form.
 pub(crate) fn redact_url_secrets(text: &str, secret_values: &HashSet<String>) -> String {
     let mut forms: HashSet<String> = HashSet::new();
-    for secret in secret_values.iter().filter(|s| s.len() >= MIN_REDACTION_LEN) {
+    for secret in secret_values
+        .iter()
+        .filter(|s| s.len() >= MIN_REDACTION_LEN)
+    {
         forms.insert(secret.clone());
         for set in [QUERY_SET, PATH_SET, USERINFO_SET, NON_ALPHANUMERIC] {
             forms.insert(utf8_percent_encode(secret, set).to_string());
@@ -90,9 +93,15 @@ mod tests {
         let secret = "p@ss word é1";
         let secrets = set(&[secret]);
         let raw = format!("https://h/{secret}?q={secret}");
-        assert_eq!(redact_url_secrets(&raw, &secrets), "https://h/••••••?q=••••••");
+        assert_eq!(
+            redact_url_secrets(&raw, &secrets),
+            "https://h/••••••?q=••••••"
+        );
         let encoded = "https://h/p@ss%20word%20%C3%A91?q=p%40ss+word+%C3%A91";
-        assert_eq!(redact_url_secrets(encoded, &secrets), "https://h/••••••?q=••••••");
+        assert_eq!(
+            redact_url_secrets(encoded, &secrets),
+            "https://h/••••••?q=••••••"
+        );
     }
 
     #[test]

@@ -1374,7 +1374,11 @@ mod tests {
                 let n = self
                     .counter
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let (status, duration_ms) = if n.is_multiple_of(2) { (200, 10) } else { (500, 20) };
+                let (status, duration_ms) = if n.is_multiple_of(2) {
+                    (200, 10)
+                } else {
+                    (500, 20)
+                };
                 Ok(HttpResponse {
                     status,
                     status_text: "".into(),

@@ -1235,9 +1235,10 @@ mod tests {
 
     #[test]
     fn a_request_body_flag_is_omitted_when_false_and_defaults_when_missing() {
-        let old: FlowDebugRequest =
-            serde_json::from_str(r#"{"method":"GET","url":"https://x.test","headers":[],"body":"a"}"#)
-                .expect("old record");
+        let old: FlowDebugRequest = serde_json::from_str(
+            r#"{"method":"GET","url":"https://x.test","headers":[],"body":"a"}"#,
+        )
+        .expect("old record");
         assert!(!old.body_truncated);
         let json = serde_json::to_string(&old).expect("serialize");
         assert!(!json.contains("bodyTruncated"), "{json}");

@@ -331,7 +331,9 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
     for _ in 0..3 {
         tokio::task::yield_now().await;
     }
-    let baseline = tokio::runtime::Handle::current().metrics().num_alive_tasks();
+    let baseline = tokio::runtime::Handle::current()
+        .metrics()
+        .num_alive_tasks();
 
     for _ in 0..5 {
         let session_id = client
@@ -352,7 +354,9 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
     }
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let after = tokio::runtime::Handle::current().metrics().num_alive_tasks();
+    let after = tokio::runtime::Handle::current()
+        .metrics()
+        .num_alive_tasks();
     assert!(
         after <= baseline + 1,
         "background dispatch tasks appear to have leaked: baseline={baseline}, after 5 start/end cycles={after}"

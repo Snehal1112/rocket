@@ -312,8 +312,10 @@ fn diff_legacy_to_kv(
 
     for key in old_keys {
         if !new_key_set.contains(key.as_str()) {
-            let is_breaking =
-                !matches!((prefix, policy), ("header", BreakingChangePolicy::AdditiveOk));
+            let is_breaking = !matches!(
+                (prefix, policy),
+                ("header", BreakingChangePolicy::AdditiveOk)
+            );
             out.push(ChangelogEntry {
                 timestamp: now,
                 request_path: path_buf.clone(),
@@ -361,8 +363,10 @@ fn diff_kv_list(
     for old_entry in old_kvs {
         match new_kvs.iter().find(|e| e.key == old_entry.key) {
             None => {
-                let is_breaking =
-                    !matches!((prefix, policy), ("header", BreakingChangePolicy::AdditiveOk));
+                let is_breaking = !matches!(
+                    (prefix, policy),
+                    ("header", BreakingChangePolicy::AdditiveOk)
+                );
                 out.push(ChangelogEntry {
                     timestamp: ctx.now,
                     request_path: path_buf.clone(),
@@ -435,8 +439,10 @@ fn diff_key_only_list(
 
     for key in old_keys {
         if !new_keys.contains(key) {
-            let is_breaking =
-                !matches!((prefix, policy), ("header", BreakingChangePolicy::AdditiveOk));
+            let is_breaking = !matches!(
+                (prefix, policy),
+                ("header", BreakingChangePolicy::AdditiveOk)
+            );
             out.push(ChangelogEntry {
                 timestamp: ctx.now,
                 request_path: path_buf.clone(),
