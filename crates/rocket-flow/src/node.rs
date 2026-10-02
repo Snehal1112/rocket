@@ -74,8 +74,9 @@ pub enum FlowNodeKind {
         /// Any auth type except `none` and `inherit`.
         auth: rocket_shared::types::Auth,
         /// When true (the default), every Request node whose auth is
-        /// `inherit` uses this node's credential. At most one Auth node in a
-        /// flow may have this on.
+        /// `inherit` or `none` (the backend treats `none` like `inherit`)
+        /// uses this node's credential. At most one Auth node in a flow may
+        /// have this on.
         #[serde(default = "default_true")]
         apply_to_inherit: bool,
     },
