@@ -5,6 +5,7 @@ import {
   GitBranch,
   Globe,
   Hourglass,
+  KeyRound,
   Plus,
   Repeat,
   Split,
@@ -16,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { DEFAULT_AUTH_NODE_AUTH } from '@/lib/flow-auth';
 import { DEFAULT_CALLBACK_TIMEOUT_MS, nextCallbackName } from '@/lib/flow-callback';
 import { DEFAULT_REPEAT_UNTIL } from '@/lib/flow-repeat';
 import { DEFAULT_TRANSFORM_SCRIPT } from '@/lib/flow-transform';
@@ -171,6 +173,23 @@ export function NodePalette({
           >
             <Hourglass className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
             Wait for callback
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() =>
+              onAddNode({
+                id: newNodeId('auth'),
+                kind: {
+                  kind: 'Auth',
+                  label: 'New Auth',
+                  auth: DEFAULT_AUTH_NODE_AUTH,
+                  applyToInherit: true,
+                },
+                position: defaultPosition,
+              })
+            }
+          >
+            <KeyRound className='mr-2 h-3.5 w-3.5' aria-hidden='true' />
+            Auth
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

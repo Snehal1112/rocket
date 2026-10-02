@@ -1,6 +1,6 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { Bug, Repeat } from 'lucide-react';
-import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
+import { AUTH_HANDLE, RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { msToSecondsLabel } from '@/lib/flow-repeat';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
@@ -151,6 +151,19 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
           />
           <span className='text-muted-foreground'>Body</span>
           <span className='truncate'>{bodyPreview}</span>
+        </div>
+        <div
+          data-testid='request-node-auth-row'
+          className='relative flex items-center gap-1.5 pl-2'
+        >
+          <Handle
+            type='target'
+            id={AUTH_HANDLE}
+            position={Position.Left}
+            isConnectable={isConnectable}
+            className='!h-2 !w-2'
+          />
+          <span className='text-muted-foreground'>Auth</span>
         </div>
         {/* Repeat until has no handle: it is a setting, not an input. */}
         {kind.repeatUntil && (

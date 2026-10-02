@@ -23,6 +23,7 @@ import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { edgeRunState, exitLabel } from './flowExits';
+import { AuthNode } from './nodes/AuthNode';
 import { type FlowNodeActions, FlowNodeActionsContext } from './nodes/FlowNodeActionsContext';
 import { IfNode } from './nodes/IfNode';
 import { InputNode } from './nodes/InputNode';
@@ -34,6 +35,7 @@ import { WaitForCallbackNode } from './nodes/WaitForCallbackNode';
 import { useSavedRequestPreviews } from './properties/useSavedRequestPreview';
 
 const nodeTypes = {
+  Auth: AuthNode,
   Request: RequestNode,
   Input: InputNode,
   Output: OutputNode,

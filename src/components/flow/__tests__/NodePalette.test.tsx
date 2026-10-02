@@ -106,4 +106,21 @@ describe('NodePalette Transform entry', () => {
       }),
     );
   });
+
+  it('adds an Auth node that applies to inherited auth by default', async () => {
+    const onAddNode = vi.fn();
+    render(<NodePalette onAddNode={onAddNode} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Add node/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Auth' }));
+    const node = onAddNode.mock.calls[0][0];
+    expect(node.id).toMatch(/^auth-/);
+    expect(node.position).toEqual({ x: 100, y: 100 });
+    expect(node.kind).toEqual({
+      kind: 'Auth',
+      label: 'New Auth',
+      auth: { authType: 'bearer', token: '' },
+      applyToInherit: true,
+    });
+  });
 });
