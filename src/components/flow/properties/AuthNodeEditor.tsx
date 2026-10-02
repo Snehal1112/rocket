@@ -49,17 +49,21 @@ export function AuthNodeEditor({
   collection,
   flowName,
   nodeId,
+  otherNodeApplies = false,
 }: {
   kind: AuthKind;
   onChange: (kind: FlowNodeKind) => void;
   collection: string;
   flowName: string;
   nodeId: string;
+  /** Another Auth node in the flow already applies to inherited auth. */
+  otherNodeApplies?: boolean;
 }) {
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   // The same query-cache entry getActiveGlobalEnvName() reads for the pre-run
   // step, so the editor and the preflight build the same key.
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const applyBlocked = otherNodeApplies && !kind.applyToInherit;
   const key = flowAuthKey(collection, flowName, nodeId, activeEnvId, globalEnvName);
   const stored = useFlowAuthStore((s) => s.auths[key]);
   const setAuth = useFlowAuthStore((s) => s.setAuth);
@@ -161,11 +165,18 @@ export function AuthNodeEditor({
             Every request in this flow with no auth of its own (inherit or none) uses this
             credential. A request with its own auth keeps it.
           </p>
+          {applyBlocked && (
+            <p id='auth-node-apply-note' className='text-xs text-amber-600 dark:text-amber-500'>
+              Another Auth node already applies to inherited auth. Turn that one off first.
+            </p>
+          )}
         </div>
         <Switch
           id='auth-node-apply'
           aria-label='Apply to inherited auth'
           checked={kind.applyToInherit}
+          disabled={applyBlocked}
+          aria-describedby={applyBlocked ? 'auth-node-apply-note' : undefined}
           onCheckedChange={(applyToInherit) => onChange({ ...kind, applyToInherit })}
         />
       </div>

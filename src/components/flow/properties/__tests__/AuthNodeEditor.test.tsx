@@ -614,4 +614,42 @@ describe('AuthNodeEditor', () => {
       ),
     );
   });
+
+  describe('apply to inherited auth', () => {
+    const renderApply = (applyToInherit: boolean, otherNodeApplies?: boolean) =>
+      render(
+        <AuthNodeEditor
+          kind={{ ...kind, applyToInherit }}
+          onChange={vi.fn()}
+          collection='api'
+          flowName='login'
+          nodeId='n1'
+          otherNodeApplies={otherNodeApplies}
+        />,
+      );
+    const note = /another auth node already applies/i;
+
+    it('disables the switch and explains why when another node applies', () => {
+      renderApply(false, true);
+      expect(screen.getByRole('switch', { name: 'Apply to inherited auth' })).toBeDisabled();
+      expect(screen.getByText(note)).toBeInTheDocument();
+    });
+
+    it('is enabled when no other node applies', () => {
+      renderApply(false, false);
+      expect(screen.getByRole('switch', { name: 'Apply to inherited auth' })).toBeEnabled();
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+    });
+
+    it('stays enabled when this node itself applies', () => {
+      renderApply(true, true);
+      expect(screen.getByRole('switch', { name: 'Apply to inherited auth' })).toBeEnabled();
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+    });
+
+    it('is unaffected for a single node', () => {
+      renderApply(false);
+      expect(screen.getByRole('switch', { name: 'Apply to inherited auth' })).toBeEnabled();
+    });
+  });
 });

@@ -78,6 +78,9 @@ function editorFor(
           nodeId={node.id}
           collection={collection}
           flowName={flowName}
+          otherNodeApplies={nodes.some(
+            (n) => n.id !== node.id && n.kind.kind === 'Auth' && n.kind.applyToInherit,
+          )}
           onChange={onChange}
         />
       );
