@@ -5,9 +5,15 @@ use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use rocket_flow::{Flow, FlowNodeKind};
+use rocket_http::{AdditionalParam, OAuthToken};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::oauth2::OAuth2Flow;
+use rocket_shared::oauth2::{
+    OAuth2AdditionalParameter, OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow,
+    OAuth2Settings, OAuth2TokenConfig,
+};
 use rocket_shared::types::Auth;
+
+use crate::oauth2_service::{OAuth2GetTokenRequest, OAuth2Service};
 
 /// A token the UI obtained before the run. Lives for one run, in memory only.
 /// `Debug` never shows the value.
@@ -202,6 +208,156 @@ pub(crate) async fn resolve_flow_credentials(
         creds.by_node.insert(node.id.clone(), credential);
     }
     Ok(creds)
+}
+
+/// Fetches tokens through the existing `OAuth2Service`.
+pub struct OAuth2ServiceFetcher {
+    service: OAuth2Service,
+}
+
+impl OAuth2ServiceFetcher {
+    pub fn new(service: OAuth2Service) -> Self {
+        Self { service }
+    }
+}
+
+#[async_trait]
+impl FlowTokenFetcher for OAuth2ServiceFetcher {
+    async fn fetch_token(&self, flow: &OAuth2Flow, ctx: &FetchContext) -> DomainResult<String> {
+        let request = build_get_token_request(flow, ctx)?;
+        let config = self
+            .service
+            .resolve_get_token_request_with_secrets(&request, &ctx.external_secrets);
+        let token = self.service.get_token_direct(&config).await?;
+        select_token(flow, token)
+    }
+}
+
+/// Maps a client-credentials or password flow to a get-token request, with
+/// every `{{variable}}` resolved against the run's variables. The service
+/// only reads the global environment, so this resolution must happen here.
+pub(crate) fn build_get_token_request(
+    flow: &OAuth2Flow,
+    ctx: &FetchContext,
+) -> DomainResult<OAuth2GetTokenRequest> {
+    let r = |s: &str| rocket_environment::resolve(s, &ctx.vars).output;
+    let params = |list: Option<&Vec<OAuth2AdditionalParameter>>| -> Option<Vec<AdditionalParam>> {
+        list.map(|items| {
+            items
+                .iter()
+                .map(|p| AdditionalParam {
+                    key: r(&p.name),
+                    value: r(&p.value),
+                    send_in: if p.placement.as_deref() == Some("query") {
+                        "queryparams".to_string()
+                    } else {
+                        "body".to_string()
+                    },
+                    enabled: p.enabled,
+                })
+                .collect()
+        })
+    };
+    let make = |grant_type: &str,
+                token_url: &str,
+                credentials: &OAuth2ClientCredentials,
+                scope: Option<&String>,
+                owner: Option<(&str, &str)>,
+                additional: Option<&OAuth2AdditionalParameters>,
+                settings: Option<&OAuth2Settings>| {
+        OAuth2GetTokenRequest {
+            grant_type: grant_type.to_string(),
+            authorization_url: None,
+            token_url: Some(r(token_url)),
+            callback_url: None,
+            client_id: r(&credentials.client_id),
+            client_secret: Some(r(&credentials.client_secret)),
+            scope: scope.map(|s| r(s)),
+            state: None,
+            username: owner.map(|(u, _)| r(u)),
+            password: owner.map(|(_, p)| r(p)),
+            client_authentication: Some(
+                if credentials.placement.as_deref() == Some("basic_auth_header") {
+                    "header".to_string()
+                } else {
+                    "body".to_string()
+                },
+            ),
+            use_pkce: None,
+            use_system_browser: None,
+            verify_ssl: settings.and_then(|s| s.verify_ssl),
+            auth_params: None,
+            token_params: params(additional.and_then(|a| a.access_token_request.as_ref())),
+            refresh_params: params(additional.and_then(|a| a.refresh_token_request.as_ref())),
+            collection: Some(ctx.collection.clone()),
+            environment_name: ctx.environment_name.clone(),
+            request_path: None,
+            force_reauth: None,
+        }
+    };
+    match flow {
+        OAuth2Flow::ClientCredentials {
+            access_token_url,
+            credentials,
+            scope,
+            additional_parameters,
+            settings,
+            ..
+        } => Ok(make(
+            "client_credentials",
+            access_token_url,
+            credentials,
+            scope.as_ref(),
+            None,
+            additional_parameters.as_ref(),
+            settings.as_ref(),
+        )),
+        OAuth2Flow::ResourceOwnerPassword {
+            access_token_url,
+            credentials,
+            resource_owner,
+            scope,
+            additional_parameters,
+            settings,
+            ..
+        } => Ok(make(
+            "password",
+            access_token_url,
+            credentials,
+            scope.as_ref(),
+            resource_owner
+                .as_ref()
+                .map(|o| (o.username.as_str(), o.password.as_str())),
+            additional_parameters.as_ref(),
+            settings.as_ref(),
+        )),
+        _ => Err(DomainError::InvalidInput(
+            "only client credentials and password grants can be fetched during a run".to_string(),
+        )),
+    }
+}
+
+/// Picks the access token or, when the flow's token config asks for it, the ID token.
+fn select_token(flow: &OAuth2Flow, token: OAuthToken) -> DomainResult<String> {
+    let token_config: Option<&OAuth2TokenConfig> = match flow {
+        OAuth2Flow::ClientCredentials { token_config, .. }
+        | OAuth2Flow::ResourceOwnerPassword { token_config, .. } => token_config.as_ref(),
+        _ => None,
+    };
+    let wants_id_token = token_config.and_then(|t| t.source.as_deref()) == Some("idToken");
+    if wants_id_token {
+        token
+            .id_token
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| DomainError::InvalidInput("the token response has no id_token".into()))
+    } else {
+        if token.access_token.trim().is_empty() {
+            return Err(DomainError::InvalidInput(
+                "the token response has an empty access token".into(),
+            ));
+        }
+        Ok(token.access_token)
+    }
 }
 
 #[cfg(test)]
@@ -609,6 +765,194 @@ mod tests {
             assert!(
                 !printed.contains(secret),
                 "Debug leaked {secret}: {printed}"
+            );
+        }
+    }
+
+    use rocket_shared::oauth2::{
+        OAuth2AdditionalParameter, OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow,
+        OAuth2ResourceOwner, OAuth2Settings, OAuth2TokenConfig,
+    };
+
+    fn vars_ctx() -> FetchContext {
+        FetchContext {
+            collection: "my-api".to_string(),
+            environment_name: Some("dev".to_string()),
+            vars: HashMap::from([
+                ("clientId".to_string(), "cid-1".to_string()),
+                ("clientSecret".to_string(), "sec-1".to_string()),
+            ]),
+            ..FetchContext::default()
+        }
+    }
+
+    #[test]
+    fn the_request_resolves_variables_from_the_run_context() {
+        let request = build_get_token_request(&client_credentials(), &vars_ctx()).expect("maps");
+
+        assert_eq!(request.grant_type, "client_credentials");
+        assert_eq!(request.client_id, "cid-1");
+        assert_eq!(request.client_secret.as_deref(), Some("sec-1"));
+        assert_eq!(
+            request.token_url.as_deref(),
+            Some("https://idp.example.com/token")
+        );
+        assert_eq!(request.scope.as_deref(), Some("read"));
+        assert_eq!(request.client_authentication.as_deref(), Some("body"));
+        assert_eq!(request.collection.as_deref(), Some("my-api"));
+        assert_eq!(request.environment_name.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn basic_auth_header_placement_maps_to_header_client_authentication() {
+        let flow = OAuth2Flow::ClientCredentials {
+            access_token_url: "https://idp.example.com/token".to_string(),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "id".to_string(),
+                client_secret: "secret".to_string(),
+                placement: Some("basic_auth_header".to_string()),
+            },
+            scope: None,
+            additional_parameters: Some(OAuth2AdditionalParameters {
+                authorization_request: None,
+                access_token_request: Some(vec![
+                    OAuth2AdditionalParameter {
+                        name: "audience".to_string(),
+                        value: "{{clientId}}".to_string(),
+                        placement: Some("body".to_string()),
+                        enabled: true,
+                    },
+                    OAuth2AdditionalParameter {
+                        name: "tenant".to_string(),
+                        value: "t1".to_string(),
+                        placement: Some("query".to_string()),
+                        enabled: false,
+                    },
+                ]),
+                refresh_token_request: None,
+            }),
+            token_config: None,
+            settings: Some(OAuth2Settings {
+                auto_fetch_token: None,
+                auto_refresh_token: None,
+                verify_ssl: Some(false),
+                use_system_browser: None,
+            }),
+        };
+
+        let request = build_get_token_request(&flow, &vars_ctx()).expect("maps");
+
+        assert_eq!(request.client_authentication.as_deref(), Some("header"));
+        assert_eq!(request.verify_ssl, Some(false));
+        let params = request.token_params.expect("token params");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].key, "audience");
+        assert_eq!(params[0].value, "cid-1");
+        assert_eq!(params[0].send_in, "body");
+        assert!(params[0].enabled);
+        assert_eq!(params[1].send_in, "queryparams");
+        assert!(!params[1].enabled);
+    }
+
+    #[test]
+    fn the_password_grant_carries_the_resource_owner() {
+        let flow = OAuth2Flow::ResourceOwnerPassword {
+            access_token_url: "https://idp.example.com/token".to_string(),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "id".to_string(),
+                client_secret: "secret".to_string(),
+                placement: None,
+            },
+            resource_owner: Some(OAuth2ResourceOwner {
+                username: "{{clientId}}".to_string(),
+                password: "pw".to_string(),
+            }),
+            scope: None,
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        };
+
+        let request = build_get_token_request(&flow, &vars_ctx()).expect("maps");
+
+        assert_eq!(request.grant_type, "password");
+        assert_eq!(request.username.as_deref(), Some("cid-1"));
+        assert_eq!(request.password.as_deref(), Some("pw"));
+    }
+
+    #[test]
+    fn an_interactive_grant_cannot_be_fetched() {
+        let err = build_get_token_request(&authorization_code(), &vars_ctx())
+            .expect_err("interactive grants are not fetched in the backend");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn the_id_token_is_chosen_when_the_token_config_says_so() {
+        let mut flow = client_credentials();
+        if let OAuth2Flow::ClientCredentials { token_config, .. } = &mut flow {
+            *token_config = Some(OAuth2TokenConfig {
+                id: None,
+                source: Some("idToken".to_string()),
+                placement: None,
+            });
+        }
+        let token = rocket_http::OAuthToken {
+            access_token: "access-1".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_in: None,
+            refresh_token: None,
+            scope: None,
+            id_token: Some("id-1".to_string()),
+        };
+        assert_eq!(
+            select_token(&flow, token.clone()).expect("id token"),
+            "id-1"
+        );
+        assert_eq!(
+            select_token(&client_credentials(), token).expect("access token"),
+            "access-1"
+        );
+    }
+
+    #[test]
+    fn a_missing_id_token_is_an_error() {
+        let mut flow = client_credentials();
+        if let OAuth2Flow::ClientCredentials { token_config, .. } = &mut flow {
+            *token_config = Some(OAuth2TokenConfig {
+                id: None,
+                source: Some("idToken".to_string()),
+                placement: None,
+            });
+        }
+        let token = rocket_http::OAuthToken {
+            access_token: "access-1".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_in: None,
+            refresh_token: None,
+            scope: None,
+            id_token: None,
+        };
+        assert!(select_token(&flow, token).is_err());
+    }
+
+    #[test]
+    fn a_blank_access_token_is_an_error() {
+        for blank in ["", "   "] {
+            let token = rocket_http::OAuthToken {
+                access_token: blank.to_string(),
+                token_type: "Bearer".to_string(),
+                expires_in: None,
+                refresh_token: None,
+                scope: None,
+                id_token: Some("id-1".to_string()),
+            };
+            let err = select_token(&client_credentials(), token).expect_err("blank token");
+            assert!(
+                matches!(&err, DomainError::InvalidInput(m) if m == "the token response has an empty access token"),
+                "got: {err}"
             );
         }
     }
