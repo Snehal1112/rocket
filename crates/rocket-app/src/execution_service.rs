@@ -1410,9 +1410,11 @@ impl RequestExecutionService {
         Ok(())
     }
 
-    /// Dispatches the (possibly script-mutated) request.
+    /// Dispatches the (possibly script-mutated) request. A RocketVault certificate selected for
+    /// its URL, or for its OAuth2 client-credentials token URL, is fetched first.
     pub(crate) async fn send_request(&self, state: &PhaseState) -> DomainResult<HttpResponse> {
-        let response = self.executor.execute(&state.http_request).await?;
+        let request = self.with_vault_certificates(&state.http_request).await;
+        let response = self.executor.execute(&request).await?;
 
         tracing::info!(
             status = response.status,
@@ -1422,6 +1424,32 @@ impl RequestExecutionService {
         );
 
         Ok(response)
+    }
+
+    /// The request with its selected RocketVault certificates fetched. The fetched copy lives
+    /// only for this send: `state.http_request`, which history and scripts see, keeps the
+    /// names-only form. A request with nothing to fetch is not copied.
+    async fn with_vault_certificates<'r>(
+        &self,
+        request: &'r HttpRequest,
+    ) -> std::borrow::Cow<'r, HttpRequest> {
+        let urls = crate::vault_certificates::certificate_urls(request);
+        if !crate::vault_certificates::needs_fetch(&request.options.client_certificates, &urls) {
+            return std::borrow::Cow::Borrowed(request);
+        }
+        let access = crate::vault_certificates::VaultCertificateAccess {
+            connections: self.secret_manager_repo.as_ref(),
+            secret_store: self.vault_connection_secret_store.as_ref(),
+            fetcher: self.vault_fetcher.as_ref(),
+        };
+        let mut fetched = request.clone();
+        crate::vault_certificates::materialize_selected(
+            &mut fetched.options.client_certificates,
+            &urls,
+            Some(&access),
+        )
+        .await;
+        std::borrow::Cow::Owned(fetched)
     }
 
     /// Runs the after-response script (if any) and applies its side effects.

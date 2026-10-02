@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use rocket_collection::CollectionRepository;
 use rocket_environment::{
-    resolve, EnvironmentRepository, EnvironmentRepositoryFactory, VariableContext,
+    resolve, EnvironmentRepository, EnvironmentRepositoryFactory, SecretManagerRepository,
+    SecretStore, VariableContext, VaultSecretFetcher,
 };
 use rocket_http::{
     apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken,
@@ -122,6 +124,16 @@ pub struct OAuth2Service {
     /// Builds the client for token requests. Without it, a plain client is used and client
     /// certificates are not presented.
     token_client_provider: Option<Arc<dyn TokenClientProvider>>,
+    /// Lets a token request fetch a RocketVault certificate selected for the token URL.
+    /// Without it, such a certificate fails the token request.
+    vault_access: Option<OAuth2VaultAccess>,
+}
+
+/// The RocketVault pieces `OAuth2Service` needs to fetch a certificate.
+struct OAuth2VaultAccess {
+    connections: Box<dyn SecretManagerRepository>,
+    secret_store: Arc<dyn SecretStore>,
+    fetcher: Arc<dyn VaultSecretFetcher>,
 }
 
 impl OAuth2Service {
@@ -134,6 +146,7 @@ impl OAuth2Service {
             collection_repo,
             collection_env_repo_factory: None,
             token_client_provider: None,
+            vault_access: None,
         }
     }
 
@@ -147,6 +160,21 @@ impl OAuth2Service {
 
     pub fn with_token_client_provider(mut self, provider: Arc<dyn TokenClientProvider>) -> Self {
         self.token_client_provider = Some(provider);
+        self
+    }
+
+    /// Lets token requests fetch a RocketVault certificate selected for the token URL.
+    pub fn with_vault_access(
+        mut self,
+        connections: Box<dyn SecretManagerRepository>,
+        secret_store: Arc<dyn SecretStore>,
+        fetcher: Arc<dyn VaultSecretFetcher>,
+    ) -> Self {
+        self.vault_access = Some(OAuth2VaultAccess {
+            connections,
+            secret_store,
+            fetcher,
+        });
         self
     }
 
@@ -196,6 +224,29 @@ impl OAuth2Service {
                 .build()
                 .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}"))),
         }
+    }
+
+    /// `certificates` with the entry selected for `url` fetched when it is a RocketVault
+    /// certificate. A list with nothing to fetch is not copied.
+    async fn certificates_for<'c>(
+        &self,
+        url: &str,
+        certificates: &'c [ResolvedClientCertificate],
+    ) -> Cow<'c, [ResolvedClientCertificate]> {
+        if !crate::vault_certificates::needs_fetch(certificates, &[url]) {
+            return Cow::Borrowed(certificates);
+        }
+        let access = self.vault_access.as_ref().map(|v| {
+            crate::vault_certificates::VaultCertificateAccess {
+                connections: v.connections.as_ref(),
+                secret_store: v.secret_store.as_ref(),
+                fetcher: v.fetcher.as_ref(),
+            }
+        });
+        let mut fetched = certificates.to_vec();
+        crate::vault_certificates::materialize_selected(&mut fetched, &[url], access.as_ref())
+            .await;
+        Cow::Owned(fetched)
     }
 
     /// Builds a flattened variable map from all backend-accessible scopes.
@@ -344,7 +395,8 @@ impl OAuth2Service {
         let (form, extra_headers) = Self::build_token_request_parts(config);
         // Apply queryparam-type extra token params to the URL (body-type were added to `form`).
         let url = apply_params_to_url(&config.token_url, &config.token_params);
-        let client = self.token_client(&url, config.verify_ssl, &config.client_certificates)?;
+        let certificates = self.certificates_for(&url, &config.client_certificates).await;
+        let client = self.token_client(&url, config.verify_ssl, &certificates)?;
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
@@ -417,12 +469,13 @@ impl OAuth2Service {
         apply_params_to_body(&mut form, &refresh_params);
         let url = apply_params_to_url(&refresh_url, &refresh_params);
 
-        let certificates = self.client_certificates(
+        let environment_certificates = self.client_certificates(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
             &vars,
             external_secrets,
         );
+        let certificates = self.certificates_for(&url, &environment_certificates).await;
         let client = self.token_client(&url, verify_ssl, &certificates)?;
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
@@ -486,7 +539,8 @@ impl OAuth2Service {
             ));
         }
 
-        let client = self.token_client(&url, config.verify_ssl, &config.client_certificates)?;
+        let certificates = self.certificates_for(&url, &config.client_certificates).await;
+        let client = self.token_client(&url, config.verify_ssl, &certificates)?;
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 

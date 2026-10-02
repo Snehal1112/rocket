@@ -420,7 +420,16 @@ pub fn run() {
             .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
                 Arc::clone(&active_workspace_path),
             )))
-            .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider));
+            .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider))
+            // A RocketVault certificate selected for a token URL is fetched at send time. It
+            // shares the connection store and fetcher (and so the token and id caches) above.
+            .with_vault_access(
+                Box::new(rocket_infra::FsSecretManagerRepo::new(
+                    data_dir.join("secret_managers.yml"),
+                )),
+                Arc::clone(&vault_connection_secret_store),
+                Arc::clone(&vault_fetcher),
+            );
 
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows

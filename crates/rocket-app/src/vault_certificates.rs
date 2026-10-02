@@ -573,3 +573,335 @@ mod tests {
         assert!(!needs_fetch(&certs, &["https://elsewhere.example.org/"]));
     }
 }
+
+#[cfg(test)]
+mod wiring_tests {
+    use super::*;
+    use crate::client_certificates::describe_all;
+    use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+    use crate::oauth2_service::{OAuth2GetTokenRequest, OAuth2Service};
+    use crate::test_doubles::{
+        FakeCertificateFetcher, FakeExport, FakeSecretManagerRepo, FakeSecretStore,
+        InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo, SharedCollectionRepo,
+        SharedHistoryRepo, StaticEnvRepo, FAKE_BUNDLE, FAKE_PASSWORD,
+    };
+    use async_trait::async_trait;
+    use rocket_collection::Collection;
+    use rocket_environment::{Environment, ExternalSecretBinding, SecretManagerConnection};
+    use rocket_http::{HttpExecutor, HttpResponse, RequestOptions, TokenClientProvider};
+    use rocket_shared::certificate::ClientCertificate;
+    use rocket_shared::error::DomainResult;
+    use rocket_shared::events::NullEventPublisher;
+    use rocket_shared::types::HttpMethod;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    /// Records the certificates of every request it sends, as `describe_all` lines.
+    #[derive(Default)]
+    struct CertificateRecordingExecutor {
+        seen: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl CertificateRecordingExecutor {
+        fn seen(&self) -> Vec<Vec<String>> {
+            self.seen.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl HttpExecutor for CertificateRecordingExecutor {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            self.seen
+                .lock()
+                .expect("lock")
+                .push(describe_all(&req.options.client_certificates));
+            Ok(HttpResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![],
+                body: "{}".into(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+                size_bytes: 2,
+            })
+        }
+    }
+
+    /// Records the certificates each token request would present, then stops before the network.
+    #[derive(Default)]
+    struct RecordingTokenClientProvider {
+        seen: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl TokenClientProvider for RecordingTokenClientProvider {
+        fn client_for(
+            &self,
+            _token_url: &str,
+            _verify_ssl: bool,
+            certificates: &[ResolvedClientCertificate],
+        ) -> DomainResult<reqwest::Client> {
+            self.seen.lock().expect("lock").push(describe_all(certificates));
+            Err(DomainError::Internal("stopped before the network".into()))
+        }
+    }
+
+    fn connection() -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: "conn-1".into(),
+            label: "Prod RocketVault".into(),
+            base_url: "https://vault.internal:8774".into(),
+            client_id: "rocketapi".into(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+        }
+    }
+
+    /// One binding with no secret names (so no secret fetch), a PEM vault certificate for the
+    /// API host and a PKCS12 one for the identity provider.
+    fn environment() -> Environment {
+        let mut env = Environment::new("prod");
+        env.external_secrets = vec![ExternalSecretBinding {
+            alias: "prod".into(),
+            connection_id: "conn-1".into(),
+            vault_name: "prod-vault".into(),
+            secret_names: Vec::new(),
+        }];
+        env.client_certificates = vec![
+            ClientCertificate::Vault {
+                domain: "api.example.com".into(),
+                binding: "prod".into(),
+                certificate: "client-a".into(),
+                format: VaultCertificateFormat::Pem,
+            },
+            ClientCertificate::Vault {
+                domain: "idp.example.com".into(),
+                binding: "prod".into(),
+                certificate: "idp-cert".into(),
+                format: VaultCertificateFormat::Pkcs12,
+            },
+        ];
+        env
+    }
+
+    fn service(
+        executor: Arc<CertificateRecordingExecutor>,
+        fetcher: Arc<FakeCertificateFetcher>,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(StaticEnvRepo(environment())),
+            executor,
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(Collection::new("c")))),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(connection())),
+            Arc::new(FakeSecretStore("client-secret".into())),
+            fetcher,
+        )
+    }
+
+    fn input(url: &str, auth: Auth) -> ExecuteRequestInput {
+        ExecuteRequestInput {
+            skip_history: false,
+            flow_vars: HashMap::new(),
+            method: HttpMethod::Get,
+            url: url.into(),
+            headers: vec![],
+            query_params: vec![],
+            body: None,
+            auth,
+            options: RequestOptions::default(),
+            environment_name: Some("prod".into()),
+            collection: None,
+            request_name: None,
+            pre_request_script: None,
+            post_response_script: None,
+            tests_script: None,
+            request_path: None,
+            global_env_name: None,
+            assertions: vec![],
+            tags: vec![],
+            path_params: vec![],
+            actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+        }
+    }
+
+    fn client_credentials(token_url: &str) -> Auth {
+        Auth::OAuth2(Box::new(
+            serde_json::from_value(serde_json::json!({
+                "flow": "client_credentials",
+                "accessTokenUrl": token_url,
+                "credentials": { "clientId": "id", "clientSecret": "s" }
+            }))
+            .expect("client credentials flow"),
+        ))
+    }
+
+    fn pkcs12_line(domain: &str) -> String {
+        format!("pkcs12 {domain} inline:{} pass:{FAKE_PASSWORD}", FAKE_BUNDLE.len())
+    }
+
+    #[tokio::test]
+    async fn a_send_fetches_the_vault_certificate_selected_for_the_request_url() {
+        let executor = Arc::new(CertificateRecordingExecutor::default());
+        let fetcher =
+            FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok), ("idp-cert", FakeExport::Ok)]);
+        let svc = service(executor.clone(), fetcher.clone());
+
+        svc.execute(input("https://api.example.com/v1", Auth::None))
+            .await
+            .expect("send");
+
+        assert_eq!(fetcher.calls(), vec!["prod-vault/client-a/pem"]);
+        let seen = executor.seen();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0][0].starts_with("pem api.example.com inline:"), "{seen:?}");
+        assert!(seen[0][1].starts_with("deferred idp.example.com"), "{seen:?}");
+    }
+
+    // Review Focus 3.
+    #[tokio::test]
+    async fn a_request_to_another_domain_never_calls_the_vault() {
+        let executor = Arc::new(CertificateRecordingExecutor::default());
+        let fetcher =
+            FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok), ("idp-cert", FakeExport::Ok)]);
+        let svc = service(executor.clone(), fetcher.clone());
+
+        svc.execute(input("https://elsewhere.example.org/", Auth::None))
+            .await
+            .expect("send");
+
+        assert!(fetcher.calls().is_empty());
+        let seen = executor.seen();
+        assert!(seen[0].iter().all(|line| line.starts_with("deferred ")), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_client_credentials_send_also_fetches_the_certificate_for_the_token_url() {
+        let executor = Arc::new(CertificateRecordingExecutor::default());
+        let fetcher =
+            FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok), ("idp-cert", FakeExport::Ok)]);
+        let svc = service(executor.clone(), fetcher.clone());
+
+        svc.execute(input(
+            "https://api.example.com/v1",
+            client_credentials("https://idp.example.com/token"),
+        ))
+        .await
+        .expect("send");
+
+        assert_eq!(
+            fetcher.calls(),
+            vec!["prod-vault/client-a/pem", "prod-vault/idp-cert/pkcs12"]
+        );
+        let seen = executor.seen();
+        assert_eq!(seen[0][1], pkcs12_line("idp.example.com"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_reaches_the_executor_as_unavailable_with_the_reason() {
+        let executor = Arc::new(CertificateRecordingExecutor::default());
+        let fetcher = FakeCertificateFetcher::new(&[(
+            "client-a",
+            FakeExport::Fail("Certificate is not marked exportable."),
+        )]);
+        let svc = service(executor.clone(), fetcher.clone());
+
+        // The recording executor sends anyway; the real one fails on the Unavailable entry
+        // (pinned in rocket-infra by A1 and the existing Unavailable tests).
+        svc.execute(input("https://api.example.com/v1", Auth::None))
+            .await
+            .expect("send");
+
+        let seen = executor.seen();
+        assert_eq!(
+            seen[0][0],
+            "unavailable api.example.com The RocketVault certificate client-a (binding prod) \
+             for api.example.com could not be fetched: Certificate is not marked exportable."
+        );
+    }
+
+    #[tokio::test]
+    async fn the_recorded_request_keeps_names_only() {
+        let executor = Arc::new(CertificateRecordingExecutor::default());
+        let fetcher = FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok)]);
+        let svc = service(executor.clone(), fetcher.clone());
+
+        let mut sent = None;
+        svc.execute_capturing(
+            input("https://api.example.com/v1", Auth::None),
+            &HashMap::new(),
+            &mut sent,
+        )
+        .await
+        .expect("send");
+
+        let sent = sent.expect("the request is recorded");
+        assert!(
+            describe_all(&sent.options.client_certificates)[0].starts_with("deferred api.example.com"),
+            "history and scripts see names only"
+        );
+        assert!(executor.seen()[0][0].starts_with("pem api.example.com inline:"));
+    }
+
+    fn oauth2_service(provider: Arc<RecordingTokenClientProvider>) -> OAuth2Service {
+        OAuth2Service::new(
+            Box::new(StaticEnvRepo(environment())),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(Collection::new("c")))),
+        )
+        .with_token_client_provider(provider)
+    }
+
+    fn token_request() -> OAuth2GetTokenRequest {
+        serde_json::from_value(serde_json::json!({
+            "grantType": "client_credentials",
+            "tokenUrl": "https://idp.example.com/token",
+            "clientId": "id",
+            "environmentName": "prod"
+        }))
+        .expect("token request")
+    }
+
+    #[tokio::test]
+    async fn a_token_request_fetches_the_certificate_selected_for_the_token_url() {
+        let provider = Arc::new(RecordingTokenClientProvider::default());
+        let fetcher = FakeCertificateFetcher::new(&[("idp-cert", FakeExport::Ok)]);
+        let svc = oauth2_service(provider.clone()).with_vault_access(
+            Box::new(FakeSecretManagerRepo(connection())),
+            Arc::new(FakeSecretStore("client-secret".into())),
+            fetcher.clone(),
+        );
+
+        let config = svc.resolve_get_token_request(&token_request());
+        let err = svc
+            .get_token_direct(&config)
+            .await
+            .expect_err("the provider stops before the network");
+        assert!(err.to_string().contains("stopped before the network"), "{err}");
+
+        assert_eq!(fetcher.calls(), vec!["prod-vault/idp-cert/pkcs12"]);
+        let seen = provider.seen.lock().expect("lock").clone();
+        // The API entry is for another domain and stays deferred.
+        assert!(seen[0][0].starts_with("deferred api.example.com"), "{seen:?}");
+        assert_eq!(seen[0][1], pkcs12_line("idp.example.com"));
+        // The resolved config still holds names only.
+        assert!(describe_all(&config.client_certificates)[1].starts_with("deferred idp.example.com"));
+    }
+
+    #[tokio::test]
+    async fn without_vault_access_a_token_request_fails_on_a_vault_certificate() {
+        let provider = Arc::new(RecordingTokenClientProvider::default());
+        let svc = oauth2_service(provider.clone());
+
+        let config = svc.resolve_get_token_request(&token_request());
+        let _ = svc.get_token_direct(&config).await;
+
+        let seen = provider.seen.lock().expect("lock").clone();
+        assert!(
+            seen[0][1].starts_with("unavailable idp.example.com")
+                && seen[0][1].contains("cannot be fetched here"),
+            "{seen:?}"
+        );
+    }
+}
