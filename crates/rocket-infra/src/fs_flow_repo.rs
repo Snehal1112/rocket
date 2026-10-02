@@ -552,6 +552,42 @@ mod tests {
     }
 
     #[test]
+    fn auth_node_roundtrips_through_yaml_without_a_token_field() {
+        use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
+        use rocket_shared::types::Auth;
+
+        let (_dir, repo) = setup();
+        let mut flow = sample("Auth Flow");
+        flow.nodes.push(FlowNode {
+            id: "a1".to_string(),
+            kind: FlowNodeKind::Auth {
+                label: "Sign in".to_string(),
+                auth: Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
+                    access_token_url: "https://idp.example.com/token".to_string(),
+                    refresh_token_url: None,
+                    credentials: OAuth2ClientCredentials {
+                        client_id: "{{clientId}}".to_string(),
+                        client_secret: "{{clientSecret}}".to_string(),
+                        placement: None,
+                    },
+                    scope: Some("read".to_string()),
+                    additional_parameters: None,
+                    token_config: None,
+                    settings: None,
+                })),
+                apply_to_inherit: true,
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        });
+        repo.save("acme", &flow).expect("save");
+        assert_eq!(repo.get("acme", "Auth Flow").expect("get"), flow);
+
+        let raw = serde_yaml::to_string(&flow).expect("serialize flow to yaml");
+        assert!(!raw.to_lowercase().contains("accesstoken:"), "got: {raw}");
+        assert!(raw.contains("{{clientSecret}}"), "got: {raw}");
+    }
+
+    #[test]
     fn if_and_switch_nodes_with_routed_edges_roundtrip() {
         let (_dir, repo) = setup();
         let mut flow = sample("Routing Flow");

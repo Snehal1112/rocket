@@ -174,6 +174,16 @@ pub enum FlowNodeKindDto {
         label: String,
         script: String,
     },
+    Auth {
+        label: String,
+        auth: rocket_shared::types::Auth,
+        #[serde(default = "default_true")]
+        apply_to_inherit: bool,
+    },
+}
+
+fn default_true() -> bool {
+    true
 }
 impl From<FlowNodeKind> for FlowNodeKindDto {
     fn from(k: FlowNodeKind) -> Self {
@@ -215,6 +225,15 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
             FlowNodeKind::Transform { label, script } => {
                 FlowNodeKindDto::Transform { label, script }
             }
+            FlowNodeKind::Auth {
+                label,
+                auth,
+                apply_to_inherit,
+            } => FlowNodeKindDto::Auth {
+                label,
+                auth,
+                apply_to_inherit,
+            },
         }
     }
 }
@@ -258,6 +277,15 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
             FlowNodeKindDto::Transform { label, script } => {
                 FlowNodeKind::Transform { label, script }
             }
+            FlowNodeKindDto::Auth {
+                label,
+                auth,
+                apply_to_inherit,
+            } => FlowNodeKind::Auth {
+                label,
+                auth,
+                apply_to_inherit,
+            },
         }
     }
 }
@@ -775,6 +803,36 @@ mod tests {
         let a = serde_json::to_value(&dto).expect("to_value dto");
         let b = serde_json::to_value(&back).expect("to_value back");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn auth_node_dto_uses_camel_case_and_roundtrips() {
+        let kind = FlowNodeKind::Auth {
+            label: "Sign in".to_string(),
+            auth: rocket_shared::types::Auth::Bearer {
+                token: "t".to_string(),
+            },
+            apply_to_inherit: false,
+        };
+        let dto: FlowNodeKindDto = kind.clone().into();
+        let json = serde_json::to_string(&dto).expect("serialize FlowNodeKindDto");
+        assert!(json.contains(r#""kind":"Auth""#), "got: {json}");
+        assert!(json.contains(r#""applyToInherit":false"#), "got: {json}");
+        assert!(json.contains(r#""authType":"bearer""#), "got: {json}");
+        let back: FlowNodeKindDto = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(FlowNodeKind::from(back), kind);
+    }
+
+    #[test]
+    fn auth_node_dto_defaults_apply_to_inherit_to_true() {
+        let json = r#"{"kind":"Auth","label":"Sign in","auth":{"authType":"basic","username":"u","password":"p"}}"#;
+        let dto: FlowNodeKindDto = serde_json::from_str(json).expect("deserialize");
+        match FlowNodeKind::from(dto) {
+            FlowNodeKind::Auth {
+                apply_to_inherit, ..
+            } => assert!(apply_to_inherit),
+            other => panic!("expected an Auth node, got {other:?}"),
+        }
     }
 
     #[test]
