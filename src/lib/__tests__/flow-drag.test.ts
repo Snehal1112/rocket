@@ -3,6 +3,7 @@ import {
   decodeFlowRequestDragPayload,
   encodeFlowRequestDragPayload,
   FLOW_REQUEST_DRAG_MIME,
+  FLOW_REQUEST_DRAG_TEXT_PREFIX,
 } from '../flow-drag';
 
 function fakeDataTransfer(data: Record<string, string>): DataTransfer {
@@ -29,6 +30,19 @@ describe('flow-drag payload codec', () => {
   it('returns null when the drag payload MIME type is absent', () => {
     const dt = fakeDataTransfer({ 'text/plain': 'not a flow drag' });
     expect(decodeFlowRequestDragPayload(dt)).toBeNull();
+  });
+
+  it('decodes the self-identifying text fallback when the custom MIME type is absent', () => {
+    const payload = {
+      collection: 'my-collection',
+      path: 'auth/login.yml',
+      name: 'Login',
+      method: 'POST',
+    };
+    const dt = fakeDataTransfer({
+      'text/plain': `${FLOW_REQUEST_DRAG_TEXT_PREFIX}${encodeFlowRequestDragPayload(payload)}`,
+    });
+    expect(decodeFlowRequestDragPayload(dt)).toEqual(payload);
   });
 
   it('returns null when the payload is present but not valid JSON', () => {

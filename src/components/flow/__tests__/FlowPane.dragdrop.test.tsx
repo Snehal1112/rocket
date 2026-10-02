@@ -1,6 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeFlowRequestDragPayload, FLOW_REQUEST_DRAG_MIME } from '@/lib/flow-drag';
+import {
+  encodeFlowRequestDragPayload,
+  FLOW_REQUEST_DRAG_MIME,
+  FLOW_REQUEST_DRAG_TEXT_PREFIX,
+} from '@/lib/flow-drag';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { isFlowTab } from '@/types/pane-types';
@@ -97,6 +101,24 @@ describe('FlowPane drag-and-drop', () => {
         source: { type: 'Saved', requestPath: 'auth/refresh.yml' },
       });
     }
+  });
+
+  it('adds a Saved Request node from the text fallback payload', () => {
+    render(<FlowPane tab={baseTab} groupId={usePaneStore.getState().activeGroupId} />);
+    const payload = encodeFlowRequestDragPayload({
+      collection: 'my-collection',
+      path: 'auth/login.yml',
+      name: 'Login',
+      method: 'POST',
+    });
+    const dataTransfer = {
+      getData: (type: string) =>
+        type === 'text/plain' ? `${FLOW_REQUEST_DRAG_TEXT_PREFIX}${payload}` : '',
+    };
+
+    fireEvent.drop(screen.getByTestId('flow-canvas'), { dataTransfer, clientX: 200, clientY: 150 });
+
+    expect(getFlowTab().nodes).toHaveLength(1);
   });
 
   it('ignores a drop whose dataTransfer carries no flow-request payload', () => {

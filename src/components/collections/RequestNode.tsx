@@ -34,7 +34,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
-import { encodeFlowRequestDragPayload, FLOW_REQUEST_DRAG_MIME } from '@/lib/flow-drag';
+import {
+  encodeFlowRequestDragPayload,
+  FLOW_REQUEST_DRAG_MIME,
+  FLOW_REQUEST_DRAG_TEXT_PREFIX,
+} from '@/lib/flow-drag';
 import { collectLeafGroupIds, findTabInTree, mapApiRequestToState } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { getRequest, renameRequest } from '@/lib/tauri-api';
@@ -240,10 +244,14 @@ export function RequestNode({
             data-testid={`request-item-${method}-${name}`}
             draggable
             onDragStart={(e) => {
-              e.dataTransfer.setData(
-                FLOW_REQUEST_DRAG_MIME,
-                encodeFlowRequestDragPayload({ collection: collectionName, path, name, method }),
-              );
+              const payload = encodeFlowRequestDragPayload({
+                collection: collectionName,
+                path,
+                name,
+                method,
+              });
+              e.dataTransfer.setData(FLOW_REQUEST_DRAG_MIME, payload);
+              e.dataTransfer.setData('text/plain', `${FLOW_REQUEST_DRAG_TEXT_PREFIX}${payload}`);
               e.dataTransfer.effectAllowed = 'copy';
             }}
           >

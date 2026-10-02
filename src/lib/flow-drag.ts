@@ -1,4 +1,5 @@
 export const FLOW_REQUEST_DRAG_MIME = 'application/x-rocket-flow-request';
+export const FLOW_REQUEST_DRAG_TEXT_PREFIX = 'rocket-flow-request:';
 
 export interface FlowRequestDragPayload {
   collection: string;
@@ -14,7 +15,13 @@ export function encodeFlowRequestDragPayload(payload: FlowRequestDragPayload): s
 export function decodeFlowRequestDragPayload(
   dataTransfer: DataTransfer,
 ): FlowRequestDragPayload | null {
-  const raw = dataTransfer.getData(FLOW_REQUEST_DRAG_MIME);
+  const customPayload = dataTransfer.getData(FLOW_REQUEST_DRAG_MIME);
+  const textPayload = dataTransfer.getData('text/plain');
+  const raw =
+    customPayload ||
+    (textPayload.startsWith(FLOW_REQUEST_DRAG_TEXT_PREFIX)
+      ? textPayload.slice(FLOW_REQUEST_DRAG_TEXT_PREFIX.length)
+      : '');
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<FlowRequestDragPayload>;
