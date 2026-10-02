@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSaveButton } from '@/hooks/use-save-button';
+import { validateClientCertificates } from '@/lib/certificate-validation';
 import { validateExternalSecretBindings } from '@/lib/external-secrets';
 import {
   useDeleteEnvironment,
@@ -21,10 +22,16 @@ import {
   useProcessEnvVars,
   useSaveEnvironment,
 } from '@/lib/queries/environment-queries';
-import type { Environment, ExternalSecretBinding, Variable } from '@/lib/tauri-api';
+import type {
+  ClientCertificate,
+  Environment,
+  ExternalSecretBinding,
+  Variable,
+} from '@/lib/tauri-api';
 import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
+import { CertificatesTab } from './CertificatesTab';
 import { EnvironmentSidebar } from './EnvironmentSidebar';
 import { ExternalSecretsTab } from './ExternalSecretsTab';
 import { VariableTable } from './VariableTable';
@@ -64,11 +71,20 @@ function dedupeVariables(variables: Variable[]): Variable[] {
 // downstream reader in this file (and `ExternalSecretsTab`'s required
 // `bindings` prop) can rely on a real array both at runtime and in the type
 // system.
-type NormalizedEnvironment = Environment & { externalSecrets: ExternalSecretBinding[] };
+type NormalizedEnvironment = Environment & {
+  externalSecrets: ExternalSecretBinding[];
+  clientCertificates: ClientCertificate[];
+};
 
 function normalizeEnv(env: Environment): NormalizedEnvironment {
-  return { ...env, externalSecrets: env.externalSecrets ?? [] };
+  return {
+    ...env,
+    externalSecrets: env.externalSecrets ?? [],
+    clientCertificates: env.clientCertificates ?? [],
+  };
 }
+
+type DialogTab = 'variables' | 'external-secrets' | 'certificates';
 
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const activeCollection = useEnvStore((s) => s.activeCollection);
@@ -82,9 +98,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const [selectedName, setSelectedName] = useState<string | null>(environments[0]?.name ?? null);
   const [isDirty, setIsDirty] = useState(false);
-  const [activeDialogTab, setActiveDialogTab] = useState<'variables' | 'external-secrets'>(
-    'variables',
-  );
+  const [activeDialogTab, setActiveDialogTab] = useState<DialogTab>('variables');
 
   // Local in-flight edit state — avoids writing to the store mid-edit.
   const [localEnvs, setLocalEnvs] = useState<NormalizedEnvironment[]>(environments);
@@ -139,8 +153,8 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     'Failed to save changes',
   );
 
-  // Both tabs share one save, so an unfinished binding blocks a Variables save too.
-  // Point the user at the External Secrets tab instead of failing with a generic toast.
+  // All tabs share one save, so an unfinished binding or certificate blocks a Variables save too.
+  // Point the user at the tab that holds the problem instead of failing with a generic toast.
   const handleSave = useCallback(() => {
     if (!selectedEnv) return;
     const error = validateExternalSecretBindings(selectedEnv.externalSecrets);
@@ -149,6 +163,18 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       setActiveDialogTab('external-secrets');
       return;
     }
+    // Certificate references are checked against the bindings above, which are now known valid.
+    const issues = validateClientCertificates(
+      selectedEnv.clientCertificates,
+      selectedEnv.externalSecrets,
+    );
+    if (issues.errors.length > 0) {
+      toast.error(issues.errors[0]);
+      setActiveDialogTab('certificates');
+      return;
+    }
+    // Warnings (a literal passphrase) never block the save.
+    if (issues.warnings.length > 0) toast.warning(issues.warnings[0]);
     void triggerSave();
   }, [selectedEnv, triggerSave]);
 
@@ -286,6 +312,76 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     [selectedEnv],
   );
 
+  const updateClientCertificate = useCallback(
+    (idx: number, patch: Partial<ClientCertificate>) => {
+      if (!selectedEnv) return;
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          const clientCertificates = e.clientCertificates.slice();
+          clientCertificates[idx] = { ...clientCertificates[idx], ...patch } as ClientCertificate;
+          return { ...e, clientCertificates };
+        }),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
+
+  const addClientCertificate = useCallback(
+    (type: 'pem' | 'pkcs12') => {
+      if (!selectedEnv) return;
+      const fresh: ClientCertificate =
+        type === 'pem'
+          ? { type: 'pem', domain: '', certificateFilePath: '', privateKeyFilePath: '' }
+          : { type: 'pkcs12', domain: '', pkcs12FilePath: '' };
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          return { ...e, clientCertificates: [...e.clientCertificates, fresh] };
+        }),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
+
+  const removeClientCertificate = useCallback(
+    (idx: number) => {
+      if (!selectedEnv) return;
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          return { ...e, clientCertificates: e.clientCertificates.filter((_, i) => i !== idx) };
+        }),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
+
+  // The first matching certificate wins, so the order is part of the data.
+  const moveClientCertificate = useCallback(
+    (idx: number, direction: -1 | 1) => {
+      if (!selectedEnv) return;
+      setLocalEnvs((prev) =>
+        prev.map((e) => {
+          if (e.name !== selectedEnv.name) return e;
+          const target = idx + direction;
+          if (target < 0 || target >= e.clientCertificates.length) return e;
+          const clientCertificates = e.clientCertificates.slice();
+          [clientCertificates[idx], clientCertificates[target]] = [
+            clientCertificates[target],
+            clientCertificates[idx],
+          ];
+          return { ...e, clientCertificates };
+        }),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
+
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
   const { data: processEnvVars = {} } = useProcessEnvVars();
@@ -334,7 +430,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
             {selectedEnv ? (
               <Tabs
                 value={activeDialogTab}
-                onValueChange={(v) => setActiveDialogTab(v as 'variables' | 'external-secrets')}
+                onValueChange={(v) => setActiveDialogTab(v as DialogTab)}
                 className='flex-1 flex flex-col min-h-0'
               >
                 <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
@@ -343,6 +439,9 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                   </TabsTrigger>
                   <TabsTrigger value='external-secrets' className='text-xs'>
                     External Secrets
+                  </TabsTrigger>
+                  <TabsTrigger value='certificates' className='text-xs'>
+                    Certificates
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value='variables' className='flex-1 flex flex-col min-h-0 m-0'>
@@ -366,6 +465,20 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     onSave={handleSave}
                     isDirty={isDirty}
                     saveState={saveState}
+                  />
+                </TabsContent>
+                <TabsContent value='certificates' className='flex-1 flex flex-col min-h-0 m-0'>
+                  <CertificatesTab
+                    certificates={selectedEnv.clientCertificates}
+                    bindings={selectedEnv.externalSecrets}
+                    onChange={updateClientCertificate}
+                    onAdd={addClientCertificate}
+                    onRemove={removeClientCertificate}
+                    onMove={moveClientCertificate}
+                    onSave={handleSave}
+                    isDirty={isDirty}
+                    saveState={saveState}
+                    variableContext={variableContext}
                   />
                 </TabsContent>
               </Tabs>
