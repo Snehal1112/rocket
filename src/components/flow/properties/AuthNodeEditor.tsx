@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { AUTH_NODE_TYPE_OPTIONS, authStateForType } from '@/lib/auth-type-defaults';
+import { withCurrentAuthType } from '@/lib/auth-type-options';
 import { flowAuthKey, pickAuthState, resetTokenOnConfigChange } from '@/lib/flow-auth';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import {
@@ -116,6 +125,29 @@ export function AuthNodeEditor({
           checked={kind.applyToInherit}
           onCheckedChange={(applyToInherit) => onChange({ ...kind, applyToInherit })}
         />
+      </div>
+
+      <div className='space-y-1.5'>
+        <Label htmlFor='auth-node-type' className='text-xs'>
+          Auth type
+        </Label>
+        <Select
+          value={state.authType}
+          onValueChange={(t) =>
+            handleAuthChange(authStateForType(t as AuthState['authType'], state))
+          }
+        >
+          <SelectTrigger id='auth-node-type' aria-label='Auth type' className='h-8 text-xs'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {withCurrentAuthType(AUTH_NODE_TYPE_OPTIONS, state.authType).map((t) => (
+              <SelectItem key={t.value} value={t.value} className='text-sm'>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <AuthEditor

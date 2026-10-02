@@ -83,6 +83,16 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   })),
 }));
 
+// Radix Select calls pointer-capture and scrollIntoView APIs that jsdom lacks.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {
+    // No-op for test polyfill.
+  };
+}
+
 type AuthKind = Extract<FlowNodeKind, { kind: 'Auth' }>;
 const kind: AuthKind = {
   kind: 'Auth',
@@ -216,5 +226,40 @@ describe('AuthNodeEditor', () => {
     expect(ctx?.has('disabled')).toBe(false);
     expect(ctx?.get('tenant')?.value).toBe('acme');
     expect(ctx?.get('process.env.HOME')?.value).toBe('/home/u');
+  });
+
+  it('has an Auth type selector and switches to OAuth 2.0 without persisting a token', async () => {
+    const onChange = vi.fn();
+    render(
+      <AuthNodeEditor
+        kind={kind}
+        onChange={onChange}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+    await userEvent.click(screen.getByRole('combobox', { name: 'Auth type' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'OAuth 2.0' }));
+    const sent = onChange.mock.lastCall?.[0] as AuthKind;
+    expect(sent.auth.authType).toBe('o-auth2');
+    // No key named accessToken at any depth (accessTokenUrl etc. are fine).
+    expect(JSON.stringify(sent.auth)).not.toMatch(/"(accessToken|access_token)"\s*:/);
+  });
+
+  it('switches to Basic', async () => {
+    const onChange = vi.fn();
+    render(
+      <AuthNodeEditor
+        kind={{ ...kind, auth: { authType: 'bearer', token: 'tok-12345678' } }}
+        onChange={onChange}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+    await userEvent.click(screen.getByRole('combobox', { name: 'Auth type' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Basic' }));
+    expect((onChange.mock.lastCall?.[0] as AuthKind).auth.authType).toBe('basic');
   });
 });
