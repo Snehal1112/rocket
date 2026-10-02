@@ -213,7 +213,10 @@ mod tests {
 
     #[test]
     fn a_single_line_value_has_one_form() {
-        assert_eq!(redaction_forms("sk-live-abcdef123"), vec!["sk-live-abcdef123"]);
+        assert_eq!(
+            redaction_forms("sk-live-abcdef123"),
+            vec!["sk-live-abcdef123"]
+        );
         assert!(redaction_forms("abc").is_empty(), "below the floor");
     }
 
@@ -249,7 +252,8 @@ mod tests {
 
     #[test]
     fn pem_armor_lines_and_short_lines_are_not_secret() {
-        let set = forms("-----BEGIN CERTIFICATE-----\nabc\n1234567890\n-----END CERTIFICATE-----\n");
+        let set =
+            forms("-----BEGIN CERTIFICATE-----\nabc\n1234567890\n-----END CERTIFICATE-----\n");
         // The whole value starts with armor on purpose. No single line of armor is a form.
         assert!(!set
             .iter()

@@ -132,7 +132,10 @@ mod tests {
                 assert_clean(&format!("{cert:?}"));
                 assert_clean(&format!("{cert:#?}"));
             }
-            let shown = format!("{:?}", request_with_certificates().options.client_certificates);
+            let shown = format!(
+                "{:?}",
+                request_with_certificates().options.client_certificates
+            );
             assert!(shown.contains("inline 20 bytes"), "{shown}");
             assert!(shown.contains("<redacted>"), "{shown}");
         }

@@ -139,7 +139,6 @@ fn absolutize(p: String, base: Option<&Path>) -> String {
     base.join(tidy).to_string_lossy().into_owned()
 }
 
-
 /// How the text of a secret becomes bytes.
 #[derive(Clone, Copy)]
 enum Encoding {

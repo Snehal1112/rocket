@@ -631,7 +631,8 @@ impl RequestExecutionService {
 
         // The selected environment decides which client certificates the executor may present.
         let mut options = input.options.clone();
-        options.client_certificates = self.environment_client_certificates(input, &vars, external_secrets);
+        options.client_certificates =
+            self.environment_client_certificates(input, &vars, external_secrets);
 
         Ok(HttpRequest {
             method: input.method,
@@ -3291,9 +3292,7 @@ mod tests {
             }
         }
 
-        pub(super) fn secrets(
-            pairs: &[(&str, &str)],
-        ) -> std::collections::HashMap<String, String> {
+        pub(super) fn secrets(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
             pairs
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -3308,10 +3307,13 @@ mod tests {
             let mut env = Environment::new("dev");
             env.client_certificates = certs;
             let svc = service_with(env, None);
-            svc.resolve_request(&sample_input("https://a.example.com/x", Some("dev")), secrets)
-                .expect("resolve_request")
-                .options
-                .client_certificates
+            svc.resolve_request(
+                &sample_input("https://a.example.com/x", Some("dev")),
+                secrets,
+            )
+            .expect("resolve_request")
+            .options
+            .client_certificates
         }
 
         pub(super) fn source_bytes(source: &CertificateSource) -> Vec<u8> {
@@ -3417,7 +3419,12 @@ mod tests {
         #[tokio::test]
         async fn vault_certificates_missing_secret_uses_the_spec_message() {
             let certs = resolve_certificates(
-                vec![vault_pem("a.example.com", "vault.clientCertPem", "vault.k", None)],
+                vec![vault_pem(
+                    "a.example.com",
+                    "vault.clientCertPem",
+                    "vault.k",
+                    None,
+                )],
                 &secrets(&[("vault.k", KEY_PEM)]),
             );
             assert_eq!(
@@ -3450,8 +3457,9 @@ mod tests {
                 ],
                 &secrets(&[("vault.ok", "AQIDBAU=")]),
             );
-            let first = rocket_http::client_cert::find_certificate(&certs, "https://a.example.com/x")
-                .expect("the first certificate is selected");
+            let first =
+                rocket_http::client_cert::find_certificate(&certs, "https://a.example.com/x")
+                    .expect("the first certificate is selected");
             assert!(matches!(
                 first.material,
                 CertificateMaterial::Pkcs12 {
@@ -3483,8 +3491,10 @@ mod tests {
                 pkcs12_secret: None,
                 passphrase: None,
             };
-            let certs =
-                resolve_certificates(vec![both, neither], &secrets(&[("vault.bundle", "AQIDBAU=")]));
+            let certs = resolve_certificates(
+                vec![both, neither],
+                &secrets(&[("vault.bundle", "AQIDBAU=")]),
+            );
             let both_reason = unavailable_reason(&certs[0]);
             assert!(
                 both_reason.contains("a.example.com") && both_reason.contains("only one"),
@@ -3550,8 +3560,8 @@ mod tests {
     /// Hygiene tests for vault-backed certificate material (Plan C, Task C2).
     mod vault_certificate_hygiene {
         use super::vault_certificates::{
-            resolve_certificates, secrets, source_bytes, unavailable_reason, vault_p12,
-            vault_pem, CERT_PEM, KEY_PEM,
+            resolve_certificates, secrets, source_bytes, unavailable_reason, vault_p12, vault_pem,
+            CERT_PEM, KEY_PEM,
         };
         use super::*;
         use rocket_http::CertificateMaterial;
@@ -3583,12 +3593,8 @@ mod tests {
         #[tokio::test]
         async fn vault_certificate_hygiene_short_secret_is_still_skipped() {
             let svc = service_with(Environment::new("dev"), None);
-            let values = svc.secret_values(
-                None,
-                None,
-                Some("dev"),
-                &secrets(&[("vault.short", "abc")]),
-            );
+            let values =
+                svc.secret_values(None, None, Some("dev"), &secrets(&[("vault.short", "abc")]));
             assert!(values.is_empty());
         }
 
@@ -3665,7 +3671,11 @@ mod tests {
                 "45, 45, 45, 45, 45, 66, 69",
             ];
             let json = serde_json::to_string(&request).expect("serialize");
-            for shown in [format!("{request:?}"), format!("{request:#?}"), json.clone()] {
+            for shown in [
+                format!("{request:?}"),
+                format!("{request:#?}"),
+                json.clone(),
+            ] {
                 for needle in needles {
                     assert!(!shown.contains(needle), "{needle} leaked into {shown}");
                 }

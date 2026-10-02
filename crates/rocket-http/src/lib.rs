@@ -1,8 +1,8 @@
 pub mod aws_sig;
 pub mod client_cert;
 pub mod cookie;
-pub mod digest_sig;
 pub mod cookie_repository;
+pub mod digest_sig;
 pub mod executor;
 pub mod jwt;
 pub mod load_test;
