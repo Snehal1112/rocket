@@ -12,7 +12,8 @@ use crate::execution_service::{
     ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
 use crate::flow_auth::{
-    resolve_flow_credentials, FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher,
+    resolve_flow_credentials, FetchContext, FlowAuthTokens, FlowCredentials, FlowTokenFetcher,
+    NoTokenFetcher,
 };
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange};
@@ -942,6 +943,7 @@ impl FlowExecutionService {
                                 &data_edges,
                                 &captured,
                                 &external_secrets,
+                                &credentials,
                                 &mut node_logs,
                                 &mut node_debug,
                                 &mut node_exchange,
@@ -1085,6 +1087,7 @@ impl FlowExecutionService {
         data_edges: &[&FlowEdge],
         captured: &HashMap<String, CapturedOutput>,
         external_secrets: &HashMap<String, String>,
+        credentials: &FlowCredentials,
         logs: &mut Vec<FlowLogEntry>,
         debug: &mut Option<FlowDebugRequest>,
         exchange: &mut Option<FlowDebugRequest>,
@@ -1144,9 +1147,13 @@ impl FlowExecutionService {
                     .await;
                 logs.extend(outcome.logs);
                 let value = outcome.result?;
-                Ok(ExecutedNode::plain(CapturedOutput::Value(
-                    VariableValue::simple(value),
-                )))
+                // Wires get the raw value. The step shows Auth tokens masked.
+                let reported =
+                    crate::redaction::redact_secrets(&value, &credentials.secret_forms());
+                Ok(ExecutedNode {
+                    reported_value: Some(reported),
+                    ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(value)))
+                })
             }
             FlowNodeKind::Request {
                 debug: debug_on,
@@ -1318,10 +1325,21 @@ impl FlowExecutionService {
                     ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(text)))
                 })
             }
-            // Replaced by flow-auth-node plan 03 (executor).
-            FlowNodeKind::Auth { label, .. } => Err(DomainError::InvalidInput(format!(
-                "Auth node '{label}' cannot run yet"
-            ))),
+            FlowNodeKind::Auth { label, .. } => {
+                // The credential was resolved at run start. The node only
+                // publishes its plain wire value, which is empty for types
+                // without a token. The step reports no value, so a token
+                // never shows in step output.
+                if credentials.auth_for_node(&node.id).is_none() {
+                    return Err(DomainError::Internal(format!(
+                        "Auth node '{label}' has no resolved credential"
+                    )));
+                }
+                let value = credentials.wire_value(&node.id).unwrap_or_default();
+                Ok(ExecutedNode::plain(CapturedOutput::Value(
+                    VariableValue::simple(value),
+                )))
+            }
         }
     }
 }
@@ -1435,14 +1453,13 @@ fn result_to_step(
             reported_value,
             ..
         }) => {
-            // An Input or Transform node reports its masked value, an Output node its capture.
+            // An Input, Transform or Output node reports its masked value.
             let value = match kind {
-                Some(FlowNodeKind::Input { .. }) | Some(FlowNodeKind::Transform { .. }) => {
-                    reported_value
-                        .clone()
-                        .or_else(|| Some(v.data().to_string()))
-                }
-                Some(FlowNodeKind::Output { .. }) => Some(v.data().to_string()),
+                Some(FlowNodeKind::Input { .. })
+                | Some(FlowNodeKind::Transform { .. })
+                | Some(FlowNodeKind::Output { .. }) => reported_value
+                    .clone()
+                    .or_else(|| Some(v.data().to_string())),
                 _ => None,
             };
             FlowStepResult { value, ..base }
@@ -3070,6 +3087,77 @@ mod tests {
             .expect("the run starts");
 
         assert_eq!(fetcher.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_auth_node_succeeds_without_reporting_its_token_and_an_output_masks_it() {
+        use rocket_shared::types::Auth;
+
+        let flow = Flow {
+            name: "auth-output".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Sign in".to_string(),
+                        auth: Auth::Bearer {
+                            token: "static-token-123456".to_string(),
+                        },
+                        apply_to_inherit: false,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                FlowNode {
+                    id: "b".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "Token".to_string(),
+                    },
+                    position: NodePosition { x: 100.0, y: 0.0 },
+                },
+            ],
+            edges: vec![FlowEdge {
+                id: "e1".to_string(),
+                source_node_id: "a".to_string(),
+                target_node_id: "b".to_string(),
+                target_field: "value".to_string(),
+                expression: "response.body".to_string(),
+                source_handle: rocket_flow::handle::RESULT.to_string(),
+            }],
+            callback_host: None,
+        };
+        let service = service_with_flow(flow);
+        // The engine answers every wire expression with the token, as
+        // `response.body` would for the Auth node's wire value.
+        let exec = service_with_engine(
+            FakeCollectionRepo::new(),
+            Box::new(FixedJsonqEngine {
+                value: serde_json::json!("static-token-123456"),
+            }),
+        );
+
+        let summary = service
+            .run(&exec, run_input("auth-output"))
+            .await
+            .expect("run must succeed");
+
+        let step = |id: &str| {
+            summary
+                .steps
+                .iter()
+                .find(|s| s.node_id == id)
+                .expect("step recorded")
+        };
+        assert_eq!(step("a").status, FlowNodeStatus::Success);
+        assert_eq!(
+            step("a").value,
+            None,
+            "an Auth node never reports its token"
+        );
+        assert_eq!(
+            step("b").value.as_deref(),
+            Some(crate::redaction::REDACTED),
+            "an Output wired to an Auth node shows the token masked"
+        );
     }
 
     #[tokio::test]
