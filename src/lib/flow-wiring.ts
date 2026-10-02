@@ -1,5 +1,6 @@
 import type { Connection } from '@xyflow/react';
 import {
+  AUTH_HANDLE,
   caseIdFromHandle,
   DEFAULT_HANDLE,
   FALSE_HANDLE,
@@ -21,7 +22,9 @@ export function defaultExpressionFor(_sourceNode: FlowNode): string {
 // An If, Switch or Transform `input` and a "Run when" `trigger` carry no wired value, so
 // their edges have no expression to evaluate or edit.
 export function isDataLessTarget(targetHandle: string): boolean {
-  return targetHandle === INPUT_HANDLE || targetHandle === TRIGGER_HANDLE;
+  return (
+    targetHandle === INPUT_HANDLE || targetHandle === TRIGGER_HANDLE || targetHandle === AUTH_HANDLE
+  );
 }
 
 export function shouldPromptForExpression(edge: FlowEdge): boolean {
@@ -62,6 +65,7 @@ function sourceHandleExists(node: FlowNode, handle: string): boolean {
     case 'Input':
     case 'WaitForCallback':
     case 'Transform':
+    case 'Auth':
       return handle === RESULT_HANDLE;
     case 'If':
       return handle === TRUE_HANDLE || handle === FALSE_HANDLE;
@@ -75,7 +79,7 @@ function sourceHandleExists(node: FlowNode, handle: string): boolean {
   }
 }
 
-const REQUEST_TARGETS = ['url', 'headers', 'body', TRIGGER_HANDLE];
+const REQUEST_TARGETS = ['url', 'headers', 'body', TRIGGER_HANDLE, AUTH_HANDLE];
 const OUTPUT_TARGETS = ['value', TRIGGER_HANDLE];
 
 function targetAccepts(node: FlowNode, handle: string): boolean {
@@ -91,6 +95,7 @@ function targetAccepts(node: FlowNode, handle: string): boolean {
     case 'WaitForCallback':
       return handle === TRIGGER_HANDLE;
     case 'Input':
+    case 'Auth':
       return false;
   }
 }
@@ -110,6 +115,11 @@ export function isValidFlowConnection(
   if (!sourceNode || !targetNode) return false;
   if (!sourceHandleExists(sourceNode, connection.sourceHandle ?? RESULT_HANDLE)) return false;
   if (!targetAccepts(targetNode, targetHandle)) return false;
+  // An auth wire comes only from an Auth node, and carries one credential per request.
+  if (targetHandle === AUTH_HANDLE) {
+    if (sourceNode.kind.kind !== 'Auth') return false;
+    if (edges.some((e) => e.targetNodeId === target && e.targetField === AUTH_HANDLE)) return false;
+  }
   // An If, Switch or Transform node evaluates exactly one input.
   if (takesSingleInput(targetNode.kind) && edges.some((e) => e.targetNodeId === target))
     return false;

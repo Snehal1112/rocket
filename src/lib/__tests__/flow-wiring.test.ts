@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { AUTH_HANDLE } from '@/lib/flow-handles';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import {
   buildEdgeFromConnection,
@@ -383,5 +384,47 @@ describe('Transform wiring', () => {
     expect(edge).not.toBeNull();
     expect(edge?.sourceHandle).toBeUndefined();
     expect(edge?.expression).toBe('response.body');
+  });
+});
+
+describe('Auth node wiring', () => {
+  const authNode: FlowNode = {
+    id: 'a',
+    kind: {
+      kind: 'Auth',
+      label: 'Sign in',
+      auth: { authType: 'bearer', token: 't' },
+      applyToInherit: true,
+    },
+    position: { x: 0, y: 0 },
+  };
+  const requestNode: FlowNode = {
+    id: 'r',
+    kind: {
+      kind: 'Request',
+      label: 'Get',
+      source: { type: 'Saved', requestPath: 'x.yml' },
+    },
+    position: { x: 0, y: 0 },
+  };
+
+  it('lets an Auth node feed a Request auth handle', () => {
+    expect(
+      isValidFlowConnection(
+        { source: 'a', target: 'r', sourceHandle: 'result', targetHandle: AUTH_HANDLE },
+        [authNode, requestNode],
+        [],
+      ),
+    ).toBe(true);
+  });
+
+  it('does not let anything wire into an Auth node', () => {
+    expect(
+      isValidFlowConnection(
+        { source: 'r', target: 'a', sourceHandle: 'result', targetHandle: 'url' },
+        [authNode, requestNode],
+        [],
+      ),
+    ).toBe(false);
   });
 });

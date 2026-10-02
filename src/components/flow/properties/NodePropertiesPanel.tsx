@@ -67,6 +67,9 @@ function editorFor(
       return <WaitForCallbackEditor kind={kind} onChange={onChange} />;
     case 'Transform':
       return <TransformNodeEditor kind={kind} onChange={onChange} />;
+    case 'Auth':
+      // Replaced by flow-auth-node plan 05 (frontend node).
+      return <LabelOnlyEditor kind={kind} onChange={onChange} />;
   }
 }
 

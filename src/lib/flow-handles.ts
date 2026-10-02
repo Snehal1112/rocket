@@ -7,6 +7,7 @@ export const FALSE_HANDLE = 'false';
 export const DEFAULT_HANDLE = 'default';
 export const INPUT_HANDLE = 'input';
 export const TRIGGER_HANDLE = 'trigger';
+export const AUTH_HANDLE = 'auth';
 const CASE_PREFIX = 'case:';
 
 export function caseHandle(caseId: string): string {

@@ -1848,6 +1848,14 @@ export type FlowNodeKind =
       label: string;
       /** One expression or a function body that returns a value. It reads `response`. */
       script: string;
+    }
+  | {
+      kind: 'Auth';
+      label: string;
+      /** The auth configuration. A token is never stored here. */
+      auth: Auth;
+      /** When true, every Request in the flow whose auth is inherit uses this credential. */
+      applyToInherit: boolean;
     };
 
 export interface FlowNode {

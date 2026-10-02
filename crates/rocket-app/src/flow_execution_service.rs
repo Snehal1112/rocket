@@ -1273,6 +1273,10 @@ impl FlowExecutionService {
                     ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(text)))
                 })
             }
+            // Replaced by flow-auth-node plan 03 (executor).
+            FlowNodeKind::Auth { label, .. } => Err(DomainError::InvalidInput(format!(
+                "Auth node '{label}' cannot run yet"
+            ))),
         }
     }
 }
