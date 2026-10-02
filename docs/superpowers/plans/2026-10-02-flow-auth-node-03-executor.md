@@ -255,7 +255,7 @@ In `flow_execution_service.rs` `mod tests`, after the Task 1 test, add a helper 
 
 ```rust
     /// An exec service whose HTTP layer records every request it sends.
-    fn recording_exec(executor: &Arc<crate::test_doubles::RecordingExecutor>) -> RequestExecutionService {
+    fn recording_http_exec(executor: &Arc<crate::test_doubles::RecordingExecutor>) -> RequestExecutionService {
         RequestExecutionService::new(
             Box::new(NullEnvRepo),
             Arc::new(SharedExecutor(Arc::clone(executor))),
@@ -312,7 +312,7 @@ In `flow_execution_service.rs` `mod tests`, after the Task 1 test, add a helper 
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let service =
             service_with_saved_request(auth_and_request_flow(true, Vec::new()), Auth::Inherit);
 
@@ -334,7 +334,7 @@ In `flow_execution_service.rs` `mod tests`, after the Task 1 test, add a helper 
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let service =
             service_with_saved_request(auth_and_request_flow(false, Vec::new()), Auth::Inherit);
 
@@ -359,7 +359,7 @@ In `flow_execution_service.rs` `mod tests`, after the Task 1 test, add a helper 
             password: "mine".to_string(),
         };
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let service =
             service_with_saved_request(auth_and_request_flow(true, Vec::new()), own.clone());
 
@@ -437,7 +437,7 @@ After the Task 2 tests, add:
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         // The node does not auto-apply, so only the wire can supply the credential.
         let service = service_with_saved_request(
             auth_and_request_flow(false, vec![auth_wire()]),
@@ -465,7 +465,7 @@ After the Task 2 tests, add:
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let service = service_with_saved_request(
             auth_and_request_flow(false, vec![auth_wire()]),
             Auth::Inherit,

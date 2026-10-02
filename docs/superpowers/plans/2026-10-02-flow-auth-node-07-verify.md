@@ -39,7 +39,7 @@
 - Modify: `crates/rocket-app/src/flow_execution_service.rs` (tests only)
 
 **Interfaces:**
-- Consumes (all from earlier plans): `FakeFetcher`, `SharedFetcher`, `client_credentials()`, `authorization_code()` (`crate::flow_auth::test_support`); `recording_exec`, `auth_and_request_flow`, `service_with_saved_request`, `run_input`, `saved_flow_node` (test helpers added in Plans 2–3 and earlier); `RecordingExecutor::sent_auths()`; `FlowExecutionService::{run, run_with_auth, with_token_fetcher}`.
+- Consumes (all from earlier plans): `FakeFetcher`, `SharedFetcher`, `client_credentials()`, `authorization_code()` (`crate::flow_auth::test_support`); `recording_http_exec`, `auth_and_request_flow`, `service_with_saved_request`, `run_input`, `saved_flow_node` (test helpers added in Plans 2–3 and earlier); `RecordingExecutor::sent_auths()`; `FlowExecutionService::{run, run_with_auth, with_token_fetcher}`.
 - Produces: the regression tests below. No production API.
 
 - [ ] **Step 1: Read the OpenCollection reference**
@@ -173,7 +173,7 @@ Append inside `mod tests` of `flow_execution_service.rs`, after the Plan 3 tests
 
         let fetcher = FakeFetcher::ok("fetched-token-999999");
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let flow = Flow {
             name: "auth-req".to_string(),
             nodes: vec![
@@ -205,7 +205,7 @@ Append inside `mod tests` of `flow_execution_service.rs`, after the Plan 3 tests
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let flow = Flow {
             name: "auth-req".to_string(),
             nodes: vec![
@@ -245,7 +245,7 @@ Append inside `mod tests` of `flow_execution_service.rs`, after the Plan 3 tests
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = recording_exec(&executor);
+        let exec = recording_http_exec(&executor);
         let flow = Flow {
             name: "auth-req".to_string(),
             nodes: vec![
