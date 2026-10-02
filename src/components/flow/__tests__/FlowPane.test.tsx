@@ -16,6 +16,7 @@ import {
   saveFlow,
 } from '@/lib/tauri-api';
 import { useConsoleStore } from '@/stores/console-store';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
@@ -392,6 +393,43 @@ describe('FlowPane run logs', () => {
         expect.objectContaining({ flowName: 'login-flow', globalEnvName: 'g1' }),
       ),
     );
+  });
+
+  it('hands the toolbar a pre-run step that collects tokens for the latest nodes and active env', async () => {
+    const authNode: FlowNode = {
+      id: 'auth1',
+      kind: {
+        kind: 'Auth',
+        label: 'Sign in',
+        auth: { authType: 'bearer', token: '' },
+        applyToInherit: true,
+      },
+      position: { x: 0, y: 0 },
+    } as FlowNode;
+    vi.mocked(getActiveGlobalEnvName).mockReturnValue('g1');
+    vi.mocked(collectFlowAuthTokens).mockResolvedValue({ auth1: { accessToken: 'tok-abcdef123' } });
+    vi.mocked(saveFlow).mockResolvedValue(undefined);
+    vi.mocked(runFlow).mockResolvedValue({ runId: 'r1', stoppedReason: 'completed', steps: [] });
+    useEnvStore.setState({ activeEnvId: 'dev' });
+    // The rendered `tab` prop is stale; the store holds the newer nodes.
+    usePaneStore.getState().updateFlowNodes(logTab.id, [authNode]);
+
+    render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() => expect(runFlow).toHaveBeenCalledTimes(1));
+    expect(collectFlowAuthTokens).toHaveBeenCalledTimes(1);
+    expect(collectFlowAuthTokens).toHaveBeenCalledWith({
+      collection: 'demo',
+      flowName: 'login-flow',
+      nodes: [authNode],
+      environmentName: 'dev',
+      globalEnvName: 'g1',
+    });
+    expect(runFlow).toHaveBeenCalledWith('demo', 'login-flow', 'dev', 'g1', {
+      auth1: { accessToken: 'tok-abcdef123' },
+    });
+    useEnvStore.setState({ activeEnvId: null });
   });
 
   const runWithDebug = async (debugRequest: object, error: string | null = null) => {
