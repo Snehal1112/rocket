@@ -467,6 +467,8 @@ fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult
 ///   header whose key matches `Name` case-insensitively, or appends a new
 ///   header when none matches. This is the form the Flow UI uses, because it
 ///   does not know a saved request's header order.
+/// - `"auth"` wires are applied by the `Request` arm before this function runs
+///   and are skipped here, because they carry a credential rather than a value.
 ///
 /// A wired header is always enabled, so the wire takes effect. Any other
 /// path is a `DomainError` — never a silent no-op, since a wire the user drew
@@ -1176,6 +1178,21 @@ impl FlowExecutionService {
 
                 let mut resolved = HashMap::new();
                 for edge in data_edges {
+                    // An auth wire carries a credential, not a value, so it has
+                    // no expression to evaluate. It wins over inherit and over
+                    // the request's own auth.
+                    if edge.target_field == handle::AUTH {
+                        request_input.auth = credentials
+                            .auth_for_node(&edge.source_node_id)
+                            .cloned()
+                            .ok_or_else(|| {
+                                DomainError::Internal(format!(
+                                    "edge '{}': node '{}' has no credential",
+                                    edge.id, edge.source_node_id
+                                ))
+                            })?;
+                        continue;
+                    }
                     let source_output = captured_source(node, edge, captured)?;
                     let outcome = exec
                         .resolve_flow_wire_expression(
@@ -3280,6 +3297,69 @@ mod tests {
             .expect("run must succeed");
 
         assert_eq!(executor.sent_auths(), vec![own]);
+    }
+
+    fn auth_wire() -> FlowEdge {
+        FlowEdge {
+            id: "e1".to_string(),
+            source_node_id: "a".to_string(),
+            target_node_id: "r".to_string(),
+            target_field: rocket_flow::handle::AUTH.to_string(),
+            expression: String::new(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_auth_wire_sets_the_requests_auth_over_its_own() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        // The node does not auto-apply, so only the wire can supply the credential.
+        let service = service_with_saved_request(
+            auth_and_request_flow(false, vec![auth_wire()]),
+            Auth::Basic {
+                username: "own".to_string(),
+                password: "own".to_string(),
+            },
+        );
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "flow-token-123456".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_auth_wire_also_beats_inherit() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let service = service_with_saved_request(
+            auth_and_request_flow(false, vec![auth_wire()]),
+            Auth::Inherit,
+        );
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "flow-token-123456".to_string()
+            }]
+        );
     }
     #[tokio::test]
     async fn a_run_resolves_a_global_env_placeholder_in_an_inline_requests_url() {
