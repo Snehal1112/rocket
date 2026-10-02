@@ -42,6 +42,21 @@ export function flowAuthKey(
   return `${collection}::${flowName}::${environmentName || ''}::${globalEnvironmentName || ''}::${nodeId}`;
 }
 
+/**
+ * True when `key` (from `flowAuthKey`) belongs to the flow, and, when `nodeId`
+ * is given, to that node in any environment. The node id is the last segment
+ * and must equal `nodeId` exactly, so node "a" never matches node "ba".
+ */
+export function flowAuthKeyMatches(
+  key: string,
+  collection: string,
+  flowName: string,
+  nodeId?: string,
+): boolean {
+  if (!key.startsWith(`${collection}::${flowName}::`)) return false;
+  return nodeId === undefined || key.endsWith(`::${nodeId}`);
+}
+
 export function isOAuth2(auth: Auth): boolean {
   return asRecord(auth).authType === 'o-auth2';
 }

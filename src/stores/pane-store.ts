@@ -23,6 +23,7 @@ import {
   renameRequest,
 } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
+import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type {
   ChatMessage,
   CollectionSection,
@@ -316,6 +317,20 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // Best-effort session cleanup for the tab being closed.
     if (found) endSessionIfActive(found.tab);
+
+    // A flow's in-memory Auth tokens go with its last open tab. Another tab
+    // of the same flow keeps them.
+    if (found && isFlowTab(found.tab) && found.tab.collectionName && found.tab.flowName) {
+      const { collectionName, flowName } = found.tab;
+      const stillOpen = collectAllTabs(root).some(
+        (t) =>
+          t.id !== tabId &&
+          isFlowTab(t) &&
+          t.collectionName === collectionName &&
+          t.flowName === flowName,
+      );
+      if (!stillOpen) useFlowAuthStore.getState().clearFlow(collectionName, flowName);
+    }
 
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);

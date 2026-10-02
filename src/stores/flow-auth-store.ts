@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { flowAuthKeyMatches } from '@/lib/flow-auth';
 import type { AuthState } from '@/types/pane-types';
 
 /**
@@ -21,6 +22,10 @@ interface FlowAuthStore {
   getAuth: (key: string) => AuthState | undefined;
   getEntry: (key: string) => FlowAuthEntry | undefined;
   clearAuth: (key: string) => void;
+  /** Removes one node's entries in every environment variant. */
+  clearNode: (collection: string, flowName: string, nodeId: string) => void;
+  /** Removes every entry of a flow. */
+  clearFlow: (collection: string, flowName: string) => void;
 }
 
 export const useFlowAuthStore = create<FlowAuthStore>()((set, get) => ({
@@ -42,4 +47,23 @@ export const useFlowAuthStore = create<FlowAuthStore>()((set, get) => ({
     const { [key]: _removed, ...rest } = get().auths;
     set({ auths: rest });
   },
+
+  clearNode(collection, flowName, nodeId) {
+    removeWhere(set, get, (key) => flowAuthKeyMatches(key, collection, flowName, nodeId));
+  },
+
+  clearFlow(collection, flowName) {
+    removeWhere(set, get, (key) => flowAuthKeyMatches(key, collection, flowName));
+  },
 }));
+
+function removeWhere(
+  set: (partial: { auths: Record<string, FlowAuthEntry> }) => void,
+  get: () => FlowAuthStore,
+  match: (key: string) => boolean,
+) {
+  const current = get().auths;
+  const keys = Object.keys(current);
+  if (!keys.some(match)) return;
+  set({ auths: Object.fromEntries(keys.filter((k) => !match(k)).map((k) => [k, current[k]])) });
+}

@@ -40,6 +40,7 @@ import { FlowCanvas } from './FlowCanvas';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
 import { NodePropertiesPanel, type PanelTab } from './properties/NodePropertiesPanel';
+import { useClearRemovedAuthTokens } from './useClearRemovedAuthTokens';
 import { WireScriptDialog } from './WireScriptDialog';
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
@@ -101,6 +102,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     setPanelNodeId(nodeId);
     setPanelFocusRequest({ nodeId });
   }, []);
+  // A removed Auth node's in-memory token goes with it.
+  useClearRemovedAuthTokens(tab.collectionName, tab.flowName, tab.nodes);
   // A deleted node closes its panel.
   useEffect(() => {
     setPanelNodeId((current) =>
