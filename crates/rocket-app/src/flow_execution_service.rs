@@ -8004,10 +8004,29 @@ mod tests {
             "got: {}",
             response.body
         );
+        // The sent request's record shows that a Bearer was used, never its value.
+        let auth_header = debug
+            .headers
+            .iter()
+            .find(|h| h.key == "Authorization")
+            .expect("the record names the auth in use");
+        assert_eq!(
+            auth_header.value,
+            format!("Bearer {}", crate::redaction::REDACTED)
+        );
+        assert!(
+            debug.headers.iter().all(|h| !h.value.contains(token)),
+            "a request header leaked the token: {:?}",
+            debug.headers
+        );
+        let events = publisher.events();
+        // Without events the event half of the check below passes vacuously.
+        assert!(!events.is_empty(), "the run must publish events");
         let everything = format!(
-            "{}\n{:?}",
+            "{}\n{}\n{:?}",
             serde_json::to_string(&summary).expect("serialize summary"),
-            publisher.events()
+            serde_json::to_string(&events).expect("serialize events"),
+            events
         );
         assert!(
             !everything.contains(token),

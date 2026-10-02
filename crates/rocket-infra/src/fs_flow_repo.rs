@@ -583,8 +583,110 @@ mod tests {
         assert_eq!(repo.get("acme", "Auth Flow").expect("get"), flow);
 
         let raw = serde_yaml::to_string(&flow).expect("serialize flow to yaml");
-        assert!(!raw.to_lowercase().contains("accesstoken:"), "got: {raw}");
+        // The Auth config is on disk (so the key checks below see real output)...
+        assert!(raw.contains("accessTokenUrl"), "got: {raw}");
         assert!(raw.contains("{{clientSecret}}"), "got: {raw}");
+        // ...but no key that could hold a fetched token.
+        let value: serde_yaml::Value = serde_yaml::from_str(&raw).expect("parse yaml");
+        let mut keys = Vec::new();
+        collect_yaml_keys(&value, &mut keys);
+        assert!(
+            keys.iter().any(|k| k == "accessTokenUrl"),
+            "the key walk reaches the Auth config, keys: {keys:?}"
+        );
+        for forbidden in ["accessToken", "access_token", "refreshToken", "token"] {
+            assert!(
+                !keys.iter().any(|k| k == forbidden),
+                "key {forbidden} persisted, keys: {keys:?}"
+            );
+        }
+    }
+
+    /// Every mapping key anywhere in `value`.
+    fn collect_yaml_keys(value: &serde_yaml::Value, keys: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) => {
+                for (key, child) in map {
+                    if let Some(key) = key.as_str() {
+                        keys.push(key.to_string());
+                    }
+                    collect_yaml_keys(child, keys);
+                }
+            }
+            serde_yaml::Value::Sequence(items) => {
+                for item in items {
+                    collect_yaml_keys(item, keys);
+                }
+            }
+            serde_yaml::Value::Tagged(tagged) => collect_yaml_keys(&tagged.value, keys),
+            _ => {}
+        }
+    }
+
+    /// A flow file written before Auth nodes existed: Input, Request and
+    /// Output nodes and one edge, in the on-disk shape existing flows use.
+    const LEGACY_FLOW_YAML: &str = "\
+name: Legacy Flow
+nodes:
+- id: in1
+  kind:
+    kind: Input
+    label: Username
+    value: alice
+  position:
+    x: 0.0
+    y: 0.0
+- id: req1
+  kind:
+    kind: Request
+    label: Get user
+    source:
+      type: Saved
+      request_path: users/get-user.yml
+  position:
+    x: 200.0
+    y: 0.0
+- id: out1
+  kind:
+    kind: Output
+    label: Result
+  position:
+    x: 400.0
+    y: 0.0
+edges:
+- id: e1
+  source_node_id: req1
+  target_node_id: out1
+  target_field: value
+  expression: response.body
+";
+
+    #[test]
+    fn a_legacy_flow_without_auth_nodes_loads_and_reserializes_unchanged() {
+        let flow: Flow = serde_yaml::from_str(LEGACY_FLOW_YAML).expect("legacy flow loads");
+        assert_eq!(flow.nodes.len(), 3);
+        assert_eq!(flow.edges.len(), 1);
+        assert!(matches!(flow.nodes[0].kind, FlowNodeKind::Input { .. }));
+        assert!(matches!(flow.nodes[1].kind, FlowNodeKind::Request { .. }));
+        assert!(matches!(flow.nodes[2].kind, FlowNodeKind::Output { .. }));
+
+        let resaved = serde_yaml::to_string(&flow).expect("serialize");
+        let reloaded: Flow = serde_yaml::from_str(&resaved).expect("re-load");
+        assert_eq!(reloaded, flow);
+    }
+
+    #[test]
+    fn a_legacy_flow_file_loads_through_the_repo() {
+        let (dir, repo) = setup();
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(&flows_dir).expect("create flows dir");
+        fs::write(flows_dir.join("legacy-flow.yml"), LEGACY_FLOW_YAML).expect("write legacy file");
+
+        let loaded = repo.get("acme", "Legacy Flow").expect("load legacy file");
+        let parsed: Flow = serde_yaml::from_str(LEGACY_FLOW_YAML).expect("parse");
+        assert_eq!(loaded, parsed);
+        repo.save("acme", &loaded).expect("re-save");
+        assert_eq!(repo.get("acme", "Legacy Flow").expect("reload"), loaded);
     }
 
     #[test]
