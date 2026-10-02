@@ -1170,6 +1170,9 @@ impl FlowExecutionService {
                 // Callback URLs (`{{callback.<name>}}`) resolve in every
                 // field and script of every request in the run.
                 request_input.flow_vars = callbacks.vars().clone();
+                // A request set to inherit uses the flow's Auth node, when one
+                // applies. A request with its own auth keeps it.
+                credentials.apply_to_inherit(&mut request_input.auth);
 
                 let mut resolved = HashMap::new();
                 for edge in data_edges {
@@ -3160,6 +3163,124 @@ mod tests {
         );
     }
 
+    /// An exec service whose HTTP layer records every request it sends.
+    fn recording_http_exec(
+        executor: &Arc<crate::test_doubles::RecordingExecutor>,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+    }
+
+    /// A flow of one Auth node (Bearer, `apply_to_inherit` as given) and one
+    /// saved Request node `r` that reads `req.yml`.
+    fn auth_and_request_flow(apply_to_inherit: bool, edges: Vec<FlowEdge>) -> Flow {
+        Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Sign in".to_string(),
+                        auth: rocket_shared::types::Auth::Bearer {
+                            token: "flow-token-123456".to_string(),
+                        },
+                        apply_to_inherit,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                saved_flow_node("r", "req.yml"),
+            ],
+            edges,
+            callback_host: None,
+        }
+    }
+
+    /// A service whose collection holds `req.yml` with the given auth.
+    fn service_with_saved_request(
+        flow: Flow,
+        request_auth: rocket_shared::types::Auth,
+    ) -> FlowExecutionService {
+        let mut saved = Request::new("Get", HttpMethod::Get, "https://api.example.com/x");
+        saved.runtime_auth = Some(request_auth);
+        FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved)),
+            Box::new(NullEventPublisher),
+        )
+    }
+
+    #[tokio::test]
+    async fn an_inherit_request_uses_the_flows_auto_apply_credential() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let service =
+            service_with_saved_request(auth_and_request_flow(true, Vec::new()), Auth::Inherit);
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "flow-token-123456".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_inherit_request_is_left_alone_when_the_node_does_not_apply() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let service =
+            service_with_saved_request(auth_and_request_flow(false, Vec::new()), Auth::Inherit);
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::None],
+            "inherit with no collection auth resolves to none"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_with_its_own_auth_is_never_replaced_by_auto_apply() {
+        use rocket_shared::types::Auth;
+
+        let own = Auth::Basic {
+            username: "mine".to_string(),
+            password: "mine".to_string(),
+        };
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let service =
+            service_with_saved_request(auth_and_request_flow(true, Vec::new()), own.clone());
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(executor.sent_auths(), vec![own]);
+    }
     #[tokio::test]
     async fn a_run_resolves_a_global_env_placeholder_in_an_inline_requests_url() {
         let mut global_env = rocket_environment::Environment::new("shared-global");

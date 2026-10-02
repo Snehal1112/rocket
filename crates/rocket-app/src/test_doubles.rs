@@ -341,6 +341,7 @@ impl CookieRepository for NullCookieRepo {
 /// fails with a transport error instead.
 pub struct RecordingExecutor {
     sent: Mutex<Vec<String>>,
+    sent_auth: Mutex<Vec<rocket_shared::types::Auth>>,
     statuses: Mutex<HashMap<String, u16>>,
 }
 
@@ -348,6 +349,7 @@ impl RecordingExecutor {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
+            sent_auth: Mutex::new(Vec::new()),
             statuses: Mutex::new(HashMap::new()),
         })
     }
@@ -363,12 +365,16 @@ impl RecordingExecutor {
     pub fn sent_urls(&self) -> Vec<String> {
         self.sent.lock().expect("lock").clone()
     }
+    pub fn sent_auths(&self) -> Vec<rocket_shared::types::Auth> {
+        self.sent_auth.lock().expect("lock").clone()
+    }
 }
 
 #[async_trait]
 impl HttpExecutor for RecordingExecutor {
     async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
         self.sent.lock().expect("lock").push(req.url.clone());
+        self.sent_auth.lock().expect("lock").push(req.auth.clone());
         let status = self
             .statuses
             .lock()
