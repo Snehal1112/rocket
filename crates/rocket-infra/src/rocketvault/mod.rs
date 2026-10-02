@@ -8,6 +8,10 @@ use serde::Deserialize;
 // The certificate contract. Its export half is first used in Task B3, which removes this allow.
 #[allow(dead_code)]
 mod certificate_api;
+// `certificate_id` and `forget_certificate_id` are first used outside tests in Task B3, which
+// removes this allow.
+#[allow(dead_code)]
+mod certificates;
 
 /// Minimum token TTL enforced client-side, even when the server reports
 /// `expires_in: 0` — mirrors the reference Go client's floor in
@@ -100,6 +104,9 @@ pub struct ReqwestVaultSecretFetcher {
     /// ever rebuilt on a request path.
     http_insecure: reqwest::Client,
     tokens: DashMap<String, TokenCache>,
+    /// Certificate name to id, per connection and vault (see `certificates.rs`). An id is not a
+    /// secret. Certificate material is never cached.
+    certificate_ids: DashMap<String, String>,
 }
 
 impl ReqwestVaultSecretFetcher {
@@ -132,6 +139,7 @@ impl ReqwestVaultSecretFetcher {
             http,
             http_insecure,
             tokens: DashMap::new(),
+            certificate_ids: DashMap::new(),
         }
     }
 
@@ -337,7 +345,7 @@ fn validate_base_url(connection: &SecretManagerConnection) -> DomainResult<()> {
     Ok(())
 }
 
-use rocket_environment::{ExternalSecretRef, VaultSecretFetcher};
+use rocket_environment::{ExternalSecretRef, VaultCertificateSummary, VaultSecretFetcher};
 
 /// Deserialization target for one entry inside a RocketVault list-secrets
 /// response's `secrets` array. Deliberately has no `value` field —
@@ -485,6 +493,19 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
         self.list_secrets(connection, client_secret, vault_name)
             .await?;
         Ok(())
+    }
+
+    async fn list_certificates(
+        &self,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        vault_name: &str,
+    ) -> DomainResult<Vec<VaultCertificateSummary>> {
+        let listed = self
+            .list_certificate_pages(connection, client_secret, vault_name, None)
+            .await?;
+        self.remember_certificate_ids(connection, vault_name, &listed);
+        Ok(listed)
     }
 }
 
