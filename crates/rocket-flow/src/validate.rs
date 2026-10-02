@@ -1,5 +1,5 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V13). Rules run in table order and the first violation found
+//! §7 (rules V1-V14). Rules run in table order and the first violation found
 //! is returned, so the same file always yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
@@ -58,6 +58,7 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
             )
         })
     })?;
+    check_single_auth_wire(flow)?;
     check_edges(flow, &kinds, |edge, target, _| {
         (matches!(target, FlowNodeKind::WaitForCallback { .. })
             && edge.target_field != handle::TRIGGER)
@@ -171,6 +172,21 @@ where
             return Err(FlowGraphError::InvalidEdge {
                 edge_id: edge.id.clone(),
                 reason,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// V14: a Request node has at most one incoming `auth` wire. The later edge in
+/// file order is the one reported.
+fn check_single_auth_wire(flow: &Flow) -> Result<(), FlowGraphError> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    for edge in flow.edges.iter().filter(|e| e.target_field == handle::AUTH) {
+        if !seen.insert(edge.target_node_id.as_str()) {
+            return Err(FlowGraphError::InvalidEdge {
+                edge_id: edge.id.clone(),
+                reason: format!("a Request node can take only one '{}' wire", handle::AUTH),
             });
         }
     }
@@ -1170,6 +1186,39 @@ mod tests {
         let f = flow(
             vec![auth_node("a", bearer(), true), request("r")],
             vec![edge("e1", "a", handle::RESULT, "r", handle::AUTH)],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn v14_two_auth_wires_into_one_request_are_rejected_at_the_second() {
+        let f = flow(
+            vec![
+                auth_node("a", bearer(), true),
+                auth_node("b", bearer(), false),
+                request("r"),
+            ],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "b", handle::RESULT, "r", handle::AUTH),
+            ],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e2");
+    }
+
+    #[test]
+    fn v14_auth_wires_into_different_requests_are_valid() {
+        let f = flow(
+            vec![
+                auth_node("a", bearer(), true),
+                auth_node("b", bearer(), false),
+                request("r1"),
+                request("r2"),
+            ],
+            vec![
+                edge("e1", "a", handle::RESULT, "r1", handle::AUTH),
+                edge("e2", "b", handle::RESULT, "r2", handle::AUTH),
+            ],
         );
         assert!(validate(&f).is_ok(), "{:?}", validate(&f));
     }

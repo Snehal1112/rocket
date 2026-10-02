@@ -31,7 +31,7 @@ cargo test -p rocket-flow -j4
 | `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch/WaitForCallback/Transform/Auth), `SwitchCase`, `RepeatUntil`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
-| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V13 (spec §7, listed in the file header) |
+| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V14 (spec §7, listed in the file header) |
 
 ### Key Design Points
 
@@ -64,5 +64,6 @@ run. It has no inputs and one `result` exit. `auth` is any `rocket_shared`
 token. Validation (`validate.rs`): no wires into an Auth node; an `auth` wire
 (`handle::AUTH`) must go from an Auth node into a Request node; and
 `check_auth_nodes` (V13) requires a concrete auth type on every Auth node and
-at most one Auth node with `apply_to_inherit = true`. Only V13 is labelled in
-the code; the two wire rules are inline `check_edges` closures.
+at most one Auth node with `apply_to_inherit = true`. `check_single_auth_wire` (V14) allows at most one `auth` wire into a Request.
+V13 and V14 are labelled in the code; the other wire rules are inline
+`check_edges` closures.
