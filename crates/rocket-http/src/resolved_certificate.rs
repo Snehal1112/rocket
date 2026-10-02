@@ -6,7 +6,18 @@
 
 use std::fmt;
 
+use rocket_shared::certificate::VaultCertificateFormat;
 use zeroize::Zeroizing;
+
+/// The RocketVault connection and vault behind an External Secrets binding, copied from the
+/// environment when the certificate is resolved. Names and ids only, never a secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultCertificateBinding {
+    /// The binding alias, used in messages.
+    pub alias: String,
+    pub connection_id: String,
+    pub vault_name: String,
+}
 
 /// Where one piece of material (certificate, private key or PKCS12 bundle) comes from.
 #[derive(Clone)]
@@ -31,6 +42,14 @@ pub enum CertificateMaterial {
     },
     /// The material could not be resolved. Selecting this certificate fails with `reason`.
     Unavailable { reason: String },
+    /// A RocketVault certificate that `rocket-app` exports only when it is selected for a URL.
+    /// It holds names, never material. The executor does not load it: one that reaches the
+    /// executor is an error.
+    Deferred {
+        binding: VaultCertificateBinding,
+        certificate: String,
+        format: VaultCertificateFormat,
+    },
 }
 
 /// A client certificate with its domain, ready for the executor.
@@ -79,6 +98,27 @@ impl ResolvedClientCertificate {
             },
         }
     }
+
+    pub fn deferred(
+        domain: impl Into<String>,
+        binding: VaultCertificateBinding,
+        certificate: impl Into<String>,
+        format: VaultCertificateFormat,
+    ) -> Self {
+        Self {
+            domain: domain.into(),
+            material: CertificateMaterial::Deferred {
+                binding,
+                certificate: certificate.into(),
+                format,
+            },
+        }
+    }
+
+    /// True while the material is a RocketVault certificate that has not been fetched yet.
+    pub fn is_deferred(&self) -> bool {
+        matches!(self.material, CertificateMaterial::Deferred { .. })
+    }
 }
 
 /// Prints `<redacted>` in place of a passphrase.
@@ -123,6 +163,16 @@ impl fmt::Debug for CertificateMaterial {
             CertificateMaterial::Unavailable { reason } => f
                 .debug_struct("Unavailable")
                 .field("reason", reason)
+                .finish(),
+            CertificateMaterial::Deferred {
+                binding,
+                certificate,
+                format,
+            } => f
+                .debug_struct("Deferred")
+                .field("binding", &binding.alias)
+                .field("certificate", certificate)
+                .field("format", &format.as_str())
                 .finish(),
         }
     }
@@ -226,5 +276,54 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn prod_binding() -> VaultCertificateBinding {
+        VaultCertificateBinding {
+            alias: "prod".into(),
+            connection_id: "conn-1".into(),
+            vault_name: "prod-vault".into(),
+        }
+    }
+
+    #[test]
+    fn a_deferred_certificate_shows_its_names_and_holds_no_material() {
+        let cert = ResolvedClientCertificate::deferred(
+            "api.example.com",
+            prod_binding(),
+            "client-a",
+            VaultCertificateFormat::Pkcs12,
+        );
+        assert_eq!(cert.domain, "api.example.com");
+        match &cert.material {
+            CertificateMaterial::Deferred {
+                binding,
+                certificate,
+                format,
+            } => {
+                assert_eq!(binding, &prod_binding());
+                assert_eq!(certificate, "client-a");
+                assert_eq!(*format, VaultCertificateFormat::Pkcs12);
+            }
+            other => panic!("unexpected material {other:?}"),
+        }
+        let shown = format!("{cert:?}");
+        assert!(shown.contains("Deferred"), "{shown}");
+        assert!(shown.contains("prod"), "{shown}");
+        assert!(shown.contains("client-a"), "{shown}");
+        assert!(shown.contains("pkcs12"), "{shown}");
+    }
+
+    #[test]
+    fn is_deferred_is_true_only_for_deferred_material() {
+        let deferred = ResolvedClientCertificate::deferred(
+            "a",
+            prod_binding(),
+            "client-a",
+            VaultCertificateFormat::Pem,
+        );
+        assert!(deferred.is_deferred());
+        assert!(!ResolvedClientCertificate::unavailable("a", "gone").is_deferred());
+        assert!(!ResolvedClientCertificate::pkcs12("a", inline(&[1, 2]), None).is_deferred());
     }
 }

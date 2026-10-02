@@ -525,6 +525,7 @@ fn build_client_with_identity(
 /// The TLS backend is the platform one (native-tls), which loads PKCS12 bundles and
 /// unencrypted PKCS#8 PEM keys. An encrypted PKCS#8 key is decrypted in memory first.
 /// `Unavailable` material fails with its reason, since this certificate was selected.
+/// `Deferred` material fails too: rocket-app must have fetched it before the send.
 fn load_identity(cert: &ResolvedClientCertificate) -> DomainResult<reqwest::Identity> {
     match &cert.material {
         CertificateMaterial::Pkcs12 { bundle, passphrase } => {
@@ -561,6 +562,18 @@ fn load_identity(cert: &ResolvedClientCertificate) -> DomainResult<reqwest::Iden
         CertificateMaterial::Unavailable { reason } => {
             Err(DomainError::InvalidInput(reason.clone()))
         }
+        // rocket-app fetches a RocketVault certificate before the send. One that is still
+        // deferred here was never fetched, so the request must fail instead of going out
+        // without the certificate.
+        CertificateMaterial::Deferred {
+            binding,
+            certificate,
+            ..
+        } => Err(DomainError::InvalidInput(format!(
+            "The RocketVault certificate {certificate} (binding {}) for {} was not fetched \
+             before the request was sent.",
+            binding.alias, cert.domain
+        ))),
     }
 }
 
@@ -2095,6 +2108,83 @@ mod mtls_tests {
                 .expect_err("a selected unavailable certificate is an error")
                 .to_string();
             assert!(err.contains("vault.missing"), "{err}");
+        }
+    }
+
+    mod deferred_certificates {
+        use super::*;
+        use rocket_http::{ResolvedClientCertificate, TokenClientProvider, VaultCertificateBinding};
+        use rocket_shared::certificate::VaultCertificateFormat;
+
+        fn deferred(domain: &str) -> ResolvedClientCertificate {
+            ResolvedClientCertificate::deferred(
+                domain,
+                VaultCertificateBinding {
+                    alias: "prod".into(),
+                    connection_id: "conn-1".into(),
+                    vault_name: "prod-vault".into(),
+                },
+                "client-a",
+                VaultCertificateFormat::Pem,
+            )
+        }
+
+        // Spec section 10, mutation check: if the executor ever skipped a Deferred entry, the
+        // request would go out, here with the valid certificate listed second.
+        #[tokio::test]
+        async fn a_selected_deferred_certificate_fails_the_request_and_nothing_is_sent() {
+            let server = ok_server().await;
+            let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+            req.options.client_certificates = vec![
+                deferred("127.0.0.1"),
+                p12("127.0.0.1", fixture("client.p12"), Some("changeit")),
+            ];
+            let err = ReqwestExecutor::new()
+                .execute(&req)
+                .await
+                .expect_err("a selected deferred certificate is an error");
+            assert!(
+                matches!(&err, DomainError::InvalidInput(m)
+                    if m.contains("client-a") && m.contains("binding prod") && m.contains("was not fetched")),
+                "{err:?}"
+            );
+            assert!(server
+                .received_requests()
+                .await
+                .expect("requests recorded")
+                .is_empty());
+        }
+
+        #[tokio::test]
+        async fn a_deferred_certificate_for_another_domain_does_not_block_the_request() {
+            let server = ok_server().await;
+            let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
+            req.options.client_certificates = vec![deferred("other.example.com")];
+            let resp = ReqwestExecutor::new()
+                .execute(&req)
+                .await
+                .expect("an entry for another domain is not selected");
+            assert_eq!(resp.status, 200);
+        }
+
+        #[test]
+        fn the_token_client_fails_on_a_selected_deferred_certificate_only() {
+            let provider = ReqwestTokenClientProvider;
+            let certs = [deferred("idp.example.com")];
+            assert!(provider
+                .client_for("https://other.example.com/token", true, &certs)
+                .is_ok());
+            let err = provider
+                .client_for("https://idp.example.com/token", true, &certs)
+                .expect_err("a selected deferred certificate is an error")
+                .to_string();
+            assert!(err.contains("was not fetched"), "{err}");
+        }
+
+        #[test]
+        fn load_identity_never_skips_a_deferred_certificate() {
+            let err = load_identity(&deferred("x")).expect_err("deferred material cannot load");
+            assert!(err.to_string().contains("was not fetched"), "{err}");
         }
     }
 

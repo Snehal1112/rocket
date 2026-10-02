@@ -262,7 +262,8 @@ fn inline_from_secret(
     }
 }
 
-/// One line per certificate, for test assertions: `pkcs12 <domain> file:<path> pass:<value>`.
+/// One line per certificate, for test assertions: `pkcs12 <domain> file:<path> pass:<value>`,
+/// or `deferred <domain> <alias>:<name> <format> conn:<id> vault:<name>`.
 /// It prints the passphrase, so it only exists in tests.
 #[cfg(test)]
 pub(crate) fn describe_all(certs: &[ResolvedClientCertificate]) -> Vec<String> {
@@ -294,6 +295,19 @@ pub(crate) fn describe_all(certs: &[ResolvedClientCertificate]) -> Vec<String> {
             CertificateMaterial::Unavailable { reason } => {
                 format!("unavailable {} {reason}", c.domain)
             }
+            CertificateMaterial::Deferred {
+                binding,
+                certificate,
+                format: kind,
+            } => format!(
+                "deferred {} {}:{} {} conn:{} vault:{}",
+                c.domain,
+                binding.alias,
+                certificate,
+                kind.as_str(),
+                binding.connection_id,
+                binding.vault_name
+            ),
         })
         .collect()
 }

@@ -3108,6 +3108,7 @@ mod tests {
                 } => vec![path(certificate), path(private_key)],
                 CertificateMaterial::Pkcs12 { bundle, .. } => vec![path(bundle)],
                 CertificateMaterial::Unavailable { .. } => Vec::new(),
+                CertificateMaterial::Deferred { .. } => Vec::new(),
             })
             .collect()
     }

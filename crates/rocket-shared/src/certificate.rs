@@ -1,5 +1,25 @@
 use serde::{Deserialize, Serialize};
 
+/// How a RocketVault certificate is exported: PEM text (the certificate chain and an
+/// unencrypted PKCS#8 key) or a PKCS12 bundle. Persisted as `pem` or `pkcs12`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VaultCertificateFormat {
+    #[default]
+    Pem,
+    Pkcs12,
+}
+
+impl VaultCertificateFormat {
+    /// The persisted and wire name: `pem` or `pkcs12`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VaultCertificateFormat::Pem => "pem",
+            VaultCertificateFormat::Pkcs12 => "pkcs12",
+        }
+    }
+}
+
 /// Client certificate — PEM or PKCS12 format, discriminated by `type` field.
 ///
 /// Each piece of material comes from a file path or from a RocketVault reference
@@ -248,5 +268,21 @@ mod tests {
         assert!(shown.contains("vault.clientCertPem"), "{shown}");
         assert!(shown.contains("<redacted>"), "{shown}");
         assert!(!shown.contains("hunter2"), "{shown}");
+    }
+
+    #[test]
+    fn vault_certificate_format_uses_lowercase_names_and_defaults_to_pem() {
+        assert_eq!(
+            serde_json::to_string(&VaultCertificateFormat::Pkcs12).expect("serialize"),
+            "\"pkcs12\""
+        );
+        assert_eq!(
+            serde_json::from_str::<VaultCertificateFormat>("\"pem\"").expect("deserialize"),
+            VaultCertificateFormat::Pem
+        );
+        assert_eq!(VaultCertificateFormat::default(), VaultCertificateFormat::Pem);
+        assert!(serde_json::from_str::<VaultCertificateFormat>("\"der\"").is_err());
+        assert_eq!(VaultCertificateFormat::Pem.as_str(), "pem");
+        assert_eq!(VaultCertificateFormat::Pkcs12.as_str(), "pkcs12");
     }
 }

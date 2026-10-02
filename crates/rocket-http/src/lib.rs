@@ -31,6 +31,8 @@ pub use oauth2::{
 };
 pub use pkce::{generate_pkce, PkcePair};
 pub use request::{HttpRequest, RequestOptions};
-pub use resolved_certificate::{CertificateMaterial, CertificateSource, ResolvedClientCertificate};
+pub use resolved_certificate::{
+    CertificateMaterial, CertificateSource, ResolvedClientCertificate, VaultCertificateBinding,
+};
 pub use response::HttpResponse;
 pub use token_client::TokenClientProvider;
