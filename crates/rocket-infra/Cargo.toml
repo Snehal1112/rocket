@@ -42,6 +42,8 @@ keyring.workspace = true
 # only for reading old keys the user already has, never for writing.
 pkcs8 = { version = "0.10", features = ["encryption", "pem", "std", "3des", "sha1-insecure"] }
 zeroize = "1"
+# The one-time PKCS12 export password comes from the OS random generator.
+rand = "0.8"
 agent-client-protocol = "2.2"
 async-process = "2"
 futures-lite = "2"

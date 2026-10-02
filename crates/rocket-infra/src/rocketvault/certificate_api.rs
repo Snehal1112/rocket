@@ -6,7 +6,9 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::StatusCode;
-use rocket_environment::{SecretManagerConnection, VaultCertificateMaterial, VaultCertificateSummary};
+use rocket_environment::{
+    SecretManagerConnection, VaultCertificateMaterial, VaultCertificateSummary,
+};
 use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
@@ -83,7 +85,7 @@ struct RawCertificateSummary {
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
-    key_algorithm: String,
+    key_algorithm: Option<String>,
     #[serde(default)]
     expires_at: Option<String>,
 }
@@ -106,7 +108,9 @@ pub(super) struct CertificatePage {
 /// Decodes a list page. A list never carries key material, so the decoder's message is kept.
 pub(super) fn parse_certificate_page(body: &[u8]) -> DomainResult<CertificatePage> {
     let raw: RawCertificatePage = serde_json::from_slice(body).map_err(|e| {
-        DomainError::Http(format!("failed to decode RocketVault certificate list: {e}"))
+        DomainError::Http(format!(
+            "failed to decode RocketVault certificate list: {e}"
+        ))
     })?;
     Ok(CertificatePage {
         certificates: raw
@@ -117,7 +121,7 @@ pub(super) fn parse_certificate_page(body: &[u8]) -> DomainResult<CertificatePag
                 name: c.name,
                 exportable: c.exportable,
                 enabled: c.enabled,
-                key_algorithm: c.key_algorithm,
+                key_algorithm: c.key_algorithm.unwrap_or_default(),
                 expires_at: c.expires_at,
             })
             .collect(),
@@ -183,7 +187,7 @@ pub(super) fn export_request_body(
 #[derive(Deserialize)]
 struct RawExport {
     #[serde(default)]
-    key_algorithm: String,
+    key_algorithm: Option<String>,
     #[serde(default)]
     certificate_pem: Option<String>,
     #[serde(default)]
@@ -207,6 +211,7 @@ pub(super) fn parse_export(
     } = serde_json::from_slice::<RawExport>(body).map_err(|_| {
         DomainError::Http("RocketVault returned a certificate export Rocket cannot read.".into())
     })?;
+    let key_algorithm = key_algorithm.unwrap_or_default();
     let certificate_pem = certificate_pem.map(Zeroizing::new);
     let private_key_pem = private_key_pem.map(Zeroizing::new);
     let pkcs12_base64 = pkcs12_base64.map(Zeroizing::new);
@@ -284,7 +289,7 @@ pub(super) enum ExportFailure {
 pub(super) fn classify_export_error(status: StatusCode, body: &[u8]) -> ExportFailure {
     let code = serde_json::from_slice::<RawErrorEnvelope>(body)
         .ok()
-        .map(|e| e.error.code.chars().take(64).collect::<String>());
+        .map(|e| e.error.code);
     match (status.as_u16(), code.as_deref()) {
         (401, _) => ExportFailure::TokenRejected,
         (404, _) => ExportFailure::NotFound,
@@ -292,9 +297,10 @@ pub(super) fn classify_export_error(status: StatusCode, body: &[u8]) -> ExportFa
             ExportFailure::Failed(DomainError::InvalidInput(NOT_EXPORTABLE.to_string()))
         }
         (403, None) => ExportFailure::Failed(DomainError::Http(MISSING_ROLE.to_string())),
-        (403, Some(other)) => ExportFailure::Failed(DomainError::Http(format!(
-            "RocketVault refused the export (403, {other})."
-        ))),
+        (403, Some(other)) => ExportFailure::Failed(DomainError::Http(match shown_code(other) {
+            Some(code) => format!("RocketVault refused the export (403, {code})."),
+            None => "RocketVault refused the export (403).".to_string(),
+        })),
         (409, _) => ExportFailure::Failed(DomainError::InvalidInput(DISABLED.to_string())),
         (other, _) => ExportFailure::Failed(DomainError::Http(format!(
             "RocketVault returned status {other} for the certificate export."
@@ -302,6 +308,15 @@ pub(super) fn classify_export_error(status: StatusCode, body: &[u8]) -> ExportFa
     }
 }
 
+/// A server-supplied error code, if it is safe to show: 1 to 64 ASCII letters, digits, `_` or
+/// `-`. Anything else is dropped, so a hostile server cannot inject text into a message.
+fn shown_code(code: &str) -> Option<&str> {
+    let safe = (1..=64).contains(&code.len())
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    safe.then_some(code)
+}
 
 #[cfg(test)]
 mod tests {
@@ -393,8 +408,16 @@ mod tests {
         assert!(is_last_page(3, 3, None));
         assert!(is_last_page(0, 400, None));
         assert!(!is_last_page(LIST_PAGE_SIZE, LIST_PAGE_SIZE, None));
-        assert!(is_last_page(LIST_PAGE_SIZE, LIST_PAGE_SIZE, Some(LIST_PAGE_SIZE)));
-        assert!(!is_last_page(LIST_PAGE_SIZE, LIST_PAGE_SIZE, Some(LIST_PAGE_SIZE + 1)));
+        assert!(is_last_page(
+            LIST_PAGE_SIZE,
+            LIST_PAGE_SIZE,
+            Some(LIST_PAGE_SIZE)
+        ));
+        assert!(!is_last_page(
+            LIST_PAGE_SIZE,
+            LIST_PAGE_SIZE,
+            Some(LIST_PAGE_SIZE + 1)
+        ));
     }
 
     #[test]
@@ -406,7 +429,9 @@ mod tests {
             list_failed(StatusCode::NOT_FOUND),
             DomainError::NotFound(_)
         ));
-        assert!(list_failed(StatusCode::BAD_GATEWAY).to_string().contains("502"));
+        assert!(list_failed(StatusCode::BAD_GATEWAY)
+            .to_string()
+            .contains("502"));
     }
 
     #[test]
@@ -437,8 +462,7 @@ mod tests {
         }))
         .expect("json");
         let password = Zeroizing::new("one-time-pass-123".to_string());
-        match parse_export(&body, VaultCertificateFormat::Pkcs12, Some(password))
-            .expect("material")
+        match parse_export(&body, VaultCertificateFormat::Pkcs12, Some(password)).expect("material")
         {
             VaultCertificateMaterial::Pkcs12 {
                 bundle, password, ..
@@ -452,8 +476,8 @@ mod tests {
 
     #[test]
     fn parse_export_rejects_a_pem_export_without_the_key() {
-        let body = serde_json::to_vec(&serde_json::json!({ "certificate_pem": CERT_PEM }))
-            .expect("json");
+        let body =
+            serde_json::to_vec(&serde_json::json!({ "certificate_pem": CERT_PEM })).expect("json");
         let err = parse_export(&body, VaultCertificateFormat::Pem, None)
             .expect_err("a PEM export needs both pieces");
         assert!(err.to_string().contains("private key"), "{err}");
@@ -471,8 +495,7 @@ mod tests {
     #[test]
     fn classify_maps_each_status_and_code() {
         let json = |code: &str| {
-            format!(r#"{{"error":{{"code":"{code}","message":"from RocketVault"}}}}"#)
-                .into_bytes()
+            format!(r#"{{"error":{{"code":"{code}","message":"from RocketVault"}}}}"#).into_bytes()
         };
         let failed = |status: u16, body: &[u8]| {
             let status = StatusCode::from_u16(status).expect("status");
@@ -495,5 +518,58 @@ mod tests {
         assert!(failed(409, &json("certificate_disabled")).contains(DISABLED));
         assert!(failed(400, &json("bad_request")).contains("400"));
         assert!(failed(500, &json("internal_error")).contains("500"));
+    }
+
+    // A server-supplied code is echoed only when it is short and plain.
+    #[test]
+    fn classify_never_echoes_an_unsafe_403_code() {
+        let forbidden = |code: &str| {
+            let body = serde_json::to_vec(&serde_json::json!({ "error": { "code": code } }))
+                .expect("json");
+            match classify_export_error(StatusCode::FORBIDDEN, &body) {
+                ExportFailure::Failed(err) => err.to_string(),
+                _ => panic!("expected Failed"),
+            }
+        };
+        let long = "a".repeat(65);
+        for unsafe_code in [
+            "<b>x</b>",
+            "line\nbreak",
+            "sp ace",
+            "dot.ted",
+            "",
+            long.as_str(),
+        ] {
+            let message = forbidden(unsafe_code);
+            assert!(message.contains("403"), "{message}");
+            // A JSON body is still not the missing-role case.
+            assert!(!message.contains(MISSING_ROLE), "{message}");
+            if !unsafe_code.is_empty() {
+                assert!(!message.contains(unsafe_code), "{message}");
+            }
+            assert!(
+                !message.contains('<') && !message.contains('\n'),
+                "{message}"
+            );
+        }
+        assert!(forbidden("vault-forbidden_2").contains("vault-forbidden_2"));
+    }
+
+    #[test]
+    fn a_null_key_algorithm_reads_as_empty() {
+        let page = parse_certificate_page(
+            br#"{"certificates":[{"id":"id-1","name":"a","key_algorithm":null}]}"#,
+        )
+        .expect("page");
+        assert_eq!(page.certificates[0].key_algorithm, "");
+
+        let body = br#"{"key_algorithm":null,"pkcs12_base64":"AQID"}"#;
+        let material = parse_export(
+            body,
+            VaultCertificateFormat::Pkcs12,
+            Some(Zeroizing::new("pw".to_string())),
+        )
+        .expect("material");
+        assert_eq!(material.key_algorithm(), "");
     }
 }

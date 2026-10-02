@@ -5,12 +5,9 @@ use rocket_environment::SecretManagerConnection;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
 
-// The certificate contract. Its export half is first used in Task B3, which removes this allow.
-#[allow(dead_code)]
+/// The RocketVault certificate contract: routes, shapes, codes and messages.
 mod certificate_api;
-// `certificate_id` and `forget_certificate_id` are first used outside tests in Task B3, which
-// removes this allow.
-#[allow(dead_code)]
+/// Certificate calls: the paged list, the name-to-id cache and the export.
 mod certificates;
 
 /// Minimum token TTL enforced client-side, even when the server reports
@@ -345,7 +342,10 @@ fn validate_base_url(connection: &SecretManagerConnection) -> DomainResult<()> {
     Ok(())
 }
 
-use rocket_environment::{ExternalSecretRef, VaultCertificateSummary, VaultSecretFetcher};
+use rocket_environment::{
+    ExternalSecretRef, VaultCertificateMaterial, VaultCertificateSummary, VaultSecretFetcher,
+};
+use rocket_shared::certificate::VaultCertificateFormat;
 
 /// Deserialization target for one entry inside a RocketVault list-secrets
 /// response's `secrets` array. Deliberately has no `value` field —
@@ -506,6 +506,24 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
             .await?;
         self.remember_certificate_ids(connection, vault_name, &listed);
         Ok(listed)
+    }
+
+    async fn fetch_certificate(
+        &self,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        vault_name: &str,
+        certificate_name: &str,
+        format: VaultCertificateFormat,
+    ) -> DomainResult<VaultCertificateMaterial> {
+        self.export_certificate(
+            connection,
+            client_secret,
+            vault_name,
+            certificate_name,
+            format,
+        )
+        .await
     }
 }
 
