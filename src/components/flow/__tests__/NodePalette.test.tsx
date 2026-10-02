@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { FlowNode } from '@/lib/tauri-api';
 import { NodePalette } from '../NodePalette';
 
 describe('NodePalette routing entries', () => {
@@ -122,5 +123,24 @@ describe('NodePalette Transform entry', () => {
       auth: { authType: 'bearer', token: '' },
       applyToInherit: true,
     });
+  });
+
+  it('adds a second Auth node that does not apply to inherited auth', async () => {
+    const onAddNode = vi.fn();
+    const existing: FlowNode = {
+      id: 'auth-1',
+      kind: {
+        kind: 'Auth',
+        label: 'Sign in',
+        auth: { authType: 'bearer', token: '' },
+        applyToInherit: true,
+      },
+      position: { x: 0, y: 0 },
+    };
+    render(<NodePalette onAddNode={onAddNode} nodes={[existing]} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Add node/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Auth' }));
+    expect(onAddNode.mock.calls[0][0].kind.applyToInherit).toBe(false);
   });
 });

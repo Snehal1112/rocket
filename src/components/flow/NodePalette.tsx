@@ -182,7 +182,10 @@ export function NodePalette({
                   kind: 'Auth',
                   label: 'New Auth',
                   auth: DEFAULT_AUTH_NODE_AUTH,
-                  applyToInherit: true,
+                  // Only one Auth node may apply to inherited auth (V13).
+                  applyToInherit: !nodes.some(
+                    (n) => n.kind.kind === 'Auth' && n.kind.applyToInherit,
+                  ),
                 },
                 position: defaultPosition,
               })
