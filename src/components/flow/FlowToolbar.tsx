@@ -109,6 +109,20 @@ export function FlowToolbar({
   // A ref guard, checked and set synchronously before any `await`, closes
   // that window regardless of render timing.
   const isStartingRef = useRef(false);
+  // True while the pre-run sign-in step is pending. State, so the button shows it.
+  const [preparing, setPreparing] = useState(false);
+  // Abandons the pending sign-in wait of the current attempt. Null when none.
+  const abandonPrepareRef = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(true);
+
+  // Unmounting abandons a pending sign-in, so its result starts no run.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abandonPrepareRef.current?.();
+    };
+  }, []);
 
   const cleanupListeners = useCallback(() => {
     for (const unlisten of unlistenRefs.current) unlisten();
@@ -172,16 +186,44 @@ export function FlowToolbar({
     }
     let authTokens: Record<string, FlowAuthToken> | undefined;
     if (onPrepareAuth) {
+      // Stop (or unmount) resolves this, so the toolbar stops waiting on a
+      // sign-in the user abandoned. The sign-in promise itself may never settle.
+      const abandoned = Symbol('abandoned');
+      let abandon: () => void = () => {
+        // Reassigned by the promise executor below.
+      };
+      const abandonPromise = new Promise<typeof abandoned>((resolve) => {
+        abandon = () => resolve(abandoned);
+      });
+      abandonPrepareRef.current = abandon;
+      setPreparing(true);
+      const pending = onPrepareAuth();
+      // A late rejection after abandoning must not surface as unhandled.
+      pending.catch(() => undefined);
       try {
-        const prepared = await onPrepareAuth();
+        const prepared = await Promise.race([pending, abandonPromise]);
+        if (prepared === abandoned) {
+          isStartingRef.current = false;
+          if (mountedRef.current) {
+            setPreparing(false);
+            toast.info('Sign-in cancelled');
+          }
+          return;
+        }
+        abandonPrepareRef.current = null;
+        if (mountedRef.current) setPreparing(false);
         if (prepared === null) {
           isStartingRef.current = false;
           return;
         }
         authTokens = prepared;
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
+        abandonPrepareRef.current = null;
         isStartingRef.current = false;
+        if (mountedRef.current) {
+          setPreparing(false);
+          toast.error(err instanceof Error ? err.message : String(err));
+        }
         return;
       }
     }
@@ -246,6 +288,11 @@ export function FlowToolbar({
   };
 
   const handleStop = () => {
+    if (abandonPrepareRef.current) {
+      abandonPrepareRef.current();
+      abandonPrepareRef.current = null;
+      return;
+    }
     if (!liveRunId) return;
     // Cancelling a run that just finished is a no-op on the backend.
     cancelFlowRun(liveRunId).catch((err) => console.error('[FlowToolbar] cancel failed', err));
@@ -253,8 +300,8 @@ export function FlowToolbar({
 
   return (
     <div className='flex items-center gap-2'>
-      <Button size='sm' onClick={() => void handleRun()} disabled={liveRunId !== null}>
-        Run
+      <Button size='sm' onClick={() => void handleRun()} disabled={liveRunId !== null || preparing}>
+        {preparing ? 'Signing in…' : 'Run'}
       </Button>
       <Button size='sm' variant='outline' onClick={handleStop}>
         Stop

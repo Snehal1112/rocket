@@ -26,7 +26,7 @@ vi.mock('@/lib/execute-request', () => ({
   getActiveGlobalEnvName: vi.fn(),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
 const onPatchStatus = vi.fn();
 const onRunStateChange = vi.fn();
@@ -110,6 +110,8 @@ describe('FlowToolbar', () => {
     vi.mocked(tauriApi.onFlowStepStarted).mockClear();
     vi.mocked(tauriApi.onFlowStepCompleted).mockClear();
     vi.mocked(tauriApi.runFlow).mockClear();
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.info).mockClear();
   });
 
   it('hands each summary step with logs to onStepLogs, once, in order', async () => {
@@ -658,5 +660,112 @@ describe('FlowToolbar', () => {
       message: 'attempt 1/5',
     });
     expect(onPatchProgress).toHaveBeenCalledWith('node-a', 'attempt 1/5');
+  });
+
+  describe('pending sign-in', () => {
+    type Tokens = Record<string, tauriApi.FlowAuthToken> | null;
+    const pendingAuth = () => {
+      let resolve: (v: Tokens) => void = () => {
+        // Reassigned by the promise executor below.
+      };
+      let reject: (e: unknown) => void = () => {
+        // Reassigned by the promise executor below.
+      };
+      const promise = new Promise<Tokens>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+
+    it('disables Run with a "Signing in…" label and keeps Stop enabled while pending', async () => {
+      const auth = pendingAuth();
+      renderToolbar({ onPrepareAuth: () => auth.promise });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      const busy = await screen.findByRole('button', { name: /Signing in/ });
+      expect(busy).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+    });
+
+    it('Stop abandons the wait, resets the guard, and a new Run works', async () => {
+      const first = pendingAuth();
+      const second = pendingAuth();
+      const onPrepareAuth = vi
+        .fn()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise);
+      renderToolbar({ onPrepareAuth });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(await screen.findByRole('button', { name: 'Run' })).toBeEnabled();
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+      expect(toast.info).toHaveBeenCalledWith('Sign-in cancelled');
+      expect(tauriApi.cancelFlowRun).not.toHaveBeenCalled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      expect(onPrepareAuth).toHaveBeenCalledTimes(2);
+      second.resolve({ a: { accessToken: 'tok-123456' } });
+      await waitFor(() =>
+        expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null, {
+          a: { accessToken: 'tok-123456' },
+        }),
+      );
+    });
+
+    it('ignores an abandoned sign-in that resolves later', async () => {
+      const auth = pendingAuth();
+      renderToolbar({ onPrepareAuth: () => auth.promise });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      await screen.findByRole('button', { name: 'Run' });
+      auth.resolve({ a: { accessToken: 'tok-123456' } });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled();
+    });
+
+    it('ignores an abandoned sign-in that rejects later, without an error toast', async () => {
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        const auth = pendingAuth();
+        renderToolbar({ onPrepareAuth: () => auth.promise });
+        await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+        await screen.findByRole('button', { name: /Signing in/ });
+        await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+        await screen.findByRole('button', { name: 'Run' });
+        auth.reject(new Error('window closed'));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(toast.error).not.toHaveBeenCalled();
+        expect(unhandled).not.toHaveBeenCalled();
+      } finally {
+        process.off('unhandledRejection', unhandled);
+      }
+    });
+
+    it('recovers and shows an error when the sign-in rejects without a cancel', async () => {
+      const auth = pendingAuth();
+      renderToolbar({ onPrepareAuth: () => auth.promise });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      auth.reject(new Error('boom'));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+      expect(await screen.findByRole('button', { name: 'Run' })).toBeEnabled();
+    });
+
+    it('does not start a run when unmounted while signing in', async () => {
+      const auth = pendingAuth();
+      const { unmount } = renderToolbar({ onPrepareAuth: () => auth.promise });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await screen.findByRole('button', { name: /Signing in/ });
+      unmount();
+      auth.resolve({ a: { accessToken: 'tok-123456' } });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+      expect(tauriApi.onFlowRunStarted).not.toHaveBeenCalled();
+    });
   });
 });
