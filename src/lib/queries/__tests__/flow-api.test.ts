@@ -74,6 +74,35 @@ describe('flow tauri-api bindings', () => {
     });
   });
 
+  it('runFlow sends authTokens when there are some', async () => {
+    vi.mocked(invoke).mockResolvedValue({ runId: 'r', steps: [], stoppedReason: 'completed' });
+    const { runFlow } = await import('@/lib/tauri-api');
+    await runFlow('my-collection', 'My Flow', null, null, { a: { accessToken: 'tok-123456' } });
+    expect(invoke).toHaveBeenCalledWith('run_flow', {
+      input: {
+        collection: 'my-collection',
+        flowName: 'My Flow',
+        environmentName: null,
+        globalEnvName: null,
+        authTokens: { a: { accessToken: 'tok-123456' } },
+      },
+    });
+  });
+
+  it('runFlow leaves authTokens out when the map is empty', async () => {
+    vi.mocked(invoke).mockResolvedValue({ runId: 'r', steps: [], stoppedReason: 'completed' });
+    const { runFlow } = await import('@/lib/tauri-api');
+    await runFlow('my-collection', 'My Flow', null, null, {});
+    expect(invoke).toHaveBeenCalledWith('run_flow', {
+      input: {
+        collection: 'my-collection',
+        flowName: 'My Flow',
+        environmentName: null,
+        globalEnvName: null,
+      },
+    });
+  });
+
   it('cancelFlowRun invokes cancel_flow_run with the run id', async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
     const { cancelFlowRun } = await import('@/lib/tauri-api');

@@ -1964,6 +1964,11 @@ export interface FlowRunSummary {
   stoppedReason: 'completed' | 'cancelled' | string;
 }
 
+/** A token the UI obtained for an Auth node. Held in memory only, never persisted. */
+export interface FlowAuthToken {
+  accessToken: string;
+}
+
 /**
  * Runs a flow. The promise resolves only when the run ENDS. Subscribe to
  * the flow-run-* events before calling this; the run id arrives first on
@@ -1974,6 +1979,7 @@ export const runFlow = (
   flowName: string,
   environmentName?: string | null,
   globalEnvName?: string | null,
+  authTokens?: Record<string, FlowAuthToken>,
 ) =>
   invoke<FlowRunSummary>('run_flow', {
     input: {
@@ -1981,6 +1987,9 @@ export const runFlow = (
       flowName,
       environmentName: environmentName ?? null,
       globalEnvName: globalEnvName ?? null,
+      // Sent only when there is something to send, so a flow without Auth nodes
+      // calls the command exactly as before.
+      ...(authTokens && Object.keys(authTokens).length > 0 ? { authTokens } : {}),
     },
   });
 
