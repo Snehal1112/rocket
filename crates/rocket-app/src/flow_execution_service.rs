@@ -2048,6 +2048,30 @@ mod tests {
     }
 
     #[test]
+    fn saved_source_preserves_runtime_inherit_auth_for_collection_merging() {
+        use rocket_shared::types::Auth;
+
+        let mut saved = Request::new(
+            "Get Auth Token",
+            HttpMethod::Get,
+            "https://api.example.com/login",
+        );
+        saved.runtime_auth = Some(Auth::Inherit);
+        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
+
+        let input = build_execute_request_input(
+            &repo,
+            "my-api",
+            None,
+            None,
+            &saved_flow_node("n1", "auth/login.yml"),
+        )
+        .expect("saved source must resolve");
+
+        assert_eq!(input.auth, Auth::Inherit);
+    }
+
+    #[test]
     fn build_execute_request_input_threads_global_env_name() {
         let mut saved = Request::new(
             "Get Auth Token",

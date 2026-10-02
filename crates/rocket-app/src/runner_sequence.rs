@@ -102,8 +102,9 @@ fn folder_dir_name(folder: &Folder) -> &str {
 /// Mirrors what the Request tab sends for a single send: request-level auth
 /// (collection auth is merged later inside `resolve_request`), the saved
 /// settings mapped onto `RequestOptions`, and all three script phases.
-/// `request.runtime_auth` is deliberately ignored — the single-send path does
-/// not consume it either, and the runner must not diverge from it.
+/// OpenCollection persists a request's auth under `runtime.auth`; that value
+/// takes precedence when present. This is especially important for `inherit`,
+/// which must reach `resolve_request` so collection defaults can be applied.
 ///
 /// `request_guard_policy` is the workspace's SSRF guard policy (see
 /// `request_guard.rs` / Item 6's request-mutation host guard spec) — the
@@ -123,7 +124,10 @@ pub fn build_step_input(
         headers: request.headers.clone(),
         query_params: request.query_params.clone(),
         body: request.body.clone(),
-        auth: request.auth.clone(),
+        auth: request
+            .runtime_auth
+            .clone()
+            .unwrap_or_else(|| request.auth.clone()),
         options: request_options_from(request.settings.as_ref()),
         environment_name: environment_name.map(str::to_string),
         collection: Some(collection.to_string()),
@@ -293,6 +297,29 @@ mod tests {
         assert_eq!(input.pre_request_script.as_deref(), Some("// pre"));
         assert_eq!(input.tests_script.as_deref(), Some("// tests"));
         assert_eq!(input.tags, vec!["smoke".to_string()]);
+    }
+
+    #[test]
+    fn step_input_prefers_runtime_inherit_auth() {
+        use rocket_shared::types::Auth;
+
+        let mut request = req("Login", "login.yml");
+        request.runtime_auth = Some(Auth::Inherit);
+        let item = RunItem {
+            name: request.name.clone(),
+            request_path: "login.yml".into(),
+            request,
+        };
+
+        let input = build_step_input(
+            &item,
+            "my-api",
+            None,
+            None,
+            rocket_workspace::RequestGuardPolicy::default(),
+        );
+
+        assert_eq!(input.auth, Auth::Inherit);
     }
 
     #[test]

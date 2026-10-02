@@ -136,6 +136,10 @@ describe('getEnvInvalidationKeys', () => {
 describe('toApiAuth for digest, wsse, ntlm and oauth1', () => {
   const resolve = (s: string) => s.replace('{{pw}}', 'secret');
 
+  it('preserves inherit on the wire so the backend applies collection auth', () => {
+    expect(toApiAuth({ authType: 'inherit' })).toEqual({ authType: 'inherit' });
+  });
+
   it('sends digest and wsse credentials with variables resolved', () => {
     expect(
       toApiAuth({ authType: 'digest', digest: { username: 'u', password: '{{pw}}' } }, resolve),

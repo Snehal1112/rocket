@@ -91,6 +91,9 @@ const OAUTH1_RESOLVED_FIELDS = [
 export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
   switch (auth.authType) {
     case 'inherit':
+      // Preserve the distinction on the wire so the backend can merge the
+      // collection default. Collapsing this to `none` loses the user's intent.
+      return { authType: 'inherit' };
     case 'none':
       return { authType: 'none' };
     case 'basic':
