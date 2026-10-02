@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 
 const MAX_ENTRIES = 200;
+/** The backend log buffer is separate so logs never push out other entries. */
+export const MAX_LOG_ENTRIES = 500;
 
 export interface HttpConsoleEntry {
   kind: 'http';
@@ -39,10 +41,44 @@ export interface TestResultEntry {
   requestName: string;
 }
 
+export type BackendLogLevel = 'INFO' | 'WARN' | 'ERROR';
+
+/** Payload of the "backend-log" Tauri event (camelCase JSON from Rust). */
+export interface BackendLogPayload {
+  timestamp: string;
+  level: string;
+  target: string;
+  message: string;
+  fields: Record<string, string>;
+  spanFields: Record<string, string>;
+}
+
+export interface LogConsoleEntry {
+  kind: 'log';
+  id: string;
+  timestamp: string;
+  level: BackendLogLevel;
+  target: string;
+  message: string;
+  fields: Record<string, string>;
+  spanFields: Record<string, string>;
+}
+
+/** Maps tracing's level text (for example "WARN") to a known level. Unknown values become INFO. */
+export function normalizeLogLevel(level: string): BackendLogLevel {
+  const upper = level.trim().toUpperCase();
+  if (upper === 'ERROR') return 'ERROR';
+  if (upper === 'WARN' || upper === 'WARNING') return 'WARN';
+  return 'INFO';
+}
+
 export type ConsoleEntry = HttpConsoleEntry | ScriptLogEntry | TestResultEntry;
 
 interface ConsoleState {
   entries: ConsoleEntry[];
+  /** Backend log entries, newest first, in their own capped buffer. */
+  logEntries: LogConsoleEntry[];
+  addLogEntry: (payload: BackendLogPayload) => void;
   addHttpEntry: (entry: Omit<HttpConsoleEntry, 'id' | 'timestamp' | 'kind'>) => void;
   addScriptEntry: (entry: Omit<ScriptLogEntry, 'id' | 'timestamp' | 'kind'>) => void;
   addTestEntry: (entry: Omit<TestResultEntry, 'id' | 'timestamp' | 'kind'>) => void;
@@ -55,6 +91,23 @@ interface ConsoleState {
 
 export const useConsoleStore = create<ConsoleState>((set) => ({
   entries: [],
+  logEntries: [],
+
+  addLogEntry: (payload) => {
+    const full: LogConsoleEntry = {
+      kind: 'log',
+      id: crypto.randomUUID(),
+      timestamp: payload.timestamp,
+      level: normalizeLogLevel(payload.level),
+      target: payload.target,
+      message: payload.message,
+      fields: payload.fields ?? {},
+      spanFields: payload.spanFields ?? {},
+    };
+    set((state) => ({
+      logEntries: [full, ...state.logEntries].slice(0, MAX_LOG_ENTRIES),
+    }));
+  },
 
   addHttpEntry: (entry) => {
     const full: HttpConsoleEntry = {
@@ -118,5 +171,5 @@ export const useConsoleStore = create<ConsoleState>((set) => ({
     }));
   },
 
-  clearEntries: () => set({ entries: [] }),
+  clearEntries: () => set({ entries: [], logEntries: [] }),
 }));

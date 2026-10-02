@@ -1,12 +1,15 @@
 import { CheckCircle2, ChevronDown, ChevronRight, Trash2, XCircle } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { statusTextColor } from '@/lib/colors';
 import { cn } from '@/lib/utils';
 import {
+  type BackendLogLevel,
   type ConsoleEntry,
   type HttpConsoleEntry,
+  type LogConsoleEntry,
   type ScriptLogEntry,
   type TestResultEntry,
   useConsoleStore,
@@ -119,8 +122,50 @@ function TestResultRow({ entry }: { entry: TestResultEntry }) {
   );
 }
 
-function matchesSearch(entry: ConsoleEntry, term: string): boolean {
+type PanelEntry = ConsoleEntry | LogConsoleEntry;
+
+const logLevelColor: Record<BackendLogLevel, string> = {
+  INFO: 'text-sky-500',
+  WARN: 'text-yellow-500',
+  ERROR: 'text-red-500',
+};
+
+function LogRow({ entry }: { entry: LogConsoleEntry }) {
+  const fields = Object.entries({ ...entry.spanFields, ...entry.fields });
+  return (
+    <div data-testid='console-log-row' className='px-2 py-1 border-b border-border/30'>
+      <div className='flex items-start gap-1.5'>
+        <span className='w-3.5 shrink-0' />
+        <span className='text-muted-foreground w-16 shrink-0'>{formatTime(entry.timestamp)}</span>
+        <span
+          data-testid='console-log-level'
+          className={cn(
+            'font-semibold w-12 shrink-0 text-center rounded border border-current text-2xs',
+            logLevelColor[entry.level],
+          )}
+        >
+          {entry.level}
+        </span>
+        <span className='text-muted-foreground shrink-0 truncate max-w-[12rem]'>
+          {entry.target}
+        </span>
+        <span className='flex-1 break-all text-foreground/80'>{entry.message}</span>
+      </div>
+      {fields.length > 0 && (
+        <div className='pl-[8.5rem] text-muted-foreground break-all'>
+          {fields.map(([k, v]) => `${k}=${v}`).join(' ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function matchesSearch(entry: PanelEntry, term: string): boolean {
   const lower = term.toLowerCase();
+  if (entry.kind === 'log')
+    return (
+      entry.message.toLowerCase().includes(lower) || entry.target.toLowerCase().includes(lower)
+    );
   if (entry.kind === 'http') return entry.url.toLowerCase().includes(lower);
   if (entry.kind === 'test')
     return (
@@ -133,14 +178,24 @@ function matchesSearch(entry: ConsoleEntry, term: string): boolean {
 
 export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelProps) {
   const entries = useConsoleStore((s) => s.entries);
+  const logEntries = useConsoleStore((s) => s.logEntries);
   const clearEntries = useConsoleStore((s) => s.clearEntries);
+  const [showInfoLogs, setShowInfoLogs] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const dragRef = useRef<{ y: number; h: number } | null>(null);
 
+  // Backend logs show WARN and ERROR by default; INFO is opt-in.
+  const visible = useMemo(() => {
+    const logs = showInfoLogs ? logEntries : logEntries.filter((l) => l.level !== 'INFO');
+    if (logs.length === 0) return entries as PanelEntry[];
+    const all: PanelEntry[] = [...entries, ...logs];
+    return all.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  }, [entries, logEntries, showInfoLogs]);
+
   if (!isOpen) return null;
 
-  const filtered = search ? entries.filter((e) => matchesSearch(e, search)) : entries;
+  const filtered = search ? visible.filter((e) => matchesSearch(e, search)) : visible;
 
   const handleDragDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -173,12 +228,21 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       {/* Toolbar. */}
       <div className='flex items-center gap-2 px-2 py-1 border-b border-border/70 shrink-0'>
         <span className='text-sm font-medium'>Console</span>
-        {entries.length > 0 && (
+        {visible.length > 0 && (
           <span className='text-2xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground'>
-            {entries.length}
+            {visible.length}
           </span>
         )}
         <div className='flex-1' />
+        <div className='flex items-center gap-1.5'>
+          <Switch
+            id='console-show-info-logs'
+            checked={showInfoLogs}
+            onCheckedChange={setShowInfoLogs}
+            aria-label='Show INFO backend logs'
+          />
+          <span className='text-sm text-muted-foreground'>Show INFO logs</span>
+        </div>
         <Input
           placeholder='Filter by URL or message'
           value={search}
@@ -201,10 +265,13 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       <div className='flex-1 overflow-y-auto font-mono text-2xs'>
         {filtered.length === 0 ? (
           <div className='flex items-center justify-center h-full text-muted-foreground text-sm'>
-            No requests sent yet
+            No console activity yet
           </div>
         ) : (
           filtered.map((entry) => {
+            if (entry.kind === 'log') {
+              return <LogRow key={entry.id} entry={entry} />;
+            }
             if (entry.kind === 'script') {
               return <ScriptLogRow key={entry.id} entry={entry} />;
             }
