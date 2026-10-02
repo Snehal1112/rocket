@@ -13,6 +13,7 @@ pub struct NodePosition {
 /// wire resolves to. `If` and `Switch` nodes route execution to one of their
 /// named exits. `WaitForCallback` nodes wait for an inbound call on a local URL.
 /// `Transform` nodes reshape their one input with a script.
+/// `Auth` nodes authenticate once per run and supply the credential to requests.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FlowNodeKind {
@@ -65,11 +66,28 @@ pub enum FlowNodeKind {
         label: String,
         script: String,
     },
+    /// Authenticates once per run and hands the credential to requests. It has
+    /// no inputs and one exit, `result`. Only the auth *configuration* is
+    /// stored; a token is never written to the flow file.
+    Auth {
+        label: String,
+        /// Any auth type except `none` and `inherit`.
+        auth: rocket_shared::types::Auth,
+        /// When true (the default), every Request node whose auth is
+        /// `inherit` uses this node's credential. At most one Auth node in a
+        /// flow may have this on.
+        #[serde(default = "default_true")]
+        apply_to_inherit: bool,
+    },
 }
 
 // Keeps `debug: false` out of saved files, so old flows round-trip unchanged.
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Default, minimum and maximum `timeout_ms` of a Wait for callback node.
@@ -422,5 +440,33 @@ mod tests {
         assert!(!yaml.contains("accept_when"), "got:\n{yaml}");
         let back: FlowNodeKind = serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn flow_node_kind_auth_tagged_roundtrip() {
+        let kind = FlowNodeKind::Auth {
+            label: "Sign in".to_string(),
+            auth: rocket_shared::types::Auth::Bearer {
+                token: "{{token}}".to_string(),
+            },
+            apply_to_inherit: false,
+        };
+        let json = serde_json::to_string(&kind).expect("serialize FlowNodeKind");
+        assert!(json.contains("\"kind\":\"Auth\""), "got: {json}");
+        assert!(json.contains("\"authType\":\"bearer\""), "got: {json}");
+        let back: FlowNodeKind = serde_json::from_str(&json).expect("deserialize FlowNodeKind");
+        assert_eq!(kind, back);
+    }
+
+    #[test]
+    fn flow_node_kind_auth_defaults_apply_to_inherit_to_true() {
+        let json = r#"{"kind":"Auth","label":"Sign in","auth":{"authType":"basic","username":"u","password":"p"}}"#;
+        let kind: FlowNodeKind = serde_json::from_str(json).expect("deserialize FlowNodeKind");
+        match kind {
+            FlowNodeKind::Auth {
+                apply_to_inherit, ..
+            } => assert!(apply_to_inherit),
+            other => panic!("expected an Auth node, got {other:?}"),
+        }
     }
 }

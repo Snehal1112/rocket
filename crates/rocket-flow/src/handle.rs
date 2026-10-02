@@ -14,6 +14,9 @@ pub const DEFAULT: &str = "default";
 pub const INPUT: &str = "input";
 /// The data-less "Run when" input of Request and Output nodes.
 pub const TRIGGER: &str = "trigger";
+/// The `target_field` of a wire from an Auth node into a Request node. The
+/// wire sets the request's auth. It carries no expression.
+pub const AUTH: &str = "auth";
 /// Prefix of a Switch case exit. The rest of the handle is the case id.
 pub const CASE_PREFIX: &str = "case:";
 
@@ -62,5 +65,10 @@ mod tests {
             [RESULT, TRUE, FALSE, DEFAULT, INPUT, TRIGGER, CASE_PREFIX],
             ["result", "true", "false", "default", "input", "trigger", "case:"]
         );
+    }
+
+    #[test]
+    fn auth_handle_name_matches_the_spec() {
+        assert_eq!(AUTH, "auth");
     }
 }

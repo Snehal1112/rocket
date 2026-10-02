@@ -1,5 +1,5 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V10). Rules run in table order and the first violation found
+//! §7 (rules V1-V13). Rules run in table order and the first violation found
 //! is returned, so the same file always yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
@@ -44,6 +44,20 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
         matches!(target, FlowNodeKind::Input { .. })
             .then(|| "Input nodes cannot receive wires".to_string())
     })?;
+    check_edges(flow, &kinds, |_, target, _| {
+        matches!(target, FlowNodeKind::Auth { .. })
+            .then(|| "Auth nodes cannot receive wires".to_string())
+    })?;
+    check_edges(flow, &kinds, |edge, target, source| {
+        let from_auth = matches!(source, FlowNodeKind::Auth { .. });
+        let into_request = matches!(target, FlowNodeKind::Request { .. });
+        (edge.target_field == handle::AUTH && !(from_auth && into_request)).then(|| {
+            format!(
+                "an '{}' wire must go from an Auth node into a Request node",
+                handle::AUTH
+            )
+        })
+    })?;
     check_edges(flow, &kinds, |edge, target, _| {
         (matches!(target, FlowNodeKind::WaitForCallback { .. })
             && edge.target_field != handle::TRIGGER)
@@ -69,6 +83,7 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     check_expressions(flow)?;
     check_repeat_until(flow)?;
     check_wait_nodes(flow)?;
+    check_auth_nodes(flow)?;
 
     Ok(order)
 }
@@ -92,6 +107,7 @@ fn kind_name(kind: &FlowNodeKind) -> &'static str {
         FlowNodeKind::Switch { .. } => "Switch",
         FlowNodeKind::WaitForCallback { .. } => "Wait for callback",
         FlowNodeKind::Transform { .. } => "Transform",
+        FlowNodeKind::Auth { .. } => "Auth",
     }
 }
 
@@ -181,7 +197,8 @@ fn source_handle_exists(source: &FlowNodeKind, source_handle: &str) -> bool {
         FlowNodeKind::Request { .. }
         | FlowNodeKind::Input { .. }
         | FlowNodeKind::WaitForCallback { .. }
-        | FlowNodeKind::Transform { .. } => source_handle == handle::RESULT,
+        | FlowNodeKind::Transform { .. }
+        | FlowNodeKind::Auth { .. } => source_handle == handle::RESULT,
         FlowNodeKind::Output { .. } => false,
         FlowNodeKind::If { .. } => source_handle == handle::TRUE || source_handle == handle::FALSE,
         FlowNodeKind::Switch { cases, .. } => {
@@ -266,6 +283,40 @@ fn check_repeat_until(flow: &Flow) -> Result<(), FlowGraphError> {
         };
         if let Some(reason) = reason {
             return Err(invalid_node(node, reason));
+        }
+    }
+    Ok(())
+}
+
+/// V13: an Auth node holds a concrete auth type, and at most one Auth node
+/// applies to inherited auth.
+fn check_auth_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
+    use rocket_shared::types::Auth;
+    let mut applying = false;
+    for node in &flow.nodes {
+        let FlowNodeKind::Auth {
+            auth,
+            apply_to_inherit,
+            ..
+        } = &node.kind
+        else {
+            continue;
+        };
+        if matches!(auth, Auth::None | Auth::Inherit) {
+            return Err(invalid_node(
+                node,
+                "the Auth node needs an auth type other than none or inherit".to_string(),
+            ));
+        }
+        if *apply_to_inherit {
+            if applying {
+                return Err(invalid_node(
+                    node,
+                    "only one Auth node can apply to inherited auth; turn this one or the other off"
+                        .to_string(),
+                ));
+            }
+            applying = true;
         }
     }
     Ok(())
@@ -1089,5 +1140,121 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(invalid_node_id(validate(&f)), "w");
+    }
+
+    fn auth_node(id: &str, auth: rocket_shared::types::Auth, apply_to_inherit: bool) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Auth {
+                label: id.to_string(),
+                auth,
+                apply_to_inherit,
+            },
+        )
+    }
+
+    fn bearer() -> rocket_shared::types::Auth {
+        rocket_shared::types::Auth::Bearer {
+            token: "{{token}}".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_auth_node_alone_is_valid() {
+        let f = flow(vec![auth_node("a", bearer(), true)], vec![]);
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn an_auth_wire_into_a_request_is_valid() {
+        let f = flow(
+            vec![auth_node("a", bearer(), true), request("r")],
+            vec![edge("e1", "a", handle::RESULT, "r", handle::AUTH)],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn an_auth_node_may_feed_a_header_wire() {
+        let f = flow(
+            vec![auth_node("a", bearer(), true), request("r")],
+            vec![edge(
+                "e1",
+                "a",
+                handle::RESULT,
+                "r",
+                "headers[Authorization].value",
+            )],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn an_auth_node_cannot_receive_a_wire() {
+        let f = flow(
+            vec![request("a"), auth_node("x", bearer(), false)],
+            vec![edge("e1", "a", handle::RESULT, "x", "url")],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn an_auth_wire_must_come_from_an_auth_node() {
+        let f = flow(
+            vec![request("a"), request("b")],
+            vec![edge("e1", "a", handle::RESULT, "b", handle::AUTH)],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn an_auth_wire_must_end_at_a_request() {
+        let f = flow(
+            vec![auth_node("a", bearer(), true), output("o")],
+            vec![edge("e1", "a", handle::RESULT, "o", handle::AUTH)],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn an_auth_node_has_only_a_result_exit() {
+        let f = flow(
+            vec![auth_node("a", bearer(), true), request("r")],
+            vec![edge("e1", "a", handle::TRUE, "r", handle::TRIGGER)],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn two_auth_nodes_cannot_both_apply_to_inherit() {
+        let f = flow(
+            vec![
+                auth_node("a", bearer(), true),
+                auth_node("b", bearer(), true),
+            ],
+            vec![],
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "b");
+    }
+
+    #[test]
+    fn two_auth_nodes_may_coexist_when_only_one_applies() {
+        let f = flow(
+            vec![
+                auth_node("a", bearer(), true),
+                auth_node("b", bearer(), false),
+            ],
+            vec![],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn an_auth_node_needs_a_concrete_auth_type() {
+        use rocket_shared::types::Auth;
+        for auth in [Auth::None, Auth::Inherit] {
+            let f = flow(vec![auth_node("a", auth, false)], vec![]);
+            assert_eq!(invalid_node_id(validate(&f)), "a");
+        }
     }
 }
