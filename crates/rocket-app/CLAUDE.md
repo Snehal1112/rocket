@@ -94,7 +94,7 @@ interactive grant without a token fails the run before any event. Static auth
 types pass through. `FlowExecutionService::run_with_auth`
 (`flow_execution_service.rs`) injects each credential secret into the run's
 external-secrets map as `flow-auth.<node id>` so the existing redaction masks
-it. Request nodes whose auth is `inherit` use the auto-apply credential; an
+it. Request nodes whose auth is `inherit` or `none` (the backend treats them alike) use the auto-apply credential; an
 `auth` wire overrides it. Types holding secrets (`SuppliedToken`,
 `FetchContext`, `FlowCredentials`) have redacting `Debug` impls; keep it that
 way.

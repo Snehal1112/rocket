@@ -97,10 +97,13 @@ impl FlowCredentials {
         self.by_node.get(node_id)
     }
 
-    /// Replaces `auth` with the auto-apply credential when `auth` is `inherit`.
-    /// Any other auth is left alone.
+    /// Replaces `auth` with the auto-apply credential when `auth` is `inherit`
+    /// or `none`. The backend (`merge_auth`) treats `none` like `inherit` (both
+    /// fall back to the collection auth), and requests created in the app,
+    /// saved requests with no auth block and inline Flow requests are all
+    /// `none`. Any other (explicit) auth is left alone.
     pub(crate) fn apply_to_inherit(&self, auth: &mut Auth) {
-        if matches!(auth, Auth::Inherit) {
+        if matches!(auth, Auth::Inherit | Auth::None) {
             if let Some(credential) = &self.auto_apply {
                 *auth = credential.clone();
             }
@@ -692,6 +695,61 @@ mod tests {
             },
             "a request with its own auth is never replaced"
         );
+    }
+
+    #[tokio::test]
+    async fn apply_to_inherit_replaces_none_and_inherit_but_never_explicit_auth() {
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::Bearer {
+                token: "t".to_string(),
+            },
+            true,
+        )]);
+        let fetcher = FakeFetcher::ok("x");
+        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+            .await
+            .expect("resolves");
+        let bearer = Auth::Bearer {
+            token: "t".to_string(),
+        };
+
+        for start in [Auth::None, Auth::Inherit] {
+            let mut auth = start.clone();
+            creds.apply_to_inherit(&mut auth);
+            assert_eq!(auth, bearer, "{start:?} takes the credential");
+        }
+        for own in [
+            Auth::Basic {
+                username: "u".to_string(),
+                password: "p".to_string(),
+            },
+            Auth::Bearer {
+                token: "mine".to_string(),
+            },
+        ] {
+            let mut auth = own.clone();
+            creds.apply_to_inherit(&mut auth);
+            assert_eq!(auth, own, "explicit auth is kept");
+        }
+    }
+
+    #[tokio::test]
+    async fn no_applying_node_leaves_none_alone() {
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::Bearer {
+                token: "t".to_string(),
+            },
+            false,
+        )]);
+        let fetcher = FakeFetcher::ok("x");
+        let creds = resolve_flow_credentials(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+            .await
+            .expect("resolves");
+        let mut auth = Auth::None;
+        creds.apply_to_inherit(&mut auth);
+        assert_eq!(auth, Auth::None);
     }
 
     #[tokio::test]

@@ -115,8 +115,8 @@ export function AuthNodeEditor({
             Apply to inherited auth
           </Label>
           <p className='text-xs text-muted-foreground'>
-            Every request in this flow whose auth is set to inherit uses this credential. A request
-            with its own auth keeps it.
+            Every request in this flow with no auth of its own (inherit or none) uses this
+            credential. A request with its own auth keeps it.
           </p>
         </div>
         <Switch

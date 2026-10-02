@@ -3258,6 +3258,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_request_with_no_auth_uses_the_flows_auto_apply_credential() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let mut saved = Request::new("Get", HttpMethod::Get, "https://api.example.com/x");
+        saved.runtime_auth = None;
+        let service = FlowExecutionService::new(
+            Box::new(
+                FakeFlowRepository::new().with_flow("my-api", auth_and_request_flow(true, vec![])),
+            ),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved)),
+            Box::new(NullEventPublisher),
+        );
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "flow-token-123456".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_inline_request_uses_the_flows_auto_apply_credential() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let mut flow = auth_and_request_flow(true, Vec::new());
+        flow.nodes[1] = request_flow_node("r", "https://api.example.com/x");
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullEventPublisher),
+        );
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "flow-token-123456".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
     async fn an_inherit_request_is_left_alone_when_the_node_does_not_apply() {
         use rocket_shared::types::Auth;
 

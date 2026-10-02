@@ -30,6 +30,8 @@ necessary but not sufficient for OAuth2.
 - A missing credential that cannot be obtained fails the run before the first
   node, with a message naming the Auth node.
 - Dragged-in requests set to `inherit` just work, with no per-request wiring.
+  Note: "inherit" here means inherit or none, because the backend treats `none`
+  like `inherit` (new, imported and inline requests are all `none`).
 - No token is ever written to disk or left in step output, history or logs.
 
 ## Non-goals
@@ -78,8 +80,9 @@ keep working. Its reported step value is masked.
 
 ### How requests receive it
 
-1. **Automatic:** a Request node whose resolved auth is `inherit` uses the
-   flow's auto-apply Auth credential instead of the collection auth.
+1. **Automatic:** a Request node whose resolved auth is `inherit` or `none`
+   (the backend treats `none` like `inherit`) uses the flow's auto-apply Auth
+   credential instead of the collection auth.
 2. **Explicit:** a new wire target `auth` from an Auth node sets a request's
    auth, overriding both `inherit` and the request's own auth.
 3. `apply_wired_overrides` gains the `auth` target. An `auth` wire from a
