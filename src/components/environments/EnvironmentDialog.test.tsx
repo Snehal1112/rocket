@@ -122,3 +122,47 @@ describe('EnvironmentDialog external secrets save flow', () => {
     expect(tauriApi.saveEnvironment).not.toHaveBeenCalled();
   });
 });
+
+describe('EnvironmentDialog preserves fields it does not edit', () => {
+  const fullEnv: Environment = {
+    name: 'prod',
+    variables: [{ key: 'HOST', value: 'https://api.example.com', enabled: true, secret: false }],
+    externalSecrets: [],
+    clientCertificates: [
+      {
+        type: 'pem',
+        domain: 'api.example.com',
+        certificateFilePath: 'certs/client.pem',
+        privateKeyFilePath: 'certs/client.key',
+        passphrase: '{{vault.keyPass}}',
+      },
+      { type: 'pkcs12', domain: '*.internal.example.com', pkcs12FilePath: 'certs/client.p12' },
+    ],
+    extends: 'base',
+    dotEnvFilePath: '.env.prod',
+    color: '#ff0000',
+    description: { content: 'Production', type: 'text/markdown' },
+  };
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([fullEnv]);
+    vi.mocked(tauriApi.saveEnvironment).mockReset().mockResolvedValue(undefined);
+  });
+
+  it('saves clientCertificates, extends, dotEnvFilePath, color and description unchanged', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+    const [, savedEnv] = vi.mocked(tauriApi.saveEnvironment).mock.calls[0];
+    expect(savedEnv.variables[0].key).toBe('HOST2');
+    expect(savedEnv.clientCertificates).toEqual(fullEnv.clientCertificates);
+    expect(savedEnv.extends).toBe('base');
+    expect(savedEnv.dotEnvFilePath).toBe('.env.prod');
+    expect(savedEnv.color).toBe('#ff0000');
+    expect(savedEnv.description).toEqual({ content: 'Production', type: 'text/markdown' });
+  });
+});

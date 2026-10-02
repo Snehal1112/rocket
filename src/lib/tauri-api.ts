@@ -202,10 +202,35 @@ export interface SecretManagerConnection {
   allowInsecureHttp: boolean;
 }
 
+// Persisted client certificate. A piece has one source: a file path or a
+// vault reference (`alias.secretName`). A reference is never a value.
+export type ClientCertificate =
+  | {
+      type: 'pem';
+      domain: string;
+      certificateFilePath?: string;
+      privateKeyFilePath?: string;
+      certificateSecret?: string;
+      privateKeySecret?: string;
+      passphrase?: string;
+    }
+  | {
+      type: 'pkcs12';
+      domain: string;
+      pkcs12FilePath?: string;
+      pkcs12Secret?: string;
+      passphrase?: string;
+    };
+
 export interface Environment {
   name: string;
   variables: Variable[];
   externalSecrets?: ExternalSecretBinding[];
+  clientCertificates?: ClientCertificate[];
+  extends?: string;
+  dotEnvFilePath?: string;
+  color?: string;
+  description?: unknown;
 }
 
 export interface AgentConfig {
