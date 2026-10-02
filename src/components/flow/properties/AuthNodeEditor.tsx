@@ -64,8 +64,11 @@ export function AuthNodeEditor({
   const stored = useFlowAuthStore((s) => s.auths[key]);
   const setAuth = useFlowAuthStore((s) => s.setAuth);
   const environmentName = activeEnvId ?? undefined;
-  const activeCollection = useEnvStore((s) => s.activeCollection);
-  const { data: environments = NO_ENVIRONMENTS } = useEnvironments(activeCollection);
+  // The flow's own collection, as the key and the settings use. The pre-run step
+  // (getActiveVariables in execute-request.ts) reads the env store's
+  // activeCollection instead, so the two can differ when a flow tab belongs to
+  // a collection other than the active one.
+  const { data: environments = NO_ENVIRONMENTS } = useEnvironments(collection);
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
   const { data: processEnvVars = NO_PROCESS_ENV } = useProcessEnvVars();
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);

@@ -595,4 +595,23 @@ describe('AuthNodeEditor', () => {
       expect(entry?.fingerprint).toBe(preflightFingerprint(state));
     });
   });
+
+  it('looks environments up in the collection prop, not the env store active collection', async () => {
+    useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'other' });
+    render(
+      <AuthNodeEditor
+        kind={kind}
+        onChange={vi.fn()}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+    // The 'dev' environment exists only for 'api' in the mock.
+    await waitFor(() =>
+      expect(authEditorProps.last?.variableContext?.get('clientId')).toEqual(
+        expect.objectContaining({ value: 'dev-client', source: 'environment' }),
+      ),
+    );
+  });
 });
