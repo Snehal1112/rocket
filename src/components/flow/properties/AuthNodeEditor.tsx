@@ -1,10 +1,17 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { flowAuthKey, pickAuthState, resetTokenOnConfigChange } from '@/lib/flow-auth';
 import { toPersistedAuth } from '@/lib/persisted-auth';
-import type { FlowNodeKind } from '@/lib/tauri-api';
+import {
+  useEnvironments,
+  useGlobalEnvironment,
+  useGlobalEnvironmentName,
+  useProcessEnvVars,
+} from '@/lib/queries/environment-queries';
+import { type CollectionVariable, type FlowNodeKind, getCollectionSettings } from '@/lib/tauri-api';
+import { buildScopedContext } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
@@ -30,6 +37,48 @@ export function AuthNodeEditor({
   const stored = useFlowAuthStore((s) => s.auths[key]);
   const setAuth = useFlowAuthStore((s) => s.setAuth);
   const environmentName = activeEnvId ?? undefined;
+  const activeCollection = useEnvStore((s) => s.activeCollection);
+  const { data: environments = [] } = useEnvironments(activeCollection);
+  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCollectionSettings(collection)
+      .then((s) => {
+        if (!cancelled) setCollectionVars(s.variables);
+      })
+      .catch(() => {
+        if (!cancelled) setCollectionVars([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [collection]);
+
+  // The same scoped context the collection Authorization tab builds. The OAuth2
+  // editor resolves {{vars}} from it before "Get New Access Token", because the
+  // backend does not read collection-scoped environments.
+  const variableContext = useMemo(() => {
+    const envVars: Record<string, string> = {};
+    const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
+    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) envVars[v.key] = v.value;
+    const globalVars: Record<string, string> = globalEnv
+      ? Object.fromEntries(
+          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
+        )
+      : {};
+    return buildScopedContext({
+      envVars,
+      envLabel: activeEnvId ?? undefined,
+      externalSecrets: activeEnv?.externalSecrets,
+      globalVars,
+      processEnvVars,
+      collectionVars,
+    });
+  }, [activeEnvId, environments, globalEnv, processEnvVars, collectionVars]);
 
   // The store holds the full state, including a fetched token. It is used only
   // while it matches the persisted configuration; otherwise (never edited, or
@@ -72,6 +121,7 @@ export function AuthNodeEditor({
       <AuthEditor
         auth={state}
         onChange={handleAuthChange}
+        variableContext={variableContext}
         collection={collection}
         environmentName={environmentName}
       />
