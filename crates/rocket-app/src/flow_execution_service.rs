@@ -1558,13 +1558,28 @@ mod tests {
     struct FakeCollectionRepo {
         requests: std::sync::Mutex<HashMap<(String, String), Request>>,
         settings: CollectionSettings,
+        /// Answered for every request path.
+        folder_vars: Vec<rocket_collection::CollectionVariable>,
+        /// Answered for every request path.
+        request_vars: Vec<rocket_collection::CollectionVariable>,
     }
     impl FakeCollectionRepo {
         fn new() -> Self {
             Self {
                 requests: std::sync::Mutex::new(HashMap::new()),
                 settings: CollectionSettings::default(),
+                folder_vars: Vec::new(),
+                request_vars: Vec::new(),
             }
+        }
+        fn with_scope_variables(
+            mut self,
+            folder_vars: Vec<rocket_collection::CollectionVariable>,
+            request_vars: Vec<rocket_collection::CollectionVariable>,
+        ) -> Self {
+            self.folder_vars = folder_vars;
+            self.request_vars = request_vars;
+            self
         }
         fn with_settings(mut self, settings: CollectionSettings) -> Self {
             self.settings = settings;
@@ -1637,7 +1652,7 @@ mod tests {
             _c: &str,
             _p: &str,
         ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(Vec::new())
+            Ok(self.folder_vars.clone())
         }
         fn get_folder_variables(
             &self,
@@ -1659,7 +1674,7 @@ mod tests {
             _c: &str,
             _p: &str,
         ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(Vec::new())
+            Ok(self.request_vars.clone())
         }
         fn save_request_variables(
             &self,
@@ -7941,6 +7956,52 @@ mod tests {
             "the token leaked into run output: {everything}"
         );
         assert_eq!(fetcher.calls(), 1);
+    }
+
+    /// A Bearer `{{token}}` Auth node is resolved at run start from the
+    /// environment. A folder or request variable named `token` cannot change
+    /// what is sent, so the sent token, the wire value and the masked secret
+    /// are the same value.
+    #[tokio::test]
+    async fn a_static_bearer_sends_the_run_start_value_that_is_masked() {
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env_with(&[("token", "env-token-123456")]))),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new().with_scope_variables(
+                vec![collection_var("token", "folder-token-654321")],
+                vec![collection_var("token", "request-token-987654")],
+            )),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let mut flow = auth_and_request_flow(true, Vec::new());
+        if let FlowNodeKind::Auth { auth, .. } = &mut flow.nodes[0].kind {
+            *auth = Auth::Bearer {
+                token: "{{token}}".to_string(),
+            };
+        }
+        let service = service_with_saved_request(flow, Auth::Inherit);
+        let input = RunFlowInput {
+            environment_name: Some("dev".to_string()),
+            ..run_input("auth-req")
+        };
+
+        service.run(&exec, input).await.expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "env-token-123456".to_string()
+            }],
+            "the request sends the run-start value, not a shadowing variable"
+        );
     }
 
     #[tokio::test]

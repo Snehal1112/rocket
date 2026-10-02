@@ -78,6 +78,12 @@ The credential is kept in run context, not as a wire value. The node's wire
 output is the raw token string (when the type has one) so custom header wires
 keep working. Its reported step value is masked.
 
+A static Bearer or API key is resolved once at run start, and requests send
+that resolved value, so the value sent, the wire value and the masked secret
+always match; if a `{{variable}}` in it is still unset at run start (for
+example one a script sets during the run), the request resolves it at send
+time instead, and the node then has no wire value and adds no masked secret.
+
 ### How requests receive it
 
 1. **Automatic:** a Request node whose resolved auth is `inherit` or `none`

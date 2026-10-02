@@ -157,22 +157,69 @@ fn is_non_interactive(flow: &OAuth2Flow) -> bool {
     )
 }
 
-/// The plain value an auth puts on a wire, with `{{variables}}` resolved.
-fn wire_value_of(credential: &Auth, vars: &HashMap<String, String>) -> Option<String> {
-    let resolved = match credential {
-        Auth::Bearer { token } => rocket_environment::resolve(token, vars).output,
-        Auth::ApiKey { value, .. } => rocket_environment::resolve(value, vars).output,
-        _ => return None,
+/// Resolves `template` with the run-start variables. `None` when a
+/// placeholder is left over, or when a variable's value itself contains
+/// `{{`: the request would resolve that text again at send time, so the
+/// value sent could differ from the value resolved here.
+fn resolve_fully(template: &str, vars: &HashMap<String, String>) -> Option<String> {
+    let resolved = rocket_environment::resolve(template, vars);
+    (resolved.unresolved.is_empty() && !resolved.output.contains("{{")).then_some(resolved.output)
+}
+
+/// A static Bearer or API key credential and its wire value.
+///
+/// The token is resolved once, at run start, with the run's variables
+/// (global < collection < environment, plus vault values), and the RESOLVED
+/// credential is what requests send. So the value sent, the Auth node's wire
+/// value and the masked secret are always the same value: a folder or
+/// request variable with the same name, or a script that changes the
+/// variable later in the run, cannot make a request send an unmasked token.
+///
+/// When a placeholder cannot be resolved at run start (typically a variable
+/// that a script sets during the run), the credential is kept unresolved so
+/// the request still resolves it at send time, as before. That credential
+/// has no wire value and no masked secret, because its value is not known
+/// yet; it is masked only if the variable itself is a secret.
+fn resolve_static_token(auth: &Auth, vars: &HashMap<String, String>) -> (Auth, Option<String>) {
+    let resolved = match auth {
+        Auth::Bearer { token } => resolve_fully(token, vars)
+            .filter(|t| !t.is_empty())
+            .map(|token| Auth::Bearer { token }),
+        Auth::ApiKey {
+            key,
+            value,
+            placement,
+        } => match (resolve_fully(key, vars), resolve_fully(value, vars)) {
+            (Some(key), Some(value)) if !value.is_empty() => Some(Auth::ApiKey {
+                key,
+                value,
+                placement: placement.clone(),
+            }),
+            _ => None,
+        },
+        _ => None,
     };
-    (!resolved.is_empty()).then_some(resolved)
+    match resolved {
+        Some(credential) => {
+            let wire = match &credential {
+                Auth::Bearer { token } => Some(token.clone()),
+                Auth::ApiKey { value, .. } => Some(value.clone()),
+                _ => None,
+            };
+            (credential, wire)
+        }
+        None => (auth.clone(), None),
+    }
 }
 
 /// Resolves every Auth node of `flow` into a credential, before the run starts.
 ///
 /// Order per OAuth2 node: a supplied token wins; otherwise a non-interactive
-/// grant is fetched, bounded by `fetch_timeout`; otherwise the run cannot start. Other auth types pass
-/// through with their `{{variables}}` intact, because the request resolves
-/// them at send time with its own scopes.
+/// grant is fetched, bounded by `fetch_timeout`; otherwise the run cannot
+/// start. A static Bearer or API key is resolved here, at run start (see
+/// `resolve_static_token`). Other auth types pass through with their
+/// `{{variables}}` intact, because the request resolves them at send time
+/// with its own scopes; they have no wire value.
 pub(crate) async fn resolve_flow_credentials(
     flow: &Flow,
     supplied: &FlowAuthTokens,
@@ -190,7 +237,7 @@ pub(crate) async fn resolve_flow_credentials(
         else {
             continue;
         };
-        let credential = match auth {
+        let (credential, wire) = match auth {
             Auth::None | Auth::Inherit => {
                 return Err(DomainError::InvalidInput(format!(
                     "Auth node \"{label}\" needs an auth type other than none or inherit"
@@ -222,11 +269,16 @@ pub(crate) async fn resolve_flow_credentials(
                         )));
                     }
                 };
-                Auth::Bearer { token }
+                (
+                    Auth::Bearer {
+                        token: token.clone(),
+                    },
+                    Some(token),
+                )
             }
-            other => other.clone(),
+            other => resolve_static_token(other, &ctx.vars),
         };
-        if let Some(value) = wire_value_of(&credential, &ctx.vars) {
+        if let Some(value) = wire {
             creds.wire_values.push((node.id.clone(), value));
         }
         if *apply_to_inherit {
@@ -624,12 +676,120 @@ mod tests {
         assert_eq!(
             creds.auth_for_node("a"),
             Some(&Auth::Bearer {
-                token: "{{token}}".to_string()
+                token: "resolved-token-123".to_string()
             }),
-            "variables stay unresolved in the credential; the request resolves them"
+            "the credential is resolved at run start, so what is sent is what is masked"
         );
         assert_eq!(creds.wire_value("a"), Some("resolved-token-123"));
+        assert!(creds.secret_forms().contains("resolved-token-123"));
         assert_eq!(fetcher.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_static_api_key_is_resolved_at_run_start() {
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::ApiKey {
+                key: "X-{{keyName}}".to_string(),
+                value: "{{token}}".to_string(),
+                placement: "header".to_string(),
+            },
+            true,
+        )]);
+        let mut context = ctx();
+        context
+            .vars
+            .insert("keyName".to_string(), "Api-Key".to_string());
+        let fetcher = FakeFetcher::ok("unused");
+
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &context)
+            .await
+            .expect("static auth resolves");
+
+        assert_eq!(
+            creds.auth_for_node("a"),
+            Some(&Auth::ApiKey {
+                key: "X-Api-Key".to_string(),
+                value: "resolved-token-123".to_string(),
+                placement: "header".to_string(),
+            })
+        );
+        assert_eq!(creds.wire_value("a"), Some("resolved-token-123"));
+        assert!(creds.secret_forms().contains("resolved-token-123"));
+    }
+
+    #[tokio::test]
+    async fn a_placeholder_unresolved_at_run_start_is_left_for_the_request_and_has_no_wire_value() {
+        let flow = flow_with(vec![
+            auth_node(
+                "a",
+                Auth::Bearer {
+                    token: "{{setByScript}}".to_string(),
+                },
+                true,
+            ),
+            auth_node(
+                "k",
+                Auth::ApiKey {
+                    key: "X-Api-Key".to_string(),
+                    value: "{{setByScript}}".to_string(),
+                    placement: "query".to_string(),
+                },
+                false,
+            ),
+        ]);
+        let fetcher = FakeFetcher::ok("unused");
+
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+            .await
+            .expect("an unresolved placeholder does not fail the run");
+
+        assert_eq!(
+            creds.auth_for_node("a"),
+            Some(&Auth::Bearer {
+                token: "{{setByScript}}".to_string()
+            }),
+            "the request still resolves it at send time"
+        );
+        assert_eq!(
+            creds.auth_for_node("k"),
+            Some(&Auth::ApiKey {
+                key: "X-Api-Key".to_string(),
+                value: "{{setByScript}}".to_string(),
+                placement: "query".to_string(),
+            })
+        );
+        assert_eq!(creds.wire_value("a"), None);
+        assert_eq!(creds.wire_value("k"), None);
+        assert_eq!(creds.secrets().count(), 0, "a template is never a secret");
+    }
+
+    #[tokio::test]
+    async fn a_value_that_resolves_to_another_placeholder_is_left_for_the_request() {
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::Bearer {
+                token: "{{token}}".to_string(),
+            },
+            true,
+        )]);
+        let context = FetchContext {
+            vars: HashMap::from([("token".to_string(), "{{inner}}".to_string())]),
+            ..ctx()
+        };
+        let fetcher = FakeFetcher::ok("unused");
+
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &context)
+            .await
+            .expect("resolves");
+
+        assert_eq!(
+            creds.auth_for_node("a"),
+            Some(&Auth::Bearer {
+                token: "{{token}}".to_string()
+            })
+        );
+        assert_eq!(creds.wire_value("a"), None);
     }
 
     #[tokio::test]
@@ -780,7 +940,7 @@ mod tests {
         assert_eq!(
             inherited,
             Auth::Bearer {
-                token: "{{token}}".to_string()
+                token: "resolved-token-123".to_string()
             }
         );
 
