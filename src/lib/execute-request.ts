@@ -1,3 +1,4 @@
+import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
@@ -411,23 +412,9 @@ async function maybeAutoRefreshOrFetchToken(
     (oauth.refreshTokenUrl || oauth.tokenUrl)
   ) {
     try {
-      const resolvedRefreshParams = oauth.refreshParams.length
-        ? oauth.refreshParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
-        : undefined;
-      const result = await oauth2RefreshToken({
-        refreshToken: rv(oauth.refreshToken),
-        tokenUrl: rv(oauth.tokenUrl),
-        refreshTokenUrl: oauth.refreshTokenUrl ? rv(oauth.refreshTokenUrl) : undefined,
-        clientId: rv(oauth.clientId),
-        clientSecret: oauth.clientSecret ? rv(oauth.clientSecret) : undefined,
-        scope: oauth.scope ? rv(oauth.scope) : undefined,
-        clientAuthentication: oauth.clientAuthentication,
-        verifySsl: oauth.verifySsl,
-        refreshParams: resolvedRefreshParams,
-        collection,
-        environmentName,
-        requestPath,
-      });
+      const result = await oauth2RefreshToken(
+        buildRefreshRequest(oauth, rv, { collection, environmentName, requestPath }),
+      );
       applyToken({
         accessToken: result.access_token,
         refreshToken: result.refresh_token || oauth.refreshToken,
@@ -448,37 +435,9 @@ async function maybeAutoRefreshOrFetchToken(
     // Auto-fetch is restricted to non-interactive grants. Opening the system
     // browser or a webview as a side effect of Send would surprise the user.
     try {
-      const resolvedAuthParams = oauth.authParams.length
-        ? oauth.authParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
-        : undefined;
-      const resolvedTokenParams = oauth.tokenParams.length
-        ? oauth.tokenParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
-        : undefined;
-      const resolvedRefreshParams = oauth.refreshParams.length
-        ? oauth.refreshParams.map((p) => ({ ...p, key: rv(p.key), value: rv(p.value) }))
-        : undefined;
-      const result = await oauth2GetToken({
-        grantType: oauth.grantType,
-        authorizationUrl: rv(oauth.authorizationUrl) || undefined,
-        tokenUrl: rv(oauth.tokenUrl) || undefined,
-        callbackUrl: rv(oauth.callbackUrl) || undefined,
-        clientId: rv(oauth.clientId),
-        clientSecret: oauth.clientSecret ? rv(oauth.clientSecret) : undefined,
-        scope: oauth.scope ? rv(oauth.scope) : undefined,
-        state: oauth.state ? rv(oauth.state) : undefined,
-        username: oauth.username ? rv(oauth.username) : undefined,
-        password: oauth.password ? rv(oauth.password) : undefined,
-        clientAuthentication: oauth.clientAuthentication,
-        usePkce: oauth.usePkce,
-        useSystemBrowser: oauth.useSystemBrowser,
-        verifySsl: oauth.verifySsl,
-        authParams: resolvedAuthParams,
-        tokenParams: resolvedTokenParams,
-        refreshParams: resolvedRefreshParams,
-        collection,
-        environmentName,
-        requestPath,
-      });
+      const result = await oauth2GetToken(
+        buildGetTokenRequest(oauth, rv, { collection, environmentName, requestPath }),
+      );
       applyToken({
         accessToken: result.access_token,
         refreshToken: result.refresh_token || '',
@@ -502,6 +461,48 @@ async function maybeAutoRefreshOrFetchToken(
   return request;
 }
 
+// Builds the variable context used to pre-resolve OAuth2 fields before they
+// reach the Tauri command. The backend env_repo only covers the workspace-level
+// (global) environment directory, not collection-scoped environments, so
+// variable resolution for OAuth2 must happen on the frontend. Shared by the
+// Request tab and the Flow pre-run step.
+export async function buildOAuth2VarContext(
+  collection: string | undefined,
+  requestPath?: string,
+): Promise<Record<string, string>> {
+  let collectionVars: CollectionVariable[] = [];
+  if (collection) {
+    try {
+      const settings = await getCollectionSettings(collection);
+      collectionVars = settings.variables;
+    } catch {
+      // Non-critical.
+    }
+  }
+  let folderVars: CollectionVariable[] = [];
+  let requestVars: CollectionVariable[] = [];
+  if (collection && requestPath) {
+    try {
+      folderVars = await getFolderChainVariables(collection, requestPath);
+    } catch {
+      // Non-critical.
+    }
+    try {
+      requestVars = await getRequestVariables(collection, requestPath);
+    } catch {
+      // Non-critical.
+    }
+  }
+  return buildVariableContext({
+    processEnvVars: getProcessEnvVars(),
+    globalVars: getGlobalVariables(),
+    envVars: getActiveVariables(),
+    collectionVars,
+    folderVars,
+    requestVars,
+  });
+}
+
 // Executes a request and writes the response into the pane store.
 // This is a plain async function so it can be called from both React
 // components and non-React contexts (e.g. keyboard shortcut handlers).
@@ -514,41 +515,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const preRequestPath = found?.tab.source?.path;
   const preEnvName = useEnvStore.getState().activeEnvId ?? undefined;
 
-  // Build a variable context for pre-resolving OAuth2 fields before they reach
-  // the Tauri command. The backend env_repo only covers the workspace-level
-  // (global) environment directory, not collection-scoped environments, so
-  // variable resolution for OAuth2 must happen here on the frontend.
-  let preCollectionVars: CollectionVariable[] = [];
-  if (preCollection) {
-    try {
-      const settings = await getCollectionSettings(preCollection);
-      preCollectionVars = settings.variables;
-    } catch {
-      // Non-critical.
-    }
-  }
-  let preFolderVars: CollectionVariable[] = [];
-  let preRequestVars: CollectionVariable[] = [];
-  if (preCollection && preRequestPath) {
-    try {
-      preFolderVars = await getFolderChainVariables(preCollection, preRequestPath);
-    } catch {
-      // Non-critical.
-    }
-    try {
-      preRequestVars = await getRequestVariables(preCollection, preRequestPath);
-    } catch {
-      // Non-critical.
-    }
-  }
-  const preVarCtx = buildVariableContext({
-    processEnvVars: getProcessEnvVars(),
-    globalVars: getGlobalVariables(),
-    envVars: getActiveVariables(),
-    collectionVars: preCollectionVars,
-    folderVars: preFolderVars,
-    requestVars: preRequestVars,
-  });
+  const preVarCtx = await buildOAuth2VarContext(preCollection, preRequestPath);
 
   const effectiveRequest = await maybeAutoRefreshOrFetchToken(
     tabId,
