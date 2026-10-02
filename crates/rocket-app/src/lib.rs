@@ -33,6 +33,7 @@ pub mod security_audit_service;
 pub mod template_service;
 #[cfg(test)]
 pub(crate) mod test_doubles;
+pub(crate) mod vault_certificates;
 pub mod vault_secret_resolution;
 pub mod workspace_service;
 

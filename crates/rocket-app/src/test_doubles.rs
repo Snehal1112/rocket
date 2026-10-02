@@ -16,13 +16,16 @@ use rocket_collection::{
 };
 use rocket_environment::{
     Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
-    SecretManagerConnection, SecretManagerRepository, SecretStore, VaultSecretFetcher,
+    SecretManagerConnection, SecretManagerRepository, SecretStore, VaultCertificateMaterial,
+    VaultCertificateSummary, VaultSecretFetcher,
 };
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
+use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
+use zeroize::Zeroizing;
 
 // ---------------------------------------------------------------------------
 // Collection repo
@@ -639,6 +642,131 @@ impl VaultSecretFetcher for FakeVaultSecretFetcher {
         _vault_name: &str,
     ) -> DomainResult<()> {
         Ok(())
+    }
+}
+
+/// What `FakeCertificateFetcher` answers for one certificate name.
+#[derive(Clone, Copy)]
+pub enum FakeExport {
+    /// Exports fixed material in the asked format.
+    Ok,
+    /// Fails with `InvalidInput(message)`, as RocketVault's mapped errors do.
+    Fail(&'static str),
+}
+
+pub const FAKE_CERT_PEM: &[u8] =
+    b"-----BEGIN CERTIFICATE-----\nZmFrZS1jZXJ0\n-----END CERTIFICATE-----\n";
+pub const FAKE_KEY_PEM: &[u8] =
+    b"-----BEGIN PRIVATE KEY-----\nc2VjcmV0LWtleQ==\n-----END PRIVATE KEY-----\n";
+pub const FAKE_BUNDLE: &[u8] = &[0x30, 0x82, 0x01, 0x02, 0x03];
+pub const FAKE_PASSWORD: &str = "one-time-pass-123";
+
+/// Vault fetcher that exports certificates from a script and records every export as
+/// `vault/name/format`. A name with no script entry is "not found". `list_certificates` lists
+/// the scripted names, with `exportable` true for `Ok`.
+pub struct FakeCertificateFetcher {
+    exports: HashMap<String, FakeExport>,
+    calls: Mutex<Vec<String>>,
+}
+
+impl FakeCertificateFetcher {
+    pub fn new(exports: &[(&str, FakeExport)]) -> Arc<Self> {
+        Arc::new(Self {
+            exports: exports
+                .iter()
+                .map(|(name, export)| (name.to_string(), *export))
+                .collect(),
+            calls: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl VaultSecretFetcher for FakeCertificateFetcher {
+    async fn list_secrets(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<Vec<ExternalSecretRef>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_secret_value(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+        _secret_id: &str,
+    ) -> DomainResult<Option<String>> {
+        Ok(None)
+    }
+
+    async fn test_connection(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
+
+    async fn list_certificates(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<Vec<VaultCertificateSummary>> {
+        let mut listed: Vec<VaultCertificateSummary> = self
+            .exports
+            .iter()
+            .map(|(name, export)| VaultCertificateSummary {
+                id: format!("id-{name}"),
+                name: name.clone(),
+                exportable: matches!(export, FakeExport::Ok),
+                enabled: true,
+                key_algorithm: "RSA-2048".into(),
+                expires_at: None,
+            })
+            .collect();
+        listed.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(listed)
+    }
+
+    async fn fetch_certificate(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        vault_name: &str,
+        certificate_name: &str,
+        export_format: VaultCertificateFormat,
+    ) -> DomainResult<VaultCertificateMaterial> {
+        self.calls.lock().expect("lock").push(format!(
+            "{vault_name}/{certificate_name}/{}",
+            export_format.as_str()
+        ));
+        match self.exports.get(certificate_name).copied() {
+            Some(FakeExport::Ok) => Ok(match export_format {
+                VaultCertificateFormat::Pem => VaultCertificateMaterial::Pem {
+                    certificate: Zeroizing::new(FAKE_CERT_PEM.to_vec()),
+                    private_key: Zeroizing::new(FAKE_KEY_PEM.to_vec()),
+                    key_algorithm: "RSA-2048".into(),
+                },
+                VaultCertificateFormat::Pkcs12 => VaultCertificateMaterial::Pkcs12 {
+                    bundle: Zeroizing::new(FAKE_BUNDLE.to_vec()),
+                    password: Zeroizing::new(FAKE_PASSWORD.to_string()),
+                    key_algorithm: "EC-P256".into(),
+                },
+            }),
+            Some(FakeExport::Fail(message)) => Err(DomainError::InvalidInput(message.to_string())),
+            None => Err(DomainError::NotFound(
+                "Certificate not found in this vault.".into(),
+            )),
+        }
     }
 }
 
