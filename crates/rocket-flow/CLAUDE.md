@@ -67,3 +67,6 @@ token. Validation (`validate.rs`): no wires into an Auth node; an `auth` wire
 at most one Auth node with `apply_to_inherit = true`. `check_single_auth_wire` (V14) allows at most one `auth` wire into a Request.
 V13 and V14 are labelled in the code; the other wire rules are inline
 `check_edges` closures.
+Secrets typed literally into an Auth node (client secret, password, token)
+are persisted in plaintext in the flow yml, as with collection auth; use
+`{{vars}}` or RocketVault references.

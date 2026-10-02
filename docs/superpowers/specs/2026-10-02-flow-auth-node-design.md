@@ -224,3 +224,19 @@ the Low and Info findings are accepted, deliberate, or deferred as noted below.
 - F6: send a config hash with each supplied token and reject a mismatch.
 - F7 (partial): in-memory tokens are cleared on node removal and tab close; flow delete/rename have no UI yet — call `clearFlow` when they are added. Still open: clear on workspace and environment delete or rename events; add the workspace id to the key.
 - F8: use `redact_url_secrets` for the history URL.
+- Send-time masking caveats (a static Bearer or API key template is resolved
+  and masked per request):
+  - A `repeat_until` attempt after a script rotates the variable may send a
+    value that is not in that request's mask, unless the variable is a secret
+    variable.
+  - `{{$dynamic}}` placeholders inside a static token are not masked at send
+    time: the masked value and the sent value are generated separately.
+  - A partly resolved template (`{{token}}-{{unset}}`) is not masked by the
+    Auth node: the resolved part of the sent text is an unmasked secret unless
+    another path (e.g. a secret variable) masks it.
+  - `flow-auth-sent.<id>` adds the sent value to that request's secrets, which
+    widens the script-write hold-back for that request (a script write
+    containing the value is kept in memory instead of persisted).
+- Literal secrets typed into an Auth node (client secret, password, token) are
+  stored in plaintext in the flow yml, like collection auth. Use `{{vars}}` or
+  RocketVault references; consider a UI warning.

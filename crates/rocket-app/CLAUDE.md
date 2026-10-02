@@ -104,3 +104,10 @@ it. Request nodes whose auth is `inherit` or `none` (the backend treats them ali
 `auth` wire overrides it. Types holding secrets (`SuppliedToken`,
 `FetchContext`, `FlowCredentials`) have redacting `Debug` impls; keep it that
 way.
+
+Send-time masking caveats: a `repeat_until` attempt after a script rotates the
+variable may send a value not in that request's mask (unless it is a secret
+variable); `{{$dynamic}}` placeholders in a static token are generated
+separately for the mask and the send, so they are not masked; a partly
+resolved template (`{{token}}-{{unset}}`) is not masked by the Auth node; and
+`flow-auth-sent.<id>` widens the script-write hold-back for that request.

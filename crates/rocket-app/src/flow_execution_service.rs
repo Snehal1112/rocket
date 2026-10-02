@@ -1418,8 +1418,10 @@ impl FlowExecutionService {
 /// Resolved with the same variables `resolve_request` uses for this request
 /// (global < collection < environment < folder < request, plus vault values
 /// and flow variables), read now, just before the send. `None` for a literal
-/// or non-token credential, or when a placeholder stays unresolved (the
-/// request then sends the template text, which is not a secret).
+/// or non-token credential, or when a placeholder stays unresolved. In that
+/// last case the request still sends the partly resolved text, so with
+/// `{{token}}-{{unset}}` the resolved `token` part goes out unmasked unless
+/// another path (e.g. a secret variable) masks it.
 fn send_time_credential_value(
     exec: &RequestExecutionService,
     request_input: &ExecuteRequestInput,
