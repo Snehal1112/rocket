@@ -84,3 +84,17 @@ src-tauri (Tauri commands)
 ```
 
 `src-tauri/src/lib.rs` constructs each service by injecting concrete `rocket-infra` implementations, then stores them in Tauri managed state. Tauri commands call service methods directly; services never call back into Tauri.
+
+## Flow Auth nodes (`flow_auth.rs`)
+
+`resolve_flow_credentials` turns every Auth node into a credential before a
+run starts: a UI-supplied token wins, a non-interactive OAuth2 grant is fetched
+through the `FlowTokenFetcher` port (`OAuth2ServiceFetcher` in production), an
+interactive grant without a token fails the run before any event. Static auth
+types pass through. `FlowExecutionService::run_with_auth`
+(`flow_execution_service.rs`) injects each credential secret into the run's
+external-secrets map as `flow-auth.<node id>` so the existing redaction masks
+it. Request nodes whose auth is `inherit` use the auto-apply credential; an
+`auth` wire overrides it. Types holding secrets (`SuppliedToken`,
+`FetchContext`, `FlowCredentials`) have redacting `Debug` impls; keep it that
+way.

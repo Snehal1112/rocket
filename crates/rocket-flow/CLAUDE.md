@@ -55,3 +55,14 @@ cargo test -p rocket-flow -j4
 
 - `rocket-shared` — `DomainResult`, `VariableValue`
 - `serde` — serialization
+
+## Auth node
+
+`FlowNodeKind::Auth { label, auth, apply_to_inherit }` authenticates once per
+run. It has no inputs and one `result` exit. `auth` is any `rocket_shared`
+`Auth` except `none` and `inherit`; only configuration is stored, never a
+token. Validation (`validate.rs`): no wires into an Auth node; an `auth` wire
+(`handle::AUTH`) must go from an Auth node into a Request node; and
+`check_auth_nodes` (V13) requires a concrete auth type on every Auth node and
+at most one Auth node with `apply_to_inherit = true`. Only V13 is labelled in
+the code; the two wire rules are inline `check_edges` closures.

@@ -1,7 +1,7 @@
 # Flow Auth Node — Design
 
 Date: 2026-10-02
-Status: Draft for review
+Status: Implemented
 
 ## Problem
 
