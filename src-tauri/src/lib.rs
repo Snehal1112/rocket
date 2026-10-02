@@ -715,6 +715,7 @@ pub fn run() {
             commands::secret_managers::delete_secret_manager_connection,
             commands::secret_managers::test_secret_manager_connection,
             commands::secret_managers::fetch_external_secret_names,
+            commands::secret_managers::list_vault_certificates,
             commands::agent_configs::list_agent_configs,
             commands::agent_configs::save_agent_config,
             commands::agent_configs::delete_agent_config,

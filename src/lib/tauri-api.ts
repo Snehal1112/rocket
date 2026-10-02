@@ -202,6 +202,16 @@ export interface SecretManagerConnection {
   allowInsecureHttp: boolean;
 }
 
+// A certificate in a RocketVault vault, for the Certificates tab picker. Never key material.
+export interface VaultCertificateSummary {
+  id: string;
+  name: string;
+  exportable: boolean;
+  enabled: boolean;
+  keyAlgorithm: string;
+  expiresAt?: string | null;
+}
+
 // Persisted client certificate. A piece has one source: a file path or a
 // vault reference (`alias.secretName`). A reference is never a value.
 export type ClientCertificate =
@@ -1740,6 +1750,9 @@ export const testSecretManagerConnection = (id: string, vaultName: string) =>
 
 export const fetchExternalSecretNames = (id: string, vaultName: string) =>
   invoke<ExternalSecretRef[]>('fetch_external_secret_names', { id, vaultName });
+
+export const listVaultCertificates = (connectionId: string, vaultName: string) =>
+  invoke<VaultCertificateSummary[]>('list_vault_certificates', { connectionId, vaultName });
 
 // ============================================================
 // Agent configs (ACP AI assist)

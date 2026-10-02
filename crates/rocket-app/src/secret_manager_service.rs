@@ -3,6 +3,7 @@ use rocket_environment::external_secret::ExternalSecretRef;
 use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
 use rocket_environment::secret_store::SecretStore;
 use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
+use rocket_environment::VaultCertificateSummary;
 use rocket_shared::error::{DomainError, DomainResult};
 use std::sync::Arc;
 
@@ -119,6 +120,19 @@ impl SecretManagerService {
         let (connection, secret) = self.connection_and_secret(id)?;
         self.fetcher
             .list_secrets(&connection, &secret, vault_name)
+            .await
+    }
+
+    /// Lists the certificates in `vault_name` through the connection `id`, for the Certificates
+    /// tab picker. Names and metadata only, never key material.
+    pub async fn list_certificates(
+        &self,
+        id: &str,
+        vault_name: &str,
+    ) -> DomainResult<Vec<VaultCertificateSummary>> {
+        let (connection, secret) = self.connection_and_secret(id)?;
+        self.fetcher
+            .list_certificates(&connection, &secret, vault_name)
             .await
     }
 
@@ -696,6 +710,58 @@ mod tests {
         assert!(
             matches!(result, Err(DomainError::Internal(_))),
             "a transport failure must surface as DomainError::Internal, not be swallowed, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_certificates_returns_the_fetcher_output_unchanged() {
+        let repo = FakeRepo::new();
+        repo.save(&sample_connection("conn-1"))
+            .expect("seed connection");
+        let store = FakeSecretStore::new();
+        store
+            .set(VAULT_CONNECTION_SCOPE, "conn-1", "shh-its-a-secret")
+            .expect("seed keychain entry");
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::new(store),
+            crate::test_doubles::FakeCertificateFetcher::new(&[
+                ("client-a", crate::test_doubles::FakeExport::Ok),
+                (
+                    "locked",
+                    crate::test_doubles::FakeExport::Fail("not exportable"),
+                ),
+            ]),
+        );
+
+        let listed = service
+            .list_certificates("conn-1", "prod-vault")
+            .await
+            .expect("list_certificates should succeed");
+
+        let names: Vec<(&str, bool)> = listed
+            .iter()
+            .map(|c| (c.name.as_str(), c.exportable))
+            .collect();
+        assert_eq!(names, vec![("client-a", true), ("locked", false)]);
+    }
+
+    #[tokio::test]
+    async fn list_certificates_needs_a_stored_client_secret() {
+        let repo = FakeRepo::new();
+        repo.save(&sample_connection("conn-1"))
+            .expect("seed connection");
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::new(FakeSecretStore::new()), // no keychain entry seeded
+            crate::test_doubles::FakeCertificateFetcher::new(&[]),
+        );
+
+        let result = service.list_certificates("conn-1", "prod-vault").await;
+
+        assert!(
+            matches!(result, Err(DomainError::Internal(_))),
+            "expected DomainError::Internal for a connection with no stored secret, got {result:?}"
         );
     }
 }

@@ -1,6 +1,7 @@
 use rocket_app::SecretManagerService;
 use rocket_environment::external_secret::ExternalSecretRef;
 use rocket_environment::secret_manager::SecretManagerConnection;
+use rocket_environment::VaultCertificateSummary;
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -58,6 +59,32 @@ impl From<ExternalSecretRef> for ExternalSecretRefDto {
     }
 }
 
+/// One certificate for the Certificates tab picker. Names and metadata only, never key
+/// material, so the IPC payload cannot carry a key.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultCertificateSummaryDto {
+    pub id: String,
+    pub name: String,
+    pub exportable: bool,
+    pub enabled: bool,
+    pub key_algorithm: String,
+    pub expires_at: Option<String>,
+}
+
+impl From<VaultCertificateSummary> for VaultCertificateSummaryDto {
+    fn from(c: VaultCertificateSummary) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            exportable: c.exportable,
+            enabled: c.enabled,
+            key_algorithm: c.key_algorithm,
+            expires_at: c.expires_at,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn list_secret_manager_connections(
     svc: State<'_, SecretManagerService>,
@@ -103,4 +130,47 @@ pub async fn fetch_external_secret_names(
         .into_iter()
         .map(Into::into)
         .collect())
+}
+
+#[tauri::command]
+pub async fn list_vault_certificates(
+    connection_id: String,
+    vault_name: String,
+    svc: State<'_, SecretManagerService>,
+) -> Result<Vec<VaultCertificateSummaryDto>, DomainError> {
+    Ok(svc
+        .list_certificates(&connection_id, &vault_name)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vault_certificate_dto_is_camel_case_and_carries_no_material() {
+        let dto = VaultCertificateSummaryDto::from(VaultCertificateSummary {
+            id: "id-1".into(),
+            name: "client-a".into(),
+            exportable: true,
+            enabled: false,
+            key_algorithm: "EC-P256".into(),
+            expires_at: None,
+        });
+        let json = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "id": "id-1",
+                "name": "client-a",
+                "exportable": true,
+                "enabled": false,
+                "keyAlgorithm": "EC-P256",
+                "expiresAt": null
+            })
+        );
+    }
 }
