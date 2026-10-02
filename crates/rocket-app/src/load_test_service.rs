@@ -27,9 +27,13 @@ impl LoadTestService {
             ));
         }
 
-        // Load testing is out of scope for external-secrets resolution.
-        let resolved =
+        // Load testing is out of scope for external-secrets resolution and RocketVault
+        // certificates, which fail with a clear message when selected.
+        let mut resolved =
             execution_service.resolve_request(&input, &std::collections::HashMap::new())?;
+        crate::client_certificates::unavailable_in_load_tests(
+            &mut resolved.options.client_certificates,
+        );
         let result = run_load_test_v2(executor, &resolved, &config, app).await;
         Ok(result)
     }

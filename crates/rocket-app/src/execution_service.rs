@@ -1724,8 +1724,12 @@ impl RequestExecutionService {
         input: ExecuteRequestInput,
         config: LoadTestConfig,
     ) -> DomainResult<LoadTestResult> {
-        // Load testing is out of scope for external-secrets resolution.
-        let resolved = self.resolve_request(&input, &std::collections::HashMap::new())?;
+        // Load testing is out of scope for external-secrets resolution and RocketVault
+        // certificates, which fail with a clear message when selected.
+        let mut resolved = self.resolve_request(&input, &std::collections::HashMap::new())?;
+        crate::client_certificates::unavailable_in_load_tests(
+            &mut resolved.options.client_certificates,
+        );
         let executor = Arc::clone(&self.executor);
         Ok(http_run_load_test(executor, &resolved, &config).await)
     }

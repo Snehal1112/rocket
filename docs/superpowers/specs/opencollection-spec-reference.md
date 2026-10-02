@@ -507,6 +507,18 @@ pkcs12Secret: string          # reference to a secret holding the base64 text of
 
 Each piece has exactly one source: a non-empty file path or a reference. With a reference the file path field is empty and is not written. A value that starts with `-----BEGIN` in a path or reference field is rejected on save, so key text never reaches the environment file. References are validated on save against the environment's `externalSecrets` bindings. The schema requires the file paths, so another OpenCollection tool may reject or drop an entry that uses a reference, the same trade-off as `externalSecrets`. Fetched values are never persisted. An unresolved reference fails a request or token request only when that certificate is the one selected for the URL.
 
+**Rocket extension entry type `vault` (not in the OpenCollection schema).** An entry may name a certificate that RocketVault exports at send time, instead of naming material:
+
+```yaml
+- type: vault
+  domain: api.example.com
+  binding: prod          # External Secrets alias of this environment; the connection and vault come from it
+  certificate: client-a  # certificate name in that vault
+  format: pem            # pem (default) or pkcs12
+```
+
+Only names are stored: no id, version, password, key text or path. On save the binding must be one of the environment's `externalSecrets` aliases, the certificate name must be set, and no field may start with `-----BEGIN`. At send time Rocket exports the certificate only when it is the one selected for the URL (requests and OAuth2 token URLs alike), keeps the material in memory, and fails that request with a clear message if the export fails, with no fallback to another entry. Load tests cannot use it. Other OpenCollection tools do not know this type, and Rocket builds from before it fail to parse an environment file that holds it, so they hide that environment.
+
 Rocket resolves a relative certificate file path against the collection folder (the parent of `environments/`) and rejects one with `..`. Absolute and `~/` paths are used as written. Rocket presents the first certificate whose `domain` matches the request URL (host, optional scheme and port, `*` wildcard). PKCS12 bundles and PEM keys work. A PKCS#8 PEM key may be encrypted (`BEGIN ENCRYPTED PRIVATE KEY`) when `passphrase` is set. Old OpenSSL `Proc-Type: 4,ENCRYPTED` keys and PBES1 keys return an error that says how to convert them. A matching certificate that cannot be loaded fails the request. A redirect that leaves the certificate's domain is not followed, so the certificate is not offered to another host; the 3xx response is returned. OAuth2 token requests use the same certificate, matched against the token URL.
 
 ---

@@ -295,6 +295,20 @@ fn inline_from_secret(
     }
 }
 
+/// Load tests send without RocketVault access, so each vault certificate becomes
+/// `Unavailable` with a clear reason. As everywhere else, it fails a request only when it is
+/// the one selected for the URL.
+pub(crate) fn unavailable_in_load_tests(certificates: &mut [ResolvedClientCertificate]) {
+    for cert in certificates.iter_mut().filter(|c| c.is_deferred()) {
+        let reason = format!(
+            "RocketVault certificates are not available in load tests. Use a file or a vault \
+             secret certificate for {}.",
+            cert.domain
+        );
+        *cert = ResolvedClientCertificate::unavailable(cert.domain.clone(), reason);
+    }
+}
+
 /// One line per certificate, for test assertions: `pkcs12 <domain> file:<path> pass:<value>`,
 /// or `deferred <domain> <alias>:<name> <format> conn:<id> vault:<name>`.
 /// It prints the passphrase, so it only exists in tests.
@@ -417,5 +431,35 @@ mod tests {
         env.client_certificates = vec![vault_entry("{{apiHost}}", "prod")];
         let lines = resolve_env(env, &[("apiHost", "api.example.com")]);
         assert!(lines[0].starts_with("deferred api.example.com "), "{lines:?}");
+    }
+
+    // Spec section 6.
+    #[test]
+    fn load_tests_turn_a_vault_certificate_into_a_clear_error() {
+        let mut certs = vec![
+            ResolvedClientCertificate::deferred(
+                "api.example.com",
+                VaultCertificateBinding {
+                    alias: "prod".into(),
+                    connection_id: "conn-1".into(),
+                    vault_name: "prod-vault".into(),
+                },
+                "client-a",
+                VaultCertificateFormat::Pem,
+            ),
+            ResolvedClientCertificate::pkcs12(
+                "files.example.com",
+                CertificateSource::File("/certs/client.p12".into()),
+                None,
+            ),
+        ];
+        unavailable_in_load_tests(&mut certs);
+        let lines = describe_all(&certs);
+        assert!(
+            lines[0].starts_with("unavailable api.example.com")
+                && lines[0].contains("not available in load tests"),
+            "{lines:?}"
+        );
+        assert_eq!(lines[1], "pkcs12 files.example.com file:/certs/client.p12 pass:-");
     }
 }

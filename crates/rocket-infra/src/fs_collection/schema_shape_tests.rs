@@ -181,6 +181,9 @@ const CLIENT_CERT_PKCS12: &[&str] = &["type", "domain", "pkcs12FilePath", "passp
 /// Other OpenCollection tools do not know them.
 const ROCKET_CLIENT_CERT_PEM_EXTENSIONS: &[&str] = &["certificateSecret", "privateKeySecret"];
 const ROCKET_CLIENT_CERT_PKCS12_EXTENSIONS: &[&str] = &["pkcs12Secret"];
+/// Rocket extension outside the OpenCollection schema: a certificate that RocketVault exports
+/// when it is selected. The whole entry type is an extension, and it stores names only.
+const ROCKET_CLIENT_CERT_VAULT: &[&str] = &["type", "domain", "binding", "certificate", "format"];
 
 #[derive(Default)]
 struct Violations(Vec<String>);
@@ -840,17 +843,24 @@ fn environment_client_certificates_use_schema_keys_plus_rocket_extensions() {
             pkcs12_secret: Some("vault.clientBundleB64".into()),
             passphrase: Some("{{vault.bundlePass}}".into()),
         },
+        ClientCertificate::Vault {
+            domain: "e.example.com".into(),
+            binding: "vault".into(),
+            certificate: "client-e".into(),
+            format: rocket_shared::certificate::VaultCertificateFormat::Pem,
+        },
     ];
     repo.save(&env).expect("save environment");
 
     let doc = read_yaml(&dir.path().join("prod.yml"));
-    assert_eq!(seq(doc.get("clientCertificates")).count(), 4);
+    assert_eq!(seq(doc.get("clientCertificates")).count(), 5);
     let mut v = Violations::default();
     for (i, cert) in seq(doc.get("clientCertificates")).enumerate() {
         let at = format!("prod.yml clientCertificates[{i}]");
         let allowed: Vec<&str> = match cert.get("type").and_then(Value::as_str) {
             Some("pem") => [CLIENT_CERT_PEM, ROCKET_CLIENT_CERT_PEM_EXTENSIONS].concat(),
             Some("pkcs12") => [CLIENT_CERT_PKCS12, ROCKET_CLIENT_CERT_PKCS12_EXTENSIONS].concat(),
+            Some("vault") => ROCKET_CLIENT_CERT_VAULT.to_vec(),
             other => {
                 v.0.push(format!("{at}: unknown certificate type {other:?}"));
                 continue;

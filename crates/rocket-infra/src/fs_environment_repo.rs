@@ -209,7 +209,7 @@ mod tests {
     use super::*;
     use rocket_environment::secret_store::SecretStore;
     use rocket_environment::Variable;
-    use rocket_shared::certificate::ClientCertificate;
+    use rocket_shared::certificate::{ClientCertificate, VaultCertificateFormat};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -759,6 +759,34 @@ mod tests {
         assert_eq!(
             repo.get("prod").expect("load").client_certificates,
             env.client_certificates
+        );
+    }
+
+    #[test]
+    fn a_vault_certificate_entry_round_trips_through_yaml_with_names_only() {
+        let (dir, repo) = setup();
+        let yaml = "name: prod\nclientCertificates:\n\
+            - type: vault\n  domain: api.example.com\n  binding: prod\n  certificate: client-a\n  format: pkcs12\n";
+        std::fs::write(dir.path().join("prod.yml"), yaml).expect("write prod.yml");
+
+        let env = repo.get("prod").expect("a vault entry loads");
+        assert_eq!(
+            env.client_certificates,
+            vec![ClientCertificate::Vault {
+                domain: "api.example.com".into(),
+                binding: "prod".into(),
+                certificate: "client-a".into(),
+                format: VaultCertificateFormat::Pkcs12,
+            }]
+        );
+
+        repo.save(&env).expect("save");
+        let raw = std::fs::read_to_string(dir.path().join("prod.yml")).expect("read prod.yml");
+        let saved: serde_yaml::Value = serde_yaml::from_str(&raw).expect("parse saved");
+        let original: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse original");
+        assert_eq!(
+            saved["clientCertificates"], original["clientCertificates"],
+            "{raw}"
         );
     }
 }
