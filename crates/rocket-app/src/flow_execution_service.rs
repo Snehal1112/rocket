@@ -7721,4 +7721,239 @@ mod tests {
         );
         assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
     }
+
+    // ---- Plan 7: end-to-end Auth node coverage ----
+
+    /// Echoes a Bearer token into the response body: the worst case for redaction.
+    struct EchoTokenExecutor;
+
+    #[async_trait]
+    impl HttpExecutor for EchoTokenExecutor {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            let body = match &req.auth {
+                rocket_shared::types::Auth::Bearer { token } => {
+                    format!("{{\"echo\":\"{token}\"}}")
+                }
+                _ => "{}".to_string(),
+            };
+            Ok(HttpResponse {
+                size_bytes: body.len(),
+                body,
+                status: 200,
+                status_text: "OK".to_string(),
+                headers: Vec::new(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+            })
+        }
+    }
+
+    fn client_credentials_auth_node(id: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Auth {
+                label: "Sign in".to_string(),
+                auth: rocket_shared::types::Auth::OAuth2(Box::new(
+                    crate::flow_auth::test_support::client_credentials(),
+                )),
+                apply_to_inherit: true,
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn inherit_saved_request() -> Request {
+        let mut saved = Request::new("Get", HttpMethod::Get, "https://api.example.com/x");
+        saved.runtime_auth = Some(rocket_shared::types::Auth::Inherit);
+        saved
+    }
+
+    #[tokio::test]
+    async fn a_fetched_token_never_appears_in_any_run_output() {
+        use crate::flow_auth::test_support::{FakeFetcher, SharedFetcher};
+
+        let token = "fetched-token-999999";
+        let fetcher = FakeFetcher::ok(token);
+        let publisher = RecordingPublisher::new();
+        let mut request_node = saved_flow_node("r", "req.yml");
+        if let FlowNodeKind::Request { debug, .. } = &mut request_node.kind {
+            *debug = true;
+        }
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![client_credentials_auth_node("a"), request_node],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().with_request(
+                "my-api",
+                "req.yml",
+                inherit_saved_request(),
+            )),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+        )
+        .with_token_fetcher(Box::new(SharedFetcher(Arc::clone(&fetcher))));
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(EchoTokenExecutor),
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let summary = service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        let step = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "r")
+            .expect("request step recorded");
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        // The token reached the HTTP layer, which echoed it into the response.
+        // The record of that response must show it masked.
+        let debug = step.debug_request.as_ref().expect("debug record");
+        let response = debug.response.as_ref().expect("response in record");
+        assert!(
+            response.body.contains(crate::redaction::REDACTED),
+            "got: {}",
+            response.body
+        );
+        let everything = format!(
+            "{}\n{:?}",
+            serde_json::to_string(&summary).expect("serialize summary"),
+            publisher.events()
+        );
+        assert!(
+            !everything.contains(token),
+            "the token leaked into run output: {everything}"
+        );
+        assert_eq!(fetcher.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_credential_is_fetched_once_and_reused_by_every_request() {
+        use crate::flow_auth::test_support::{FakeFetcher, SharedFetcher};
+        use rocket_shared::types::Auth;
+
+        let fetcher = FakeFetcher::ok("fetched-token-999999");
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![
+                client_credentials_auth_node("a"),
+                saved_flow_node("r1", "req.yml"),
+                saved_flow_node("r2", "req.yml"),
+            ],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = service_with_saved_request(flow, Auth::Inherit)
+            .with_token_fetcher(Box::new(SharedFetcher(Arc::clone(&fetcher))));
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        let bearer = Auth::Bearer {
+            token: "fetched-token-999999".to_string(),
+        };
+        assert_eq!(executor.sent_auths(), vec![bearer.clone(), bearer]);
+        assert_eq!(fetcher.calls(), 1, "one fetch per run, not per request");
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_interactive_node_sends_no_request() {
+        use crate::flow_auth::test_support::authorization_code;
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Corporate SSO".to_string(),
+                        auth: Auth::OAuth2(Box::new(authorization_code())),
+                        apply_to_inherit: true,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                saved_flow_node("r", "req.yml"),
+            ],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = service_with_saved_request(flow, Auth::Inherit);
+
+        let err = service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect_err("the run must not start");
+
+        assert!(
+            err.to_string().contains("Corporate SSO")
+                && err.to_string().contains("needs you to authenticate first"),
+            "got: {err}"
+        );
+        assert!(executor.sent_urls().is_empty(), "no request may be sent");
+    }
+
+    #[tokio::test]
+    async fn a_supplied_token_for_an_interactive_node_is_what_requests_send() {
+        use crate::flow_auth::test_support::authorization_code;
+        use crate::flow_auth::{FlowAuthTokens, SuppliedToken};
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Corporate SSO".to_string(),
+                        auth: Auth::OAuth2(Box::new(authorization_code())),
+                        apply_to_inherit: true,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                saved_flow_node("r", "req.yml"),
+            ],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = service_with_saved_request(flow, Auth::Inherit);
+        let tokens: FlowAuthTokens = HashMap::from([(
+            "a".to_string(),
+            SuppliedToken {
+                access_token: "supplied-token-123456".to_string(),
+            },
+        )]);
+
+        service
+            .run_with_auth(&exec, run_input("auth-req"), tokens)
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "supplied-token-123456".to_string()
+            }]
+        );
+    }
 }
