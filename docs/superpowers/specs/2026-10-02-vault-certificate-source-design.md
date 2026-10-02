@@ -44,7 +44,7 @@ A new entry type next to `pem` and `pkcs12`:
 
 - No id, version, password, key text or file path is stored.
 - Save-time rules (rocket-environment `validate_client_certificates`, mirrored in `src/lib/certificate-validation.ts`): non-empty domain; `binding` matches one of the environment's bindings; non-empty `certificate`; `format` is `pem` or `pkcs12`; a value starting with `-----BEGIN` is rejected in any field.
-- Backward compatible: additive; an older build ignores the unknown type. `rocket-shared` `ClientCertificate` gains a `Vault` variant (camelCase on its fields like the others). The OpenCollection spec reference gets a note that `vault` is a Rocket extension outside the schema.
+- Backward compatibility: existing files load unchanged (`format` defaults to `pem`), but the change is **not** forward compatible. `ClientCertificate` is `#[serde(tag = "type")]` with no catch-all, so an older build cannot parse an environment file that contains a `vault` entry. `FsEnvironmentRepo::list` skips such a file as corrupt and `get` returns an error, so the older build hides that environment. Plan E records this as a release note (see section 11, risk 5). `rocket-shared` `ClientCertificate` gains a `Vault` variant (camelCase on its fields like the others). The OpenCollection spec reference gets a note that `vault` is a Rocket extension outside the schema.
 
 ## 5. Runtime flow
 
@@ -52,7 +52,7 @@ A new entry type next to `pem` and `pkcs12`:
 2. Before dispatch, rocket-app selects the certificate for the request URL with the existing `find_certificate`. If the selected entry is `Deferred`, it asks the fetcher for the material and replaces it with `Inline`. OAuth2 token requests do the same against the token URL. Entries for other domains cause no network call.
 3. The fetcher (`VaultSecretFetcher`, same `connection, client_secret, vault_name` arguments as today) gains:
    - `list_certificates(...)`: id, name, `exportable`, `key_algorithm`, enabled and `expires_at`, for the picker.
-   - `fetch_certificate(..., name, format, password)`: returns `Zeroizing` bytes plus format and key algorithm.
+   - `fetch_certificate(..., name, format)`: returns `Zeroizing` bytes plus format and key algorithm. For PKCS12 the one-time password is generated inside the RocketVault client (rocket-infra), used for the export request, and returned with the material so rocket-app can open the bundle; it is never stored or logged.
    The name-to-id walk, the in-memory id cache and the single retry on a 404 live inside the RocketVault client in rocket-infra, next to its token cache.
 4. PKCS12: a fresh random password per call, sent with `compat` set to `legacy`, then zeroized. PEM: the private key is already unencrypted PKCS#8, so the existing `-----BEGIN PRIVATE KEY-----` rule holds.
 5. The resulting `Inline` material goes through the unchanged load code, the 1 MiB cap and the redaction forms of Plan C.
@@ -96,6 +96,7 @@ A new entry type next to `pem` and `pkcs12`:
 2. The picker needs to know the operating system for the EC warning. Use the Tauri OS information if the app already depends on it, otherwise the user agent; decide in the plan.
 3. The id cache has no size limit beyond the number of distinct certificates used in a session; this is acceptable, and the cache is cleared when a connection changes.
 4. Interaction with the Flow auth work on another machine: that work changes how auth is inherited in flows, not how certificates are selected. Keep edits in `execution_service.rs` small and pull before starting.
+5. Forward compatibility (found while planning): a build without the `vault` variant hides any environment file that contains a `vault` entry as corrupt. Anyone sharing a repository between builds, including the user's second machine, must update both before using the entry type. Whether to ship a tolerant parse (an unknown-type catch-all) first is a release decision, not part of this plan.
 
 ## 12. Delivery
 
