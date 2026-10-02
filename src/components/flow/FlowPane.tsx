@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import {
   buildEdgeFromConnection,
@@ -383,6 +384,15 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               tabRunState={tab.runState}
               tabRunId={tab.runId}
               onBeforeRun={handleBeforeRun}
+              onPrepareAuth={() =>
+                collectFlowAuthTokens({
+                  collection: collectionName,
+                  flowName,
+                  // Read at click time, after onBeforeRun saved unsaved edits.
+                  nodes: latestFlowTab()?.nodes ?? tab.nodes,
+                  environmentName: activeEnvironmentName ?? undefined,
+                })
+              }
               onStepLogs={(nodeId, logs) => {
                 const node = latestFlowTab()?.nodes.find((n) => n.id === nodeId);
                 const label = node?.kind.label || nodeId;

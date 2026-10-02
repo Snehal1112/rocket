@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import * as tauriApi from '@/lib/tauri-api';
@@ -24,6 +25,8 @@ vi.mock('@/lib/tauri-api', async () => {
 vi.mock('@/lib/execute-request', () => ({
   getActiveGlobalEnvName: vi.fn(),
 }));
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
 const onPatchStatus = vi.fn();
 const onRunStateChange = vi.fn();
@@ -445,6 +448,66 @@ describe('FlowToolbar', () => {
         'fresh-global',
       ),
     );
+  });
+
+  it('passes the tokens from onPrepareAuth to runFlow', async () => {
+    const onPrepareAuth = vi.fn().mockResolvedValue({ a: { accessToken: 'tok-123456' } });
+    renderToolbar({ onPrepareAuth });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() =>
+      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null, {
+        a: { accessToken: 'tok-123456' },
+      }),
+    );
+  });
+
+  it('keeps the four-argument runFlow call when there are no tokens', async () => {
+    const onPrepareAuth = vi.fn().mockResolvedValue({});
+    renderToolbar({ onPrepareAuth });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() =>
+      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null),
+    );
+  });
+
+  it('does not start the run when the sign-in step fails, and says why', async () => {
+    const onPrepareAuth = vi
+      .fn()
+      .mockRejectedValue(new Error('Sign-in for Auth node "SSO" failed: window closed'));
+    renderToolbar({ onPrepareAuth });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('Sign-in for Auth node "SSO" failed: window closed'),
+      ),
+    );
+    expect(tauriApi.runFlow).not.toHaveBeenCalled();
+    // The Run button works again.
+    expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled();
+  });
+
+  it('does not start the run when onPrepareAuth returns null', async () => {
+    const onPrepareAuth = vi.fn().mockResolvedValue(null);
+    renderToolbar({ onPrepareAuth });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(onPrepareAuth).toHaveBeenCalled());
+    expect(tauriApi.runFlow).not.toHaveBeenCalled();
+  });
+
+  it('runs onPrepareAuth after onBeforeRun saves', async () => {
+    const order: string[] = [];
+    const onBeforeRun = vi.fn(async () => {
+      order.push('save');
+      return true;
+    });
+    const onPrepareAuth = vi.fn(async () => {
+      order.push('auth');
+      return {};
+    });
+    renderToolbar({ onBeforeRun, onPrepareAuth });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+    expect(order).toEqual(['save', 'auth']);
   });
 
   it('Stop calls cancelFlowRun with the active run id', async () => {

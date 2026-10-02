@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import {
   cancelFlowRun,
+  type FlowAuthToken,
   type FlowDebugRequest,
   type FlowLogEntry,
   type FlowStepCompletedEvent,
@@ -32,6 +33,10 @@ interface FlowToolbarProps {
   // Runs before a new run starts. `run_flow` runs the flow saved on disk, so
   // this saves unsaved canvas edits first. Returning false aborts the run.
   onBeforeRun?: () => Promise<boolean>;
+  // Runs after onBeforeRun and before the run starts. Authenticates Auth nodes
+  // and returns the tokens to hand to the run. Returning null, or rejecting,
+  // aborts the run.
+  onPrepareAuth?: () => Promise<Record<string, FlowAuthToken> | null>;
   // Receives each step's script console output once the run ends.
   onStepLogs?: (nodeId: string, logs: FlowLogEntry[]) => void;
   // Receives each debug node's sent request once the run ends.
@@ -78,6 +83,7 @@ export function FlowToolbar({
   tabRunState,
   tabRunId,
   onBeforeRun,
+  onPrepareAuth,
   onStepLogs,
   onStepDebug,
 }: FlowToolbarProps) {
@@ -164,6 +170,21 @@ export function FlowToolbar({
         return;
       }
     }
+    let authTokens: Record<string, FlowAuthToken> | undefined;
+    if (onPrepareAuth) {
+      try {
+        const prepared = await onPrepareAuth();
+        if (prepared === null) {
+          isStartingRef.current = false;
+          return;
+        }
+        authTokens = prepared;
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+        isStartingRef.current = false;
+        return;
+      }
+    }
     cleanupListeners();
     // Held in a local, not state, so the event handlers see it at once.
     let runId: string | null = null;
@@ -199,7 +220,12 @@ export function FlowToolbar({
       // the wrong global environment. Mirrors how runner-execute.ts reads
       // this at execution time rather than caching it.
       const globalEnvName = getActiveGlobalEnvName();
-      const summary = await runFlow(collection, flowName, environmentName, globalEnvName ?? null);
+      // Tokens are sent only when there are some, so a flow without Auth nodes
+      // calls the command exactly as before.
+      const summary =
+        authTokens && Object.keys(authTokens).length > 0
+          ? await runFlow(collection, flowName, environmentName, globalEnvName ?? null, authTokens)
+          : await runFlow(collection, flowName, environmentName, globalEnvName ?? null);
       // The summary is the authoritative final state. Event delivery is not
       // guaranteed to finish before the command response arrives.
       for (const step of summary.steps) {
