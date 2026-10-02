@@ -26,13 +26,15 @@ import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
 
-// Reads the active environment's variables from the query cache.
-function getActiveVariables(): Record<string, string> {
+// Reads the active environment's variables from the query cache. `collection`
+// picks whose environments to read; without it the env store's active
+// collection is used.
+function getActiveVariables(collection?: string): Record<string, string> {
   const { activeEnvId, activeCollection } = useEnvStore.getState();
-  if (!activeEnvId || !activeCollection) return {};
+  const source = collection ?? activeCollection;
+  if (!activeEnvId || !source) return {};
   const envs =
-    getQueryClient().getQueryData<Environment[]>(environmentKeys.collection(activeCollection)) ??
-    [];
+    getQueryClient().getQueryData<Environment[]>(environmentKeys.collection(source)) ?? [];
   const env = envs.find((e) => e.name === activeEnvId);
   if (!env) return {};
   const vars: Record<string, string> = {};
@@ -496,7 +498,7 @@ export async function buildOAuth2VarContext(
   return buildVariableContext({
     processEnvVars: getProcessEnvVars(),
     globalVars: getGlobalVariables(),
-    envVars: getActiveVariables(),
+    envVars: getActiveVariables(collection),
     collectionVars,
     folderVars,
     requestVars,
