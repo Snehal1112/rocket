@@ -14,6 +14,7 @@ pub mod environment_service;
 pub mod execution_service;
 pub mod export_service;
 pub(crate) mod flow_callbacks;
+pub mod flow_auth;
 pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;
@@ -50,6 +51,7 @@ pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
 pub use export_service::{ExportFormat, ExportService};
+pub use flow_auth::{FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher, SuppliedToken};
 pub use flow_execution_service::{
     CapturedOutput, FlowExecutionService, FlowRunSummary, FlowStepResult, RunFlowInput,
 };
