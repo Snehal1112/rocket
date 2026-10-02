@@ -77,8 +77,8 @@ impl FlowTokenFetcher for NoTokenFetcher {
 #[derive(Clone, Default)]
 pub(crate) struct FlowCredentials {
     by_node: HashMap<String, Auth>,
-    /// The credential of the Auth node that applies to inherited auth.
-    auto_apply: Option<Auth>,
+    /// `(node id, credential)` of the Auth node that applies to inherited auth.
+    auto_apply: Option<(String, Auth)>,
     /// `(node id, value)` for every credential that has a plain token or key value.
     wire_values: Vec<(String, String)>,
 }
@@ -103,12 +103,15 @@ impl FlowCredentials {
     /// fall back to the collection auth), and requests created in the app,
     /// saved requests with no auth block and inline Flow requests are all
     /// `none`. Any other (explicit) auth is left alone.
-    pub(crate) fn apply_to_inherit(&self, auth: &mut Auth) {
+    /// Returns the id of the Auth node whose credential was applied.
+    pub(crate) fn apply_to_inherit(&self, auth: &mut Auth) -> Option<&str> {
         if matches!(auth, Auth::Inherit | Auth::None) {
-            if let Some(credential) = &self.auto_apply {
+            if let Some((node_id, credential)) = &self.auto_apply {
                 *auth = credential.clone();
+                return Some(node_id);
             }
         }
+        None
     }
 
     /// The plain value an Auth node puts on its wire (a token or API key
@@ -138,7 +141,8 @@ impl FlowCredentials {
 
 /// How long a run-start token fetch may take. The fetch runs before the run
 /// is registered, so Stop cannot reach it; without a bound, a token endpoint
-/// that never answers would hang the run forever.
+/// that never answers would hang the run forever. The bound is per fetch and
+/// fetches run one after another, so N hanging Auth nodes wait N x 30 s.
 pub(crate) const TOKEN_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `30s` for whole seconds, `50ms` below a second.
@@ -157,69 +161,55 @@ fn is_non_interactive(flow: &OAuth2Flow) -> bool {
     )
 }
 
-/// Resolves `template` with the run-start variables. `None` when a
-/// placeholder is left over, or when a variable's value itself contains
-/// `{{`: the request would resolve that text again at send time, so the
-/// value sent could differ from the value resolved here.
-fn resolve_fully(template: &str, vars: &HashMap<String, String>) -> Option<String> {
+/// Resolves `template` with `vars`. `None` when a placeholder is left over,
+/// or when the result still contains `{{` (a variable whose value is itself
+/// a template), since that text is not a final value.
+pub(crate) fn resolve_fully(template: &str, vars: &HashMap<String, String>) -> Option<String> {
     let resolved = rocket_environment::resolve(template, vars);
     (resolved.unresolved.is_empty() && !resolved.output.contains("{{")).then_some(resolved.output)
 }
 
-/// A static Bearer or API key credential and its wire value.
-///
-/// The token is resolved once, at run start, with the run's variables
-/// (global < collection < environment, plus vault values), and the RESOLVED
-/// credential is what requests send. So the value sent, the Auth node's wire
-/// value and the masked secret are always the same value: a folder or
-/// request variable with the same name, or a script that changes the
-/// variable later in the run, cannot make a request send an unmasked token.
-///
-/// When a placeholder cannot be resolved at run start (typically a variable
-/// that a script sets during the run), the credential is kept unresolved so
-/// the request still resolves it at send time, as before. That credential
-/// has no wire value and no masked secret, because its value is not known
-/// yet; it is masked only if the variable itself is a secret.
-fn resolve_static_token(auth: &Auth, vars: &HashMap<String, String>) -> (Auth, Option<String>) {
-    let resolved = match auth {
-        Auth::Bearer { token } => resolve_fully(token, vars)
-            .filter(|t| !t.is_empty())
-            .map(|token| Auth::Bearer { token }),
-        Auth::ApiKey {
-            key,
-            value,
-            placement,
-        } => match (resolve_fully(key, vars), resolve_fully(value, vars)) {
-            (Some(key), Some(value)) if !value.is_empty() => Some(Auth::ApiKey {
-                key,
-                value,
-                placement: placement.clone(),
-            }),
-            _ => None,
-        },
+/// The secret-bearing text of a static Bearer token or API key value.
+fn secret_text(auth: &Auth) -> Option<&str> {
+    match auth {
+        Auth::Bearer { token } => Some(token),
+        Auth::ApiKey { value, .. } => Some(value),
         _ => None,
-    };
-    match resolved {
-        Some(credential) => {
-            let wire = match &credential {
-                Auth::Bearer { token } => Some(token.clone()),
-                Auth::ApiKey { value, .. } => Some(value.clone()),
-                _ => None,
-            };
-            (credential, wire)
-        }
-        None => (auth.clone(), None),
     }
+}
+
+/// The token or API key template of `auth` when it holds a `{{placeholder}}`,
+/// which the request resolves at send time.
+pub(crate) fn credential_template(auth: &Auth) -> Option<&str> {
+    secret_text(auth).filter(|text| text.contains("{{"))
+}
+
+/// The run-start wire value of a static Bearer or API key credential.
+///
+/// The credential itself is NOT resolved here: a request resolves its
+/// `{{variables}}` at send time with its own scopes (folder, request, flow
+/// variables and anything a script wrote earlier in the run), so a Login
+/// request that writes a fresh `token` is honoured. The value returned here is
+/// an informational snapshot for the node's wire output, resolved with the
+/// run-start variables; `{{$dynamic}}` values in it are generated once, at run
+/// start. For a template the snapshot can therefore differ from the value a
+/// request sends; the sent value is masked separately, per request, by
+/// `FlowExecutionService`. A snapshot with a placeholder still unresolved is
+/// no wire value at all, so a template is never registered as a secret.
+fn static_wire_snapshot(auth: &Auth, vars: &HashMap<String, String>) -> Option<String> {
+    secret_text(auth)
+        .and_then(|text| resolve_fully(text, vars))
+        .filter(|value| !value.is_empty())
 }
 
 /// Resolves every Auth node of `flow` into a credential, before the run starts.
 ///
 /// Order per OAuth2 node: a supplied token wins; otherwise a non-interactive
 /// grant is fetched, bounded by `fetch_timeout`; otherwise the run cannot
-/// start. A static Bearer or API key is resolved here, at run start (see
-/// `resolve_static_token`). Other auth types pass through with their
-/// `{{variables}}` intact, because the request resolves them at send time
-/// with its own scopes; they have no wire value.
+/// start. Other auth types pass through with their `{{variables}}` intact,
+/// because the request resolves them at send time with its own scopes. A
+/// static Bearer or API key also gets a run-start wire snapshot (see
+/// `static_wire_snapshot`); other static types have no wire value.
 pub(crate) async fn resolve_flow_credentials(
     flow: &Flow,
     supplied: &FlowAuthTokens,
@@ -276,13 +266,13 @@ pub(crate) async fn resolve_flow_credentials(
                     Some(token),
                 )
             }
-            other => resolve_static_token(other, &ctx.vars),
+            other => (other.clone(), static_wire_snapshot(other, &ctx.vars)),
         };
         if let Some(value) = wire {
             creds.wire_values.push((node.id.clone(), value));
         }
         if *apply_to_inherit {
-            creds.auto_apply = Some(credential.clone());
+            creds.auto_apply = Some((node.id.clone(), credential.clone()));
         }
         creds.by_node.insert(node.id.clone(), credential);
     }
@@ -676,17 +666,46 @@ mod tests {
         assert_eq!(
             creds.auth_for_node("a"),
             Some(&Auth::Bearer {
-                token: "resolved-token-123".to_string()
+                token: "{{token}}".to_string()
             }),
-            "the credential is resolved at run start, so what is sent is what is masked"
+            "a template stays unresolved; the request resolves it at send time"
         );
-        assert_eq!(creds.wire_value("a"), Some("resolved-token-123"));
+        assert_eq!(
+            creds.wire_value("a"),
+            Some("resolved-token-123"),
+            "the wire value is a run-start snapshot"
+        );
         assert!(creds.secret_forms().contains("resolved-token-123"));
         assert_eq!(fetcher.calls(), 0);
     }
 
     #[tokio::test]
-    async fn a_static_api_key_is_resolved_at_run_start() {
+    async fn a_literal_bearer_is_sent_and_wired_as_is() {
+        let flow = flow_with(vec![auth_node(
+            "a",
+            Auth::Bearer {
+                token: "literal-token-123456".to_string(),
+            },
+            true,
+        )]);
+        let fetcher = FakeFetcher::ok("unused");
+
+        let creds = resolve(&flow, &HashMap::new(), fetcher.as_ref(), &ctx())
+            .await
+            .expect("static auth resolves");
+
+        assert_eq!(
+            creds.auth_for_node("a"),
+            Some(&Auth::Bearer {
+                token: "literal-token-123456".to_string()
+            })
+        );
+        assert_eq!(creds.wire_value("a"), Some("literal-token-123456"));
+        assert!(creds.secret_forms().contains("literal-token-123456"));
+    }
+
+    #[tokio::test]
+    async fn a_static_api_key_template_is_kept_and_snapshotted_for_its_wire() {
         let flow = flow_with(vec![auth_node(
             "a",
             Auth::ApiKey {
@@ -709,8 +728,8 @@ mod tests {
         assert_eq!(
             creds.auth_for_node("a"),
             Some(&Auth::ApiKey {
-                key: "X-Api-Key".to_string(),
-                value: "resolved-token-123".to_string(),
+                key: "X-{{keyName}}".to_string(),
+                value: "{{token}}".to_string(),
                 placement: "header".to_string(),
             })
         );
@@ -940,7 +959,7 @@ mod tests {
         assert_eq!(
             inherited,
             Auth::Bearer {
-                token: "resolved-token-123".to_string()
+                token: "{{token}}".to_string()
             }
         );
 

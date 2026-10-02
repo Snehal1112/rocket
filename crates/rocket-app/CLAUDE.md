@@ -91,10 +91,13 @@ src-tauri (Tauri commands)
 run starts: a UI-supplied token wins, a non-interactive OAuth2 grant is fetched
 through the `FlowTokenFetcher` port (`OAuth2ServiceFetcher` in production), an
 interactive grant without a token fails the run before any event; each fetch is
-bounded by `TOKEN_FETCH_TIMEOUT` (30 s). A static Bearer or API key is resolved
-at run start and sent resolved, so the sent, wired and masked values match (a
-placeholder unset at run start is left for the request and has no wire value).
-Other static auth types pass through. `FlowExecutionService::run_with_auth`
+bounded by `TOKEN_FETCH_TIMEOUT` (30 s per fetch; fetches are sequential).
+Static auth types pass through unresolved, so each request resolves
+`{{variables}}` at send time with its own scopes. For a static Bearer or API
+key the node's wire output is a run-start snapshot; the Request arm of
+`execute_node` resolves an Auth-node template with the request's own variables
+and adds the sent value to that request's secrets (`flow-auth-sent.<node id>`),
+so what is sent is masked. `FlowExecutionService::run_with_auth`
 (`flow_execution_service.rs`) injects each credential secret into the run's
 external-secrets map as `flow-auth.<node id>` so the existing redaction masks
 it. Request nodes whose auth is `inherit` or `none` (the backend treats them alike) use the auto-apply credential; an

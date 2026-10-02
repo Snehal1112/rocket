@@ -1189,7 +1189,9 @@ impl FlowExecutionService {
                 request_input.flow_vars = callbacks.vars().clone();
                 // A request set to inherit uses the flow's Auth node, when one
                 // applies. A request with its own auth keeps it.
-                credentials.apply_to_inherit(&mut request_input.auth);
+                let mut auth_from: Option<String> = credentials
+                    .apply_to_inherit(&mut request_input.auth)
+                    .map(str::to_string);
 
                 let mut resolved = HashMap::new();
                 for edge in data_edges {
@@ -1206,6 +1208,7 @@ impl FlowExecutionService {
                                     edge.id, edge.source_node_id
                                 ))
                             })?;
+                        auth_from = Some(edge.source_node_id.clone());
                         continue;
                     }
                     let source_output = captured_source(node, edge, captured)?;
@@ -1224,6 +1227,37 @@ impl FlowExecutionService {
                 let edges_owned: Vec<FlowEdge> = data_edges.iter().map(|e| (*e).clone()).collect();
                 apply_wired_overrides(&mut request_input, &resolved, &edges_owned)?;
 
+                // An Auth-node credential with a `{{template}}` is resolved by
+                // the request at send time, so the value sent can differ from
+                // the run-start snapshot. Mask the value this request will
+                // send too: it joins this request's secrets, which cover the
+                // debug record, the exchange, history and script console.
+                let sent_secret = auth_from.and_then(|node_id| {
+                    send_time_credential_value(exec, &request_input, external_secrets)
+                        .map(|value| (format!("flow-auth-sent.{node_id}"), value))
+                });
+                let request_secrets: std::borrow::Cow<'_, HashMap<String, String>>;
+                let request_secret_values: std::borrow::Cow<'_, HashSet<String>>;
+                match sent_secret {
+                    Some((key, value)) => {
+                        let mut secrets = external_secrets.clone();
+                        secrets.insert(key, value);
+                        request_secret_values = std::borrow::Cow::Owned(exec.secret_values(
+                            input.global_env_name.as_deref(),
+                            Some(&input.collection),
+                            input.environment_name.as_deref(),
+                            &secrets,
+                        ));
+                        request_secrets = std::borrow::Cow::Owned(secrets);
+                    }
+                    None => {
+                        request_secrets = std::borrow::Cow::Borrowed(external_secrets);
+                        request_secret_values = std::borrow::Cow::Borrowed(&secret_values);
+                    }
+                }
+                let external_secrets = request_secrets.as_ref();
+                let secret_values = request_secret_values.as_ref();
+
                 // Wires were resolved once above; every attempt reuses them.
                 if let Some(repeat) = repeat_until {
                     return self
@@ -1233,7 +1267,7 @@ impl FlowExecutionService {
                             request_input,
                             repeat,
                             external_secrets,
-                            &secret_values,
+                            secret_values,
                             *debug_on,
                             logs,
                             debug,
@@ -1254,7 +1288,7 @@ impl FlowExecutionService {
                         sent,
                         result.as_ref().ok().map(|o| &o.response),
                         error.as_deref(),
-                        &secret_values,
+                        secret_values,
                     );
                     if *debug_on {
                         *debug = Some(record.clone());
@@ -1377,6 +1411,30 @@ impl FlowExecutionService {
             }
         }
     }
+}
+
+/// The value a request will send for its Auth-node credential, when that
+/// credential is a static Bearer or API key holding a `{{template}}`.
+/// Resolved with the same variables `resolve_request` uses for this request
+/// (global < collection < environment < folder < request, plus vault values
+/// and flow variables), read now, just before the send. `None` for a literal
+/// or non-token credential, or when a placeholder stays unresolved (the
+/// request then sends the template text, which is not a secret).
+fn send_time_credential_value(
+    exec: &RequestExecutionService,
+    request_input: &ExecuteRequestInput,
+    external_secrets: &HashMap<String, String>,
+) -> Option<String> {
+    let template = crate::flow_auth::credential_template(&request_input.auth)?;
+    let mut vars = exec.build_variable_context(
+        request_input.global_env_name.as_deref(),
+        request_input.collection.as_deref(),
+        request_input.environment_name.as_deref(),
+        request_input.request_path.as_deref(),
+        external_secrets,
+    );
+    vars.extend(request_input.flow_vars.clone());
+    crate::flow_auth::resolve_fully(template, &vars).filter(|value| !value.is_empty())
 }
 
 /// The captured output of `edge`'s source. Topological order guarantees it
@@ -7958,50 +8016,371 @@ mod tests {
         assert_eq!(fetcher.calls(), 1);
     }
 
-    /// A Bearer `{{token}}` Auth node is resolved at run start from the
-    /// environment. A folder or request variable named `token` cannot change
-    /// what is sent, so the sent token, the wire value and the masked secret
-    /// are the same value.
-    #[tokio::test]
-    async fn a_static_bearer_sends_the_run_start_value_that_is_masked() {
-        use rocket_shared::types::Auth;
+    // ---- Template credentials resolve at send time; the value sent is masked ----
 
-        let executor = crate::test_doubles::RecordingExecutor::new();
-        let exec = RequestExecutionService::new(
-            Box::new(StaticEnvRepo(env_with(&[("token", "env-token-123456")]))),
-            Arc::new(SharedExecutor(Arc::clone(&executor))),
+    /// An environment repo over a shared, mutable environment.
+    struct SharedEnvRepo(Arc<std::sync::Mutex<Environment>>);
+
+    impl EnvironmentRepository for SharedEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            Ok(vec![self.0.lock().expect("lock env").clone()])
+        }
+        fn get(&self, _name: &str) -> DomainResult<Environment> {
+            Ok(self.0.lock().expect("lock env").clone())
+        }
+        fn save(&self, env: &Environment) -> DomainResult<()> {
+            *self.0.lock().expect("lock env") = env.clone();
+            Ok(())
+        }
+        fn delete(&self, _name: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    /// Records every sent auth and echoes its token into the response body
+    /// (the worst case for redaction). A send to a URL ending in `/login`
+    /// writes `fresh` to the environment's `token`, as a Login request's
+    /// post-response script does (script environment writes are persisted).
+    struct LoginEchoExecutor {
+        env: Arc<std::sync::Mutex<Environment>>,
+        fresh: String,
+        sent: std::sync::Mutex<Vec<rocket_shared::types::Auth>>,
+    }
+
+    impl LoginEchoExecutor {
+        fn new(env: &Arc<std::sync::Mutex<Environment>>, fresh: &str) -> Arc<Self> {
+            Arc::new(Self {
+                env: Arc::clone(env),
+                fresh: fresh.to_string(),
+                sent: std::sync::Mutex::new(Vec::new()),
+            })
+        }
+        fn sent_auths(&self) -> Vec<rocket_shared::types::Auth> {
+            self.sent.lock().expect("lock sent").clone()
+        }
+    }
+
+    #[async_trait]
+    impl HttpExecutor for LoginEchoExecutor {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            use rocket_shared::types::Auth;
+            self.sent.lock().expect("lock sent").push(req.auth.clone());
+            if req.url.ends_with("/login") {
+                self.env
+                    .lock()
+                    .expect("lock env")
+                    .set_variable(rocket_environment::Variable::new("token", &self.fresh));
+            }
+            let body = match &req.auth {
+                Auth::Bearer { token } => format!("{{\"echo\":\"{token}\"}}"),
+                Auth::ApiKey { value, .. } => format!("{{\"echo\":\"{value}\"}}"),
+                _ => "{}".to_string(),
+            };
+            Ok(HttpResponse {
+                size_bytes: body.len(),
+                body,
+                status: 200,
+                status_text: "OK".to_string(),
+                headers: Vec::new(),
+                duration_ms: 1,
+                ttfb_ms: 1,
+            })
+        }
+    }
+
+    /// A flow of an applying Auth node `a` with `auth`, an optional `login`
+    /// request (its own Basic auth, so the Auth node never applies to it), and
+    /// an inherit request `r` with debug on. No edges: they run in this order.
+    fn template_auth_service(
+        auth: rocket_shared::types::Auth,
+        with_login: bool,
+    ) -> FlowExecutionService {
+        let mut nodes = vec![FlowNode {
+            id: "a".to_string(),
+            kind: FlowNodeKind::Auth {
+                label: "Sign in".to_string(),
+                auth,
+                apply_to_inherit: true,
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }];
+        if with_login {
+            nodes.push(saved_flow_node("login", "login.yml"));
+        }
+        let mut request_node = saved_flow_node("r", "req.yml");
+        if let FlowNodeKind::Request { debug, .. } = &mut request_node.kind {
+            *debug = true;
+        }
+        nodes.push(request_node);
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes,
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let mut login = Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
+        login.runtime_auth = Some(rocket_shared::types::Auth::Basic {
+            username: "u".to_string(),
+            password: "p".to_string(),
+        });
+        FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "login.yml", login)
+                    .with_request("my-api", "req.yml", inherit_saved_request()),
+            ),
+            Box::new(NullEventPublisher),
+        )
+    }
+
+    fn template_exec(
+        env: &Arc<std::sync::Mutex<Environment>>,
+        executor: &Arc<LoginEchoExecutor>,
+        collection_repo: FakeCollectionRepo,
+    ) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(SharedEnvRepo(Arc::clone(env))),
+            Arc::clone(executor) as Arc<dyn HttpExecutor>,
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new().with_scope_variables(
-                vec![collection_var("token", "folder-token-654321")],
-                vec![collection_var("token", "request-token-987654")],
-            )),
+            Box::new(collection_repo),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
-        let mut flow = auth_and_request_flow(true, Vec::new());
-        if let FlowNodeKind::Auth { auth, .. } = &mut flow.nodes[0].kind {
-            *auth = Auth::Bearer {
-                token: "{{token}}".to_string(),
-            };
-        }
-        let service = service_with_saved_request(flow, Auth::Inherit);
-        let input = RunFlowInput {
+        )
+    }
+
+    fn dev_input() -> RunFlowInput {
+        RunFlowInput {
             environment_name: Some("dev".to_string()),
             ..run_input("auth-req")
-        };
+        }
+    }
 
-        service.run(&exec, input).await.expect("run must succeed");
+    /// Request `r`'s debug response echoes the token it sent: it must be
+    /// masked there and nowhere in the summary.
+    fn assert_masked_in_run_output(summary: &FlowRunSummary, token: &str) {
+        let step = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "r")
+            .expect("request step recorded");
+        assert_eq!(step.status, FlowNodeStatus::Success);
+        let debug = step.debug_request.as_ref().expect("debug record");
+        let response = debug.response.as_ref().expect("response in record");
+        assert!(
+            response.body.contains(crate::redaction::REDACTED) && !response.body.contains(token),
+            "the token sent must be masked, got: {}",
+            response.body
+        );
+        let everything = serde_json::to_string(summary).expect("serialize summary");
+        assert!(
+            !everything.contains(token),
+            "the token sent leaked into run output: {everything}"
+        );
+    }
+
+    /// The canonical Login flow: the environment holds a stale `token` from a
+    /// previous run, the Login request writes a fresh one, and the next
+    /// request uses an Auth node `Bearer {{token}}`. The request must send the
+    /// fresh token (resolved at send time), and that token must be masked.
+    #[tokio::test]
+    async fn a_template_bearer_sends_the_token_a_login_wrote_during_the_run_and_masks_it() {
+        use rocket_shared::types::Auth;
+
+        let env = Arc::new(std::sync::Mutex::new(env_with(&[(
+            "token",
+            "stale-token-111111",
+        )])));
+        let executor = LoginEchoExecutor::new(&env, "fresh-token-222222");
+        let exec = template_exec(&env, &executor, FakeCollectionRepo::new());
+        let service = template_auth_service(
+            Auth::Bearer {
+                token: "{{token}}".to_string(),
+            },
+            true,
+        );
+
+        let summary = service
+            .run(&exec, dev_input())
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths().last(),
+            Some(&Auth::Bearer {
+                token: "fresh-token-222222".to_string()
+            }),
+            "the request sends the token resolved at send time, not the run-start value"
+        );
+        assert_masked_in_run_output(&summary, "fresh-token-222222");
+    }
+
+    /// A folder or request variable named `token` shadows the environment at
+    /// send time, as for any request. What is sent is what is masked.
+    #[tokio::test]
+    async fn a_template_bearer_uses_request_scope_variables_and_masks_what_is_sent() {
+        use rocket_shared::types::Auth;
+
+        let env = Arc::new(std::sync::Mutex::new(env_with(&[(
+            "token",
+            "env-token-123456",
+        )])));
+        let executor = LoginEchoExecutor::new(&env, "unused");
+        let exec = template_exec(
+            &env,
+            &executor,
+            FakeCollectionRepo::new().with_scope_variables(
+                vec![collection_var("token", "folder-token-654321")],
+                vec![collection_var("token", "request-token-987654")],
+            ),
+        );
+        let service = template_auth_service(
+            Auth::Bearer {
+                token: "{{token}}".to_string(),
+            },
+            false,
+        );
+
+        let summary = service
+            .run(&exec, dev_input())
+            .await
+            .expect("run must succeed");
 
         assert_eq!(
             executor.sent_auths(),
             vec![Auth::Bearer {
-                token: "env-token-123456".to_string()
-            }],
-            "the request sends the run-start value, not a shadowing variable"
+                token: "request-token-987654".to_string()
+            }]
         );
+        assert_masked_in_run_output(&summary, "request-token-987654");
+    }
+
+    #[tokio::test]
+    async fn a_template_api_key_is_resolved_at_send_time_and_masked() {
+        use rocket_shared::types::Auth;
+
+        let env = Arc::new(std::sync::Mutex::new(env_with(&[(
+            "token",
+            "stale-key-111111",
+        )])));
+        let executor = LoginEchoExecutor::new(&env, "fresh-key-222222");
+        let exec = template_exec(&env, &executor, FakeCollectionRepo::new());
+        let service = template_auth_service(
+            Auth::ApiKey {
+                key: "X-Api-Key".to_string(),
+                value: "{{token}}".to_string(),
+                placement: "header".to_string(),
+            },
+            true,
+        );
+
+        let summary = service
+            .run(&exec, dev_input())
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths().last(),
+            Some(&Auth::ApiKey {
+                key: "X-Api-Key".to_string(),
+                value: "fresh-key-222222".to_string(),
+                placement: "header".to_string(),
+            })
+        );
+        assert_masked_in_run_output(&summary, "fresh-key-222222");
+    }
+
+    #[tokio::test]
+    async fn a_literal_bearer_is_sent_unchanged_and_masked() {
+        use rocket_shared::types::Auth;
+
+        let env = Arc::new(std::sync::Mutex::new(env_with(&[])));
+        let executor = LoginEchoExecutor::new(&env, "unused");
+        let exec = template_exec(&env, &executor, FakeCollectionRepo::new());
+        let service = template_auth_service(
+            Auth::Bearer {
+                token: "literal-token-123456".to_string(),
+            },
+            false,
+        );
+
+        let summary = service
+            .run(&exec, dev_input())
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "literal-token-123456".to_string()
+            }]
+        );
+        assert_masked_in_run_output(&summary, "literal-token-123456");
+    }
+
+    #[tokio::test]
+    async fn a_vault_reference_bearer_sends_the_vault_value_and_masks_it() {
+        use rocket_shared::types::Auth;
+
+        let mut vault_env = env_with(&[]);
+        vault_env
+            .external_secrets
+            .push(rocket_environment::ExternalSecretBinding {
+                alias: "payments".to_string(),
+                connection_id: "conn-1".to_string(),
+                vault_name: "prod-vault".to_string(),
+                secret_names: vec![rocket_environment::ExternalSecretRef {
+                    name: "apiKey".to_string(),
+                    secret_id: "sec-1".to_string(),
+                }],
+            });
+        let connection = rocket_environment::SecretManagerConnection {
+            id: "conn-1".to_string(),
+            label: "Prod RocketVault".to_string(),
+            base_url: "https://vault.internal:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+        };
+        let fetcher = FakeVaultSecretFetcher::new(HashMap::from([(
+            "sec-1".to_string(),
+            "sk-vault-secret-123456".to_string(),
+        )]));
+        let env = Arc::new(std::sync::Mutex::new(vault_env));
+        let executor = LoginEchoExecutor::new(&env, "unused");
+        let exec = RequestExecutionService::new(
+            Box::new(SharedEnvRepo(Arc::clone(&env))),
+            Arc::clone(&executor) as Arc<dyn HttpExecutor>,
+            Box::new(NullHistoryRepo),
+            Box::new(FakeCollectionRepo::new()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(connection)),
+            Arc::new(FakeSecretStore("client-secret".to_string())),
+            Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
+        );
+        let service = template_auth_service(
+            Auth::Bearer {
+                token: "{{payments.apiKey}}".to_string(),
+            },
+            false,
+        );
+
+        let summary = service
+            .run(&exec, dev_input())
+            .await
+            .expect("run must succeed");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "sk-vault-secret-123456".to_string()
+            }]
+        );
+        assert_masked_in_run_output(&summary, "sk-vault-secret-123456");
     }
 
     #[tokio::test]

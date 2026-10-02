@@ -78,11 +78,12 @@ The credential is kept in run context, not as a wire value. The node's wire
 output is the raw token string (when the type has one) so custom header wires
 keep working. Its reported step value is masked.
 
-A static Bearer or API key is resolved once at run start, and requests send
-that resolved value, so the value sent, the wire value and the masked secret
-always match; if a `{{variable}}` in it is still unset at run start (for
-example one a script sets during the run), the request resolves it at send
-time instead, and the node then has no wire value and adds no masked secret.
+For a static Bearer or API key that holds `{{variables}}`, the wire output is
+a run-start snapshot (no wire value if a variable is still unset then;
+`{{$dynamic}}` values are generated once), while each request resolves the
+credential at send time with its own scopes, so a token a Login script writes
+during the run is sent; the value each request sends is masked in that
+request's debug record, exchange, history and console.
 
 ### How requests receive it
 
@@ -210,9 +211,9 @@ the Low and Info findings are accepted, deliberate, or deferred as noted below.
 | F7 | Low | Webview tokens live for the whole session and are never cleared; key has no workspace | Deferred: follow-up (the environment part is fixed under F1) |
 | F8 | Low | History URL redaction misses percent-encoded token forms | Deferred: also affects vault secrets today; follow-up |
 | F9 | Info | Output node masks only Auth tokens, not secret variables | Deliberate: Output shows secret variables raw by an existing test; Auth tokens are masked |
-| F10 | Info | Redacted wire value can differ from the sent value if a folder or request variable shadows the token variable | Informational, no change |
+| F10 | Info | Redacted wire value can differ from the sent value if a folder or request variable shadows the token variable | Addressed by the send-time masking commit: each request masks the credential value it actually sends |
 | F11 | Info | Spec said injection happens inside `resolve_request` after the request guard | Documentation fix: Security section corrected above; nothing is bypassed |
-| F12 | Info | A token is re-resolved as a template before use | Accepted: needs a hostile token endpoint, which the flow author already controls |
+| F12 | Info | A token is re-resolved as a template before use | Accepted: needs a hostile token endpoint, which the flow author already controls; a token containing `{{x}}` can also make the wire value differ from the sent value |
 | F13 | Info | Imported flows fetch tokens without asking | Informational, no change: equivalent to an inline Request node using `{{vault.x}}` |
 | F14 | Info | Tokens are plain `String`, not zeroized | Informational, no change |
 
