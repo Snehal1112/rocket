@@ -123,8 +123,10 @@ sent.
 - Every supplied or fetched token (and refresh/secret fields) is registered
   with `redaction.rs` for the run, so step output, debug exchange, history
   and script logs show it masked.
-- Injection happens inside `resolve_request`, after the existing request
-  guard (SSRF) checks and with the same redirect rules as other auth.
+- The credential is applied in `execute_node`, before `resolve_request`. The
+  request guard only governs script `req.setUrl` redirects, so injection
+  bypasses nothing. A Bearer credential goes through `bearer_auth`, so
+  `Authorization` is stripped on cross-host redirects like other auth.
 - No new IPC command exposes a token.
 
 ### Failure messages
@@ -181,3 +183,34 @@ only, `.yml` persistence only.
 | 7 | Security review and `verify-rocket` | Opus |
 
 Order: 1 → (2 ∥ 4) → 3 → 5 → 6 → 7.
+
+## Security review
+
+Reviewed 2026-10-02 (read-only, `main..feat/flow-auth-node`). No Critical or
+High findings. One Medium (F1, a token reused across environments) was fixed;
+the Low and Info findings are accepted, deliberate, or deferred as noted below.
+
+| ID | Severity | Finding | Resolution |
+|---|---|---|---|
+| F1 | Medium | In-memory token key had no environment, so a token fetched under "prod" was reused under "staging" | Fixed: `fix(flow): scope in-memory Auth tokens to the active environment` |
+| F2 | Low | Step `error` text is not redacted (failed-send URL, If node value, script exceptions can quote a token) | Deferred: same gap exists for vault secrets; follow-up |
+| F3 | Low | Provider error body in the run error is unbounded and unredacted | Deferred: the Authentication tab already behaves this way; follow-up |
+| F4 | Low | Literal secrets of non-token auth types (Basic, Digest, etc.) are not masked | Deferred: matches collection-level auth today; narrow exposure |
+| F5 | Low | `{{flow-auth.<node id>}}` resolves in every field and script of the run | Accepted: resolves like `{{vault.x}}`; no new capability beyond wiring an Auth node into a URL or header |
+| F6 | Low | Backend does not check that a supplied token matches the config it was fetched for (flow file edited during sign-in) | Deferred: needs a config fingerprint; follow-up |
+| F7 | Low | Webview tokens live for the whole session and are never cleared; key has no workspace | Deferred: follow-up (the environment part is fixed under F1) |
+| F8 | Low | History URL redaction misses percent-encoded token forms | Deferred: also affects vault secrets today; follow-up |
+| F9 | Info | Output node masks only Auth tokens, not secret variables | Deliberate: Output shows secret variables raw by an existing test; Auth tokens are masked |
+| F10 | Info | Redacted wire value can differ from the sent value if a folder or request variable shadows the token variable | Informational, no change |
+| F11 | Info | Spec said injection happens inside `resolve_request` after the request guard | Documentation fix: Security section corrected above; nothing is bypassed |
+| F12 | Info | A token is re-resolved as a template before use | Accepted: needs a hostile token endpoint, which the flow author already controls |
+| F13 | Info | Imported flows fetch tokens without asking | Informational, no change: equivalent to an inline Request node using `{{vault.x}}` |
+| F14 | Info | Tokens are plain `String`, not zeroized | Informational, no change |
+
+### Follow-ups
+
+- F2: redact every step error (`redact_url_secrets` in the run loop; consider `reqwest::Error::without_url()`).
+- F3: truncate provider error bodies and redact echoed credentials.
+- F6: send a config hash with each supplied token and reject a mismatch.
+- F7: clear tokens on workspace, environment and flow delete or rename events; add the workspace id to the key.
+- F8: use `redact_url_secrets` for the history URL.
