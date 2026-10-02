@@ -10,6 +10,13 @@ tracked separately and out of scope here.
 
 > 📖 Before starting implementation, read `docs/superpowers/specs/opencollection-spec-reference.md`.
 
+> **Update 2026-10-01.** The scope of this integration now also covers client certificate
+> material and OAuth2 token requests. An environment's client certificate entry can name a
+> RocketVault secret (`alias.secretName`) for its certificate, private key or base64 PKCS12
+> bundle, and OAuth2 token requests resolve `{{alias.secretName}}` references. See section 4.9
+> and the [environment client certificates design](2026-10-01-environment-client-certificates-design.md).
+> Text below that says otherwise is marked superseded.
+
 ## 1. Problem
 
 RocketAPI users who run their own [RocketVault](https://github.com/) server (a
@@ -63,12 +70,13 @@ resolves *values* live at request-send time.
 - Not supporting other secret-manager providers (AWS Secrets Manager, HashiCorp
   Vault, cloud Azure Key Vault). RocketVault only, for now — the connection model
   should not preclude adding providers later, but no other provider is built here.
-- Not resolving external secrets inside `OAuth2Service`'s own variable
-  interpolation (`crates/rocket-app/src/oauth2_service.rs`, which duplicates
-  `build_variable_context`, per its own comment). Using an external-secret
-  reference as part of an OAuth2 token-request field is a reasonable follow-up,
-  explicitly deferred here to keep the resolution-path change scoped to
-  `RequestExecutionService`/`CollectionRunnerService`.
+- ~~Not resolving external secrets inside `OAuth2Service`'s own variable
+  interpolation.~~ **Superseded 2026-10-01 (commit `5666e771`).** `OAuth2Service` now takes
+  the resolved values (`resolve_get_token_request_with_secrets`,
+  `refresh_token_with_secrets`), and the OAuth2 Tauri commands fetch them first with
+  `RequestExecutionService::resolve_external_secrets`. So `{{alias.secretName}}` works in
+  token-request fields and in the client certificate passphrase. Client certificate material
+  is also in scope, see section 4.9.
 - Not building an app-wide Preferences dialog beyond what this feature needs. A
   minimal "Secret Managers" panel is in scope; a general settings framework is
   not — see §4.5.
@@ -368,6 +376,38 @@ which the already-shipped `redact()` helper in
 secret-aware-variable-context spec, already implemented). Same
 `MIN_REDACTION_LEN` (6-char) threshold applies.
 
+**Update 2026-10-01.** "No new redaction code" is superseded for multi-line values.
+`redaction_forms()` (`crates/rocket-app/src/redaction.rs`) now adds, for every external secret
+value, the whole value, its trimmed form and, for a multi-line value such as a PEM, each line on
+its own (lines shorter than `MIN_REDACTION_LEN` and `-----BEGIN`/`-----END` armor lines are
+skipped). `build_variable_scopes` uses it, so history, flow debug records and run output mask a
+single printed line of a PEM, not only the whole text. Script console output is masked by
+`redact()` in `crates/rocket-infra/src/scripting/ops/mod.rs` (`ops/console.rs` calls it), which
+replaces every member of the set and needs no change. Section 4.6's remark that
+`ops/console.rs` needs no changes still holds.
+
+### 4.9 Client certificate material (added 2026-10-01)
+
+An environment's `clientCertificates` entry may take each piece of material from a RocketVault
+secret instead of a file: `certificateSecret` and `privateKeySecret` (PEM text) for a `pem`
+entry, `pkcs12Secret` (the base64 text of the DER bundle) for a `pkcs12` entry. The value is a
+reference, `alias.secretName`, validated on save against the environment's bindings. It is never
+a value.
+
+- **Resolution.** `crates/rocket-app/src/client_certificates.rs` looks each reference up in the
+  map from `resolve_external_secrets`, for request execution and OAuth2 alike. A found value
+  becomes inline bytes (`Zeroizing`). PKCS12 is base64 decoded and ignores whitespace, so a
+  wrapped secret works. A missing, empty, undecodable or over-1-MiB value makes the entry
+  `Unavailable`.
+- **Fail only when selected.** An `Unavailable` entry is an error only when it is the certificate
+  chosen for the URL, and there is no fallback to another source. An unresolved reference on
+  another domain does not affect the request.
+- **Never persisted or shown.** Values are not written to the environment file, history, logs,
+  events or the audit trail, and the resolved type is not `Serialize`. Its `Debug` prints sizes
+  and the source kind only. Error messages name the reference, never the value.
+- **Known limit.** Load tests call `resolve_request` with an empty secrets map, so a vault-backed
+  certificate is `Unavailable` there.
+
 ## 5. Interfaces (for the implementation plan)
 
 - `rocket_infra::rocketvault::RocketVaultClient` — new, `list_secrets`/
@@ -407,6 +447,8 @@ secret-aware-variable-context spec, already implemented). Same
   error, never a silent fallback to another secret source or an empty value
   substitution (§4.6) — sending a request with a missing credential silently is
   worse than failing loudly.
+- Client certificate material fetched from RocketVault follows the same rules (section 4.9):
+  never persisted, held as `Zeroizing` bytes, absent from `Debug` and serialization output.
 
 ## 7. Testing
 

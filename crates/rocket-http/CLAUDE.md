@@ -30,6 +30,7 @@ cargo test -p rocket-http <test_name>
 | `pkce` | `generate_pkce()` → `PkcePair` (verifier + challenge per RFC 7636) |
 | `oauth1_sig` | `sign()` → `oauth_*` params, `authorization_header()` — OAuth 1.0 (RFC 5849) signing for HMAC-SHA1/256/512 and PLAINTEXT. RSA-* returns an error. |
 | `client_cert` | `find_certificate()` picks the environment client certificate whose `domain` matches a URL (host, optional scheme and port, `*` wildcard; an empty domain never matches). `certificate_covers()` checks one certificate against a URL, for redirect targets. |
+| `resolved_certificate` | `ResolvedClientCertificate { domain, material }`, the runtime form of a client certificate. `CertificateMaterial` is `Pem`, `Pkcs12` or `Unavailable { reason }`. Each piece is a `CertificateSource`: `File(path)` or `Inline(Zeroizing<Vec<u8>>)` (bytes from a RocketVault secret). Passphrases are `Zeroizing<String>`. Not `Serialize`. `Debug` prints the domain, the piece kinds, `file <path>` or `inline <n> bytes`, and `<redacted>` for a passphrase. |
 | `token_client` | `TokenClientProvider` trait: builds the client for an OAuth2 token request, presenting the matching environment certificate. Implemented by `ReqwestTokenClientProvider` in `rocket-infra`. |
 | `digest_sig` | `select_challenge()` parses `WWW-Authenticate`, `authorize()` builds the Digest `Authorization` value (RFC 7616: MD5, SHA-256, SHA-512-256 and `-sess`, qop auth/auth-int, legacy no-qop form). |
 | `wsse_sig` | `wsse_headers()` → `Authorization` and `X-WSSE` header values (SHA-1 password digest over nonce + created + password). |
@@ -42,6 +43,7 @@ cargo test -p rocket-http <test_name>
 
 - `HttpRequest` is the **resolved** request (variables already substituted). It is distinct from `rocket-collection`'s `Request`, which is a saved template.
 - `RequestOptions` defaults: `follow_redirects = true`, `timeout_ms = 30_000`, `verify_ssl = true`. These are applied via `#[serde(default)]`, so missing fields in JSON deserialise correctly.
+- `RequestOptions.client_certificates` is `Vec<ResolvedClientCertificate>` with `#[serde(skip)]`: it is never serialized and never read from IPC input. The selected environment is its only source (`rocket-app` fills it). Because it can hold key bytes, nothing may log or persist an `HttpRequest` or `RequestOptions` through another type. The tests in `request.rs` (`certificate_leaks`) pin `Debug` and `serde_json` output.
 - Auth is **stateless and functional**: `acquire_token`, `sign_request`, and `generate_pkce` are standalone functions. The service layer (`rocket-app`) calls them during request preparation — nothing here holds token state.
 - `AwsCredentials` and `SignedHeaders` do **not** derive `serde` (they are transient signing artefacts, never serialised for IPC).
 - All other public types derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` for Tauri IPC compatibility.
