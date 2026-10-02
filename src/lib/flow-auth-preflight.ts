@@ -82,6 +82,8 @@ export async function collectFlowAuthTokens(
   const nodes = input.nodes.filter(isAuthNode).filter((n) => isOAuth2(n.kind.auth));
   if (nodes.length === 0) return tokens;
 
+  // Also the token fingerprint's resolution; the editor's `flowAuthResolver`
+  // builds the same context, so both recognise each other's tokens.
   const varCtx = await buildOAuth2VarContext(input.collection);
   const rv = (s: string) => resolveWithContext(s, varCtx);
   const target: OAuth2Target = {

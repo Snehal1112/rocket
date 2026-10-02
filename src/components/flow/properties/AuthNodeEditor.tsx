@@ -12,10 +12,10 @@ import { Switch } from '@/components/ui/switch';
 import { AUTH_NODE_TYPE_OPTIONS, authStateForType } from '@/lib/auth-type-defaults';
 import { withCurrentAuthType } from '@/lib/auth-type-options';
 import {
-  fingerprintFor,
+  flowAuthEntryAfterEdit,
   flowAuthKey,
+  flowAuthResolver,
   flowAuthState,
-  resetTokenOnConfigChange,
 } from '@/lib/flow-auth';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import {
@@ -31,7 +31,6 @@ import {
   getCollectionSettings,
 } from '@/lib/tauri-api';
 import { buildScopedContext } from '@/lib/url-variables';
-import { resolveWithContext } from '@/lib/variable-context';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
@@ -85,34 +84,46 @@ export function AuthNodeEditor({
     };
   }, [collection]);
 
+  // The active environment's and the global environment's enabled variables.
+  const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
+  const envVars = useMemo(() => {
+    const vars: Record<string, string> = {};
+    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) vars[v.key] = v.value;
+    return vars;
+  }, [activeEnv]);
+  const globalVars = useMemo<Record<string, string>>(
+    () =>
+      globalEnv
+        ? Object.fromEntries(
+            globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
+          )
+        : {},
+    [globalEnv],
+  );
+
   // The same scoped context the collection Authorization tab builds. The OAuth2
   // editor resolves {{vars}} from it before "Get New Access Token", because the
-  // backend does not read collection-scoped environments.
-  const variableContext = useMemo(() => {
-    const envVars: Record<string, string> = {};
-    const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
-    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) envVars[v.key] = v.value;
-    const globalVars: Record<string, string> = globalEnv
-      ? Object.fromEntries(
-          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
-        )
-      : {};
-    return buildScopedContext({
-      envVars,
-      envLabel: activeEnvId ?? undefined,
-      externalSecrets: activeEnv?.externalSecrets,
-      globalVars,
-      processEnvVars,
-      collectionVars,
-    });
-  }, [activeEnvId, environments, globalEnv, processEnvVars, collectionVars]);
+  // backend does not read collection-scoped environments. It also drives
+  // highlighting and autocomplete.
+  const variableContext = useMemo(
+    () =>
+      buildScopedContext({
+        envVars,
+        envLabel: activeEnvId ?? undefined,
+        externalSecrets: activeEnv?.externalSecrets,
+        globalVars,
+        processEnvVars,
+        collectionVars,
+      }),
+    [activeEnvId, activeEnv, envVars, globalVars, processEnvVars, collectionVars],
+  );
 
-  // Resolves {{vars}} the way the OAuth2 editor does before "Get New Access
-  // Token", so a token's fingerprint describes the values it was fetched with.
-  const rv = useMemo(() => {
-    const ctx = Object.fromEntries([...variableContext.entries()].map(([k, e]) => [k, e.value]));
-    return (s: string) => resolveWithContext(s, ctx);
-  }, [variableContext]);
+  // Resolves {{vars}} for the token fingerprint exactly as the pre-run step
+  // does, so a token stored by either one is recognised by the other.
+  const rv = useMemo(
+    () => flowAuthResolver({ processEnvVars, globalVars, envVars, collectionVars }),
+    [processEnvVars, globalVars, envVars, collectionVars],
+  );
 
   // The store holds the full state, including a fetched token. It is used only
   // while it matches the persisted configuration; otherwise (never edited, or
@@ -126,12 +137,12 @@ export function AuthNodeEditor({
   const handleAuthChange = useCallback(
     (next: AuthState) => {
       // A token fetched for the old configuration must not outlive an edit to it.
-      const safe = resetTokenOnConfigChange(state, next);
-      setAuth(key, safe, fingerprintFor(safe, rv));
+      const entry = flowAuthEntryAfterEdit(stored, state, next, rv);
+      setAuth(key, entry.auth, entry.fingerprint);
       // Only the configuration is persisted: toPersistedAuth has no token field.
-      onChange({ ...kind, auth: toPersistedAuth(safe) });
+      onChange({ ...kind, auth: toPersistedAuth(entry.auth) });
     },
-    [key, kind, onChange, rv, setAuth, state],
+    [key, kind, onChange, rv, setAuth, state, stored],
   );
 
   return (

@@ -1,5 +1,6 @@
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
-import type { Auth } from '@/lib/tauri-api';
+import type { Auth, CollectionVariable } from '@/lib/tauri-api';
+import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import type { FlowAuthEntry } from '@/stores/flow-auth-store';
 import type { AuthState, OAuth2AdditionalParam } from '@/types/pane-types';
 
@@ -165,6 +166,64 @@ export function flowAuthState(
  */
 export function fingerprintFor(state: AuthState, rv: (s: string) => string): string | undefined {
   return state.oauth2 && hasToken(state.oauth2) ? oauth2Fingerprint(state.oauth2, rv) : undefined;
+}
+
+/**
+ * The variable resolution an Auth node's token fingerprint uses in the editor.
+ * It must match the pre-run step, which resolves with `buildOAuth2VarContext`
+ * (the same layers through `buildVariableContext`, no folder or request scope
+ * for a flow): references the frontend cannot resolve, such as vault secrets,
+ * stay as written there and here. Do not build it from the editor's scoped
+ * highlighting context, which maps vault references to ''.
+ */
+export function flowAuthResolver(sources: {
+  processEnvVars: Record<string, string>;
+  globalVars: Record<string, string>;
+  envVars: Record<string, string>;
+  collectionVars: CollectionVariable[];
+}): (s: string) => string {
+  const ctx = buildVariableContext(sources);
+  return (s) => resolveWithContext(s, ctx);
+}
+
+const TOKEN_KEYS = Object.keys(EMPTY_TOKEN) as (keyof typeof EMPTY_TOKEN)[];
+
+/**
+ * The store entry after an editor change. `shown` is what the editor showed
+ * (`flowAuthState`), `next` what it reports. A token fetched for an older
+ * configuration is dropped (`resetTokenOnConfigChange`), and a token in `next`
+ * is fingerprinted with the current resolution `rv`.
+ *
+ * One exception keeps a token the editor could not show: when the stored token
+ * is hidden only because its fingerprint no longer matches (a variable value
+ * changed), and the edit leaves the configuration as it was stored, the token
+ * and its old fingerprint are kept. It stays unused until the values match
+ * again; it is never re-fingerprinted. A token the user cleared while it was
+ * shown is not kept.
+ */
+export function flowAuthEntryAfterEdit(
+  entry: FlowAuthEntry | undefined,
+  shown: AuthState,
+  next: AuthState,
+  rv: (s: string) => string,
+): FlowAuthEntry {
+  const safe = resetTokenOnConfigChange(shown, next);
+  const held = entry?.auth.oauth2;
+  const hidden =
+    held && hasToken(held) && shown.oauth2 && !hasToken(shown.oauth2) && entry?.fingerprint;
+  if (
+    hidden &&
+    safe.oauth2 &&
+    !hasToken(safe.oauth2) &&
+    canonicalAuth(toPersistedAuth(entry.auth)) === canonicalAuth(toPersistedAuth(safe))
+  ) {
+    const token = Object.fromEntries(TOKEN_KEYS.map((k) => [k, held[k]]));
+    return {
+      auth: { ...safe, oauth2: { ...safe.oauth2, ...token } },
+      fingerprint: entry.fingerprint,
+    };
+  }
+  return { auth: safe, fingerprint: fingerprintFor(safe, rv) };
 }
 
 /**

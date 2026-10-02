@@ -6,7 +6,7 @@ import { flowAuthKey, oauth2Fingerprint } from '@/lib/flow-auth';
 import { fromPersistedAuth } from '@/lib/persisted-auth';
 import type { Auth, FlowNodeKind } from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
-import { resolveWithContext } from '@/lib/variable-context';
+import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
@@ -54,6 +54,21 @@ vi.mock('@/components/request/AuthEditor', () => ({
         >
           fetch token
         </button>
+        <button type='button' onClick={() => props.onChange(props.auth)}>
+          no-op edit
+        </button>
+        <button
+          type='button'
+          onClick={() =>
+            props.auth.oauth2 &&
+            props.onChange({
+              ...props.auth,
+              oauth2: { ...props.auth.oauth2, accessToken: '', expiresIn: null },
+            })
+          }
+        >
+          clear token
+        </button>
         <button
           type='button'
           onClick={() =>
@@ -79,6 +94,15 @@ vi.mock('@/lib/queries/environment-queries', () => ({
               variables: [
                 { key: 'clientId', value: 'dev-client', enabled: true, secret: false },
                 { key: 'disabled', value: 'x', enabled: false, secret: false },
+              ],
+              // A vault binding: {{vault.secret}} is resolved by the backend.
+              externalSecrets: [
+                {
+                  alias: 'vault',
+                  connectionId: 'c1',
+                  vaultName: 'v',
+                  secretNames: [{ name: 'secret' }],
+                },
               ],
             },
           ]
@@ -441,6 +465,134 @@ describe('AuthNodeEditor', () => {
 
       expect(screen.getByTestId('header-prefix')).toHaveTextContent(/^$/);
       expect(screen.getByTestId('access-token')).toHaveTextContent('stored-token-123456');
+    });
+
+    it('keeps a stored token that is hidden only because the variables changed when an edit leaves the configuration as it is', async () => {
+      const state = withToken();
+      const staleFingerprint = fingerprintFor(state, { ...devVars, clientId: 'prod-client' });
+      const key = flowAuthKey('api', 'login', 'n1', 'dev', 'global');
+      useFlowAuthStore.getState().setAuth(key, state, staleFingerprint);
+      renderEditor();
+      await waitFor(() =>
+        expect(authEditorProps.last?.variableContext?.get('tokenUrl')?.value).toBe(
+          'https://idp/token',
+        ),
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'no-op edit' }));
+
+      // Still hidden, but kept with its own fingerprint, for when the values match again.
+      expect(screen.getByTestId('access-token')).toHaveTextContent(/^$/);
+      const entry = useFlowAuthStore.getState().getEntry(key);
+      expect(entry?.auth.oauth2?.accessToken).toBe('stored-token-123456');
+      expect(entry?.fingerprint).toBe(staleFingerprint);
+    });
+
+    it('clears a shown token when the user clears it', async () => {
+      const state = withToken();
+      const key = flowAuthKey('api', 'login', 'n1', 'dev', 'global');
+      useFlowAuthStore.getState().setAuth(key, state, fingerprintFor(state, devVars));
+      renderEditor();
+      await waitFor(() =>
+        expect(screen.getByTestId('access-token')).toHaveTextContent('stored-token-123456'),
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'clear token' }));
+
+      expect(useFlowAuthStore.getState().getEntry(key)?.auth.oauth2?.accessToken).toBe('');
+    });
+  });
+
+  describe('OAuth2 tokens with a vault reference', () => {
+    const vaultKind: AuthKind = {
+      ...kind,
+      auth: {
+        authType: 'o-auth2',
+        flow: 'client_credentials',
+        accessTokenUrl: '{{tokenUrl}}',
+        credentials: { clientId: '{{clientId}}', clientSecret: '{{vault.secret}}' },
+      } as unknown as Auth,
+    };
+    const key = flowAuthKey('api', 'login', 'n1', 'dev', 'global');
+    const withToken = (): AuthState => {
+      const base = fromPersistedAuth(vaultKind.auth);
+      return {
+        ...base,
+        oauth2: {
+          ...(base.oauth2 as NonNullable<AuthState['oauth2']>),
+          accessToken: 'preflight-token-123456',
+          expiresIn: 3600,
+          tokenAcquiredAt: Math.floor(Date.now() / 1000),
+        },
+      };
+    };
+    // How the pre-run step fingerprints: buildVariableContext leaves
+    // {{vault.secret}} as written, for the backend to resolve.
+    const preflightFingerprint = (state: AuthState) =>
+      oauth2Fingerprint(state.oauth2 as NonNullable<AuthState['oauth2']>, (s) =>
+        resolveWithContext(
+          s,
+          buildVariableContext({
+            processEnvVars: { HOME: '/home/u' },
+            globalVars: { tenant: 'acme' },
+            envVars: { clientId: 'dev-client' },
+            collectionVars: [
+              {
+                key: 'tokenUrl',
+                value: 'https://idp/token',
+                initialValue: '',
+                enabled: true,
+                secret: false,
+              },
+            ],
+          }),
+        ),
+      );
+
+    beforeEach(() => {
+      useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'api' });
+    });
+
+    it('shows a token the pre-run step stored', async () => {
+      const state = withToken();
+      useFlowAuthStore.getState().setAuth(key, state, preflightFingerprint(state));
+      render(
+        <AuthNodeEditor
+          kind={vaultKind}
+          onChange={vi.fn()}
+          collection='api'
+          flowName='login'
+          nodeId='n1'
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('access-token')).toHaveTextContent('preflight-token-123456'),
+      );
+    });
+
+    it('keeps that token, with the same fingerprint, across an edit that leaves the configuration as it is', async () => {
+      const state = withToken();
+      useFlowAuthStore.getState().setAuth(key, state, preflightFingerprint(state));
+      render(
+        <AuthNodeEditor
+          kind={vaultKind}
+          onChange={vi.fn()}
+          collection='api'
+          flowName='login'
+          nodeId='n1'
+        />,
+      );
+      await waitFor(() =>
+        expect(authEditorProps.last?.variableContext?.get('tokenUrl')?.value).toBe(
+          'https://idp/token',
+        ),
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'no-op edit' }));
+
+      const entry = useFlowAuthStore.getState().getEntry(key);
+      expect(entry?.auth.oauth2?.accessToken).toBe('preflight-token-123456');
+      expect(entry?.fingerprint).toBe(preflightFingerprint(state));
     });
   });
 });
