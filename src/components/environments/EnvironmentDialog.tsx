@@ -86,6 +86,18 @@ function normalizeEnv(env: Environment): NormalizedEnvironment {
 
 type DialogTab = 'variables' | 'external-secrets' | 'certificates';
 
+// A new, empty certificate of the given type. A vault entry writes its PEM default out.
+function emptyCertificate(type: ClientCertificate['type']): ClientCertificate {
+  switch (type) {
+    case 'pem':
+      return { type: 'pem', domain: '', certificateFilePath: '', privateKeyFilePath: '' };
+    case 'pkcs12':
+      return { type: 'pkcs12', domain: '', pkcs12FilePath: '' };
+    case 'vault':
+      return { type: 'vault', domain: '', binding: '', certificate: '', format: 'pem' };
+  }
+}
+
 export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps) {
   const activeCollection = useEnvStore((s) => s.activeCollection);
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
@@ -329,12 +341,9 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   );
 
   const addClientCertificate = useCallback(
-    (type: 'pem' | 'pkcs12') => {
+    (type: ClientCertificate['type']) => {
       if (!selectedEnv) return;
-      const fresh: ClientCertificate =
-        type === 'pem'
-          ? { type: 'pem', domain: '', certificateFilePath: '', privateKeyFilePath: '' }
-          : { type: 'pkcs12', domain: '', pkcs12FilePath: '' };
+      const fresh = emptyCertificate(type);
       setLocalEnvs((prev) =>
         prev.map((e) => {
           if (e.name !== selectedEnv.name) return e;

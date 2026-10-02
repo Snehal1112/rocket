@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CertificatesTab } from '@/components/environments/CertificatesTab';
 import type { ClientCertificate, ExternalSecretBinding } from '@/lib/tauri-api';
+import * as tauriApi from '@/lib/tauri-api';
 
 // CodeMirror does not run in jsdom, so the variable-aware field is replaced by a plain input.
 vi.mock('@/components/editor', () => ({
@@ -33,6 +34,13 @@ vi.mock('@/components/editor', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
+
+vi.mock('@tauri-apps/plugin-os', () => ({ type: vi.fn(() => 'linux') }));
+
+vi.mock('@/lib/tauri-api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
+  return { ...actual, listVaultCertificates: vi.fn().mockResolvedValue([]) };
+});
 
 // Radix Select calls pointer-capture and scrollIntoView APIs that jsdom lacks.
 if (!Element.prototype.hasPointerCapture) {
@@ -271,5 +279,38 @@ describe('CertificatesTab', () => {
   it('disables Save when nothing changed', () => {
     renderTab([pem], { isDirty: false });
     expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+  });
+
+  it('adds a RocketVault certificate', async () => {
+    const { onAdd } = renderTab([]);
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Add RocketVault certificate' }));
+    expect(onAdd).toHaveBeenCalledWith('vault');
+  });
+
+  it('renders a vault row with its pickers and no file or passphrase fields', async () => {
+    renderTab([
+      {
+        type: 'vault',
+        domain: 'api.example.com',
+        binding: 'vault',
+        certificate: 'client-a',
+        format: 'pem',
+      },
+    ]);
+    expect(screen.getByText('Vault')).toBeInTheDocument();
+    expect(screen.getByLabelText('Domain for certificate 1')).toHaveValue('api.example.com');
+    expect(screen.getByRole('combobox', { name: 'Binding for certificate 1' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Format for certificate 1' })).toHaveTextContent(
+      'PEM',
+    );
+    expect(screen.queryByLabelText('Passphrase for certificate 1')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Certificate source for certificate 1' }),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(tauriApi.listVaultCertificates).toHaveBeenCalledWith('conn-1', 'prod-vault'),
+    );
   });
 });

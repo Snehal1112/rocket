@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
-import type { Environment } from '@/lib/tauri-api';
+import type { ClientCertificate, Environment } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
 
@@ -20,8 +20,11 @@ vi.mock('@/lib/tauri-api', async () => {
     getGlobalEnvironmentName: vi.fn().mockResolvedValue(null),
     getGlobalEnvironment: vi.fn().mockResolvedValue(null),
     getProcessEnvVars: vi.fn().mockResolvedValue({}),
+    listVaultCertificates: vi.fn().mockResolvedValue([]),
   };
 });
+
+vi.mock('@tauri-apps/plugin-os', () => ({ type: vi.fn(() => 'linux') }));
 
 // CodeMirror does not run in jsdom, so the variable-aware field is replaced by a plain input.
 vi.mock('@/components/editor', () => ({
@@ -325,5 +328,61 @@ describe('EnvironmentDialog certificates tab', () => {
     await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
     expect(toast.error).not.toHaveBeenCalled();
     expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('literal'));
+  });
+
+  it('saves a RocketVault certificate unchanged', async () => {
+    const vaultCert: ClientCertificate = {
+      type: 'vault',
+      domain: 'api.example.com',
+      binding: 'vault',
+      certificate: 'client-a',
+      format: 'pkcs12',
+    };
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([
+      { ...prodEnv, externalSecrets: [vaultBinding], clientCertificates: [vaultCert] },
+    ]);
+    renderDialog();
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+    const [, savedEnv] = vi.mocked(tauriApi.saveEnvironment).mock.calls[0];
+    expect(savedEnv.clientCertificates).toEqual([vaultCert]);
+  });
+
+  it('blocks the save when a RocketVault certificate names a binding the environment lacks', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([
+      {
+        ...prodEnv,
+        externalSecrets: [vaultBinding],
+        clientCertificates: [
+          { type: 'vault', domain: 'a.com', binding: 'payments', certificate: 'client-a' },
+        ],
+      },
+    ]);
+    renderDialog();
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(tauriApi.saveEnvironment).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('binding "payments"'));
+  });
+
+  it('adds a RocketVault certificate with PEM as its format', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+
+    await user.click(screen.getByRole('tab', { name: /certificates/i }));
+    await user.click(await screen.findByRole('button', { name: 'Add RocketVault certificate' }));
+
+    expect(screen.getByRole('combobox', { name: 'Format for certificate 1' })).toHaveTextContent(
+      'PEM',
+    );
+    expect(screen.getByRole('combobox', { name: 'Binding for certificate 1' })).toBeInTheDocument();
   });
 });

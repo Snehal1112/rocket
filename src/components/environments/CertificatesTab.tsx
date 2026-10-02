@@ -21,6 +21,7 @@ import type { ClientCertificate, ExternalSecretBinding } from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { type VaultSecretOption, vaultSecretOptions } from '@/lib/vault-secret-options';
+import { VaultCertificateRow } from './VaultCertificateRow';
 
 type FileCertificate = Exclude<ClientCertificate, { type: 'vault' }>;
 
@@ -34,7 +35,7 @@ export interface CertificatesTabProps {
   certificates: ClientCertificate[];
   bindings: ExternalSecretBinding[];
   onChange: (idx: number, patch: Partial<ClientCertificate>) => void;
-  onAdd: (type: 'pem' | 'pkcs12') => void;
+  onAdd: (type: ClientCertificate['type']) => void;
   onRemove: (idx: number) => void;
   onMove: (idx: number, direction: -1 | 1) => void;
   onSave: () => void;
@@ -117,13 +118,16 @@ export function CertificatesTab({
         <p className='text-[11px] text-muted-foreground'>
           Relative paths start at the collection folder. Encrypted PEM keys need their passphrase.
         </p>
+        <p className='text-[11px] text-muted-foreground'>
+          A RocketVault certificate is exported when a request needs it and is never saved.
+        </p>
       </div>
 
       {certificates.length === 0 ? (
         <div className='flex-1 flex flex-col items-center justify-center gap-1 text-center px-6'>
           <p className='text-sm font-medium text-foreground'>No client certificates</p>
           <p className='text-xs text-muted-foreground leading-relaxed max-w-[280px]'>
-            Add a PEM or PKCS12 certificate to present it to matching hosts.
+            Add a PEM, PKCS12 or RocketVault certificate to present it to matching hosts.
           </p>
         </div>
       ) : (
@@ -136,6 +140,7 @@ export function CertificatesTab({
                 idx={idx}
                 total={certificates.length}
                 cert={cert}
+                bindings={bindings}
                 options={options}
                 onChange={onChange}
                 onRemove={onRemove}
@@ -167,6 +172,15 @@ export function CertificatesTab({
             <Plus className='h-3.5 w-3.5' />
             Add PKCS12
           </Button>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => onAdd('vault')}
+            className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
+          >
+            <Plus className='h-3.5 w-3.5' />
+            Add RocketVault certificate
+          </Button>
         </div>
         <Button
           size='sm'
@@ -192,6 +206,7 @@ interface CertificateRowProps {
   idx: number;
   total: number;
   cert: ClientCertificate;
+  bindings: ExternalSecretBinding[];
   options: VaultSecretOption[];
   onChange: (idx: number, patch: Partial<ClientCertificate>) => void;
   onRemove: (idx: number) => void;
@@ -203,6 +218,7 @@ function CertificateRow({
   idx,
   total,
   cert,
+  bindings,
   options,
   onChange,
   onRemove,
@@ -258,7 +274,9 @@ function CertificateRow({
         </Button>
       </div>
 
-      {cert.type !== 'vault' && (
+      {cert.type === 'vault' ? (
+        <VaultCertificateRow idx={idx} cert={cert} bindings={bindings} onChange={onChange} />
+      ) : (
         <>
           {pieceSpecs(cert).map((spec) => (
             <PieceField
