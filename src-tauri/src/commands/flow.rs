@@ -449,6 +449,18 @@ pub fn save_flow(
     svc.save(&collection, flow.into())
 }
 
+/// A token the UI obtained before the run. `Debug` never shows the value.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowAuthTokenDto {
+    pub access_token: String,
+}
+impl std::fmt::Debug for FlowAuthTokenDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FlowAuthTokenDto(<redacted>)")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunFlowInputDto {
@@ -456,15 +468,33 @@ pub struct RunFlowInputDto {
     pub flow_name: String,
     pub environment_name: Option<String>,
     pub global_env_name: Option<String>,
+    /// Tokens the UI obtained for Auth nodes, keyed by node id. Never serialized.
+    #[serde(default, skip_serializing)]
+    pub auth_tokens: std::collections::HashMap<String, FlowAuthTokenDto>,
 }
-impl From<RunFlowInputDto> for RunFlowInput {
-    fn from(i: RunFlowInputDto) -> Self {
-        Self {
-            collection: i.collection,
-            flow_name: i.flow_name,
-            environment_name: i.environment_name,
-            global_env_name: i.global_env_name,
-        }
+impl RunFlowInputDto {
+    /// Splits the DTO into the run input and the tokens, so the tokens cannot
+    /// be dropped by accident.
+    pub fn into_parts(self) -> (RunFlowInput, rocket_app::FlowAuthTokens) {
+        let tokens = self
+            .auth_tokens
+            .into_iter()
+            .map(|(node_id, t)| {
+                (
+                    node_id,
+                    rocket_app::SuppliedToken {
+                        access_token: t.access_token,
+                    },
+                )
+            })
+            .collect();
+        let input = RunFlowInput {
+            collection: self.collection,
+            flow_name: self.flow_name,
+            environment_name: self.environment_name,
+            global_env_name: self.global_env_name,
+        };
+        (input, tokens)
     }
 }
 
@@ -481,7 +511,8 @@ pub async fn run_flow(
     flow_exec: State<'_, FlowExecutionService>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<FlowRunSummary, DomainError> {
-    flow_exec.run(&exec, input.into()).await
+    let (run_input, tokens) = input.into_parts();
+    flow_exec.run_with_auth(&exec, run_input, tokens).await
 }
 
 /// Asks an in-progress Flow run to stop. An unknown or already-finished run
@@ -498,6 +529,56 @@ pub fn cancel_flow_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_flow_input_carries_auth_tokens_into_the_run() {
+        let json = r#"{
+            "collection": "my-api",
+            "flowName": "login",
+            "environmentName": null,
+            "globalEnvName": null,
+            "authTokens": { "a": { "accessToken": "tok-123456" } }
+        }"#;
+        let dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+
+        let (input, tokens) = dto.into_parts();
+
+        assert_eq!(input.collection, "my-api");
+        assert_eq!(input.flow_name, "login");
+        assert_eq!(
+            tokens.get("a").map(|t| t.access_token.as_str()),
+            Some("tok-123456")
+        );
+    }
+
+    #[test]
+    fn run_flow_input_without_auth_tokens_has_none() {
+        let json =
+            r#"{"collection":"c","flowName":"f","environmentName":null,"globalEnvName":null}"#;
+        let dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+        let (_input, tokens) = dto.into_parts();
+        assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn run_flow_input_never_prints_or_serializes_a_token() {
+        let json = r#"{
+            "collection": "c", "flowName": "f", "environmentName": null, "globalEnvName": null,
+            "authTokens": { "a": { "accessToken": "super-secret-token" } }
+        }"#;
+        let dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+
+        assert!(
+            !format!("{dto:?}").contains("super-secret-token"),
+            "Debug must redact tokens"
+        );
+        assert!(
+            !serde_json::to_string(&dto)
+                .expect("serialize")
+                .contains("super-secret-token"),
+            "Serialize must omit tokens"
+        );
+    }
 
     fn sample_dto() -> FlowDto {
         FlowDto {
