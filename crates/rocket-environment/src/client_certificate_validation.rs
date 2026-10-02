@@ -2,7 +2,8 @@
 //!
 //! Every piece of material needs exactly one source, a reference must name a bound secret, and
 //! no path or reference field may hold key text, so a private key never lands in the
-//! environment file or in git.
+//! environment file or in git. A `vault` entry must name one of the environment's External
+//! Secrets aliases and a certificate, and none of its fields may hold key text either.
 
 use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -57,6 +58,14 @@ pub fn validate_client_certificates(
                     bindings,
                 )?;
             }
+            ClientCertificate::Vault {
+                domain,
+                binding,
+                certificate,
+                ..
+            } => {
+                check_vault_entry(entry, domain, binding, certificate, bindings)?;
+            }
         }
     }
     Ok(())
@@ -91,6 +100,49 @@ fn reject_key_text(entry: usize, field: &str, value: &str) -> DomainResult<()> {
         return Err(invalid(format!(
             "Client certificate {entry}: field {field} must be a file path or a vault secret \
              reference, not key text."
+        )));
+    }
+    Ok(())
+}
+
+/// A `vault` entry names a bound alias and a certificate. The format needs no check: serde
+/// already rejects anything but `pem` and `pkcs12`. The alias is compared exactly, like the
+/// lookup at send time, so a value that passes here also resolves there.
+fn check_vault_entry(
+    entry: usize,
+    domain: &str,
+    binding: &str,
+    certificate: &str,
+    bindings: &[ExternalSecretBinding],
+) -> DomainResult<()> {
+    reject_key_text_in_name(entry, "domain", domain)?;
+    reject_key_text_in_name(entry, "binding", binding)?;
+    reject_key_text_in_name(entry, "certificate", certificate)?;
+    if binding.trim().is_empty() {
+        return Err(invalid(format!(
+            "Client certificate {entry}: set binding to an External Secrets alias of this \
+             environment."
+        )));
+    }
+    if !bindings.iter().any(|b| b.alias == binding) {
+        return Err(invalid(format!(
+            "Client certificate {entry}: binding {binding} has no External Secrets binding in \
+             this environment."
+        )));
+    }
+    if certificate.trim().is_empty() {
+        return Err(invalid(format!(
+            "Client certificate {entry}: set certificate to the certificate name in the vault."
+        )));
+    }
+    Ok(())
+}
+
+/// Rejects key text in a field that holds a name, without echoing the value.
+fn reject_key_text_in_name(entry: usize, field: &str, value: &str) -> DomainResult<()> {
+    if value.trim_start().starts_with(PEM_MARKER) {
+        return Err(invalid(format!(
+            "Client certificate {entry}: field {field} must be a name, not key text."
         )));
     }
     Ok(())
@@ -176,6 +228,15 @@ mod tests {
             pkcs12_file_path: path.to_string(),
             pkcs12_secret: secret.map(String::from),
             passphrase: None,
+        }
+    }
+
+    fn vault(domain: &str, binding: &str, certificate: &str) -> ClientCertificate {
+        ClientCertificate::Vault {
+            domain: domain.to_string(),
+            binding: binding.to_string(),
+            certificate: certificate.to_string(),
+            format: rocket_shared::certificate::VaultCertificateFormat::Pem,
         }
     }
 
@@ -315,6 +376,56 @@ mod tests {
                 !msg.contains("MIIEvQsecret"),
                 "the key must not be echoed: {msg}"
             );
+        }
+    }
+
+    #[test]
+    fn accepts_a_vault_entry_with_a_bound_alias_and_a_certificate_name() {
+        let certs = [vault("api.example.com", "vault", "client-a")];
+        assert!(validate_client_certificates(&certs, &bindings()).is_ok());
+    }
+
+    #[test]
+    fn rejects_a_vault_entry_whose_binding_is_not_in_the_environment() {
+        let msg = message(validate_client_certificates(
+            &[vault("api.example.com", "payments", "client-a")],
+            &bindings(),
+        ));
+        assert!(
+            msg.contains("binding payments") && msg.contains("no External Secrets binding"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_vault_entry_with_no_binding_or_no_certificate_name() {
+        let msg = message(validate_client_certificates(
+            &[vault("api.example.com", "  ", "client-a")],
+            &bindings(),
+        ));
+        assert!(msg.contains("set binding"), "{msg}");
+
+        let msg = message(validate_client_certificates(
+            &[vault("api.example.com", "vault", " ")],
+            &bindings(),
+        ));
+        assert!(msg.contains("set certificate"), "{msg}");
+    }
+
+    #[test]
+    fn rejects_key_text_in_any_vault_field_without_echoing_it() {
+        let cases = [
+            (vault(KEY_TEXT, "vault", "client-a"), "domain"),
+            (vault("a.example.com", KEY_TEXT, "client-a"), "binding"),
+            (vault("a.example.com", "vault", KEY_TEXT), "certificate"),
+        ];
+        for (cert, field) in cases {
+            let msg = message(validate_client_certificates(&[cert], &bindings()));
+            assert!(
+                msg.contains(&format!("field {field}")) && msg.contains("not key text"),
+                "{field}: {msg}"
+            );
+            assert!(!msg.contains("MIIEvQsecret"), "the key must not be echoed: {msg}");
         }
     }
 }

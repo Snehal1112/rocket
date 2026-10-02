@@ -81,7 +81,7 @@ mod tests {
     use rocket_audit::event::AuditEventKind;
     use rocket_environment::Variable;
     use rocket_environment::{ExternalSecretBinding, ExternalSecretRef};
-    use rocket_shared::certificate::ClientCertificate;
+    use rocket_shared::certificate::{ClientCertificate, VaultCertificateFormat};
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use std::sync::Mutex;
@@ -255,5 +255,22 @@ mod tests {
         }];
         svc.save(&env).expect("a bound reference is valid");
         assert_eq!(svc.get("prod").expect("saved").client_certificates.len(), 1);
+    }
+
+    #[test]
+    fn save_rejects_a_vault_certificate_whose_binding_is_missing() {
+        let svc = make_service();
+        let mut env = Environment::new("prod");
+        env.client_certificates = vec![ClientCertificate::Vault {
+            domain: "api.example.com".into(),
+            binding: "prod".into(),
+            certificate: "client-a".into(),
+            format: VaultCertificateFormat::Pem,
+        }];
+        let err = svc
+            .save(&env)
+            .expect_err("a vault entry needs a bound alias");
+        assert!(err.to_string().contains("binding prod"), "{err}");
+        assert!(svc.list().expect("list").is_empty(), "nothing may be written");
     }
 }

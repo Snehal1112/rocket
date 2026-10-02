@@ -20,12 +20,13 @@ impl VaultCertificateFormat {
     }
 }
 
-/// Client certificate — PEM or PKCS12 format, discriminated by `type` field.
+/// Client certificate — PEM, PKCS12 or RocketVault, discriminated by the `type` field.
 ///
-/// Each piece of material comes from a file path or from a RocketVault reference
-/// (`alias.secretName`, never a value). A path that is not used is empty and is not written.
-/// The `*Secret` keys are Rocket extensions outside the OpenCollection schema, like
-/// `externalSecrets`.
+/// For PEM and PKCS12, each piece of material comes from a file path or from a RocketVault
+/// reference (`alias.secretName`, never a value). A path that is not used is empty and is not
+/// written. The `*Secret` keys are Rocket extensions outside the OpenCollection schema, like
+/// `externalSecrets`. The whole `vault` type is a Rocket extension too: it names a certificate
+/// that RocketVault exports at send time, and stores names only.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientCertificate {
@@ -57,15 +58,27 @@ pub enum ClientCertificate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         passphrase: Option<String>,
     },
+    /// A certificate that RocketVault exports when it is selected. `binding` is an External
+    /// Secrets alias of this environment (the connection and vault come from it) and
+    /// `certificate` is the certificate name in that vault. No id, password, key or path is
+    /// stored.
+    #[serde(rename = "vault", rename_all = "camelCase")]
+    Vault {
+        domain: String,
+        binding: String,
+        certificate: String,
+        #[serde(default)]
+        format: VaultCertificateFormat,
+    },
 }
 
 impl ClientCertificate {
     /// The domain this certificate is presented to.
     pub fn domain(&self) -> &str {
         match self {
-            ClientCertificate::Pem { domain, .. } | ClientCertificate::Pkcs12 { domain, .. } => {
-                domain
-            }
+            ClientCertificate::Pem { domain, .. }
+            | ClientCertificate::Pkcs12 { domain, .. }
+            | ClientCertificate::Vault { domain, .. } => domain,
         }
     }
 }
@@ -103,6 +116,18 @@ impl std::fmt::Debug for ClientCertificate {
                 .field("pkcs12_file_path", pkcs12_file_path)
                 .field("pkcs12_secret", pkcs12_secret)
                 .field("passphrase", &redact(passphrase))
+                .finish(),
+            ClientCertificate::Vault {
+                domain,
+                binding,
+                certificate,
+                format,
+            } => f
+                .debug_struct("Vault")
+                .field("domain", domain)
+                .field("binding", binding)
+                .field("certificate", certificate)
+                .field("format", format)
                 .finish(),
         }
     }
@@ -284,5 +309,57 @@ mod tests {
         assert!(serde_json::from_str::<VaultCertificateFormat>("\"der\"").is_err());
         assert_eq!(VaultCertificateFormat::Pem.as_str(), "pem");
         assert_eq!(VaultCertificateFormat::Pkcs12.as_str(), "pkcs12");
+    }
+
+    fn vault_entry() -> ClientCertificate {
+        ClientCertificate::Vault {
+            domain: "api.example.com".into(),
+            binding: "prod".into(),
+            certificate: "client-a".into(),
+            format: VaultCertificateFormat::Pkcs12,
+        }
+    }
+
+    #[test]
+    fn a_vault_entry_round_trips_with_its_names_and_format() {
+        let json = serde_json::to_string(&vault_entry()).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"vault","domain":"api.example.com","binding":"prod","certificate":"client-a","format":"pkcs12"}"#
+        );
+        let back: ClientCertificate = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, vault_entry());
+    }
+
+    #[test]
+    fn a_vault_entry_without_a_format_defaults_to_pem() {
+        let cert: ClientCertificate = serde_json::from_str(
+            r#"{"type":"vault","domain":"a.com","binding":"prod","certificate":"client-a"}"#,
+        )
+        .expect("format is optional");
+        assert!(matches!(
+            cert,
+            ClientCertificate::Vault {
+                format: VaultCertificateFormat::Pem,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_vault_entry_with_an_unknown_format_is_rejected() {
+        let result = serde_json::from_str::<ClientCertificate>(
+            r#"{"type":"vault","domain":"a.com","binding":"prod","certificate":"c","format":"der"}"#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn domain_and_debug_cover_a_vault_entry() {
+        let cert = vault_entry();
+        assert_eq!(cert.domain(), "api.example.com");
+        let shown = format!("{cert:?}");
+        assert!(shown.contains("Vault"), "{shown}");
+        assert!(shown.contains("prod") && shown.contains("client-a"), "{shown}");
     }
 }
