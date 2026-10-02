@@ -153,3 +153,78 @@ describe('isLiteralPassphrase', () => {
     expect(isLiteralPassphrase('hunter2')).toBe(true);
   });
 });
+
+describe('validateClientCertificates for RocketVault certificates', () => {
+  type VaultCert = Extract<ClientCertificate, { type: 'vault' }>;
+  const KEY_TEXT = '-----BEGIN PRIVATE KEY-----\nMIIEvQsecret\n-----END PRIVATE KEY-----';
+
+  function vaultCert(overrides: Partial<VaultCert> = {}): ClientCertificate {
+    return {
+      type: 'vault',
+      domain: 'api.example.com',
+      binding: 'vault',
+      certificate: 'client-a',
+      format: 'pem',
+      ...overrides,
+    };
+  }
+
+  it('accepts a vault entry with a bound alias and a certificate name', () => {
+    expect(validateClientCertificates([vaultCert()], bindings)).toEqual({
+      errors: [],
+      warnings: [],
+    });
+  });
+
+  it('accepts a vault entry with no format, which means PEM', () => {
+    const cert: ClientCertificate = {
+      type: 'vault',
+      domain: 'api.example.com',
+      binding: 'vault',
+      certificate: 'client-a',
+    };
+    expect(validateClientCertificates([cert], bindings).errors).toEqual([]);
+  });
+
+  it('rejects a binding that is not in the environment', () => {
+    const { errors } = validateClientCertificates([vaultCert({ binding: 'payments' })], bindings);
+    expect(errors).toEqual([
+      'Certificate 1 (api.example.com): binding "payments" has no External Secrets binding in this environment.',
+    ]);
+  });
+
+  it('asks for a binding and a certificate', () => {
+    const { errors } = validateClientCertificates(
+      [vaultCert({ binding: ' ', certificate: '' })],
+      bindings,
+    );
+    expect(errors).toEqual([
+      'Certificate 1 (api.example.com): choose an External Secrets binding.',
+      'Certificate 1 (api.example.com): choose a certificate.',
+    ]);
+  });
+
+  it('rejects key text in any vault field without echoing it', () => {
+    for (const [field, cert] of [
+      ['domain', vaultCert({ domain: KEY_TEXT })],
+      ['binding', vaultCert({ binding: KEY_TEXT })],
+      ['certificate', vaultCert({ certificate: KEY_TEXT })],
+    ] as const) {
+      const { errors } = validateClientCertificates([cert], bindings);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain(`${field} must be a name, not key text`);
+      expect(errors[0]).not.toContain('MIIEvQsecret');
+    }
+  });
+
+  it('rejects an unknown format', () => {
+    const cert = vaultCert({ format: 'der' as unknown as VaultCert['format'] });
+    expect(validateClientCertificates([cert], bindings).errors).toEqual([
+      'Certificate 1 (api.example.com): format must be PEM or PKCS12.',
+    ]);
+  });
+
+  it('never warns about a passphrase for a vault entry', () => {
+    expect(validateClientCertificates([vaultCert()], bindings).warnings).toEqual([]);
+  });
+});

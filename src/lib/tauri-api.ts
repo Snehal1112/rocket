@@ -212,8 +212,13 @@ export interface VaultCertificateSummary {
   expiresAt?: string | null;
 }
 
-// Persisted client certificate. A piece has one source: a file path or a
-// vault reference (`alias.secretName`). A reference is never a value.
+// How a RocketVault certificate is exported.
+export type VaultCertificateFormat = 'pem' | 'pkcs12';
+
+// Persisted client certificate. For PEM and PKCS12, a piece has one source: a
+// file path or a vault reference (`alias.secretName`). A reference is never a
+// value. A `vault` entry names a RocketVault certificate that is exported when
+// a request needs it; it stores names only. A missing format means PEM.
 export type ClientCertificate =
   | {
       type: 'pem';
@@ -230,6 +235,15 @@ export type ClientCertificate =
       pkcs12FilePath?: string;
       pkcs12Secret?: string;
       passphrase?: string;
+    }
+  | {
+      type: 'vault';
+      domain: string;
+      // External Secrets alias of this environment; the connection and vault come from it.
+      binding: string;
+      // Certificate name in that vault.
+      certificate: string;
+      format?: VaultCertificateFormat;
     };
 
 export interface Environment {

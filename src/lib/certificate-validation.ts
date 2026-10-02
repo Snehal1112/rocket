@@ -2,6 +2,11 @@
 
 import type { ClientCertificate, ExternalSecretBinding } from '@/lib/tauri-api';
 
+type FileCertificate = Exclude<ClientCertificate, { type: 'vault' }>;
+type VaultCertificate = Extract<ClientCertificate, { type: 'vault' }>;
+
+const VAULT_FORMATS: readonly string[] = ['pem', 'pkcs12'];
+
 export interface CertificateIssues {
   errors: string[];
   warnings: string[];
@@ -21,7 +26,7 @@ interface Piece {
   secret: string;
 }
 
-function piecesOf(cert: ClientCertificate): Piece[] {
+function piecesOf(cert: FileCertificate): Piece[] {
   if (cert.type === 'pem') {
     return [
       {
@@ -47,6 +52,37 @@ function piecesOf(cert: ClientCertificate): Piece[] {
 
 function isKeyText(value: string): boolean {
   return value.trimStart().startsWith(KEY_TEXT_PREFIX);
+}
+
+// Mirrors the `vault` rules of `validate_client_certificates` in rocket-environment.
+function vaultCertificateErrors(
+  who: string,
+  cert: VaultCertificate,
+  bindings: ExternalSecretBinding[],
+): string[] {
+  const named: [string, string][] = [
+    ['domain', cert.domain],
+    ['binding', cert.binding],
+    ['certificate', cert.certificate],
+  ];
+  const keyText = named
+    .filter(([, value]) => isKeyText(value))
+    .map(([field]) => `${who}: ${field} must be a name, not key text.`);
+  if (keyText.length > 0) return keyText;
+
+  const errors: string[] = [];
+  if (cert.binding.trim() === '') {
+    errors.push(`${who}: choose an External Secrets binding.`);
+  } else if (!bindings.some((b) => b.alias === cert.binding)) {
+    errors.push(
+      `${who}: binding "${cert.binding}" has no External Secrets binding in this environment.`,
+    );
+  }
+  if (cert.certificate.trim() === '') errors.push(`${who}: choose a certificate.`);
+  if (cert.format !== undefined && !VAULT_FORMATS.includes(cert.format)) {
+    errors.push(`${who}: format must be PEM or PKCS12.`);
+  }
+  return errors;
 }
 
 // Absolute, home and variable-prefixed paths are not relative. A variable
@@ -87,8 +123,17 @@ export function validateClientCertificates(
 
   for (const [idx, cert] of certs.entries()) {
     const domain = cert.domain.trim();
-    const who = domain ? `Certificate ${idx + 1} (${domain})` : `Certificate ${idx + 1}`;
+    // A pasted key in the domain must not be echoed back in every message.
+    const who =
+      domain && !isKeyText(domain)
+        ? `Certificate ${idx + 1} (${domain})`
+        : `Certificate ${idx + 1}`;
     if (!domain) errors.push(`${who}: domain is required.`);
+
+    if (cert.type === 'vault') {
+      errors.push(...vaultCertificateErrors(who, cert, bindings));
+      continue;
+    }
 
     for (const piece of piecesOf(cert)) {
       const hasFile = piece.filePath.trim() !== '';

@@ -22,6 +22,14 @@ import type { VariableScopeEntry } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { type VaultSecretOption, vaultSecretOptions } from '@/lib/vault-secret-options';
 
+type FileCertificate = Exclude<ClientCertificate, { type: 'vault' }>;
+
+const TYPE_LABELS: Record<ClientCertificate['type'], string> = {
+  pem: 'PEM',
+  pkcs12: 'PKCS12',
+  vault: 'Vault',
+};
+
 export interface CertificatesTabProps {
   certificates: ClientCertificate[];
   bindings: ExternalSecretBinding[];
@@ -49,7 +57,7 @@ interface PieceSpec {
   toVault: Partial<ClientCertificate>;
 }
 
-function pieceSpecs(cert: ClientCertificate): PieceSpec[] {
+function pieceSpecs(cert: FileCertificate): PieceSpec[] {
   if (cert.type === 'pem') {
     return [
       {
@@ -207,7 +215,7 @@ function CertificateRow({
     <div className='space-y-2 pb-3 border-b border-border/20 last:border-0'>
       <div className='flex items-center gap-1.5 min-w-0'>
         <Badge variant='secondary' className='text-[11px] shrink-0'>
-          {cert.type === 'pem' ? 'PEM' : 'PKCS12'}
+          {TYPE_LABELS[cert.type]}
         </Badge>
         <div className='flex-1 min-w-0'>
           <SingleLineEditor
@@ -250,26 +258,30 @@ function CertificateRow({
         </Button>
       </div>
 
-      {pieceSpecs(cert).map((spec) => (
-        <PieceField
-          key={spec.label}
-          certNumber={n}
-          idx={idx}
-          spec={spec}
-          options={options}
-          onChange={onChange}
-          variableContext={variableContext}
-        />
-      ))}
+      {cert.type !== 'vault' && (
+        <>
+          {pieceSpecs(cert).map((spec) => (
+            <PieceField
+              key={spec.label}
+              certNumber={n}
+              idx={idx}
+              spec={spec}
+              options={options}
+              onChange={onChange}
+              variableContext={variableContext}
+            />
+          ))}
 
-      <PassphraseField
-        idx={idx}
-        certNumber={n}
-        passphrase={cert.passphrase ?? ''}
-        options={options}
-        onChange={onChange}
-        variableContext={variableContext}
-      />
+          <PassphraseField
+            idx={idx}
+            certNumber={n}
+            passphrase={cert.passphrase ?? ''}
+            options={options}
+            onChange={onChange}
+            variableContext={variableContext}
+          />
+        </>
+      )}
     </div>
   );
 }
