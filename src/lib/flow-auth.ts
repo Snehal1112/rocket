@@ -1,4 +1,4 @@
-import { toPersistedAuth } from '@/lib/persisted-auth';
+import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import type { Auth } from '@/lib/tauri-api';
 import type { AuthState } from '@/types/pane-types';
 
@@ -78,6 +78,19 @@ export function resetTokenOnConfigChange(prev: AuthState | undefined, next: Auth
   const same = JSON.stringify(toPersistedAuth(prev)) === JSON.stringify(toPersistedAuth(next));
   if (same) return next;
   return { ...next, oauth2: { ...next.oauth2, ...EMPTY_TOKEN } };
+}
+
+/**
+ * The state an Auth node uses: the in-memory `stored` entry (which may hold a
+ * fetched token) while its configuration still matches the persisted auth,
+ * otherwise the persisted auth. The stored entry goes stale when the node
+ * changes outside the editor (undo, reload, another edit).
+ */
+export function pickAuthState(stored: AuthState | undefined, persisted: Auth): AuthState {
+  const fresh = fromPersistedAuth(persisted);
+  if (!stored) return fresh;
+  const same = JSON.stringify(toPersistedAuth(stored)) === JSON.stringify(toPersistedAuth(fresh));
+  return same ? stored : fresh;
 }
 
 /**

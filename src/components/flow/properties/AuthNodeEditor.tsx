@@ -2,8 +2,8 @@ import { useCallback, useMemo } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { flowAuthKey, resetTokenOnConfigChange } from '@/lib/flow-auth';
-import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
+import { flowAuthKey, pickAuthState, resetTokenOnConfigChange } from '@/lib/flow-auth';
+import { toPersistedAuth } from '@/lib/persisted-auth';
 import type { FlowNodeKind } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
@@ -31,12 +31,10 @@ export function AuthNodeEditor({
   const setAuth = useFlowAuthStore((s) => s.setAuth);
   const environmentName = activeEnvId ?? undefined;
 
-  // The store holds the full state, including a fetched token. A node that was
-  // never edited in this session falls back to its persisted configuration.
-  const state: AuthState = useMemo(
-    () => stored ?? fromPersistedAuth(kind.auth),
-    [stored, kind.auth],
-  );
+  // The store holds the full state, including a fetched token. It is used only
+  // while it matches the persisted configuration; otherwise (never edited, or
+  // changed by undo or a reload) the editor shows the persisted auth.
+  const state: AuthState = useMemo(() => pickAuthState(stored, kind.auth), [stored, kind.auth]);
 
   const handleAuthChange = useCallback(
     (next: AuthState) => {

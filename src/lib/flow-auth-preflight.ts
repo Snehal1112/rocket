@@ -1,11 +1,16 @@
 import { buildOAuth2VarContext } from '@/lib/execute-request';
-import { flowAuthKey, isInteractiveGrant, isOAuth2, isTokenExpired } from '@/lib/flow-auth';
+import {
+  flowAuthKey,
+  isInteractiveGrant,
+  isOAuth2,
+  isTokenExpired,
+  pickAuthState,
+} from '@/lib/flow-auth';
 import {
   buildGetTokenRequest,
   buildRefreshRequest,
   type OAuth2Target,
 } from '@/lib/oauth2-requests';
-import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import {
   type FlowAuthToken,
   type FlowNode,
@@ -86,12 +91,7 @@ export async function collectFlowAuthTokens(
     const store = useFlowAuthStore.getState();
     // The in-memory entry can be stale if the persisted auth changed outside
     // the editor (undo, reload); use it only while it still matches the node.
-    const stored = store.getAuth(key);
-    const fresh = fromPersistedAuth(node.kind.auth);
-    const state =
-      stored && JSON.stringify(toPersistedAuth(stored)) === JSON.stringify(toPersistedAuth(fresh))
-        ? stored
-        : fresh;
+    const state = pickAuthState(store.getAuth(key), node.kind.auth);
     const oauth = state.oauth2;
     if (!oauth) continue;
 

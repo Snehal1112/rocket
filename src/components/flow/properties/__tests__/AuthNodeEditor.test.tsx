@@ -114,4 +114,22 @@ describe('AuthNodeEditor', () => {
     await userEvent.type(screen.getByLabelText('Label'), '!');
     expect(onChange).toHaveBeenLastCalledWith({ ...kind, label: 'Sign in!' });
   });
+
+  it('shows the persisted auth when the stored state is for an older configuration', () => {
+    // Stored state for config A (bearer); the node now holds config B (basic).
+    useFlowAuthStore.getState().setAuth(flowAuthKey('api', 'login', 'n1', null), {
+      authType: 'bearer',
+      bearer: { token: 'stale-token-123456' },
+    });
+    render(
+      <AuthNodeEditor
+        kind={kind}
+        onChange={vi.fn()}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+    expect(screen.getByTestId('auth-type')).toHaveTextContent('basic');
+  });
 });

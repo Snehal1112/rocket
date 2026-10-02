@@ -6,6 +6,7 @@ import {
   isInteractiveGrant,
   isOAuth2,
   isTokenExpired,
+  pickAuthState,
   resetTokenOnConfigChange,
 } from '@/lib/flow-auth';
 import { fromPersistedAuth } from '@/lib/persisted-auth';
@@ -133,5 +134,27 @@ describe('isTokenExpired', () => {
   it('is true once acquired + expiresIn has passed, with a 30 second margin', () => {
     expect(isTokenExpired(o({}), 1000 + 29)).toBe(false);
     expect(isTokenExpired(o({}), 1000 + 31)).toBe(true);
+  });
+});
+
+describe('pickAuthState', () => {
+  const persisted = oauth('client_credentials');
+
+  it('falls back to the persisted auth when nothing is stored', () => {
+    expect(pickAuthState(undefined, persisted)).toEqual(fromPersistedAuth(persisted));
+  });
+
+  it('keeps the stored state, with its token, while it matches the persisted auth', () => {
+    const base = fromPersistedAuth(persisted);
+    const stored: AuthState = {
+      ...base,
+      oauth2: { ...(base.oauth2 as NonNullable<AuthState['oauth2']>), accessToken: 'tok' },
+    };
+    expect(pickAuthState(stored, persisted)).toBe(stored);
+  });
+
+  it('drops a stored state whose configuration no longer matches', () => {
+    const stored = fromPersistedAuth({ authType: 'bearer', token: 'old' });
+    expect(pickAuthState(stored, persisted)).toEqual(fromPersistedAuth(persisted));
   });
 });
