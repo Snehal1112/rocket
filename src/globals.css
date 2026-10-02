@@ -180,6 +180,11 @@
     --success-soft: 160 50% 92%;
     --destructive-soft: 0 74% 94%;
 
+    /* Toast text colors, chosen for contrast (at least 4.5:1) on the soft backgrounds above. */
+    --toast-error-fg: 0 80% 28%;
+    --toast-success-fg: 160 80% 22%;
+    --toast-warning-fg: 32 90% 24%;
+
     /* HTTP method colors */
     --color-method-get: 160 63% 35%;
     --color-method-post: 38 92% 48%;
@@ -365,6 +370,11 @@
     --success-foreground: 0 0% 10%;
     --success-soft: 160 50% 14%;
     --destructive-soft: 0 50% 18%;
+
+    /* Toast text colors, chosen for contrast (at least 4.5:1) on the soft backgrounds above. */
+    --toast-error-fg: 0 90% 80%;
+    --toast-success-fg: 160 63% 49%;
+    --toast-warning-fg: 38 92% 70%;
 
     /* HTTP method colors */
     --color-method-get: 160 63% 49%;
