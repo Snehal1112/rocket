@@ -492,6 +492,17 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
         Ok(Some(parsed.value))
     }
 
+    fn capabilities(
+        &self,
+        _connection: &SecretManagerConnection,
+    ) -> rocket_environment::ProviderCapabilities {
+        rocket_environment::ProviderCapabilities {
+            certificates: true,
+            credential_optional: false,
+            fetch_on_reference: false,
+        }
+    }
+
     async fn test_connection(
         &self,
         connection: &SecretManagerConnection,
@@ -986,5 +997,14 @@ mod tests {
             let err = vault_api_url(&conn, &["api", "v1", "vaults", bad]).expect_err("reject");
             assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
         }
+    }
+
+    #[test]
+    fn rocketvault_supports_certificates_and_needs_a_credential() {
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let caps = fetcher.capabilities(&test_connection("https://v:8774".to_string()));
+        assert!(caps.certificates);
+        assert!(!caps.credential_optional);
+        assert!(!caps.fetch_on_reference);
     }
 }
