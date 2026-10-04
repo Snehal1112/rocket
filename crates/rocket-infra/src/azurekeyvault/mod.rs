@@ -119,13 +119,12 @@ impl AzureKeyVaultFetcher {
             ("scope", VAULT_SCOPE),
         ];
 
-        let resp = self
-            .http
-            .post(url)
-            .form(&form)
-            .send()
-            .await
-            .map_err(|e| DomainError::Http(format!("Azure AD token request failed: {e}")))?;
+        let resp = self.http.post(url).form(&form).send().await.map_err(|e| {
+            DomainError::Http(format!(
+                "Azure AD token request failed: {}",
+                e.without_url()
+            ))
+        })?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::BAD_REQUEST || status == reqwest::StatusCode::UNAUTHORIZED
@@ -407,7 +406,9 @@ impl AzureKeyVaultFetcher {
         if status == reqwest::StatusCode::FORBIDDEN {
             return Err(forbidden_error(op));
         }
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        {
             let wait = resp
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
@@ -415,8 +416,14 @@ impl AzureKeyVaultFetcher {
                 .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
                 .map(|s| format!(" Retry after {s} seconds."))
                 .unwrap_or_default();
+            let code = status.as_u16();
+            let what = if code == 503 {
+                "is temporarily unavailable"
+            } else {
+                "is throttling requests"
+            };
             return Err(DomainError::Http(format!(
-                "Azure Key Vault is throttling requests while {op} (429).{wait}"
+                "Azure Key Vault {what} while {op} ({code}).{wait}"
             )));
         }
         Err(DomainError::Http(format!(
@@ -436,7 +443,12 @@ impl AzureKeyVaultFetcher {
             .bearer_auth(token)
             .send()
             .await
-            .map_err(|e| DomainError::Http(format!("Azure Key Vault list request failed: {e}")))?;
+            .map_err(|e| {
+                DomainError::Http(format!(
+                    "Azure Key Vault list request failed: {}",
+                    e.without_url()
+                ))
+            })?;
         let resp = self.check_status(resp, connection, "listing secrets")?;
         // The decoder's text can quote server strings, so it is not shown.
         resp.json::<RawSecretPage>().await.map_err(|_| {
@@ -508,7 +520,12 @@ impl VaultSecretFetcher for AzureKeyVaultFetcher {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| DomainError::Http(format!("Azure Key Vault get request failed: {e}")))?;
+            .map_err(|e| {
+                DomainError::Http(format!(
+                    "Azure Key Vault get request failed: {}",
+                    e.without_url()
+                ))
+            })?;
 
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
@@ -990,6 +1007,44 @@ mod tests {
             err.to_string().contains("Retry after 7 seconds"),
             "got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn unavailable_reports_503_and_retry_after() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(503).insert_header("retry-after", "7"))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&server.uri()), "shh", "")
+            .await
+            .expect_err("503");
+
+        let msg = err.to_string();
+        assert!(msg.contains("503"), "got: {msg}");
+        assert!(msg.contains("Retry after 7 seconds"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn a_non_digit_retry_after_is_left_out() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(503).insert_header("retry-after", "x y"))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&server.uri()), "shh", "")
+            .await
+            .expect_err("503");
+
+        let msg = err.to_string();
+        assert!(msg.contains("503"), "got: {msg}");
+        assert!(!msg.contains("Retry after"), "got: {msg}");
     }
 
     #[tokio::test]
