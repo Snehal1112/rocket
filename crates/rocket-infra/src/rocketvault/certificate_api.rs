@@ -333,6 +333,8 @@ mod tests {
             client_id: "rocketapi".into(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
         }
     }
 

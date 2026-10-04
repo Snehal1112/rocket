@@ -28,7 +28,8 @@ certificates (the `vault` certificate entry type and `fetch_certificate`).
 - `{{alias.secretName}}` and `rok.getSecretVar('alias.secretName')` behave the same for
   every provider.
 - Only providers that support certificates offer certificate features.
-- Cloud providers are not hit with a fetch for every secret on every send.
+- The seam leaves room to stop hitting cloud providers with a fetch for every secret on
+  every send (the work itself is deferred, see section 6).
 
 ## 3. Non-goals
 
@@ -113,8 +114,8 @@ fetch_on_reference: bool }`. The default is all false.
   reports true.
 - `credential_optional`: a new connection may be saved with no stored credential (Azure
   CLI mode, an AWS profile). RocketVault reports false.
-- `fetch_on_reference`: send-time fetches are limited to referenced secrets (section 6).
-  RocketVault reports false, so its behavior does not change.
+- `fetch_on_reference`: reserved for limiting send-time fetches to referenced secrets
+  (section 6). Nothing reads it yet. RocketVault reports false.
 
 The trait documentation is reworded from "RocketVault" to "secret manager".
 
@@ -147,28 +148,25 @@ certificate-id caches live inside each implementation.
 ## 6. Resolution at send time
 
 The merge of `alias.secretName` into `VariableContext.external_secrets`, redaction, the
-write guard and scripting are unchanged.
+write guard and scripting are unchanged. RocketVault keeps fetching every ref of every
+binding, as it does today.
 
-What changes is how many secrets are fetched. Today
-`resolve_external_secrets_partial` (`crates/rocket-app/src/execution_service.rs`) fetches
-every ref of every binding on every send. With a cloud provider this costs latency and
-money per call.
+Fetching only the secrets a request references is deferred to the first cloud provider's
+own plan, because no provider uses it yet. With a cloud provider every fetch costs
+latency and money per call, so that plan will limit a single send (`execute()`) to the
+refs the request references, using an exact `alias.secretName` text match. Two rules are
+fixed now so that plan has a clear target:
 
-New behavior, for bindings whose connection reports `fetch_on_reference`: a single send
-(`execute()`) fetches only the refs the request, its scripts or its auth reference.
+- The limit applies only to connections whose provider reports `fetch_on_reference`.
+  RocketVault does not, so its behavior never changes. A script that builds a secret name
+  dynamically (`getSecretVar('al' + 'ias.name')`) cannot be seen by a text check, so a
+  provider opts in only when its fetch cost justifies that limit.
+- The runner and the flow executor keep fetching every ref once per run.
 
-- The textual check matches the exact key `alias.secretName`.
-- A reference to a name that is not in the binding's `secret_names` is left unresolved
-  and follows the existing unresolved-variable path.
-- Bindings whose connection does not report `fetch_on_reference` (RocketVault) keep
-  fetching every ref, so nothing changes for them. A script that builds a secret name
-  dynamically (`getSecretVar('al' + 'ias.name')`) cannot be seen by a text check, so
-  each provider opts in only when its fetch cost justifies that limit.
-- The runner and the flow executor already resolve once per run. They keep fetching every
-  ref of every binding once per run, so they are unaffected.
-- The existing failure policy is kept: a failed binding fails the send only if the
-  request references that alias. The spec 2026-09-22 text that says "hard fail on any
-  failure" is superseded by this behavior, which the code already has.
+The `fetch_on_reference` flag exists in this foundation, defaults to false and is read
+by nothing yet. The work also depends on the partial-failure resolution code (a failed
+binding fails a send only when the request references that alias) that is in progress
+outside this branch, so it cannot be built on committed code today.
 
 ## 7. Certificates
 
@@ -228,7 +226,7 @@ Rust (use `-j4`, targeted crates only):
   unregistered provider, forwards `forget_connection`; the RocketVault tests pass
   unchanged.
 - `rocket-app`: per-provider validation; fetch narrowing (only referenced refs are
-  fetched; an unreferenced failing ref does not fail the send); certificate capability
+  fetched; an unreferenced failing ref does not fail the send) (deferred with section 6; tested in the first cloud provider's plan); certificate capability
   gating in `EnvironmentService`.
 - `src-tauri`: DTO JSON shape.
 

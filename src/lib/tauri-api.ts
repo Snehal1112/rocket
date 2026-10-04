@@ -193,6 +193,19 @@ export interface ExternalSecretBinding {
   secretNames: ExternalSecretRef[];
 }
 
+export type SecretProviderKind = 'rocketvault' | 'azure' | 'aws' | 'hashicorp' | 'gcp';
+
+// Azure AD service principal settings. The vault URL is baseUrl and the app
+// registration id is clientId. authorityHost exists for tests only.
+export interface AzureConfig {
+  kind: 'azure';
+  tenantId: string;
+  authorityHost?: string;
+}
+
+// Provider-specific, non-secret settings. Matches the Rust ProviderConfigDto.
+export type ProviderConfig = AzureConfig;
+
 export interface SecretManagerConnection {
   id: string;
   label: string;
@@ -200,6 +213,9 @@ export interface SecretManagerConnection {
   clientId: string;
   verifySsl: boolean;
   allowInsecureHttp: boolean;
+  // Absent means RocketVault, for payloads written before providers existed.
+  provider?: SecretProviderKind;
+  config?: ProviderConfig | null;
 }
 
 // A certificate in a RocketVault vault, for the Certificates tab picker. Never key material.

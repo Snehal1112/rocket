@@ -10,15 +10,21 @@ pub mod secret_store;
 pub mod variable;
 pub mod vault_secret_fetcher;
 
-pub use client_certificate_validation::validate_client_certificates;
+pub use client_certificate_validation::{
+    validate_client_certificates, validate_vault_certificate_providers,
+};
 pub use context::VariableContext;
 pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};
 pub use repository::{EnvironmentRepository, EnvironmentRepositoryFactory};
 pub use resolver::{resolve, resolve_with_env, ResolveResult};
-pub use secret_manager::{SecretManagerConnection, SecretManagerRepository};
+pub use secret_manager::{
+    ConnectionProvider, ProviderCapabilityLookup, ProviderConfig, SecretManagerConnection,
+    SecretManagerRepository, SecretProviderKind,
+};
 pub use secret_store::{NullSecretStore, SecretStore};
 pub use variable::Variable;
 pub use vault_secret_fetcher::{
-    NullVaultSecretFetcher, VaultCertificateMaterial, VaultCertificateSummary, VaultSecretFetcher,
+    NullVaultSecretFetcher, ProviderCapabilities, VaultCertificateMaterial,
+    VaultCertificateSummary, VaultSecretFetcher,
 };

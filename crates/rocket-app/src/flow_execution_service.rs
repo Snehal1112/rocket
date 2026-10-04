@@ -4591,6 +4591,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
         };
         let mut values = HashMap::new();
         values.insert("sec-1".to_string(), "sk-secret".to_string());
@@ -8365,6 +8367,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
         };
         let fetcher = FakeVaultSecretFetcher::new(HashMap::from([(
             "sec-1".to_string(),

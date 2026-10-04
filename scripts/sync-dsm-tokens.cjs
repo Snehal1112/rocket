@@ -22,12 +22,12 @@ function block(src, pattern) {
   throw new Error(`Unbalanced block: ${pattern}`);
 }
 
-function hslToHex(h, s, l) {
-  s /= 100;
-  l /= 100;
+function hslToHex(hue, sat, light) {
+  const s = sat / 100;
+  const l = light / 100;
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
-    const k = (n + h / 30) % 12;
+    const k = (n + hue / 30) % 12;
     const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
     return Math.round(255 * c);
   };
@@ -35,7 +35,10 @@ function hslToHex(h, s, l) {
 }
 
 const hex = ([r, g, b]) =>
-  `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+  `#${[r, g, b]
+    .map((v) => v.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()}`;
 
 // Converts one app token value (HSL triple, HSL with alpha, rgba, or plain).
 function convert(value) {
@@ -46,7 +49,10 @@ function convert(value) {
     if (tri[4] !== undefined) return `rgba(${rgb.join(', ')}, ${tri[4]})`;
     return hex(rgb);
   }
-  return v.replace(/rgba\( /g, 'rgba(').replace(/ \)/g, ')').replace(/, ,/g, ',');
+  return v
+    .replace(/rgba\( /g, 'rgba(')
+    .replace(/ \)/g, ')')
+    .replace(/, ,/g, ',');
 }
 
 function parse(body) {
@@ -112,7 +118,9 @@ const generated = [
 
 let html = fs.readFileSync(dsmPath, 'utf8');
 if (html.includes(START)) {
-  const re = new RegExp(`${START.replace(/[/*]/g, '\\$&')}[\\s\\S]*?${END.replace(/[/*]/g, '\\$&')}`);
+  const re = new RegExp(
+    `${START.replace(/[/*]/g, '\\$&')}[\\s\\S]*?${END.replace(/[/*]/g, '\\$&')}`,
+  );
   html = html.replace(re, () => generated);
 } else {
   // First run: replace the hand-written light and dark token blocks.
@@ -120,7 +128,7 @@ if (html.includes(START)) {
   const dStart = html.indexOf(':root[data-theme="dark"] {');
   const dEnd = html.indexOf('\n}\n', dStart) + 3;
   if (a < 0 || dStart < 0) throw new Error('Token blocks not found in DSM page.');
-  html = html.slice(0, a) + generated + '\n' + html.slice(dEnd);
+  html = `${html.slice(0, a)}${generated}\n${html.slice(dEnd)}`;
 }
 fs.writeFileSync(dsmPath, html);
 console.log(`DSM tokens synced: ${light.size} light, ${dark.size} dark.`);

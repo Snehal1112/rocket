@@ -4988,6 +4988,7 @@ dependencies = [
  "rocket-shared",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
  "uuid",
  "zeroize",

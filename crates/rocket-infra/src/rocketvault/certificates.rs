@@ -309,6 +309,8 @@ mod tests {
             client_id: "rocketapi".into(),
             verify_ssl: true,
             allow_insecure_http: true, // the mock server is http://127.0.0.1:<port>
+            provider: Default::default(),
+            config: None,
         }
     }
 
@@ -1166,6 +1168,8 @@ mod tests {
             client_id: var("ROCKETVAULT_CLIENT_ID"),
             verify_ssl: std::env::var("ROCKETVAULT_INSECURE").is_err(),
             allow_insecure_http: true,
+            provider: Default::default(),
+            config: None,
         };
         let secret = var("ROCKETVAULT_CLIENT_SECRET");
         let vault = var("ROCKETVAULT_VAULT");

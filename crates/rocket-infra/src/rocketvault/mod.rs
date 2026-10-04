@@ -34,7 +34,7 @@ const MAX_TOKEN_TTL_SECS: u64 = 86_400; // 24 hours
 /// (`default_timeout()` in `crates/rocket-http/src/request.rs`), so
 /// RocketVault calls fail closed with the same ceiling the rest of the app
 /// uses for outgoing HTTP requests, rather than hanging indefinitely.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One cached OAuth2 access token for a single `SecretManagerConnection`,
 /// keyed by `connection.id` in `ReqwestVaultSecretFetcher::tokens`.
@@ -71,7 +71,7 @@ struct TokenCache {
 /// that actually needs it. A fingerprint lets `ensure_token` notice the
 /// secret passed into a later call differs from the one that minted the
 /// cached token, without ever holding onto the secret itself.
-fn secret_fingerprint(secret: &str) -> String {
+pub(crate) fn secret_fingerprint(secret: &str) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write;
     Sha256::digest(secret.as_bytes())
@@ -255,7 +255,7 @@ impl Default for ReqwestVaultSecretFetcher {
 /// actual expiry, except when the token's remaining life is already at or
 /// under that window, in which case the raw expiry is used — otherwise a
 /// short-lived token (e.g. a 45s TTL) would be refetched on every call.
-fn token_expiry_cutoff(expires_at: Instant) -> Instant {
+pub(crate) fn token_expiry_cutoff(expires_at: Instant) -> Instant {
     let remaining = expires_at.saturating_duration_since(Instant::now());
     if remaining <= EARLY_REFRESH_CUTOFF {
         expires_at
@@ -270,7 +270,7 @@ fn token_expiry_cutoff(expires_at: Instant) -> Instant {
 /// `ensure_token` can never overflow, then floors to `MIN_TOKEN_TTL` so a
 /// server reporting `expires_in: 0` (or another degenerate small value)
 /// doesn't force a refetch on every call.
-fn compute_token_ttl(expires_in: u64) -> Duration {
+pub(crate) fn compute_token_ttl(expires_in: u64) -> Duration {
     Duration::from_secs(expires_in.min(MAX_TOKEN_TTL_SECS)).max(MIN_TOKEN_TTL)
 }
 
@@ -310,6 +310,18 @@ fn vault_api_url(
     Ok(url)
 }
 
+/// True for `localhost` and every loopback IP. `url::Url::host()` is matched
+/// structurally, because `host_str()` brackets IPv6 hosts ("[::1]") and would
+/// never equal a bare "::1".
+pub(crate) fn is_loopback_url(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(d)) => d == "localhost",
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 /// Enforces the `https://` requirement for non-loopback hosts, mirroring the
 /// reference Go client's `isLoopbackHost` guard in `New()`. Loopback hosts
 /// are always allowed over plain HTTP for local dev RocketVault instances,
@@ -322,17 +334,7 @@ fn validate_base_url(connection: &SecretManagerConnection) -> DomainResult<()> {
         ))
     })?;
     let host = parsed.host_str().unwrap_or_default();
-    // `url::Url::host()` (unlike `host_str()`, which brackets IPv6 hosts as
-    // "[::1]" and would never match a bare "::1" comparison) returns a
-    // `url::Host` we can match structurally, so `Host::Ipv6(ip).is_loopback()`
-    // correctly recognizes "::1" and every other loopback form (e.g. also
-    // `Host::Ipv4(ip).is_loopback()` covers 127.0.0.2, not just 127.0.0.1).
-    let is_loopback = match parsed.host() {
-        Some(url::Host::Domain(d)) => d == "localhost",
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        None => false,
-    };
+    let is_loopback = is_loopback_url(&parsed);
     if parsed.scheme() != "https" && !is_loopback && !connection.allow_insecure_http {
         return Err(DomainError::InvalidInput(format!(
             "RocketVault connection {} must use https:// for non-loopback host {host} \
@@ -492,6 +494,17 @@ impl VaultSecretFetcher for ReqwestVaultSecretFetcher {
         Ok(Some(parsed.value))
     }
 
+    fn capabilities(
+        &self,
+        _connection: &SecretManagerConnection,
+    ) -> rocket_environment::ProviderCapabilities {
+        rocket_environment::ProviderCapabilities {
+            certificates: true,
+            credential_optional: false,
+            fetch_on_reference: false,
+        }
+    }
+
     async fn test_connection(
         &self,
         connection: &SecretManagerConnection,
@@ -551,6 +564,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: true, // mock server is http://127.0.0.1:<port>
+            provider: Default::default(),
+            config: None,
         }
     }
 
@@ -984,5 +999,14 @@ mod tests {
             let err = vault_api_url(&conn, &["api", "v1", "vaults", bad]).expect_err("reject");
             assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
         }
+    }
+
+    #[test]
+    fn rocketvault_supports_certificates_and_needs_a_credential() {
+        let fetcher = ReqwestVaultSecretFetcher::new();
+        let caps = fetcher.capabilities(&test_connection("https://v:8774".to_string()));
+        assert!(caps.certificates);
+        assert!(!caps.credential_optional);
+        assert!(!caps.fetch_on_reference);
     }
 }

@@ -1,6 +1,8 @@
 use crate::vault_secret_resolution::VAULT_CONNECTION_SCOPE;
 use rocket_environment::external_secret::ExternalSecretRef;
-use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
+use rocket_environment::secret_manager::{
+    SecretManagerConnection, SecretManagerRepository, SecretProviderKind,
+};
 use rocket_environment::secret_store::SecretStore;
 use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
 use rocket_environment::VaultCertificateSummary;
@@ -39,13 +41,26 @@ impl SecretManagerService {
     /// and only the connection record is saved, but only if a keychain entry
     /// for this connection already exists; a brand-new connection with no
     /// stored secret and no prior keychain entry is rejected rather than
-    /// silently persisted as a permanently broken record.
+    /// silently persisted as a permanently broken record. The credential is
+    /// optional for providers that report `credential_optional`.
     pub fn save(
         &self,
         connection: SecretManagerConnection,
         client_secret: Option<String>,
     ) -> DomainResult<()> {
-        validate_connection(&connection)?;
+        validate_connection(&connection, self.fetcher.as_ref())?;
+        // A saved connection keeps its provider. Otherwise a stored credential
+        // could be sent to a different provider by an edit over IPC.
+        if let Some(existing) = self.repo.get(&connection.id)? {
+            if existing.provider != connection.provider {
+                return Err(DomainError::InvalidInput(format!(
+                    "the provider of connection {} cannot be changed from {} to {}",
+                    connection.id,
+                    existing.provider.display_name(),
+                    connection.provider.display_name()
+                )));
+            }
+        }
         if client_secret
             .as_deref()
             .is_some_and(|s| s.trim().is_empty())
@@ -64,7 +79,8 @@ impl SecretManagerService {
                     .secret_store
                     .get(VAULT_CONNECTION_SCOPE, &connection.id)?
                     .is_some();
-                if !has_existing_secret {
+                let optional = self.fetcher.capabilities(&connection).credential_optional;
+                if !has_existing_secret && !optional {
                     return Err(DomainError::InvalidInput(
                         "a new connection must be saved with a client_secret".to_string(),
                     ));
@@ -97,14 +113,16 @@ impl SecretManagerService {
             .repo
             .get(id)?
             .ok_or_else(|| DomainError::NotFound(id.to_string()))?;
-        let secret = self
-            .secret_store
-            .get(VAULT_CONNECTION_SCOPE, id)?
-            .ok_or_else(|| {
-                DomainError::Internal(format!(
+        let stored = self.secret_store.get(VAULT_CONNECTION_SCOPE, id)?;
+        let secret = match stored {
+            Some(secret) => secret,
+            None if self.fetcher.capabilities(&connection).credential_optional => String::new(),
+            None => {
+                return Err(DomainError::Internal(format!(
                     "no client secret available for connection {id} — it was never stored, or the OS keychain is locked/unavailable"
-                ))
-            })?;
+                )))
+            }
+        };
         Ok((connection, secret))
     }
 
@@ -158,16 +176,27 @@ impl SecretManagerService {
 
 /// Rejects a connection record that could never work, before anything is
 /// written to the keychain or to `secret_managers.yml`. The https-only rule
-/// for non-loopback hosts is enforced by the fetcher on every call, so it is
-/// not repeated here.
-fn validate_connection(connection: &SecretManagerConnection) -> DomainResult<()> {
-    let required = [
-        ("id", &connection.id),
-        ("label", &connection.label),
+/// for non-loopback hosts is enforced by the RocketVault fetcher on every
+/// call, so it is not repeated here. Other providers' rules come from their
+/// fetcher.
+fn validate_connection(
+    connection: &SecretManagerConnection,
+    fetcher: &dyn VaultSecretFetcher,
+) -> DomainResult<()> {
+    for (field, value) in [("id", &connection.id), ("label", &connection.label)] {
+        if value.trim().is_empty() {
+            return Err(DomainError::InvalidInput(format!(
+                "secret manager connection {field} must not be empty"
+            )));
+        }
+    }
+    if connection.provider != SecretProviderKind::RocketVault {
+        return fetcher.validate_connection(connection);
+    }
+    for (field, value) in [
         ("base_url", &connection.base_url),
         ("client_id", &connection.client_id),
-    ];
-    for (field, value) in required {
+    ] {
         if value.trim().is_empty() {
             return Err(DomainError::InvalidInput(format!(
                 "secret manager connection {field} must not be empty"
@@ -186,10 +215,26 @@ fn validate_connection(connection: &SecretManagerConnection) -> DomainResult<()>
     Ok(())
 }
 
+impl rocket_environment::ProviderCapabilityLookup for SecretManagerService {
+    fn provider_of(
+        &self,
+        connection_id: &str,
+    ) -> DomainResult<Option<rocket_environment::ConnectionProvider>> {
+        let Some(connection) = self.repo.get(connection_id)? else {
+            return Ok(None);
+        };
+        Ok(Some(rocket_environment::ConnectionProvider {
+            kind: connection.provider,
+            capabilities: self.fetcher.capabilities(&connection),
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rocket_environment::external_secret::ExternalSecretRef;
+    use rocket_environment::secret_manager::ProviderConfig;
     use rocket_shared::error::DomainError;
     use std::sync::Mutex;
 
@@ -370,6 +415,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
         }
     }
 
@@ -819,5 +866,362 @@ mod tests {
             matches!(result, Err(DomainError::Internal(_))),
             "expected DomainError::Internal for a connection with no stored secret, got {result:?}"
         );
+    }
+
+    use rocket_environment::{ProviderCapabilities, SecretProviderKind};
+
+    struct P2Repo {
+        rows: std::sync::Mutex<Vec<SecretManagerConnection>>,
+    }
+    impl P2Repo {
+        fn new() -> Self {
+            Self {
+                rows: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+    impl SecretManagerRepository for P2Repo {
+        fn list(&self) -> DomainResult<Vec<SecretManagerConnection>> {
+            Ok(self.rows.lock().expect("lock").clone())
+        }
+        fn get(&self, id: &str) -> DomainResult<Option<SecretManagerConnection>> {
+            Ok(self
+                .rows
+                .lock()
+                .expect("lock")
+                .iter()
+                .find(|c| c.id == id)
+                .cloned())
+        }
+        fn save(&self, c: &SecretManagerConnection) -> DomainResult<()> {
+            let mut rows = self.rows.lock().expect("lock");
+            rows.retain(|r| r.id != c.id);
+            rows.push(c.clone());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> DomainResult<()> {
+            self.rows.lock().expect("lock").retain(|r| r.id != id);
+            Ok(())
+        }
+    }
+
+    struct P2Store {
+        values: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    }
+    impl P2Store {
+        fn new() -> Self {
+            Self {
+                values: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }
+        }
+    }
+    impl SecretStore for P2Store {
+        fn get(&self, scope: &str, key: &str) -> DomainResult<Option<String>> {
+            Ok(self
+                .values
+                .lock()
+                .expect("lock")
+                .get(&format!("{scope}/{key}"))
+                .cloned())
+        }
+        fn set(&self, scope: &str, key: &str, value: &str) -> DomainResult<()> {
+            self.values
+                .lock()
+                .expect("lock")
+                .insert(format!("{scope}/{key}"), value.to_string());
+            Ok(())
+        }
+        fn delete(&self, scope: &str, key: &str) -> DomainResult<()> {
+            self.values
+                .lock()
+                .expect("lock")
+                .remove(&format!("{scope}/{key}"));
+            Ok(())
+        }
+    }
+
+    /// A fetcher with scripted capabilities and an optional validation error.
+    struct P2Fetcher {
+        caps: ProviderCapabilities,
+        reject: Option<&'static str>,
+        seen_credential: std::sync::Mutex<Option<String>>,
+    }
+    impl P2Fetcher {
+        fn new(caps: ProviderCapabilities, reject: Option<&'static str>) -> Arc<Self> {
+            Arc::new(Self {
+                caps,
+                reject,
+                seen_credential: std::sync::Mutex::new(None),
+            })
+        }
+    }
+    #[async_trait::async_trait]
+    impl VaultSecretFetcher for P2Fetcher {
+        async fn list_secrets(
+            &self,
+            _c: &SecretManagerConnection,
+            _s: &str,
+            _v: &str,
+        ) -> DomainResult<Vec<ExternalSecretRef>> {
+            Ok(vec![])
+        }
+        async fn get_secret_value(
+            &self,
+            _c: &SecretManagerConnection,
+            _s: &str,
+            _v: &str,
+            _id: &str,
+        ) -> DomainResult<Option<String>> {
+            Ok(None)
+        }
+        async fn test_connection(
+            &self,
+            _c: &SecretManagerConnection,
+            secret: &str,
+            _v: &str,
+        ) -> DomainResult<()> {
+            *self.seen_credential.lock().expect("lock") = Some(secret.to_string());
+            Ok(())
+        }
+        fn capabilities(&self, _c: &SecretManagerConnection) -> ProviderCapabilities {
+            self.caps
+        }
+        fn validate_connection(&self, _c: &SecretManagerConnection) -> DomainResult<()> {
+            match self.reject {
+                Some(msg) => Err(DomainError::InvalidInput(msg.to_string())),
+                None => Ok(()),
+            }
+        }
+    }
+
+    fn p2_connection(id: &str, provider: SecretProviderKind) -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: id.to_string(),
+            label: "L".to_string(),
+            base_url: String::new(),
+            client_id: String::new(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider,
+            config: None,
+        }
+    }
+
+    fn p2_service(fetcher: Arc<P2Fetcher>) -> SecretManagerService {
+        SecretManagerService::new(Box::new(P2Repo::new()), Arc::new(P2Store::new()), fetcher)
+    }
+
+    #[test]
+    fn rocketvault_still_requires_base_url_client_id_and_a_secret() {
+        let svc = p2_service(P2Fetcher::new(ProviderCapabilities::default(), None));
+
+        let blank = p2_connection("c1", SecretProviderKind::RocketVault);
+        let err = svc
+            .save(blank, Some("s".to_string()))
+            .expect_err("blank base_url");
+        assert!(err.to_string().contains("base_url"), "got: {err}");
+
+        let mut ok = p2_connection("c2", SecretProviderKind::RocketVault);
+        ok.base_url = "https://v:8774".to_string();
+        ok.client_id = "rocketapi".to_string();
+        let err = svc
+            .save(ok, None)
+            .expect_err("a new connection needs a secret");
+        assert!(err.to_string().contains("client_secret"), "got: {err}");
+    }
+
+    #[test]
+    fn another_provider_uses_its_own_validation_and_skips_the_rocketvault_url_rules() {
+        let svc = p2_service(P2Fetcher::new(
+            ProviderCapabilities::default(),
+            Some("tenant is required"),
+        ));
+        let err = svc
+            .save(
+                p2_connection("c1", SecretProviderKind::Azure),
+                Some("s".to_string()),
+            )
+            .expect_err("the provider rejects it");
+        assert!(err.to_string().contains("tenant is required"), "got: {err}");
+
+        let svc = p2_service(P2Fetcher::new(ProviderCapabilities::default(), None));
+        svc.save(
+            p2_connection("c2", SecretProviderKind::Azure),
+            Some("s".to_string()),
+        )
+        .expect("empty base_url is fine for a provider that does not use it");
+    }
+
+    #[test]
+    fn a_credential_optional_provider_saves_without_a_secret() {
+        let caps = ProviderCapabilities {
+            credential_optional: true,
+            ..ProviderCapabilities::default()
+        };
+        let svc = p2_service(P2Fetcher::new(caps, None));
+        svc.save(p2_connection("c1", SecretProviderKind::Azure), None)
+            .expect("no credential is allowed for this provider");
+    }
+
+    #[test]
+    fn a_provider_that_needs_a_credential_rejects_a_new_connection_without_one() {
+        let svc = p2_service(P2Fetcher::new(ProviderCapabilities::default(), None));
+        let err = svc
+            .save(p2_connection("c1", SecretProviderKind::Azure), None)
+            .expect_err("a credential is required");
+        assert!(err.to_string().contains("client_secret"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn an_optional_credential_reaches_the_fetcher_as_an_empty_string() {
+        let caps = ProviderCapabilities {
+            credential_optional: true,
+            ..ProviderCapabilities::default()
+        };
+        let fetcher = P2Fetcher::new(caps, None);
+        let svc = p2_service(Arc::clone(&fetcher));
+        svc.save(p2_connection("c1", SecretProviderKind::Azure), None)
+            .expect("save");
+
+        svc.test_connection("c1", "vault")
+            .await
+            .expect("an optional credential is not an error");
+
+        assert_eq!(
+            fetcher.seen_credential.lock().expect("lock").as_deref(),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn the_service_reports_a_connections_provider_and_capabilities() {
+        use rocket_environment::ProviderCapabilityLookup;
+        let caps = ProviderCapabilities {
+            certificates: true,
+            ..ProviderCapabilities::default()
+        };
+        let svc = p2_service(P2Fetcher::new(caps, None));
+        let mut c = p2_connection("c1", SecretProviderKind::RocketVault);
+        c.base_url = "https://v:8774".to_string();
+        c.client_id = "rocketapi".to_string();
+        svc.save(c, Some("s".to_string())).expect("save");
+
+        let info = svc.provider_of("c1").expect("lookup").expect("exists");
+        assert_eq!(info.kind, SecretProviderKind::RocketVault);
+        assert!(info.capabilities.certificates);
+        assert!(svc.provider_of("missing").expect("lookup").is_none());
+    }
+
+    fn azure_connection(id: &str) -> SecretManagerConnection {
+        SecretManagerConnection {
+            label: "Prod Azure".to_string(),
+            base_url: "https://prod-kv.vault.azure.net".to_string(),
+            client_id: "app-id".to_string(),
+            provider: SecretProviderKind::Azure,
+            config: Some(ProviderConfig::Azure {
+                tenant_id: "tenant-1".to_string(),
+                authority_host: None,
+            }),
+            ..sample_connection(id)
+        }
+    }
+
+    #[test]
+    fn save_rejects_changing_the_provider_of_an_existing_connection() {
+        let store = Arc::new(FakeSecretStore::new());
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            Arc::clone(&store) as Arc<dyn SecretStore>,
+            Arc::new(FakeFetcher),
+        );
+        service
+            .save(sample_connection("conn-1"), Some("original".to_string()))
+            .expect("initial RocketVault save");
+
+        let result = service.save(azure_connection("conn-1"), Some("attacker".to_string()));
+
+        assert!(
+            matches!(result, Err(DomainError::InvalidInput(_))),
+            "expected InvalidInput, got {result:?}"
+        );
+        assert_eq!(
+            store.get("vault-connection", "conn-1").expect("get"),
+            Some("original".to_string()),
+            "a rejected save must not overwrite the stored credential"
+        );
+        let listed = service.list().expect("list");
+        assert_eq!(listed[0].provider, SecretProviderKind::RocketVault);
+    }
+
+    #[test]
+    fn save_keeps_allowing_edits_that_do_not_change_the_provider() {
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            Arc::new(FakeSecretStore::new()) as Arc<dyn SecretStore>,
+            Arc::new(FakeFetcher),
+        );
+        let mut conn = azure_connection("az-1");
+        service
+            .save(conn.clone(), Some("s".to_string()))
+            .expect("first save");
+        conn.label = "Renamed".to_string();
+        service.save(conn, None).expect("edit keeps the provider");
+    }
+
+    #[test]
+    fn a_credential_required_non_rocketvault_connection_needs_a_secret_on_save() {
+        let service = SecretManagerService::new(
+            Box::new(FakeRepo::new()),
+            Arc::new(FakeSecretStore::new()) as Arc<dyn SecretStore>,
+            Arc::new(FakeFetcher),
+        );
+
+        let result = service.save(azure_connection("az-1"), None);
+
+        assert!(
+            matches!(result, Err(DomainError::InvalidInput(_))),
+            "got {result:?}"
+        );
+        assert!(service.list().expect("list").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_credential_required_connection_with_no_stored_secret_fails_at_connection_time() {
+        let repo = FakeRepo::new();
+        repo.save(&azure_connection("az-1"))
+            .expect("seed the record directly");
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::new(FakeSecretStore::new()) as Arc<dyn SecretStore>,
+            Arc::new(FakeFetcher),
+        );
+
+        let result = service.test_connection("az-1", "any").await;
+
+        match result {
+            Err(DomainError::Internal(msg)) => {
+                assert!(msg.contains("no client secret"), "got: {msg}")
+            }
+            other => panic!("expected an Internal error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_azure_connection_reaches_certificate_gating_without_certificate_support() {
+        let repo = FakeRepo::new();
+        repo.save(&azure_connection("az-1"))
+            .expect("seed the record");
+        let service = SecretManagerService::new(
+            Box::new(repo),
+            Arc::new(FakeSecretStore::new()) as Arc<dyn SecretStore>,
+            Arc::new(FakeFetcher),
+        );
+
+        let provider = rocket_environment::ProviderCapabilityLookup::provider_of(&service, "az-1")
+            .expect("lookup")
+            .expect("the connection exists");
+
+        assert_eq!(provider.kind, SecretProviderKind::Azure);
+        assert!(!provider.capabilities.certificates);
     }
 }

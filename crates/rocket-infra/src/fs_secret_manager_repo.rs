@@ -38,7 +38,9 @@ impl FsSecretManagerRepo {
             return Ok(Vec::new());
         }
         serde_yaml::from_str(&content).map_err(|e| {
-            DomainError::InvalidInput(format!("Failed to parse secret_managers.yml: {e}"))
+            DomainError::InvalidInput(format!(
+                "Failed to parse secret_managers.yml: {e}. The file may have been written by a newer version of Rocket."
+            ))
         })
     }
 
@@ -77,6 +79,7 @@ impl SecretManagerRepository for FsSecretManagerRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_environment::SecretProviderKind;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, FsSecretManagerRepo) {
@@ -93,6 +96,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
         }
     }
 
@@ -154,6 +159,56 @@ mod tests {
     }
 
     #[test]
+    fn an_old_file_with_no_provider_loads_as_rocketvault() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("secret_managers.yml"),
+            "- id: old-1\n  label: Prod\n  base_url: https://v:8774\n  client_id: rocketapi\n  verify_ssl: true\n  allow_insecure_http: false\n",
+        )
+        .expect("write old file");
+
+        let rows = repo.list().expect("old file loads");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider, SecretProviderKind::RocketVault);
+        assert!(rows[0].config.is_none());
+    }
+
+    #[test]
+    fn a_saved_rocketvault_row_has_no_provider_key_on_disk() {
+        let (dir, repo) = setup();
+
+        repo.save(&sample("c1")).expect("save");
+
+        let text =
+            std::fs::read_to_string(dir.path().join("secret_managers.yml")).expect("read back");
+        assert!(
+            !text.contains("provider"),
+            "older builds must read this file: {text}"
+        );
+        assert!(
+            !text.contains("config"),
+            "older builds must read this file: {text}"
+        );
+    }
+
+    #[test]
+    fn a_row_with_an_unknown_provider_fails_loudly_and_names_it() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("secret_managers.yml"),
+            "- id: x\n  label: X\n  provider: bogus\n",
+        )
+        .expect("write");
+
+        let err = repo
+            .list()
+            .expect_err("must not silently become RocketVault");
+
+        assert!(err.to_string().contains("bogus"), "got: {err}");
+    }
+
+    #[test]
     fn persisted_yaml_never_contains_client_secret() {
         // `SecretManagerConnection` (rocket-environment, Plan 01) has no
         // `client_secret` field — the client secret lives only in the OS
@@ -172,5 +227,23 @@ mod tests {
             !raw.contains("client_secret"),
             "secret_managers.yml must never contain a client_secret field: {raw}"
         );
+    }
+
+    #[test]
+    fn an_unreadable_file_points_at_a_newer_build() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("secret_managers.yml"),
+            "- id: x\n  label: X\n  base_url: https://v\n  client_id: a\n  provider: azure\n  config: !FutureProvider {region: eu}\n",
+        )
+        .expect("write");
+
+        let err = repo
+            .list()
+            .expect_err("an unknown config tag must not load");
+
+        let msg = err.to_string();
+        assert!(msg.contains("newer version of Rocket"), "got: {msg}");
+        assert!(msg.contains("secret_managers.yml"), "got: {msg}");
     }
 }
