@@ -77,6 +77,7 @@ impl SecretManagerRepository for FsSecretManagerRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_environment::SecretProviderKind;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, FsSecretManagerRepo) {
@@ -153,6 +154,56 @@ mod tests {
         repo.delete("no-such-id")
             .expect("delete of missing id must not error");
         assert_eq!(repo.list().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn an_old_file_with_no_provider_loads_as_rocketvault() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("secret_managers.yml"),
+            "- id: old-1\n  label: Prod\n  base_url: https://v:8774\n  client_id: rocketapi\n  verify_ssl: true\n  allow_insecure_http: false\n",
+        )
+        .expect("write old file");
+
+        let rows = repo.list().expect("old file loads");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider, SecretProviderKind::RocketVault);
+        assert!(rows[0].config.is_none());
+    }
+
+    #[test]
+    fn a_saved_rocketvault_row_has_no_provider_key_on_disk() {
+        let (dir, repo) = setup();
+
+        repo.save(&sample("c1")).expect("save");
+
+        let text =
+            std::fs::read_to_string(dir.path().join("secret_managers.yml")).expect("read back");
+        assert!(
+            !text.contains("provider"),
+            "older builds must read this file: {text}"
+        );
+        assert!(
+            !text.contains("config"),
+            "older builds must read this file: {text}"
+        );
+    }
+
+    #[test]
+    fn a_row_with_an_unknown_provider_fails_loudly_and_names_it() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("secret_managers.yml"),
+            "- id: x\n  label: X\n  provider: bogus\n",
+        )
+        .expect("write");
+
+        let err = repo
+            .list()
+            .expect_err("must not silently become RocketVault");
+
+        assert!(err.to_string().contains("bogus"), "got: {err}");
     }
 
     #[test]
