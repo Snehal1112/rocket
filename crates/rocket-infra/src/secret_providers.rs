@@ -11,6 +11,7 @@ use rocket_environment::{
 use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::azurekeyvault::AzureKeyVaultFetcher;
 use crate::rocketvault::ReqwestVaultSecretFetcher;
 
 /// One `VaultSecretFetcher` that holds an implementation per provider and
@@ -26,12 +27,16 @@ impl DispatchingSecretFetcher {
         Self::default()
     }
 
-    /// A dispatcher with only the RocketVault provider registered.
-    pub fn with_rocketvault() -> Self {
+    /// A dispatcher with every provider this build ships registered.
+    pub fn with_providers() -> Self {
         let mut dispatcher = Self::new();
         dispatcher.register(
             SecretProviderKind::RocketVault,
             Arc::new(ReqwestVaultSecretFetcher::new()),
+        );
+        dispatcher.register(
+            SecretProviderKind::Azure,
+            Arc::new(AzureKeyVaultFetcher::new()),
         );
         dispatcher
     }
@@ -312,8 +317,8 @@ mod tests {
     }
 
     #[test]
-    fn with_rocketvault_reports_certificate_support_for_rocketvault_only() {
-        let d = DispatchingSecretFetcher::with_rocketvault();
+    fn with_providers_reports_certificate_support_for_rocketvault_only() {
+        let d = DispatchingSecretFetcher::with_providers();
         assert!(
             d.capabilities(&conn(SecretProviderKind::RocketVault))
                 .certificates
@@ -322,5 +327,42 @@ mod tests {
             !d.capabilities(&conn(SecretProviderKind::Azure))
                 .certificates
         );
+    }
+
+    fn azure_connection() -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: "az-1".to_string(),
+            label: "Azure".to_string(),
+            base_url: "https://kv.vault.azure.net".to_string(),
+            client_id: "app-id".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: SecretProviderKind::Azure,
+            config: Some(rocket_environment::ProviderConfig::Azure {
+                tenant_id: "tenant-1".to_string(),
+                authority_host: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn with_providers_registers_azure() {
+        let d = DispatchingSecretFetcher::with_providers();
+        let conn = azure_connection();
+
+        assert!(d.validate_connection(&conn).is_ok());
+        assert!(!d.capabilities(&conn).certificates);
+    }
+
+    #[test]
+    fn with_providers_still_refuses_providers_that_do_not_exist_yet() {
+        let d = DispatchingSecretFetcher::with_providers();
+        let mut conn = azure_connection();
+        conn.provider = SecretProviderKind::Aws;
+        conn.config = None;
+
+        let err = d.validate_connection(&conn).expect_err("AWS is not built");
+
+        assert!(err.to_string().contains("not available in this build"), "got: {err}");
     }
 }

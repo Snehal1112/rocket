@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use dashmap::DashMap;
 use rocket_environment::{
-    ExternalSecretRef, ProviderConfig, SecretManagerConnection, VaultSecretFetcher,
+    ExternalSecretRef, ProviderCapabilities, ProviderConfig, SecretManagerConnection,
+    VaultSecretFetcher,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -542,6 +543,27 @@ impl VaultSecretFetcher for AzureKeyVaultFetcher {
         let vault = vault_url(connection)?;
         let url = vault_endpoint(&vault, &["secrets"], &[("maxresults", "1")])?;
         self.get_page(connection, &token, url).await?;
+        Ok(())
+    }
+
+    fn forget_connection(&self, connection_id: &str) {
+        self.tokens.remove(connection_id);
+    }
+
+    fn capabilities(&self, _connection: &SecretManagerConnection) -> ProviderCapabilities {
+        // Azure supplies secrets only. Certificates, a credential-free mode and
+        // fetch-on-reference are all out of scope for this provider version.
+        ProviderCapabilities::default()
+    }
+
+    fn validate_connection(&self, connection: &SecretManagerConnection) -> DomainResult<()> {
+        if connection.client_id.trim().is_empty() {
+            return Err(DomainError::InvalidInput(
+                "Azure Key Vault connection client_id must not be empty".to_string(),
+            ));
+        }
+        azure_settings(connection)?;
+        vault_url(connection)?;
         Ok(())
     }
 }
@@ -1142,5 +1164,63 @@ mod tests {
             None
         );
         assert_eq!(secret_name_from_id("not a url"), None);
+    }
+
+    #[test]
+    fn azure_offers_no_certificates_and_needs_a_credential() {
+        let caps = AzureKeyVaultFetcher::new().capabilities(&connection("http://127.0.0.1:1"));
+        assert!(!caps.certificates);
+        assert!(!caps.credential_optional);
+        assert!(!caps.fetch_on_reference);
+    }
+
+    #[test]
+    fn validate_connection_accepts_a_complete_connection() {
+        let mut conn = connection("https://kv.vault.azure.net");
+        conn.config = Some(ProviderConfig::Azure {
+            tenant_id: "contoso.onmicrosoft.com".to_string(),
+            authority_host: None,
+        });
+        assert!(AzureKeyVaultFetcher::new().validate_connection(&conn).is_ok());
+    }
+
+    #[test]
+    fn validate_connection_rejects_each_missing_piece() {
+        let fetcher = AzureKeyVaultFetcher::new();
+        let good = connection("https://kv.vault.azure.net");
+
+        let mut no_client = good.clone();
+        no_client.client_id = "  ".to_string();
+        let mut no_config = good.clone();
+        no_config.config = None;
+        let mut bad_tenant = good.clone();
+        bad_tenant.config = Some(ProviderConfig::Azure {
+            tenant_id: "a/b".to_string(),
+            authority_host: None,
+        });
+        let mut http_vault = good.clone();
+        http_vault.base_url = "http://kv.vault.azure.net".to_string();
+        let mut no_url = good;
+        no_url.base_url = String::new();
+
+        for bad in [no_client, no_config, bad_tenant, http_vault, no_url] {
+            assert!(
+                matches!(fetcher.validate_connection(&bad), Err(DomainError::InvalidInput(_))),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn forget_connection_drops_the_cached_token() {
+        let server = server_with_token().await;
+        let fetcher = AzureKeyVaultFetcher::new();
+        let conn = connection(&server.uri());
+        fetcher.ensure_token(&conn, "shh").await.expect("token");
+        assert!(fetcher.tokens.get(&conn.id).is_some());
+
+        fetcher.forget_connection(&conn.id);
+
+        assert!(fetcher.tokens.get(&conn.id).is_none());
     }
 }
