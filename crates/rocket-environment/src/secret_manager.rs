@@ -39,10 +39,19 @@ impl SecretProviderKind {
 }
 
 /// Typed, non-secret settings for one provider (tenant, region, project and
-/// so on). Each provider's own spec adds its variant. The foundation has
-/// none, so no value of this type can exist yet.
+/// so on). Each provider's own spec adds its variant. Persisted as a serde
+/// YAML tag, and never renamed to camelCase: IPC uses its own DTO.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ProviderConfig {}
+pub enum ProviderConfig {
+    /// Azure AD service principal settings. The vault URL is the connection's
+    /// `base_url` and the app registration id is its `client_id`.
+    Azure {
+        tenant_id: String,
+        /// Overrides `https://login.microsoftonline.com`. Used by tests.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authority_host: Option<String>,
+    },
+}
 
 /// An app-level, reusable connection to a RocketVault server. Persisted
 /// separately from any workspace/environment (see Plan 04's
@@ -91,7 +100,7 @@ pub trait ProviderCapabilityLookup: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{SecretManagerConnection, SecretManagerRepository, SecretProviderKind};
+    use super::{ProviderConfig, SecretManagerConnection, SecretManagerRepository, SecretProviderKind};
     use rocket_shared::error::DomainResult;
     use std::sync::Mutex;
 
@@ -223,6 +232,56 @@ mod tests {
         assert!(yaml.contains("provider: azure"), "got: {yaml}");
         let back: SecretManagerConnection = serde_yaml::from_str(&yaml).expect("round trip");
         assert_eq!(back, c);
+    }
+
+    fn azure_connection() -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: "az-1".to_string(),
+            label: "Prod Azure".to_string(),
+            base_url: "https://prod-kv.vault.azure.net".to_string(),
+            client_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: SecretProviderKind::Azure,
+            config: Some(ProviderConfig::Azure {
+                tenant_id: "22222222-2222-2222-2222-222222222222".to_string(),
+                authority_host: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn azure_config_round_trips_through_yaml() {
+        let c = azure_connection();
+        let yaml = serde_yaml::to_string(&c).expect("serialize");
+        assert!(yaml.contains("provider: azure"), "got: {yaml}");
+        assert!(yaml.contains("tenant_id"), "persistence keeps snake_case: {yaml}");
+        assert!(
+            !yaml.contains("authority_host"),
+            "an unset authority host is not written: {yaml}"
+        );
+        let back: SecretManagerConnection = serde_yaml::from_str(&yaml).expect("round trip");
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn azure_config_keeps_an_authority_host_override() {
+        let mut c = azure_connection();
+        c.config = Some(ProviderConfig::Azure {
+            tenant_id: "t".to_string(),
+            authority_host: Some("http://127.0.0.1:9999".to_string()),
+        });
+        let yaml = serde_yaml::to_string(&c).expect("serialize");
+        let back: SecretManagerConnection = serde_yaml::from_str(&yaml).expect("round trip");
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn azure_config_without_a_tenant_does_not_load() {
+        let yaml = "id: c1\nlabel: X\nbase_url: https://v\nclient_id: a\nprovider: azure\nconfig: !Azure {}\n";
+        let err = serde_yaml::from_str::<SecretManagerConnection>(yaml)
+            .expect_err("a missing tenant must not default to empty");
+        assert!(err.to_string().contains("tenant_id"), "got: {err}");
     }
 
     #[test]
