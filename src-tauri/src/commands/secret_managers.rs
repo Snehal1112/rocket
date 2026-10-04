@@ -1,6 +1,8 @@
 use rocket_app::SecretManagerService;
 use rocket_environment::external_secret::ExternalSecretRef;
-use rocket_environment::secret_manager::SecretManagerConnection;
+use rocket_environment::secret_manager::{
+    ProviderConfig, SecretManagerConnection, SecretProviderKind,
+};
 use rocket_environment::VaultCertificateSummary;
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
@@ -15,6 +17,10 @@ pub struct SecretManagerConnectionDto {
     pub client_id: String,
     pub verify_ssl: bool,
     pub allow_insecure_http: bool,
+    #[serde(default)]
+    pub provider: SecretProviderKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ProviderConfig>,
 }
 
 impl From<SecretManagerConnection> for SecretManagerConnectionDto {
@@ -26,6 +32,8 @@ impl From<SecretManagerConnection> for SecretManagerConnectionDto {
             client_id: c.client_id,
             verify_ssl: c.verify_ssl,
             allow_insecure_http: c.allow_insecure_http,
+            provider: c.provider,
+            config: c.config,
         }
     }
 }
@@ -39,6 +47,8 @@ impl From<SecretManagerConnectionDto> for SecretManagerConnection {
             client_id: dto.client_id,
             verify_ssl: dto.verify_ssl,
             allow_insecure_http: dto.allow_insecure_http,
+            provider: dto.provider,
+            config: dto.config,
         }
     }
 }
@@ -172,5 +182,42 @@ mod tests {
                 "expiresAt": null
             })
         );
+    }
+
+    #[test]
+    fn connection_dto_without_provider_deserializes_as_rocketvault() {
+        let json = r#"{"id":"c1","label":"L","baseUrl":"https://v","clientId":"x","verifySsl":true,"allowInsecureHttp":false}"#;
+        let dto: SecretManagerConnectionDto = serde_json::from_str(json).expect("older payload");
+        let conn: SecretManagerConnection = dto.into();
+        assert_eq!(
+            conn.provider,
+            rocket_environment::SecretProviderKind::RocketVault
+        );
+        assert!(conn.config.is_none());
+    }
+
+    #[test]
+    fn connection_dto_round_trips_the_provider_as_lowercase() {
+        let mut conn = SecretManagerConnection {
+            id: "c1".to_string(),
+            label: "L".to_string(),
+            base_url: String::new(),
+            client_id: String::new(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: rocket_environment::SecretProviderKind::Azure,
+            config: None,
+        };
+        let json = serde_json::to_value(SecretManagerConnectionDto::from(conn.clone()))
+            .expect("serialize");
+        assert_eq!(json["provider"], "azure");
+        assert!(json.get("config").is_none());
+
+        let back: SecretManagerConnection =
+            serde_json::from_value::<SecretManagerConnectionDto>(json)
+                .expect("deserialize")
+                .into();
+        conn.base_url = String::new();
+        assert_eq!(back, conn);
     }
 }

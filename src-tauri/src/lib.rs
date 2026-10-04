@@ -329,7 +329,7 @@ pub fn run() {
             > = Arc::new(rocket_infra::KeyringSecretStore::new_vault_connections());
             let vault_fetcher: Arc<
                 dyn rocket_environment::vault_secret_fetcher::VaultSecretFetcher,
-            > = Arc::new(rocket_infra::ReqwestVaultSecretFetcher::new());
+            > = Arc::new(rocket_infra::DispatchingSecretFetcher::with_rocketvault());
 
             let secret_manager_svc = rocket_app::SecretManagerService::new(
                 Box::new(rocket_infra::FsSecretManagerRepo::new(
