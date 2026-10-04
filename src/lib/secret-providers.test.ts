@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   bindingScopeColumnLabel,
   canAddVaultCertificate,
+  connectionFieldLabel,
   getProviderDescriptor,
+  requiredFieldsMessage,
   SECRET_PROVIDERS,
 } from '@/lib/secret-providers';
 import type { ExternalSecretBinding, SecretManagerConnection } from '@/lib/tauri-api';
@@ -28,11 +30,20 @@ describe('getProviderDescriptor', () => {
     expect(getProviderDescriptor(null).kind).toBe('rocketvault');
   });
 
-  it('only RocketVault is selectable and supports certificates', () => {
+  it('RocketVault and Azure are selectable, and only RocketVault supports certificates', () => {
     const selectable = SECRET_PROVIDERS.filter((p) => p.selectable).map((p) => p.kind);
     const certificates = SECRET_PROVIDERS.filter((p) => p.supportsCertificates).map((p) => p.kind);
-    expect(selectable).toEqual(['rocketvault']);
+    expect(selectable).toEqual(['rocketvault', 'azure']);
     expect(certificates).toEqual(['rocketvault']);
+  });
+
+  it('lists the Azure connection fields and no TLS switches', () => {
+    expect(getProviderDescriptor('azure').connectionFields).toEqual([
+      'baseUrl',
+      'tenantId',
+      'clientId',
+      'clientSecret',
+    ]);
   });
 
   it('lists the RocketVault connection fields the form shows today', () => {
@@ -78,5 +89,29 @@ describe('canAddVaultCertificate', () => {
 
   it('ignores a binding whose connection was deleted', () => {
     expect(canAddVaultCertificate([binding('gone')], [rocketVault], true)).toBe(false);
+  });
+});
+
+describe('connectionFieldLabel', () => {
+  it('uses the default label unless the provider overrides it', () => {
+    expect(connectionFieldLabel(getProviderDescriptor('rocketvault'), 'baseUrl')).toBe('Base URL');
+    expect(connectionFieldLabel(getProviderDescriptor('azure'), 'baseUrl')).toBe('Vault URL');
+    expect(connectionFieldLabel(getProviderDescriptor('azure'), 'tenantId')).toBe('Tenant ID');
+  });
+});
+
+describe('requiredFieldsMessage', () => {
+  it('names the required fields of the provider', () => {
+    expect(requiredFieldsMessage(getProviderDescriptor('rocketvault'))).toBe(
+      'Label, Base URL and Client ID are required.',
+    );
+    expect(requiredFieldsMessage(getProviderDescriptor('azure'))).toBe(
+      'Label, Vault URL, Tenant ID and Client ID are required.',
+    );
+  });
+
+  it('handles a provider with no required connection fields', () => {
+    const none = { ...getProviderDescriptor('rocketvault'), connectionFields: [] };
+    expect(requiredFieldsMessage(none)).toBe('Label is required.');
   });
 });
