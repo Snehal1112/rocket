@@ -6,6 +6,12 @@
 @import "tw-animate-css";
 @config "../tailwind.config.js";
 
+/* Micro text size for badges, counts and kbd hints. */
+@theme {
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 1rem;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @layer base {
