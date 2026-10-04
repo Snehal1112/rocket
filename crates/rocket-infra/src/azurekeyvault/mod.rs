@@ -4,7 +4,9 @@
 use std::time::Instant;
 
 use dashmap::DashMap;
-use rocket_environment::{ProviderConfig, SecretManagerConnection};
+use rocket_environment::{
+    ExternalSecretRef, ProviderConfig, SecretManagerConnection, VaultSecretFetcher,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
 
@@ -15,6 +17,9 @@ use crate::rocketvault::{
 const DEFAULT_AUTHORITY: &str = "https://login.microsoftonline.com";
 const VAULT_SCOPE: &str = "https://vault.azure.net/.default";
 const API_VERSION: &str = "7.4";
+const PAGE_SIZE: &str = "25";
+/// A guard against a vault, or a hostile server, that keeps returning a next link.
+const MAX_PAGES: usize = 100;
 
 /// One cached access token. Every input that went into minting it is kept
 /// next to it, so editing a connection never reuses a token minted under the
@@ -292,11 +297,261 @@ fn vault_endpoint(
     Ok(url)
 }
 
+/// One entry of a list response. There is deliberately no `value` field, so a
+/// list can never read a secret's value into memory.
+#[derive(Deserialize)]
+struct RawSecretItem {
+    id: String,
+    #[serde(default)]
+    attributes: RawAttributes,
+}
+
+#[derive(Deserialize)]
+struct RawAttributes {
+    #[serde(default = "enabled_by_default")]
+    enabled: bool,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+impl Default for RawAttributes {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Deserialize)]
+struct RawSecretPage {
+    #[serde(default)]
+    value: Vec<RawSecretItem>,
+    #[serde(default, rename = "nextLink")]
+    next_link: Option<String>,
+}
+
+/// Extracts `NAME` from `https://<vault>/secrets/NAME[/<version>]`.
+fn secret_name_from_id(id: &str) -> Option<String> {
+    let url = url::Url::parse(id).ok()?;
+    let segments: Vec<&str> = url.path_segments()?.collect();
+    match segments.as_slice() {
+        ["secrets", name] | ["secrets", name, _] if !name.is_empty() => Some((*name).to_string()),
+        _ => None,
+    }
+}
+
+/// A next link is followed only when it stays on the vault's own origin.
+/// Otherwise the bearer token would go to whatever host the response named.
+fn follow_link(vault: &url::Url, link: &str) -> DomainResult<url::Url> {
+    let parsed = url::Url::parse(link).map_err(|_| {
+        DomainError::Http("Azure Key Vault returned an invalid next page link".to_string())
+    })?;
+    if parsed.origin() != vault.origin() {
+        return Err(DomainError::Http(
+            "Azure Key Vault returned a page link to a different host, so it was not followed"
+                .to_string(),
+        ));
+    }
+    Ok(parsed)
+}
+
+fn forbidden_error(op: &str) -> DomainError {
+    DomainError::Http(format!(
+        "Azure Key Vault denied access while {op} (403). Give the app the \
+         Key Vault Secrets User role, or get and list permissions in the vault access policy."
+    ))
+}
+
+/// True when a 403 body says the secret is disabled. Azure nests the code, so
+/// both the outer and the inner code are checked.
+async fn is_disabled_secret_error(resp: reqwest::Response) -> bool {
+    #[derive(Deserialize)]
+    struct Body {
+        error: Option<Detail>,
+    }
+    #[derive(Deserialize)]
+    struct Detail {
+        code: Option<String>,
+        innererror: Option<Box<Detail>>,
+    }
+    let Some(detail) = resp.json::<Body>().await.ok().and_then(|b| b.error) else {
+        return false;
+    };
+    let is_disabled = |code: &Option<String>| code.as_deref() == Some("SecretDisabled");
+    is_disabled(&detail.code)
+        || detail
+            .innererror
+            .is_some_and(|inner| is_disabled(&inner.code))
+}
+
+impl AzureKeyVaultFetcher {
+    /// Maps a non-success response to a safe error. A 401 also clears the
+    /// cached token. The body is never read, so it can never reach the message.
+    fn check_status(
+        &self,
+        resp: reqwest::Response,
+        connection: &SecretManagerConnection,
+        op: &str,
+    ) -> DomainResult<reqwest::Response> {
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(resp);
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            self.tokens.remove(&connection.id);
+            return Err(DomainError::Http(format!(
+                "Azure Key Vault rejected the token while {op} (401)"
+            )));
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(forbidden_error(op));
+        }
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let wait = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+                .map(|s| format!(" Retry after {s} seconds."))
+                .unwrap_or_default();
+            return Err(DomainError::Http(format!(
+                "Azure Key Vault is throttling requests while {op} (429).{wait}"
+            )));
+        }
+        Err(DomainError::Http(format!(
+            "Azure Key Vault returned unexpected status {status} while {op}"
+        )))
+    }
+
+    async fn get_page(
+        &self,
+        connection: &SecretManagerConnection,
+        token: &str,
+        url: url::Url,
+    ) -> DomainResult<RawSecretPage> {
+        let resp = self
+            .http
+            .get(url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| DomainError::Http(format!("Azure Key Vault list request failed: {e}")))?;
+        let resp = self.check_status(resp, connection, "listing secrets")?;
+        // The decoder's text can quote server strings, so it is not shown.
+        resp.json::<RawSecretPage>().await.map_err(|_| {
+            DomainError::Http(
+                "Azure Key Vault returned a secret list that could not be decoded.".to_string(),
+            )
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl VaultSecretFetcher for AzureKeyVaultFetcher {
+    async fn list_secrets(
+        &self,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<Vec<ExternalSecretRef>> {
+        let token = self.ensure_token(connection, client_secret).await?;
+        let vault = vault_url(connection)?;
+        let mut next = Some(vault_endpoint(
+            &vault,
+            &["secrets"],
+            &[("maxresults", PAGE_SIZE)],
+        )?);
+        let mut refs = Vec::new();
+        let mut pages = 0usize;
+        while let Some(url) = next.take() {
+            pages += 1;
+            if pages > MAX_PAGES {
+                return Err(DomainError::Http(format!(
+                    "Azure Key Vault returned more than {MAX_PAGES} pages of secrets"
+                )));
+            }
+            let page = self.get_page(connection, &token, url).await?;
+            for item in page.value {
+                // A disabled secret cannot be read, so it is not offered.
+                if !item.attributes.enabled {
+                    continue;
+                }
+                if let Some(name) = secret_name_from_id(&item.id) {
+                    refs.push(ExternalSecretRef {
+                        secret_id: name.clone(),
+                        name,
+                    });
+                }
+            }
+            next = match page.next_link.as_deref().filter(|l| !l.is_empty()) {
+                Some(link) => Some(follow_link(&vault, link)?),
+                None => None,
+            };
+        }
+        Ok(refs)
+    }
+
+    async fn get_secret_value(
+        &self,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        _vault_name: &str,
+        secret_id: &str,
+    ) -> DomainResult<Option<String>> {
+        let token = self.ensure_token(connection, client_secret).await?;
+        let vault = vault_url(connection)?;
+        let url = vault_endpoint(&vault, &["secrets", secret_id], &[])?;
+        let resp = self
+            .http
+            .get(url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| DomainError::Http(format!("Azure Key Vault get request failed: {e}")))?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if resp.status() == reqwest::StatusCode::FORBIDDEN {
+            if is_disabled_secret_error(resp).await {
+                return Ok(None);
+            }
+            return Err(forbidden_error("fetching a secret value"));
+        }
+        let resp = self.check_status(resp, connection, "fetching a secret value")?;
+
+        #[derive(Deserialize)]
+        struct RawSecretValue {
+            #[serde(default)]
+            value: String,
+        }
+        // The decode error is dropped on purpose, because it can quote the secret value.
+        let parsed: RawSecretValue = resp.json().await.map_err(|_| {
+            DomainError::Http("failed to decode the Azure Key Vault secret value".to_string())
+        })?;
+        Ok(Some(parsed.value))
+    }
+
+    async fn test_connection(
+        &self,
+        connection: &SecretManagerConnection,
+        client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<()> {
+        let token = self.ensure_token(connection, client_secret).await?;
+        let vault = vault_url(connection)?;
+        let url = vault_endpoint(&vault, &["secrets"], &[("maxresults", "1")])?;
+        self.get_page(connection, &token, url).await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rocket_environment::SecretProviderKind;
-    use wiremock::matchers::{body_string_contains, method, path};
+    use rocket_environment::VaultSecretFetcher;
+    use wiremock::matchers::{body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     pub(super) fn connection(server_uri: &str) -> SecretManagerConnection {
@@ -528,5 +783,364 @@ mod tests {
         }
         let slash = vault_endpoint(&vault, &["secrets", "a/b"], &[]).expect("encoded");
         assert!(slash.as_str().contains("a%2Fb"), "got: {slash}");
+    }
+
+    fn secret_item(server: &str, name: &str, enabled: bool) -> serde_json::Value {
+        serde_json::json!({
+            "id": format!("{server}/secrets/{name}"),
+            "attributes": { "enabled": enabled, "created": 1, "updated": 2 },
+            "contentType": "text/plain"
+        })
+    }
+
+    async fn server_with_token() -> MockServer {
+        let server = MockServer::start().await;
+        token_mock("tenant-1", "tok-1").mount(&server).await;
+        server
+    }
+
+    #[tokio::test]
+    async fn list_maps_names_and_skips_disabled_secrets() {
+        let server = server_with_token().await;
+        let uri = server.uri();
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .and(query_param("api-version", "7.4"))
+            .and(header("authorization", "Bearer tok-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": [
+                    secret_item(&uri, "stripe-key", true),
+                    secret_item(&uri, "old-key", false),
+                    secret_item(&uri, "db-password", true)
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let refs = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&uri), "shh", "ignored")
+            .await
+            .expect("list");
+
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["stripe-key", "db-password"]);
+        assert!(refs.iter().all(|r| r.secret_id == r.name));
+    }
+
+    #[tokio::test]
+    async fn list_follows_next_link_on_the_vault_host() {
+        let server = server_with_token().await;
+        let uri = server.uri();
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .and(query_param("maxresults", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": [secret_item(&uri, "one", true)],
+                "nextLink": format!("{uri}/secrets?api-version=7.4&$skiptoken=abc")
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .and(query_param("$skiptoken", "abc"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": [secret_item(&uri, "two", true)],
+                "nextLink": null
+            })))
+            .mount(&server)
+            .await;
+
+        let refs = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&uri), "shh", "")
+            .await
+            .expect("list");
+
+        let names: Vec<_> = refs.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["one", "two"]);
+    }
+
+    #[tokio::test]
+    async fn list_never_follows_a_next_link_to_another_host() {
+        let server = server_with_token().await;
+        let foreign = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&foreign)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": [],
+                "nextLink": format!("{}/secrets?api-version=7.4", foreign.uri())
+            })))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&server.uri()), "shh", "")
+            .await
+            .expect_err("a foreign link must fail");
+
+        assert!(err.to_string().contains("different host"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn list_stops_a_runaway_next_link_loop() {
+        let server = server_with_token().await;
+        let uri = server.uri();
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": [],
+                "nextLink": format!("{uri}/secrets?api-version=7.4&$skiptoken=again")
+            })))
+            .expect(100)
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&uri), "shh", "")
+            .await
+            .expect_err("page cap");
+
+        assert!(
+            err.to_string().contains("more than 100 pages"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_401_clears_the_cached_token() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        let fetcher = AzureKeyVaultFetcher::new();
+        let conn = connection(&server.uri());
+
+        let err = fetcher
+            .list_secrets(&conn, "shh", "")
+            .await
+            .expect_err("401");
+
+        assert!(err.to_string().contains("401"), "got: {err}");
+        assert!(fetcher.tokens.get(&conn.id).is_none());
+    }
+
+    #[tokio::test]
+    async fn list_403_names_the_missing_permission() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&server.uri()), "shh", "")
+            .await
+            .expect_err("403");
+
+        assert!(
+            err.to_string().contains("Key Vault Secrets User"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn throttling_reports_retry_after_digits_only() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "7"))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&server.uri()), "shh", "")
+            .await
+            .expect_err("429");
+
+        assert!(
+            err.to_string().contains("Retry after 7 seconds"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_error_body_never_reaches_the_message() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("leak-me-please"))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .list_secrets(&connection(&server.uri()), "shh", "")
+            .await
+            .expect_err("500");
+
+        assert!(!err.to_string().contains("leak-me-please"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn get_returns_the_latest_value() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets/stripe-key"))
+            .and(query_param("api-version", "7.4"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": "sk_live_123",
+                "id": format!("{}/secrets/stripe-key/v1", server.uri())
+            })))
+            .mount(&server)
+            .await;
+
+        let value = AzureKeyVaultFetcher::new()
+            .get_secret_value(&connection(&server.uri()), "shh", "ignored", "stripe-key")
+            .await
+            .expect("get");
+
+        assert_eq!(value, Some("sk_live_123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_treats_a_missing_secret_as_none() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets/gone"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "error": { "code": "SecretNotFound", "message": "not found" }
+            })))
+            .mount(&server)
+            .await;
+
+        let value = AzureKeyVaultFetcher::new()
+            .get_secret_value(&connection(&server.uri()), "shh", "", "gone")
+            .await
+            .expect("404 is not an error");
+
+        assert_eq!(value, None);
+    }
+
+    #[tokio::test]
+    async fn get_treats_a_disabled_secret_as_none_for_either_error_nesting() {
+        for body in [
+            serde_json::json!({ "error": { "code": "SecretDisabled", "message": "m" } }),
+            serde_json::json!({ "error": { "code": "Forbidden", "message": "m",
+                "innererror": { "code": "SecretDisabled" } } }),
+        ] {
+            let server = server_with_token().await;
+            Mock::given(method("GET"))
+                .and(path("/secrets/off"))
+                .respond_with(ResponseTemplate::new(403).set_body_json(body))
+                .mount(&server)
+                .await;
+
+            let value = AzureKeyVaultFetcher::new()
+                .get_secret_value(&connection(&server.uri()), "shh", "", "off")
+                .await
+                .expect("disabled is not an error");
+
+            assert_eq!(value, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn get_403_for_any_other_reason_is_an_error() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets/locked"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "error": { "code": "Forbidden", "message": "m" }
+            })))
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .get_secret_value(&connection(&server.uri()), "shh", "", "locked")
+            .await
+            .expect_err("403");
+
+        assert!(
+            err.to_string().contains("Key Vault Secrets User"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_keeps_an_empty_value() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets/blank"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": "" })),
+            )
+            .mount(&server)
+            .await;
+
+        let value = AzureKeyVaultFetcher::new()
+            .get_secret_value(&connection(&server.uri()), "shh", "", "blank")
+            .await
+            .expect("get");
+
+        assert_eq!(value, Some(String::new()));
+    }
+
+    #[tokio::test]
+    async fn get_refuses_a_dot_segment_without_calling_the_vault() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let err = AzureKeyVaultFetcher::new()
+            .get_secret_value(&connection(&server.uri()), "shh", "", "..")
+            .await
+            .expect_err("dot segment");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)), "got: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn test_connection_lists_a_single_secret() {
+        let server = server_with_token().await;
+        Mock::given(method("GET"))
+            .and(path("/secrets"))
+            .and(query_param("maxresults", "1"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "value": [] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        AzureKeyVaultFetcher::new()
+            .test_connection(&connection(&server.uri()), "shh", "")
+            .await
+            .expect("test connection");
+    }
+
+    #[test]
+    fn secret_names_come_from_the_last_id_segment() {
+        assert_eq!(
+            secret_name_from_id("https://kv.vault.azure.net/secrets/stripe-key"),
+            Some("stripe-key".to_string())
+        );
+        assert_eq!(
+            secret_name_from_id("https://kv.vault.azure.net/secrets/stripe-key/0123abcd"),
+            Some("stripe-key".to_string())
+        );
+        assert_eq!(
+            secret_name_from_id("https://kv.vault.azure.net/keys/k"),
+            None
+        );
+        assert_eq!(secret_name_from_id("not a url"), None);
     }
 }
