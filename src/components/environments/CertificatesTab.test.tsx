@@ -79,7 +79,11 @@ const pkcs12: ClientCertificate = {
 
 function renderTab(
   certificates: ClientCertificate[],
-  overrides: Partial<{ isDirty: boolean; onSave: () => void }> = {},
+  overrides: Partial<{
+    isDirty: boolean;
+    onSave: () => void;
+    canAddVaultCertificate: boolean;
+  }> = {},
 ) {
   const handlers = {
     onChange: vi.fn(),
@@ -95,6 +99,7 @@ function renderTab(
       {...handlers}
       isDirty={overrides.isDirty ?? false}
       saveState='idle'
+      canAddVaultCertificate={overrides.canAddVaultCertificate}
     />,
   );
   return handlers;
@@ -103,6 +108,21 @@ function renderTab(
 describe('CertificatesTab', () => {
   beforeEach(() => {
     vi.mocked(open).mockReset();
+  });
+
+  it('shows the RocketVault certificate button by default', () => {
+    renderTab([]);
+    expect(
+      screen.getByRole('button', { name: /add rocketvault certificate/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the RocketVault certificate button when no binding can supply certificates', () => {
+    renderTab([], { canAddVaultCertificate: false });
+    expect(
+      screen.queryByRole('button', { name: /add rocketvault certificate/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add PEM' })).toBeInTheDocument();
   });
 
   it('shows an empty state and the add buttons when there are no certificates', () => {

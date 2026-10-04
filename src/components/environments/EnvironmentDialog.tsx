@@ -22,6 +22,8 @@ import {
   useProcessEnvVars,
   useSaveEnvironment,
 } from '@/lib/queries/environment-queries';
+import { useSecretManagerConnections } from '@/lib/queries/secret-manager-queries';
+import { canAddVaultCertificate } from '@/lib/secret-providers';
 import type {
   ClientCertificate,
   Environment,
@@ -394,6 +396,8 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
   const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: secretConnections = [], isSuccess: secretConnectionsLoaded } =
+    useSecretManagerConnections();
 
   const variableContext = useMemo(() => {
     const envVars: Record<string, string> = {};
@@ -488,6 +492,11 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     isDirty={isDirty}
                     saveState={saveState}
                     variableContext={variableContext}
+                    canAddVaultCertificate={canAddVaultCertificate(
+                      selectedEnv.externalSecrets,
+                      secretConnections,
+                      secretConnectionsLoaded,
+                    )}
                   />
                 </TabsContent>
               </Tabs>

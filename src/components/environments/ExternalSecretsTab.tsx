@@ -17,6 +17,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SaveButtonState } from '@/hooks/use-save-button';
 import { useSecretManagerConnections } from '@/lib/queries/secret-manager-queries';
+import { bindingScopeColumnLabel, getProviderDescriptor } from '@/lib/secret-providers';
 import type {
   ExternalSecretBinding,
   ExternalSecretRef,
@@ -63,7 +64,7 @@ export function ExternalSecretsTab({
           Connection
         </p>
         <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
-          Vault Name
+          {bindingScopeColumnLabel(bindings, connections)}
         </p>
         <div />
         <div />
@@ -73,7 +74,8 @@ export function ExternalSecretsTab({
         <div className='flex-1 flex flex-col items-center justify-center gap-3 text-center px-6'>
           <p className='text-sm font-medium text-foreground'>No external secrets bound</p>
           <p className='text-xs text-muted-foreground leading-relaxed max-w-[260px]'>
-            Bind a RocketVault connection and vault to fetch secret names for this environment.
+            Bind a secret manager connection and its vault to fetch secret names for this
+            environment.
           </p>
           <Button variant='outline' size='sm' onClick={onAdd} className='gap-1.5'>
             <Plus className='h-3.5 w-3.5' />
@@ -172,6 +174,9 @@ function BindingRow({
     connectionsLoaded &&
     !!binding.connectionId &&
     !connections.some((c) => c.id === binding.connectionId);
+  const scopePlaceholder = getProviderDescriptor(
+    connections.find((c) => c.id === binding.connectionId)?.provider,
+  ).scopePlaceholder;
 
   // Fetched ids belong to one connection and vault. Keeping them after either
   // changes would resolve old ids against the new vault at send time.
@@ -234,7 +239,7 @@ function BindingRow({
           </SelectContent>
         </Select>
         <Input
-          placeholder='Vault name'
+          placeholder={scopePlaceholder}
           value={vaultName}
           onChange={(e) => {
             setVaultName(e.target.value);

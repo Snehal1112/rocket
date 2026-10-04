@@ -108,6 +108,20 @@ describe('ExternalSecretsTab', () => {
     });
   });
 
+  it('keeps the Vault Name header and the vault name aria label for RocketVault bindings', async () => {
+    vi.mocked(tauriApi.listSecretManagerConnections).mockResolvedValue([connection]);
+    renderTab([binding]);
+
+    expect(await screen.findByText('Vault Name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vault name for binding 1')).toBeInTheDocument();
+  });
+
+  it('describes the binding without naming one provider when the list is empty', () => {
+    renderTab([]);
+
+    expect(screen.getByText(/bind a secret manager connection/i)).toBeInTheDocument();
+  });
+
   it('appends an empty binding on Add Binding', async () => {
     const { onAdd } = renderTab([]);
     const user = userEvent.setup();

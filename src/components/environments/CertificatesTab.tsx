@@ -42,6 +42,8 @@ export interface CertificatesTabProps {
   isDirty: boolean;
   saveState: SaveButtonState;
   variableContext?: Map<string, VariableScopeEntry>;
+  // False hides "Add RocketVault certificate" when no binding can supply certificates.
+  canAddVaultCertificate?: boolean;
 }
 
 type PieceSource = 'file' | 'vault';
@@ -105,6 +107,7 @@ export function CertificatesTab({
   isDirty,
   saveState,
   variableContext,
+  canAddVaultCertificate = true,
 }: CertificatesTabProps) {
   const options = useMemo(() => vaultSecretOptions(bindings), [bindings]);
 
@@ -172,15 +175,17 @@ export function CertificatesTab({
             <Plus className='h-3.5 w-3.5' />
             Add PKCS12
           </Button>
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => onAdd('vault')}
-            className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
-          >
-            <Plus className='h-3.5 w-3.5' />
-            Add RocketVault certificate
-          </Button>
+          {canAddVaultCertificate && (
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => onAdd('vault')}
+              className='h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5'
+            >
+              <Plus className='h-3.5 w-3.5' />
+              Add RocketVault certificate
+            </Button>
+          )}
         </div>
         <Button
           size='sm'
