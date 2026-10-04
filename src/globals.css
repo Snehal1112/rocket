@@ -833,3 +833,11 @@ html.windows.window-inactive #root {
     box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.5);
   }
 }
+
+/* Monaco ships its own system font stack for its widgets. This rule is kept
+   outside any cascade layer and uses a higher specificity than Monaco's own
+   rule so the widgets (find, hover, suggest, menus) use the app font. */
+html .monaco-editor {
+  font-family: var(--font-sans);
+  --monaco-monospace-font: var(--font-mono);
+}

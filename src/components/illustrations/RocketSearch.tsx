@@ -86,34 +86,13 @@ export function RocketSearch({ className = '' }: Props) {
       <circle cx='175' cy='90' r='1.5' className='fill-primary/20' />
 
       {/* Question marks scattered — "searching". */}
-      <text
-        x='50'
-        y='80'
-        className='fill-muted-foreground/20'
-        fontSize='16'
-        fontFamily='sans-serif'
-        fontWeight='600'
-      >
+      <text x='50' y='80' className='fill-muted-foreground/20' fontSize='16' fontWeight='600'>
         ?
       </text>
-      <text
-        x='160'
-        y='75'
-        className='fill-muted-foreground/15'
-        fontSize='12'
-        fontFamily='sans-serif'
-        fontWeight='600'
-      >
+      <text x='160' y='75' className='fill-muted-foreground/15' fontSize='12' fontWeight='600'>
         ?
       </text>
-      <text
-        x='35'
-        y='140'
-        className='fill-muted-foreground/15'
-        fontSize='14'
-        fontFamily='sans-serif'
-        fontWeight='600'
-      >
+      <text x='35' y='140' className='fill-muted-foreground/15' fontSize='14' fontWeight='600'>
         ?
       </text>
     </svg>

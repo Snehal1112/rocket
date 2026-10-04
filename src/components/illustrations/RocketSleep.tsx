@@ -50,34 +50,13 @@ export function RocketSleep({ className = '' }: Props) {
       </g>
 
       {/* ZZZ text. */}
-      <text
-        x='130'
-        y='75'
-        className='fill-primary/40'
-        fontSize='18'
-        fontFamily='sans-serif'
-        fontWeight='700'
-      >
+      <text x='130' y='75' className='fill-primary/40' fontSize='18' fontWeight='700'>
         Z
       </text>
-      <text
-        x='142'
-        y='62'
-        className='fill-primary/30'
-        fontSize='14'
-        fontFamily='sans-serif'
-        fontWeight='700'
-      >
+      <text x='142' y='62' className='fill-primary/30' fontSize='14' fontWeight='700'>
         Z
       </text>
-      <text
-        x='150'
-        y='50'
-        className='fill-primary/20'
-        fontSize='10'
-        fontFamily='sans-serif'
-        fontWeight='700'
-      >
+      <text x='150' y='50' className='fill-primary/20' fontSize='10' fontWeight='700'>
         Z
       </text>
 

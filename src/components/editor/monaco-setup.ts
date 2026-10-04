@@ -8,3 +8,14 @@ import { defineMonacoThemes } from './monaco-config';
 
 loader.config({ monaco });
 defineMonacoThemes(monaco);
+
+// Monaco measures glyph widths when an editor is created. Re-measure once the
+// app font has loaded so cursor and selection positions stay accurate.
+if (typeof document !== 'undefined' && document.fonts) {
+  document.fonts
+    .load("15px 'JetBrains Mono'")
+    .then(() => monaco.editor.remeasureFonts())
+    .catch(() => {
+      // The font is optional, so a load failure is safe to ignore.
+    });
+}

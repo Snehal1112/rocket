@@ -1,6 +1,7 @@
 import '@/components/editor/monaco-setup';
 import Editor from '@monaco-editor/react';
 import { useEffect, useState } from 'react';
+import { MONACO_FONT_FAMILY } from '@/components/editor/monaco-config';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import {
   AlertDialog,
@@ -153,7 +154,7 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
             options={{
               minimap: { enabled: false },
               fontSize: 15,
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: MONACO_FONT_FAMILY,
               scrollBeyondLastLine: false,
             }}
           />
@@ -194,7 +195,7 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
                 readOnly: true,
                 minimap: { enabled: false },
                 fontSize: 15,
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: MONACO_FONT_FAMILY,
                 scrollBeyondLastLine: false,
               }}
             />
@@ -210,7 +211,7 @@ export function ConflictResolver({ conflictState, onResolved }: ConflictResolver
                 readOnly: true,
                 minimap: { enabled: false },
                 fontSize: 15,
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: MONACO_FONT_FAMILY,
                 scrollBeyondLastLine: false,
               }}
             />

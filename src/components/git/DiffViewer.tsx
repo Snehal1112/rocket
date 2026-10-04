@@ -2,6 +2,7 @@ import '@/components/editor/monaco-setup';
 import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import type * as monacoNs from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { MONACO_FONT_FAMILY } from '@/components/editor/monaco-config';
 import { acquireJsWorker, releaseJsWorker } from '@/components/editor/monaco-js-worker-lifecycle';
 import { useMonacoTheme } from '@/components/editor/useMonacoTheme';
 import { gitDiff, gitDiffStaged } from '@/lib/tauri-api';
@@ -156,7 +157,7 @@ export function DiffViewer({
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
               fontSize: 15,
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: MONACO_FONT_FAMILY,
               hideUnchangedRegions: { enabled: true },
             }}
           />

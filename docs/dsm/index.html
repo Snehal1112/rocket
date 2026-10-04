@@ -6,6 +6,11 @@
 <title>Rocket — Design System Map · VSCode 2026</title>
 <style>
 /* ─── VSCode 2026 Token System ─────────────────────────────────────────── */
+:root {
+  --font-sans: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
 :root[data-theme="light"] {
   --background:       #FAFAFD;
   --foreground:       #202020;
@@ -97,7 +102,7 @@
 
 html, body {
   height: 100%;
-  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   background: var(--background);
   color: var(--foreground);
@@ -313,13 +318,13 @@ html, body {
   font-size: 11px;
   font-weight: 600;
   color: var(--foreground);
-  font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .token-value {
   font-size: 10px;
   color: var(--muted-fg);
-  font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   margin-top: 2px;
 }
 
@@ -366,7 +371,7 @@ html, body {
 .dsm-card-meta {
   font-size: 10px;
   color: var(--muted-fg);
-  font-family: monospace;
+  font-family:var(--font-mono);
   background: var(--muted);
   padding: 2px 7px;
   border-radius: 3px;
@@ -753,7 +758,7 @@ html, body {
 
 /* ─── Typography Scale ─────────────────────────────────────────────────────── */
 .type-row { display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
-.type-label { font-size: 10px; color: var(--muted-fg); font-family: monospace; width: 100px; flex-shrink: 0; }
+.type-label { font-size: 10px; color: var(--muted-fg); font-family:var(--font-mono); width: 100px; flex-shrink: 0; }
 .type-sample { color: var(--foreground); }
 
 /* ─── Motion Demo ──────────────────────────────────────────────────────────── */
@@ -806,7 +811,7 @@ html, body {
 .spacing-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .spacing-block { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .spacing-box { background: var(--primary); border-radius: 2px; opacity: 0.7; }
-.spacing-val { font-size: 9px; color: var(--muted-fg); font-family: monospace; }
+.spacing-val { font-size: 9px; color: var(--muted-fg); font-family:var(--font-mono); }
 
 /* ─── Focus ring demo ──────────────────────────────────────────────────────── */
 .focus-ring-demo {
@@ -828,7 +833,7 @@ html, body {
 /* ─── Annotation chips ─────────────────────────────────────────────────────── */
 .anno {
   display: inline-flex; align-items: center;
-  font-size: 9px; font-family: monospace;
+  font-size: 9px; font-family:var(--font-mono);
   background: var(--muted);
   color: var(--muted-fg);
   border: 1px solid var(--border);
@@ -843,7 +848,7 @@ html, body {
 
 /* ─── Code block ───────────────────────────────────────────────────────────── */
 .code {
-  font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   background: var(--muted);
   border: 1px solid var(--border);
@@ -1067,7 +1072,7 @@ html, body {
       <section class="dsm-section" id="typography">
         <div class="section-title">02 — Foundations</div>
         <div class="section-heading">Typography Scale</div>
-        <p class="section-desc">Inter for UI text. JetBrains Mono for code, URLs, key-value pairs, and variable names.</p>
+        <p class="section-desc">JetBrains Mono for all text (UI, code, URLs, key-value pairs, and variable names), bundled via @fontsource/jetbrains-mono at weights 400-700. Tokens: --font-sans, --font-mono and --font-serif all resolve to "JetBrains Mono", ui-monospace, monospace.</p>
 
         <div class="dsm-card">
           <div class="type-row"><span class="type-label">text-2xs / 9px</span><span class="type-sample" style="font-size:9px">Status bar · Badge counts · Annotations</span></div>
@@ -1076,8 +1081,8 @@ html, body {
           <div class="type-row"><span class="type-label">text-sm / 12px</span><span class="type-sample" style="font-size:12px">Primary UI text · Button labels · Tree items · Table rows</span></div>
           <div class="type-row"><span class="type-label">text-sm / 13px</span><span class="type-sample" style="font-size:13px;font-weight:500">Card titles · Dialog content · Panel headings</span></div>
           <div class="type-row"><span class="type-label">text-base / 14px</span><span class="type-sample" style="font-size:14px;font-weight:600">Dialog titles · Section headings</span></div>
-          <div class="type-row"><span class="type-label">mono / 11px</span><span class="type-sample" style="font-size:11px;font-family:monospace;color:var(--primary)">{{variable}} · /path/to/request.http · Bearer token</span></div>
-          <div class="type-row" style="border:none;margin:0;padding:0"><span class="type-label">mono / 12px</span><span class="type-sample" style="font-size:12px;font-family:monospace">Content-Type: application/json · 200 OK · 42ms</span></div>
+          <div class="type-row"><span class="type-label">mono / 11px</span><span class="type-sample" style="font-size:11px;font-family:var(--font-mono);color:var(--primary)">{{variable}} · /path/to/request.http · Bearer token</span></div>
+          <div class="type-row" style="border:none;margin:0;padding:0"><span class="type-label">mono / 12px</span><span class="type-sample" style="font-size:12px;font-family:var(--font-mono)">Content-Type: application/json · 200 OK · 42ms</span></div>
         </div>
       </section>
 
@@ -1148,7 +1153,7 @@ html, body {
       <section class="dsm-section" id="button">
         <div class="section-title">05 — Components</div>
         <div class="section-heading">Button</div>
-        <p class="section-desc">Used in 59 files. Six variants × four sizes. Primary maps to <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">button.background</code> from VSCode 2026.</p>
+        <p class="section-desc">Used in 59 files. Six variants × four sizes. Primary maps to <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">button.background</code> from VSCode 2026.</p>
 
         <div class="dsm-card">
           <div class="component-label">Variants</div>
@@ -1239,19 +1244,19 @@ html, body {
       <section class="dsm-section" id="input">
         <div class="section-title">07 — Components</div>
         <div class="section-heading">Input & Textarea</div>
-        <p class="section-desc">Used in 35 files. Background is <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">input.background</code>, border from <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">input.border</code>, ring from <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">focusBorder</code>.</p>
+        <p class="section-desc">Used in 35 files. Background is <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">input.background</code>, border from <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">input.border</code>, ring from <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">focusBorder</code>.</p>
 
         <div class="dsm-card">
           <div class="component-label">Text Input</div>
           <div class="component-row" style="flex-direction:column;align-items:flex-start;gap:8px">
             <input class="input" type="text" placeholder="Enter URL or paste a cURL request" />
-            <input class="input" type="text" value="Authorization" style="font-family:monospace;font-size:11px" />
+            <input class="input" type="text" value="Authorization" style="font-family:var(--font-mono);font-size:11px" />
             <input class="input" type="text" placeholder="Disabled input" disabled />
           </div>
 
           <div class="component-label" style="margin-top:16px">Compact (h-7 pattern)</div>
           <div class="component-row">
-            <input class="input" type="number" value="30000" style="width:80px;height:26px;font-size:11px;text-align:right;font-family:monospace" />
+            <input class="input" type="number" value="30000" style="width:80px;height:26px;font-size:11px;text-align:right;font-family:var(--font-mono)" />
             <span style="font-size:11px;color:var(--muted-fg)">ms</span>
           </div>
 
@@ -1345,7 +1350,7 @@ html, body {
       <section class="dsm-section" id="card">
         <div class="section-title">10 — Components</div>
         <div class="section-heading">Card</div>
-        <p class="section-desc">Used in 12 files. The surface hierarchy: <strong>background → card → popover</strong>. Nested cards use <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">bg-popover</code> automatically via the global CSS <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">[data-slot='card'] [data-slot='card']</code> rule.</p>
+        <p class="section-desc">Used in 12 files. The surface hierarchy: <strong>background → card → popover</strong>. Nested cards use <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">bg-popover</code> automatically via the global CSS <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">[data-slot='card'] [data-slot='card']</code> rule.</p>
 
         <div class="two-col">
           <div class="card">
@@ -1379,7 +1384,7 @@ html, body {
                   <div style="font-size:11px;color:var(--muted-fg);margin-top:2px">Max wait before aborting</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px">
-                  <input class="input" type="number" value="30000" style="width:80px;height:26px;font-size:11px;text-align:right;font-family:monospace" />
+                  <input class="input" type="number" value="30000" style="width:80px;height:26px;font-size:11px;text-align:right;font-family:var(--font-mono)" />
                   <span style="font-size:11px;color:var(--muted-fg)">ms</span>
                 </div>
               </div>
@@ -1392,7 +1397,7 @@ html, body {
       <section class="dsm-section" id="tabs">
         <div class="section-title">11 — Components</div>
         <div class="section-heading">Tabs</div>
-        <p class="section-desc">Two patterns: shadcn pill-style <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">Tabs</code> for mode switching (edit/preview), and the custom <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">RocketTabBar</code> underline style for main request sections.</p>
+        <p class="section-desc">Two patterns: shadcn pill-style <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">Tabs</code> for mode switching (edit/preview), and the custom <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">RocketTabBar</code> underline style for main request sections.</p>
 
         <div class="dsm-card" style="margin-bottom:16px">
           <div class="component-label">Pill Style (shadcn Tabs — used in MarkdownEditor, OAuth)</div>
@@ -1427,7 +1432,7 @@ html, body {
       <section class="dsm-section" id="dialog">
         <div class="section-title">12 — Components</div>
         <div class="section-heading">Dialog & Alert Dialog</div>
-        <p class="section-desc">Dialog used in 14 files. AlertDialog in 6. Both use <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">bg-card</code> for the content surface.</p>
+        <p class="section-desc">Dialog used in 14 files. AlertDialog in 6. Both use <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">bg-card</code> for the content surface.</p>
 
         <div class="two-col">
           <div>
@@ -1472,7 +1477,7 @@ html, body {
       <section class="dsm-section" id="dropdown">
         <div class="section-title">13 — Components</div>
         <div class="section-heading">Dropdown & Context Menu</div>
-        <p class="section-desc">Used in 11 files combined. Background is <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">editorWidget.background</code> (popover token). Removed all <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">bg-card/40 backdrop-blur</code> overrides.</p>
+        <p class="section-desc">Used in 11 files combined. Background is <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">editorWidget.background</code> (popover token). Removed all <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">bg-card/40 backdrop-blur</code> overrides.</p>
 
         <div class="three-col">
           <div>
@@ -1554,11 +1559,11 @@ html, body {
               <div style="font-size:11px;font-weight:600;color:var(--foreground);margin-bottom:8px">Environment Variables</div>
               <div style="display:flex;flex-direction:column;gap:6px">
                 <div style="display:flex;justify-content:space-between;font-size:11px">
-                  <span style="font-family:monospace;color:var(--primary)">{{baseUrl}}</span>
+                  <span style="font-family:var(--font-mono);color:var(--primary)">{{baseUrl}}</span>
                   <span style="color:var(--muted-fg)">env</span>
                 </div>
                 <div style="display:flex;justify-content:space-between;font-size:11px">
-                  <span style="font-family:monospace;color:var(--primary)">{{token}}</span>
+                  <span style="font-family:var(--font-mono);color:var(--primary)">{{token}}</span>
                   <span style="color:var(--muted-fg)">collection</span>
                 </div>
               </div>
@@ -1584,23 +1589,23 @@ html, body {
             </thead>
             <tbody>
               <tr>
-                <td style="font-family:monospace;font-size:11px">Content-Type</td>
-                <td style="font-family:monospace;font-size:11px;color:var(--muted-fg)">application/json; charset=utf-8</td>
+                <td style="font-family:var(--font-mono);font-size:11px">Content-Type</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)">application/json; charset=utf-8</td>
                 <td><span class="badge badge-secondary">response</span></td>
               </tr>
               <tr>
-                <td style="font-family:monospace;font-size:11px">Authorization</td>
-                <td style="font-family:monospace;font-size:11px;color:var(--muted-fg)">Bearer {{token}}</td>
+                <td style="font-family:var(--font-mono);font-size:11px">Authorization</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)">Bearer {{token}}</td>
                 <td><span class="badge badge-default">request</span></td>
               </tr>
               <tr>
-                <td style="font-family:monospace;font-size:11px">X-Request-ID</td>
-                <td style="font-family:monospace;font-size:11px;color:var(--muted-fg)">4f2a-9b1c-...</td>
+                <td style="font-family:var(--font-mono);font-size:11px">X-Request-ID</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)">4f2a-9b1c-...</td>
                 <td><span class="badge badge-outline">response</span></td>
               </tr>
               <tr>
-                <td style="font-family:monospace;font-size:11px">Cache-Control</td>
-                <td style="font-family:monospace;font-size:11px;color:var(--muted-fg)">no-cache, no-store</td>
+                <td style="font-family:var(--font-mono);font-size:11px">Cache-Control</td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)">no-cache, no-store</td>
                 <td><span class="badge badge-secondary">response</span></td>
               </tr>
             </tbody>
@@ -1612,7 +1617,7 @@ html, body {
       <section class="dsm-section" id="tree">
         <div class="section-title">16 — Components</div>
         <div class="section-heading">Tree</div>
-        <p class="section-desc">Custom component used in 4 files for the collections sidebar. Active item uses <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">border-left: 2px solid primary</code> + <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">bg-list-active</code>.</p>
+        <p class="section-desc">Custom component used in 4 files for the collections sidebar. Active item uses <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">border-left: 2px solid primary</code> + <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">bg-list-active</code>.</p>
 
         <div class="dsm-card" style="max-width:320px">
           <div class="tree">
@@ -1635,11 +1640,11 @@ html, body {
               <div class="tree-children">
                 <div class="tree-item active">
                   <svg class="tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
-                  <span style="font-size:11px;font-family:monospace"><span class="method method-post" style="font-size:9px;margin-right:5px">POST</span>Get Token</span>
+                  <span style="font-size:11px;font-family:var(--font-mono)"><span class="method method-post" style="font-size:9px;margin-right:5px">POST</span>Get Token</span>
                 </div>
                 <div class="tree-item">
                   <svg class="tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
-                  <span style="font-size:11px;font-family:monospace"><span class="method method-get" style="font-size:9px;margin-right:5px">GET</span>Refresh</span>
+                  <span style="font-size:11px;font-family:var(--font-mono)"><span class="method method-get" style="font-size:9px;margin-right:5px">GET</span>Refresh</span>
                 </div>
               </div>
             </div>
@@ -1651,7 +1656,7 @@ html, body {
       <section class="dsm-section" id="scroll">
         <div class="section-title">17 — Components</div>
         <div class="section-heading">ScrollArea</div>
-        <p class="section-desc">Used in 10 files. Thin 6px scrollbars using <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">scrollbarSlider.background</code> — same as VSCode 2026.</p>
+        <p class="section-desc">Used in 10 files. Thin 6px scrollbars using <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">scrollbarSlider.background</code> — same as VSCode 2026.</p>
 
         <div class="dsm-card">
           <div class="scroll-demo">
@@ -1707,7 +1712,7 @@ html, body {
       <section class="dsm-section" id="methods">
         <div class="section-title">20 — Patterns</div>
         <div class="section-heading">HTTP Method Colors</div>
-        <p class="section-desc">Defined in <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">src/lib/colors.ts</code> as <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">METHOD_TEXT_COLOR</code>. Not using semantic tokens — intentionally kept as fixed hues for recognizability.</p>
+        <p class="section-desc">Defined in <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">src/lib/colors.ts</code> as <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">METHOD_TEXT_COLOR</code>. Not using semantic tokens — intentionally kept as fixed hues for recognizability.</p>
 
         <div class="dsm-card">
           <table class="dsm-table">
@@ -1727,7 +1732,7 @@ html, body {
       <section class="dsm-section" id="git">
         <div class="section-title">21 — Patterns</div>
         <div class="section-heading">Git Decorations</div>
-        <p class="section-desc">Mapped directly from VSCode 2026 <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">gitDecoration.*</code> tokens. Used in file diffs, sidebar tree, and commit views.</p>
+        <p class="section-desc">Mapped directly from VSCode 2026 <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">gitDecoration.*</code> tokens. Used in file diffs, sidebar tree, and commit views.</p>
 
         <div class="dsm-card">
           <div class="component-row" style="gap:16px">
@@ -1748,17 +1753,17 @@ html, body {
           <div class="tree" style="margin-top:8px">
             <div class="tree-item" style="color:var(--git-added)">
               <svg class="tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
-              <span style="font-size:11px;font-family:monospace">POST /auth/register</span>
+              <span style="font-size:11px;font-family:var(--font-mono)">POST /auth/register</span>
               <span style="margin-left:auto;font-size:9px;font-weight:600">U</span>
             </div>
             <div class="tree-item" style="color:var(--git-modified)">
               <svg class="tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
-              <span style="font-size:11px;font-family:monospace">GET /users/:id</span>
+              <span style="font-size:11px;font-family:var(--font-mono)">GET /users/:id</span>
               <span style="margin-left:auto;font-size:9px;font-weight:600">M</span>
             </div>
             <div class="tree-item" style="color:var(--git-deleted)">
               <svg class="tree-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
-              <span style="font-size:11px;font-family:monospace">DELETE /session</span>
+              <span style="font-size:11px;font-family:var(--font-mono)">DELETE /session</span>
               <span style="margin-left:auto;font-size:9px;font-weight:600">D</span>
             </div>
           </div>
@@ -1769,7 +1774,7 @@ html, body {
       <section class="dsm-section" id="shell">
         <div class="section-title">22 — Patterns</div>
         <div class="section-heading">App Shell Preview</div>
-        <p class="section-desc">A miniature representation of the full Rocket shell using 2026 tokens. Sidebar = <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">sideBar.background</code>, editor pane = <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">editor.background</code>, tab bar = <code style="font-family:monospace;background:var(--muted);padding:1px 5px;border-radius:3px">editorGroupHeader.tabsBackground</code>.</p>
+        <p class="section-desc">A miniature representation of the full Rocket shell using 2026 tokens. Sidebar = <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">sideBar.background</code>, editor pane = <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">editor.background</code>, tab bar = <code style="font-family:var(--font-mono);background:var(--muted);padding:1px 5px;border-radius:3px">editorGroupHeader.tabsBackground</code>.</p>
 
         <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;height:280px;display:flex;flex-direction:column">
           <!-- Mini title bar -->
@@ -1787,7 +1792,7 @@ html, body {
               <div style="padding:3px 10px;font-size:10px;color:var(--muted-fg)">⬛ Connect</div>
               <div style="padding:3px 10px;font-size:10px;color:var(--foreground);border-left:2px solid var(--primary);background:var(--list-active)">⬛ Sage Network</div>
               <div style="padding:3px 10px 3px 20px;font-size:10px;color:var(--muted-fg)">📁 Auth</div>
-              <div style="padding:3px 10px 3px 28px;font-size:10px;color:var(--git-added);font-family:monospace">POST Get Token</div>
+              <div style="padding:3px 10px 3px 28px;font-size:10px;color:var(--git-added);font-family:var(--font-mono)">POST Get Token</div>
               <div style="padding:3px 10px;font-size:10px;color:var(--muted-fg)">⬛ NDS</div>
             </div>
             <!-- Mini main -->
@@ -1801,8 +1806,8 @@ html, body {
               </div>
               <!-- Mini URL bar -->
               <div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px;background:var(--card);flex-shrink:0">
-                <div style="padding:2px 8px;background:var(--input);border:1px solid var(--border-strong);border-radius:3px;font-size:9px;color:#E8A44A;font-weight:700;font-family:monospace">POST</div>
-                <div style="flex:1;padding:2px 8px;background:var(--input);border:1px solid var(--border-strong);border-radius:3px;font-size:9px;color:var(--muted-fg);font-family:monospace">{{baseUrl}}/auth/token</div>
+                <div style="padding:2px 8px;background:var(--input);border:1px solid var(--border-strong);border-radius:3px;font-size:9px;color:#E8A44A;font-weight:700;font-family:var(--font-mono)">POST</div>
+                <div style="flex:1;padding:2px 8px;background:var(--input);border:1px solid var(--border-strong);border-radius:3px;font-size:9px;color:var(--muted-fg);font-family:var(--font-mono)">{{baseUrl}}/auth/token</div>
                 <div style="padding:2px 10px;background:var(--primary);border-radius:3px;font-size:9px;color:white;font-weight:600">Send</div>
               </div>
               <!-- Mini tab bar -->
@@ -1859,10 +1864,10 @@ html, body {
           <table class="dsm-table">
             <thead><tr><th>Old Pattern</th><th>Problem</th><th>Correct Replacement</th></tr></thead>
             <tbody>
-              <tr><td><span style="color:var(--destructive);font-family:monospace;font-size:11px">bg-card/70 backdrop-blur-sm</span></td><td>Frosted glass out of place in IDE-style app</td><td><span class="anno">bg-card</span></td></tr>
-              <tr><td><span style="color:var(--destructive);font-family:monospace;font-size:11px">bg-card/80, bg-card/65, bg-card/50</span></td><td>Opacity creates inconsistent depth</td><td><span class="anno">bg-card</span></td></tr>
-              <tr><td><span style="color:var(--destructive);font-family:monospace;font-size:11px">bg-card/40 backdrop-blur-sm</span> on menus</td><td>Overrides shadcn primitive's correct bg-popover</td><td>Remove className override entirely</td></tr>
-              <tr><td>Sidebar as <span style="color:var(--destructive);font-family:monospace;font-size:11px">bg-card</span></td><td>Same as editor — no depth separation</td><td><span class="anno">bg-background</span></td></tr>
+              <tr><td><span style="color:var(--destructive);font-family:var(--font-mono);font-size:11px">bg-card/70 backdrop-blur-sm</span></td><td>Frosted glass out of place in IDE-style app</td><td><span class="anno">bg-card</span></td></tr>
+              <tr><td><span style="color:var(--destructive);font-family:var(--font-mono);font-size:11px">bg-card/80, bg-card/65, bg-card/50</span></td><td>Opacity creates inconsistent depth</td><td><span class="anno">bg-card</span></td></tr>
+              <tr><td><span style="color:var(--destructive);font-family:var(--font-mono);font-size:11px">bg-card/40 backdrop-blur-sm</span> on menus</td><td>Overrides shadcn primitive's correct bg-popover</td><td>Remove className override entirely</td></tr>
+              <tr><td>Sidebar as <span style="color:var(--destructive);font-family:var(--font-mono);font-size:11px">bg-card</span></td><td>Same as editor — no depth separation</td><td><span class="anno">bg-background</span></td></tr>
             </tbody>
           </table>
         </div>

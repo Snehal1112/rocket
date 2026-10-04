@@ -4,9 +4,12 @@ import type * as monacoNs from 'monaco-editor';
 // Alias for the Monaco standalone editor construction options type.
 type EditorOptions = EditorProps['options'];
 
+// Monaco measures glyphs itself, so it needs a literal stack rather than a CSS variable.
+export const MONACO_FONT_FAMILY = "'JetBrains Mono', ui-monospace, monospace";
+
 export const BASE_EDITOR_OPTIONS: EditorOptions = {
   fontSize: 15,
-  fontFamily: "'JetBrains Mono', monospace",
+  fontFamily: MONACO_FONT_FAMILY,
   tabSize: 2,
   wordWrap: 'on',
   bracketPairColorization: { enabled: true },
