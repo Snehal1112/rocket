@@ -226,7 +226,7 @@ Rust (use `-j4`, targeted crates only):
   unregistered provider, forwards `forget_connection`; the RocketVault tests pass
   unchanged.
 - `rocket-app`: per-provider validation; fetch narrowing (only referenced refs are
-  fetched; an unreferenced failing ref does not fail the send); certificate capability
+  fetched; an unreferenced failing ref does not fail the send) (deferred with section 6; tested in the first cloud provider's plan); certificate capability
   gating in `EnvironmentService`.
 - `src-tauri`: DTO JSON shape.
 

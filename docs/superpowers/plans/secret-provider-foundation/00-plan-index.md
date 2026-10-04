@@ -13,7 +13,7 @@
 | 03 | [Fetch-on-reference and certificate gating](2026-10-04-secret-provider-plan-03-resolution-and-certs.md) | 1 done, 1 deferred | `rocket-environment`, `rocket-app`, `src-tauri` | 01, 02 |
 | 04 | [Frontend provider selector and certificate gating](2026-10-04-secret-provider-plan-04-frontend.md) | 3 | frontend | 02 (03 for the save-time error) |
 
-Plan 03 has 2 tasks, not 3: the fetch narrowing and the certificate gating are the only two slices, and splitting either would leave a half task. Each plan ends with a **Next Plan** section, so a fresh session opening any one file knows what to run next. Chain to the next plan automatically when a plan finishes, one at a time.
+Plan 03 has 2 tasks. Task 2 (certificate gating) is done. Task 1 (fetch-on-reference) is deferred to the first cloud provider's plan. Each plan ends with a **Next Plan** section, so a fresh session opening any one file knows what to run next. Chain to the next plan automatically when a plan finishes, one at a time.
 
 ## Locked interface contract
 
@@ -64,10 +64,9 @@ impl DispatchingSecretFetcher {
 // environment_service.rs
 pub fn save_with_capabilities(&self, env: &Environment, lookup: &dyn ProviderCapabilityLookup) -> DomainResult<()>;
 // secret_manager_service.rs: impl ProviderCapabilityLookup for SecretManagerService
-// execution_service.rs (private):
-async fn resolve_external_secrets_partial(&self, collection: Option<&str>, environment_name: Option<&str>, only_referenced_by: Option<&ExecuteRequestInput>) -> (HashMap<String, String>, Vec<UnresolvedBinding>);
-fn references_text(&self, input: &ExecuteRequestInput, needle: &str, resolved: &HashMap<String, String>) -> bool;
 ```
+
+The execution_service.rs functions `resolve_external_secrets_partial` and `references_text` belong to the deferred Plan 03 Task 1 and are not part of this branch.
 
 ### IPC and frontend
 
@@ -108,3 +107,11 @@ The spec was corrected to match these before the plans were written, because the
 - Targeted tests per plan, always with `-j4`. Never run `cargo test --workspace`.
 - `yarn tsc --noEmit` and `yarn check`
 - Manual check in the real app: open Settings, add a RocketVault connection, bind it in an environment, send a request that uses `{{alias.secret}}`, and confirm the certificate button appears only with a RocketVault binding.
+
+## Carry into the provider plans
+
+- Fetch-on-reference (the deferred Plan 03 Task 1): build it in the first cloud provider's plan, on top of the partial-failure resolution code once that is committed.
+- Add a guard in `SecretManagerService::save` that a saved connection's provider cannot change, so a stored credential is never sent to a different provider over IPC.
+- Forward `config` from the connections dialog on save (it currently builds the connection without `config`), or editing a connection will erase it once a provider uses `config`.
+- Add the test for a non-RocketVault provider that needs a credential, saved with no stored credential, at connection time.
+- Environment saves now read `secret_managers.yml` through `save_with_capabilities` when an environment has a `vault` certificate. A file written by a newer build with an unknown provider or a `config` fails that save loudly. Decide whether that is acceptable when the first provider lands.
