@@ -32,7 +32,9 @@
 
 ---
 
-## Task 1: Fetch only referenced secrets for `fetch_on_reference` providers
+## Task 1: Fetch only referenced secrets for `fetch_on_reference` providers (DEFERRED)
+
+> **Deferred, not part of this branch.** This task builds on `resolve_external_secrets_partial` and `references_alias`, which exist only as uncommitted work outside this branch, and no provider reports `fetch_on_reference` yet. It moves to the first cloud provider's plan (see spec section 6). Skip it when executing this plan.
 
 > 📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`.
 
