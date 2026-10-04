@@ -45,8 +45,11 @@ table) but no provider other than RocketVault. Users cannot resolve
 - The vault URL lives in the existing `base_url`. `client_id` reuses `client_id`. The
   client secret is the single keychain string under the existing vault-connection
   scope. `verify_ssl` and `allow_insecure_http` keep their defaults and are ignored.
-- One connection is one vault. The binding's vault scope is ignored for Azure and the
-  UI hides that column.
+- One connection is one vault, so the fetcher ignores the `vault_name` argument. The
+  binding contract still requires a non-empty `vault_name`
+  (`external_secret.rs:60`) and the External Secrets tab needs it before "Fetch" works.
+  Changing both is out of scope, so Azure keeps the scope field and only relabels it
+  (section 7). Users type any short name. Hiding the column is a follow-up.
 
 ## 5. Fetcher (`rocket-infra/src/azurekeyvault/`)
 
@@ -80,8 +83,9 @@ without camelCase.
 ## 7. Frontend
 
 - `ConnectionField` gains `tenantId`. The Azure descriptor becomes `selectable: true`
-  with fields `baseUrl` (label "Vault URL"), `tenantId`, `clientId`, `clientSecret`,
-  and a flag that hides the binding scope column.
+  with fields `baseUrl` (label "Vault URL"), `tenantId`, `clientId` and `clientSecret`.
+  Its scope label is "Vault name" with the placeholder "Any name (the connection
+  sets the vault)", because the fetcher ignores the value.
 - `tauri-api.ts` types `config` with an `AzureConfig` interface (`tenantId`,
   `authorityHost?`) matching the DTO.
 - The dialog sends `config` on save and restores it in `startEdit`. Its validation
