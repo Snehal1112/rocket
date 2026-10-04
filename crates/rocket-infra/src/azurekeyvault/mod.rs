@@ -1181,7 +1181,9 @@ mod tests {
             tenant_id: "contoso.onmicrosoft.com".to_string(),
             authority_host: None,
         });
-        assert!(AzureKeyVaultFetcher::new().validate_connection(&conn).is_ok());
+        assert!(AzureKeyVaultFetcher::new()
+            .validate_connection(&conn)
+            .is_ok());
     }
 
     #[test]
@@ -1205,7 +1207,10 @@ mod tests {
 
         for bad in [no_client, no_config, bad_tenant, http_vault, no_url] {
             assert!(
-                matches!(fetcher.validate_connection(&bad), Err(DomainError::InvalidInput(_))),
+                matches!(
+                    fetcher.validate_connection(&bad),
+                    Err(DomainError::InvalidInput(_))
+                ),
                 "{bad:?}"
             );
         }

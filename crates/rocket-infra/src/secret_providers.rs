@@ -363,6 +363,9 @@ mod tests {
 
         let err = d.validate_connection(&conn).expect_err("AWS is not built");
 
-        assert!(err.to_string().contains("not available in this build"), "got: {err}");
+        assert!(
+            err.to_string().contains("not available in this build"),
+            "got: {err}"
+        );
     }
 }

@@ -1,5 +1,6 @@
 pub mod acp_agent_client;
 mod atomic_write;
+pub mod azurekeyvault;
 pub mod callback_server;
 pub mod clone_destination_capabilities;
 pub mod contract_records;
@@ -23,7 +24,6 @@ pub(crate) mod migration;
 pub(crate) mod oc;
 mod pem_key;
 pub mod reqwest_executor;
-pub mod azurekeyvault;
 pub mod rocketvault;
 pub mod scripting;
 mod secret_providers;
@@ -34,6 +34,7 @@ pub mod shared_path_flow_repo;
 mod yaml_io;
 pub use acp_agent_client::AcpAgentClient;
 pub use atomic_write::{atomic_write, atomic_write_bulk};
+pub use azurekeyvault::AzureKeyVaultFetcher;
 pub use callback_server::HyperCallbackListener;
 pub use clone_destination_capabilities::{
     CloneDestinationCapabilities, CloneDestinationGrant, DEFAULT_CLONE_DESTINATION_CAPABILITY_TTL,
@@ -55,7 +56,6 @@ pub use fs_template_repo::FsTemplateRepo;
 pub use fs_workspace_config_repo::FsWorkspaceConfigRepo;
 pub use fs_workspace_repo::FsWorkspaceRepo;
 pub use reqwest_executor::{ReqwestExecutor, ReqwestTokenClientProvider};
-pub use azurekeyvault::AzureKeyVaultFetcher;
 pub use rocketvault::ReqwestVaultSecretFetcher;
 pub use secret_providers::DispatchingSecretFetcher;
 pub use secret_store::KeyringSecretStore;

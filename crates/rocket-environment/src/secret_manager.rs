@@ -100,7 +100,9 @@ pub trait ProviderCapabilityLookup: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProviderConfig, SecretManagerConnection, SecretManagerRepository, SecretProviderKind};
+    use super::{
+        ProviderConfig, SecretManagerConnection, SecretManagerRepository, SecretProviderKind,
+    };
     use rocket_shared::error::DomainResult;
     use std::sync::Mutex;
 
@@ -255,7 +257,10 @@ mod tests {
         let c = azure_connection();
         let yaml = serde_yaml::to_string(&c).expect("serialize");
         assert!(yaml.contains("provider: azure"), "got: {yaml}");
-        assert!(yaml.contains("tenant_id"), "persistence keeps snake_case: {yaml}");
+        assert!(
+            yaml.contains("tenant_id"),
+            "persistence keeps snake_case: {yaml}"
+        );
         assert!(
             !yaml.contains("authority_host"),
             "an unset authority host is not written: {yaml}"
