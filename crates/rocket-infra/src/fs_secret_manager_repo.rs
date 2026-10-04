@@ -38,7 +38,9 @@ impl FsSecretManagerRepo {
             return Ok(Vec::new());
         }
         serde_yaml::from_str(&content).map_err(|e| {
-            DomainError::InvalidInput(format!("Failed to parse secret_managers.yml: {e}"))
+            DomainError::InvalidInput(format!(
+                "Failed to parse secret_managers.yml: {e}. The file may have been written by a newer version of Rocket."
+            ))
         })
     }
 
@@ -225,5 +227,23 @@ mod tests {
             !raw.contains("client_secret"),
             "secret_managers.yml must never contain a client_secret field: {raw}"
         );
+    }
+
+    #[test]
+    fn an_unreadable_file_points_at_a_newer_build() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("secret_managers.yml"),
+            "- id: x\n  label: X\n  base_url: https://v\n  client_id: a\n  provider: azure\n  config: !FutureProvider {region: eu}\n",
+        )
+        .expect("write");
+
+        let err = repo
+            .list()
+            .expect_err("an unknown config tag must not load");
+
+        let msg = err.to_string();
+        assert!(msg.contains("newer version of Rocket"), "got: {msg}");
+        assert!(msg.contains("secret_managers.yml"), "got: {msg}");
     }
 }
