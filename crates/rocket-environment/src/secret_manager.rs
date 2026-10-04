@@ -1,3 +1,4 @@
+use crate::vault_secret_fetcher::ProviderCapabilities;
 use rocket_shared::error::DomainResult;
 use serde::{Deserialize, Serialize};
 
@@ -71,6 +72,21 @@ pub trait SecretManagerRepository: Send + Sync {
     fn get(&self, id: &str) -> DomainResult<Option<SecretManagerConnection>>;
     fn save(&self, connection: &SecretManagerConnection) -> DomainResult<()>;
     fn delete(&self, id: &str) -> DomainResult<()>;
+}
+
+/// A connection's provider and what that provider supports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionProvider {
+    pub kind: SecretProviderKind,
+    pub capabilities: ProviderCapabilities,
+}
+
+/// Answers "which provider does this connection id use and what can it do".
+/// Lets save-time validation reject a certificate that a connection's provider
+/// cannot supply, without the validator holding connections itself.
+pub trait ProviderCapabilityLookup: Send + Sync {
+    /// `Ok(None)` means no connection has this id.
+    fn provider_of(&self, connection_id: &str) -> DomainResult<Option<ConnectionProvider>>;
 }
 
 #[cfg(test)]
@@ -181,8 +197,14 @@ mod tests {
             config: None,
         };
         let yaml = serde_yaml::to_string(&c).expect("serialize");
-        assert!(!yaml.contains("provider"), "an older build must read this: {yaml}");
-        assert!(!yaml.contains("config"), "an older build must read this: {yaml}");
+        assert!(
+            !yaml.contains("provider"),
+            "an older build must read this: {yaml}"
+        );
+        assert!(
+            !yaml.contains("config"),
+            "an older build must read this: {yaml}"
+        );
     }
 
     #[test]
@@ -213,11 +235,23 @@ mod tests {
 
     #[test]
     fn provider_display_names() {
-        assert_eq!(SecretProviderKind::RocketVault.display_name(), "RocketVault");
+        assert_eq!(
+            SecretProviderKind::RocketVault.display_name(),
+            "RocketVault"
+        );
         assert_eq!(SecretProviderKind::Azure.display_name(), "Azure Key Vault");
-        assert_eq!(SecretProviderKind::Aws.display_name(), "AWS Secrets Manager");
-        assert_eq!(SecretProviderKind::Hashicorp.display_name(), "HashiCorp Vault");
-        assert_eq!(SecretProviderKind::Gcp.display_name(), "Google Secret Manager");
+        assert_eq!(
+            SecretProviderKind::Aws.display_name(),
+            "AWS Secrets Manager"
+        );
+        assert_eq!(
+            SecretProviderKind::Hashicorp.display_name(),
+            "HashiCorp Vault"
+        );
+        assert_eq!(
+            SecretProviderKind::Gcp.display_name(),
+            "Google Secret Manager"
+        );
     }
 
     #[test]

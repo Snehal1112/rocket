@@ -203,6 +203,21 @@ fn validate_connection(
     Ok(())
 }
 
+impl rocket_environment::ProviderCapabilityLookup for SecretManagerService {
+    fn provider_of(
+        &self,
+        connection_id: &str,
+    ) -> DomainResult<Option<rocket_environment::ConnectionProvider>> {
+        let Some(connection) = self.repo.get(connection_id)? else {
+            return Ok(None);
+        };
+        Ok(Some(rocket_environment::ConnectionProvider {
+            kind: connection.provider,
+            capabilities: self.fetcher.capabilities(&connection),
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1063,5 +1078,24 @@ mod tests {
             fetcher.seen_credential.lock().expect("lock").as_deref(),
             Some("")
         );
+    }
+
+    #[test]
+    fn the_service_reports_a_connections_provider_and_capabilities() {
+        use rocket_environment::ProviderCapabilityLookup;
+        let caps = ProviderCapabilities {
+            certificates: true,
+            ..ProviderCapabilities::default()
+        };
+        let svc = p2_service(P2Fetcher::new(caps, None));
+        let mut c = p2_connection("c1", SecretProviderKind::RocketVault);
+        c.base_url = "https://v:8774".to_string();
+        c.client_id = "rocketapi".to_string();
+        svc.save(c, Some("s".to_string())).expect("save");
+
+        let info = svc.provider_of("c1").expect("lookup").expect("exists");
+        assert_eq!(info.kind, SecretProviderKind::RocketVault);
+        assert!(info.capabilities.certificates);
+        assert!(svc.provider_of("missing").expect("lookup").is_none());
     }
 }

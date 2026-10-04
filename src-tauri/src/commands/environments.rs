@@ -62,11 +62,12 @@ pub fn save_environment(
     collection: String,
     env: Environment,
     workspace: State<'_, Arc<Mutex<PathBuf>>>,
+    secret_managers: State<'_, rocket_app::SecretManagerService>,
 ) -> Result<(), DomainError> {
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
-    env_service_for(&collection, &ws)?.save(&env)
+    env_service_for(&collection, &ws)?.save_with_capabilities(&env, &*secret_managers)
 }
 
 #[tauri::command]
@@ -139,11 +140,12 @@ pub fn get_global_environment(
 pub fn save_global_environment(
     env: Environment,
     workspace: State<'_, Arc<Mutex<PathBuf>>>,
+    secret_managers: State<'_, rocket_app::SecretManagerService>,
 ) -> Result<(), DomainError> {
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
-    global_env_service(&ws)?.save(&env)
+    global_env_service(&ws)?.save_with_capabilities(&env, &*secret_managers)
 }
 
 #[tauri::command]

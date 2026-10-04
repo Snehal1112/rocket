@@ -66,6 +66,22 @@ impl EnvironmentService {
         Ok(())
     }
 
+    /// Like `save`, but also rejects a `vault` client certificate whose
+    /// binding points at a provider that cannot supply certificates. The
+    /// lookup is passed in because this service holds no connections.
+    pub fn save_with_capabilities(
+        &self,
+        env: &Environment,
+        lookup: &dyn rocket_environment::ProviderCapabilityLookup,
+    ) -> DomainResult<()> {
+        rocket_environment::validate_vault_certificate_providers(
+            &env.client_certificates,
+            &env.external_secrets,
+            lookup,
+        )?;
+        self.save(env)
+    }
+
     pub fn delete(&self, name: &str) -> DomainResult<()> {
         self.repo.delete(name)?;
         self.events.publish(DomainEvent::EnvironmentDeleted {
@@ -140,6 +156,71 @@ mod tests {
 
     fn make_service() -> EnvironmentService {
         EnvironmentService::new(Box::new(MockEnvRepo::new()), Box::new(NullEventPublisher))
+    }
+
+    use rocket_environment::{
+        ConnectionProvider, ProviderCapabilities, ProviderCapabilityLookup, SecretProviderKind,
+    };
+
+    struct FixedLookup(Option<ConnectionProvider>);
+    impl ProviderCapabilityLookup for FixedLookup {
+        fn provider_of(&self, _id: &str) -> DomainResult<Option<ConnectionProvider>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn env_with_vault_certificate() -> Environment {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(ExternalSecretBinding {
+            alias: "vault".to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "v".to_string(),
+            secret_names: vec![],
+        });
+        env.client_certificates.push(ClientCertificate::Vault {
+            domain: "api.example.com".to_string(),
+            binding: "vault".to_string(),
+            certificate: "client".to_string(),
+            format: VaultCertificateFormat::default(),
+        });
+        env
+    }
+
+    #[test]
+    fn save_with_capabilities_rejects_a_vault_certificate_on_azure() {
+        let svc = make_service();
+        let lookup = FixedLookup(Some(ConnectionProvider {
+            kind: SecretProviderKind::Azure,
+            capabilities: ProviderCapabilities::default(),
+        }));
+
+        let err = svc
+            .save_with_capabilities(&env_with_vault_certificate(), &lookup)
+            .expect_err("azure cannot supply certificates");
+
+        assert!(err.to_string().contains("Azure Key Vault"), "got: {err}");
+    }
+
+    #[test]
+    fn save_with_capabilities_saves_when_the_provider_supports_certificates() {
+        let svc = make_service();
+        let lookup = FixedLookup(Some(ConnectionProvider {
+            kind: SecretProviderKind::RocketVault,
+            capabilities: ProviderCapabilities {
+                certificates: true,
+                ..ProviderCapabilities::default()
+            },
+        }));
+
+        svc.save_with_capabilities(&env_with_vault_certificate(), &lookup)
+            .expect("rocketvault supplies certificates");
+    }
+
+    #[test]
+    fn save_with_capabilities_saves_when_the_connection_was_deleted() {
+        let svc = make_service();
+        svc.save_with_capabilities(&env_with_vault_certificate(), &FixedLookup(None))
+            .expect("a deleted connection is not a save error");
     }
 
     #[test]
@@ -271,6 +352,9 @@ mod tests {
             .save(&env)
             .expect_err("a vault entry needs a bound alias");
         assert!(err.to_string().contains("binding prod"), "{err}");
-        assert!(svc.list().expect("list").is_empty(), "nothing may be written");
+        assert!(
+            svc.list().expect("list").is_empty(),
+            "nothing may be written"
+        );
     }
 }

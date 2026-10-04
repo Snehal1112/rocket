@@ -9,6 +9,7 @@ use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::external_secret::ExternalSecretBinding;
+use crate::secret_manager::ProviderCapabilityLookup;
 
 const PEM_MARKER: &str = "-----BEGIN";
 
@@ -175,6 +176,37 @@ fn check_reference(
             "Client certificate {entry}: {field} names the secret {name}, which is not in the \
              {alias} binding. Fetch the secret names first."
         )));
+    }
+    Ok(())
+}
+
+/// A `vault` entry needs a binding whose connection can supply client
+/// certificates. Only RocketVault can. A binding whose connection no longer
+/// exists is skipped, because that case already has its own warning in the
+/// External Secrets tab. Entries of other types are never checked.
+pub fn validate_vault_certificate_providers(
+    certs: &[ClientCertificate],
+    bindings: &[ExternalSecretBinding],
+    lookup: &dyn ProviderCapabilityLookup,
+) -> DomainResult<()> {
+    for (index, cert) in certs.iter().enumerate() {
+        let ClientCertificate::Vault { binding, .. } = cert else {
+            continue;
+        };
+        let Some(bound) = bindings.iter().find(|b| b.alias == *binding) else {
+            continue;
+        };
+        let Some(info) = lookup.provider_of(&bound.connection_id)? else {
+            continue;
+        };
+        if !info.capabilities.certificates {
+            return Err(invalid(format!(
+                "Client certificate {}: {} cannot supply client certificates. Use a RocketVault \
+                 binding, or reference the certificate as a secret instead.",
+                index + 1,
+                info.kind.display_name()
+            )));
+        }
     }
     Ok(())
 }
@@ -425,7 +457,69 @@ mod tests {
                 msg.contains(&format!("field {field}")) && msg.contains("not key text"),
                 "{field}: {msg}"
             );
-            assert!(!msg.contains("MIIEvQsecret"), "the key must not be echoed: {msg}");
+            assert!(
+                !msg.contains("MIIEvQsecret"),
+                "the key must not be echoed: {msg}"
+            );
         }
+    }
+
+    use crate::secret_manager::{ConnectionProvider, ProviderCapabilityLookup, SecretProviderKind};
+    use crate::vault_secret_fetcher::ProviderCapabilities;
+    struct FixedLookup(Option<ConnectionProvider>);
+    impl ProviderCapabilityLookup for FixedLookup {
+        fn provider_of(&self, _id: &str) -> DomainResult<Option<ConnectionProvider>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn vault_entry() -> Vec<ClientCertificate> {
+        vec![vault("api.example.com", "vault", "client")]
+    }
+
+    fn provider(kind: SecretProviderKind, certificates: bool) -> Option<ConnectionProvider> {
+        Some(ConnectionProvider {
+            kind,
+            capabilities: ProviderCapabilities {
+                certificates,
+                ..ProviderCapabilities::default()
+            },
+        })
+    }
+
+    #[test]
+    fn a_vault_entry_on_a_certificate_capable_provider_is_accepted() {
+        let lookup = FixedLookup(provider(SecretProviderKind::RocketVault, true));
+        validate_vault_certificate_providers(&vault_entry(), &bindings(), &lookup)
+            .expect("rocketvault supplies certificates");
+    }
+
+    #[test]
+    fn a_vault_entry_on_another_provider_is_rejected_naming_the_provider() {
+        let lookup = FixedLookup(provider(SecretProviderKind::Azure, false));
+        let err = validate_vault_certificate_providers(&vault_entry(), &bindings(), &lookup)
+            .expect_err("azure cannot supply client certificates");
+        let text = err.to_string();
+        assert!(text.contains("Azure Key Vault"), "got: {text}");
+        assert!(text.contains("Client certificate 1"), "got: {text}");
+        assert!(
+            text.contains("RocketVault"),
+            "should say what to do instead: {text}"
+        );
+    }
+
+    #[test]
+    fn a_missing_connection_is_not_rejected_here() {
+        let lookup = FixedLookup(None);
+        validate_vault_certificate_providers(&vault_entry(), &bindings(), &lookup)
+            .expect("a deleted connection already has its own warning");
+    }
+
+    #[test]
+    fn file_and_secret_certificates_are_never_checked_against_the_provider() {
+        let lookup = FixedLookup(provider(SecretProviderKind::Azure, false));
+        let pem_only = vec![pem("api.example.com", "c.pem", "k.pem", None, None)];
+        validate_vault_certificate_providers(&pem_only, &bindings(), &lookup)
+            .expect("only vault entries need certificate support");
     }
 }
