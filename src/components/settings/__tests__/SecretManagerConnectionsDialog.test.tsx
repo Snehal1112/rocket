@@ -240,4 +240,24 @@ describe('SecretManagerConnectionsDialog', () => {
     expect(saved).toBeDefined();
     expect(saved).not.toHaveProperty('config');
   });
+
+  it('marks only the providers without an implementation as not available yet', async () => {
+    Element.prototype.hasPointerCapture = () => false;
+    Element.prototype.scrollIntoView = () => undefined;
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /add connection/i }));
+    await user.click(screen.getByRole('combobox', { name: /provider/i }));
+
+    expect(await screen.findByRole('option', { name: /^azure key vault$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: /aws secrets manager \(not available yet\)/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: /hashicorp vault \(not available yet\)/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: /google secret manager \(not available yet\)/i }),
+    ).toBeInTheDocument();
+  });
 });

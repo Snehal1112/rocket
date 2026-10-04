@@ -115,3 +115,16 @@ describe('requiredFieldsMessage', () => {
     expect(requiredFieldsMessage(none)).toBe('Label is required.');
   });
 });
+
+describe('the not-available-yet providers', () => {
+  it('lists exactly AWS, HashiCorp and Google as not selectable', () => {
+    const blocked = SECRET_PROVIDERS.filter((p) => !p.selectable).map((p) => p.kind);
+    expect(blocked).toEqual(['aws', 'hashicorp', 'gcp']);
+  });
+
+  it('labels the Azure binding scope as a free-form name', () => {
+    const azure = getProviderDescriptor('azure');
+    expect(azure.scopeLabel).toBe('Vault name');
+    expect(azure.scopePlaceholder).toMatch(/any name/i);
+  });
+});
