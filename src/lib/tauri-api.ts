@@ -193,6 +193,8 @@ export interface ExternalSecretBinding {
   secretNames: ExternalSecretRef[];
 }
 
+export type SecretProviderKind = 'rocketvault' | 'azure' | 'aws' | 'hashicorp' | 'gcp';
+
 export interface SecretManagerConnection {
   id: string;
   label: string;
@@ -200,6 +202,10 @@ export interface SecretManagerConnection {
   clientId: string;
   verifySsl: boolean;
   allowInsecureHttp: boolean;
+  // Absent means RocketVault, for payloads written before providers existed.
+  provider?: SecretProviderKind;
+  // Provider-specific, non-secret settings. No provider uses it yet.
+  config?: Record<string, unknown> | null;
 }
 
 // A certificate in a RocketVault vault, for the Certificates tab picker. Never key material.
