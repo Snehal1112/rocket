@@ -5,6 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import {
   useDeleteSecretManagerConnection,
@@ -12,7 +19,8 @@ import {
   useSecretManagerConnections,
   useTestSecretManagerConnection,
 } from '@/lib/queries/secret-manager-queries';
-import type { SecretManagerConnection } from '@/lib/tauri-api';
+import { getProviderDescriptor, SECRET_PROVIDERS } from '@/lib/secret-providers';
+import type { SecretManagerConnection, SecretProviderKind } from '@/lib/tauri-api';
 
 interface SecretManagerConnectionsDialogProps {
   open: boolean;
@@ -27,6 +35,7 @@ const emptyForm = {
   verifySsl: true,
   allowInsecureHttp: false,
   clientSecret: '',
+  provider: 'rocketvault' as SecretProviderKind,
 };
 
 export function SecretManagerConnectionsDialog({
@@ -49,6 +58,8 @@ export function SecretManagerConnectionsDialog({
   const [testVaultNames, setTestVaultNames] = useState<Record<string, string>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const fields = editing ? getProviderDescriptor(editing.provider).connectionFields : [];
+
   useEffect(() => {
     if (!open) {
       setEditing(null);
@@ -59,19 +70,30 @@ export function SecretManagerConnectionsDialog({
 
   const startAdd = () => setEditing({ ...emptyForm, id: crypto.randomUUID(), isNew: true });
   const startEdit = (c: SecretManagerConnection) =>
-    setEditing({ ...c, clientSecret: '', isNew: false });
+    setEditing({ ...c, provider: c.provider ?? 'rocketvault', clientSecret: '', isNew: false });
 
   const handleSave = async () => {
     if (!editing) return;
-    if (!editing.label.trim() || !editing.baseUrl.trim() || !editing.clientId.trim()) {
+    const descriptorFields = getProviderDescriptor(editing.provider).connectionFields;
+    const needsBaseUrl = descriptorFields.includes('baseUrl');
+    const needsClientId = descriptorFields.includes('clientId');
+    if (
+      !editing.label.trim() ||
+      (needsBaseUrl && !editing.baseUrl.trim()) ||
+      (needsClientId && !editing.clientId.trim())
+    ) {
       toast.error('Label, base URL and client ID are required.');
       return;
     }
-    if (!/^https?:\/\/[^/\s]+/i.test(editing.baseUrl.trim())) {
+    if (needsBaseUrl && !/^https?:\/\/[^/\s]+/i.test(editing.baseUrl.trim())) {
       toast.error('Base URL must start with http:// or https://.');
       return;
     }
-    if (editing.isNew && !editing.clientSecret.trim()) {
+    if (
+      descriptorFields.includes('clientSecret') &&
+      editing.isNew &&
+      !editing.clientSecret.trim()
+    ) {
       toast.error('A client secret is required when adding a new connection.');
       return;
     }
@@ -82,6 +104,7 @@ export function SecretManagerConnectionsDialog({
       clientId: editing.clientId.trim(),
       verifySsl: editing.verifySsl,
       allowInsecureHttp: editing.allowInsecureHttp,
+      provider: editing.provider,
     };
     try {
       await saveMutation.mutateAsync({
@@ -139,73 +162,107 @@ export function SecretManagerConnectionsDialog({
               />
             </div>
             <div>
-              <Label htmlFor='sm-base-url' className='text-sm'>
-                Base URL
+              <Label htmlFor='sm-provider' className='text-sm'>
+                Provider
               </Label>
-              <Input
-                id='sm-base-url'
-                value={editing.baseUrl}
-                onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })}
-                placeholder='https://vault.internal:8774'
-                className='h-8 text-sm'
-              />
-            </div>
-            <div>
-              <Label htmlFor='sm-client-id' className='text-sm'>
-                Client ID
-              </Label>
-              <Input
-                id='sm-client-id'
-                value={editing.clientId}
-                onChange={(e) => setEditing({ ...editing, clientId: e.target.value })}
-                className='h-8 text-sm'
-              />
-            </div>
-            <div>
-              <Label htmlFor='sm-client-secret' className='text-sm'>
-                Client Secret{' '}
-                {editing.isNew ? (
-                  <span>(required)</span>
-                ) : (
-                  <span className='text-muted-foreground'>
-                    (leave blank to keep the existing secret)
-                  </span>
-                )}
-              </Label>
-              <Input
-                id='sm-client-secret'
-                type='password'
-                value={editing.clientSecret}
-                onChange={(e) => setEditing({ ...editing, clientSecret: e.target.value })}
-                className='h-8 text-sm'
-                autoComplete='new-password'
-              />
-            </div>
-            <div className='flex items-center justify-between'>
-              <Label htmlFor='sm-verify-ssl' className='text-sm'>
-                Verify SSL
-              </Label>
-              <Switch
-                id='sm-verify-ssl'
-                checked={editing.verifySsl}
-                onCheckedChange={(checked) => setEditing({ ...editing, verifySsl: checked })}
-              />
-            </div>
-            <div className='flex items-center justify-between'>
-              <Label htmlFor='sm-allow-insecure' className='text-sm'>
-                Allow insecure HTTP{' '}
-                <span className='text-muted-foreground'>
-                  (permits non-loopback hosts over plain HTTP — loopback is always allowed)
-                </span>
-              </Label>
-              <Switch
-                id='sm-allow-insecure'
-                checked={editing.allowInsecureHttp}
-                onCheckedChange={(checked) =>
-                  setEditing({ ...editing, allowInsecureHttp: checked })
+              <Select
+                value={editing.provider}
+                onValueChange={(value) =>
+                  setEditing({ ...editing, provider: value as SecretProviderKind })
                 }
-              />
+                // A saved connection keeps its provider, so its stored credential stays valid.
+                disabled={!editing.isNew}
+              >
+                <SelectTrigger id='sm-provider' className='h-8 text-sm'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SECRET_PROVIDERS.map((p) => (
+                    <SelectItem key={p.kind} value={p.kind} disabled={!p.selectable}>
+                      {p.selectable ? p.label : `${p.label} (not available yet)`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            {fields.includes('baseUrl') && (
+              <div>
+                <Label htmlFor='sm-base-url' className='text-sm'>
+                  Base URL
+                </Label>
+                <Input
+                  id='sm-base-url'
+                  value={editing.baseUrl}
+                  onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })}
+                  placeholder='https://vault.internal:8774'
+                  className='h-8 text-sm'
+                />
+              </div>
+            )}
+            {fields.includes('clientId') && (
+              <div>
+                <Label htmlFor='sm-client-id' className='text-sm'>
+                  Client ID
+                </Label>
+                <Input
+                  id='sm-client-id'
+                  value={editing.clientId}
+                  onChange={(e) => setEditing({ ...editing, clientId: e.target.value })}
+                  className='h-8 text-sm'
+                />
+              </div>
+            )}
+            {fields.includes('clientSecret') && (
+              <div>
+                <Label htmlFor='sm-client-secret' className='text-sm'>
+                  Client Secret{' '}
+                  {editing.isNew ? (
+                    <span>(required)</span>
+                  ) : (
+                    <span className='text-muted-foreground'>
+                      (leave blank to keep the existing secret)
+                    </span>
+                  )}
+                </Label>
+                <Input
+                  id='sm-client-secret'
+                  type='password'
+                  value={editing.clientSecret}
+                  onChange={(e) => setEditing({ ...editing, clientSecret: e.target.value })}
+                  className='h-8 text-sm'
+                  autoComplete='new-password'
+                />
+              </div>
+            )}
+            {fields.includes('verifySsl') && (
+              <div className='flex items-center justify-between'>
+                <Label htmlFor='sm-verify-ssl' className='text-sm'>
+                  Verify SSL
+                </Label>
+                <Switch
+                  id='sm-verify-ssl'
+                  checked={editing.verifySsl}
+                  onCheckedChange={(checked) => setEditing({ ...editing, verifySsl: checked })}
+                />
+              </div>
+            )}
+            {fields.includes('allowInsecureHttp') && (
+              <div className='flex items-center justify-between'>
+                <Label htmlFor='sm-allow-insecure' className='text-sm'>
+                  Allow insecure HTTP{' '}
+                  <span className='text-muted-foreground'>
+                    (permits non-loopback hosts over plain HTTP — loopback is always allowed)
+                  </span>
+                </Label>
+                <Switch
+                  id='sm-allow-insecure'
+                  checked={editing.allowInsecureHttp}
+                  onCheckedChange={(checked) =>
+                    setEditing({ ...editing, allowInsecureHttp: checked })
+                  }
+                />
+              </div>
+            )}
             <div className='flex gap-2'>
               <Button variant='outline' size='sm' onClick={() => setEditing(null)}>
                 Cancel
