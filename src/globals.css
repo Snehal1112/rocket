@@ -226,7 +226,7 @@
     --accent: 210 3% 15%;
     --accent-foreground: 0 0% 82%;
     /* VSCode 2026 Dark: inputValidation.errorBorder #BE1100 */
-    --destructive: 5 100% 37%;
+    --destructive: 5 99% 37%;
     --destructive-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 10%;
@@ -243,7 +243,7 @@
     --chart-2: 151 42% 58%;
     --chart-3: 36 69% 69%;
     --chart-4: 275 50% 66%;
-    --chart-5: 5 100% 37%;
+    --chart-5: 5 99% 37%;
     /* VSCode 2026 Dark: gitDecoration tokens */
     --git-added: 137 47% 69%; /* #73c991 */
     --git-modified: 36 69% 69%; /* #e5ba7d */
