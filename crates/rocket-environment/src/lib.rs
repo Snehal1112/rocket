@@ -22,5 +22,6 @@ pub use secret_manager::{
 pub use secret_store::{NullSecretStore, SecretStore};
 pub use variable::Variable;
 pub use vault_secret_fetcher::{
-    NullVaultSecretFetcher, VaultCertificateMaterial, VaultCertificateSummary, VaultSecretFetcher,
+    NullVaultSecretFetcher, ProviderCapabilities, VaultCertificateMaterial,
+    VaultCertificateSummary, VaultSecretFetcher,
 };

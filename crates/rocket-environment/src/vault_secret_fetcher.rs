@@ -90,7 +90,19 @@ impl fmt::Debug for VaultCertificateMaterial {
     }
 }
 
-/// Fetches secret names and values from a RocketVault server.
+/// What a provider can do beyond listing and reading secrets. The default is
+/// all false, so a fetcher written before a capability existed never claims it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProviderCapabilities {
+    /// Can list and export client certificates (RocketVault only).
+    pub certificates: bool,
+    /// A new connection may be saved with no stored credential.
+    pub credential_optional: bool,
+    /// A single send fetches only the secrets the request references.
+    pub fetch_on_reference: bool,
+}
+
+/// Fetches secret names and values from a secret manager.
 ///
 /// Takes `connection`/`client_secret`/`vault_name` as call arguments rather
 /// than being constructed bound to one connection. One injected
@@ -99,7 +111,7 @@ impl fmt::Debug for VaultCertificateMaterial {
 /// (`crates/rocket-http/src/executor.rs`) serves every request regardless of
 /// target host — a single `ReqwestExecutor` handles requests to any URL, it
 /// is never rebuilt per host. This keeps `rocket-app` free of any
-/// RocketVault-specific concrete type, per this repo's DDD boundary rule
+/// provider-specific concrete type, per this repo's DDD boundary rule
 /// (rocket-app: trait-first, no infra concrete coupling). A per-connection
 /// struct would instead force whatever wires the trait object to either hold
 /// one fetcher instance per configured connection or reconstruct one on
@@ -156,6 +168,18 @@ pub trait VaultSecretFetcher: Send + Sync {
     /// deleted. The default does nothing, for fetchers that cache nothing.
     fn forget_connection(&self, _connection_id: &str) {}
 
+    /// What this provider supports for `connection`. The default is nothing.
+    fn capabilities(&self, _connection: &SecretManagerConnection) -> ProviderCapabilities {
+        ProviderCapabilities::default()
+    }
+
+    /// Provider-specific checks on a connection record, run on save before
+    /// anything is written. The default accepts. RocketVault's own rules live
+    /// in `SecretManagerService`, so only other providers override this.
+    fn validate_connection(&self, _connection: &SecretManagerConnection) -> DomainResult<()> {
+        Ok(())
+    }
+
     /// Exports the certificate named `certificate_name` in `format`. A PKCS12 export uses a
     /// fresh random password, returned with the bundle and never stored. Nothing is cached.
     /// The default refuses, like `list_certificates`.
@@ -183,6 +207,12 @@ pub struct NullVaultSecretFetcher;
 
 #[async_trait::async_trait]
 impl VaultSecretFetcher for NullVaultSecretFetcher {
+    fn validate_connection(&self, _connection: &SecretManagerConnection) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "no vault secret fetcher configured".to_string(),
+        ))
+    }
+
     async fn list_secrets(
         &self,
         _connection: &SecretManagerConnection,
@@ -434,5 +464,31 @@ mod tests {
             key_algorithm: "RSA-2048".into(),
         };
         assert_eq!(pem.format(), VaultCertificateFormat::Pem);
+    }
+
+    #[test]
+    fn default_capabilities_are_all_false() {
+        let fetcher = SecretsOnlyFetcher;
+        let caps = fetcher.capabilities(&dummy_connection());
+        assert_eq!(caps, ProviderCapabilities::default());
+        assert!(!caps.certificates);
+        assert!(!caps.credential_optional);
+        assert!(!caps.fetch_on_reference);
+    }
+
+    #[test]
+    fn default_validate_connection_accepts() {
+        let fetcher = SecretsOnlyFetcher;
+        assert!(fetcher.validate_connection(&dummy_connection()).is_ok());
+    }
+
+    #[test]
+    fn null_fetcher_still_fails_validate_connection() {
+        let err = NullVaultSecretFetcher
+            .validate_connection(&dummy_connection())
+            .expect_err("a null fetcher must never accept a connection");
+        assert!(err
+            .to_string()
+            .contains("no vault secret fetcher configured"));
     }
 }
