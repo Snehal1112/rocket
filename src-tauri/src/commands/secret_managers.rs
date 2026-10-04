@@ -8,6 +8,47 @@ use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+/// IPC shape of `ProviderConfig`. Kept apart from the persistence enum so the
+/// camelCase rename never reaches `secret_managers.yml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum ProviderConfigDto {
+    #[serde(rename = "azure", rename_all = "camelCase")]
+    Azure {
+        tenant_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        authority_host: Option<String>,
+    },
+}
+
+impl From<ProviderConfig> for ProviderConfigDto {
+    fn from(config: ProviderConfig) -> Self {
+        match config {
+            ProviderConfig::Azure {
+                tenant_id,
+                authority_host,
+            } => Self::Azure {
+                tenant_id,
+                authority_host,
+            },
+        }
+    }
+}
+
+impl From<ProviderConfigDto> for ProviderConfig {
+    fn from(dto: ProviderConfigDto) -> Self {
+        match dto {
+            ProviderConfigDto::Azure {
+                tenant_id,
+                authority_host,
+            } => Self::Azure {
+                tenant_id,
+                authority_host,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretManagerConnectionDto {
@@ -20,7 +61,7 @@ pub struct SecretManagerConnectionDto {
     #[serde(default)]
     pub provider: SecretProviderKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config: Option<ProviderConfig>,
+    pub config: Option<ProviderConfigDto>,
 }
 
 impl From<SecretManagerConnection> for SecretManagerConnectionDto {
@@ -33,7 +74,7 @@ impl From<SecretManagerConnection> for SecretManagerConnectionDto {
             verify_ssl: c.verify_ssl,
             allow_insecure_http: c.allow_insecure_http,
             provider: c.provider,
-            config: c.config,
+            config: c.config.map(Into::into),
         }
     }
 }
@@ -48,7 +89,7 @@ impl From<SecretManagerConnectionDto> for SecretManagerConnection {
             verify_ssl: dto.verify_ssl,
             allow_insecure_http: dto.allow_insecure_http,
             provider: dto.provider,
-            config: dto.config,
+            config: dto.config.map(Into::into),
         }
     }
 }
@@ -159,6 +200,62 @@ pub async fn list_vault_certificates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_dto_is_tagged_and_camel_case() {
+        let dto = ProviderConfigDto::from(ProviderConfig::Azure {
+            tenant_id: "tenant-1".to_string(),
+            authority_host: Some("http://127.0.0.1:1".to_string()),
+        });
+        let json = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "kind": "azure",
+                "tenantId": "tenant-1",
+                "authorityHost": "http://127.0.0.1:1"
+            })
+        );
+    }
+
+    #[test]
+    fn config_dto_omits_an_unset_authority_host() {
+        let dto = ProviderConfigDto::from(ProviderConfig::Azure {
+            tenant_id: "tenant-1".to_string(),
+            authority_host: None,
+        });
+        let json = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({ "kind": "azure", "tenantId": "tenant-1" })
+        );
+    }
+
+    #[test]
+    fn azure_connection_dto_round_trips_its_config() {
+        let json = serde_json::json!({
+            "id": "c1",
+            "label": "L",
+            "baseUrl": "https://v.vault.azure.net",
+            "clientId": "app",
+            "verifySsl": true,
+            "allowInsecureHttp": false,
+            "provider": "azure",
+            "config": { "kind": "azure", "tenantId": "t1" }
+        });
+        let dto: SecretManagerConnectionDto =
+            serde_json::from_value(json.clone()).expect("deserialize");
+        let conn: SecretManagerConnection = dto.into();
+        assert_eq!(
+            conn.config,
+            Some(ProviderConfig::Azure {
+                tenant_id: "t1".to_string(),
+                authority_host: None
+            })
+        );
+        let back = serde_json::to_value(SecretManagerConnectionDto::from(conn)).expect("serialize");
+        assert_eq!(back, json);
+    }
 
     #[test]
     fn vault_certificate_dto_is_camel_case_and_carries_no_material() {
