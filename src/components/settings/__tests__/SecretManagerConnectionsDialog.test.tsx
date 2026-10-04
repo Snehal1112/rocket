@@ -149,4 +149,95 @@ describe('SecretManagerConnectionsDialog', () => {
       'super-secret-value',
     );
   });
+
+  const azureConnection: tauriApi.SecretManagerConnection = {
+    id: 'az-1',
+    label: 'Prod Azure',
+    baseUrl: 'https://prod-kv.vault.azure.net',
+    clientId: 'app-id',
+    verifySsl: true,
+    allowInsecureHttp: false,
+    provider: 'azure',
+    config: { kind: 'azure', tenantId: 'tenant-1' },
+  };
+
+  async function openAzureEdit(connection = azureConnection) {
+    vi.mocked(tauriApi.listSecretManagerConnections).mockResolvedValue([connection]);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /edit connection/i }));
+    return user;
+  }
+
+  it('shows the Azure fields and hides the TLS switches', async () => {
+    await openAzureEdit();
+
+    expect(screen.getByLabelText(/vault url/i)).toHaveValue('https://prod-kv.vault.azure.net');
+    expect(screen.getByLabelText(/tenant id/i)).toHaveValue('tenant-1');
+    expect(screen.getByLabelText(/client id/i)).toHaveValue('app-id');
+    expect(screen.getByLabelText(/client secret/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/verify ssl/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/allow insecure http/i)).not.toBeInTheDocument();
+  });
+
+  it('saves an edited Azure connection with its config', async () => {
+    const user = await openAzureEdit();
+    const tenant = screen.getByLabelText(/tenant id/i);
+    await user.clear(tenant);
+    await user.type(tenant, 'tenant-2');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(tauriApi.saveSecretManagerConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'azure',
+        baseUrl: 'https://prod-kv.vault.azure.net',
+        config: { kind: 'azure', tenantId: 'tenant-2' },
+      }),
+      undefined,
+    );
+  });
+
+  it('keeps a stored authority host that the form has no field for', async () => {
+    const user = await openAzureEdit({
+      ...azureConnection,
+      config: { kind: 'azure', tenantId: 'tenant-1', authorityHost: 'http://127.0.0.1:9' },
+    });
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(tauriApi.saveSecretManagerConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: { kind: 'azure', tenantId: 'tenant-1', authorityHost: 'http://127.0.0.1:9' },
+      }),
+      undefined,
+    );
+  });
+
+  it('does not save an Azure connection with a blank tenant', async () => {
+    const user = await openAzureEdit();
+    await user.clear(screen.getByLabelText(/tenant id/i));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(tauriApi.saveSecretManagerConnection).not.toHaveBeenCalled();
+  });
+
+  it('saves a RocketVault edit without a config key', async () => {
+    vi.mocked(tauriApi.listSecretManagerConnections).mockResolvedValue([
+      {
+        id: 'conn-1',
+        label: 'Prod',
+        baseUrl: 'https://vault.internal:8774',
+        clientId: 'rocketapi',
+        verifySsl: true,
+        allowInsecureHttp: false,
+      },
+    ]);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /edit connection/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    const saved = vi.mocked(tauriApi.saveSecretManagerConnection).mock.calls[0]?.[0];
+    expect(saved).toBeDefined();
+    expect(saved).not.toHaveProperty('config');
+  });
 });
