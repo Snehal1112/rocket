@@ -5,6 +5,44 @@ fn default_true() -> bool {
     true
 }
 
+/// Which kind of secret manager a connection talks to. Rows written before
+/// providers existed have no `provider` key and load as `RocketVault`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretProviderKind {
+    #[default]
+    RocketVault,
+    Azure,
+    Aws,
+    Hashicorp,
+    Gcp,
+}
+
+impl SecretProviderKind {
+    /// True for the value a row gets when the key is absent. Used to keep
+    /// RocketVault rows byte-identical to the format older builds read.
+    pub fn is_default(&self) -> bool {
+        *self == Self::RocketVault
+    }
+
+    /// The name shown to users and used in error messages.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::RocketVault => "RocketVault",
+            Self::Azure => "Azure Key Vault",
+            Self::Aws => "AWS Secrets Manager",
+            Self::Hashicorp => "HashiCorp Vault",
+            Self::Gcp => "Google Secret Manager",
+        }
+    }
+}
+
+/// Typed, non-secret settings for one provider (tenant, region, project and
+/// so on). Each provider's own spec adds its variant. The foundation has
+/// none, so no value of this type can exist yet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ProviderConfig {}
+
 /// An app-level, reusable connection to a RocketVault server. Persisted
 /// separately from any workspace/environment (see Plan 04's
 /// `FsSecretManagerRepo`) — the actual `client_secret` never lives on this
@@ -20,6 +58,10 @@ pub struct SecretManagerConnection {
     pub verify_ssl: bool,
     #[serde(default)]
     pub allow_insecure_http: bool,
+    #[serde(default, skip_serializing_if = "SecretProviderKind::is_default")]
+    pub provider: SecretProviderKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ProviderConfig>,
 }
 
 /// Persistence boundary for `SecretManagerConnection`. No I/O in this crate —
@@ -33,7 +75,7 @@ pub trait SecretManagerRepository: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{SecretManagerConnection, SecretManagerRepository};
+    use super::{SecretManagerConnection, SecretManagerRepository, SecretProviderKind};
     use rocket_shared::error::DomainResult;
     use std::sync::Mutex;
 
@@ -46,6 +88,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: SecretProviderKind::RocketVault,
+            config: None,
         };
         let json = serde_json::to_string(&c).expect("serialize SecretManagerConnection");
         // Deliberately NOT camelCase — plain field names, see Global Constraints.
@@ -106,12 +150,74 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: SecretProviderKind::RocketVault,
+            config: None,
         };
         repo.save(&c).expect("save connection");
         assert_eq!(repo.get("conn-1").expect("get connection"), Some(c.clone()));
         assert_eq!(repo.list().expect("list connections").len(), 1);
         repo.delete("conn-1").expect("delete connection");
         assert_eq!(repo.get("conn-1").expect("get after delete"), None);
+    }
+
+    #[test]
+    fn provider_defaults_to_rocketvault_when_absent_from_yaml() {
+        let yaml = "id: c1\nlabel: Prod\nbase_url: https://v:8774\nclient_id: rocketapi\n";
+        let c: SecretManagerConnection = serde_yaml::from_str(yaml).expect("old row parses");
+        assert_eq!(c.provider, SecretProviderKind::RocketVault);
+        assert!(c.config.is_none());
+    }
+
+    #[test]
+    fn rocketvault_connection_serializes_without_provider_or_config() {
+        let c = SecretManagerConnection {
+            id: "c1".to_string(),
+            label: "Prod".to_string(),
+            base_url: "https://v:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: SecretProviderKind::RocketVault,
+            config: None,
+        };
+        let yaml = serde_yaml::to_string(&c).expect("serialize");
+        assert!(!yaml.contains("provider"), "an older build must read this: {yaml}");
+        assert!(!yaml.contains("config"), "an older build must read this: {yaml}");
+    }
+
+    #[test]
+    fn non_default_provider_is_serialized_lowercase() {
+        let c = SecretManagerConnection {
+            id: "c2".to_string(),
+            label: "Azure".to_string(),
+            base_url: String::new(),
+            client_id: String::new(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: SecretProviderKind::Azure,
+            config: None,
+        };
+        let yaml = serde_yaml::to_string(&c).expect("serialize");
+        assert!(yaml.contains("provider: azure"), "got: {yaml}");
+        let back: SecretManagerConnection = serde_yaml::from_str(&yaml).expect("round trip");
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn unknown_provider_is_rejected_and_named() {
+        let yaml = "id: c1\nlabel: X\nprovider: bogus\n";
+        let err = serde_yaml::from_str::<SecretManagerConnection>(yaml)
+            .expect_err("unknown provider must not load");
+        assert!(err.to_string().contains("bogus"), "got: {err}");
+    }
+
+    #[test]
+    fn provider_display_names() {
+        assert_eq!(SecretProviderKind::RocketVault.display_name(), "RocketVault");
+        assert_eq!(SecretProviderKind::Azure.display_name(), "Azure Key Vault");
+        assert_eq!(SecretProviderKind::Aws.display_name(), "AWS Secrets Manager");
+        assert_eq!(SecretProviderKind::Hashicorp.display_name(), "HashiCorp Vault");
+        assert_eq!(SecretProviderKind::Gcp.display_name(), "Google Secret Manager");
     }
 
     #[test]

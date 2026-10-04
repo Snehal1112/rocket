@@ -551,6 +551,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: true, // mock server is http://127.0.0.1:<port>
+            provider: Default::default(),
+            config: None,
         }
     }
 

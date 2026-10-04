@@ -2370,6 +2370,8 @@ mod tests {
             client_id: "rocketapi".to_string(),
             verify_ssl: true,
             allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
         }
     }
 
