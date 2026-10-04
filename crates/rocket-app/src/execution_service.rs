@@ -24,6 +24,12 @@ use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// An external secret binding whose values could not be fetched.
+struct UnresolvedBinding {
+    alias: String,
+    error: rocket_shared::error::DomainError,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecuteRequestInput {
@@ -402,16 +408,40 @@ impl RequestExecutionService {
         collection: Option<&str>,
         environment_name: Option<&str>,
     ) -> DomainResult<std::collections::HashMap<String, String>> {
+        let (result, failures) = self
+            .resolve_external_secrets_partial(collection, environment_name)
+            .await;
+        match failures.into_iter().next() {
+            Some(failure) => Err(failure.error),
+            None => Ok(result),
+        }
+    }
+
+    /// Like `resolve_external_secrets`, but a binding that fails to resolve
+    /// is reported in the second value instead of aborting the call. The
+    /// first failing secret of a binding ends that binding, because its
+    /// connection is the likely cause of every later failure. Bindings after
+    /// it are still resolved. The caller decides whether the failure matters
+    /// for the request in hand.
+    async fn resolve_external_secrets_partial(
+        &self,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+    ) -> (
+        std::collections::HashMap<String, String>,
+        Vec<UnresolvedBinding>,
+    ) {
         let mut result = std::collections::HashMap::new();
+        let mut failures = Vec::new();
 
         let Some(name) = environment_name else {
-            return Ok(result);
+            return (result, failures);
         };
 
         let Ok(env) = self.regular_env_repo(collection).get(name) else {
-            return Ok(result);
+            return (result, failures);
         };
-        for binding in &env.external_secrets {
+        'bindings: for binding in &env.external_secrets {
             for secret_ref in &binding.secret_names {
                 let value = match crate::vault_secret_resolution::resolve_vault_secret_value(
                     self.secret_manager_repo.as_ref(),
@@ -431,7 +461,13 @@ impl RequestExecutionService {
                     // mirroring how a deleted-from-the-vault secret (fetcher
                     // Ok(None)) is already handled just below.
                     Err(rocket_shared::error::DomainError::NotFound(_)) => continue,
-                    Err(err) => return Err(err),
+                    Err(error) => {
+                        failures.push(UnresolvedBinding {
+                            alias: binding.alias.clone(),
+                            error,
+                        });
+                        continue 'bindings;
+                    }
                 };
 
                 if let Some(value) = value {
@@ -440,7 +476,63 @@ impl RequestExecutionService {
             }
         }
 
-        Ok(result)
+        (result, failures)
+    }
+
+    /// Whether anything this send can read refers to a secret of `alias`:
+    /// the request input (URL, headers, body, auth, scripts and so on) or a
+    /// variable value from any scope. The match is the plain text `alias.`,
+    /// so it covers `{{alias.name}}` and `getSecretVar('alias.name')`. It can
+    /// over-match, and then the send is refused as before, never the reverse.
+    fn references_alias(
+        &self,
+        input: &ExecuteRequestInput,
+        alias: &str,
+        resolved: &std::collections::HashMap<String, String>,
+    ) -> bool {
+        let needle = format!("{alias}.");
+        // A full-line `//` comment in a script is not a use, so a disabled
+        // `getSecretVar` line does not count. The scripts are checked line by
+        // line and left out of the whole-input check below.
+        let scripts = [
+            &input.pre_request_script,
+            &input.post_response_script,
+            &input.tests_script,
+        ];
+        if scripts
+            .iter()
+            .filter_map(|script| script.as_deref())
+            .any(|script| {
+                script
+                    .lines()
+                    .any(|line| !line.trim_start().starts_with("//") && line.contains(&needle))
+            })
+        {
+            return true;
+        }
+        let mut rest = input.clone();
+        rest.pre_request_script = None;
+        rest.post_response_script = None;
+        rest.tests_script = None;
+        if serde_json::to_string(&rest).map_or(true, |text| text.contains(&needle)) {
+            return true;
+        }
+        let ctx = self.build_variable_scopes(
+            input.global_env_name.as_deref(),
+            input.collection.as_deref(),
+            input.environment_name.as_deref(),
+            input.request_path.as_deref(),
+            resolved,
+        );
+        [
+            &ctx.global_env,
+            &ctx.collection,
+            &ctx.env,
+            &ctx.folder,
+            &ctx.request,
+        ]
+        .iter()
+        .any(|scope| scope.values().any(|value| value.contains(&needle)))
     }
 
     /// Builds a scope-separated `VariableContext` from all backend-accessible
@@ -1687,18 +1779,29 @@ impl RequestExecutionService {
     }
 
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
-        // Fetches must succeed before any variable resolution or dispatch runs —
-        // a configured external secret that fails to resolve live is a hard
-        // stop, not a silent empty-string substitution (spec §2/§4.6). The `?`
-        // here is the entire mechanism: an Err from resolve_external_secrets
-        // propagates straight out of execute() before begin_phases (and
-        // therefore before send_request) ever runs.
-        let external_secrets = self
-            .resolve_external_secrets(
+        // A configured external secret that fails to resolve live is a hard
+        // stop, not a silent empty-string substitution (spec §2/§4.6) — but
+        // only when this send refers to it. A binding the request never
+        // mentions must not block it, so an unreachable or rejected vault
+        // cannot stop unrelated requests in the same environment. An Err
+        // returned here leaves execute() before begin_phases (and therefore
+        // before send_request) ever runs.
+        let (external_secrets, failures) = self
+            .resolve_external_secrets_partial(
                 input.collection.as_deref(),
                 input.environment_name.as_deref(),
             )
-            .await?;
+            .await;
+        for failure in failures {
+            if self.references_alias(&input, &failure.alias, &external_secrets) {
+                return Err(failure.error);
+            }
+            tracing::warn!(
+                alias = %failure.alias,
+                error = %failure.error,
+                "vault secrets for an unused binding could not be fetched, sending without them"
+            );
+        }
         self.execute_with_external_secrets(input, &external_secrets)
             .await
     }
@@ -2837,6 +2940,87 @@ mod tests {
              this is the 'never a silent empty-string substitution' / hard-stop-before-dispatch \
              requirement from spec §2/§4.6"
         );
+    }
+
+    #[tokio::test]
+    async fn execute_sends_when_the_failing_binding_is_not_referenced() {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Error("vault rejected the credentials".to_string()),
+        )]));
+
+        let executor = Arc::new(CallCountingExecutor::new(200));
+        let exec_arc = Arc::clone(&executor);
+
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            executor,
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        let result = svc
+            .execute(sample_input("https://api.example.com/health", Some("prod")))
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "a request that never mentions the failing binding must still send"
+        );
+        assert_eq!(exec_arc.call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn execute_ignores_a_commented_out_secret_reference_in_a_script() {
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Error("vault rejected the credentials".to_string()),
+        )]));
+        let build = |fetcher: Arc<FakeVaultFetcher>| {
+            let executor = Arc::new(CallCountingExecutor::new(200));
+            let counter = Arc::clone(&executor);
+            let svc = RequestExecutionService::new(
+                Box::new(MockEnvRepo::with_env(env.clone())),
+                executor,
+                Box::new(MockHistoryRepo::new()),
+                Box::new(StubCollectionRepo::empty()),
+                Box::new(NullCookieRepo),
+                Box::new(NullEventPublisher),
+                Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                    "conn-1",
+                ))),
+                Arc::new(FakeSecretStore),
+                fetcher,
+            );
+            (svc, counter)
+        };
+
+        let (svc, counter) = build(Arc::clone(&fetcher));
+        let mut commented = sample_input("https://api.example.com/health", Some("prod"));
+        commented.post_response_script =
+            Some("  // rok.getSecretVar(\"payments.apiKey\")\nconsole.log(1)".to_string());
+        assert!(svc.execute(commented).await.is_ok());
+        assert_eq!(counter.call_count(), 1);
+
+        let (svc, counter) = build(fetcher);
+        let mut live = sample_input("https://api.example.com/health", Some("prod"));
+        live.post_response_script = Some("rok.getSecretVar(\"payments.apiKey\")".to_string());
+        assert!(svc.execute(live).await.is_err());
+        assert_eq!(counter.call_count(), 0);
     }
 
     #[tokio::test]
