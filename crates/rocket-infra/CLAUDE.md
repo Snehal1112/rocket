@@ -42,7 +42,7 @@ cargo check -p rocket-infra
 
 These are `pub` in `lib.rs` but are serialization-layer details — callers outside this crate should not depend on them directly.
 
-- `opencollection` — serde structs mirroring the OpenCollection YAML schema (`OcCollection`, `OcHttpRequest`, `OcFolderInfo`, etc.). Used only for serialization; domain types are used everywhere else. Also contains GraphQL, gRPC, and WebSocket structs for schema completeness, but the repo only round-trips `OcHttpRequest` for individual request files — other protocol types land as `OpaqueProtocolItem` in the domain layer.
+- `opencollection` — serde structs mirroring the OpenCollection YAML schema (`OcCollection`, `OcHttpRequest`, `OcFolderInfo`, etc.). Used only for serialization; domain types are used everywhere else. Also contains GraphQL, gRPC, and WebSocket structs for schema completeness, but the repo round-trips `OcHttpRequest` and `OcGraphQLRequest` for individual request files — only gRPC and WebSocket land as `OpaqueProtocolItem` in the domain layer.
 - `oc_conversions` — bidirectional `From` impls between domain types and `Oc*` serde structs. The boundary layer between persistence and domain.
 - `migration` — detects and converts legacy JSON collections to OpenCollection YAML on first access; idempotent.
 

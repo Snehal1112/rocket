@@ -130,43 +130,8 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
         auth: persisted_oc_auth(req.auth.clone()),
     };
 
-    let mut scripts = Vec::new();
-    if let Some(ref code) = req.pre_request_script {
-        scripts.push(OcScript {
-            script_type: "before-request".into(),
-            code: code.trim_end_matches('\n').to_string(),
-        });
-    }
-    if let Some(ref code) = req.post_response_script {
-        scripts.push(OcScript {
-            script_type: "after-response".into(),
-            code: code.trim_end_matches('\n').to_string(),
-        });
-    }
-    if let Some(ref code) = req.tests {
-        scripts.push(OcScript {
-            script_type: "tests".into(),
-            code: code.trim_end_matches('\n').to_string(),
-        });
-    }
-
-    let actions: Vec<OcAction> = req
-        .actions
-        .iter()
-        .map(|a| OcAction::SetVariable {
-            description: a.description.clone(),
-            phase: a.phase.clone(),
-            selector: OcActionSelector {
-                expression: a.selector.expression.clone(),
-                method: a.selector.method.clone(),
-            },
-            variable: OcActionVariable {
-                name: a.variable.name.clone(),
-                scope: a.variable.scope.clone(),
-            },
-            disabled: a.disabled,
-        })
-        .collect();
+    let scripts = scripts_to_oc(&req.pre_request_script, &req.post_response_script, &req.tests);
+    let actions = actions_to_oc(&req.actions);
 
     let has_runtime = !scripts.is_empty()
         || !req.assertions.is_empty()
@@ -232,13 +197,28 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
 fn extract_scripts(
     runtime: &Option<OcHttpRequestRuntime>,
 ) -> (Option<String>, Option<String>, Option<String>) {
-    let Some(rt) = runtime else {
-        return (None, None, None);
-    };
+    match runtime {
+        Some(rt) => scripts_from_oc(&rt.scripts),
+        None => (None, None, None),
+    }
+}
+
+/// Extract action-set-variable entries from runtime.
+fn extract_actions(runtime: &Option<OcHttpRequestRuntime>) -> Vec<ActionSetVariable> {
+    match runtime {
+        Some(rt) => actions_from_oc(&rt.actions),
+        None => Vec::new(),
+    }
+}
+
+/// Splits a `runtime.scripts` list into the before-request, after-response and tests scripts.
+pub(super) fn scripts_from_oc(
+    scripts: &[OcScript],
+) -> (Option<String>, Option<String>, Option<String>) {
     let mut pre = None;
     let mut post = None;
     let mut tests = None;
-    for script in &rt.scripts {
+    for script in scripts {
         match script.script_type.as_str() {
             "before-request" => pre = Some(script.code.clone()),
             "after-response" => post = Some(script.code.clone()),
@@ -249,10 +229,51 @@ fn extract_scripts(
     (pre, post, tests)
 }
 
-/// Extract action-set-variable entries from runtime.
-fn extract_actions(runtime: &Option<OcHttpRequestRuntime>) -> Vec<ActionSetVariable> {
-    let Some(rt) = runtime else { return Vec::new() };
-    rt.actions
+/// Builds the `runtime.scripts` list from the three domain scripts.
+pub(super) fn scripts_to_oc(
+    pre: &Option<String>,
+    post: &Option<String>,
+    tests: &Option<String>,
+) -> Vec<OcScript> {
+    let mut scripts = Vec::new();
+    for (script_type, code) in [
+        ("before-request", pre),
+        ("after-response", post),
+        ("tests", tests),
+    ] {
+        if let Some(code) = code {
+            scripts.push(OcScript {
+                script_type: script_type.into(),
+                code: code.trim_end_matches('\n').to_string(),
+            });
+        }
+    }
+    scripts
+}
+
+/// Converts domain actions to `runtime.actions`.
+pub(super) fn actions_to_oc(actions: &[ActionSetVariable]) -> Vec<OcAction> {
+    actions
+        .iter()
+        .map(|a| OcAction::SetVariable {
+            description: a.description.clone(),
+            phase: a.phase.clone(),
+            selector: OcActionSelector {
+                expression: a.selector.expression.clone(),
+                method: a.selector.method.clone(),
+            },
+            variable: OcActionVariable {
+                name: a.variable.name.clone(),
+                scope: a.variable.scope.clone(),
+            },
+            disabled: a.disabled,
+        })
+        .collect()
+}
+
+/// Converts `runtime.actions` to domain actions.
+pub(super) fn actions_from_oc(actions: &[OcAction]) -> Vec<ActionSetVariable> {
+    actions
         .iter()
         .map(|a| match a {
             OcAction::SetVariable {

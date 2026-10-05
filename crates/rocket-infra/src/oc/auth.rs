@@ -257,6 +257,8 @@ pub struct OcGraphQLRequestSettings {
     pub follow_redirects: Option<InheritableBoolean>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<InheritableNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_ssl: Option<InheritableBoolean>,
 }
 
 /// Proxy auth for OC file format (schema uses disabled + username + password).

@@ -1,7 +1,9 @@
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection::Collection;
+use crate::graphql_request::GraphQlRequest;
 use crate::request::Request;
+use crate::request_kind::RequestKind;
 use crate::settings::{CollectionSettings, CollectionVariable};
 use crate::summary::CollectionSummary;
 
@@ -44,6 +46,30 @@ pub trait CollectionRepository: Send + Sync {
 
     /// Delete a request file.
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()>;
+
+    /// Read one GraphQL request file. Repositories without GraphQL support keep this default.
+    fn get_graphql_request(&self, _collection: &str, _path: &str) -> DomainResult<GraphQlRequest> {
+        Err(DomainError::InvalidInput(
+            "this repository does not support GraphQL requests".into(),
+        ))
+    }
+
+    /// Save a GraphQL request. Returns the actual filename written, like `save_request`.
+    fn save_graphql_request(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &GraphQlRequest,
+    ) -> DomainResult<String> {
+        Err(DomainError::InvalidInput(
+            "this repository does not support GraphQL requests".into(),
+        ))
+    }
+
+    /// Which protocol the request file at `path` holds. Repositories that only know HTTP keep this default.
+    fn request_kind(&self, _collection: &str, _path: &str) -> DomainResult<RequestKind> {
+        Ok(RequestKind::Http)
+    }
 
     /// Create a folder within a collection.
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()>;

@@ -64,7 +64,7 @@ pub struct OcGraphQLRequestDetails {
 }
 
 /// GraphQL request runtime.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OcGraphQLRequestRuntime {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<OcVariable>,
@@ -81,6 +81,9 @@ pub struct OcGraphQLRequestRuntime {
 /// Complete GraphQL request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcGraphQLRequest {
+    /// Stable identity for tab deduplication across reloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
     pub info: OcGraphQLRequestInfo,
     pub graphql: OcGraphQLRequestDetails,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -989,6 +989,8 @@ fn walk_folder<'a>(
                 };
                 walk_folder(sub, &next, out);
             }
+            // Contracts describe HTTP request signatures only.
+            CollectionItem::GraphQl(_) => {}
             CollectionItem::OpaqueItem(_) => {}
             // Summary items carry no file content; skip for contract audit.
             CollectionItem::Summary(_) => {}

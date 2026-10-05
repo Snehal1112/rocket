@@ -30,6 +30,8 @@ const KNOWN_DEFERRED: &[&str] = &[
     "HttpRequest.uid",
     "FolderInfo.uid",
     "HttpRequestSettings.verifySsl",
+    "GraphQLRequest.uid",
+    "GraphQLRequestSettings.verifySsl",
     "HttpRequestRuntime.auth",
     "Variable.initial",
     "OAuth2Settings.verifySsl",
@@ -740,13 +742,21 @@ fn written_collection_files_only_use_schema_keys() {
     let users = col.root.find_folder("users").expect("users folder");
     let mut protocols = Vec::new();
     for item in &users.items {
-        if let CollectionItem::OpaqueItem(o) = item {
-            protocols.push(o.protocol.clone());
-            match o.protocol.as_str() {
-                "graphql" => check_graphql_request(&mut v, &o.name, &o.raw),
-                "websocket" => check_websocket_request(&mut v, &o.name, &o.raw),
-                other => panic!("unexpected protocol {other}"),
+        match item {
+            CollectionItem::GraphQl(g) => {
+                protocols.push("graphql".to_string());
+                let raw = serde_yaml::to_value(crate::conversions::graphql_to_oc(g))
+                    .expect("serialize GraphQL request");
+                check_graphql_request(&mut v, &g.name, &raw);
             }
+            CollectionItem::OpaqueItem(o) => {
+                protocols.push(o.protocol.clone());
+                match o.protocol.as_str() {
+                    "websocket" => check_websocket_request(&mut v, &o.name, &o.raw),
+                    other => panic!("unexpected protocol {other}"),
+                }
+            }
+            _ => {}
         }
     }
     protocols.sort();
@@ -755,6 +765,29 @@ fn written_collection_files_only_use_schema_keys() {
         vec!["graphql", "websocket"],
         "non-HTTP fixtures must load"
     );
+    assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
+}
+
+#[test]
+fn saved_graphql_request_only_uses_schema_keys_besides_deferred() {
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    let mut g = rocket_collection::GraphQlRequest::new("Q", "https://x/graphql").with_query("{ a }");
+    g.body.variables = Some("{}".into());
+    g.settings = Some(RequestSettings {
+        encode_url: None,
+        timeout: Some(RequestSettingValue::Value(3000.0)),
+        follow_redirects: None,
+        max_redirects: None,
+        verify_ssl: Some(RequestSettingValue::Value(false)),
+    });
+    g.pre_request_script = Some("console.log(1)".into());
+    let rel = repo
+        .save_graphql_request("api", "q.yml", &g)
+        .expect("save graphql request");
+
+    let mut v = Violations::default();
+    check_graphql_request(&mut v, &rel, &read_yaml(&dir.path().join("api").join(&rel)));
     assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
 }
 

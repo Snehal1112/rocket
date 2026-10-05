@@ -2,6 +2,7 @@ mod auth;
 mod body;
 mod environment;
 mod folder;
+mod graphql;
 mod header;
 mod param;
 mod request;
@@ -26,6 +27,8 @@ pub use folder::{
     collection_to_oc_collection, folder_to_oc_folder, oc_collection_to_collection,
     oc_folder_to_folder, oc_item_to_collection_item,
 };
+#[allow(unused_imports)]
+pub use graphql::{graphql_to_oc, oc_graphql_to_domain};
 #[allow(unused_imports)]
 pub use header::*;
 #[allow(unused_imports)]

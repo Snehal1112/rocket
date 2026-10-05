@@ -5,11 +5,12 @@ use rocket_collection::settings::{CollectionSettings, CollectionVariable, Sandbo
 use rocket_shared::types::{Auth, Header};
 
 use super::auth::persisted_oc_auth;
+use super::graphql::{graphql_to_oc, oc_graphql_to_domain};
 use super::request::{oc_http_request_to_request, request_to_oc_http_request};
 
 /// Converts one parsed OpenCollection item into a domain tree item.
-/// GraphQL, gRPC and WebSocket items become `OpaqueItem`s that hold their raw
-/// YAML, so nothing is lost on load. Script files are not tree items in the
+/// GraphQL becomes a typed `GraphQl` item. gRPC and WebSocket items become
+/// `OpaqueItem`s that hold their raw YAML, so nothing is lost on load. Script files are not tree items in the
 /// domain model, so they return `None`.
 pub fn oc_item_to_collection_item(item: OcItem) -> Option<CollectionItem> {
     match item {
@@ -18,10 +19,7 @@ pub fn oc_item_to_collection_item(item: OcItem) -> Option<CollectionItem> {
         ))),
         OcItem::Folder(f) => Some(CollectionItem::Folder(oc_folder_to_folder(f))),
         OcItem::ScriptFile(_) => None,
-        OcItem::GraphQL(gql) => {
-            let name = gql.info.name.clone();
-            opaque_item("graphql", name, &OcItem::GraphQL(gql))
-        }
+        OcItem::GraphQL(gql) => Some(CollectionItem::GraphQl(Box::new(oc_graphql_to_domain(gql)))),
         OcItem::Grpc(grpc) => {
             let name = grpc.info.name.clone();
             opaque_item("grpc", name, &OcItem::Grpc(grpc))
@@ -78,6 +76,7 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
             CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
+            CollectionItem::GraphQl(g) => Some(OcItem::GraphQL(graphql_to_oc(&g))),
             CollectionItem::OpaqueItem(opaque) => Some(
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
@@ -188,6 +187,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
             CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
+            CollectionItem::GraphQl(g) => Some(OcItem::GraphQL(graphql_to_oc(&g))),
             CollectionItem::OpaqueItem(opaque) => Some(
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {

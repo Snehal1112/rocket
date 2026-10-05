@@ -5,7 +5,7 @@ use dashmap::DashMap;
 
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    Request,
+    GraphQlRequest, Request, RequestKind,
 };
 use rocket_shared::error::DomainResult;
 
@@ -82,6 +82,23 @@ impl CollectionRepository for SharedPathCollectionRepo {
 
     fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.repo().delete_request(collection, path)
+    }
+
+    fn get_graphql_request(&self, collection: &str, path: &str) -> DomainResult<GraphQlRequest> {
+        self.repo().get_graphql_request(collection, path)
+    }
+
+    fn save_graphql_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GraphQlRequest,
+    ) -> DomainResult<String> {
+        self.repo().save_graphql_request(collection, path, request)
+    }
+
+    fn request_kind(&self, collection: &str, path: &str) -> DomainResult<RequestKind> {
+        self.repo().request_kind(collection, path)
     }
 
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {

@@ -1,3 +1,4 @@
+use crate::graphql_request::GraphQlRequest;
 use crate::request::Request;
 use crate::request_summary::RequestSummary;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,10 @@ pub enum CollectionItem {
     Request(Box<Request>),
     #[serde(rename = "folder")]
     Folder(Folder),
-    /// Raw YAML for non-HTTP protocols (GraphQL, gRPC, WebSocket).
+    /// A GraphQL request. Boxed for the same reason `Request` is.
+    #[serde(rename = "graphql")]
+    GraphQl(Box<GraphQlRequest>),
+    /// Raw YAML for protocols that have no typed variant yet (gRPC, WebSocket).
     #[serde(rename = "opaque")]
     OpaqueItem(OpaqueProtocolItem),
     /// Lightweight request placeholder for sidebar loads (no body/auth).
@@ -90,6 +94,7 @@ impl Folder {
             .iter()
             .map(|item| match item {
                 CollectionItem::Request(_) => 1,
+                CollectionItem::GraphQl(_) => 1,
                 CollectionItem::Summary(_) => 1, // one summary = one request on disk
                 CollectionItem::Folder(f) => f.request_count(),
                 CollectionItem::OpaqueItem(_) => 0,
@@ -141,6 +146,21 @@ mod tests {
     use super::*;
     use crate::request::Request;
     use rocket_shared::types::HttpMethod;
+
+    #[test]
+    fn graphql_items_count_as_requests_and_use_the_graphql_tag() {
+        use crate::graphql_request::GraphQlRequest;
+        let mut folder = Folder::new("api");
+        folder.add_request(Request::new("A", HttpMethod::Get, "/a"));
+        folder.items.push(CollectionItem::GraphQl(Box::new(GraphQlRequest::new(
+            "Q",
+            "https://x/graphql",
+        ))));
+        assert_eq!(folder.request_count(), 2);
+        let v = serde_json::to_value(&folder.items[1]).expect("serialize");
+        assert_eq!(v["type"], "graphql");
+        assert_eq!(v["name"], "Q");
+    }
 
     #[test]
     fn empty_folder() {

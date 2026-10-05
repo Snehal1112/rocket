@@ -30,8 +30,9 @@ Collection (aggregate root)
 Folder
 └── items: Vec<CollectionItem>
     ├── Request           — a saved HTTP request definition
+    ├── GraphQl           — a saved GraphQL request
     ├── Folder            — nested subfolder
-    └── OpaqueProtocolItem — raw YAML passthrough for GraphQL/gRPC/WebSocket
+    └── OpaqueProtocolItem — raw YAML passthrough for gRPC/WebSocket
 
 CollectionSummary         — lightweight listing type (no full tree)
 ```
@@ -46,7 +47,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **Serde backward compat:** New optional fields on `Request` must have `#[serde(default)]` so old JSON files without those fields still deserialize correctly.
 - **`request_count()`** on `Folder` is recursive; on `Collection` it delegates to `root`.
 - **`find_request` / `find_folder`** on `Folder` are non-recursive — they search the current level only. Use `subfolder_names()` to get all folder names at current level.
-- **`CollectionItem` serde tag:** Uses `#[serde(tag = "type")]` with values `"request"`, `"folder"`, `"opaque"`. The `type` field appears in serialized JSON.
+- **`CollectionItem` serde tag:** Uses `#[serde(tag = "type")]` with values `"request"`, `"folder"`, `"graphql"`, `"opaque"`. The `type` field appears in serialized JSON.
 - **`OpaqueProtocolItem.raw`** holds a `serde_yaml::Value` for lossless roundtrip of GraphQL/gRPC/WebSocket items — do not parse or transform it.
 - **`CollectionSummary.ref_type`** defaults to `"embedded"`; `"external"` is set by the workspace layer for collections referenced by path rather than owned.
 - **`save_request`** on the repository returns the actual filename written, which may differ from `path` when the infra layer generates a unique name to avoid collisions.

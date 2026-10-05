@@ -87,7 +87,11 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                 collect_items(sub, &sub_prefix, out);
             }
             // Non-HTTP protocols and sidebar summaries are not executable.
-            CollectionItem::OpaqueItem(_) | CollectionItem::Summary(_) => {}
+            // GraphQL becomes a run step in Plan 06; until then it, the other
+            // protocols and sidebar summaries are not executable.
+            CollectionItem::GraphQl(_)
+            | CollectionItem::OpaqueItem(_)
+            | CollectionItem::Summary(_) => {}
         }
     }
 }

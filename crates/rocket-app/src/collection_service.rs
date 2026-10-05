@@ -3,7 +3,8 @@ use rocket_audit::{
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_collection::{
-    Collection, CollectionRepository, CollectionSummary, CollectionVariable, Request,
+    Collection, CollectionRepository, CollectionSummary, CollectionVariable, GraphQlRequest,
+    Request, RequestKind,
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
@@ -55,6 +56,30 @@ impl CollectionService {
     /// that was loaded via `get_summaries`.
     pub fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
         self.repo.get_request(collection, path)
+    }
+
+    /// Get the full GraphQL request at `path`.
+    pub fn get_graphql_request(
+        &self,
+        collection: &str,
+        path: &str,
+    ) -> DomainResult<GraphQlRequest> {
+        self.repo.get_graphql_request(collection, path)
+    }
+
+    /// Save a GraphQL request and return it as stored (the file name may differ from `path`).
+    pub fn save_graphql_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GraphQlRequest,
+    ) -> DomainResult<GraphQlRequest> {
+        let actual_path = self.repo.save_graphql_request(collection, path, request)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: actual_path.clone(),
+        });
+        self.repo.get_graphql_request(collection, &actual_path)
     }
 
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
@@ -111,6 +136,18 @@ impl CollectionService {
         old_path: &str,
         new_name: &str,
     ) -> DomainResult<()> {
+        if self.repo.request_kind(collection, old_path)? == RequestKind::GraphQl {
+            let mut request = self.repo.get_graphql_request(collection, old_path)?;
+            request.name = new_name.to_string();
+            let actual_path = self
+                .repo
+                .save_graphql_request(collection, old_path, &request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path,
+            });
+            return Ok(());
+        }
         // Only update the name field inside the JSON. The filename stays the same.
         // This produces a single Modify filesystem event.
         let mut request = self.repo.get_request(collection, old_path)?;
@@ -129,6 +166,16 @@ impl CollectionService {
         path: &str,
         docs: Option<String>,
     ) -> DomainResult<()> {
+        if self.repo.request_kind(collection, path)? == RequestKind::GraphQl {
+            let mut request = self.repo.get_graphql_request(collection, path)?;
+            request.docs = docs.map(Documentation::text);
+            let actual_path = self.repo.save_graphql_request(collection, path, &request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path,
+            });
+            return Ok(());
+        }
         let mut request = self.repo.get_request(collection, path)?;
         request.docs = docs.map(Documentation::text);
         let actual_path = self.repo.save_request(collection, path, &request)?;
@@ -898,6 +945,22 @@ mod tests {
             )),
             "expected RequestVariablesSaved, got {:?}", *published
         );
+    }
+
+    #[test]
+    fn rename_request_keeps_a_graphql_item_graphql() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        repo.create("api").expect("create collection");
+        let g = GraphQlRequest::new("Old", "https://x/graphql").with_query("{ a }");
+        repo.save_graphql_request("api", "q.yml", &g).expect("save");
+
+        let svc = CollectionService::new(Box::new(repo), Box::new(NullEventPublisher));
+        svc.rename_request("api", "q.yml", "New").expect("rename");
+
+        let back = svc.get_graphql_request("api", "q.yml").expect("get");
+        assert_eq!(back.name, "New");
+        assert_eq!(back.body.query, "{ a }");
     }
 
     #[test]

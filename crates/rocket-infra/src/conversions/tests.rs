@@ -1073,7 +1073,7 @@ items:
     let folder = oc_folder_to_folder(oc);
     assert_eq!(folder.items.len(), 2);
     assert!(matches!(&folder.items[0], CollectionItem::Request(_)));
-    assert!(matches!(&folder.items[1], CollectionItem::OpaqueItem(o) if o.protocol == "graphql"));
+    assert!(matches!(&folder.items[1], CollectionItem::GraphQl(g) if g.name == "GQL Query"));
 
     let back = folder_to_oc_folder(folder);
     let items = back.items.unwrap();
@@ -1503,4 +1503,112 @@ fn oauth2_client_credentials_without_client_secret_key_parses() {
         },
         other => panic!("expected OAuth2, got {other:?}"),
     }
+}
+
+#[test]
+fn oc_graphql_single_body_round_trips() {
+    use rocket_collection::GraphQlRequest;
+    let yaml = r#"
+uid: gql-1
+info:
+  name: List Users
+  type: graphql
+  seq: 3
+graphql:
+  method: POST
+  url: https://api.example.com/graphql
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    query: "{ users { id } }"
+    variables: '{"first": 10}'
+  auth:
+    type: bearer
+    token: t
+runtime:
+  scripts:
+    - type: before-request
+      code: console.log(1)
+settings:
+  timeout: 1000
+  verifySsl: false
+docs: GraphQL docs
+"#;
+    let oc: OcGraphQLRequest = serde_yaml::from_str(yaml).expect("parse");
+    let g: GraphQlRequest = oc_graphql_to_domain(oc);
+    assert_eq!(g.uid, "gql-1");
+    assert_eq!(g.name, "List Users");
+    assert_eq!(g.seq, Some(3));
+    assert_eq!(g.method, rocket_shared::types::HttpMethod::Post);
+    assert_eq!(g.body.query, "{ users { id } }");
+    assert_eq!(g.body.variables.as_deref(), Some("{\"first\": 10}"));
+    assert_eq!(g.pre_request_script.as_deref(), Some("console.log(1)"));
+    assert!(g.body_variants.is_empty());
+    assert!(matches!(g.auth, rocket_shared::types::Auth::Bearer { .. }));
+
+    let back = graphql_to_oc(&g);
+    assert_eq!(back.uid.as_deref(), Some("gql-1"));
+    assert_eq!(back.info.request_type.as_deref(), Some("graphql"));
+    assert_eq!(back.graphql.method.as_deref(), Some("POST"));
+    match back.graphql.body {
+        Some(OcGraphQLBodyOrVariants::Single(b)) => {
+            assert_eq!(b.query, "{ users { id } }");
+            assert_eq!(b.variables.as_deref(), Some("{\"first\": 10}"));
+        }
+        other => panic!("expected a single body, got {other:?}"),
+    }
+    assert_eq!(back.docs.as_deref(), Some("GraphQL docs"));
+    let verify = back.settings.expect("settings").verify_ssl;
+    assert!(matches!(verify, Some(InheritableBoolean::Value(false))));
+}
+
+#[test]
+fn oc_graphql_variants_keep_every_variant_on_round_trip() {
+    let yaml = r#"
+info:
+  name: Multi
+  type: graphql
+graphql:
+  url: https://api.example.com/graphql
+  body:
+    - title: Users
+      selected: false
+      body:
+        query: "{ users { id } }"
+    - title: Orders
+      selected: true
+      body:
+        query: "{ orders { id } }"
+        variables: '{"n": 1}'
+"#;
+    let oc: OcGraphQLRequest = serde_yaml::from_str(yaml).expect("parse");
+    let mut g = oc_graphql_to_domain(oc);
+    assert_eq!(g.method, rocket_shared::types::HttpMethod::Post, "method defaults to POST");
+    assert_eq!(g.body_variants.len(), 2);
+    assert_eq!(g.body.query, "{ orders { id } }", "the selected variant is the active body");
+
+    g.body.query = "{ orders { id total } }".into();
+    let back = graphql_to_oc(&g);
+    let Some(OcGraphQLBodyOrVariants::Variants(vs)) = back.graphql.body else {
+        panic!("expected variants to be kept");
+    };
+    assert_eq!(vs.len(), 2);
+    assert_eq!(vs[0].body.query, "{ users { id } }");
+    assert!(!vs[0].selected);
+    assert!(vs[1].selected);
+    assert_eq!(vs[1].body.query, "{ orders { id total } }", "edits land in the selected variant");
+}
+
+#[test]
+fn graphql_to_oc_drops_blank_variables_and_empty_uid() {
+    let mut g = rocket_collection::GraphQlRequest::new("A", "https://x/graphql").with_query("{ a }");
+    g.uid = String::new();
+    g.body.variables = Some("   ".into());
+    let oc = graphql_to_oc(&g);
+    assert!(oc.uid.is_none(), "an empty uid is not written");
+    let Some(OcGraphQLBodyOrVariants::Single(b)) = oc.graphql.body else {
+        panic!("single body");
+    };
+    assert!(b.variables.is_none());
 }

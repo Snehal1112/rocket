@@ -410,6 +410,7 @@ fn reorder_items_writes_order_file_and_get_respects_it() {
         match item {
             CollectionItem::Request(r) => r.name.as_str(),
             CollectionItem::Folder(f) => f.name.as_str(),
+            CollectionItem::GraphQl(g) => g.name.as_str(),
             CollectionItem::OpaqueItem(o) => o.name.as_str(),
             CollectionItem::Summary(s) => s.name.as_str(),
         }
@@ -1473,7 +1474,11 @@ fn build_folder_tree_loads_non_http_items_as_opaque() {
         .map(|o| (o.protocol.as_str(), o.name.as_str()))
         .collect();
     root.sort();
-    assert_eq!(root, vec![("graphql", "List Users"), ("grpc", "Get User")]);
+    // GraphQL is typed now (see full_tree_loads_graphql_as_a_typed_item_with_its_file_name).
+    assert_eq!(root, vec![("grpc", "Get User")]);
+    assert!(col.root.items.iter().any(
+        |i| matches!(i, rocket_collection::CollectionItem::GraphQl(g) if g.name == "List Users")
+    ));
 
     let realtime = col.root.find_folder("realtime").unwrap();
     let ws = opaque_items(realtime);
@@ -1524,10 +1529,10 @@ fn build_folder_tree_skips_http_file_missing_method_instead_of_misreading_it() {
 }
 
 #[test]
-fn get_summaries_skips_non_http_items_without_error() {
+fn get_summaries_skips_grpc_items_without_error() {
     let (dir, repo) = setup();
-    repo.create("my-api").unwrap();
-    fs::write(dir.path().join("my-api/list-users.yml"), GRAPHQL_ITEM_YML).unwrap();
+    repo.create("my-api").expect("create collection");
+    fs::write(dir.path().join("my-api/list-users.yml"), GRPC_ITEM_YML).expect("write grpc item");
     let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
     repo.save_request("my-api", "good.yml", &req).unwrap();
 
@@ -1732,4 +1737,191 @@ fn save_folder_variables_without_folder_yml_names_folder_after_its_directory() {
     assert_eq!(raw["info"]["name"].as_str(), Some("billing"), "{raw:?}");
     let col = repo.get("my-api").expect("get");
     assert_eq!(find_root_folder(&col).name, "billing");
+}
+
+fn gql_fixture(uid_line: &str) -> String {
+    format!(
+        "{uid_line}info:\n  name: List Users\n  type: graphql\ngraphql:\n  method: POST\n  url: https://api.example.com/graphql\n  body:\n    query: '{{ users {{ id }} }}'\n"
+    )
+}
+
+#[test]
+fn graphql_request_round_trips_through_the_repo() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let mut g = rocket_collection::GraphQlRequest::new(
+        "List Users",
+        "https://api.example.com/graphql",
+    )
+    .with_query("query Users { users { id } }");
+    g.body.variables = Some("{\"first\": 5}".into());
+    g.headers.push(rocket_shared::types::Header::new("X-Trace", "1"));
+
+    let saved = repo
+        .save_graphql_request("my-api", "list-users.yml", &g)
+        .expect("save");
+    assert_eq!(saved, "list-users.yml");
+
+    let back = repo
+        .get_graphql_request("my-api", "list-users.yml")
+        .expect("get");
+    assert_eq!(back.uid, g.uid);
+    assert_eq!(back.body, g.body);
+    assert_eq!(back.method, HttpMethod::Post);
+    assert_eq!(back.headers.len(), 1);
+    assert_eq!(back.file_name.as_deref(), Some("list-users.yml"));
+
+    let yaml = fs::read_to_string(dir.path().join("my-api/list-users.yml")).expect("read yaml");
+    assert!(yaml.contains("type: graphql"), "{yaml}");
+    assert!(yaml.contains("graphql:"), "{yaml}");
+    assert!(!yaml.contains("http:"), "{yaml}");
+}
+
+#[test]
+fn get_graphql_request_gives_a_uid_less_file_an_in_memory_uid() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let path = dir.path().join("my-api/q.yml");
+    fs::write(&path, gql_fixture("")).expect("write fixture");
+
+    let g = repo.get_graphql_request("my-api", "q.yml").expect("get");
+    assert!(!g.uid.is_empty());
+    assert_eq!(
+        fs::read_to_string(&path).expect("read back"),
+        gql_fixture(""),
+        "a read must not rewrite the file"
+    );
+}
+
+#[test]
+fn save_graphql_request_rejects_an_empty_uid() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let mut g = rocket_collection::GraphQlRequest::new("A", "https://x/graphql");
+    g.uid = String::new();
+    assert!(repo.save_graphql_request("my-api", "a.yml", &g).is_err());
+}
+
+#[test]
+fn save_graphql_request_keeps_unselected_variants_and_stored_variables() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(
+        dir.path().join("my-api/multi.yml"),
+        "uid: g1\ninfo:\n  name: Multi\n  type: graphql\ngraphql:\n  url: https://x/graphql\n  body:\n  - title: A\n    selected: true\n    body:\n      query: '{ a }'\n  - title: B\n    body:\n      query: '{ b }'\nruntime:\n  variables:\n  - name: tenant\n    value: acme\n",
+    )
+    .expect("write fixture");
+
+    let mut g = repo
+        .get_graphql_request("my-api", "multi.yml")
+        .expect("get");
+    // The IPC payload carries no request variables, so a save must not erase them.
+    g.variables.clear();
+    g.body.query = "{ a id }".into();
+    repo.save_graphql_request("my-api", "multi.yml", &g)
+        .expect("save");
+
+    let yaml = fs::read_to_string(dir.path().join("my-api/multi.yml")).expect("read yaml");
+    assert!(yaml.contains("title: B"), "{yaml}");
+    assert!(yaml.contains("{ b }"), "{yaml}");
+    assert!(yaml.contains("{ a id }"), "{yaml}");
+    assert!(yaml.contains("name: tenant"), "{yaml}");
+}
+
+#[test]
+fn request_kind_reads_the_protocol_key() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(dir.path().join("my-api/q.yml"), gql_fixture("")).expect("write gql");
+    fs::write(dir.path().join("my-api/g.yml"), GRPC_ITEM_YML).expect("write grpc");
+    let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
+    repo.save_request("my-api", "good.yml", &req)
+        .expect("save http");
+
+    use rocket_collection::RequestKind;
+    assert_eq!(
+        repo.request_kind("my-api", "q.yml").expect("gql kind"),
+        RequestKind::GraphQl
+    );
+    assert_eq!(
+        repo.request_kind("my-api", "g.yml").expect("grpc kind"),
+        RequestKind::Grpc
+    );
+    assert_eq!(
+        repo.request_kind("my-api", "good.yml").expect("http kind"),
+        RequestKind::Http
+    );
+    assert!(repo.request_kind("my-api", "missing.yml").is_err());
+}
+
+#[test]
+fn request_variables_work_for_a_graphql_file() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(dir.path().join("my-api/q.yml"), gql_fixture("uid: g1\n")).expect("write fixture");
+
+    let vars = vec![CollectionVariable {
+        key: "tenant".into(),
+        value: "acme".into(),
+        initial_value: String::new(),
+        enabled: true,
+        secret: false,
+    }];
+    repo.save_request_variables("my-api", "q.yml", vars)
+        .expect("save vars");
+    let back = repo
+        .get_request_variables("my-api", "q.yml")
+        .expect("get vars");
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].key, "tenant");
+
+    // The save must not turn the file into an HTTP request.
+    let g = repo.get_graphql_request("my-api", "q.yml").expect("get");
+    assert_eq!(g.body.query, "{ users { id } }");
+}
+
+#[test]
+fn full_tree_loads_graphql_as_a_typed_item_with_its_file_name() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(
+        dir.path().join("my-api/list-users.yml"),
+        gql_fixture("uid: g1\n"),
+    )
+    .expect("write fixture");
+
+    let col = repo.get("my-api").expect("get collection");
+    let found = col.root.items.iter().find_map(|i| match i {
+        rocket_collection::CollectionItem::GraphQl(g) => Some(g),
+        _ => None,
+    });
+    let g = found.expect("a typed GraphQl item");
+    assert_eq!(g.name, "List Users");
+    assert_eq!(g.uid, "g1");
+    assert_eq!(g.file_name.as_deref(), Some("list-users.yml"));
+}
+
+#[test]
+fn get_summaries_returns_a_graphql_summary_with_its_kind() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(
+        dir.path().join("my-api/list-users.yml"),
+        gql_fixture("uid: g1\n"),
+    )
+    .expect("write gql");
+    fs::write(dir.path().join("my-api/get-user.yml"), GRPC_ITEM_YML).expect("write grpc");
+
+    let col = repo.get_summaries("my-api").expect("summaries");
+    assert_eq!(col.root.items.len(), 1, "gRPC is still skipped: {:?}", col.root.items);
+    match &col.root.items[0] {
+        rocket_collection::CollectionItem::Summary(s) => {
+            assert_eq!(s.kind, rocket_collection::RequestKind::GraphQl);
+            assert_eq!(s.uid, "g1");
+            assert_eq!(s.method, "POST");
+            assert_eq!(s.url, "https://api.example.com/graphql");
+            assert_eq!(s.file_name.as_deref(), Some("list-users.yml"));
+        }
+        other => panic!("expected a summary, got {other:?}"),
+    }
 }

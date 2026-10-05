@@ -1,12 +1,16 @@
 use std::fs;
 use std::path::Path;
 
-use rocket_collection::{generate_uid, request_filename_for, Collection, Request};
+use rocket_collection::{
+    generate_uid, request_filename_for, Collection, GraphQlRequest, Request, RequestKind,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
-use crate::conversions::{oc_http_request_to_request, request_to_oc_http_request};
-use crate::oc::OcHttpRequest;
+use crate::conversions::{
+    graphql_to_oc, oc_graphql_to_domain, oc_http_request_to_request, request_to_oc_http_request,
+};
+use crate::oc::{OcGraphQLRequest, OcHttpRequest};
 
 use super::paths::resolve_request_path;
 use super::FsCollectionRepo;
@@ -152,4 +156,109 @@ pub(super) fn delete_request(
     }
     fs::remove_file(&file_path)?;
     Ok(())
+}
+
+pub(super) fn get_graphql_request(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+) -> DomainResult<GraphQlRequest> {
+    Collection::validate_name(collection)?;
+    let collection_dir = repo.collection_path(collection);
+    let file_path = resolve_request_path(repo, &collection_dir, path)?;
+    if !file_path.exists() {
+        return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
+    }
+    let content = fs::read_to_string(&file_path)?;
+    let oc: OcGraphQLRequest = serde_yaml::from_str(&content)
+        .map_err(|e| DomainError::Internal(format!("Failed to parse GraphQL request: {e}")))?;
+    let mut request = oc_graphql_to_domain(oc);
+    request.file_name = file_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string());
+    // A uid-less file gets an in-memory uid only; the next save persists it.
+    if request.uid.is_empty() {
+        request.uid = generate_uid();
+    }
+    Ok(request)
+}
+
+#[tracing::instrument(name = "collection_save_graphql_request", skip(repo, request), fields(collection_name = %collection, request_path = %path))]
+pub(super) fn save_graphql_request(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    request: &GraphQlRequest,
+) -> DomainResult<String> {
+    Collection::validate_name(collection)?;
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    if request.uid.is_empty() {
+        return Err(DomainError::Internal(format!(
+            "save_graphql_request: empty uid on request for '{path}' in collection '{collection}'; callers must construct via GraphQlRequest::new()"
+        )));
+    }
+
+    let collection_dir = repo.collection_path(collection);
+    let normalized = request_filename_for(path);
+    let file_path = repo.validate_path(&collection_dir, Path::new(&normalized))?;
+
+    let mut oc = graphql_to_oc(request);
+
+    // Request variables are saved on their own path, so an empty list in the
+    // payload must keep what is on disk.
+    if request.variables.is_empty() && file_path.exists() {
+        if let Ok(existing_content) = fs::read_to_string(&file_path) {
+            if let Ok(existing) = serde_yaml::from_str::<OcGraphQLRequest>(&existing_content) {
+                if let Some(existing_runtime) = existing.runtime {
+                    if !existing_runtime.variables.is_empty() {
+                        let runtime = oc.runtime.get_or_insert_with(Default::default);
+                        runtime.variables = existing_runtime.variables;
+                    }
+                }
+            }
+        }
+    }
+
+    let yaml = serde_yaml::to_string(&oc).map_err(|e| {
+        DomainError::Internal(format!("Failed to serialize GraphQL request YAML: {e}"))
+    })?;
+    atomic_write(&file_path, yaml.as_bytes())?;
+
+    let actual = file_path
+        .strip_prefix(&collection_dir)
+        .unwrap_or(&file_path)
+        .to_string_lossy()
+        .to_string();
+    Ok(actual)
+}
+
+/// Reads which protocol the request file holds from its protocol key.
+pub(super) fn request_kind(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+) -> DomainResult<RequestKind> {
+    Collection::validate_name(collection)?;
+    let collection_dir = repo.collection_path(collection);
+    let file_path = resolve_request_path(repo, &collection_dir, path)?;
+    if !file_path.exists() {
+        return Err(DomainError::NotFound(format!("{}/{}", collection, path)));
+    }
+    // Legacy JSON requests are always HTTP.
+    if file_path.extension().is_some_and(|e| e == "json") {
+        return Ok(RequestKind::Http);
+    }
+    let content = fs::read_to_string(&file_path)?;
+    let value: serde_yaml::Value = serde_yaml::from_str(&content)
+        .map_err(|e| DomainError::Internal(format!("Failed to parse request file: {e}")))?;
+    Ok(if value.get("graphql").is_some() {
+        RequestKind::GraphQl
+    } else if value.get("grpc").is_some() {
+        RequestKind::Grpc
+    } else if value.get("websocket").is_some() {
+        RequestKind::WebSocket
+    } else {
+        RequestKind::Http
+    })
 }

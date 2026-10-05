@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use rocket_collection::{CollectionItem, Folder, RequestSummary};
+use rocket_collection::{CollectionItem, Folder, RequestKind, RequestSummary};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::conversions::{oc_http_request_to_request, oc_item_to_collection_item};
@@ -24,6 +24,10 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             Ok(Some(CollectionItem::Request(mut request))) => {
                 request.file_name = Some(entry_name.to_string());
                 Ok(Some(CollectionItem::Request(request)))
+            }
+            Ok(Some(CollectionItem::GraphQl(mut gql))) => {
+                gql.file_name = Some(entry_name.to_string());
+                Ok(Some(CollectionItem::GraphQl(gql)))
             }
             Ok(other) => Ok(other),
             Err(e) => {
@@ -209,10 +213,10 @@ where
 }
 
 /// Parse only the uid/name/method/url fields from a request file for sidebar display.
-/// Non-HTTP protocol files (e.g. a GraphQL, gRPC, WebSocket, or ScriptFile .yml that
-/// passes `is_request_file`) are recognised via the untagged `OcItem` probe, just like
-/// `load_yaml_item`, and return `Ok(None)` so the caller can skip them silently (at
-/// debug level) instead of reporting them as corrupt. A file that matches only
+/// GraphQL files return a summary with `kind: GraphQl`. gRPC, WebSocket and ScriptFile
+/// .yml files that pass `is_request_file` are recognised via the untagged `OcItem` probe,
+/// just like `load_yaml_item`, and return `Ok(None)` so the caller can skip them silently
+/// (at debug level) instead of reporting them as corrupt. A file that matches only
 /// `OcItem::Folder` is a broken request, not a recognised non-HTTP item — a folder is a
 /// directory and never a single file — so, like `load_yaml_item`, it is reported as
 /// genuine corruption alongside anything that matches no `OcItem` variant at all.
@@ -244,17 +248,24 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                     method: min.http.method,
                     url: min.http.url,
                     file_name: Some(entry_name.to_string()),
+                    kind: RequestKind::Http,
                 }))
             }
             Err(e) => e,
         };
         match serde_yaml::from_str::<OcItem>(&content) {
+            Ok(OcItem::GraphQL(gql)) => Ok(Some(RequestSummary {
+                uid: gql.uid.unwrap_or_default(),
+                name: gql.info.name,
+                method: gql.graphql.method.unwrap_or_else(|| "POST".to_string()),
+                url: gql.graphql.url,
+                file_name: Some(entry_name.to_string()),
+                kind: RequestKind::GraphQl,
+            })),
             Ok(OcItem::Http(_)) | Ok(OcItem::Folder(_)) | Err(_) => Err(DomainError::Internal(
                 format!("Failed to parse request summary: {min_err}"),
             )),
-            Ok(
-                OcItem::GraphQL(_) | OcItem::Grpc(_) | OcItem::WebSocket(_) | OcItem::ScriptFile(_),
-            ) => Ok(None),
+            Ok(OcItem::Grpc(_) | OcItem::WebSocket(_) | OcItem::ScriptFile(_)) => Ok(None),
         }
     } else {
         // Legacy JSON: full Request deserialization then extract fields.
@@ -266,6 +277,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
             method: req.method.to_string(),
             url: req.url,
             file_name: Some(entry_name.to_string()),
+            kind: RequestKind::Http,
         }))
     }
 }
