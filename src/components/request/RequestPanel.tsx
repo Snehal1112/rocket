@@ -78,6 +78,7 @@ import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
 import { GraphQlDocsExplorer } from './GraphQlDocsExplorer';
 import { GraphQlEditor } from './GraphQlEditor';
+import { GraphQlQueryBuilder } from './GraphQlQueryBuilder';
 import { HeadersEditor } from './HeadersEditor';
 import { LoadTestTab } from './load-test/LoadTestTab';
 import { MethodSelect } from './MethodSelect';
@@ -153,6 +154,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const [activeSection, setActiveSection] = useState<SectionTab>(profile.initialSection);
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
+  const [schemaView, setSchemaView] = useState<'docs' | 'builder'>('docs');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [showLoadTest, setShowLoadTest] = useState(false);
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
@@ -1057,14 +1059,47 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </div>
       ) : null}
       {activeSection === 'schema' ? (
-        <div className='flex-1 min-h-0 overflow-hidden'>
-          <GraphQlDocsExplorer
-            schema={schemaEntry?.schema}
-            status={schemaEntry?.status ?? 'idle'}
-            error={schemaEntry?.error}
-            fetchedAt={schemaEntry?.fetchedAt}
-            onFetch={(refresh) => void fetchSchema(tab.id, request, refresh)}
-          />
+        <div className='flex flex-1 min-h-0 flex-col overflow-hidden'>
+          <div className='flex items-center border-b border-border px-3 py-1 shrink-0'>
+            <Tabs value={schemaView} onValueChange={(v) => setSchemaView(v as 'docs' | 'builder')}>
+              <TabsList className='h-6'>
+                <TabsTrigger value='docs' className='text-[10px] px-2.5 py-0.5'>
+                  Docs
+                </TabsTrigger>
+                <TabsTrigger
+                  value='builder'
+                  className='text-[10px] px-2.5 py-0.5'
+                  disabled={!schemaEntry?.schema}
+                >
+                  Builder
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <div className='flex-1 min-h-0 overflow-hidden'>
+            {schemaView === 'builder' && schemaEntry?.schema ? (
+              <GraphQlQueryBuilder
+                schema={schemaEntry.schema}
+                currentQuery={request.graphql?.query ?? ''}
+                onApply={(out) => {
+                  handleGraphQlChange({
+                    query: out.query,
+                    variables: out.variables,
+                    operationName: out.operationName,
+                  });
+                  setActiveSection('body');
+                }}
+              />
+            ) : (
+              <GraphQlDocsExplorer
+                schema={schemaEntry?.schema}
+                status={schemaEntry?.status ?? 'idle'}
+                error={schemaEntry?.error}
+                fetchedAt={schemaEntry?.fetchedAt}
+                onFetch={(refresh) => void fetchSchema(tab.id, request, refresh)}
+              />
+            )}
+          </div>
         </div>
       ) : null}
       {activeSection === 'load-test' ? (
