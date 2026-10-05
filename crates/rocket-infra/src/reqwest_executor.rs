@@ -461,7 +461,8 @@ impl HttpExecutor for ReqwestExecutor {
         // Kept so a Digest challenge can be checked against the origin that was asked.
         let requested_origin = url.origin();
 
-        // NTLM sends message 1 to this URL, without the request body.
+        // NTLM sends message 1 to this URL, with the real request body.
+        // A 401 challenge means nothing was processed, so message 3 uploads it again.
         let ntlm_url = url.clone();
 
         // Apply authentication.
