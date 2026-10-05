@@ -439,7 +439,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
           />
 
           {/* Right panel: variable editor. */}
-          <div className='flex-1 flex flex-col min-w-0'>
+          <div className='flex-1 flex flex-col min-w-0 min-h-0'>
             {selectedEnv ? (
               <Tabs
                 value={activeDialogTab}

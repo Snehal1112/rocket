@@ -112,7 +112,7 @@ export function CertificatesTab({
   const options = useMemo(() => vaultSecretOptions(bindings), [bindings]);
 
   return (
-    <div className='flex-1 flex flex-col min-w-0'>
+    <div className='flex-1 flex flex-col min-w-0 min-h-0'>
       <div className='px-3 pt-3 pb-2 border-b border-border/40 shrink-0 space-y-0.5'>
         <p className='text-[11px] text-muted-foreground'>
           Domain: use * as a wildcard, for example *.example.com, and add :port to match one port.

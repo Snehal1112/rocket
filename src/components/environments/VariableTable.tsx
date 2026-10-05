@@ -42,7 +42,7 @@ export function VariableTable({
   }
 
   return (
-    <div className='flex-1 flex flex-col min-w-0'>
+    <div className='flex-1 flex flex-col min-w-0 min-h-0'>
       <div
         className={cn(
           'grid min-w-0 items-center gap-1.5 px-3 pt-3 pb-1.5 border-b border-border/40 shrink-0',
