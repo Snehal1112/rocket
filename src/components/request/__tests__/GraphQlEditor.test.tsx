@@ -59,4 +59,33 @@ describe('GraphQlEditor', () => {
     render(<GraphQlEditor state={{ query: '{ a }', variables: '[1]' }} onChange={vi.fn()} />);
     expect(await screen.findByText('Variables must be a JSON object.')).toBeTruthy();
   });
+
+  it('does not patch the operation for several anonymous operations', async () => {
+    vi.mocked(listGraphQlOperations).mockResolvedValue([
+      { name: null, kind: 'query' },
+      { name: null, kind: 'query' },
+    ]);
+    const onChange = vi.fn();
+    render(<GraphQlEditor state={{ query: '{ a }\n{ b }', variables: '' }} onChange={onChange} />);
+    await waitFor(() => expect(listGraphQlOperations).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps a chosen operation while the scan is pending after a remount', async () => {
+    vi.mocked(listGraphQlOperations).mockResolvedValue([
+      { name: 'A', kind: 'query' },
+      { name: 'B', kind: 'mutation' },
+    ]);
+    const onChange = vi.fn();
+    render(
+      <GraphQlEditor
+        state={{ query: 'query A { a } mutation B { b }', variables: '', operationName: 'B' }}
+        onChange={onChange}
+      />,
+    );
+    await waitFor(() => expect(listGraphQlOperations).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

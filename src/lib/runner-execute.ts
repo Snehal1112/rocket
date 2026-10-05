@@ -66,6 +66,8 @@ export async function executeRunnerEntry(
           query: resolved.graphql?.query ?? graphql.body.query,
           variables: resolved.graphql?.variables ?? (graphql.body.variables || undefined),
           operationName: undefined,
+          // A run has no operation picker, so a multi-operation document runs its first.
+          fallbackFirst: true,
         })
       : await executeRequest(input);
     const hasFailingTest = result.testResults.some((t) => t.status === 'failed');

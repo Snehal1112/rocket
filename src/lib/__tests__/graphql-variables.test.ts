@@ -21,4 +21,11 @@ describe('validateVariablesText', () => {
   it('does not judge text that holds a placeholder, which is not JSON until resolved', () => {
     expect(validateVariablesText('{"n": {{count}}}')).toBeNull();
   });
+
+  it('still rejects extra members after a placeholder', () => {
+    expect(validateVariablesText('{"a":"{{x}}"} , "query":"mutation { deleteAll }"')).toMatch(
+      /^Variables are not valid JSON/,
+    );
+    expect(validateVariablesText('{"a": "{{x}}",}')).toMatch(/^Variables are not valid JSON/);
+  });
 });

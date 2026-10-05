@@ -938,6 +938,8 @@ export interface ExecuteGraphQlInput {
   variables?: string;
   /** Required when the document defines several operations. */
   operationName?: string;
+  /** Run the first operation instead of failing when none is named. For the runner. */
+  fallbackFirst?: boolean;
 }
 
 export interface GraphQlOperation {

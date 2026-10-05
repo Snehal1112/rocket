@@ -2,10 +2,12 @@
 // editor warns about the same text the backend would reject.
 export function validateVariablesText(text: string): string | null {
   const trimmed = text.trim();
-  // Text with a placeholder is not valid JSON until the placeholder is resolved.
-  if (trimmed === '' || trimmed.includes('{{')) return null;
+  if (trimmed === '') return null;
+  // A placeholder stands for a value that is only known once it is resolved, so check the
+  // rest of the text with each placeholder read as null.
+  const masked = trimmed.replace(/\{\{[^{}]*\}\}/g, 'null');
   try {
-    const parsed: unknown = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(masked);
     if (parsed === null || (typeof parsed === 'object' && !Array.isArray(parsed))) return null;
     return 'Variables must be a JSON object.';
   } catch (err) {

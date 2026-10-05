@@ -200,6 +200,7 @@ describe('executeRunnerEntry', () => {
     expect(executeGraphQlRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         query: '{ a }',
+        fallbackFirst: true,
         request: expect.objectContaining({ body: undefined }),
       }),
     );

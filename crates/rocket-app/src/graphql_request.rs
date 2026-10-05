@@ -22,15 +22,40 @@ pub struct GraphQlWire {
     pub query_params: Vec<QueryParam>,
 }
 
-/// Checks the variables text. Blank is fine and means no variables. Text with a
-/// `{{placeholder}}` is not parsed, because it is not valid JSON until the
-/// placeholder is resolved. Anything else must be a JSON object.
+/// Replaces each `{{placeholder}}` with `null`, so text that is only valid JSON
+/// once its placeholders are resolved can still be checked for its shape.
+fn mask_placeholders(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) if !after[..end].contains('}') => {
+                out.push_str(&rest[..start]);
+                out.push_str("null");
+                rest = &after[end + 2..];
+            }
+            _ => {
+                out.push_str(&rest[..start + 2]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Checks the variables text. Blank is fine and means no variables. Each
+/// `{{placeholder}}` is treated as a JSON value, because it is not known until
+/// it is resolved, but the rest of the text must still be a JSON object. That
+/// stops extra members from being spliced into the request body.
 pub fn validate_variables(variables: &str) -> DomainResult<()> {
     let text = variables.trim();
-    if text.is_empty() || text.contains("{{") {
+    if text.is_empty() {
         return Ok(());
     }
-    match serde_json::from_str::<serde_json::Value>(text) {
+    let masked = mask_placeholders(text);
+    match serde_json::from_str::<serde_json::Value>(&masked) {
         Ok(serde_json::Value::Object(_)) | Ok(serde_json::Value::Null) => Ok(()),
         Ok(_) => Err(DomainError::InvalidInput(
             "variables must be a JSON object".into(),
@@ -131,6 +156,10 @@ pub struct ExecuteGraphQlInput {
     /// The operation to run. Required when the document defines several.
     #[serde(default)]
     pub operation_name: Option<String>,
+    /// With several operations and no `operation_name`, run the first one instead of
+    /// failing. The Collection Runner has no operation picker, so it sets this.
+    #[serde(default)]
+    pub fallback_first: bool,
 }
 
 /// Applies the GraphQL payload to an HTTP input: method, body and query parameters.
@@ -140,7 +169,19 @@ pub fn apply_graphql_payload(
     variables: Option<&str>,
     operation_name: Option<&str>,
 ) -> DomainResult<()> {
-    let chosen = select_operation(query, operation_name, false)?;
+    apply_graphql_payload_with(input, query, variables, operation_name, false)
+}
+
+/// Like `apply_graphql_payload`, but `fallback_first` picks the first operation of a
+/// multi-operation document when none is named.
+pub fn apply_graphql_payload_with(
+    input: &mut ExecuteRequestInput,
+    query: &str,
+    variables: Option<&str>,
+    operation_name: Option<&str>,
+    fallback_first: bool,
+) -> DomainResult<()> {
+    let chosen = select_operation(query, operation_name, fallback_first)?;
     let wire = build_wire(input.method.clone(), query, variables, chosen.as_deref())?;
     input.method = wire.method;
     input.body = wire.body;
@@ -155,11 +196,12 @@ impl RequestExecutionService {
         input: ExecuteGraphQlInput,
     ) -> DomainResult<ExecuteRequestOutput> {
         let mut request = input.request;
-        apply_graphql_payload(
+        apply_graphql_payload_with(
             &mut request,
             &input.query,
             input.variables.as_deref(),
             input.operation_name.as_deref(),
+            input.fallback_first,
         )?;
         self.execute(request).await
     }
@@ -264,6 +306,16 @@ mod tests {
         assert!(err.to_string().contains("JSON object"), "got: {err}");
         let err = validate_variables("{\"a\": ").expect_err("truncated");
         assert!(err.to_string().contains("not valid JSON"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_variables_rejects_extra_members_even_with_a_placeholder() {
+        let err = validate_variables(r#"{"a":"{{x}}"} , "query":"mutation { deleteAll }""#)
+            .expect_err("trailing members");
+        assert!(err.to_string().contains("not valid JSON"), "got: {err}");
+        assert!(validate_variables(r#"{"a": "{{x}}",}"#).is_err());
+        assert!(validate_variables(r#"{"a":"{{"} , "query":"x""#).is_err());
+        assert!(validate_variables(r#"[{{x}}]"#).is_err());
     }
 
     #[test]
@@ -409,6 +461,7 @@ mod tests {
                 query: "query A { a } query B { b }".into(),
                 variables: Some("{\"n\": 1}".into()),
                 operation_name: Some("B".into()),
+                fallback_first: false,
             })
             .await
             .expect("execute");
@@ -425,6 +478,30 @@ mod tests {
             1,
             "a GraphQL send is recorded in History"
         );
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_runs_the_first_operation_when_asked_to_fall_back() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        let (svc, _history) = service(Environment::new("dev"));
+
+        svc.execute_graphql(ExecuteGraphQlInput {
+            request: input(&format!("{}/graphql", server.uri())),
+            query: "query A { a } query B { b }".into(),
+            variables: None,
+            operation_name: None,
+            fallback_first: true,
+        })
+        .await
+        .expect("execute");
+
+        let seen = server.received_requests().await.expect("recording");
+        let body: serde_json::Value = serde_json::from_slice(&seen[0].body).expect("json body");
+        assert_eq!(body["operationName"], "A");
     }
 
     #[tokio::test]
@@ -447,6 +524,7 @@ mod tests {
                 query: "query A { a }".into(),
                 variables: None,
                 operation_name: None,
+                fallback_first: false,
             })
             .await
             .expect("execute");
@@ -464,6 +542,7 @@ mod tests {
                 query: "{ a }".into(),
                 variables: Some("[1]".into()),
                 operation_name: None,
+                fallback_first: false,
             })
             .await
             .expect_err("bad variables");
@@ -486,6 +565,7 @@ mod tests {
                 query: "query A { a } query B { b }".into(),
                 variables: None,
                 operation_name: None,
+                fallback_first: false,
             })
             .await
             .expect_err("must choose");
@@ -517,6 +597,7 @@ mod tests {
             query: "query Q($n: Int) {a{b(id: \"{{id}}\", n: $n)}}".into(),
             variables: Some("{\"n\": {{count}}}".into()),
             operation_name: None,
+            fallback_first: false,
         })
         .await
         .expect("execute");

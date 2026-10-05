@@ -1,5 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import {
   Select,
@@ -29,7 +29,7 @@ interface GraphQlEditorProps {
 // Query on top, variables below, operation picker in the toolbar when the
 // document defines several operations.
 export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEditorProps) {
-  const [operations, setOperations] = useState<GraphQlOperation[]>([]);
+  const [operations, setOperations] = useState<GraphQlOperation[] | null>(null);
 
   // Ask the backend scanner for the operation list, debounced while typing.
   useEffect(() => {
@@ -40,7 +40,7 @@ export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEdito
           if (!cancelled) setOperations(ops);
         })
         .catch(() => {
-          if (!cancelled) setOperations([]);
+          if (!cancelled) setOperations(null);
         });
     }, 300);
     return () => {
@@ -49,19 +49,25 @@ export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEdito
     };
   }, [state.query]);
 
-  const names = useMemo(() => operations.flatMap((o) => (o.name ? [o.name] : [])), [operations]);
-  const hasSeveral = operations.length > 1;
+  const names = useMemo(
+    () => (operations ?? []).flatMap((o) => (o.name ? [o.name] : [])),
+    [operations],
+  );
+  const hasSeveral = (operations?.length ?? 0) > 1;
 
-  // Keep the chosen operation valid as the document changes.
+  // The parent's handler changes identity on every state patch, so keep the latest in a ref.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // Keep the chosen operation valid as the document changes. Nothing happens until the
+  // first scan answers, so a remount cannot clobber the saved choice, and the patch is
+  // only sent when the value would actually change.
   useEffect(() => {
-    if (!hasSeveral) {
-      if (state.operationName !== undefined) onChange({ operationName: undefined });
-      return;
-    }
-    if (!state.operationName || !names.includes(state.operationName)) {
-      onChange({ operationName: names[0] });
-    }
-  }, [hasSeveral, names, state.operationName, onChange]);
+    if (operations === null) return;
+    const current = state.operationName;
+    const next = hasSeveral ? (current && names.includes(current) ? current : names[0]) : undefined;
+    if (next !== current) onChangeRef.current({ operationName: next });
+  }, [operations, hasSeveral, names, state.operationName]);
 
   const variablesError = validateVariablesText(state.variables);
 
@@ -78,7 +84,7 @@ export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEdito
               <SelectValue placeholder='Choose an operation' />
             </SelectTrigger>
             <SelectContent>
-              {operations.map((op) =>
+              {(operations ?? []).map((op) =>
                 op.name ? (
                   <SelectItem key={op.name} value={op.name} className='text-xs'>
                     {op.kind} {op.name}

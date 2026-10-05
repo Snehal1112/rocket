@@ -111,7 +111,9 @@ pub fn list_operations(document: &str) -> Vec<GraphQlOperation> {
                 "query" => Some(GraphQlOperationKind::Query),
                 "mutation" => Some(GraphQlOperationKind::Mutation),
                 "subscription" => Some(GraphQlOperationKind::Subscription),
-                "fragment" => {
+                // Fragment and schema definitions have a body that is not an operation.
+                "fragment" | "type" | "input" | "enum" | "interface" | "union" | "schema"
+                | "extend" | "directive" => {
                     awaiting_body = true;
                     None
                 }
@@ -251,6 +253,16 @@ mod tests {
                 (Some("B".into()), GraphQlOperationKind::Query),
             ]
         );
+    }
+
+    #[test]
+    fn list_operations_ignores_schema_definition_bodies() {
+        let doc = "type A { a: Int }\ninput B { b: Int }\nextend type A { c: Int }\nschema { query: A }\nquery Q { a }";
+        assert_eq!(
+            names(doc),
+            vec![(Some("Q".into()), GraphQlOperationKind::Query)]
+        );
+        assert!(list_operations("type A { a: Int } enum E { X Y }").is_empty());
     }
 
     #[test]
