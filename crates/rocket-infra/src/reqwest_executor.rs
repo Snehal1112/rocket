@@ -1072,7 +1072,7 @@ mod tests {
     }
 
     #[test]
-    fn build_client_impl_respects_ssl_option() {
+    fn build_client_accepts_invalid_certs_option() {
         // Should not error when building a client that accepts invalid certs.
         assert!(build_client_with_identity(true, false, None, None, None).is_ok());
     }

@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 
 use rocket_http::{CookieJar, CookieRepository};
@@ -20,6 +21,25 @@ impl FsCookieRepo {
     fn file_path(&self, domain: &str) -> PathBuf {
         let sanitized = domain.replace(['.', ':'], "_");
         self.dir.join(format!("{}.yml", sanitized))
+    }
+
+    /// Keeps session cookies out of git when the workspace is a repository.
+    /// Creates `.gitignore` only if it is missing and never fails the save.
+    fn ensure_gitignore(&self) {
+        let result = fs::create_dir_all(&self.dir).and_then(|()| {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(self.dir.join(".gitignore"))
+            {
+                Ok(mut file) => file.write_all(b"*"),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                Err(e) => Err(e),
+            }
+        });
+        if let Err(e) = result {
+            tracing::warn!("Could not write the cookie folder .gitignore: {e}");
+        }
     }
 }
 
@@ -47,6 +67,7 @@ impl CookieRepository for FsCookieRepo {
         let yaml = serde_yaml::to_string(jar).map_err(|e| {
             rocket_shared::error::DomainError::Internal(format!("Failed to serialize YAML: {e}"))
         })?;
+        self.ensure_gitignore();
         atomic_write(&self.file_path(&jar.domain), yaml.as_bytes())?;
         Ok(())
     }
@@ -110,6 +131,50 @@ mod tests {
         repo.save(&sample_jar("b.com")).unwrap();
         repo.clear().unwrap();
         assert!(repo.get_all().unwrap().is_empty());
+    }
+
+    fn cookies_setup() -> (TempDir, PathBuf, FsCookieRepo) {
+        let dir = TempDir::new().expect("temp dir");
+        let cookies = dir.path().join("cookies");
+        let repo = FsCookieRepo::new(cookies.clone());
+        (dir, cookies, repo)
+    }
+
+    #[test]
+    fn save_writes_gitignore_with_star() {
+        let (_dir, cookies, repo) = cookies_setup();
+        repo.save(&sample_jar("example.com")).expect("save");
+        let content = fs::read_to_string(cookies.join(".gitignore")).expect("gitignore");
+        assert_eq!(content, "*");
+    }
+
+    #[test]
+    fn second_save_keeps_gitignore_unchanged() {
+        let (_dir, cookies, repo) = cookies_setup();
+        repo.save(&sample_jar("a.com")).expect("save a");
+        repo.save(&sample_jar("b.com")).expect("save b");
+        let content = fs::read_to_string(cookies.join(".gitignore")).expect("gitignore");
+        assert_eq!(content, "*");
+    }
+
+    #[test]
+    fn save_leaves_user_edited_gitignore_untouched() {
+        let (_dir, cookies, repo) = cookies_setup();
+        fs::create_dir_all(&cookies).expect("mkdir");
+        fs::write(cookies.join(".gitignore"), "custom\n").expect("write");
+        repo.save(&sample_jar("example.com")).expect("save");
+        let content = fs::read_to_string(cookies.join(".gitignore")).expect("gitignore");
+        assert_eq!(content, "custom\n");
+    }
+
+    #[test]
+    fn save_succeeds_when_gitignore_cannot_be_written() {
+        let (_dir, cookies, repo) = cookies_setup();
+        // A directory named .gitignore cannot be replaced by a file.
+        fs::create_dir_all(cookies.join(".gitignore")).expect("mkdir");
+        repo.save(&sample_jar("example.com")).expect("save");
+        let jar = repo.get_by_domain("example.com").expect("get");
+        assert!(jar.is_some());
     }
 
     #[test]
