@@ -100,6 +100,32 @@ describe('scheduleAutoSave', () => {
     );
   });
 
+  it('saves enabled path params', () => {
+    const request = baseRequest({
+      pathParams: [{ id: 'p1', key: 'id', value: '7', enabled: true }],
+    });
+
+    scheduleAutoSave('tab1', 'my-collection', 'req.yml', 'My Request', request);
+    vi.advanceTimersByTime(500);
+
+    expect(saveRequest).toHaveBeenCalledWith(
+      'my-collection',
+      'req.yml',
+      expect.objectContaining({ pathParams: [{ name: 'id', value: '7' }] }),
+    );
+  });
+
+  it('saves an empty path param list when there are none', () => {
+    scheduleAutoSave('tab1', 'my-collection', 'req.yml', 'My Request', baseRequest());
+    vi.advanceTimersByTime(500);
+
+    expect(saveRequest).toHaveBeenCalledWith(
+      'my-collection',
+      'req.yml',
+      expect.objectContaining({ pathParams: [] }),
+    );
+  });
+
   it('cancelAutoSave prevents a pending save from firing', () => {
     scheduleAutoSave('tab1', 'my-collection', 'req.yml', 'My Request', baseRequest());
     cancelAutoSave('tab1');

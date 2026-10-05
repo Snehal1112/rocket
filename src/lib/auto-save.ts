@@ -1,6 +1,7 @@
 import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
+import { toPersistedPathParams } from '@/lib/request-save-mapper';
 import { type Request, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
@@ -16,6 +17,7 @@ function toApiRequest(uid: string, name: string, request: RequestState): Request
     method: request.method,
     url: request.url,
     headers: toPersistedHeaders(request.headers),
+    pathParams: toPersistedPathParams(request.pathParams),
     body: toApiBody(request.body),
     auth: toPersistedAuth(request.auth),
     tags: request.tags && request.tags.length > 0 ? request.tags : undefined,

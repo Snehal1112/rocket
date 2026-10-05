@@ -1,4 +1,5 @@
 import type { ResolvedRequestFields } from '@/lib/execute-request';
+import { normalizeMethod } from '@/lib/method-options';
 import type { Body, Header } from '@/lib/tauri-api';
 import { applyPathParams } from '@/lib/url-params';
 
@@ -167,7 +168,9 @@ export function generateCurlCommand(resolved: ResolvedRequestFields, method: str
   const headerLines = buildHeaderLines(resolved.headers);
   const { lines: bodyLines, extraHeaderLine } = buildBodyParts(resolved.body, resolved.headers);
 
-  const parts: string[] = [`curl -X ${method.toUpperCase()} ${shellQuote(url)}`];
+  const parts: string[] = [
+    `curl -X ${shellQuote(normalizeMethod(method) ?? method)} ${shellQuote(url)}`,
+  ];
   if (authFlag) parts.push(authFlag);
   parts.push(...authHeaderLines);
   if (extraHeaderLine) parts.push(extraHeaderLine);

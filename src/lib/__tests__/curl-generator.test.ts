@@ -44,6 +44,25 @@ describe('generateCurlCommand', () => {
     expect(cmd).toContain("curl -X GET 'https://api.example.com/users?sort=asc'");
   });
 
+  describe('method', () => {
+    it('upper-cases a lower-case standard method', () => {
+      expect(generateCurlCommand(baseResolved(), 'get')).toBe(
+        'curl -X GET https://api.example.com/users',
+      );
+    });
+
+    it('keeps a custom token as written', () => {
+      expect(generateCurlCommand(baseResolved(), 'm-search')).toBe(
+        'curl -X m-search https://api.example.com/users',
+      );
+    });
+
+    it('single-quotes a method containing shell metacharacters', () => {
+      expect(generateCurlCommand(baseResolved(), "A'B")).toContain("curl -X 'A'\\''B' ");
+      expect(generateCurlCommand(baseResolved(), '$(id)')).toContain("curl -X '$(id)' ");
+    });
+  });
+
   describe('headers', () => {
     it('adds one -H flag per enabled header, always quoted (space between key and value)', () => {
       const cmd = generateCurlCommand(
@@ -319,6 +338,8 @@ describe('generateCurlCommand', () => {
         }),
         method: 'GET',
       },
+      { name: 'method with a quote', resolved: baseResolved(), method: "A'B" },
+      { name: 'method with command substitution', resolved: baseResolved(), method: '$(id)' },
     ];
 
     it.each(cases)('produces syntactically valid bash for: $name', ({ resolved, method }) => {

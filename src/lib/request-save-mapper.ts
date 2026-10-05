@@ -6,7 +6,12 @@ import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import type { Request as ApiRequest } from '@/lib/tauri-api';
-import type { RequestTab } from '@/types/pane-types';
+import type { KeyValueEntry, RequestTab } from '@/types/pane-types';
+
+// Only enabled, named path params are persisted.
+export function toPersistedPathParams(params: KeyValueEntry[]): { name: string; value: string }[] {
+  return params.filter((p) => p.enabled && p.key).map((p) => ({ name: p.key, value: p.value }));
+}
 
 export interface RequestSavePayloadOverrides {
   /** Overrides tab.title — used when saving under a name chosen at save time. */
@@ -28,9 +33,7 @@ export function buildRequestSavePayload(
     method: tab.request.method,
     url: tab.request.url,
     headers: toPersistedHeaders(tab.request.headers),
-    pathParams: tab.request.pathParams
-      .filter((p) => p.enabled && p.key)
-      .map((p) => ({ name: p.key, value: p.value })),
+    pathParams: toPersistedPathParams(tab.request.pathParams),
     body: toApiBody(body),
     auth: toPersistedAuth(tab.request.auth),
     tags: tab.request.tags && tab.request.tags.length > 0 ? tab.request.tags : undefined,
