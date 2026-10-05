@@ -13,8 +13,11 @@ pub async fn ws_connect(
     exec: State<'_, RequestExecutionService>,
     sessions: State<'_, WebSocketService>,
 ) -> Result<(), DomainError> {
-    let request = exec.resolve_websocket(&input).await?;
-    sessions.connect(&session_id, request).await
+    // The id is reserved before resolving, so a disconnect during a slow vault fetch cancels
+    // the connect instead of being ignored.
+    sessions
+        .connect_with(&session_id, exec.resolve_websocket(&input))
+        .await
 }
 
 #[tauri::command]

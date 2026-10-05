@@ -236,6 +236,11 @@ async fn pump(
                     }
                 }
                 Some(Ok(Message::Close(frame))) => {
+                    // When the peer started the close, the library only queued our reply. Flush
+                    // it so the peer sees a close frame instead of a dropped connection.
+                    if closing_deadline.is_none() {
+                        let _ = tokio::time::timeout(CLOSE_REPLY_TIMEOUT, stream.flush()).await;
+                    }
                     break WebSocketClose {
                         code: frame.as_ref().map(|f| u16::from(f.code)),
                         reason: frame.map(|f| f.reason.as_str().to_string()).unwrap_or_default(),
@@ -494,6 +499,57 @@ mod tests {
             .await
             .expect("channel ends");
         assert!(after.is_none(), "no event may follow Closed, got {after:?}");
+    }
+
+    #[tokio::test]
+    async fn a_peer_close_is_answered_with_a_close_frame() {
+        use tokio_tungstenite::tungstenite::error::ProtocolError;
+
+        // A server that starts the close, then reports whether the client replied with a close
+        // frame (clean) or just dropped the TCP connection (reset without closing handshake).
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let (verdict_tx, verdict_rx) = tokio::sync::oneshot::channel::<bool>();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.expect("accept");
+            let mut ws = tokio_tungstenite::accept_async(tcp)
+                .await
+                .expect("handshake");
+            let _ = ws
+                .close(Some(CloseFrame {
+                    code: CloseCode::Normal,
+                    reason: "bye".into(),
+                }))
+                .await;
+            let mut clean = true;
+            while let Some(item) = ws.next().await {
+                if let Err(WsError::Protocol(ProtocolError::ResetWithoutClosingHandshake)) = item {
+                    clean = false;
+                    break;
+                }
+                if item.is_err() {
+                    break;
+                }
+            }
+            let _ = verdict_tx.send(clean);
+        });
+
+        let mut handle = TungsteniteWebSocketClient::new()
+            .connect(request_for(port))
+            .await
+            .expect("connect");
+        match next_event(&mut handle).await {
+            WebSocketEvent::Closed(close) => assert!(close.clean, "{close:?}"),
+            other => panic!("expected Closed, got {other:?}"),
+        }
+        let clean = tokio::time::timeout(Duration::from_secs(5), verdict_rx)
+            .await
+            .expect("the server finishes")
+            .expect("verdict");
+        assert!(
+            clean,
+            "the client must echo the close frame before dropping the socket"
+        );
     }
 
     #[tokio::test]

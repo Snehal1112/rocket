@@ -3,6 +3,8 @@
 //! Inbound frames and lifecycle changes leave as `DomainEvent`s, never as return values.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -16,13 +18,19 @@ use rocket_shared::events::{
 };
 use tokio::sync::mpsc;
 
-/// A session slot. `None` reserves the id while the handshake is in flight.
-type Slot = Option<mpsc::Sender<WebSocketCommand>>;
+/// A session slot. `tx` is `None` while the id is reserved and the handshake is in flight.
+/// `generation` tells apart two sessions that reuse one id, so a stale task never acts on
+/// the newer session.
+struct Slot {
+    generation: u64,
+    tx: Option<mpsc::Sender<WebSocketCommand>>,
+}
 
 pub struct WebSocketService {
     client: Arc<dyn WebSocketClient>,
     events: Arc<dyn EventPublisher>,
     sessions: Arc<Mutex<HashMap<String, Slot>>>,
+    next_generation: AtomicU64,
 }
 
 fn publish_status(
@@ -67,6 +75,7 @@ impl WebSocketService {
             client,
             events,
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            next_generation: AtomicU64::new(1),
         }
     }
 
@@ -79,6 +88,18 @@ impl WebSocketService {
         self.lock().len()
     }
 
+    /// Removes the slot only if it still belongs to `generation`. Returns whether it did.
+    fn release(&self, session_id: &str, generation: u64) -> bool {
+        let mut sessions = self.lock();
+        match sessions.get(session_id) {
+            Some(slot) if slot.generation == generation => {
+                sessions.remove(session_id);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Opens a session. Publishes `Connecting`, then `Open` (with the negotiated subprotocol) or
     /// `Failed`. A `disconnect` that arrives while the handshake is in flight cancels it: the
     /// late socket is closed and this returns `Conflict`.
@@ -87,9 +108,22 @@ impl WebSocketService {
         session_id: &str,
         request: WebSocketConnectRequest,
     ) -> DomainResult<()> {
+        self.connect_with(session_id, async move { Ok(request) })
+            .await
+    }
+
+    /// Like `connect`, but the id is reserved first and the request is produced afterwards.
+    /// Resolving variables and secrets can take a while, and a `disconnect` during that time
+    /// cancels the connect before any socket is opened.
+    pub async fn connect_with(
+        &self,
+        session_id: &str,
+        resolve: impl Future<Output = DomainResult<WebSocketConnectRequest>>,
+    ) -> DomainResult<()> {
         if session_id.trim().is_empty() {
             return Err(DomainError::InvalidInput("session id is required".into()));
         }
+        let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
         {
             let mut sessions = self.lock();
             if sessions.contains_key(session_id) {
@@ -97,7 +131,13 @@ impl WebSocketService {
                     "WebSocket session '{session_id}'"
                 )));
             }
-            sessions.insert(session_id.to_string(), None);
+            sessions.insert(
+                session_id.to_string(),
+                Slot {
+                    generation,
+                    tx: None,
+                },
+            );
         }
         publish_status(
             self.events.as_ref(),
@@ -107,28 +147,22 @@ impl WebSocketService {
             None,
         );
 
+        let request = match resolve.await {
+            Ok(request) => request,
+            Err(error) => return Err(self.fail_connect(session_id, generation, error)),
+        };
+        // A disconnect while resolving removed the slot: do not open a socket nobody wants.
+        if !self.owns(session_id, generation) {
+            return Err(self.cancelled(session_id));
+        }
+
         let WebSocketHandle {
             subprotocol,
             outbound,
             events: inbound,
         } = match self.client.connect(request).await {
             Ok(handle) => handle,
-            Err(error) => {
-                self.lock().remove(session_id);
-                let close = WebSocketClose {
-                    code: None,
-                    reason: error.to_string(),
-                    clean: false,
-                };
-                publish_status(
-                    self.events.as_ref(),
-                    session_id,
-                    WebSocketSessionState::Failed,
-                    None,
-                    Some(&close),
-                );
-                return Err(error);
-            }
+            Err(error) => return Err(self.fail_connect(session_id, generation, error)),
         };
 
         // Take the slot under the lock, then act on the result with the lock released, so the
@@ -136,8 +170,8 @@ impl WebSocketService {
         let registered = {
             let mut sessions = self.lock();
             match sessions.get_mut(session_id) {
-                Some(slot @ None) => {
-                    *slot = Some(outbound.clone());
+                Some(slot) if slot.generation == generation && slot.tx.is_none() => {
+                    slot.tx = Some(outbound.clone());
                     true
                 }
                 _ => false,
@@ -151,7 +185,7 @@ impl WebSocketService {
                     reason: "cancelled".into(),
                 })
                 .await;
-            return Err(DomainError::Conflict("connection was cancelled".into()));
+            return Err(self.cancelled(session_id));
         }
         publish_status(
             self.events.as_ref(),
@@ -160,13 +194,62 @@ impl WebSocketService {
             subprotocol,
             None,
         );
-        self.spawn_pump(session_id.to_string(), inbound);
+        self.spawn_pump(session_id.to_string(), generation, inbound);
         Ok(())
+    }
+
+    fn owns(&self, session_id: &str, generation: u64) -> bool {
+        self.lock()
+            .get(session_id)
+            .is_some_and(|slot| slot.generation == generation)
+    }
+
+    /// A connect that was cancelled by `disconnect`. Publishes its one terminal status.
+    fn cancelled(&self, session_id: &str) -> DomainError {
+        let close = WebSocketClose {
+            code: None,
+            reason: "cancelled".into(),
+            clean: true,
+        };
+        publish_status(
+            self.events.as_ref(),
+            session_id,
+            WebSocketSessionState::Closed,
+            None,
+            Some(&close),
+        );
+        DomainError::Conflict("connection was cancelled".into())
+    }
+
+    /// A connect that failed. If it was already cancelled, the cancel is what gets reported and
+    /// the reservation (which may now belong to a newer connect) is left alone.
+    fn fail_connect(&self, session_id: &str, generation: u64, error: DomainError) -> DomainError {
+        if !self.release(session_id, generation) {
+            return self.cancelled(session_id);
+        }
+        let close = WebSocketClose {
+            code: None,
+            reason: error.to_string(),
+            clean: false,
+        };
+        publish_status(
+            self.events.as_ref(),
+            session_id,
+            WebSocketSessionState::Failed,
+            None,
+            Some(&close),
+        );
+        error
     }
 
     /// Forwards inbound events as `DomainEvent`s, then publishes exactly one terminal status and
     /// frees the session id.
-    fn spawn_pump(&self, session_id: String, mut inbound: mpsc::Receiver<WebSocketEvent>) {
+    fn spawn_pump(
+        &self,
+        session_id: String,
+        generation: u64,
+        mut inbound: mpsc::Receiver<WebSocketEvent>,
+    ) {
         let events = Arc::clone(&self.events);
         let sessions = Arc::clone(&self.sessions);
         tokio::spawn(async move {
@@ -188,10 +271,17 @@ impl WebSocketService {
                 reason: "connection ended unexpectedly".into(),
                 clean: false,
             });
-            sessions
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&session_id);
+            // Only free the id if it still belongs to this session. After a disconnect the id may
+            // already be in use by a newer one.
+            {
+                let mut sessions = sessions.lock().unwrap_or_else(|e| e.into_inner());
+                if sessions
+                    .get(&session_id)
+                    .is_some_and(|slot| slot.generation == generation)
+                {
+                    sessions.remove(&session_id);
+                }
+            }
             let state = if close.clean {
                 WebSocketSessionState::Closed
             } else {
@@ -206,8 +296,10 @@ impl WebSocketService {
         let sender = {
             let sessions = self.lock();
             match sessions.get(session_id) {
-                Some(Some(sender)) => sender.clone(),
-                Some(None) => {
+                Some(Slot {
+                    tx: Some(sender), ..
+                }) => sender.clone(),
+                Some(Slot { tx: None, .. }) => {
                     return Err(DomainError::Conflict("session is still connecting".into()))
                 }
                 None => {
@@ -235,7 +327,10 @@ impl WebSocketService {
     /// cancelled.
     pub async fn disconnect(&self, session_id: &str) -> DomainResult<()> {
         let slot = self.lock().remove(session_id);
-        if let Some(Some(sender)) = slot {
+        if let Some(Slot {
+            tx: Some(sender), ..
+        }) = slot
+        {
             // The pump may already be gone; then there is nothing left to close.
             let _ = sender
                 .send(WebSocketCommand::Close {
@@ -250,7 +345,7 @@ impl WebSocketService {
     /// Closes every session. Used on app exit.
     pub async fn end_all_sessions(&self) {
         let drained: Vec<Slot> = self.lock().drain().map(|(_, slot)| slot).collect();
-        for slot in drained.into_iter().flatten() {
+        for slot in drained.into_iter().filter_map(|slot| slot.tx) {
             let _ = slot
                 .send(WebSocketCommand::Close {
                     code: 1001,
@@ -279,6 +374,7 @@ mod tests {
     struct FakeClient {
         gate: Option<Arc<Notify>>,
         fail_with: Option<String>,
+        fail_first: Mutex<Option<String>>,
         subprotocol: Option<String>,
         endpoints: Mutex<Vec<Endpoints>>,
     }
@@ -297,6 +393,9 @@ mod tests {
         ) -> DomainResult<WebSocketHandle> {
             if let Some(gate) = &self.gate {
                 gate.notified().await;
+            }
+            if let Some(message) = self.fail_first.lock().expect("lock").take() {
+                return Err(DomainError::Http(message));
             }
             if let Some(message) = &self.fail_with {
                 return Err(DomainError::Http(message.clone()));
@@ -634,6 +733,183 @@ mod tests {
             ),
             "the socket that opened after the cancel must be closed"
         );
+    }
+
+    /// Spawns a connect and waits until it has reserved its id.
+    async fn start_gated_connect(
+        svc: &Arc<WebSocketService>,
+        id: &'static str,
+        expected_count: usize,
+    ) -> tokio::task::JoinHandle<DomainResult<()>> {
+        let handle = {
+            let svc = Arc::clone(svc);
+            tokio::spawn(async move { svc.connect(id, request()).await })
+        };
+        for _ in 0..200 {
+            if svc.session_count() == expected_count {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        handle
+    }
+
+    #[tokio::test]
+    async fn the_old_pump_cannot_free_a_session_that_reused_its_id() {
+        let client = Arc::new(FakeClient::default());
+        let (svc, _publisher) = service(&client);
+        svc.connect("s1", request()).await.expect("first");
+        let old = client.take();
+        svc.disconnect("s1").await.expect("disconnect");
+        svc.connect("s1", request())
+            .await
+            .expect("reconnect with the same id");
+        let mut fresh = client.take();
+
+        // The old socket's close finally arrives.
+        old.events
+            .send(WebSocketEvent::Closed(WebSocketClose {
+                code: Some(1000),
+                reason: String::new(),
+                clean: true,
+            }))
+            .await
+            .expect("old close");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert_eq!(
+            svc.session_count(),
+            1,
+            "the new session must still be registered"
+        );
+        svc.send("s1", WebSocketFrame::Text("still here".into()))
+            .await
+            .expect("the new session still works");
+        assert!(fresh.commands.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_connect_cannot_take_over_a_reconnect() {
+        let gate = Arc::new(Notify::new());
+        let client = Arc::new(FakeClient {
+            gate: Some(Arc::clone(&gate)),
+            ..Default::default()
+        });
+        let (svc, _publisher) = service(&client);
+        let svc = Arc::new(svc);
+
+        let first = start_gated_connect(&svc, "s1", 1).await;
+        svc.disconnect("s1").await.expect("cancel the first");
+        let second = start_gated_connect(&svc, "s1", 1).await;
+        // Release the first handshake, then the second.
+        gate.notify_one();
+        let first_result = first.await.expect("join first");
+        gate.notify_one();
+        let second_result = second.await.expect("join second");
+
+        assert!(
+            matches!(first_result, Err(DomainError::Conflict(_))),
+            "the cancelled connect must not succeed: {first_result:?}"
+        );
+        assert!(
+            second_result.is_ok(),
+            "the reconnect must win: {second_result:?}"
+        );
+        assert_eq!(svc.session_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_cancelled_connect_keeps_the_reconnects_reservation() {
+        let gate = Arc::new(Notify::new());
+        let client = Arc::new(FakeClient {
+            gate: Some(Arc::clone(&gate)),
+            fail_first: Mutex::new(Some("refused".into())),
+            ..Default::default()
+        });
+        let (svc, _publisher) = service(&client);
+        let svc = Arc::new(svc);
+
+        let first = start_gated_connect(&svc, "s1", 1).await;
+        svc.disconnect("s1").await.expect("cancel the first");
+        let second = start_gated_connect(&svc, "s1", 1).await;
+        gate.notify_one();
+        let first_result = first.await.expect("join first");
+        assert!(first_result.is_err());
+        gate.notify_one();
+        let second_result = second.await.expect("join second");
+
+        assert!(
+            second_result.is_ok(),
+            "the reconnect must win: {second_result:?}"
+        );
+        assert_eq!(svc.session_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn disconnect_during_resolution_never_opens_a_socket() {
+        let client = Arc::new(FakeClient::default());
+        let (svc, publisher) = service(&client);
+        let svc = Arc::new(svc);
+        let release = Arc::new(Notify::new());
+
+        let connecting = {
+            let svc = Arc::clone(&svc);
+            let release = Arc::clone(&release);
+            tokio::spawn(async move {
+                svc.connect_with("s1", async move {
+                    release.notified().await;
+                    Ok(request())
+                })
+                .await
+            })
+        };
+        for _ in 0..200 {
+            if svc.session_count() == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(svc.session_count(), 1, "the id is reserved while resolving");
+
+        svc.disconnect("s1").await.expect("cancel");
+        release.notify_one();
+        let result = connecting.await.expect("join");
+
+        assert!(
+            matches!(result, Err(DomainError::Conflict(_))),
+            "{result:?}"
+        );
+        assert!(
+            client.endpoints.lock().expect("lock").is_empty(),
+            "no socket may be opened for a cancelled connect"
+        );
+        assert_eq!(svc.session_count(), 0);
+        assert!(statuses(&publisher.events()).contains(&WebSocketSessionState::Closed));
+    }
+
+    #[tokio::test]
+    async fn a_failed_resolution_publishes_failed_and_frees_the_id() {
+        let client = Arc::new(FakeClient::default());
+        let (svc, publisher) = service(&client);
+
+        let err = svc
+            .connect_with("s1", async {
+                Err(DomainError::InvalidInput(
+                    "Digest auth is not supported".into(),
+                ))
+            })
+            .await
+            .expect_err("resolution failed");
+
+        assert!(err.to_string().contains("Digest"), "{err}");
+        assert_eq!(
+            statuses(&publisher.events()),
+            vec![
+                WebSocketSessionState::Connecting,
+                WebSocketSessionState::Failed
+            ]
+        );
+        assert_eq!(svc.session_count(), 0);
     }
 
     #[tokio::test]
