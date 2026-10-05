@@ -426,3 +426,56 @@ fn import_workspace_mixed_modern_and_legacy_collections() {
     assert!(ws_dir.path().join("collections/modern-col").exists());
     assert!(ws_dir.path().join("collections/legacy-col").exists());
 }
+
+#[test]
+fn bru_graphql_file_imports_as_graphql_item() {
+    use rocket_collection::{CollectionRepository, GraphQlRequest};
+
+    let tmp = TempDir::new().expect("tempdir");
+    // Use a named subdirectory so the collection name doesn't start with '.'.
+    let src = tmp.path().join("gql-api");
+    std::fs::create_dir_all(&src).expect("create source dir");
+    std::fs::write(
+        src.join("bruno.json"),
+        r#"{ "name": "gql-api", "version": "1", "type": "collection" }"#,
+    )
+    .expect("write bruno.json");
+    std::fs::write(
+        src.join("users.bru"),
+        "meta {\n  name: Users\n  type: graphql\n  seq: 1\n}\n\npost {\n  url: https://api.example.com/graphql\n  body: graphql\n  auth: none\n}\n\nbody:graphql {\n  query Users($n: Int) {\n    users(first: $n) { id }\n  }\n}\n\nbody:graphql:vars {\n  {\n    \"n\": 5\n  }\n}\n",
+    )
+    .expect("write users.bru");
+    std::fs::write(
+        src.join("orders.yml"),
+        "info:\n  name: Orders\n  type: graphql\ngraphql:\n  method: POST\n  url: https://api.example.com/graphql\n  body:\n    query: '{ orders { id } }'\n",
+    )
+    .expect("write orders.yml");
+
+    let workspace_dir = TempDir::new().expect("tempdir");
+    let service = make_service(workspace_dir.path());
+    let report = service
+        .import_collection(&src, "default")
+        .expect("import");
+
+    assert_eq!(report.total_files, 2);
+    assert_eq!(report.imported, 2, "skipped: {:?}", report.skipped);
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+
+    let repo = FsCollectionRepo::new_standalone(workspace_dir.path().join("collections"));
+    let g: GraphQlRequest = repo
+        .get_graphql_request(&report.created_collections[0], "users.yml")
+        .expect("users.yml is a graphql item");
+    assert!(g.body.query.contains("users(first: $n)"), "{}", g.body.query);
+    assert!(g
+        .body
+        .variables
+        .as_deref()
+        .expect("variables")
+        .contains("\"n\": 5"));
+    assert_eq!(g.url, "https://api.example.com/graphql");
+
+    let o = repo
+        .get_graphql_request(&report.created_collections[0], "orders.yml")
+        .expect("orders.yml is a graphql item");
+    assert_eq!(o.body.query, "{ orders { id } }");
+}

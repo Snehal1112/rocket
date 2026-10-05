@@ -195,6 +195,17 @@ fn parse_body(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
                 })
                 .collect(),
         ),
+        "graphql" => {
+            doc.graphql.get_or_insert_with(Default::default).query = raw;
+            return;
+        }
+        "graphql:vars" => {
+            // An empty vars block is the same as none.
+            if !raw.trim().is_empty() {
+                doc.graphql.get_or_insert_with(Default::default).variables = Some(raw);
+            }
+            return;
+        }
         other => {
             doc.unknown_blocks.push(BruRawBlock {
                 name: "body".into(),
@@ -270,6 +281,23 @@ mod tests {
 
     fn parse(s: &str) -> BruDocument {
         super::parse(s).unwrap()
+    }
+
+    #[test]
+    fn parses_graphql_body_and_vars_blocks() {
+        let doc = parse(
+            "meta {\n  name: Users\n  type: graphql\n  seq: 1\n}\n\npost {\n  url: https://api.example.com/graphql\n  body: graphql\n  auth: none\n}\n\nbody:graphql {\n  query Users($n: Int) {\n    users(first: $n) { id }\n  }\n}\n\nbody:graphql:vars {\n  {\n    \"n\": 5\n  }\n}\n",
+        );
+        let gql = doc.graphql.expect("graphql body parsed");
+        assert!(gql.query.contains("users(first: $n)"), "{}", gql.query);
+        assert!(gql.variables.as_deref().expect("vars").contains("\"n\": 5"));
+        assert!(doc.body.is_none(), "a GraphQL body is not an HTTP body");
+        assert!(
+            doc.unknown_blocks.iter().all(|b| b.name != "body"),
+            "{:?}",
+            doc.unknown_blocks
+        );
+        assert_eq!(doc.method, Some(BruMethod::Post));
     }
 
     #[test]

@@ -356,7 +356,7 @@ impl ImportService {
                     });
                 }
                 Ok(doc) => {
-                    let (req_opt, skipped_reasons) = req_converter::convert(&doc);
+                    let (item_opt, skipped_reasons) = req_converter::convert_item(&doc);
 
                     for reason in skipped_reasons {
                         report.skipped.push(SkippedItem {
@@ -365,10 +365,22 @@ impl ImportService {
                         });
                     }
 
-                    if let Some(req) = req_opt {
-                        let out_path = rel_path.with_extension("yml").to_string_lossy().to_string();
-                        let _ = repo.save_request(collection_name, &out_path, &req);
-                        report.imported += 1;
+                    let out_path = rel_path.with_extension("yml").to_string_lossy().to_string();
+                    match item_opt {
+                        Some(req_converter::Converted::Http(req)) => {
+                            let _ = repo.save_request(collection_name, &out_path, &req);
+                            report.imported += 1;
+                        }
+                        Some(req_converter::Converted::GraphQl(gql)) => {
+                            match repo.save_graphql_request(collection_name, &out_path, &gql) {
+                                Ok(_) => report.imported += 1,
+                                Err(e) => report.skipped.push(SkippedItem {
+                                    path: rel_str.clone(),
+                                    reason: SkipReason::ParseError(e.to_string()),
+                                }),
+                            }
+                        }
+                        None => {}
                     }
                 }
             }

@@ -8,6 +8,20 @@ use serde::Deserialize;
 pub struct BruYmlRequest {
     pub meta: Option<BruYmlMeta>,
     pub http: Option<BruYmlHttp>,
+    /// OpenCollection-shaped `info:` block, used by GraphQL files.
+    pub info: Option<BruYmlMeta>,
+    /// OpenCollection-shaped `graphql:` block.
+    pub graphql: Option<BruYmlGraphql>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BruYmlGraphql {
+    pub method: Option<String>,
+    pub url: Option<String>,
+    pub headers: Option<Vec<BruYmlHeader>>,
+    /// A `{query, variables}` mapping, or a list of titled variants.
+    pub body: Option<serde_yaml::Value>,
+    pub auth: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,13 +162,22 @@ pub fn bru_document_from_yml_env_str(input: &str) -> ImportResult<BruDocument> {
 }
 
 fn adapt_request(yml: BruYmlRequest) -> BruDocument {
+    let BruYmlRequest {
+        meta,
+        http,
+        info,
+        graphql,
+    } = yml;
+    if let Some(gql) = graphql {
+        return adapt_graphql(info.or(meta), gql);
+    }
     let mut doc = BruDocument::default();
 
     // Meta
-    if let Some(m) = yml.meta {
+    if let Some(m) = meta {
         let request_type = m.request_type.clone().unwrap_or_default();
         // Non-http types go to unknown_blocks immediately.
-        if !matches!(request_type.as_str(), "http" | "") {
+        if !matches!(request_type.as_str(), "http" | "" | "graphql") {
             doc.unknown_blocks.push(BruRawBlock {
                 name: "unsupported_type".into(),
                 subtype: Some(request_type.clone()),
@@ -168,7 +191,7 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
         });
     }
 
-    if let Some(http) = yml.http {
+    if let Some(http) = http {
         doc.method = http
             .method
             .as_deref()
@@ -209,6 +232,72 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
     }
 
     doc
+}
+
+fn adapt_graphql(info: Option<BruYmlMeta>, gql: BruYmlGraphql) -> BruDocument {
+    let mut doc = BruDocument::default();
+    if let Some(m) = info {
+        doc.meta = Some(BruMeta {
+            name: m.name.unwrap_or_default(),
+            request_type: "graphql".into(),
+            seq: m.seq,
+        });
+    }
+    doc.method = gql
+        .method
+        .as_deref()
+        .and_then(|m| BruMethod::from_block_name(&m.to_lowercase()));
+    doc.url = gql.url;
+    if let Some(headers) = gql.headers {
+        doc.headers = headers
+            .into_iter()
+            .map(|h| BruKeyValue {
+                key: h.name,
+                value: h.value,
+                disabled: h.disabled,
+            })
+            .collect();
+    }
+    doc.graphql = gql.body.as_ref().and_then(graphql_body_of);
+    // OpenCollection auth is `type:`-tagged, unlike the `mode:`-tagged http block,
+    // so it is reported instead of converted.
+    if let Some(auth) = gql.auth {
+        let auth_type = auth
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string();
+        doc.unknown_blocks.push(BruRawBlock {
+            name: "auth".into(),
+            subtype: Some(auth_type),
+            content: String::new(),
+        });
+    }
+    doc
+}
+
+/// Reads a GraphQL body that is either a `{query, variables}` mapping or a
+/// list of titled variants. A variant list yields the selected variant, or the first.
+fn graphql_body_of(body: &serde_yaml::Value) -> Option<BruGraphQl> {
+    fn plain(v: &serde_yaml::Value) -> Option<BruGraphQl> {
+        let query = v.get("query")?.as_str()?.to_string();
+        let variables = v
+            .get("variables")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(String::from);
+        Some(BruGraphQl { query, variables })
+    }
+    match body.as_sequence() {
+        Some(variants) => {
+            let chosen = variants
+                .iter()
+                .find(|v| v.get("selected").and_then(|s| s.as_bool()).unwrap_or(false))
+                .or_else(|| variants.first())?;
+            plain(chosen.get("body")?)
+        }
+        None => plain(body),
+    }
 }
 
 fn adapt_body(body: BruYmlBody, unknown: &mut Vec<BruRawBlock>) -> Option<BruBody> {
@@ -432,16 +521,80 @@ variables:
     }
 
     #[test]
-    fn graphql_request_type_lands_in_unknown_blocks() {
+    fn opencollection_graphql_request_is_adapted() {
         let yml = r#"
-meta:
+info:
   name: GQL Query
   type: graphql
-http:
+  seq: 4
+graphql:
   method: POST
   url: https://api.example.com/graphql
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    query: "{ users { id } }"
+    variables: '{"first": 2}'
 "#;
-        let doc = bru_document_from_yml_str(yml).unwrap();
+        let doc = bru_document_from_yml_str(yml).expect("adapt");
+        assert!(doc.unknown_blocks.is_empty(), "{:?}", doc.unknown_blocks);
+        let meta = doc.meta.as_ref().expect("meta");
+        assert_eq!(meta.name, "GQL Query");
+        assert_eq!(meta.request_type, "graphql");
+        assert_eq!(meta.seq, Some(4));
+        assert_eq!(doc.method, Some(BruMethod::Post));
+        assert_eq!(doc.url.as_deref(), Some("https://api.example.com/graphql"));
+        assert_eq!(doc.headers.len(), 1);
+        let gql = doc.graphql.expect("graphql");
+        assert_eq!(gql.query, "{ users { id } }");
+        assert_eq!(gql.variables.as_deref(), Some("{\"first\": 2}"));
+    }
+
+    #[test]
+    fn opencollection_graphql_variants_use_the_selected_body() {
+        let yml = r#"
+info:
+  name: Multi
+  type: graphql
+graphql:
+  url: https://api.example.com/graphql
+  body:
+    - title: A
+      body:
+        query: "{ a }"
+    - title: B
+      selected: true
+      body:
+        query: "{ b }"
+"#;
+        let doc = bru_document_from_yml_str(yml).expect("adapt");
+        assert_eq!(doc.graphql.expect("graphql").query, "{ b }");
+    }
+
+    #[test]
+    fn opencollection_graphql_auth_is_reported_not_silently_dropped() {
+        let yml = r#"
+info:
+  name: Authed
+  type: graphql
+graphql:
+  url: https://api.example.com/graphql
+  body:
+    query: "{ a }"
+  auth:
+    type: oauth2
+"#;
+        let doc = bru_document_from_yml_str(yml).expect("adapt");
+        assert_eq!(doc.unknown_blocks.len(), 1);
+        assert_eq!(doc.unknown_blocks[0].name, "auth");
+        assert_eq!(doc.unknown_blocks[0].subtype.as_deref(), Some("oauth2"));
+    }
+
+    #[test]
+    fn grpc_request_type_still_lands_in_unknown_blocks() {
+        let yml = "meta:\n  name: G\n  type: grpc\nhttp:\n  method: POST\n  url: grpc://x\n";
+        let doc = bru_document_from_yml_str(yml).expect("adapt");
         assert_eq!(doc.unknown_blocks.len(), 1);
         assert_eq!(doc.unknown_blocks[0].name, "unsupported_type");
     }

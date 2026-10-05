@@ -14,8 +14,17 @@ pub struct BruDocument {
     pub secret_vars: Vec<String>,
     pub pre_request_script: Option<String>,
     pub post_response_script: Option<String>,
+    /// The query and variables of a GraphQL request (`body:graphql` and `body:graphql:vars`).
+    pub graphql: Option<BruGraphQl>,
     /// Unrecognised or unsupported blocks — fed into ImportReport.
     pub unknown_blocks: Vec<BruRawBlock>,
+}
+
+/// A GraphQL body: the query text and the optional variables JSON.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BruGraphQl {
+    pub query: String,
+    pub variables: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

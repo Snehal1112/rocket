@@ -1,8 +1,85 @@
-use rocket_collection::Request;
+use rocket_collection::{GraphQlBody, GraphQlRequest, Request};
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod};
 
 use crate::bru::ast::*;
 use crate::report::SkipReason;
+
+/// What a Bruno file turns into.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Converted {
+    Http(Request),
+    GraphQl(GraphQlRequest),
+}
+
+/// True when the document is a GraphQL request: its `meta` says so or it carries a GraphQL body.
+fn is_graphql(doc: &BruDocument) -> bool {
+    doc.graphql.is_some()
+        || doc
+            .meta
+            .as_ref()
+            .is_some_and(|m| m.request_type == "graphql")
+}
+
+/// Converts a Bruno document to whichever domain item it describes.
+/// Unsupported request types (gRPC, WebSocket) still produce `(None, [skip])`.
+pub fn convert_item(doc: &BruDocument) -> (Option<Converted>, Vec<SkipReason>) {
+    if is_graphql(doc) {
+        let (g, skipped) = convert_graphql(doc);
+        return (g.map(Converted::GraphQl), skipped);
+    }
+    let (req, skipped) = convert(doc);
+    (req.map(Converted::Http), skipped)
+}
+
+/// Unsupported-auth reasons recorded in the document.
+fn auth_skips(doc: &BruDocument) -> Vec<SkipReason> {
+    doc.unknown_blocks
+        .iter()
+        .filter(|b| b.name == "auth")
+        .map(|b| SkipReason::UnsupportedAuthType(b.subtype.clone().unwrap_or_default()))
+        .collect()
+}
+
+/// Converts a GraphQL Bruno document to a domain `GraphQlRequest`.
+/// Unsupported auth is reported and the request still imports with `auth: None`.
+pub fn convert_graphql(doc: &BruDocument) -> (Option<GraphQlRequest>, Vec<SkipReason>) {
+    let skipped = auth_skips(doc);
+    let name = doc
+        .meta
+        .as_ref()
+        .map(|m| m.name.clone())
+        .unwrap_or_else(|| "Untitled".into());
+    let mut g = GraphQlRequest::new(name, doc.url.clone().unwrap_or_default());
+    g.method = doc
+        .method
+        .as_ref()
+        .map(bru_method_to_domain)
+        .unwrap_or(HttpMethod::Post);
+    g.seq = doc.meta.as_ref().and_then(|m| m.seq);
+
+    for h in &doc.headers {
+        g.headers.push(if h.disabled {
+            Header::disabled(h.key.clone(), h.value.clone())
+        } else {
+            Header::new(h.key.clone(), h.value.clone())
+        });
+    }
+
+    let gql = doc.graphql.clone().unwrap_or_default();
+    g.body = GraphQlBody {
+        query: gql.query,
+        variables: gql.variables.filter(|v| !v.trim().is_empty()),
+    };
+
+    if skipped.is_empty() {
+        if let Some(auth) = &doc.auth {
+            g.auth = bru_auth_to_domain(auth);
+        }
+    }
+    g.pre_request_script = doc.pre_request_script.clone();
+    g.post_response_script = doc.post_response_script.clone();
+    (Some(g), skipped)
+}
 
 /// Convert a BruDocument to a domain Request.
 /// Returns `(Option<Request>, Vec<SkipReason>)`.
@@ -199,6 +276,65 @@ fn bru_auth_to_domain(auth: &BruAuth) -> Auth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn graphql_doc() -> BruDocument {
+        BruDocument {
+            meta: Some(BruMeta {
+                name: "Users".into(),
+                request_type: "graphql".into(),
+                seq: Some(2),
+            }),
+            method: Some(BruMethod::Post),
+            url: Some("{{baseUrl}}/graphql".into()),
+            headers: vec![BruKeyValue {
+                key: "Accept".into(),
+                value: "application/json".into(),
+                disabled: false,
+            }],
+            graphql: Some(BruGraphQl {
+                query: "{ users { id } }".into(),
+                variables: Some("{\"n\": 1}".into()),
+            }),
+            pre_request_script: Some("// pre".into()),
+            ..BruDocument::default()
+        }
+    }
+
+    #[test]
+    fn graphql_document_converts_to_a_graphql_request() {
+        let (g, skipped) = convert_graphql(&graphql_doc());
+        assert!(skipped.is_empty());
+        let g = g.expect("graphql request");
+        assert_eq!(g.name, "Users");
+        assert_eq!(g.seq, Some(2));
+        assert_eq!(g.method, HttpMethod::Post);
+        assert_eq!(g.url, "{{baseUrl}}/graphql");
+        assert_eq!(g.body.query, "{ users { id } }");
+        assert_eq!(g.body.variables.as_deref(), Some("{\"n\": 1}"));
+        assert_eq!(g.headers.len(), 1);
+        assert_eq!(g.pre_request_script.as_deref(), Some("// pre"));
+    }
+
+    #[test]
+    fn convert_item_routes_by_request_type() {
+        let (item, _) = convert_item(&graphql_doc());
+        assert!(matches!(item, Some(Converted::GraphQl(_))));
+        let (item, _) = convert_item(&doc_with_method(BruMethod::Get, "https://example.com"));
+        assert!(matches!(item, Some(Converted::Http(_))));
+    }
+
+    #[test]
+    fn graphql_document_with_unsupported_auth_still_imports_and_reports() {
+        let mut doc = graphql_doc();
+        doc.unknown_blocks.push(BruRawBlock {
+            name: "auth".into(),
+            subtype: Some("oauth2".into()),
+            content: String::new(),
+        });
+        let (g, skipped) = convert_graphql(&doc);
+        assert!(g.is_some());
+        assert!(matches!(skipped[0], SkipReason::UnsupportedAuthType(_)));
+    }
 
     fn doc_with_method(method: BruMethod, url: &str) -> BruDocument {
         BruDocument {
