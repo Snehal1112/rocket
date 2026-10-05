@@ -85,6 +85,22 @@ pub async fn import_postman_environment(
         .map_err(|e| e.to_string())
 }
 
+/// Import a WSDL 1.1 file as a collection of SOAP requests.
+#[tauri::command]
+pub async fn import_wsdl(
+    path: String,
+    target_workspace_id: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+) -> Result<ImportReport, String> {
+    let base = workspace_path
+        .lock()
+        .map_err(|_| "workspace path lock poisoned".to_string())?
+        .clone();
+    make_import_service(base)
+        .import_wsdl(&PathBuf::from(&path), &target_workspace_id)
+        .map_err(|e| e.to_string())
+}
+
 /// Extract a Bruno ZIP and import the contained collection or workspace.
 #[tauri::command]
 pub async fn import_bruno_zip(

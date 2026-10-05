@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-`rocket-import` orchestrates importing Bruno API client collections into RocketAPI. It parses both `.bru` (DSL) and `.yml` (YAML) Bruno formats, converts the parsed AST into domain types, and delegates all disk writes to `FsCollectionRepo` and `FsEnvironmentRepo` from `rocket-infra`. No raw YAML is written by this crate.
+`rocket-import` orchestrates importing Bruno API client collections, Postman collections and WSDL 1.1 files into RocketAPI. It parses both `.bru` (DSL) and `.yml` (YAML) Bruno formats, converts the parsed AST into domain types, and delegates all disk writes to `FsCollectionRepo` and `FsEnvironmentRepo` from `rocket-infra`. No raw YAML is written by this crate.
 
 ## Commands
 
@@ -35,6 +35,8 @@ cargo test -p rocket-import <test_name>
 | `converter/request.rs` | `convert(doc) → (Option<Request>, Vec<SkipReason>)` |
 | `converter/environment.rs` | `convert(name, doc) → Environment` |
 | `converter/collection.rs` | `convert_variables(kvs) → Vec<CollectionVariable>` |
+| `wsdl/{ast,schema,sampler,parser}.rs` | WSDL 1.1 reader, owned XSD model, sample XML generation |
+| `converter/wsdl.rs` | `convert_operation`, `build_envelope`, `soap_headers` |
 | `importer.rs` | `ImportService` — top-level orchestrator |
 
 ### Data Flow
@@ -103,6 +105,18 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 **collection.rs** — `&[BruKeyValue]` → `Vec<CollectionVariable>`:
 - `disabled` → `!enabled`; `initial_value` and `secret` are always empty/false (Bruno collection vars have no secret flag in the vars block)
 
+### WSDL import
+
+- SOAP is an HTTP POST with `BodyMode::Xml`.
+- Headers are set per binding version. SOAP 1.1 uses `text/xml` and a quoted `SOAPAction`. SOAP 1.2 uses `application/soap+xml; action="..."` and no `SOAPAction`.
+- Layout is `<service>/<port>/<operation>`.
+- Only local imports are followed. Remote locations produce `UnsupportedRequestType` report items.
+- DTDs are rejected.
+- XSD attributes, wildcards and `group` are ignored. `choice` uses its first alternative.
+- The depth limit is `sampler::MAX_DEPTH`.
+- rpc/encoded is generated as literal.
+- WSDL 2.0 is rejected.
+
 ### Fixture Files
 
 Integration tests live in `tests/integration_test.rs` and use `tests/fixtures/my-api/`:
@@ -126,6 +140,7 @@ Registered in `src-tauri/src/commands/import.rs` (following project convention �
 ```rust
 import_bruno_collection(path: String, target_workspace_id: String) -> Result<ImportReport, String>
 import_bruno_workspace(path: String, create_new_workspace: bool, target_workspace_id: Option<String>) -> Result<ImportReport, String>
+import_wsdl(path: String, target_workspace_id: String) -> Result<ImportReport, String>
 ```
 
 ### Dependencies
@@ -136,6 +151,7 @@ import_bruno_workspace(path: String, create_new_workspace: bool, target_workspac
 - `rocket-workspace` — workspace types
 - `rocket-infra` — `FsCollectionRepo`, `FsEnvironmentRepo` (concrete I/O)
 - `serde` / `serde_yaml` — YAML deserialization for `.yml` format
+- `roxmltree` — WSDL and XSD XML parsing
 - `thiserror` — `ImportError` derive
 - `tempfile` (dev) — integration test fixtures
 

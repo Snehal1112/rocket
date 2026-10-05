@@ -718,6 +718,7 @@ pub fn run() {
             commands::import::import_bruno_zip,
             commands::import::import_postman_collection,
             commands::import::import_postman_environment,
+            commands::import::import_wsdl,
             commands::contract::attach_contract,
             commands::contract::update_contract,
             commands::contract::list_contracts,
