@@ -519,6 +519,7 @@ pub fn run() {
             app.manage(cookie_svc);
             app.manage(proxy_svc);
             app.manage(exec_svc);
+            app.manage(rocket_app::graphql_schema::GraphQlSchemaCache::default());
             app.manage(secret_manager_svc);
             app.manage(agent_config_svc);
             app.manage(acp_session_svc);
@@ -620,6 +621,9 @@ pub fn run() {
             commands::execution::execute_request,
             commands::execution::execute_graphql_request,
             commands::execution::list_graphql_operations,
+            commands::graphql_schema::fetch_graphql_schema,
+            commands::graphql_schema::get_cached_graphql_schema,
+            commands::graphql_schema::clear_graphql_schema,
             commands::execution::evaluate_var_expression,
             commands::runner::run_collection,
             commands::runner::stop_collection_run,

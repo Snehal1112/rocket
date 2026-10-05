@@ -266,8 +266,9 @@ pub fn response_error_summary(body: &str) -> Option<String> {
     Some(format!("{} GraphQL {noun}: {message}", errors.len()))
 }
 
+/// Helpers shared by the GraphQL tests in this crate.
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use super::*;
     use crate::test_doubles::{
         EmptySecretManagerRepo, InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo,
@@ -275,10 +276,61 @@ mod tests {
     };
     use rocket_collection::Collection;
     use rocket_environment::environment::Environment;
-    use rocket_environment::variable::Variable;
     use rocket_http::RequestOptions;
     use rocket_shared::types::Auth;
     use std::sync::Arc;
+
+    pub(crate) fn input(url: &str) -> ExecuteRequestInput {
+        ExecuteRequestInput {
+            skip_history: false,
+            flow_vars: std::collections::HashMap::new(),
+            method: HttpMethod::Post,
+            url: url.to_string(),
+            headers: vec![],
+            query_params: vec![],
+            body: None,
+            auth: Auth::None,
+            options: RequestOptions::default(),
+            environment_name: None,
+            collection: None,
+            request_name: Some("Users".into()),
+            pre_request_script: None,
+            post_response_script: None,
+            tests_script: None,
+            request_path: None,
+            global_env_name: None,
+            assertions: vec![],
+            tags: vec![],
+            path_params: vec![],
+            actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+        }
+    }
+
+    pub(crate) fn service(env: Environment) -> (RequestExecutionService, Arc<InMemoryHistoryRepo>) {
+        let history = InMemoryHistoryRepo::new();
+        let repo = InMemoryCollectionRepo::new(Collection::new("api"));
+        let svc = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            Arc::new(rocket_infra::ReqwestExecutor::new()),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(SharedCollectionRepo(repo)),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        (svc, history)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{input, service};
+    use super::*;
+    use rocket_environment::environment::Environment;
+    use rocket_environment::variable::Variable;
     use wiremock::matchers::{header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -395,50 +447,6 @@ mod tests {
         assert!(err.to_string().contains("GET or POST"), "got: {err}");
         let err = build_wire(HttpMethod::Post, "  \n", None, None).expect_err("empty");
         assert!(err.to_string().contains("query is empty"), "got: {err}");
-    }
-
-    fn input(url: &str) -> ExecuteRequestInput {
-        ExecuteRequestInput {
-            skip_history: false,
-            flow_vars: std::collections::HashMap::new(),
-            method: HttpMethod::Post,
-            url: url.to_string(),
-            headers: vec![],
-            query_params: vec![],
-            body: None,
-            auth: Auth::None,
-            options: RequestOptions::default(),
-            environment_name: None,
-            collection: None,
-            request_name: Some("Users".into()),
-            pre_request_script: None,
-            post_response_script: None,
-            tests_script: None,
-            request_path: None,
-            global_env_name: None,
-            assertions: vec![],
-            tags: vec![],
-            path_params: vec![],
-            actions: vec![],
-            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
-        }
-    }
-
-    fn service(env: Environment) -> (RequestExecutionService, Arc<InMemoryHistoryRepo>) {
-        let history = InMemoryHistoryRepo::new();
-        let repo = InMemoryCollectionRepo::new(Collection::new("api"));
-        let svc = RequestExecutionService::new(
-            Box::new(StaticEnvRepo(env)),
-            Arc::new(rocket_infra::ReqwestExecutor::new()),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(repo)),
-            Box::new(NullCookieRepo),
-            Box::new(rocket_shared::events::NullEventPublisher),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
-        (svc, history)
     }
 
     #[tokio::test]

@@ -954,6 +954,46 @@ export const executeGraphQlRequest = (input: ExecuteGraphQlInput) =>
 export const listGraphQlOperations = (document: string) =>
   invoke<GraphQlOperation[]>('list_graphql_operations', { document });
 
+/** A schema as `buildClientSchema` takes it: `{ __schema: ... }`. */
+export interface GraphQlSchemaResult {
+  key: string;
+  /** RFC 3339 time of the fetch. */
+  fetchedAt: string;
+  introspection: unknown;
+}
+
+export interface FetchGraphQlSchemaInput {
+  /** The tab's endpoint, headers, auth and options. Its scripts and body are ignored. */
+  request: ExecuteRequestInput;
+  /** Bypass the cache and fetch again. */
+  refresh?: boolean;
+}
+
+export const fetchGraphQlSchema = (input: FetchGraphQlSchemaInput) =>
+  invoke<GraphQlSchemaResult>('fetch_graphql_schema', { input });
+
+export const getCachedGraphQlSchema = (
+  collection: string | undefined,
+  environmentName: string | undefined,
+  url: string,
+) =>
+  invoke<GraphQlSchemaResult | null>('get_cached_graphql_schema', {
+    collection: collection ?? null,
+    environmentName: environmentName ?? null,
+    url,
+  });
+
+export const clearGraphQlSchema = (
+  collection: string | undefined,
+  environmentName: string | undefined,
+  url: string,
+) =>
+  invoke<void>('clear_graphql_schema', {
+    collection: collection ?? null,
+    environmentName: environmentName ?? null,
+    url,
+  });
+
 export const evaluateVarExpression = (
   collectionRoot: string,
   expression: string,
