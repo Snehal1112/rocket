@@ -198,7 +198,8 @@ export function ProxySettingsDialog({ open, onOpenChange }: ProxySettingsDialogP
                   </p>
                 )}
                 <p className='text-xs text-muted-foreground'>
-                  OAuth 2.0 token requests do not use this setting yet.
+                  OAuth 2.0 token requests (token, refresh and authorization-code exchange) also use
+                  this setting.
                 </p>
               </div>
             )}
