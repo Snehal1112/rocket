@@ -172,6 +172,9 @@ fn request_options_from(settings: Option<&RequestSettings>) -> RequestOptions {
             options.max_redirects = Some(*v as u32);
         }
     }
+    if let Some(RequestSettingValue::Value(v)) = settings.encode_url.as_ref() {
+        options.encode_url = *v;
+    }
     options
 }
 
@@ -373,5 +376,49 @@ mod tests {
 
         let input = build_step_input(&item, "my-api", None, None, policy.clone());
         assert_eq!(input.request_guard_policy, policy);
+    }
+
+    #[test]
+    fn step_input_maps_encode_url() {
+        use rocket_shared::types::{RequestSettingValue, RequestSettings};
+
+        let mut request = req("Login", "login.yml");
+        request.settings = Some(RequestSettings {
+            encode_url: Some(RequestSettingValue::Value(false)),
+            timeout: None,
+            follow_redirects: None,
+            max_redirects: None,
+            verify_ssl: None,
+        });
+        let item = RunItem {
+            name: request.name.clone(),
+            request_path: "login.yml".into(),
+            request,
+        };
+        let input = build_step_input(
+            &item,
+            "my-api",
+            None,
+            None,
+            rocket_workspace::RequestGuardPolicy::default(),
+        );
+        assert!(!input.options.encode_url);
+
+        let inherit = RunItem {
+            name: "x".into(),
+            request_path: "x.yml".into(),
+            request: req("x", "x.yml"),
+        };
+        let input = build_step_input(
+            &inherit,
+            "my-api",
+            None,
+            None,
+            rocket_workspace::RequestGuardPolicy::default(),
+        );
+        assert!(
+            input.options.encode_url,
+            "no setting means encoded, the default"
+        );
     }
 }

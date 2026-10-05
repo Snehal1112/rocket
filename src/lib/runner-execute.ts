@@ -2,6 +2,7 @@ import {
   getActiveGlobalEnvName,
   getActiveWorkspaceRequestGuardPolicy,
   resolveRequestFieldsForPath,
+  toApiOptions,
 } from '@/lib/execute-request';
 import { mapApiRequestToState } from '@/lib/pane-utils';
 import {
@@ -39,11 +40,7 @@ export async function executeRunnerEntry(
       queryParams: resolved.queryParams,
       body: resolved.body,
       auth: resolved.auth,
-      options: {
-        followRedirects: requestState.settings.followRedirects,
-        timeoutMs: requestState.settings.timeoutMs,
-        verifySsl: requestState.settings.verifySsl,
-      },
+      options: toApiOptions(requestState.settings),
       environmentName,
       collection,
       requestName: request.name,

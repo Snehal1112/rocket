@@ -21,6 +21,13 @@ vi.mock('@/lib/execute-request', () => ({
     environmentName: undefined,
     requestPath: undefined,
   })),
+  toApiOptions: (s?: { maxRedirects?: number; encodeUrl?: boolean }) => ({
+    followRedirects: true,
+    timeoutMs: 30000,
+    verifySsl: true,
+    maxRedirects: s?.maxRedirects,
+    encodeUrl: s?.encodeUrl,
+  }),
 }));
 
 import { runLoadTest } from '@/lib/tauri-api';
@@ -120,6 +127,32 @@ describe('LoadTestDialog', () => {
     await waitFor(() => expect(runLoadTest).toHaveBeenCalledTimes(1));
     const inputArg = (runLoadTest as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(inputArg.pathParams).toEqual([{ name: 'id', value: '7' }]);
+  });
+
+  it('forwards the request settings as options', async () => {
+    (runLoadTest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalRequests: 1,
+      succeeded: 1,
+      failed: 0,
+      failedTransport: 0,
+      failedStatus: 0,
+      minLatencyMs: 1,
+      avgLatencyMs: 1,
+      p50LatencyMs: 1,
+      p95LatencyMs: 1,
+      p99LatencyMs: 1,
+      maxLatencyMs: 1,
+      requestsPerSecond: 1,
+      totalDurationMs: 1,
+    });
+    const request = makeRequest();
+    request.settings = { ...request.settings, maxRedirects: 2, encodeUrl: false };
+    render(<LoadTestDialog open onOpenChange={noop} request={request} tabId='t1' />);
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+    await waitFor(() => expect(runLoadTest).toHaveBeenCalledTimes(1));
+    const options = (runLoadTest as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0].options;
+    expect(options.maxRedirects).toBe(2);
+    expect(options.encodeUrl).toBe(false);
   });
 
   it('shows the failure breakdown when failures exist', async () => {

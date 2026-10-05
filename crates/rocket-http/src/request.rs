@@ -32,6 +32,10 @@ pub struct RequestOptions {
     /// it off, so a burst of requests does not rewrite a jar file for each response.
     #[serde(default = "default_true")]
     pub use_cookie_jar: bool,
+    /// Percent-encode the query parameters of the params table. Off sends them as typed,
+    /// which is what a user who pre-encoded a value wants. On by default.
+    #[serde(default = "default_true")]
+    pub encode_url: bool,
     /// Client certificates of the active environment, resolved for this request. The executor
     /// picks the one whose domain matches the request URL and presents it for mutual TLS. It is
     /// never serialized: the environment is the only source, and the material can hold key bytes.
@@ -54,6 +58,7 @@ impl Default for RequestOptions {
             verify_ssl: true,
             max_redirects: None,
             use_cookie_jar: true,
+            encode_url: true,
             client_certificates: Vec::new(),
         }
     }
@@ -92,6 +97,15 @@ mod tests {
         let off: RequestOptions =
             serde_json::from_str(r#"{"useCookieJar":false}"#).expect("deserialize");
         assert!(!off.use_cookie_jar);
+    }
+
+    #[test]
+    fn encode_url_defaults_to_true_and_can_be_turned_off() {
+        let on: RequestOptions = serde_json::from_str("{}").expect("deserialize");
+        assert!(on.encode_url);
+        let off: RequestOptions =
+            serde_json::from_str(r#"{"encodeUrl":false}"#).expect("deserialize");
+        assert!(!off.encode_url);
     }
 
     mod certificate_leaks {

@@ -2,7 +2,7 @@ import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests
 import { findTabInTree } from '@/lib/pane-utils';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
-import type { Environment } from '@/lib/tauri-api';
+import type { Environment, RequestOptions } from '@/lib/tauri-api';
 import {
   type AssertionEntry,
   type Auth,
@@ -18,14 +18,20 @@ import {
   oauth2RefreshToken,
   type RequestGuardPolicy,
 } from '@/lib/tauri-api';
-import { applyPathParams } from '@/lib/url-params';
+import { applyPathParams, splitUrl } from '@/lib/url-params';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import type { AuthState, BodyState, RequestState, ResponseState } from '@/types/pane-types';
+import type {
+  AuthState,
+  BodyState,
+  RequestSettings,
+  RequestState,
+  ResponseState,
+} from '@/types/pane-types';
 
 // Reads the active environment's variables from the query cache. `collection`
 // picks whose environments to read; without it the env store's active
@@ -205,6 +211,18 @@ export interface ResolvedRequestFields {
   requestPath: string | undefined;
 }
 
+// The execution options a request's settings ask for. One place builds them, so a single send,
+// the collection runner and the load test cannot drift apart.
+export function toApiOptions(settings: RequestSettings | undefined): RequestOptions {
+  return {
+    followRedirects: settings?.followRedirects ?? true,
+    timeoutMs: settings?.timeoutMs ?? 30000,
+    verifySsl: settings?.verifySsl ?? true,
+    maxRedirects: settings?.maxRedirects,
+    encodeUrl: settings?.encodeUrl ?? true,
+  };
+}
+
 // Builds the fully-resolved request fields for a given collection +
 // request path. Applies the same 7-scope variable resolution as
 // sendRequest() so that every caller (single-request send, the load
@@ -260,7 +278,9 @@ export async function resolveRequestFieldsForPath(
   });
   const resolve = (text: string) => resolveWithContext(text, ctx);
 
-  const resolvedUrl = resolve(request.url);
+  // The query travels in `queryParams`, so it must not also stay in the url or it is sent twice.
+  // The typed query is cut before resolving, so a query that comes from a variable is kept.
+  const resolvedUrl = resolve(splitUrl(request.url).base);
   // The backend substitutes these into the url, after resolving any {{variables}} again.
   const resolvedPathParams = request.pathParams
     .filter((p) => p.enabled && p.key)
@@ -574,11 +594,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       queryParams: resolvedQueryParams,
       body: resolvedBody,
       auth: resolvedAuth,
-      options: {
-        followRedirects: effectiveRequest.settings?.followRedirects ?? true,
-        timeoutMs: effectiveRequest.settings?.timeoutMs ?? 30000,
-        verifySsl: effectiveRequest.settings?.verifySsl ?? true,
-      },
+      options: toApiOptions(effectiveRequest.settings),
       collection: collection ?? undefined,
       environmentName,
       requestPath,

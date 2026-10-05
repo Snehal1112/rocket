@@ -64,6 +64,10 @@ export interface RequestOptions {
   verifySsl: boolean;
   /** Send and keep cookies. On by default; the backend treats a missing value as true. */
   useCookieJar?: boolean;
+  /** Redirects to follow before giving up. The backend default (10) applies when missing. */
+  maxRedirects?: number;
+  /** Percent-encode the params table. On by default; the backend treats a missing value as true. */
+  encodeUrl?: boolean;
 }
 
 export interface CollectionVariable {

@@ -35,8 +35,10 @@ import {
   resolveRequestFieldsForPath,
   toApiAuth,
   toApiBody,
+  toApiOptions,
 } from '@/lib/execute-request';
 import { environmentKeys } from '@/lib/queries/environment-queries';
+import { getCollectionSettings } from '@/lib/tauri-api';
 
 function baseRequest(): RequestState {
   return {
@@ -120,6 +122,38 @@ describe('resolveRequestFieldsForPath', () => {
     const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
     expect(resolved.url).toBe('https://collection.example/users/:id');
     expect(resolved.pathParams).toEqual([{ name: 'id', value: 'https://collection.example' }]);
+  });
+
+  it('sends the query once: it travels in queryParams, not in the url', async () => {
+    const request = {
+      ...baseRequest(),
+      url: '{{baseUrl}}/items?a=1&b=2',
+      queryParams: [
+        { id: 'q1', key: 'a', value: '1', enabled: true },
+        { id: 'q2', key: 'b', value: '2', enabled: true },
+      ],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe('https://collection.example/items');
+    expect(resolved.queryParams.map((p) => p.key)).toEqual(['a', 'b']);
+  });
+
+  it('keeps a query that comes from a variable, since the params table never held it', async () => {
+    vi.mocked(getCollectionSettings).mockResolvedValueOnce({
+      variables: [
+        {
+          key: 'baseUrl',
+          value: 'https://collection.example/api?key=k',
+          initialValue: '',
+          enabled: true,
+          secret: false,
+        },
+      ],
+      headers: [],
+    } as unknown as Awaited<ReturnType<typeof getCollectionSettings>>);
+    const request = { ...baseRequest(), url: '{{baseUrl}}' };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe('https://collection.example/api?key=k');
   });
 });
 
@@ -292,5 +326,35 @@ describe('toApiAuth aws-sig-v4', () => {
     const out = toApiAuth(auth) as unknown as Record<string, unknown>;
     expect(out.sessionToken).toBe('tok');
     expect(out.profileName).toBeUndefined();
+  });
+});
+
+describe('toApiOptions', () => {
+  it('maps every request setting the backend honors', () => {
+    expect(
+      toApiOptions({
+        verifySsl: false,
+        followRedirects: false,
+        maxRedirects: 3,
+        timeoutMs: 5000,
+        encodeUrl: false,
+      }),
+    ).toEqual({
+      followRedirects: false,
+      timeoutMs: 5000,
+      verifySsl: false,
+      maxRedirects: 3,
+      encodeUrl: false,
+    });
+  });
+
+  it('falls back to the defaults when the request has no settings', () => {
+    expect(toApiOptions(undefined)).toEqual({
+      followRedirects: true,
+      timeoutMs: 30000,
+      verifySsl: true,
+      maxRedirects: undefined,
+      encodeUrl: true,
+    });
   });
 });

@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { resolveRequestFields } from '@/lib/execute-request';
+import { resolveRequestFields, toApiOptions } from '@/lib/execute-request';
 import { type LoadTestResult, runLoadTest } from '@/lib/tauri-api';
 import type { RequestState } from '@/types/pane-types';
 
@@ -55,11 +55,7 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
           pathParams: resolved.pathParams,
           body: resolved.body ?? null,
           auth: resolved.auth,
-          options: {
-            followRedirects: request.settings.followRedirects,
-            timeoutMs: request.settings.timeoutMs,
-            verifySsl: request.settings.verifySsl,
-          },
+          options: toApiOptions(request.settings),
           collection: resolved.collection,
           environmentName: resolved.environmentName,
           requestPath: resolved.requestPath,

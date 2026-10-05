@@ -14,16 +14,64 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, OAuth1Auth};
 
 pub struct ReqwestExecutor {
-    // Cache of reqwest::Clients keyed on (follow_redirects, verify_ssl, use_cookies).
-    // These are the only HttpRequest options that force a different Client::builder()
-    // configuration; everything else (headers, body, query, timeout, auth) is applied
-    // per-request on the request builder. At most 8 distinct keys can ever exist.
-    clients: Mutex<HashMap<(bool, bool, bool), Client>>,
+    /// Cache of reqwest::Clients, keyed on the options that force a different
+    /// Client::builder() configuration (see `ClientKey`).
+    clients: Mutex<HashMap<ClientKey, Client>>,
     /// When set, file reads in Binary/FormData bodies are confined to this directory.
     /// Wrapped in Arc<Mutex<>> so workspace switches are reflected without rebuilding the executor.
     allowed_base: Option<Arc<Mutex<std::path::PathBuf>>>,
     /// Shared by every client that has cookies on. `None` means no jar is configured.
     cookie_store: Option<Arc<RepoCookieStore>>,
+    /// The app-level proxy setting. `None` means reqwest's default (the system proxy).
+    proxy: Option<rocket_http::SharedProxy>,
+}
+
+/// What decides which cached client serves a request. Everything else (headers, body,
+/// query, timeout, auth) is applied per request on the request builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ClientKey {
+    follow_redirects: bool,
+    verify_ssl: bool,
+    use_cookies: bool,
+    max_redirects: Option<u32>,
+    /// Bumped by the proxy service on every save, so a changed proxy never reuses an old client.
+    proxy_generation: u64,
+}
+
+impl ClientKey {
+    fn plain(follow_redirects: bool, verify_ssl: bool) -> Self {
+        Self {
+            follow_redirects,
+            verify_ssl,
+            use_cookies: false,
+            max_redirects: None,
+            proxy_generation: 0,
+        }
+    }
+}
+
+/// Everything needed to build one client.
+struct ClientBuild {
+    key: ClientKey,
+    identity: Option<ClientIdentity>,
+    cookies: Option<Arc<RepoCookieStore>>,
+    proxy: rocket_http::ResolvedProxy,
+    /// One idle connection and HTTP/1 only, for handshakes that belong to a connection (NTLM).
+    single_connection: bool,
+}
+
+impl ClientBuild {
+    fn plain(follow_redirects: bool, verify_ssl: bool, max_redirects: Option<u32>) -> Self {
+        let mut key = ClientKey::plain(follow_redirects, verify_ssl);
+        key.max_redirects = max_redirects;
+        Self {
+            key,
+            identity: None,
+            cookies: None,
+            proxy: rocket_http::ResolvedProxy::default(),
+            single_connection: false,
+        }
+    }
 }
 
 impl ReqwestExecutor {
@@ -32,6 +80,7 @@ impl ReqwestExecutor {
             clients: Mutex::new(HashMap::new()),
             allowed_base: None,
             cookie_store: None,
+            proxy: None,
         }
     }
 
@@ -41,6 +90,7 @@ impl ReqwestExecutor {
             clients: Mutex::new(HashMap::new()),
             allowed_base: Some(base),
             cookie_store: None,
+            proxy: None,
         }
     }
 
@@ -48,6 +98,20 @@ impl ReqwestExecutor {
     pub fn with_cookie_repo(mut self, repo: Arc<dyn CookieRepository>) -> Self {
         self.cookie_store = Some(Arc::new(RepoCookieStore::new(repo)));
         self
+    }
+
+    /// Reads requests through `shared`, which the proxy service updates when settings change.
+    pub fn with_proxy(mut self, shared: rocket_http::SharedProxy) -> Self {
+        self.proxy = Some(shared);
+        self
+    }
+
+    fn current_proxy(&self) -> rocket_http::ResolvedProxy {
+        match &self.proxy {
+            // A poisoned lock only means a writer panicked; the value is still a whole proxy.
+            Some(shared) => shared.read().unwrap_or_else(|e| e.into_inner()).clone(),
+            None => rocket_http::ResolvedProxy::default(),
+        }
     }
 
     /// Rejects any path that resolves outside the allowed base directory.
@@ -117,26 +181,23 @@ impl ReqwestExecutor {
 
     fn get_or_build_client(
         &self,
-        follow_redirects: bool,
-        verify_ssl: bool,
-        use_cookies: bool,
+        key: ClientKey,
+        cookies: Option<Arc<RepoCookieStore>>,
+        proxy: rocket_http::ResolvedProxy,
     ) -> DomainResult<Client> {
-        // Without a configured jar the cookie flag changes nothing, so it stays out of the key.
-        let use_cookies = use_cookies && self.cookie_store.is_some();
-        let key = (follow_redirects, verify_ssl, use_cookies);
         // The cache only holds clients, so a poisoned lock is safe to recover.
         let mut cache = self.clients.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = cache.get(&key) {
-            // reqwest::Client::clone is cheap — internally Arc.
+            // reqwest::Client::clone is cheap, it is an Arc inside.
             return Ok(c.clone());
         }
-        let cookies = if use_cookies {
-            self.cookie_store.clone()
-        } else {
-            None
-        };
-        let client =
-            build_client_with_identity(follow_redirects, verify_ssl, None, None, cookies)?;
+        let client = build_client(ClientBuild {
+            key,
+            identity: None,
+            cookies,
+            proxy,
+            single_connection: false,
+        })?;
         cache.insert(key, client.clone());
         Ok(client)
     }
@@ -314,21 +375,25 @@ impl HttpExecutor for ReqwestExecutor {
         } else {
             None
         };
-        let client = if identity.is_some() || request.options.max_redirects.is_some() {
+        let proxy = self.current_proxy();
+        let key = ClientKey {
+            follow_redirects: request.options.follow_redirects,
+            verify_ssl: request.options.verify_ssl,
+            use_cookies: cookies.is_some(),
+            max_redirects: request.options.max_redirects,
+            proxy_generation: proxy.generation,
+        };
+        let client = if identity.is_some() {
             // The shared client cache is keyed without an identity, so this gets its own client.
-            build_client_with_identity(
-                request.options.follow_redirects,
-                request.options.verify_ssl,
-                request.options.max_redirects,
+            build_client(ClientBuild {
+                key,
                 identity,
                 cookies,
-            )?
+                proxy,
+                single_connection: false,
+            })?
         } else {
-            self.get_or_build_client(
-                request.options.follow_redirects,
-                request.options.verify_ssl,
-                cookies.is_some(),
-            )?
+            self.get_or_build_client(key, cookies, proxy)?
         };
         let method = map_method(&request.method)?;
         let start = Instant::now();
@@ -338,12 +403,27 @@ impl HttpExecutor for ReqwestExecutor {
             .map_err(|e| DomainError::InvalidInput(format!("Invalid URL: {e}")))?;
         {
             let enabled: Vec<_> = request.query_params.iter().filter(|p| p.enabled).collect();
-            // Only call query_pairs_mut when there are params; calling it with no
-            // appends sets an empty query string and produces a trailing '?'.
+            // Only touch the query when there are params; query_pairs_mut with no appends
+            // sets an empty query string and produces a trailing '?'.
             if !enabled.is_empty() {
-                let mut pairs = url.query_pairs_mut();
-                for p in enabled {
-                    pairs.append_pair(&p.key, &p.value);
+                if request.options.encode_url {
+                    let mut pairs = url.query_pairs_mut();
+                    for p in enabled {
+                        pairs.append_pair(&p.key, &p.value);
+                    }
+                } else {
+                    // As typed: reserved characters and existing %-escapes are kept. The URL
+                    // parser still escapes what a URL cannot hold, such as a space.
+                    let extra = enabled
+                        .iter()
+                        .map(|p| format!("{}={}", p.key, p.value))
+                        .collect::<Vec<_>>()
+                        .join("&");
+                    let query = match url.query() {
+                        Some(existing) if !existing.is_empty() => format!("{existing}&{extra}"),
+                        _ => extra,
+                    };
+                    url.set_query(Some(&query));
                 }
             }
         }
@@ -587,24 +667,27 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
         certificates: &[ResolvedClientCertificate],
     ) -> DomainResult<Client> {
         let identity = identity_for_url(certificates, token_url)?;
-        build_client_with_identity(true, verify_ssl, None, identity, None)
+        let mut spec = ClientBuild::plain(true, verify_ssl, None);
+        spec.identity = identity;
+        build_client(spec)
     }
 }
 
-/// Builds a client, presenting `identity` as the TLS client certificate when there is one.
+/// Builds a client, presenting the identity as the TLS client certificate when there is one.
 ///
 /// A client offers its identity to every host it connects to, so with an identity the redirect
 /// policy stops at a redirect that leaves the certificate's domain. The 3xx response is then
 /// returned, and the user can send the request to the new host on purpose.
-fn build_client_with_identity(
-    follow_redirects: bool,
-    verify_ssl: bool,
-    max_redirects: Option<u32>,
-    identity: Option<ClientIdentity>,
-    cookies: Option<Arc<RepoCookieStore>>,
-) -> DomainResult<Client> {
-    let limit = max_redirects.unwrap_or(10) as usize;
-    let redirect_policy = if !follow_redirects {
+fn build_client(spec: ClientBuild) -> DomainResult<Client> {
+    let ClientBuild {
+        key,
+        identity,
+        cookies,
+        proxy,
+        single_connection,
+    } = spec;
+    let limit = key.max_redirects.unwrap_or(10) as usize;
+    let redirect_policy = if !key.follow_redirects {
         redirect::Policy::none()
     } else if let Some(scope) = identity.as_ref().map(|i| i.certificate.clone()) {
         redirect::Policy::custom(move |attempt| {
@@ -623,16 +706,67 @@ fn build_client_with_identity(
 
     let mut builder = Client::builder()
         .redirect(redirect_policy)
-        .danger_accept_invalid_certs(!verify_ssl);
+        .danger_accept_invalid_certs(!key.verify_ssl);
     if let Some(identity) = identity {
         builder = builder.identity(identity.identity);
     }
     if let Some(store) = cookies {
         builder = builder.cookie_provider(store);
     }
+    if single_connection {
+        builder = builder.pool_max_idle_per_host(1).http1_only();
+    }
+    builder = apply_proxy(builder, &proxy)?;
     builder
         .build()
         .map_err(|e| DomainError::Http(e.to_string()))
+}
+
+/// Applies the app's proxy setting. `System` leaves reqwest's default, which reads the
+/// `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` environment variables.
+fn apply_proxy(
+    builder: reqwest::ClientBuilder,
+    proxy: &rocket_http::ResolvedProxy,
+) -> DomainResult<reqwest::ClientBuilder> {
+    use rocket_http::ProxyMode;
+    match proxy.settings.mode {
+        ProxyMode::System => Ok(builder),
+        ProxyMode::None => Ok(builder.no_proxy()),
+        ProxyMode::Custom => {
+            // The custom proxies replace the environment ones.
+            let mut builder = builder.no_proxy();
+            let no_proxy = proxy
+                .settings
+                .no_proxy
+                .as_deref()
+                .and_then(reqwest::NoProxy::from_string);
+            let entries = [
+                ("HTTP", proxy.settings.http_proxy.as_deref(), false),
+                ("HTTPS", proxy.settings.https_proxy.as_deref(), true),
+            ];
+            for (label, url, https) in entries {
+                let Some(url) = url.map(str::trim).filter(|u| !u.is_empty()) else {
+                    continue;
+                };
+                // The URL is never echoed: it is user input and could hold credentials.
+                let created = if https {
+                    reqwest::Proxy::https(url)
+                } else {
+                    reqwest::Proxy::http(url)
+                };
+                let mut p = created.map_err(|_| {
+                    DomainError::InvalidInput(format!("The {label} proxy URL is not valid"))
+                })?;
+                if let (Some(user), Some(password)) =
+                    (proxy.settings.username.as_deref(), proxy.password.as_ref())
+                {
+                    p = p.basic_auth(user, password.as_str());
+                }
+                builder = builder.proxy(p.no_proxy(no_proxy.clone()));
+            }
+            Ok(builder)
+        }
+    }
 }
 
 /// Turns a client certificate's material, from a file or held in memory, into a TLS identity.
@@ -1037,7 +1171,9 @@ async fn fetch_client_credentials_token(
     // from the cached executor client (see get_or_build_client). The certificate is matched
     // against the token URL, which can be a different host than the request.
     let identity = identity_for_url(certificates, access_token_url)?;
-    let client = build_client_with_identity(true, verify_ssl, None, identity, None)
+    let mut spec = ClientBuild::plain(true, verify_ssl, None);
+    spec.identity = identity;
+    let client = build_client(spec)
         .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
     let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
     if let Some(s) = scope {
@@ -1131,7 +1267,7 @@ mod tests {
     #[test]
     fn build_client_accepts_invalid_certs_option() {
         // Should not error when building a client that accepts invalid certs.
-        assert!(build_client_with_identity(true, false, None, None, None).is_ok());
+        assert!(build_client(ClientBuild::plain(true, false, None)).is_ok());
     }
 
     #[test]
@@ -1143,8 +1279,20 @@ mod tests {
     #[test]
     fn executor_caches_client_on_first_use() {
         let exec = ReqwestExecutor::new();
-        let _c1 = exec.get_or_build_client(true, true, true).unwrap();
-        let _c2 = exec.get_or_build_client(true, true, true).unwrap();
+        let _c1 = exec
+            .get_or_build_client(
+                ClientKey::plain(true, true),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
+        let _c2 = exec
+            .get_or_build_client(
+                ClientKey::plain(true, true),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
         // Same options → only one cached client.
         assert_eq!(exec.cache_len(), 1);
     }
@@ -1160,20 +1308,56 @@ mod tests {
         })
         .join();
         assert!(exec.clients.is_poisoned(), "the lock should be poisoned");
-        assert!(exec.get_or_build_client(true, true, true).is_ok());
+        assert!(exec
+            .get_or_build_client(
+                ClientKey::plain(true, true),
+                None,
+                rocket_http::ResolvedProxy::default()
+            )
+            .is_ok());
     }
 
     #[test]
     fn executor_builds_different_clients_for_different_options() {
         let exec = ReqwestExecutor::new();
-        let _a = exec.get_or_build_client(true, true, true).unwrap();
-        let _b = exec.get_or_build_client(true, false, true).unwrap();
-        let _c = exec.get_or_build_client(false, true, true).unwrap();
-        let _d = exec.get_or_build_client(false, false, true).unwrap();
+        let _a = exec
+            .get_or_build_client(
+                ClientKey::plain(true, true),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
+        let _b = exec
+            .get_or_build_client(
+                ClientKey::plain(true, false),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
+        let _c = exec
+            .get_or_build_client(
+                ClientKey::plain(false, true),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
+        let _d = exec
+            .get_or_build_client(
+                ClientKey::plain(false, false),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
         // 4 distinct (redirects, ssl) combinations → 4 cached clients.
         assert_eq!(exec.cache_len(), 4);
         // Re-querying one does not grow the cache.
-        let _a2 = exec.get_or_build_client(true, true, true).unwrap();
+        let _a2 = exec
+            .get_or_build_client(
+                ClientKey::plain(true, true),
+                None,
+                rocket_http::ResolvedProxy::default(),
+            )
+            .expect("client");
         assert_eq!(exec.cache_len(), 4);
     }
 
@@ -3011,5 +3195,198 @@ mod multipart_tests {
         });
         let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
         assert!(err.to_string().contains("no file"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod encode_url_tests {
+    use super::*;
+    use rocket_shared::types::{HttpMethod, QueryParam};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn param(key: &str, value: &str) -> QueryParam {
+        QueryParam {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            description: None,
+        }
+    }
+
+    async fn query_sent(encode_url: bool, url_path: &str, params: Vec<QueryParam>) -> String {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}{url_path}", server.uri()));
+        req.query_params = params;
+        req.options.encode_url = encode_url;
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+        let received = server.received_requests().await.expect("recorded");
+        received[0].url.query().unwrap_or_default().to_string()
+    }
+
+    #[tokio::test]
+    async fn encoded_by_default() {
+        let q = query_sent(true, "/p", vec![param("q", "a+b/c:d"), param("r", "50%25")]).await;
+        assert_eq!(q, "q=a%2Bb%2Fc%3Ad&r=50%2525");
+    }
+
+    #[tokio::test]
+    async fn sent_as_typed_when_encoding_is_off() {
+        let q = query_sent(
+            false,
+            "/p",
+            vec![param("q", "a+b/c:d"), param("r", "50%25")],
+        )
+        .await;
+        assert_eq!(q, "q=a+b/c:d&r=50%25");
+    }
+
+    #[tokio::test]
+    async fn the_urls_own_query_is_kept_in_both_modes() {
+        let on = query_sent(true, "/p?x=1", vec![param("y", "2")]).await;
+        let off = query_sent(false, "/p?x=1", vec![param("y", "2")]).await;
+        assert_eq!(on, "x=1&y=2");
+        assert_eq!(off, "x=1&y=2");
+    }
+
+    #[tokio::test]
+    async fn max_redirects_does_not_defeat_the_client_cache() {
+        let exec = ReqwestExecutor::new();
+        let key = ClientKey {
+            max_redirects: Some(5),
+            ..ClientKey::plain(true, true)
+        };
+        let proxy = rocket_http::ResolvedProxy::default();
+        exec.get_or_build_client(key, None, proxy.clone())
+            .expect("first");
+        exec.get_or_build_client(key, None, proxy.clone())
+            .expect("second");
+        assert_eq!(
+            exec.cache_len(),
+            1,
+            "the same redirect limit must reuse one client"
+        );
+        let other = ClientKey {
+            max_redirects: Some(2),
+            ..key
+        };
+        exec.get_or_build_client(other, None, proxy)
+            .expect("other limit");
+        assert_eq!(exec.cache_len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+    use rocket_http::{ProxyMode, ProxySettings, ResolvedProxy};
+    use rocket_shared::types::HttpMethod;
+    use std::sync::RwLock;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn shared(settings: ProxySettings, password: Option<&str>) -> rocket_http::SharedProxy {
+        Arc::new(RwLock::new(ResolvedProxy {
+            settings,
+            password: password.map(|p| zeroize::Zeroizing::new(p.to_string())),
+            generation: 1,
+        }))
+    }
+
+    async fn proxy_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("via proxy"))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn custom(uri: &str) -> ProxySettings {
+        ProxySettings {
+            mode: ProxyMode::Custom,
+            http_proxy: Some(uri.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn custom_proxy_carries_the_request() {
+        let proxy = proxy_server().await;
+        let exec = ReqwestExecutor::new().with_proxy(shared(custom(&proxy.uri()), None));
+        let mut req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
+        req.options.timeout_ms = 5_000;
+        let response = exec.execute(&req).await.expect("through the proxy");
+        assert_eq!(response.body, "via proxy");
+    }
+
+    #[tokio::test]
+    async fn proxy_credentials_are_sent_as_basic_auth() {
+        let proxy = proxy_server().await;
+        let mut settings = custom(&proxy.uri());
+        settings.username = Some("u".into());
+        let exec = ReqwestExecutor::new().with_proxy(shared(settings, Some("p")));
+        let mut req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
+        req.options.timeout_ms = 5_000;
+        exec.execute(&req).await.expect("through the proxy");
+        let received = proxy.received_requests().await.expect("recorded");
+        let auth = received[0]
+            .headers
+            .get("proxy-authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert_eq!(auth, "Basic dTpw", "base64 of u:p");
+    }
+
+    #[tokio::test]
+    async fn no_proxy_hosts_bypass_the_proxy() {
+        let proxy = proxy_server().await;
+        let mut settings = custom(&proxy.uri());
+        settings.no_proxy = Some("upstream.invalid".into());
+        let exec = ReqwestExecutor::new().with_proxy(shared(settings, None));
+        let mut req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
+        req.options.timeout_ms = 3_000;
+        let err = exec
+            .execute(&req)
+            .await
+            .expect_err("direct connection must fail");
+        assert!(matches!(err, DomainError::Http(_)), "{err}");
+        assert!(proxy
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn changing_the_setting_changes_the_client() {
+        let proxy = proxy_server().await;
+        let handle = shared(ProxySettings::default(), None);
+        let exec = ReqwestExecutor::new().with_proxy(Arc::clone(&handle));
+        let mut req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
+        req.options.timeout_ms = 3_000;
+        assert!(
+            exec.execute(&req).await.is_err(),
+            "system mode, no proxy: unreachable host"
+        );
+        {
+            let mut write = handle.write().expect("lock");
+            write.settings = custom(&proxy.uri());
+            write.generation += 1;
+        }
+        let response = exec.execute(&req).await.expect("now through the proxy");
+        assert_eq!(response.body, "via proxy");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_proxy_url_fails_without_echoing_it() {
+        let exec = ReqwestExecutor::new().with_proxy(shared(custom("http://user:hunter2@"), None));
+        let req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
+        let err = exec.execute(&req).await.expect_err("must fail");
+        assert!(!err.to_string().contains("hunter2"), "{err}");
     }
 }

@@ -117,7 +117,7 @@ impl ReqwestVaultSecretFetcher {
         // panicking on our own code path.
         //
         // Both clients disable redirects and set a request timeout, matching
-        // the style of this crate's own `reqwest_executor::build_client_with_identity`.
+        // the style of this crate's own `reqwest_executor::build_client`.
         // RocketVault's API never redirects, so following one is never
         // correct here — and a followed redirect could carry the request's
         // `client_secret` form body to an unintended host.

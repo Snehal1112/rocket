@@ -10,6 +10,7 @@ pub mod oauth1_sig;
 pub mod oauth2;
 pub mod path_params;
 pub mod pkce;
+pub mod proxy;
 pub mod request;
 pub mod resolved_certificate;
 pub mod response;
@@ -32,6 +33,9 @@ pub use oauth2::{
 };
 pub use path_params::substitute_path_params;
 pub use pkce::{generate_pkce, PkcePair};
+pub use proxy::{
+    new_shared_proxy, ProxyMode, ProxySettings, ProxySettingsRepository, ResolvedProxy, SharedProxy,
+};
 pub use request::{HttpRequest, RequestOptions};
 pub use resolved_certificate::{
     CertificateMaterial, CertificateSource, ResolvedClientCertificate, VaultCertificateBinding,

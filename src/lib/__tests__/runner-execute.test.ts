@@ -18,6 +18,7 @@ vi.mock('@/lib/execute-request', () => ({
     requestPath: 'ping.yml',
   })),
   getActiveGlobalEnvName: vi.fn(() => 'global-prod'),
+  toApiOptions: vi.fn(() => ({ followRedirects: true, timeoutMs: 0, verifySsl: true })),
   getActiveWorkspaceRequestGuardPolicy: vi.fn(async () => ({
     blockScriptRedirectsToInternalHosts: true,
     alsoBlockPrivateRanges: true,
