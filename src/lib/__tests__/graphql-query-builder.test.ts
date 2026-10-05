@@ -117,6 +117,12 @@ describe('buildOperation', () => {
     expect(anon.operationName).toBeUndefined();
   });
 
+  it('drops leading digits so the operation name stays valid', () => {
+    const out = buildOperation(schema, { operation: 'query', name: '1users', paths: ['ping'] });
+    expect(out.query.startsWith('query users {')).toBe(true);
+    expect(out.operationName).toBe('users');
+  });
+
   it('returns an empty query when the schema has no mutation root', () => {
     const s = buildSchema('type Query { a: String }');
     expect(buildOperation(s, { operation: 'mutation', name: 'M', paths: ['a'] }).query).toBe('');

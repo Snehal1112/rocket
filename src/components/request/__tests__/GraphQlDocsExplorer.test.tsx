@@ -55,4 +55,12 @@ describe('GraphQlDocsExplorer', () => {
     await userEvent.click(screen.getByRole('button', { name: /refresh/i }));
     expect(onFetch).toHaveBeenCalledWith(true);
   });
+
+  it('keeps showing the schema and reports a failed refresh', () => {
+    render(
+      <GraphQlDocsExplorer schema={schema} status='error' error='server down' onFetch={vi.fn()} />,
+    );
+    expect(screen.getByText(/server down/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /refresh/i })).toBeTruthy();
+  });
 });

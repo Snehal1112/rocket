@@ -142,7 +142,7 @@ export function buildOperation(schema: GraphQLSchema, input: BuilderInput): Buil
   const body = emit(root, tree, 1, variables, new Set());
   if (!body) return { query: '', variables: '' };
 
-  const name = (input.name ?? '').replace(/[^_A-Za-z0-9]/g, '');
+  const name = (input.name ?? '').replace(/[^_A-Za-z0-9]/g, '').replace(/^[0-9]+/, '');
   const defs = variables.map((v) => `$${v.name}: ${String(v.type)}`).join(', ');
   const header = `${input.operation}${name ? ` ${name}` : ''}${defs ? `(${defs})` : ''}`;
   const skeletonObject = Object.fromEntries(variables.map((v) => [v.name, skeleton(v.type)]));

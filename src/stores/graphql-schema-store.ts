@@ -43,7 +43,7 @@ function ready(result: GraphQlSchemaResult): SchemaEntry {
   };
 }
 
-export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set) => {
+export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set, get) => {
   const put = (tabId: string, entry: SchemaEntry) =>
     set((s) => ({ entries: { ...s.entries, [tabId]: entry } }));
 
@@ -55,11 +55,7 @@ export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set) => {
       latest[tabId] = mine;
       try {
         const input = await buildSchemaRequestInput(tabId, request);
-        const cached = await getCachedGraphQlSchema(
-          input.collection,
-          input.environmentName,
-          input.url,
-        );
+        const cached = await getCachedGraphQlSchema(input);
         if (latest[tabId] !== mine) return;
         put(tabId, cached ? ready(cached) : { status: 'idle' });
       } catch (err) {
@@ -71,7 +67,9 @@ export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set) => {
     async fetchSchema(tabId, request, refresh) {
       const mine = ++counter;
       latest[tabId] = mine;
-      put(tabId, { status: 'loading' });
+      // Keep the schema we already have, so completion and the docs survive a refresh.
+      const { schema, fetchedAt } = get().entries[tabId] ?? {};
+      put(tabId, { status: 'loading', schema, fetchedAt });
       try {
         const input = await buildSchemaRequestInput(tabId, request);
         const result = await fetchGraphQlSchema({ request: input, refresh });
@@ -79,7 +77,7 @@ export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set) => {
         put(tabId, ready(result));
       } catch (err) {
         if (latest[tabId] !== mine) return;
-        put(tabId, { status: 'error', error: message(err) });
+        put(tabId, { status: 'error', error: message(err), schema, fetchedAt });
       }
     },
 

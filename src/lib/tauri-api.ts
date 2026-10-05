@@ -972,27 +972,12 @@ export interface FetchGraphQlSchemaInput {
 export const fetchGraphQlSchema = (input: FetchGraphQlSchemaInput) =>
   invoke<GraphQlSchemaResult>('fetch_graphql_schema', { input });
 
-export const getCachedGraphQlSchema = (
-  collection: string | undefined,
-  environmentName: string | undefined,
-  url: string,
-) =>
-  invoke<GraphQlSchemaResult | null>('get_cached_graphql_schema', {
-    collection: collection ?? null,
-    environmentName: environmentName ?? null,
-    url,
-  });
+/** Reads the cache with the same request a fetch would send, so auth and headers count. */
+export const getCachedGraphQlSchema = (request: ExecuteRequestInput) =>
+  invoke<GraphQlSchemaResult | null>('get_cached_graphql_schema', { request });
 
-export const clearGraphQlSchema = (
-  collection: string | undefined,
-  environmentName: string | undefined,
-  url: string,
-) =>
-  invoke<void>('clear_graphql_schema', {
-    collection: collection ?? null,
-    environmentName: environmentName ?? null,
-    url,
-  });
+export const clearGraphQlSchema = (request: ExecuteRequestInput) =>
+  invoke<void>('clear_graphql_schema', { request });
 
 export const evaluateVarExpression = (
   collectionRoot: string,

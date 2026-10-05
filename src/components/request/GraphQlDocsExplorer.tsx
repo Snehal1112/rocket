@@ -55,6 +55,7 @@ export function GraphQlDocsExplorer({
           Fetched {new Date(fetchedAt).toLocaleString()}
         </span>
       )}
+      {schema && error && <span className='text-xs text-destructive'>{error}</span>}
     </div>
   );
 

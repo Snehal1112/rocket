@@ -1,5 +1,5 @@
 use rocket_app::graphql_schema::{FetchGraphQlSchemaInput, GraphQlSchemaCache, GraphQlSchemaDto};
-use rocket_app::RequestExecutionService;
+use rocket_app::{ExecuteRequestInput, RequestExecutionService};
 use rocket_shared::error::DomainError;
 use tauri::State;
 
@@ -13,32 +13,17 @@ pub async fn fetch_graphql_schema(
     svc.fetch_graphql_schema(&cache, input).await
 }
 
-/// Returns the cached schema for an endpoint without touching the network.
+/// Returns the cached schema for a request without touching the network.
 #[tauri::command]
 pub fn get_cached_graphql_schema(
-    collection: Option<String>,
-    environment_name: Option<String>,
-    url: String,
+    request: ExecuteRequestInput,
     cache: State<'_, GraphQlSchemaCache>,
 ) -> Option<GraphQlSchemaDto> {
-    cache.get(&GraphQlSchemaCache::key(
-        collection.as_deref(),
-        environment_name.as_deref(),
-        &url,
-    ))
+    cache.get(&GraphQlSchemaCache::key_for(&request))
 }
 
-/// Forgets the cached schema for an endpoint.
+/// Forgets the cached schema for a request.
 #[tauri::command]
-pub fn clear_graphql_schema(
-    collection: Option<String>,
-    environment_name: Option<String>,
-    url: String,
-    cache: State<'_, GraphQlSchemaCache>,
-) {
-    cache.clear(&GraphQlSchemaCache::key(
-        collection.as_deref(),
-        environment_name.as_deref(),
-        &url,
-    ));
+pub fn clear_graphql_schema(request: ExecuteRequestInput, cache: State<'_, GraphQlSchemaCache>) {
+    cache.clear(&GraphQlSchemaCache::key_for(&request));
 }

@@ -219,6 +219,26 @@ impl GraphQlSchemaCache {
         )
     }
 
+    /// Like `key`, plus a fingerprint of what decides which schema the server returns:
+    /// the auth, headers and query parameters. Only a hash is kept, never the secrets.
+    pub fn key_for(request: &ExecuteRequestInput) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        // Serialising can only fail for a map with non-string keys, which these are not.
+        serde_json::to_string(&(&request.auth, &request.headers, &request.query_params))
+            .unwrap_or_default()
+            .hash(&mut hasher);
+        format!(
+            "{}|{:016x}",
+            Self::key(
+                request.collection.as_deref(),
+                request.environment_name.as_deref(),
+                &request.url,
+            ),
+            hasher.finish()
+        )
+    }
+
     pub fn get(&self, key: &str) -> Option<GraphQlSchemaDto> {
         self.entries
             .lock()
@@ -310,11 +330,7 @@ impl RequestExecutionService {
         cache: &GraphQlSchemaCache,
         input: FetchGraphQlSchemaInput,
     ) -> DomainResult<GraphQlSchemaDto> {
-        let key = GraphQlSchemaCache::key(
-            input.request.collection.as_deref(),
-            input.request.environment_name.as_deref(),
-            &input.request.url,
-        );
+        let key = GraphQlSchemaCache::key_for(&input.request);
         if !input.refresh {
             if let Some(hit) = cache.get(&key) {
                 return Ok(hit);
@@ -561,11 +577,10 @@ mod tests {
             "got: {err}"
         );
         assert!(cache
-            .get(&GraphQlSchemaCache::key(
-                None,
-                None,
-                &format!("{}/graphql", server.uri())
-            ))
+            .get(&GraphQlSchemaCache::key_for(&input(&format!(
+                "{}/graphql",
+                server.uri()
+            ))))
             .is_none());
     }
 
@@ -593,6 +608,65 @@ mod tests {
         assert_eq!(
             server.received_requests().await.expect("recording").len(),
             1
+        );
+    }
+
+    #[test]
+    fn key_for_separates_auth_without_exposing_it() {
+        let mut a = input("https://x/graphql");
+        let mut b = input("https://x/graphql");
+        a.auth = rocket_shared::types::Auth::Bearer {
+            token: "admin-secret".into(),
+        };
+        b.auth = rocket_shared::types::Auth::Bearer {
+            token: "user-secret".into(),
+        };
+        let ka = GraphQlSchemaCache::key_for(&a);
+        assert_ne!(ka, GraphQlSchemaCache::key_for(&b));
+        assert_eq!(ka, GraphQlSchemaCache::key_for(&a));
+        assert!(
+            !ka.contains("admin-secret"),
+            "the key must not hold the token"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_graphql_schema_refetches_when_the_auth_changes() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(schema_body()))
+            .mount(&server)
+            .await;
+        let (svc, _history) = service(Environment::new("dev"));
+        let cache = GraphQlSchemaCache::default();
+        let url = format!("{}/graphql", server.uri());
+        let with = |token: &str| {
+            let mut request = input(&url);
+            request.auth = rocket_shared::types::Auth::Bearer {
+                token: token.into(),
+            };
+            FetchGraphQlSchemaInput {
+                request,
+                refresh: false,
+            }
+        };
+
+        svc.fetch_graphql_schema(&cache, with("one"))
+            .await
+            .expect("one");
+        svc.fetch_graphql_schema(&cache, with("one"))
+            .await
+            .expect("cached");
+        assert_eq!(
+            server.received_requests().await.expect("recording").len(),
+            1
+        );
+        svc.fetch_graphql_schema(&cache, with("two"))
+            .await
+            .expect("two");
+        assert_eq!(
+            server.received_requests().await.expect("recording").len(),
+            2
         );
     }
 

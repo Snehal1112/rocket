@@ -94,4 +94,36 @@ describe('graphql schema store', () => {
     await slow;
     expect(useGraphQlSchemaStore.getState().entries.t1?.status).toBe('idle');
   });
+
+  it('keeps the current schema while a refresh is loading and after it fails', async () => {
+    vi.mocked(fetchGraphQlSchema).mockResolvedValueOnce(result);
+    const req = createDefaultRequestFor('graphql');
+    await useGraphQlSchemaStore.getState().fetchSchema('t1', req, false);
+
+    let fail: ((e: unknown) => void) | undefined;
+    vi.mocked(fetchGraphQlSchema).mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    const refresh = useGraphQlSchemaStore.getState().fetchSchema('t1', req, true);
+    const loading = useGraphQlSchemaStore.getState().entries.t1;
+    expect(loading?.status).toBe('loading');
+    expect(loading?.schema?.getQueryType()?.name).toBe('Query');
+
+    fail?.('server down');
+    await refresh;
+    const failed = useGraphQlSchemaStore.getState().entries.t1;
+    expect(failed?.status).toBe('error');
+    expect(failed?.error).toContain('server down');
+    expect(failed?.schema?.getQueryType()?.name).toBe('Query');
+  });
+
+  it('asks the backend cache with the whole request, so auth is part of the lookup', async () => {
+    vi.mocked(getCachedGraphQlSchema).mockResolvedValue(null);
+    await useGraphQlSchemaStore.getState().loadCached('t1', createDefaultRequestFor('graphql'));
+    expect(getCachedGraphQlSchema).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://x/graphql', collection: 'api' }),
+    );
+  });
 });
