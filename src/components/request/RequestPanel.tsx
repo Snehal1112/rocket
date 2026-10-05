@@ -351,10 +351,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const handleParamsChange = useCallback(
     (params: KeyValueEntry[]) => {
       const { base } = splitUrl(request.url);
-      const newUrl = buildUrl(base, params);
+      const newUrl = buildUrl(base, params, request.settings?.encodeUrl ?? true);
       updateRequest(tab.id, { url: newUrl, queryParams: params });
     },
-    [tab.id, request.url, updateRequest],
+    [tab.id, request.url, request.settings?.encodeUrl, updateRequest],
   );
 
   const handleCurlImport = useCallback(

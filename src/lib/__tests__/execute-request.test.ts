@@ -39,6 +39,7 @@ import {
 } from '@/lib/execute-request';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getCollectionSettings } from '@/lib/tauri-api';
+import { buildUrl } from '@/lib/url-params';
 
 function baseRequest(): RequestState {
   return {
@@ -193,6 +194,26 @@ describe('resolveRequestFieldsForPath', () => {
     const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
     expect(resolved.url).toBe(
       'https://collection.example/r?redirect=https%3A%2F%2Fx%2F%3Fa%3D1%26b%3D2&p=50%25',
+    );
+    expect(resolved.queryParams).toEqual([]);
+  });
+
+  it('keeps variables and values exact after a params table edit when encodeUrl is off', async () => {
+    const base = baseRequest();
+    const table = [
+      { id: 'q1', key: 'token', value: '{{baseUrl}}', enabled: true },
+      { id: 'q2', key: 'sum', value: 'a+b/c:d', enabled: true },
+    ];
+    const request = {
+      ...base,
+      settings: { ...base.settings, encodeUrl: false },
+      // What the params table edit writes into the url bar.
+      url: buildUrl('{{baseUrl}}/r', table, false),
+      queryParams: table,
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe(
+      'https://collection.example/r?token=https://collection.example&sum=a+b/c:d',
     );
     expect(resolved.queryParams).toEqual([]);
   });

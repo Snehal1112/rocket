@@ -52,15 +52,20 @@ export function parseQueryParams(url: string): KeyValueEntry[] {
 }
 
 // Build a URL from a base string and a list of key-value entries.
-// Disabled entries are excluded. Keys and values are percent-encoded.
-export function buildUrl(baseUrl: string, params: KeyValueEntry[]): string {
+// Disabled entries are excluded. Keys and values are percent-encoded unless `encode` is false,
+// which keeps them as typed so that {{variables}} stay resolvable.
+export function buildUrl(baseUrl: string, params: KeyValueEntry[], encode = true): string {
   const enabled = params.filter((p) => p.enabled);
   if (enabled.length === 0) {
     return baseUrl;
   }
 
   const queryString = enabled
-    .map((p) => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`)
+    .map((p) =>
+      encode
+        ? `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`
+        : `${p.key}=${p.value}`,
+    )
     .join('&');
 
   return `${baseUrl}?${queryString}`;
