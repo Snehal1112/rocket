@@ -1,4 +1,5 @@
 import { dispatchSend, type ResolvedGraphQl } from '@/lib/dispatch-send';
+import { parseGraphQlResponse } from '@/lib/graphql-response';
 import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
 import { environmentKeys } from '@/lib/queries/environment-queries';
@@ -643,6 +644,9 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     };
     const result = await dispatchSend(effectiveRequest, requestInput, resolvedGraphql);
 
+    const isGraphQl = effectiveRequest.requestType === 'graphql';
+    const graphqlErrors = isGraphQl ? parseGraphQlResponse(result.body).errors.length : 0;
+
     const responseState: ResponseState = {
       status: result.status,
       statusText: result.statusText,
@@ -658,7 +662,15 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       sizeBytes: result.sizeBytes,
       isBinary: result.isBinary,
       bodyBase64: result.bodyBase64,
-      activeView: result.testResults.length > 0 ? 'tests' : 'pretty',
+      protocol: isGraphQl ? 'graphql' : undefined,
+      activeView:
+        graphqlErrors > 0
+          ? 'errors'
+          : result.testResults.length > 0
+            ? 'tests'
+            : isGraphQl
+              ? 'data'
+              : 'pretty',
       testResults: result.testResults,
       consoleEntries: result.consoleEntries,
       scriptError: result.scriptError,
@@ -698,7 +710,13 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       durationMs: result.durationMs,
       sizeBytes: result.sizeBytes,
       requestHeaders: consoleRequestHeaders,
-      requestBody: resolvedBody?.content ?? '',
+      requestBody: isGraphQl
+        ? JSON.stringify({
+            query: resolvedGraphql?.query,
+            operationName: effectiveRequest.graphql?.operationName,
+            variables: resolvedGraphql?.variables,
+          })
+        : (resolvedBody?.content ?? ''),
       responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
       responseBody: result.isBinary ? `(binary, ${result.sizeBytes} bytes)` : result.body,
     });

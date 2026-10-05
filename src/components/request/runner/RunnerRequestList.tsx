@@ -31,10 +31,11 @@ export function RunnerRequestList({ tab }: { tab: RunnerTab }) {
           <span
             className={cn(
               'w-14 shrink-0 font-mono text-xs font-medium',
-              METHOD_TEXT_COLOR[entry.request.method] ?? 'text-muted-foreground',
+              METHOD_TEXT_COLOR[entry.graphql ? 'POST' : entry.request.method] ??
+                'text-muted-foreground',
             )}
           >
-            {entry.request.method}
+            {entry.graphql ? 'GQL' : entry.request.method}
           </span>
           <span className='truncate text-foreground'>{entry.request.name}</span>
           <span className='ml-auto shrink-0 truncate text-xs text-muted-foreground'>

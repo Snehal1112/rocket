@@ -342,7 +342,9 @@ impl CookieRepository for NullCookieRepo {
 pub struct RecordingExecutor {
     sent: Mutex<Vec<String>>,
     sent_auth: Mutex<Vec<rocket_shared::types::Auth>>,
+    sent_bodies: Mutex<Vec<Option<String>>>,
     statuses: Mutex<HashMap<String, u16>>,
+    bodies: Mutex<HashMap<String, String>>,
 }
 
 impl RecordingExecutor {
@@ -350,8 +352,21 @@ impl RecordingExecutor {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
             sent_auth: Mutex::new(Vec::new()),
+            sent_bodies: Mutex::new(Vec::new()),
             statuses: Mutex::new(HashMap::new()),
+            bodies: Mutex::new(HashMap::new()),
         })
+    }
+    /// Registers a response body for any URL containing `url_substring`.
+    pub fn set_body(&self, url_substring: &str, body: &str) {
+        self.bodies
+            .lock()
+            .expect("lock")
+            .insert(url_substring.to_string(), body.to_string());
+    }
+    /// The request body content of every send, in order.
+    pub fn sent_bodies(&self) -> Vec<Option<String>> {
+        self.sent_bodies.lock().expect("lock").clone()
     }
     /// Registers a status for any URL containing `url_substring`. A status of
     /// `0` makes the send fail with a transport error instead.
@@ -375,6 +390,10 @@ impl HttpExecutor for RecordingExecutor {
     async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
         self.sent.lock().expect("lock").push(req.url.clone());
         self.sent_auth.lock().expect("lock").push(req.auth.clone());
+        self.sent_bodies
+            .lock()
+            .expect("lock")
+            .push(req.body.as_ref().and_then(|b| b.content.clone()));
         let status = self
             .statuses
             .lock()
@@ -386,14 +405,22 @@ impl HttpExecutor for RecordingExecutor {
         if status == 0 {
             return Err(DomainError::Http("connection refused".into()));
         }
+        let body = self
+            .bodies
+            .lock()
+            .expect("lock")
+            .iter()
+            .find(|(fragment, _)| req.url.contains(fragment.as_str()))
+            .map(|(_, body)| body.clone())
+            .unwrap_or_else(|| "{}".to_string());
         Ok(HttpResponse {
             status,
             status_text: "OK".into(),
             headers: vec![],
-            body: "{}".into(),
+            size_bytes: body.len(),
+            body,
             duration_ms: 1,
             ttfb_ms: 1,
-            size_bytes: 2,
             ..Default::default()
         })
     }

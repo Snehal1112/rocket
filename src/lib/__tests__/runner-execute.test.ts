@@ -3,6 +3,7 @@ import type { Request } from '@/lib/tauri-api';
 
 vi.mock('@/lib/tauri-api', () => ({
   executeRequest: vi.fn(),
+  executeGraphQlRequest: vi.fn(),
 }));
 
 vi.mock('@/lib/execute-request', () => ({
@@ -27,7 +28,7 @@ vi.mock('@/lib/execute-request', () => ({
 
 import { resolveRequestFieldsForPath } from '@/lib/execute-request';
 import { executeRunnerEntry } from '@/lib/runner-execute';
-import { executeRequest } from '@/lib/tauri-api';
+import { executeGraphQlRequest, executeRequest } from '@/lib/tauri-api';
 
 function baseRequest(): Request {
   return {
@@ -163,5 +164,45 @@ describe('executeRunnerEntry', () => {
         },
       }),
     );
+  });
+
+  it('sends a graphql entry through executeGraphQlRequest and fails it on errors[]', async () => {
+    vi.mocked(executeGraphQlRequest).mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: [],
+      body: '{"data":null,"errors":[{"message":"boom"}]}',
+      durationMs: 10,
+      ttfbMs: 5,
+      sizeBytes: 40,
+      testResults: [],
+      consoleEntries: [],
+      scriptError: null,
+    });
+    const graphql = {
+      uid: 'g1',
+      name: 'Search',
+      method: 'POST' as const,
+      url: 'https://example.com/graphql',
+      headers: [],
+      auth: { authType: 'none' as const },
+      body: { query: '{ a }' },
+    };
+    const outcome = await executeRunnerEntry(
+      'demo',
+      'search.yml',
+      { ...baseRequest(), name: 'Search' },
+      undefined,
+      graphql,
+    );
+
+    expect(executeRequest).not.toHaveBeenCalled();
+    expect(executeGraphQlRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: '{ a }',
+        request: expect.objectContaining({ body: undefined }),
+      }),
+    );
+    expect(outcome.status).toBe('failed');
   });
 });

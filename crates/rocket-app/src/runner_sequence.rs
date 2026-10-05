@@ -6,7 +6,7 @@
 //! (see `rocket-infra` `build_folder_tree`), so the runner needs no ordering
 //! concept of its own (spec §4).
 
-use rocket_collection::{Collection, CollectionItem, Folder, Request};
+use rocket_collection::{Collection, CollectionItem, Folder, Request, RequestKind};
 use rocket_http::RequestOptions;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{RequestSettingValue, RequestSettings};
@@ -20,8 +20,40 @@ pub struct RunItem {
     pub name: String,
     /// Path relative to the collection root, e.g. `"auth/login.yml"`.
     pub request_path: String,
-    /// The saved request definition.
+    /// The saved request definition. For GraphQL it is the HTTP form of the item.
     pub request: Request,
+    /// Which protocol the item came from. GraphQL steps also fail on `errors[]`.
+    pub kind: RequestKind,
+    /// Set when the item could not be turned into a request, so the step errors
+    /// instead of being skipped silently.
+    pub prepare_error: Option<String>,
+}
+
+impl RunItem {
+    pub fn http(name: String, request_path: String, request: Request) -> Self {
+        Self {
+            name,
+            request_path,
+            request,
+            kind: RequestKind::Http,
+            prepare_error: None,
+        }
+    }
+
+    pub fn graphql(
+        name: String,
+        request_path: String,
+        request: Request,
+        prepare_error: Option<String>,
+    ) -> Self {
+        Self {
+            name,
+            request_path,
+            request,
+            kind: RequestKind::GraphQl,
+            prepare_error,
+        }
+    }
 }
 
 /// Flattens a collection, or one folder inside it, into the ordered list of
@@ -29,8 +61,9 @@ pub struct RunItem {
 ///
 /// `folder_path` is relative to the collection root and uses on-disk directory
 /// names; `None` or `""` runs the whole collection. Sub-folders are traversed
-/// depth-first in item order. Folders, opaque protocol items (GraphQL/gRPC/
-/// WebSocket) and sidebar summaries are not executable and never become steps.
+/// depth-first in item order. GraphQL items become steps. Folders, opaque
+/// protocol items (gRPC/WebSocket) and sidebar summaries are not executable
+/// and never become steps.
 pub fn flatten_run_set(
     collection: &Collection,
     folder_path: Option<&str>,
@@ -76,22 +109,42 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                     );
                     continue;
                 };
-                out.push(RunItem {
-                    name: request.name.clone(),
-                    request_path: format!("{prefix}{file_name}"),
-                    request: request.as_ref().clone(),
-                });
+                out.push(RunItem::http(
+                    request.name.clone(),
+                    format!("{prefix}{file_name}"),
+                    request.as_ref().clone(),
+                ));
             }
             CollectionItem::Folder(sub) => {
                 let sub_prefix = format!("{prefix}{}/", folder_dir_name(sub));
                 collect_items(sub, &sub_prefix, out);
             }
-            // Non-HTTP protocols and sidebar summaries are not executable.
-            // GraphQL becomes a run step in Plan 06; until then it, the other
-            // protocols and sidebar summaries are not executable.
-            CollectionItem::GraphQl(_)
-            | CollectionItem::OpaqueItem(_)
-            | CollectionItem::Summary(_) => {}
+            CollectionItem::GraphQl(gql) => {
+                let Some(file_name) = gql.file_name.as_ref() else {
+                    tracing::warn!(
+                        request = %gql.name,
+                        "run set: GraphQL request has no on-disk file name, skipping"
+                    );
+                    continue;
+                };
+                let request_path = format!("{prefix}{file_name}");
+                match crate::graphql_request::to_http_request(gql, None) {
+                    Ok(request) => out.push(RunItem::graphql(
+                        gql.name.clone(),
+                        request_path,
+                        request,
+                        None,
+                    )),
+                    Err(e) => out.push(RunItem::graphql(
+                        gql.name.clone(),
+                        request_path,
+                        Request::new(gql.name.clone(), gql.method.clone(), gql.url.clone()),
+                        Some(e.to_string()),
+                    )),
+                }
+            }
+            // gRPC/WebSocket items and sidebar summaries are not executable.
+            CollectionItem::OpaqueItem(_) | CollectionItem::Summary(_) => {}
         }
     }
 }
@@ -282,11 +335,7 @@ mod tests {
         request.pre_request_script = Some("// pre".into());
         request.tests = Some("// tests".into());
         request.tags = vec!["smoke".into()];
-        let item = RunItem {
-            name: request.name.clone(),
-            request_path: "auth/login.yml".into(),
-            request,
-        };
+        let item = RunItem::http(request.name.clone(), "auth/login.yml".into(), request);
 
         let input = build_step_input(
             &item,
@@ -312,11 +361,7 @@ mod tests {
 
         let mut request = req("Login", "login.yml");
         request.runtime_auth = Some(Auth::Inherit);
-        let item = RunItem {
-            name: request.name.clone(),
-            request_path: "login.yml".into(),
-            request,
-        };
+        let item = RunItem::http(request.name.clone(), "login.yml".into(), request);
 
         let input = build_step_input(
             &item,
@@ -341,11 +386,7 @@ mod tests {
             max_redirects: Some(RequestSettingValue::Value(3.0)),
             verify_ssl: Some(RequestSettingValue::Inherit("inherit".into())),
         });
-        let item = RunItem {
-            name: request.name.clone(),
-            request_path: "login.yml".into(),
-            request,
-        };
+        let item = RunItem::http(request.name.clone(), "login.yml".into(), request);
 
         let input = build_step_input(
             &item,
@@ -368,11 +409,11 @@ mod tests {
         // The Collection Runner sends every step through the same BeforeRequest
         // SSRF guard as a single send (spec follows Item 6's request_mutation
         // host guard) -- the policy must not silently default to permissive.
-        let item = RunItem {
-            name: "Login".into(),
-            request_path: "login.yml".into(),
-            request: req("Login", "login.yml"),
-        };
+        let item = RunItem::http(
+            "Login".into(),
+            "login.yml".into(),
+            req("Login", "login.yml"),
+        );
         let policy = rocket_workspace::RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
@@ -394,11 +435,7 @@ mod tests {
             max_redirects: None,
             verify_ssl: None,
         });
-        let item = RunItem {
-            name: request.name.clone(),
-            request_path: "login.yml".into(),
-            request,
-        };
+        let item = RunItem::http(request.name.clone(), "login.yml".into(), request);
         let input = build_step_input(
             &item,
             "my-api",
@@ -408,11 +445,7 @@ mod tests {
         );
         assert!(!input.options.encode_url);
 
-        let inherit = RunItem {
-            name: "x".into(),
-            request_path: "x.yml".into(),
-            request: req("x", "x.yml"),
-        };
+        let inherit = RunItem::http("x".into(), "x.yml".into(), req("x", "x.yml"));
         let input = build_step_input(
             &inherit,
             "my-api",
@@ -424,5 +457,50 @@ mod tests {
             input.options.encode_url,
             "no setting means encoded, the default"
         );
+    }
+
+    #[test]
+    fn graphql_items_become_run_steps_with_a_json_body() {
+        use rocket_collection::{CollectionItem, GraphQlRequest, RequestKind};
+        let mut collection = Collection::new("my-api");
+        collection.root.add_request(req("Login", "login.yml"));
+        let mut g = GraphQlRequest::new("Search", "https://api.test/graphql").with_query("{ a }");
+        g.file_name = Some("search.yml".into());
+        collection
+            .root
+            .items
+            .push(CollectionItem::GraphQl(Box::new(g)));
+
+        let items = flatten_run_set(&collection, None).expect("flatten");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].name, "Search");
+        assert_eq!(items[1].request_path, "search.yml");
+        assert_eq!(items[1].kind, RequestKind::GraphQl);
+        assert!(items[1].prepare_error.is_none());
+        assert_eq!(
+            items[1].request.method,
+            rocket_shared::types::HttpMethod::Post
+        );
+        assert!(items[1].request.body.is_some());
+    }
+
+    #[test]
+    fn an_unbuildable_graphql_item_is_kept_as_an_errored_step_not_dropped() {
+        use rocket_collection::{CollectionItem, GraphQlRequest};
+        let mut collection = Collection::new("my-api");
+        let mut g = GraphQlRequest::new("Broken", "https://api.test/graphql");
+        g.file_name = Some("broken.yml".into()); // no query
+        collection
+            .root
+            .items
+            .push(CollectionItem::GraphQl(Box::new(g)));
+
+        let items = flatten_run_set(&collection, None).expect("flatten");
+        assert_eq!(items.len(), 1);
+        assert!(items[0]
+            .prepare_error
+            .as_deref()
+            .expect("error")
+            .contains("query is empty"));
     }
 }

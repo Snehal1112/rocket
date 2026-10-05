@@ -16,8 +16,10 @@ import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { statusBadgeColor, timeColor } from '@/lib/colors';
+import { parseGraphQlResponse } from '@/lib/graphql-response';
 import type { ResponseState } from '@/types/pane-types';
 import { BinaryResponsePanel } from './BinaryResponsePanel';
+import { GraphQlErrorsPanel } from './GraphQlErrorsPanel';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
 import { TestsPanel } from './TestsPanel';
 
@@ -196,6 +198,18 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
     return response.body;
   }, [formatted, isJson, isXml, response.body]);
 
+  const graphqlView = useMemo(
+    () => (response.protocol === 'graphql' ? parseGraphQlResponse(response.body) : null),
+    [response.protocol, response.body],
+  );
+  const dataBody = useMemo(
+    () =>
+      graphqlView?.isGraphQl && graphqlView.data !== undefined
+        ? JSON.stringify(graphqlView.data, null, 2)
+        : '',
+    [graphqlView],
+  );
+
   const language = detectResponseLanguage(contentType, isJson, isXml);
   const jsonKeyCount = useMemo(
     () => (isJson ? countJsonKeys(response.body) : null),
@@ -289,6 +303,33 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
       {/* ── Tab bar ── */}
       <div className='flex items-center border-b border-border/70 px-1 shrink-0 bg-card'>
         <div className='flex flex-1 items-center' role='tablist'>
+          {graphqlView && (
+            <>
+              <TabButton
+                active={activeView === 'data'}
+                onClick={() => setActiveView('data')}
+                role='tab'
+                ariaSelected={activeView === 'data'}
+              >
+                Data
+              </TabButton>
+              <TabButton
+                active={activeView === 'errors'}
+                onClick={() => setActiveView('errors')}
+                role='tab'
+                ariaSelected={activeView === 'errors'}
+              >
+                Errors
+                <span
+                  className={`ml-1 text-2xs ${
+                    graphqlView.errors.length > 0 ? 'text-red-500' : 'text-muted-foreground'
+                  }`}
+                >
+                  ({graphqlView.errors.length})
+                </span>
+              </TabButton>
+            </>
+          )}
           <TabButton
             active={activeView === 'pretty'}
             onClick={() => setActiveView('pretty')}
@@ -486,6 +527,19 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
 
         {/* Tests tab. */}
         {activeView === 'tests' && <TestsPanel results={response.testResults ?? []} />}
+
+        {/* GraphQL Data and Errors tabs. */}
+        {activeView === 'data' &&
+          (dataBody ? (
+            <Suspense fallback={<EditorSkeleton />}>
+              <MonacoWrapper value={dataBody} language='json' readOnly height='100%' />
+            </Suspense>
+          ) : (
+            <EmptyBody label='No data in the response' />
+          ))}
+        {activeView === 'errors' && graphqlView && (
+          <GraphQlErrorsPanel errors={graphqlView.errors} />
+        )}
       </div>
     </div>
   );

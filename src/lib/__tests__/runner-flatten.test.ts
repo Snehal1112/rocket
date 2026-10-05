@@ -117,4 +117,25 @@ describe('flattenRunnerEntries', () => {
     const entries = flattenRunnerEntries(makeCollection());
     expect(entries[0].request).toMatchObject({ name: 'Refresh', method: 'POST', uid: 'r3' });
   });
+
+  it('includes typed graphql items as runnable entries that keep their graphql payload', () => {
+    const collection = makeCollection();
+    collection.root.items.push({
+      type: 'graphql',
+      uid: 'g1',
+      name: 'Search',
+      method: 'POST',
+      url: 'https://example.com/graphql',
+      headers: [],
+      auth: { authType: 'none' },
+      body: { query: '{ a }' },
+      fileName: 'search.yml',
+    });
+    const entries = flattenRunnerEntries(collection);
+    const gql = entries.find((e) => e.requestPath === 'search.yml');
+    expect(gql?.graphql?.body.query).toBe('{ a }');
+    expect(gql?.request.name).toBe('Search');
+    expect(gql?.request.method).toBe('POST');
+    expect(gql?.included).toBe(true);
+  });
 });

@@ -714,6 +714,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         entry.requestPath,
         entry.request,
         environmentName,
+        entry.graphql,
       );
 
       set({

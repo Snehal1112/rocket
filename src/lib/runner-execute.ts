@@ -4,11 +4,14 @@ import {
   resolveRequestFieldsForPath,
   toApiOptions,
 } from '@/lib/execute-request';
-import { mapApiRequestToState } from '@/lib/pane-utils';
+import { parseGraphQlResponse } from '@/lib/graphql-response';
+import { mapApiRequestToState, mapGraphQlToState } from '@/lib/pane-utils';
 import {
   type ExecuteRequestInput,
   type ExecuteRequestResponse,
+  executeGraphQlRequest,
   executeRequest,
+  type GraphQlRequest,
   type Request,
 } from '@/lib/tauri-api';
 
@@ -26,9 +29,10 @@ export async function executeRunnerEntry(
   requestPath: string,
   request: Request,
   environmentName: string | undefined,
+  graphql?: GraphQlRequest,
 ): Promise<RunnerExecutionOutcome> {
   try {
-    const requestState = mapApiRequestToState(request, true);
+    const requestState = graphql ? mapGraphQlToState(graphql) : mapApiRequestToState(request, true);
     const resolved = await resolveRequestFieldsForPath(collection, requestPath, requestState);
     const globalEnvName = getActiveGlobalEnvName();
     const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
@@ -56,10 +60,19 @@ export async function executeRunnerEntry(
       requestGuardPolicy,
     };
 
-    const result = await executeRequest(input);
+    const result = graphql
+      ? await executeGraphQlRequest({
+          request: { ...input, body: undefined },
+          query: resolved.graphql?.query ?? graphql.body.query,
+          variables: resolved.graphql?.variables ?? (graphql.body.variables || undefined),
+          operationName: undefined,
+        })
+      : await executeRequest(input);
     const hasFailingTest = result.testResults.some((t) => t.status === 'failed');
     const isErrorStatus = result.status < 200 || result.status >= 300;
-    const failed = isErrorStatus || hasFailingTest || Boolean(result.scriptError);
+    const hasGraphQlErrors = graphql ? parseGraphQlResponse(result.body).errors.length > 0 : false;
+    const failed =
+      isErrorStatus || hasFailingTest || Boolean(result.scriptError) || hasGraphQlErrors;
     return { status: failed ? 'failed' : 'passed', result };
   } catch (err) {
     return { status: 'failed', error: err instanceof Error ? err.message : String(err) };

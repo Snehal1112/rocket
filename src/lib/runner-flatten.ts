@@ -67,6 +67,19 @@ function collect(folder: Folder, basePath: string, out: RunnerRequestEntry[]): v
         included: true,
         status: 'pending',
       });
+    } else if (item.type === 'graphql') {
+      const requestPath = basePath
+        ? `${basePath}/${item.fileName ?? item.name}`
+        : (item.fileName ?? item.name);
+      // The HTTP-shaped form is only for display and the shared request fields.
+      const { type: _type, body: _body, bodyVariants: _variants, ...asRequest } = item;
+      out.push({
+        requestPath,
+        request: asRequest,
+        graphql: item,
+        included: true,
+        status: 'pending',
+      });
     }
     // 'summary' items never appear in a getCollection() result (only in
     // getCollectionSummaries()); flattenRunnerEntries is only ever

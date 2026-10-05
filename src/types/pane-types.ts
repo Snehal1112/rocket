@@ -127,6 +127,8 @@ export interface RunnerRequestEntry {
   // the whole object to call executeRunnerEntry. Components read
   // entry.request.name / entry.request.method for display.
   request: import('@/lib/tauri-api').Request;
+  /** Present for a GraphQL item; `request` is then only its display and HTTP-shaped form. */
+  graphql?: import('@/lib/tauri-api').GraphQlRequest;
   included: boolean;
   status: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
   result?: import('@/lib/tauri-api').ExecuteRequestResponse;
@@ -393,7 +395,9 @@ export interface ResponseState {
   sizeBytes: number;
   isBinary?: boolean;
   bodyBase64?: string;
-  activeView: 'pretty' | 'raw' | 'preview' | 'headers' | 'tests';
+  activeView: 'pretty' | 'raw' | 'preview' | 'headers' | 'tests' | 'data' | 'errors';
+  /** Set for a response to a GraphQL request, which adds the Data and Errors tabs. */
+  protocol?: 'graphql';
   testResults?: import('@/lib/tauri-api').TestResult[];
   consoleEntries?: import('@/lib/tauri-api').ConsoleEntry[];
   scriptError?: string | null;

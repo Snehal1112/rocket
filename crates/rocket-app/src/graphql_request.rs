@@ -2,11 +2,14 @@
 //! existing HTTP execution path, so variables, auth, scripts, assertions and
 //! History work exactly as they do for an HTTP request.
 
+use rocket_collection::{GraphQlRequest, Request};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Body, BodyMode, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 
-use crate::execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
+use crate::execution_service::{
+    ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
+};
 use crate::graphql_document::select_operation;
 
 /// What a GraphQL operation looks like on the wire.
@@ -161,6 +164,66 @@ impl RequestExecutionService {
         self.execute(request).await
     }
 }
+/// The HTTP form of a saved GraphQL request, for the Collection Runner.
+///
+/// A document with several operations runs its first one unless `operation_name`
+/// names another, because a run has no operation picker.
+pub fn to_http_request(g: &GraphQlRequest, operation_name: Option<&str>) -> DomainResult<Request> {
+    // Checked first so an empty query reads "the query is empty", not "no operation".
+    if g.body.query.trim().is_empty() {
+        return Err(DomainError::InvalidInput("the query is empty".into()));
+    }
+    let chosen = select_operation(&g.body.query, operation_name, true)?;
+    let wire = build_wire(
+        g.method.clone(),
+        &g.body.query,
+        g.body.variables.as_deref(),
+        chosen.as_deref(),
+    )?;
+    let mut r = Request::new(g.name.clone(), wire.method, g.url.clone());
+    r.uid = g.uid.clone();
+    r.headers = g.headers.clone();
+    r.query_params = g
+        .query_params
+        .iter()
+        .cloned()
+        .chain(wire.query_params)
+        .collect();
+    r.path_params = g.path_params.clone();
+    r.body = wire.body;
+    r.auth = g.auth.clone();
+    r.file_name = g.file_name.clone();
+    r.seq = g.seq;
+    r.tags = g.tags.clone();
+    r.description = g.description.clone();
+    r.pre_request_script = g.pre_request_script.clone();
+    r.post_response_script = g.post_response_script.clone();
+    r.tests = g.tests.clone();
+    r.assertions = g.assertions.clone();
+    r.actions = g.actions.clone();
+    r.docs = g.docs.clone();
+    r.variables = g.variables.clone();
+    r.runtime_auth = g.runtime_auth.clone();
+    r.settings = g.settings.clone();
+    Ok(r)
+}
+
+/// A one-line summary when a GraphQL response body carries a non-empty `errors`
+/// array, such as `2 GraphQL errors: boom`. `None` for a clean response or a
+/// body that is not a GraphQL response.
+pub fn response_error_summary(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let errors = value.get("errors")?.as_array()?;
+    let first = errors.first()?;
+    let message = first
+        .get("message")
+        .and_then(|m| m.as_str())
+        .or_else(|| first.as_str())
+        .unwrap_or("unknown error");
+    let noun = if errors.len() == 1 { "error" } else { "errors" };
+    Some(format!("{} GraphQL {noun}: {message}", errors.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,7 +290,10 @@ mod tests {
         );
         assert_eq!(body["operationName"], "A");
         assert_eq!(body["variables"]["n"], 5);
-        assert_eq!(wire.body.as_ref().map(|b| b.mode.clone()), Some(BodyMode::Json));
+        assert_eq!(
+            wire.body.as_ref().map(|b| b.mode.clone()),
+            Some(BodyMode::Json)
+        );
     }
 
     #[test]
@@ -354,7 +420,11 @@ mod tests {
         assert_eq!(body["query"], "query A { a } query B { b }");
         assert_eq!(body["operationName"], "B");
         assert_eq!(body["variables"]["n"], 1);
-        assert_eq!(history.saved_count(), 1, "a GraphQL send is recorded in History");
+        assert_eq!(
+            history.saved_count(),
+            1,
+            "a GraphQL send is recorded in History"
+        );
     }
 
     #[tokio::test]
@@ -398,7 +468,11 @@ mod tests {
             .await
             .expect_err("bad variables");
         assert!(err.to_string().contains("variables"), "got: {err}");
-        assert!(server.received_requests().await.expect("recording").is_empty());
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recording")
+            .is_empty());
         assert_eq!(history.saved_count(), 0);
     }
 
@@ -416,7 +490,11 @@ mod tests {
             .await
             .expect_err("must choose");
         assert!(err.to_string().contains("choose one"), "got: {err}");
-        assert!(server.received_requests().await.expect("recording").is_empty());
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recording")
+            .is_empty());
     }
 
     #[tokio::test]
@@ -447,5 +525,72 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&seen[0].body).expect("json body");
         assert_eq!(body["query"], "query Q($n: Int) {a{b(id: \"42\", n: $n)}}");
         assert_eq!(body["variables"]["n"], 7);
+    }
+
+    #[test]
+    fn response_error_summary_reports_a_non_empty_errors_array() {
+        assert_eq!(
+            response_error_summary(
+                r#"{"data":null,"errors":[{"message":"boom"},{"message":"x"}]}"#
+            ),
+            Some("2 GraphQL errors: boom".to_string())
+        );
+        assert_eq!(
+            response_error_summary(r#"{"errors":[{"message":"only"}]}"#),
+            Some("1 GraphQL error: only".to_string())
+        );
+    }
+
+    #[test]
+    fn response_error_summary_is_none_for_clean_or_foreign_bodies() {
+        assert_eq!(response_error_summary(r#"{"data":{"a":1}}"#), None);
+        assert_eq!(response_error_summary(r#"{"data":{},"errors":[]}"#), None);
+        assert_eq!(response_error_summary("not json"), None);
+        assert_eq!(response_error_summary("[1,2]"), None);
+        assert_eq!(response_error_summary(r#"{"errors":"a string"}"#), None);
+    }
+
+    #[test]
+    fn to_http_request_projects_a_saved_graphql_request() {
+        use rocket_collection::GraphQlRequest;
+        let mut g = GraphQlRequest::new("Users", "https://api.example.com/graphql")
+            .with_query("query A { a } query B { b }");
+        g.body.variables = Some("{\"n\": 1}".into());
+        g.headers
+            .push(rocket_shared::types::Header::new("X-Trace", "1"));
+        g.pre_request_script = Some("// pre".into());
+        g.tags = vec!["smoke".into()];
+        g.file_name = Some("users.yml".into());
+
+        let r = to_http_request(&g, None).expect("request");
+        assert_eq!(r.method, HttpMethod::Post);
+        assert_eq!(r.uid, g.uid);
+        assert_eq!(r.url, "https://api.example.com/graphql");
+        assert_eq!(r.headers.len(), 1);
+        assert_eq!(r.pre_request_script.as_deref(), Some("// pre"));
+        assert_eq!(r.tags, vec!["smoke".to_string()]);
+        assert_eq!(r.file_name.as_deref(), Some("users.yml"));
+        let body: serde_json::Value = serde_json::from_str(
+            r.body
+                .as_ref()
+                .and_then(|b| b.content.as_deref())
+                .expect("body"),
+        )
+        .expect("json");
+        assert_eq!(
+            body["operationName"], "A",
+            "the runner runs the first operation"
+        );
+        assert_eq!(body["variables"]["n"], 1);
+    }
+
+    #[test]
+    fn to_http_request_fails_for_an_unbuildable_request() {
+        use rocket_collection::GraphQlRequest;
+        let empty = GraphQlRequest::new("Empty", "https://x/graphql");
+        assert!(to_http_request(&empty, None).is_err());
+        let mut bad = GraphQlRequest::new("Bad", "https://x/graphql").with_query("{ a }");
+        bad.body.variables = Some("[1]".into());
+        assert!(to_http_request(&bad, None).is_err());
     }
 }

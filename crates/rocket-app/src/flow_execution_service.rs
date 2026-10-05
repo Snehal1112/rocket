@@ -410,11 +410,7 @@ pub fn build_execute_request_input(
         ),
     };
 
-    let item = RunItem {
-        name: request.name.clone(),
-        request_path,
-        request,
-    };
+    let item = RunItem::http(request.name.clone(), request_path, request);
     Ok(build_step_input(
         &item,
         collection,

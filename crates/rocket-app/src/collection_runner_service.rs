@@ -87,7 +87,7 @@ pub struct RunStepResult {
     pub test_fail_count: usize,
     /// Uncaught script exception, if any.
     pub script_error: Option<String>,
-    /// Transport or sequencing error, if any.
+    /// Transport or sequencing error, or the summary of a GraphQL `errors` array.
     pub error: Option<String>,
 }
 
@@ -373,6 +373,14 @@ impl CollectionRunnerService {
         carried_runtime: &mut HashMap<String, String>,
         external_secrets: &HashMap<String, String>,
     ) -> StepOutcome {
+        // A GraphQL item that could not be built is an errored step, never a silent skip.
+        if let Some(message) = &item.prepare_error {
+            return StepOutcome {
+                result: error_step(index, item, message.clone()),
+                next_request: None,
+            };
+        }
+
         let step_input: ExecuteRequestInput = build_step_input(
             item,
             &input.collection,
@@ -459,7 +467,17 @@ impl CollectionRunnerService {
             .iter()
             .filter(|t| t.status == rocket_scripting::TestStatus::Passed)
             .count();
-        let failed = output.test_results.len() - passed;
+        let mut failed = output.test_results.len() - passed;
+
+        // HTTP 200 with a non-empty `errors` array is a failed GraphQL operation.
+        let graphql_error = if item.kind == rocket_collection::RequestKind::GraphQl {
+            crate::graphql_request::response_error_summary(&output.response.body)
+        } else {
+            None
+        };
+        if graphql_error.is_some() {
+            failed += 1;
+        }
 
         StepOutcome {
             next_request: state.next_request.clone(),
@@ -473,7 +491,7 @@ impl CollectionRunnerService {
                 test_pass_count: passed,
                 test_fail_count: failed,
                 script_error: output.script_error.clone(),
-                error: None,
+                error: graphql_error,
             },
         }
     }
@@ -1567,5 +1585,87 @@ mod tests {
             executor.sent_urls(),
             vec!["https://api.test/first.yml".to_string()]
         );
+    }
+
+    fn graphql_collection() -> Collection {
+        use rocket_collection::{CollectionItem, GraphQlRequest};
+        let mut collection = Collection::new("my-api");
+        let mut g = GraphQlRequest::new("Search", "https://api.test/gql").with_query("{ a }");
+        g.file_name = Some("search.yml".into());
+        collection
+            .root
+            .items
+            .push(CollectionItem::GraphQl(Box::new(g)));
+        collection
+    }
+
+    #[tokio::test]
+    async fn graphql_errors_fail_a_runner_step() {
+        let executor = RecordingExecutor::new();
+        executor.set_body(
+            "api.test/gql",
+            r#"{"data":null,"errors":[{"message":"boom"}]}"#,
+        );
+        let h = harness(graphql_collection(), ProgrammableEngine::new(), executor);
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(summary.steps.len(), 1);
+        assert_eq!(summary.steps[0].status_code, Some(200));
+        assert!(
+            summary.steps[0].is_failure(),
+            "HTTP 200 with errors[] is a failure"
+        );
+        assert!(summary.steps[0]
+            .error
+            .as_deref()
+            .expect("error text")
+            .contains("boom"));
+    }
+
+    #[tokio::test]
+    async fn a_clean_graphql_response_passes_and_sends_a_json_body() {
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.test/gql", r#"{"data":{"a":1}}"#);
+        let h = harness(
+            graphql_collection(),
+            ProgrammableEngine::new(),
+            Arc::clone(&executor),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert!(!summary.steps[0].is_failure());
+        let bodies = executor.sent_bodies();
+        assert_eq!(bodies.len(), 1);
+        assert!(bodies[0].as_deref().expect("body").contains("\"query\""));
+    }
+
+    #[tokio::test]
+    async fn an_unbuildable_graphql_item_errors_the_step_without_sending() {
+        use rocket_collection::{CollectionItem, GraphQlRequest};
+        let mut collection = Collection::new("my-api");
+        let mut g = GraphQlRequest::new("Broken", "https://api.test/gql");
+        g.file_name = Some("broken.yml".into());
+        collection
+            .root
+            .items
+            .push(CollectionItem::GraphQl(Box::new(g)));
+        let executor = RecordingExecutor::new();
+        let h = harness(collection, ProgrammableEngine::new(), Arc::clone(&executor));
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(summary.steps[0].status, RunStepStatus::Error);
+        assert!(executor.sent_urls().is_empty());
     }
 }

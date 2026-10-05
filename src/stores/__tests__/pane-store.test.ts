@@ -716,6 +716,7 @@ describe('Runner tab actions', () => {
       'second.yml',
       expect.anything(),
       undefined,
+      undefined,
     );
   });
 
