@@ -434,7 +434,10 @@ pub fn run() {
                 .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
                     Arc::clone(&active_workspace_path),
                 )))
-                .with_token_client_provider(Arc::new(rocket_infra::ReqwestTokenClientProvider))
+                .with_token_client_provider(Arc::new(
+                    rocket_infra::ReqwestTokenClientProvider::new()
+                        .with_proxy(Arc::clone(&shared_proxy)),
+                ))
                 // A RocketVault certificate selected for a token URL is fetched at send time. It
                 // reads the same connection file and shares the fetcher (and so the token and id
                 // caches) above.

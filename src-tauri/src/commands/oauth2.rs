@@ -36,6 +36,7 @@ struct AuthCodeResult {
 #[tauri::command]
 pub async fn oauth2_auth_code_flow(
     app: AppHandle,
+    svc: State<'_, OAuth2Service>,
     authorization_url: String,
     token_url: String,
     client_id: String,
@@ -155,11 +156,9 @@ pub async fn oauth2_auth_code_flow(
     }
 
     // Exchange the authorization code for an access token.
-    // When TLS verification is disabled, the reqwest client must also skip it.
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(skip_tls_verify)
-        .build()
-        .map_err(|e| DomainError::Internal(format!("Failed to create HTTP client: {e}")))?;
+    // When TLS verification is disabled, the client must also skip it. The service's token
+    // client provider also applies the app proxy setting.
+    let client = svc.plain_token_client(&token_url, !skip_tls_verify)?;
     let config = OAuthConfig {
         grant_type: "authorization_code".into(),
         client_id,

@@ -107,11 +107,7 @@ impl ReqwestExecutor {
     }
 
     fn current_proxy(&self) -> rocket_http::ResolvedProxy {
-        match &self.proxy {
-            // A poisoned lock only means a writer panicked; the value is still a whole proxy.
-            Some(shared) => shared.read().unwrap_or_else(|e| e.into_inner()).clone(),
-            None => rocket_http::ResolvedProxy::default(),
-        }
+        read_proxy(self.proxy.as_ref())
     }
 
     /// Rejects any path that resolves outside the allowed base directory.
@@ -389,11 +385,11 @@ impl HttpExecutor for ReqwestExecutor {
                 key,
                 identity,
                 cookies,
-                proxy,
+                proxy: proxy.clone(),
                 single_connection,
             })?
         } else {
-            self.get_or_build_client(key, cookies, proxy)?
+            self.get_or_build_client(key, cookies, proxy.clone())?
         };
         let method = map_method(&request.method)?;
         let start = Instant::now();
@@ -468,6 +464,7 @@ impl HttpExecutor for ReqwestExecutor {
             start_builder(url),
             &request.auth,
             &request.options.client_certificates,
+            &proxy,
         )
         .await?;
         let builder = finish_builder(builder)?;
@@ -719,9 +716,38 @@ fn identity_for_url(
     }
 }
 
+/// The current app proxy setting, or the default (system) one when none is shared.
+fn read_proxy(shared: Option<&rocket_http::SharedProxy>) -> rocket_http::ResolvedProxy {
+    match shared {
+        // A poisoned lock only means a writer panicked; the value is still a whole proxy.
+        Some(shared) => shared.read().unwrap_or_else(|e| e.into_inner()).clone(),
+        None => rocket_http::ResolvedProxy::default(),
+    }
+}
+
 /// Builds the client for OAuth2 token requests. A token endpoint that requires mutual TLS
-/// gets the matching environment certificate, like the request itself does.
-pub struct ReqwestTokenClientProvider;
+/// gets the matching environment certificate, like the request itself does, and the client
+/// follows the app proxy setting.
+///
+/// A client is built per call and never cached, so a saved proxy change reaches the next token
+/// request without a restart.
+#[derive(Default)]
+pub struct ReqwestTokenClientProvider {
+    /// The app-level proxy setting. `None` means reqwest's default (the system proxy).
+    proxy: Option<rocket_http::SharedProxy>,
+}
+
+impl ReqwestTokenClientProvider {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Reads token clients' proxy from `shared`, which the proxy service updates on save.
+    pub fn with_proxy(mut self, shared: rocket_http::SharedProxy) -> Self {
+        self.proxy = Some(shared);
+        self
+    }
+}
 
 impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
     fn client_for(
@@ -733,6 +759,7 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
         let identity = identity_for_url(certificates, token_url)?;
         let mut spec = ClientBuild::plain(true, verify_ssl, None);
         spec.identity = identity;
+        spec.proxy = read_proxy(self.proxy.as_ref());
         build_client(spec)
     }
 }
@@ -998,6 +1025,7 @@ async fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &Auth,
     certificates: &[ResolvedClientCertificate],
+    proxy: &rocket_http::ResolvedProxy,
 ) -> DomainResult<reqwest::RequestBuilder> {
     match auth {
         Auth::None => {}
@@ -1036,6 +1064,7 @@ async fn apply_auth(
                         scope.as_deref(),
                         verify_ssl,
                         certificates,
+                        proxy.clone(),
                     )
                     .await?;
                     builder = builder.bearer_auth(&token);
@@ -1242,6 +1271,7 @@ async fn fetch_client_credentials_token(
     scope: Option<&str>,
     verify_ssl: bool,
     certificates: &[ResolvedClientCertificate],
+    proxy: rocket_http::ResolvedProxy,
 ) -> DomainResult<String> {
     // Build a dedicated client for the token request. SSL setting here is independent
     // from the cached executor client (see get_or_build_client). The certificate is matched
@@ -1249,6 +1279,7 @@ async fn fetch_client_credentials_token(
     let identity = identity_for_url(certificates, access_token_url)?;
     let mut spec = ClientBuild::plain(true, verify_ssl, None);
     spec.identity = identity;
+    spec.proxy = proxy;
     let client = build_client(spec)
         .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
     let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
@@ -1579,6 +1610,7 @@ mod oauth2_tests {
             Some("read write"),
             true,
             &[],
+            rocket_http::ResolvedProxy::default(),
         )
         .await
         .unwrap();
@@ -1610,6 +1642,7 @@ mod oauth2_tests {
             None,
             true,
             &[],
+            rocket_http::ResolvedProxy::default(),
         )
         .await
         .unwrap();
@@ -1640,6 +1673,7 @@ mod oauth2_tests {
             None,
             true,
             &[],
+            rocket_http::ResolvedProxy::default(),
         )
         .await;
 
@@ -1675,6 +1709,7 @@ mod oauth2_tests {
             None,
             true,
             &[],
+            rocket_http::ResolvedProxy::default(),
         )
         .await;
 
@@ -2294,7 +2329,7 @@ mod mtls_tests {
     #[test]
     fn the_token_client_provider_presents_inline_material() {
         use rocket_http::TokenClientProvider;
-        let provider = ReqwestTokenClientProvider;
+        let provider = ReqwestTokenClientProvider::new();
         let certs = [
             ResolvedClientCertificate::pkcs12(
                 "idp.example.com",
@@ -2395,9 +2430,16 @@ mod mtls_tests {
         let server = token_server().await;
         let url = format!("{}/token", server.uri());
         let certs = vec![p12("127.0.0.1", "/no/such/file.p12".into(), None)];
-        let err = fetch_client_credentials_token(&url, &client_credentials(), None, true, &certs)
-            .await
-            .unwrap_err();
+        let err = fetch_client_credentials_token(
+            &url,
+            &client_credentials(),
+            None,
+            true,
+            &certs,
+            rocket_http::ResolvedProxy::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("/no/such/file.p12"), "{err}");
         assert!(server.received_requests().await.unwrap().is_empty());
     }
@@ -2407,9 +2449,16 @@ mod mtls_tests {
         let server = token_server().await;
         let url = format!("{}/token", server.uri());
         let certs = vec![p12("127.0.0.1", fixture("client.p12"), Some("changeit"))];
-        let token = fetch_client_credentials_token(&url, &client_credentials(), None, true, &certs)
-            .await
-            .unwrap();
+        let token = fetch_client_credentials_token(
+            &url,
+            &client_credentials(),
+            None,
+            true,
+            &certs,
+            rocket_http::ResolvedProxy::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(token, "tok");
     }
 
@@ -2419,16 +2468,23 @@ mod mtls_tests {
         let url = format!("{}/token", server.uri());
         // Matched against the token URL, not the API host, so this one does not apply.
         let certs = vec![p12("api.example.com", "/no/such/file.p12".into(), None)];
-        let token = fetch_client_credentials_token(&url, &client_credentials(), None, true, &certs)
-            .await
-            .unwrap();
+        let token = fetch_client_credentials_token(
+            &url,
+            &client_credentials(),
+            None,
+            true,
+            &certs,
+            rocket_http::ResolvedProxy::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(token, "tok");
     }
 
     #[test]
     fn the_token_client_provider_builds_a_client_and_fails_on_a_bad_matching_certificate() {
         use rocket_http::TokenClientProvider;
-        let provider = ReqwestTokenClientProvider;
+        let provider = ReqwestTokenClientProvider::new();
         assert!(provider
             .client_for("https://idp.example.com/token", true, &[])
             .is_ok());
@@ -2506,7 +2562,7 @@ mod mtls_tests {
 
         #[test]
         fn unavailable_certificate_fails_the_token_client_only_when_selected() {
-            let provider = ReqwestTokenClientProvider;
+            let provider = ReqwestTokenClientProvider::new();
             let certs = [unavailable("idp.example.com")];
             assert!(provider
                 .client_for("https://other.example.com/token", true, &certs)
@@ -2579,7 +2635,7 @@ mod mtls_tests {
 
         #[test]
         fn the_token_client_fails_on_a_selected_deferred_certificate_only() {
-            let provider = ReqwestTokenClientProvider;
+            let provider = ReqwestTokenClientProvider::new();
             let certs = [deferred("idp.example.com")];
             assert!(provider
                 .client_for("https://other.example.com/token", true, &certs)
@@ -3517,6 +3573,145 @@ mod proxy_tests {
             http_proxy: Some(uri.to_string()),
             ..Default::default()
         }
+    }
+
+    /// A TCP listener that acts as a proxy: it records the first request line and answers 502.
+    async fn recording_proxy() -> (String, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let uri = format!("http://{}", listener.local_addr().expect("addr"));
+        let seen = tokio::spawn(async move {
+            // Without a connection the proxy was bypassed, so do not wait for one forever.
+            let accepted =
+                tokio::time::timeout(std::time::Duration::from_secs(3), listener.accept()).await;
+            let Ok(Ok((mut socket, _))) = accepted else {
+                return String::new();
+            };
+            let mut buf = vec![0u8; 2048];
+            let n = socket.read(&mut buf).await.expect("read");
+            let _ = socket
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\r\n")
+                .await;
+            String::from_utf8_lossy(&buf[..n]).to_string()
+        });
+        (uri, seen)
+    }
+
+    async fn token_endpoint() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("direct"))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn a_token_client_sends_the_request_through_a_custom_proxy() {
+        use rocket_http::TokenClientProvider;
+        let (uri, seen) = recording_proxy().await;
+        let provider = ReqwestTokenClientProvider::new().with_proxy(shared(custom(&uri), None));
+        let client = provider
+            .client_for("http://idp.invalid/token", true, &[])
+            .expect("client");
+        let _ = client.post("http://idp.invalid/token").send().await;
+        let line = seen.await.expect("proxy task");
+        assert!(
+            line.starts_with("POST http://idp.invalid/token"),
+            "token request went around the proxy: {line:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_client_in_none_mode_connects_directly() {
+        use rocket_http::TokenClientProvider;
+        let (uri, seen) = recording_proxy().await;
+        let mut settings = custom(&uri);
+        settings.mode = ProxyMode::None;
+        let provider = ReqwestTokenClientProvider::new().with_proxy(shared(settings, None));
+        let server = token_endpoint().await;
+        let url = format!("{}/token", server.uri());
+        let client = provider.client_for(&url, true, &[]).expect("client");
+        let body = client
+            .post(&url)
+            .send()
+            .await
+            .expect("direct")
+            .text()
+            .await
+            .expect("body");
+        assert_eq!(body, "direct");
+        assert!(seen.await.expect("proxy task").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_token_provider_without_a_proxy_keeps_the_default_client() {
+        use rocket_http::TokenClientProvider;
+        let server = token_endpoint().await;
+        let url = format!("{}/token", server.uri());
+        let client = ReqwestTokenClientProvider::new()
+            .client_for(&url, true, &[])
+            .expect("client");
+        let response = client.post(&url).send().await.expect("direct");
+        assert!(response.status().is_success());
+    }
+
+    #[tokio::test]
+    async fn a_saved_proxy_change_reaches_the_next_token_client() {
+        use rocket_http::TokenClientProvider;
+        let handle = shared(ProxySettings::default(), None);
+        let provider = ReqwestTokenClientProvider::new().with_proxy(Arc::clone(&handle));
+        let url = "http://idp.invalid/token";
+        let first = provider.client_for(url, true, &[]).expect("client");
+        let _ = first
+            .post(url)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await;
+        let (uri, seen) = recording_proxy().await;
+        {
+            let mut write = handle.write().expect("lock");
+            write.settings = custom(&uri);
+            write.generation += 1;
+        }
+        let second = provider.client_for(url, true, &[]).expect("client");
+        let _ = second.post(url).send().await;
+        let line = seen.await.expect("proxy task");
+        assert!(
+            line.starts_with("POST http://idp.invalid/token"),
+            "{line:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_credentials_fetch_inside_a_send_uses_the_proxy() {
+        let (uri, seen) = recording_proxy().await;
+        let credentials = rocket_shared::oauth2::OAuth2ClientCredentials {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            placement: None,
+        };
+        let proxy = ResolvedProxy {
+            settings: custom(&uri),
+            password: None,
+            generation: 1,
+        };
+        let _ = fetch_client_credentials_token(
+            "http://idp.invalid/token",
+            &credentials,
+            None,
+            true,
+            &[],
+            proxy,
+        )
+        .await;
+        let line = seen.await.expect("proxy task");
+        assert!(
+            line.starts_with("POST http://idp.invalid/token"),
+            "{line:?}"
+        );
     }
 
     #[tokio::test]

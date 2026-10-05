@@ -210,7 +210,16 @@ impl OAuth2Service {
         }
     }
 
+    /// The client for a token request to `url` that sends no client certificate.
+    /// Used by the legacy authorization-code command, so it honors the app proxy setting.
+    pub fn plain_token_client(&self, url: &str, verify_ssl: bool) -> DomainResult<reqwest::Client> {
+        self.token_client(url, verify_ssl, &[])
+    }
+
     /// The client for a token request to `url`.
+    ///
+    /// Production always wires a provider (which applies the app proxy). The fallback below is
+    /// only for tests and callers that never set one, and it ignores the proxy setting.
     fn token_client(
         &self,
         url: &str,
@@ -1054,6 +1063,21 @@ pub(crate) mod tests {
             request_path: None,
             force_reauth: None,
         }
+    }
+
+    #[test]
+    fn the_plain_token_client_comes_from_the_provider_so_it_honors_the_proxy() {
+        let provider = CapturingProvider::new();
+        let svc = service_with_certificates(vec![], &provider);
+        let err = svc
+            .plain_token_client("https://idp.example.com/token", false)
+            .unwrap_err();
+        assert!(err.to_string().contains("certificate cannot be loaded"));
+        let seen = provider.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "https://idp.example.com/token");
+        assert!(!seen[0].1);
+        assert!(seen[0].2.is_empty());
     }
 
     #[test]
