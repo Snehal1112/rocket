@@ -6,15 +6,17 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
-import { OUTSIDE_WORKSPACE_MESSAGE, toWorkspaceRelativePath } from '@/lib/workspace-file-path';
+import { OUTSIDE_WORKSPACE_MESSAGE, toUploadFilePath } from '@/lib/workspace-file-path';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface FormDataEditorProps {
   entries: KeyValueEntry[];
   onChange: (entries: KeyValueEntry[]) => void;
   variableContext?: Map<string, VariableScopeEntry>;
-  /** Workspace folder. When set, picked files must be inside it and are stored relative to it. */
+  /** Workspace folder. When set, picked files must be inside it. */
   workspacePath?: string;
+  /** Collection of the request. A picked file inside its folder is stored relative to it. */
+  collection?: string;
   onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
@@ -24,6 +26,7 @@ export function FormDataEditor({
   onChange,
   variableContext,
   workspacePath,
+  collection,
   onNavigateToSource,
 }: FormDataEditorProps) {
   const [rejectedRowId, setRejectedRowId] = useState<string | null>(null);
@@ -39,8 +42,8 @@ export function FormDataEditor({
       if (!workspacePath) return;
       const result = await open({ multiple: false, title: 'Select file for form field' });
       if (typeof result !== 'string') return;
-      // The executor only reads files inside the workspace, so store a relative path.
-      const relative = toWorkspaceRelativePath(result, workspacePath);
+      // The executor only reads files inside the workspace.
+      const relative = toUploadFilePath(result, workspacePath, collection);
       if (relative === null) {
         setRejectedRowId(id);
         return;
@@ -48,7 +51,7 @@ export function FormDataEditor({
       setRejectedRowId(null);
       updateEntry(id, { value: relative });
     },
-    [updateEntry, workspacePath],
+    [updateEntry, workspacePath, collection],
   );
 
   const addEntry = useCallback(

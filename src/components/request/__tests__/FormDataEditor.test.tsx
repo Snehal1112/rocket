@@ -55,14 +55,15 @@ describe('FormDataEditor', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('stores a workspace-relative path for a file inside the workspace', async () => {
-    open.mockResolvedValue('/home/me/ws/assets/pic.png');
+  it('stores a collection-relative path for a file inside the collection folder', async () => {
+    open.mockResolvedValue('/home/me/ws/collections/api/assets/pic.png');
     const onChange = vi.fn();
     render(
       <FormDataEditor
         entries={[{ ...fileRow, value: '' }]}
         onChange={onChange}
         workspacePath='/home/me/ws'
+        collection='api'
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
@@ -72,18 +73,38 @@ describe('FormDataEditor', () => {
   });
 
   it('normalizes Windows-style paths inside the workspace', async () => {
-    open.mockResolvedValue('C:\\ws\\assets\\pic.png');
+    open.mockResolvedValue('C:\\ws\\collections\\api\\assets\\pic.png');
     const onChange = vi.fn();
     render(
       <FormDataEditor
         entries={[{ ...fileRow, value: '' }]}
         onChange={onChange}
         workspacePath={'C:\\ws'}
+        collection='api'
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
     await waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith([{ ...fileRow, value: 'assets/pic.png' }]),
+    );
+  });
+
+  it('stores the absolute path for a workspace file outside the collection folder', async () => {
+    open.mockResolvedValue('/home/me/ws/collections/other/pic.png');
+    const onChange = vi.fn();
+    render(
+      <FormDataEditor
+        entries={[{ ...fileRow, value: '' }]}
+        onChange={onChange}
+        workspacePath='/home/me/ws'
+        collection='api'
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith([
+        { ...fileRow, value: '/home/me/ws/collections/other/pic.png' },
+      ]),
     );
   });
 
@@ -95,6 +116,7 @@ describe('FormDataEditor', () => {
         entries={[{ ...fileRow, value: '' }]}
         onChange={onChange}
         workspacePath='/home/me/ws'
+        collection='api'
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));

@@ -116,12 +116,13 @@ fn absolutize_certificate_paths(
     cert
 }
 
-/// Joins a relative certificate file path onto the collection folder `base`.
+/// Joins a relative file path onto the collection folder `base`. Certificates and upload files
+/// share this rule.
 ///
 /// Absolute paths and `~/` paths stay as written. So does a relative path with a `..` in it, so
 /// an environment file cannot point outside the collection folder. The executor rejects any
 /// path that is still relative, with a message that says what is allowed.
-fn absolutize(p: String, base: Option<&Path>) -> String {
+pub(crate) fn absolutize(p: String, base: Option<&Path>) -> String {
     let Some(base) = base else { return p };
     let path = Path::new(&p);
     let stays = p.is_empty()
@@ -417,8 +418,7 @@ mod tests {
         let lines = resolve_env(env, &[]);
         assert_eq!(lines.len(), 1);
         assert!(
-            lines[0].starts_with("unavailable api.example.com")
-                && lines[0].contains("payments"),
+            lines[0].starts_with("unavailable api.example.com") && lines[0].contains("payments"),
             "{lines:?}"
         );
     }
@@ -429,7 +429,10 @@ mod tests {
         env.external_secrets = vec![binding("prod")];
         env.client_certificates = vec![vault_entry("{{apiHost}}", "prod")];
         let lines = resolve_env(env, &[("apiHost", "api.example.com")]);
-        assert!(lines[0].starts_with("deferred api.example.com "), "{lines:?}");
+        assert!(
+            lines[0].starts_with("deferred api.example.com "),
+            "{lines:?}"
+        );
     }
 
     // Spec section 6.
@@ -459,6 +462,9 @@ mod tests {
                 && lines[0].contains("not available in load tests"),
             "{lines:?}"
         );
-        assert_eq!(lines[1], "pkcs12 files.example.com file:/certs/client.p12 pass:-");
+        assert_eq!(
+            lines[1],
+            "pkcs12 files.example.com file:/certs/client.p12 pass:-"
+        );
     }
 }

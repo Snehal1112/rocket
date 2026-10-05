@@ -1075,6 +1075,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onChange={handleBodyChange}
             variableContext={scopedContext}
             onNavigateToSource={handleEditorNavigateToSource}
+            collection={tab.source?.collection}
           />
         )}
         {activeSection === 'auth' && (

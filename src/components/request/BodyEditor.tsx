@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useActiveWorkspace } from '@/lib/queries/workspace-queries';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
-import { OUTSIDE_WORKSPACE_MESSAGE, toWorkspaceRelativePath } from '@/lib/workspace-file-path';
+import { OUTSIDE_WORKSPACE_MESSAGE, toUploadFilePath } from '@/lib/workspace-file-path';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 import { FormDataEditor } from './FormDataEditor';
 import { KeyValueEditor } from './KeyValueEditor';
@@ -23,6 +23,8 @@ interface BodyEditorProps {
   onChange: (body: BodyState) => void;
   variableContext?: Map<string, VariableScopeEntry>;
   onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
+  /** Collection of the request. A picked file inside its folder is stored relative to it. */
+  collection?: string;
 }
 
 export function BodyEditor({
@@ -30,6 +32,7 @@ export function BodyEditor({
   onChange,
   variableContext,
   onNavigateToSource,
+  collection,
 }: BodyEditorProps) {
   const { data: activeWorkspace } = useActiveWorkspace();
   const workspacePath = activeWorkspace?.path;
@@ -53,8 +56,8 @@ export function BodyEditor({
     });
     if (result) {
       const picked = result as string;
-      // The executor only reads files inside the workspace, so store a relative path.
-      const path = toWorkspaceRelativePath(picked, workspacePath);
+      // The executor only reads files inside the workspace.
+      const path = toUploadFilePath(picked, workspacePath, collection);
       if (path === null) {
         setFileError(OUTSIDE_WORKSPACE_MESSAGE);
         return;
@@ -66,7 +69,7 @@ export function BodyEditor({
         fileName: path.split(/[\\/]/).pop() ?? 'unknown',
       });
     }
-  }, [body, onChange, workspacePath]);
+  }, [body, onChange, workspacePath, collection]);
 
   const handleClear = useCallback(() => {
     onChange({ ...body, filePath: undefined, fileName: undefined });
@@ -104,6 +107,7 @@ export function BodyEditor({
           onChange={setFormData}
           variableContext={variableContext}
           workspacePath={workspacePath}
+          collection={collection}
           onNavigateToSource={onNavigateToSource}
         />
       )}

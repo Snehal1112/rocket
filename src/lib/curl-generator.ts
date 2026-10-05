@@ -139,6 +139,7 @@ function buildBodyParts(body: Body | undefined, headers: Header[]): BodyParts {
       return { lines };
     }
     case 'formdata': {
+      // A stored relative file path is relative to the collection folder, so run the command there.
       const lines = (body.formData ?? [])
         .filter((e) => e.enabled)
         .map((e) =>

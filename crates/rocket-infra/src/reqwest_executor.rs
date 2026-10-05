@@ -164,19 +164,17 @@ impl ReqwestExecutor {
         }
     }
 
-    /// Joins a relative file path onto the allowed base (the workspace folder).
-    /// Absolute paths, and any path when no base is configured, are returned unchanged.
+    /// Returns the path of an upload file. `rocket-app` has already joined a relative path onto
+    /// the collection folder, so a path that is still relative has no known collection (a request
+    /// that is not saved in one) or climbs out with `..`, and it is rejected.
     fn resolve_file_path(&self, path: &std::path::Path) -> DomainResult<std::path::PathBuf> {
-        let Some(ref base_lock) = self.allowed_base else {
-            return Ok(path.to_path_buf());
-        };
-        if path.is_absolute() {
-            return Ok(path.to_path_buf());
+        if self.allowed_base.is_some() && !path.is_absolute() {
+            return Err(DomainError::InvalidInput(format!(
+                "File path '{}' must be inside the collection folder (no '..'), or an absolute path inside the workspace. Save the request in a collection to use a relative path",
+                path.display()
+            )));
         }
-        let base = base_lock
-            .lock()
-            .map_err(|_| DomainError::Internal("workspace path lock poisoned".into()))?;
-        Ok(base.join(path))
+        Ok(path.to_path_buf())
     }
 
     fn get_or_build_client(
@@ -3239,33 +3237,32 @@ mod multipart_tests {
     }
 
     #[tokio::test]
-    async fn relative_file_part_is_read_from_the_workspace() {
+    async fn absolute_file_part_inside_the_workspace_is_read() {
         let server = server().await;
         let workspace = tempfile::tempdir().expect("workspace");
-        std::fs::create_dir(workspace.path().join("files")).expect("mkdir");
-        std::fs::write(workspace.path().join("files/a.txt"), b"relative-payload").expect("write");
+        let path = write(&workspace, "a.txt", b"inside-payload");
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
-        req.body = Some(multipart(vec![file_entry("doc", "files/a.txt", None)]));
+        req.body = Some(multipart(vec![file_entry("doc", &path, None)]));
         workspace_exec(&workspace)
             .execute(&req)
             .await
             .expect("send");
         let body = sent_body(&server).await;
         assert!(body.contains("filename=\"a.txt\""), "{body}");
-        assert!(body.contains("relative-payload"), "{body}");
+        assert!(body.contains("inside-payload"), "{body}");
     }
 
     #[tokio::test]
-    async fn relative_binary_body_is_read_from_the_workspace() {
+    async fn absolute_binary_body_inside_the_workspace_is_read() {
         let server = server().await;
         let workspace = tempfile::tempdir().expect("workspace");
-        std::fs::write(workspace.path().join("b.bin"), b"bin-payload").expect("write");
+        let path = write(&workspace, "b.bin", b"bin-payload");
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
         req.body = Some(Body {
             mode: BodyMode::Binary,
             content: None,
             form_data: None,
-            file_path: Some("b.bin".into()),
+            file_path: Some(path),
         });
         workspace_exec(&workspace)
             .execute(&req)
@@ -3275,7 +3272,76 @@ mod multipart_tests {
     }
 
     #[tokio::test]
-    async fn relative_file_part_escaping_the_workspace_is_rejected() {
+    async fn relative_file_part_is_rejected_because_the_collection_folder_is_unknown() {
+        let server = server().await;
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::create_dir(workspace.path().join("files")).expect("mkdir");
+        std::fs::write(workspace.path().join("files/a.txt"), b"x").expect("write");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", "files/a.txt", None)]));
+        let err = workspace_exec(&workspace)
+            .execute(&req)
+            .await
+            .expect_err("must fail");
+        assert!(err.to_string().contains("doc"), "{err}");
+        assert!(err.to_string().contains("collection folder"), "{err}");
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn relative_binary_body_is_rejected_because_the_collection_folder_is_unknown() {
+        let server = server().await;
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(workspace.path().join("b.bin"), b"x").expect("write");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(Body {
+            mode: BodyMode::Binary,
+            content: None,
+            form_data: None,
+            file_path: Some("b.bin".into()),
+        });
+        let err = workspace_exec(&workspace)
+            .execute(&req)
+            .await
+            .expect_err("must fail");
+        assert!(err.to_string().contains("collection folder"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn file_part_symlink_escaping_the_workspace_is_rejected() {
+        let server = server().await;
+        let parent = tempfile::tempdir().expect("parent");
+        let workspace = parent.path().join("ws");
+        std::fs::create_dir(&workspace).expect("mkdir");
+        let secret = parent.path().join("secret.txt");
+        std::fs::write(&secret, b"nope").expect("write");
+        let link = workspace.join("link.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret, &link).expect("symlink");
+        #[cfg(not(unix))]
+        return;
+        let exec = ReqwestExecutor::with_allowed_base(Arc::new(Mutex::new(workspace)));
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry(
+            "doc",
+            &link.to_string_lossy(),
+            None,
+        )]));
+        let err = exec.execute(&req).await.expect_err("must fail");
+        assert!(err.to_string().contains("outside the workspace"), "{err}");
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn dotdot_file_part_is_rejected() {
         let server = server().await;
         let parent = tempfile::tempdir().expect("parent");
         let workspace = parent.path().join("ws");
@@ -3285,7 +3351,7 @@ mod multipart_tests {
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
         req.body = Some(multipart(vec![file_entry("doc", "../secret.txt", None)]));
         let err = exec.execute(&req).await.expect_err("must fail");
-        assert!(err.to_string().contains("outside the workspace"), "{err}");
+        assert!(err.to_string().contains("doc"), "{err}");
         assert!(server
             .received_requests()
             .await
@@ -3772,7 +3838,9 @@ mod ntlm_tests {
     #[tokio::test]
     async fn a_challenge_from_another_origin_after_a_redirect_is_not_answered() {
         // The second server challenges with NTLM and records every Authorization header.
-        let evil = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let evil = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
         let evil_addr = evil.local_addr().expect("addr");
         let evil_auth: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
         let seen_by_evil = Arc::clone(&evil_auth);
@@ -3807,7 +3875,9 @@ mod ntlm_tests {
                 });
             }
         });
-        let origin = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let origin = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
         let origin_addr = origin.local_addr().expect("addr");
         tokio::spawn(async move {
             while let Ok((stream, _)) = origin.accept().await {

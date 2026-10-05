@@ -747,6 +747,11 @@ impl RequestExecutionService {
             body
         });
 
+        // Relative upload paths are relative to the collection folder, like certificate paths.
+        let collection_dir = self.collection_folder(input.collection.as_deref());
+        let resolved_body =
+            resolved_body.map(|b| absolutize_upload_paths(b, collection_dir.as_deref()));
+
         // The selected environment decides which client certificates the executor may present.
         let mut options = input.options.clone();
         options.client_certificates =
@@ -763,6 +768,11 @@ impl RequestExecutionService {
         })
     }
 
+    /// Returns the folder of `collection`, when the wiring knows where collections live.
+    fn collection_folder(&self, collection: Option<&str>) -> Option<std::path::PathBuf> {
+        collection.and_then(|c| self.collection_env_repo_factory.as_ref()?.collection_dir(c))
+    }
+
     /// Returns the selected environment's client certificates, with `{{placeholders}}`, relative
     /// paths and RocketVault references resolved. A missing environment means no certificates, like it means no variables.
     fn environment_client_certificates(
@@ -773,10 +783,7 @@ impl RequestExecutionService {
     ) -> Vec<ResolvedClientCertificate> {
         // Relative file paths are relative to the collection folder, so they work for a
         // collection that is shared through git.
-        let base = input
-            .collection
-            .as_deref()
-            .and_then(|c| self.collection_env_repo_factory.as_ref()?.collection_dir(c));
+        let base = self.collection_folder(input.collection.as_deref());
         let repo = self.regular_env_repo(input.collection.as_deref());
         crate::client_certificates::environment_client_certificates(
             repo.as_ref(),
@@ -2144,6 +2151,28 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
     merged
 }
 
+/// Joins the relative file paths of a multipart or binary body onto the collection folder.
+///
+/// Absolute paths and paths with a `..` stay as written. The executor rejects a path that is
+/// still relative, so a stored path can never reach outside the collection through here.
+fn absolutize_upload_paths(mut body: Body, base: Option<&std::path::Path>) -> Body {
+    if base.is_none() {
+        return body;
+    }
+    if let Some(entries) = body.form_data.as_mut() {
+        for entry in entries.iter_mut() {
+            if entry.entry_type == rocket_shared::types::FormDataType::File {
+                entry.value =
+                    crate::client_certificates::absolutize(std::mem::take(&mut entry.value), base);
+            }
+        }
+    }
+    if let Some(path) = body.file_path.take() {
+        body.file_path = Some(crate::client_certificates::absolutize(path, base));
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3250,7 +3279,10 @@ mod tests {
         #[async_trait]
         impl HttpExecutor for JarFlagExecutor {
             async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
-                self.0.lock().expect("lock").push(req.options.use_cookie_jar);
+                self.0
+                    .lock()
+                    .expect("lock")
+                    .push(req.options.use_cookie_jar);
                 Ok(HttpResponse {
                     status: 200,
                     status_text: "OK".into(),
@@ -3293,7 +3325,10 @@ mod tests {
             .expect("load test");
         let seen = flags.0.lock().expect("lock").clone();
         assert!(!seen.is_empty());
-        assert!(seen.iter().all(|jar_on| !jar_on), "load test requests must not use the jar");
+        assert!(
+            seen.iter().all(|jar_on| !jar_on),
+            "load test requests must not use the jar"
+        );
     }
 
     #[tokio::test]
@@ -3586,6 +3621,84 @@ mod tests {
             cert_paths(&resolved.options.client_certificates)[0],
             "certs/client.pem"
         );
+    }
+
+    fn upload_body() -> rocket_shared::types::Body {
+        use rocket_shared::types::{Body, BodyMode, FormDataEntry, FormDataType};
+        let file = |key: &str, value: &str, entry_type: FormDataType| FormDataEntry {
+            key: key.into(),
+            value: value.into(),
+            entry_type,
+            enabled: true,
+            content_type: None,
+            description: None,
+        };
+        Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(vec![
+                file("a", "files/a.txt", FormDataType::File),
+                file("b", "./files/b.txt", FormDataType::File),
+                file("c", "../outside.txt", FormDataType::File),
+                file("d", "/abs/d.txt", FormDataType::File),
+                file("e", "files/not-a-file", FormDataType::Text),
+            ]),
+            file_path: Some("files/blob.bin".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn relative_upload_paths_resolve_against_the_collection_folder() {
+        let env = relative_path_env();
+        let svc = service_with(
+            env.clone(),
+            Some(DirEnvRepoFactory {
+                env,
+                dir: std::path::PathBuf::from("/ws/collections"),
+            }),
+        );
+        let mut input = sample_input("https://a.example.com/x", Some("dev"));
+        input.collection = Some("api".into());
+        input.body = Some(upload_body());
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        let body = resolved.body.expect("body");
+        let values: Vec<String> = body
+            .form_data
+            .expect("entries")
+            .into_iter()
+            .map(|e| e.value)
+            .collect();
+        assert_eq!(
+            values,
+            [
+                "/ws/collections/api/files/a.txt",
+                "/ws/collections/api/files/b.txt",
+                // A `..` is left as written, so the executor rejects it.
+                "../outside.txt",
+                "/abs/d.txt",
+                // A text value is never a path.
+                "files/not-a-file",
+            ]
+        );
+        assert_eq!(
+            body.file_path.as_deref(),
+            Some("/ws/collections/api/files/blob.bin")
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_upload_paths_stay_as_written_without_a_known_collection_folder() {
+        let svc = service_with(relative_path_env(), None);
+        let mut input = sample_input("https://a.example.com/x", Some("dev"));
+        input.body = Some(upload_body());
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        let body = resolved.body.expect("body");
+        assert_eq!(body.form_data.expect("entries")[0].value, "files/a.txt");
+        assert_eq!(body.file_path.as_deref(), Some("files/blob.bin"));
     }
 
     #[tokio::test]

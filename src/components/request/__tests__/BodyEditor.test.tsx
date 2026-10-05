@@ -62,10 +62,10 @@ describe('BodyEditor', () => {
     expect(await screen.findByTestId('monaco')).toBeInTheDocument();
   });
 
-  it('stores a workspace-relative path for a binary file inside the workspace', async () => {
-    openDialog.mockResolvedValue('/home/me/ws/files/blob.bin');
+  it('stores a collection-relative path for a binary file inside the collection folder', async () => {
+    openDialog.mockResolvedValue('/home/me/ws/collections/api/files/blob.bin');
     const onChange = vi.fn();
-    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={onChange} />);
+    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={onChange} collection='api' />);
     // Let the active workspace query resolve before picking.
     await new Promise((r) => setTimeout(r, 50));
     fireEvent.click(screen.getByRole('button', { name: /choose file/i }));
@@ -86,7 +86,7 @@ describe('BodyEditor', () => {
   it('rejects a binary file outside the workspace with a message', async () => {
     openDialog.mockResolvedValue('/home/me/other/blob.bin');
     const onChange = vi.fn();
-    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={onChange} />);
+    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={onChange} collection='api' />);
     await new Promise((r) => setTimeout(r, 50));
     fireEvent.click(screen.getByRole('button', { name: /choose file/i }));
     expect(await screen.findByText('Files must be inside the workspace folder')).toBeVisible();
