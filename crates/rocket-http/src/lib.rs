@@ -16,6 +16,7 @@ pub mod request;
 pub mod resolved_certificate;
 pub mod response;
 pub mod token_client;
+pub mod websocket;
 pub mod wsse_sig;
 
 pub use aws_sig::{sign_request, AwsCredentials, SignedHeaders};
@@ -43,3 +44,7 @@ pub use resolved_certificate::{
 };
 pub use response::HttpResponse;
 pub use token_client::TokenClientProvider;
+pub use websocket::{
+    WebSocketClient, WebSocketClose, WebSocketCommand, WebSocketConnectRequest, WebSocketEvent,
+    WebSocketFrame, WebSocketHandle, DEFAULT_CONNECT_TIMEOUT_MS,
+};

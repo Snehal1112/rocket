@@ -36,6 +36,7 @@ cargo check -p rocket-infra
 | `FsWorkspaceRepo` | `WorkspaceRepository` | Persists the workspace registry to `workspaces.yml`. Creates a "My Workspace" on first load. |
 | `FsWorkspaceConfigRepo` | `WorkspaceConfigRepository` | Reads/writes per-workspace `workspace.yml` (collections list, description, environment settings). |
 | `ReqwestExecutor` | `HttpExecutor` | Executes HTTP requests via `reqwest`. Handles all auth schemes, body types, and AWS SigV4 signing. |
+| `TungsteniteWebSocketClient` | `WebSocketClient` | `tokio-tungstenite` (native-tls) client in `websocket_client.rs`. `connect` handshakes, then a pump task owns the socket and the caller uses the channels in `WebSocketHandle`. Errors name header names, never values or the URL. `verify_ssl: false` builds a permissive native-tls connector, otherwise the OS store is used like reqwest. |
 | `NotifyFileWatcher` | — | Wraps the `notify` crate; publishes `DomainEvent::FileChanged` via `EventPublisher` when collection files change. |
 
 ## Internal modules

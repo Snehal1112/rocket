@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# WebSocket client. `native-tls` matches reqwest's TLS backend, so HTTP and WebSocket trust the
+# same OS certificate store. `native-tls` itself is needed to build the permissive connector used
+# when a request turns certificate verification off.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "native-tls"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+native-tls = "0.2"
 rocket-shared.workspace = true
 rocket-audit.workspace = true
 rocket-collection.workspace = true
