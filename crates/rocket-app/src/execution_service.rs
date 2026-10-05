@@ -24,6 +24,8 @@ use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub mod websocket_resolution;
+
 /// An external secret binding whose values could not be fetched.
 struct UnresolvedBinding {
     alias: String,

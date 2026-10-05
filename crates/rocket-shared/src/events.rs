@@ -77,6 +77,33 @@ pub struct FlowDebugRequest {
     pub error: Option<String>,
 }
 
+/// Direction of a WebSocket frame from the client's point of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketDirection {
+    In,
+    Out,
+}
+
+/// Wire kind of a logged frame. `Binary` data is base64.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketPayloadKind {
+    Text,
+    Binary,
+}
+
+/// Lifecycle of a streaming session. `Closed` is a clean close; `Failed` is a
+/// refused connect or an unclean end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketSessionState {
+    Connecting,
+    Open,
+    Closed,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
@@ -326,6 +353,27 @@ pub enum DomainEvent {
     AcpSessionFailed {
         session_id: String,
         error: String,
+    },
+
+    // WebSocket session events
+    /// One frame sent or received on a WebSocket session.
+    WebSocketMessage {
+        session_id: String,
+        direction: WebSocketDirection,
+        kind: WebSocketPayloadKind,
+        /// Text as is, or base64 for binary frames.
+        data: String,
+        /// Payload size in bytes (before base64).
+        size: usize,
+        timestamp_ms: i64,
+    },
+    /// A WebSocket session changed state. `code` and `reason` describe a close.
+    WebSocketStatus {
+        session_id: String,
+        state: WebSocketSessionState,
+        subprotocol: Option<String>,
+        code: Option<u16>,
+        reason: Option<String>,
     },
 
     // File system events
@@ -1161,6 +1209,37 @@ mod tests {
             json,
             r#"{"type":"acpSessionFailed","session_id":"sess-1","error":"agent process exited unexpectedly"}"#
         );
+    }
+
+    #[test]
+    fn websocket_events_serialize_with_snake_case_fields_and_lowercase_enums() {
+        let message = DomainEvent::WebSocketMessage {
+            session_id: "s1".into(),
+            direction: WebSocketDirection::In,
+            kind: WebSocketPayloadKind::Binary,
+            data: "AQID".into(),
+            size: 3,
+            timestamp_ms: 42,
+        };
+        let json = serde_json::to_value(&message).expect("serialize");
+        assert_eq!(json["type"], "webSocketMessage");
+        assert_eq!(json["session_id"], "s1");
+        assert_eq!(json["direction"], "in");
+        assert_eq!(json["kind"], "binary");
+        assert_eq!(json["timestamp_ms"], 42);
+
+        let status = DomainEvent::WebSocketStatus {
+            session_id: "s1".into(),
+            state: WebSocketSessionState::Failed,
+            subprotocol: None,
+            code: Some(4001),
+            reason: Some("bye".into()),
+        };
+        let json = serde_json::to_value(&status).expect("serialize");
+        assert_eq!(json["type"], "webSocketStatus");
+        assert_eq!(json["state"], "failed");
+        assert_eq!(json["code"], 4001);
+        assert!(json["subprotocol"].is_null());
     }
 
     #[test]

@@ -35,6 +35,9 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
             DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
             DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
+            // WebSocket sessions: one channel for frames, one for lifecycle.
+            DomainEvent::WebSocketMessage { .. } => "ws:message",
+            DomainEvent::WebSocketStatus { .. } => "ws:status",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",

@@ -111,6 +111,9 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
             if let Some(acp_session_svc) = app_handle.try_state::<rocket_app::AcpSessionService>() {
                 let _ = acp_session_svc.end_all_sessions().await;
             }
+            if let Some(websocket_svc) = app_handle.try_state::<rocket_app::WebSocketService>() {
+                websocket_svc.end_all_sessions().await;
+            }
             app_handle.exit(0);
         }
     });
@@ -395,6 +398,11 @@ pub fn run() {
                 acp_agent_config_svc,
             );
 
+            let websocket_svc = rocket_app::WebSocketService::new(
+                Arc::new(rocket_infra::TungsteniteWebSocketClient::new()),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            );
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
                     environments_dir.clone(),
@@ -523,6 +531,7 @@ pub fn run() {
             app.manage(secret_manager_svc);
             app.manage(agent_config_svc);
             app.manage(acp_session_svc);
+            app.manage(websocket_svc);
             app.manage(runner_svc);
             app.manage(flow_exec_svc);
             app.manage(executor);
@@ -762,6 +771,9 @@ pub fn run() {
             commands::acp_sessions::start_agent_session,
             commands::acp_sessions::send_agent_prompt,
             commands::acp_sessions::end_agent_session,
+            commands::websocket::ws_connect,
+            commands::websocket::ws_send,
+            commands::websocket::ws_disconnect,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -774,6 +786,9 @@ pub fn run() {
                     // down regardless, so there is no caller left to report
                     // a kill failure to.
                     let _ = tauri::async_runtime::block_on(acp_session_svc.end_all_sessions());
+                }
+                if let Some(websocket_svc) = app_handle.try_state::<rocket_app::WebSocketService>() {
+                    tauri::async_runtime::block_on(websocket_svc.end_all_sessions());
                 }
             }
         });

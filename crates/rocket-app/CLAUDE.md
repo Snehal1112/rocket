@@ -22,6 +22,7 @@ touches the filesystem or any I/O directly — those concerns live in
 | `TemplateService` | CRUD for saved request templates (stored via `rocket-history`). |
 | `AgentConfigService` | CRUD for ACP agent configs; `resolve_credential` fetches the agent's API key from RocketVault. |
 | `AcpSessionService` | Starts/prompts/ends ACP agent sessions via `Box<dyn AcpSessionClient>`; publishes `AcpSessionStarted/Chunk/Finished/Failed` (all chunks before the terminal event); fixed 120s prompt timeout force-kills the session. |
+| `WebSocketService` | Session registry for WebSocket connections, keyed by a frontend-chosen session id. `connect`/`send`/`disconnect`/`end_all_sessions` over `Arc<dyn WebSocketClient>`; inbound frames and lifecycle leave as `WebSocketMessage` and `WebSocketStatus` events (exactly one terminal status, then the id is free). A `disconnect` during the handshake cancels it and closes the late socket. `RequestExecutionService::resolve_websocket` and `resolve_websocket_message` (in `execution_service/websocket_resolution.rs`) apply variables, collection defaults and auth; OAuth, Digest, NTLM, WSSE and SigV4 are refused for WebSocket with an explicit error. |
 | `WorkspaceService` | Create, switch, rename, close, delete, pin/unpin workspaces; link external collections; toggle multi-workspace mode; mutates the shared `Arc<Mutex<PathBuf>>` active path on switch. |
 
 ## Service Method Details

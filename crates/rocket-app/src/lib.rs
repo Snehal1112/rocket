@@ -40,6 +40,7 @@ pub mod template_service;
 pub(crate) mod test_doubles;
 pub(crate) mod vault_certificates;
 pub mod vault_secret_resolution;
+pub mod websocket_service;
 pub mod workspace_service;
 
 pub use acp_session_service::AcpSessionService;
@@ -53,6 +54,9 @@ pub use collection_service::CollectionService;
 pub use contract_service::ContractService;
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
+pub use execution_service::websocket_resolution::{
+    WebSocketConnectInput, WebSocketScope, WebSocketSendInput,
+};
 pub use execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
 pub use export_service::{ExportFormat, ExportService};
 pub use flow_auth::{
@@ -73,5 +77,6 @@ pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};
 pub use secret_manager_service::SecretManagerService;
 pub use security_audit_service::SecurityAuditService;
 pub use template_service::TemplateService;
+pub use websocket_service::WebSocketService;
 pub use vault_secret_resolution::resolve_vault_secret_value;
 pub use workspace_service::WorkspaceService;
