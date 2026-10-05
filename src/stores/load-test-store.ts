@@ -1,7 +1,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { create } from 'zustand';
 
-import { resolveRequestFields } from '@/lib/execute-request';
+import { resolveRequestFields, toApiOptions } from '@/lib/execute-request';
 import {
   type ExportFormat,
   exportLoadTest,
@@ -137,11 +137,7 @@ export const useLoadTestStore = create<LoadTestState>((set, get) => ({
       pathParams: resolved.pathParams,
       body: resolved.body ?? null,
       auth: resolved.auth,
-      options: {
-        followRedirects: request.settings.followRedirects,
-        timeoutMs: request.settings.timeoutMs,
-        verifySsl: request.settings.verifySsl,
-      },
+      options: toApiOptions(request.settings),
       collection: resolved.collection,
       environmentName: resolved.environmentName,
       requestPath: resolved.requestPath,

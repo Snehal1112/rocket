@@ -41,6 +41,13 @@ vi.mock('@/lib/execute-request', () => ({
     environmentName: undefined,
     requestPath: undefined,
   }),
+  toApiOptions: vi.fn((settings: { maxRedirects?: number } | undefined) => ({
+    followRedirects: true,
+    timeoutMs: 30000,
+    verifySsl: true,
+    maxRedirects: settings?.maxRedirects,
+    encodeUrl: true,
+  })),
 }));
 
 describe('useLoadTestStore', () => {
@@ -155,6 +162,26 @@ describe('useLoadTestStore', () => {
 
       const inputArg = vi.mocked(runLoadTestV2).mock.calls[0][0];
       expect(inputArg.pathParams).toEqual([{ name: 'id', value: '7' }]);
+    });
+
+    it('sends the request options built by toApiOptions, such as maxRedirects', async () => {
+      const { runLoadTestV2 } = await import('@/lib/tauri-api');
+      useLoadTestStore.getState().setMode('simple');
+      const fakeRequest = {
+        method: 'GET',
+        url: 'http://test.local',
+        headers: [],
+        queryParams: [],
+        pathParams: [],
+        body: { bodyType: 'none' },
+        auth: { authType: 'none' },
+        settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true, maxRedirects: 3 },
+      } as unknown as RequestState;
+
+      await useLoadTestStore.getState().startTest(fakeRequest, 'tab-1');
+
+      const inputArg = vi.mocked(runLoadTestV2).mock.calls[0][0];
+      expect(inputArg.options?.maxRedirects).toBe(3);
     });
 
     it('populates requestLog from load_test_complete event in simple mode', async () => {
