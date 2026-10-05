@@ -138,6 +138,79 @@ describe('resolveRequestFieldsForPath', () => {
     expect(resolved.queryParams.map((p) => p.key)).toEqual(['a', 'b']);
   });
 
+  it('sends the query in the url bar even when the debounced params table is stale', async () => {
+    // The url was edited from ?page=1 to ?page=2 and sent before the table re-parsed it.
+    const request = {
+      ...baseRequest(),
+      url: '{{baseUrl}}/items?page=2',
+      queryParams: [{ id: 'q1', key: 'page', value: '1', enabled: true }],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe('https://collection.example/items');
+    expect(resolved.queryParams).toEqual([{ key: 'page', value: '2', enabled: true }]);
+  });
+
+  it('sends the query of a pasted url before the params table caught up', async () => {
+    const request = {
+      ...baseRequest(),
+      url: 'https://api.example/items?a=1&b={{baseUrl}}',
+      queryParams: [],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe('https://api.example/items');
+    expect(resolved.queryParams).toEqual([
+      { key: 'a', value: '1', enabled: true },
+      { key: 'b', value: 'https://collection.example', enabled: true },
+    ]);
+  });
+
+  it('decodes the typed query into params when encodeUrl is on, as before', async () => {
+    const request = {
+      ...baseRequest(),
+      url: '{{baseUrl}}/r?redirect=https%3A%2F%2Fx%2F%3Fa%3D1%26b%3D2&p=50%25',
+      queryParams: [],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe('https://collection.example/r');
+    expect(resolved.queryParams).toEqual([
+      { key: 'redirect', value: 'https://x/?a=1&b=2', enabled: true },
+      { key: 'p', value: '50%', enabled: true },
+    ]);
+  });
+
+  it('keeps the typed query raw in the url when encodeUrl is off', async () => {
+    const base = baseRequest();
+    const request = {
+      ...base,
+      settings: { ...base.settings, encodeUrl: false },
+      url: '{{baseUrl}}/r?redirect=https%3A%2F%2Fx%2F%3Fa%3D1%26b%3D2&p=50%25',
+      // What the debounced sync stores: decoded values.
+      queryParams: [
+        { id: 'q1', key: 'redirect', value: 'https://x/?a=1&b=2', enabled: true },
+        { id: 'q2', key: 'p', value: '50%', enabled: true },
+      ],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe(
+      'https://collection.example/r?redirect=https%3A%2F%2Fx%2F%3Fa%3D1%26b%3D2&p=50%25',
+    );
+    expect(resolved.queryParams).toEqual([]);
+  });
+
+  it('still sends the params table when the url has no query', async () => {
+    const request = {
+      ...baseRequest(),
+      queryParams: [
+        { id: 'q1', key: 'on', value: '{{baseUrl}}', enabled: true },
+        { id: 'q2', key: 'off', value: 'x', enabled: false },
+      ],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.queryParams).toEqual([
+      { key: 'on', value: 'https://collection.example', enabled: true },
+    ]);
+  });
+
   it('keeps a query that comes from a variable, since the params table never held it', async () => {
     vi.mocked(getCollectionSettings).mockResolvedValueOnce({
       variables: [

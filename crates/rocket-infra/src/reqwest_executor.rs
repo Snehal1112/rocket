@@ -3254,6 +3254,14 @@ mod encode_url_tests {
     }
 
     #[tokio::test]
+    async fn a_raw_typed_query_reaches_the_wire_unchanged_when_encoding_is_off() {
+        // With encodeUrl off the frontend keeps the typed query in the url and sends no params.
+        let raw = "redirect=https%3A%2F%2Fx%2F%3Fa%3D1%26b%3D2&p=50%25&q=a+b/c:d";
+        let q = query_sent(false, &format!("/p?{raw}"), vec![]).await;
+        assert_eq!(q, raw);
+    }
+
+    #[tokio::test]
     async fn max_redirects_does_not_defeat_the_client_cache() {
         let exec = ReqwestExecutor::new();
         let key = ClientKey {

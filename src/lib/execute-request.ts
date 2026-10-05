@@ -18,7 +18,7 @@ import {
   oauth2RefreshToken,
   type RequestGuardPolicy,
 } from '@/lib/tauri-api';
-import { applyPathParams, splitUrl } from '@/lib/url-params';
+import { applyPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
@@ -278,9 +278,26 @@ export async function resolveRequestFieldsForPath(
   });
   const resolve = (text: string) => resolveWithContext(text, ctx);
 
-  // The query travels in `queryParams`, so it must not also stay in the url or it is sent twice.
-  // The typed query is cut before resolving, so a query that comes from a variable is kept.
-  const resolvedUrl = resolve(splitUrl(request.url).base);
+  // The url bar is the source of the query: the params table re-parses it only after a
+  // debounce, so it can be stale at the moment of sending. Disabled table rows are never in
+  // the url, so they stay unsent. The query is sent once, either in the url or as params.
+  const { base: typedBase, queryString: typedQuery } = splitUrl(request.url);
+  const encodeUrl = request.settings?.encodeUrl ?? true;
+  let resolvedUrl: string;
+  let queryEntries: { key: string; value: string; enabled: boolean }[];
+  if (!typedQuery) {
+    // No typed query: the table is the only source (a query from a variable is kept as is).
+    resolvedUrl = resolve(typedBase);
+    queryEntries = request.queryParams;
+  } else if (encodeUrl) {
+    // The typed query is decoded into params, which the backend encodes again.
+    resolvedUrl = resolve(typedBase);
+    queryEntries = parseQueryParams(request.url);
+  } else {
+    // Encoding is off: the typed query goes out exactly as typed, only {{variables}} resolve.
+    resolvedUrl = `${resolve(typedBase)}?${resolve(typedQuery)}`;
+    queryEntries = [];
+  }
   // The backend substitutes these into the url, after resolving any {{variables}} again.
   const resolvedPathParams = request.pathParams
     .filter((p) => p.enabled && p.key)
@@ -309,7 +326,7 @@ export async function resolveRequestFieldsForPath(
     ...resolvedHeaders,
   ];
 
-  const resolvedQueryParams = request.queryParams
+  const resolvedQueryParams = queryEntries
     .filter((p) => p.enabled)
     .map((p) => ({ key: resolve(p.key), value: resolve(p.value), enabled: p.enabled }));
 

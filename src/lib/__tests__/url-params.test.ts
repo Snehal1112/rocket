@@ -39,6 +39,14 @@ describe('splitUrl', () => {
 // ─── parseQueryParams ─────────────────────────────────────────────────────────
 
 describe('parseQueryParams', () => {
+  it('keeps a malformed escape as typed instead of throwing', () => {
+    const entries = parseQueryParams('https://api.example.com/x?q=50%&r=%zz');
+    expect(entries.map((e) => [e.key, e.value])).toEqual([
+      ['q', '50%'],
+      ['r', '%zz'],
+    ]);
+  });
+
   it('parses basic key-value pairs', () => {
     const entries = parseQueryParams('https://api.example.com/users?page=1&limit=10');
     expect(entries).toHaveLength(2);

@@ -12,6 +12,15 @@ export function splitUrl(url: string): { base: string; queryString: string } {
   };
 }
 
+// Decodes a query component. A malformed escape, such as a lone '%', is kept as typed.
+function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 // Parse the query parameters from a URL into key-value entries.
 // Duplicate keys each become a separate entry. Encoded characters are decoded.
 export function parseQueryParams(url: string): KeyValueEntry[] {
@@ -26,11 +35,11 @@ export function parseQueryParams(url: string): KeyValueEntry[] {
     let value: string;
 
     if (eqIdx === -1) {
-      key = decodeURIComponent(pair);
+      key = safeDecode(pair);
       value = '';
     } else {
-      key = decodeURIComponent(pair.slice(0, eqIdx));
-      value = decodeURIComponent(pair.slice(eqIdx + 1));
+      key = safeDecode(pair.slice(0, eqIdx));
+      value = safeDecode(pair.slice(eqIdx + 1));
     }
 
     return {
