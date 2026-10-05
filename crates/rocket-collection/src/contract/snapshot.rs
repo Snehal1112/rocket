@@ -81,16 +81,7 @@ impl RequestSignatureSnapshot {
 }
 
 fn http_method_name(m: &HttpMethod) -> String {
-    match m {
-        HttpMethod::Get => "GET",
-        HttpMethod::Post => "POST",
-        HttpMethod::Put => "PUT",
-        HttpMethod::Patch => "PATCH",
-        HttpMethod::Delete => "DELETE",
-        HttpMethod::Options => "OPTIONS",
-        HttpMethod::Head => "HEAD",
-    }
-    .to_string()
+    m.to_string()
 }
 
 fn auth_type_name(auth: &Auth) -> String {
@@ -236,6 +227,16 @@ mod tests {
     use rocket_shared::types::{
         Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, QueryParam,
     };
+
+    #[test]
+    fn http_method_name_covers_trace_connect_and_custom() {
+        assert_eq!(http_method_name(&HttpMethod::Trace), "TRACE");
+        assert_eq!(http_method_name(&HttpMethod::Connect), "CONNECT");
+        assert_eq!(
+            http_method_name(&HttpMethod::Custom("PURGE".into())),
+            "PURGE"
+        );
+    }
 
     #[test]
     fn from_request_captures_method_url_and_keys() {

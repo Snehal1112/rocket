@@ -244,7 +244,7 @@ impl HttpExecutor for ReqwestExecutor {
         } else {
             self.get_or_build_client(request.options.follow_redirects, request.options.verify_ssl)?
         };
-        let method = map_method(&request.method);
+        let method = map_method(&request.method)?;
         let start = Instant::now();
 
         // Merge enabled query params into the URL.
@@ -649,9 +649,9 @@ fn read_certificate_file(path: &str) -> DomainResult<Vec<u8>> {
     })
 }
 
-fn map_method(method: &rocket_shared::types::HttpMethod) -> Method {
+fn map_method(method: &rocket_shared::types::HttpMethod) -> DomainResult<Method> {
     use rocket_shared::types::HttpMethod::*;
-    match method {
+    Ok(match method {
         Get => Method::GET,
         Post => Method::POST,
         Put => Method::PUT,
@@ -659,7 +659,11 @@ fn map_method(method: &rocket_shared::types::HttpMethod) -> Method {
         Delete => Method::DELETE,
         Options => Method::OPTIONS,
         Head => Method::HEAD,
-    }
+        Trace => Method::TRACE,
+        Connect => Method::CONNECT,
+        Custom(name) => Method::from_bytes(name.as_bytes())
+            .map_err(|e| DomainError::InvalidInput(format!("Invalid HTTP method {name}: {e}")))?,
+    })
 }
 
 async fn apply_auth(
@@ -969,13 +973,34 @@ mod tests {
 
     #[test]
     fn maps_all_http_methods() {
-        assert_eq!(map_method(&HttpMethod::Get), Method::GET);
-        assert_eq!(map_method(&HttpMethod::Post), Method::POST);
-        assert_eq!(map_method(&HttpMethod::Put), Method::PUT);
-        assert_eq!(map_method(&HttpMethod::Patch), Method::PATCH);
-        assert_eq!(map_method(&HttpMethod::Delete), Method::DELETE);
-        assert_eq!(map_method(&HttpMethod::Options), Method::OPTIONS);
-        assert_eq!(map_method(&HttpMethod::Head), Method::HEAD);
+        assert_eq!(map_method(&HttpMethod::Get).expect("map"), Method::GET);
+        assert_eq!(map_method(&HttpMethod::Post).expect("map"), Method::POST);
+        assert_eq!(map_method(&HttpMethod::Put).expect("map"), Method::PUT);
+        assert_eq!(map_method(&HttpMethod::Patch).expect("map"), Method::PATCH);
+        assert_eq!(
+            map_method(&HttpMethod::Delete).expect("map"),
+            Method::DELETE
+        );
+        assert_eq!(
+            map_method(&HttpMethod::Options).expect("map"),
+            Method::OPTIONS
+        );
+        assert_eq!(map_method(&HttpMethod::Head).expect("map"), Method::HEAD);
+    }
+
+    #[test]
+    fn maps_trace_connect_and_custom_methods() {
+        assert_eq!(map_method(&HttpMethod::Trace).expect("map"), Method::TRACE);
+        assert_eq!(
+            map_method(&HttpMethod::Connect).expect("map"),
+            Method::CONNECT
+        );
+        assert_eq!(
+            map_method(&HttpMethod::Custom("PURGE".into()))
+                .expect("map")
+                .as_str(),
+            "PURGE"
+        );
     }
 
     #[test]
@@ -2398,5 +2423,56 @@ mod mtls_tests {
                 .status,
             200
         );
+    }
+}
+
+#[cfg(test)]
+mod method_tests {
+    use super::*;
+    use rocket_shared::types::HttpMethod;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn sends_a_custom_method_verbatim() {
+        let server = MockServer::start().await;
+        Mock::given(method("PURGE"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let req = HttpRequest::new(
+            HttpMethod::Custom("PURGE".into()),
+            format!("{}/cache/x", server.uri()),
+        );
+        let response = ReqwestExecutor::new().execute(&req).await.expect("send");
+        assert_eq!(response.status, 204);
+    }
+
+    #[tokio::test]
+    async fn sends_a_trace_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("TRACE"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let req = HttpRequest::new(HttpMethod::Trace, format!("{}/t", server.uri()));
+        let response = ReqwestExecutor::new().execute(&req).await.expect("send");
+        assert_eq!(response.status, 200);
+    }
+
+    #[test]
+    fn connect_builds_a_request_without_error() {
+        // CONNECT is not a tunnel feature here: the request is sent like any other and the
+        // response is shown. A real tunnel handshake is out of scope.
+        let client = Client::new();
+        let built = client
+            .request(
+                map_method(&HttpMethod::Connect).expect("map"),
+                "http://example.com:8080",
+            )
+            .build();
+        assert!(built.is_ok());
     }
 }

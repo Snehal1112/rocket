@@ -35,7 +35,6 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { withCurrentAuthType } from '@/lib/auth-type-options';
-import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
@@ -75,6 +74,7 @@ import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
 import { HeadersEditor } from './HeadersEditor';
 import { LoadTestTab } from './load-test/LoadTestTab';
+import { MethodSelect } from './MethodSelect';
 import { PathParamsPanel } from './PathParamsPanel';
 import { QueryParamsEditor } from './QueryParamsEditor';
 import { RequestDocsPanel } from './RequestDocsPanel';
@@ -87,8 +87,6 @@ import { VarsTab } from './VarsTab';
 // Lazy-load the Scripts tab so its heavy dependency chain (snippet sidebar,
 // rok/chai type definitions) is only loaded once a user opens the tab.
 const ScriptsTab = lazy(() => import('./ScriptsTab').then((m) => ({ default: m.ScriptsTab })));
-
-const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 
 export const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
   { label: 'None', value: 'none' },
@@ -922,27 +920,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const urlBar = (
     <>
       <div className='flex items-center gap-2 border-b border-border px-3 py-2 bg-card'>
-        <Select
+        <MethodSelect
           value={request.method}
-          onValueChange={(val) => updateRequest(tab.id, { method: val as HttpMethod })}
-        >
-          <SelectTrigger
-            className={cn('h-8 w-28 text-sm font-semibold', METHOD_TEXT_COLOR[request.method])}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {METHODS.map((m) => (
-              <SelectItem
-                key={m}
-                value={m}
-                className={cn('text-sm font-semibold', METHOD_TEXT_COLOR[m])}
-              >
-                {m}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={(method) => updateRequest(tab.id, { method })}
+        />
 
         <SingleLineEditor
           value={request.url}

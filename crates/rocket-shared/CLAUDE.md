@@ -30,7 +30,7 @@ cargo check -p rocket-shared
 - `EventPublisher` — object-safe trait (`fn publish(&self, event: DomainEvent)`). Implemented by `TauriEventBus` in `rocket-infra`; `NullEventPublisher` is the no-op used in tests.
 
 ### HTTP primitives
-- `HttpMethod` — enum for GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD; implements `Display` and `FromStr` (case-insensitive).
+- `HttpMethod` — enum for GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD/TRACE/CONNECT plus `Custom(String)` for any other valid method token (`is_valid_method_token`, kept as written). Not `Copy`. Serializes as a plain string; `FromStr` matches standard names case-insensitively.
 - `Header`, `QueryParam`, `PathParam` — keyed, enabled-flag structures with optional `Description`.
 - `Body` / `BodyMode` — request body with modes: `none`, `json`, `xml`, `text`, `sparql`, `formurlencoded`, `formdata`, `binary`.
 - `Auth` — tagged enum covering `None`, `Basic`, `Bearer`, `ApiKey`, `OAuth2`, `AwsSigV4`, `Wsse`, `Digest`, `Ntlm`, `OAuth1`, `Inherit`. Tag field is `authType` with kebab-case values.

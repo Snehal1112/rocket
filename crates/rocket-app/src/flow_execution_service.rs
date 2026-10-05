@@ -2303,7 +2303,7 @@ mod tests {
             ..
         } = &mut node.kind
         {
-            request.method = "FETCH".to_string();
+            request.method = "NOT A METHOD".to_string();
         }
 
         let err = build_execute_request_input(&repo, "my-api", None, None, &node)

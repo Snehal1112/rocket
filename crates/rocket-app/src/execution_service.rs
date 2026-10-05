@@ -727,7 +727,7 @@ impl RequestExecutionService {
             self.environment_client_certificates(input, &vars, external_secrets);
 
         Ok(HttpRequest {
-            method: input.method,
+            method: input.method.clone(),
             url: resolved_url,
             headers: resolved_headers,
             query_params: input.query_params.clone(),
@@ -5619,10 +5619,10 @@ mod tests {
         use rocket_scripting::{RequestMutations, ScriptResult};
         use rocket_shared::types::HttpMethod;
 
-        // req.setMethod('PACTH') — a typo that doesn't parse as a valid method.
+        // req.setMethod('PACTH ME') — text that is not a valid method token.
         let result = ScriptResult {
             request_mutations: Some(RequestMutations {
-                method: Some("PACTH".into()),
+                method: Some("PACTH ME".into()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -5654,7 +5654,7 @@ mod tests {
             .script_error
             .expect("an invalid setMethod() must surface a script_error");
         assert!(
-            err.contains("PACTH"),
+            err.contains("PACTH ME"),
             "error should name the invalid method: {err}"
         );
     }

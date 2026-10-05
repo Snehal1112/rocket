@@ -381,4 +381,5 @@ export interface ResponseState {
   scriptError?: string | null;
 }
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD';
+// Standard methods or any custom method token, as the backend serializes it.
+export type HttpMethod = string;

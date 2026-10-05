@@ -119,7 +119,7 @@ pub fn build_step_input(
 ) -> ExecuteRequestInput {
     let request = &item.request;
     ExecuteRequestInput {
-        method: request.method,
+        method: request.method.clone(),
         url: request.url.clone(),
         headers: request.headers.clone(),
         query_params: request.query_params.clone(),

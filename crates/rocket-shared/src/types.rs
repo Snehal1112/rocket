@@ -9,8 +9,12 @@ use crate::error::DomainError;
 // HttpMethod
 // ============================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+/// An HTTP request method. The nine standard methods have their own variant, and any other
+/// valid method token is kept as `Custom`, exactly as written, because methods are
+/// case-sensitive on the wire. It serializes as a plain string so request files, IPC payloads
+/// and scripts all keep exchanging method names as text.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub enum HttpMethod {
     Get,
     Post,
@@ -19,6 +23,36 @@ pub enum HttpMethod {
     Delete,
     Options,
     Head,
+    Trace,
+    Connect,
+    Custom(String),
+}
+
+/// True when `s` is a legal HTTP method token (RFC 9110 `token`, at most 64 characters).
+/// Anything else, such as text with spaces or line breaks, must never reach the request line.
+pub fn is_valid_method_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
 }
 
 impl fmt::Display for HttpMethod {
@@ -31,6 +65,9 @@ impl fmt::Display for HttpMethod {
             HttpMethod::Delete => write!(f, "DELETE"),
             HttpMethod::Options => write!(f, "OPTIONS"),
             HttpMethod::Head => write!(f, "HEAD"),
+            HttpMethod::Trace => write!(f, "TRACE"),
+            HttpMethod::Connect => write!(f, "CONNECT"),
+            HttpMethod::Custom(name) => write!(f, "{name}"),
         }
     }
 }
@@ -39,7 +76,7 @@ impl FromStr for HttpMethod {
     type Err = DomainError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
+        match s.to_ascii_uppercase().as_str() {
             "GET" => Ok(HttpMethod::Get),
             "POST" => Ok(HttpMethod::Post),
             "PUT" => Ok(HttpMethod::Put),
@@ -47,11 +84,27 @@ impl FromStr for HttpMethod {
             "DELETE" => Ok(HttpMethod::Delete),
             "OPTIONS" => Ok(HttpMethod::Options),
             "HEAD" => Ok(HttpMethod::Head),
+            "TRACE" => Ok(HttpMethod::Trace),
+            "CONNECT" => Ok(HttpMethod::Connect),
+            _ if is_valid_method_token(s) => Ok(HttpMethod::Custom(s.to_string())),
             _ => Err(DomainError::InvalidInput(format!(
-                "Invalid HTTP method: {}",
-                s
+                "Invalid HTTP method: {s}"
             ))),
         }
+    }
+}
+
+impl TryFrom<String> for HttpMethod {
+    type Error = DomainError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl From<HttpMethod> for String {
+    fn from(method: HttpMethod) -> Self {
+        method.to_string()
     }
 }
 
@@ -318,7 +371,71 @@ mod tests {
     fn http_method_from_string() {
         assert_eq!(HttpMethod::from_str("GET"), Ok(HttpMethod::Get));
         assert_eq!(HttpMethod::from_str("post"), Ok(HttpMethod::Post));
-        assert!(HttpMethod::from_str("INVALID").is_err());
+        assert!(HttpMethod::from_str("NOT A METHOD").is_err());
+    }
+
+    #[test]
+    fn http_method_trace_and_connect_are_standard() {
+        assert_eq!(HttpMethod::from_str("trace"), Ok(HttpMethod::Trace));
+        assert_eq!(HttpMethod::from_str("CONNECT"), Ok(HttpMethod::Connect));
+        assert_eq!(HttpMethod::Trace.to_string(), "TRACE");
+        assert_eq!(HttpMethod::Connect.to_string(), "CONNECT");
+    }
+
+    #[test]
+    fn http_method_custom_token_is_kept_as_written() {
+        let purge = HttpMethod::from_str("PURGE").expect("valid token");
+        assert_eq!(purge, HttpMethod::Custom("PURGE".into()));
+        assert_eq!(purge.to_string(), "PURGE");
+        // Methods are case-sensitive on the wire, so a custom token is not upper-cased.
+        assert_eq!(
+            HttpMethod::from_str("m-search")
+                .expect("valid token")
+                .to_string(),
+            "m-search"
+        );
+        // A standard name in any case maps to the standard variant, as before.
+        assert_eq!(HttpMethod::from_str("Get"), Ok(HttpMethod::Get));
+    }
+
+    #[test]
+    fn http_method_rejects_non_token_text() {
+        for bad in [
+            "",
+            "GET ME",
+            "PU RGE",
+            "A/B",
+            "BAD\n",
+            "BAD\r\nHost: x",
+            "caf\u{e9}",
+        ] {
+            assert!(
+                HttpMethod::from_str(bad).is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
+        assert!(HttpMethod::from_str(&"A".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn http_method_serializes_as_a_plain_string() {
+        assert_eq!(
+            serde_json::to_string(&HttpMethod::Get).expect("ser"),
+            "\"GET\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HttpMethod::Custom("PURGE".into())).expect("ser"),
+            "\"PURGE\""
+        );
+        assert_eq!(
+            serde_json::from_str::<HttpMethod>("\"TRACE\"").expect("de"),
+            HttpMethod::Trace
+        );
+        assert_eq!(
+            serde_json::from_str::<HttpMethod>("\"PURGE\"").expect("de"),
+            HttpMethod::Custom("PURGE".into())
+        );
+        assert!(serde_json::from_str::<HttpMethod>("\"BAD METHOD\"").is_err());
     }
 
     #[test]

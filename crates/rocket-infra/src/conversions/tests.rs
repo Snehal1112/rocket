@@ -87,6 +87,23 @@ fn param_split_by_type() {
 }
 
 #[test]
+fn unknown_method_survives_a_request_roundtrip() {
+    let yaml = r#"
+info:
+  name: Purge
+  type: http
+http:
+  method: PURGE
+  url: "https://cdn.example.com/x"
+"#;
+    let oc: OcHttpRequest = serde_yaml::from_str(yaml).expect("parse yaml");
+    let req = oc_http_request_to_request(oc);
+    assert_eq!(req.method, HttpMethod::Custom("PURGE".into()));
+    let back = request_to_oc_http_request(&req);
+    assert_eq!(back.http.method, "PURGE");
+}
+
+#[test]
 fn param_merge_roundtrip() {
     let query = vec![QueryParam {
         key: "q".into(),

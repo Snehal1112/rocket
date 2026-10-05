@@ -11,7 +11,8 @@ import type { OAuth2AdditionalParam, OAuth2JwtClaims } from '@/types/pane-types'
 // Domain types (mirror Rust structs)
 // ============================================================
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD';
+// Standard methods or any custom method token, as the backend serializes it.
+export type HttpMethod = string;
 
 export interface Header {
   key: string;
