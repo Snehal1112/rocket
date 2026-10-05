@@ -753,7 +753,8 @@ fn build_client(spec: ClientBuild) -> DomainResult<Client> {
         single_connection,
     } = spec;
     let limit = key.max_redirects.unwrap_or(10) as usize;
-    let redirect_policy = if !key.follow_redirects {
+    // A limit of zero would turn the first redirect into an error, so it returns the 3xx as is.
+    let redirect_policy = if !key.follow_redirects || limit == 0 {
         redirect::Policy::none()
     } else if let Some(scope) = identity.as_ref().map(|i| i.certificate.clone()) {
         redirect::Policy::custom(move |attempt| {
@@ -788,6 +789,13 @@ fn build_client(spec: ClientBuild) -> DomainResult<Client> {
         .map_err(|e| DomainError::Http(e.to_string()))
 }
 
+/// The traffic a custom proxy URL carries.
+enum Scheme {
+    Http,
+    Https,
+    All,
+}
+
 /// Applies the app's proxy setting. `System` leaves reqwest's default, which reads the
 /// `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` environment variables.
 fn apply_proxy(
@@ -806,19 +814,26 @@ fn apply_proxy(
                 .no_proxy
                 .as_deref()
                 .and_then(reqwest::NoProxy::from_string);
-            let entries = [
-                ("HTTP", proxy.settings.http_proxy.as_deref(), false),
-                ("HTTPS", proxy.settings.https_proxy.as_deref(), true),
-            ];
-            for (label, url, https) in entries {
-                let Some(url) = url.map(str::trim).filter(|u| !u.is_empty()) else {
-                    continue;
-                };
+            let clean = |url: Option<&str>| {
+                url.map(str::trim)
+                    .filter(|u| !u.is_empty())
+                    .map(str::to_string)
+            };
+            let http = clean(proxy.settings.http_proxy.as_deref());
+            let https = clean(proxy.settings.https_proxy.as_deref());
+            // A single URL carries both schemes, so one scheme never goes around the proxy.
+            let entries: Vec<(&str, String, Scheme)> = match (http, https) {
+                (Some(h), Some(s)) => vec![("HTTP", h, Scheme::Http), ("HTTPS", s, Scheme::Https)],
+                (Some(h), None) => vec![("HTTP", h, Scheme::All)],
+                (None, Some(s)) => vec![("HTTPS", s, Scheme::All)],
+                (None, None) => Vec::new(),
+            };
+            for (label, url, scheme) in entries {
                 // The URL is never echoed: it is user input and could hold credentials.
-                let created = if https {
-                    reqwest::Proxy::https(url)
-                } else {
-                    reqwest::Proxy::http(url)
+                let created = match scheme {
+                    Scheme::Http => reqwest::Proxy::http(&url),
+                    Scheme::Https => reqwest::Proxy::https(&url),
+                    Scheme::All => reqwest::Proxy::all(&url),
                 };
                 let mut p = created.map_err(|_| {
                     DomainError::InvalidInput(format!("The {label} proxy URL is not valid"))
@@ -2650,6 +2665,18 @@ mod mtls_tests {
     }
 
     #[tokio::test]
+    async fn zero_max_redirects_returns_the_redirect_response() {
+        let other = ok_server().await;
+        let origin = redirecting_to(&format!("{}/next", other.uri())).await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/start", origin.uri()));
+        req.options.max_redirects = Some(0);
+        let resp = ReqwestExecutor::new().execute(&req).await.unwrap();
+
+        assert_eq!(resp.status, 302, "the 3xx response is returned as is");
+        assert!(other.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn the_redirect_limit_still_applies_with_a_certificate() {
         // Redirect to itself forever.
         let server = MockServer::start().await;
@@ -3434,6 +3461,38 @@ mod proxy_tests {
         req.options.timeout_ms = 5_000;
         let response = exec.execute(&req).await.expect("through the proxy");
         assert_eq!(response.body, "via proxy");
+    }
+
+    #[tokio::test]
+    async fn a_single_http_proxy_url_also_carries_https_traffic() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let uri = format!("http://{}", listener.local_addr().expect("addr"));
+        let seen = tokio::spawn(async move {
+            // Without a connection the proxy was bypassed, so do not wait for one forever.
+            let accepted =
+                tokio::time::timeout(std::time::Duration::from_secs(5), listener.accept()).await;
+            let Ok(Ok((mut socket, _))) = accepted else {
+                return String::new();
+            };
+            let mut buf = vec![0u8; 1024];
+            let n = socket.read(&mut buf).await.expect("read");
+            let _ = socket
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\r\n")
+                .await;
+            String::from_utf8_lossy(&buf[..n]).to_string()
+        });
+        let exec = ReqwestExecutor::new().with_proxy(shared(custom(&uri), None));
+        let mut req = HttpRequest::new(HttpMethod::Get, "https://upstream.invalid/x");
+        req.options.timeout_ms = 5_000;
+        let _ = exec.execute(&req).await;
+        let first = seen.await.expect("proxy task");
+        assert!(
+            first.starts_with("CONNECT upstream.invalid:443"),
+            "https went around the proxy: {first:?}"
+        );
     }
 
     #[tokio::test]
