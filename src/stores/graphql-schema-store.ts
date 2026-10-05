@@ -26,6 +26,11 @@ interface GraphQlSchemaState {
   clear: (tabId: string) => void;
 }
 
+// The newest operation per tab. A reply from an older one is dropped, so a slow fetch
+// for a previous URL or environment cannot overwrite the current state.
+const latest: Record<string, number> = {};
+let counter = 0;
+
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -46,6 +51,8 @@ export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set) => {
     entries: {},
 
     async loadCached(tabId, request) {
+      const mine = ++counter;
+      latest[tabId] = mine;
       try {
         const input = await buildSchemaRequestInput(tabId, request);
         const cached = await getCachedGraphQlSchema(
@@ -53,19 +60,25 @@ export const useGraphQlSchemaStore = create<GraphQlSchemaState>((set) => {
           input.environmentName,
           input.url,
         );
+        if (latest[tabId] !== mine) return;
         put(tabId, cached ? ready(cached) : { status: 'idle' });
       } catch (err) {
+        if (latest[tabId] !== mine) return;
         put(tabId, { status: 'error', error: message(err) });
       }
     },
 
     async fetchSchema(tabId, request, refresh) {
+      const mine = ++counter;
+      latest[tabId] = mine;
       put(tabId, { status: 'loading' });
       try {
         const input = await buildSchemaRequestInput(tabId, request);
         const result = await fetchGraphQlSchema({ request: input, refresh });
+        if (latest[tabId] !== mine) return;
         put(tabId, ready(result));
       } catch (err) {
+        if (latest[tabId] !== mine) return;
         put(tabId, { status: 'error', error: message(err) });
       }
     },

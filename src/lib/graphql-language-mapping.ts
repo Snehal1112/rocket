@@ -100,3 +100,15 @@ export function diagnosticToMarker(d: LspDiagnostic, severities: MonacoSeveritie
     endColumn: d.range.end.character + 1,
   };
 }
+
+// `{{variable}}` placeholders are resolved before a request is sent, but they are not
+// valid GraphQL when unquoted. Swap each for `null` padded to the same length, so the
+// diagnostics parse and their positions still match the editor text.
+export function maskPlaceholders(text: string): string {
+  return text.replace(/\{\{[^{}]*\}\}/g, (m) => `null${' '.repeat(m.length - 4)}`);
+}
+
+// LSP `InsertTextFormat.Snippet`, whose text holds tab stops such as `$1`.
+export function isSnippetFormat(format: number | undefined): boolean {
+  return format === 2;
+}

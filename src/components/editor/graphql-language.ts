@@ -4,7 +4,9 @@ import * as monaco from 'monaco-editor';
 import {
   completionDocumentation,
   diagnosticToMarker,
+  isSnippetFormat,
   mapCompletionKind,
+  maskPlaceholders,
 } from '@/lib/graphql-language-mapping';
 
 export interface GraphQlSupport {
@@ -51,6 +53,9 @@ export function attachGraphQlSupport(
           detail: item.detail ?? undefined,
           documentation: completionDocumentation(item.documentation),
           insertText: item.insertText ?? item.label,
+          insertTextRules: isSnippetFormat(item.insertTextFormat)
+            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+            : undefined,
           range,
         })),
       };
@@ -59,7 +64,7 @@ export function attachGraphQlSupport(
 
   const revalidate = () => {
     // Without a schema this still reports syntax errors.
-    const diagnostics = getDiagnostics(model.getValue(), getSchema());
+    const diagnostics = getDiagnostics(maskPlaceholders(model.getValue()), getSchema());
     monaco.editor.setModelMarkers(
       model,
       'graphql',

@@ -78,4 +78,20 @@ describe('graphql schema store', () => {
       .fetchSchema('t1', createDefaultRequestFor('graphql'), false);
     expect(useGraphQlSchemaStore.getState().entries.t1?.status).toBe('error');
   });
+
+  it('a slow fetch does not overwrite a newer state for the same tab', async () => {
+    let finish: ((r: typeof result) => void) | undefined;
+    vi.mocked(fetchGraphQlSchema).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    vi.mocked(getCachedGraphQlSchema).mockResolvedValue(null);
+    const req = createDefaultRequestFor('graphql');
+    const slow = useGraphQlSchemaStore.getState().fetchSchema('t1', req, false);
+    await useGraphQlSchemaStore.getState().loadCached('t1', req);
+    finish?.(result);
+    await slow;
+    expect(useGraphQlSchemaStore.getState().entries.t1?.status).toBe('idle');
+  });
 });

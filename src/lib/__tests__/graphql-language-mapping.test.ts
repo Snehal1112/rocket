@@ -1,8 +1,11 @@
+import { getDiagnostics } from 'graphql-language-service';
 import { describe, expect, it } from 'vitest';
 import {
   completionDocumentation,
   diagnosticToMarker,
+  isSnippetFormat,
   mapCompletionKind,
+  maskPlaceholders,
 } from '../graphql-language-mapping';
 
 const kinds = {
@@ -76,5 +79,32 @@ describe('diagnosticToMarker', () => {
     expect(diagnosticToMarker({ ...base, severity: 3 }, severities).severity).toBe(2);
     expect(diagnosticToMarker({ ...base, severity: 4 }, severities).severity).toBe(1);
     expect(diagnosticToMarker(base, severities).severity).toBe(8);
+  });
+});
+
+describe('maskPlaceholders', () => {
+  it('keeps the text length so positions still line up', () => {
+    const text = 'query { user(id: {{userId}}, n: "{{x}}") { name } }';
+    expect(maskPlaceholders(text)).toHaveLength(text.length);
+  });
+
+  it('turns an unquoted placeholder into a value that parses', () => {
+    // No schema: this checks syntax only. Under vitest the language service loads its own
+    // copy of `graphql`, so passing a schema built here would be rejected as foreign.
+    const text = 'query { user(id: {{userId}}, n: "{{x}}") }';
+    expect(getDiagnostics(text).length).toBeGreaterThan(0);
+    expect(getDiagnostics(maskPlaceholders(text))).toEqual([]);
+  });
+
+  it('leaves text without placeholders alone', () => {
+    expect(maskPlaceholders('{ a }')).toBe('{ a }');
+  });
+});
+
+describe('isSnippetFormat', () => {
+  it('is true only for the LSP snippet format', () => {
+    expect(isSnippetFormat(2)).toBe(true);
+    expect(isSnippetFormat(1)).toBe(false);
+    expect(isSnippetFormat(undefined)).toBe(false);
   });
 });
