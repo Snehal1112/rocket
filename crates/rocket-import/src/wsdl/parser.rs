@@ -12,6 +12,10 @@ const MAX_SOURCES: usize = 32;
 const MAX_SOURCE_BYTES: u64 = 5 * 1024 * 1024;
 /// roxmltree recurses per nesting level and has no limit of its own.
 const MAX_XML_DEPTH: usize = 256;
+/// Ports kept per service. Every port repeats its binding's operations, so this bounds fan-out.
+const MAX_PORTS_PER_SERVICE: usize = 256;
+/// Operations kept across the whole model, counted over all ports.
+const MAX_MODEL_OPERATIONS: usize = 10_000;
 
 fn parse_err(path: &Path, message: impl Into<String>) -> ImportError {
     ImportError::ParseError {
@@ -412,11 +416,59 @@ impl Raw {
     }
 }
 
+/// Resolve the operations of one binding against its port type.
+fn resolve_binding_ops(
+    raw: &Raw,
+    binding: &RawBinding,
+    port_type: &[RawPortOp],
+    warnings: &mut Vec<String>,
+) -> Vec<WsdlOperation> {
+    // Index port type operations by name to avoid a scan per binding operation.
+    let mut by_name: HashMap<&str, Vec<&RawPortOp>> = HashMap::new();
+    for o in port_type {
+        by_name.entry(o.name.as_str()).or_default().push(o);
+    }
+    let mut operations = Vec::new();
+    for bop in &binding.ops {
+        let pt_op = by_name.get(bop.name.as_str()).and_then(|c| {
+            c.iter()
+                .find(|o| bop.input_name.is_none() || o.input_name == bop.input_name)
+        });
+        let Some(msg_name) = pt_op.and_then(|o| o.input_message.as_ref()) else {
+            warnings.push(format!(
+                "operation {} has no input message, skipped",
+                bop.name
+            ));
+            continue;
+        };
+        let input_parts = raw.messages.get(msg_name).cloned().unwrap_or_default();
+        operations.push(WsdlOperation {
+            name: bop.name.clone(),
+            soap_action: bop.soap_action.clone(),
+            style: bop.style.unwrap_or(binding.style),
+            rpc_namespace: bop.rpc_ns.clone(),
+            input_parts,
+        });
+    }
+    operations
+}
+
 fn build_model(raw: Raw, schemas: SchemaSet, mut warnings: Vec<String>) -> WsdlModel {
     let mut services = Vec::new();
+    let mut total_ops = 0usize;
+    let mut op_limit_hit = false;
+    // Operations per binding, resolved once however many ports share the binding.
+    let mut resolved: HashMap<QName, Vec<WsdlOperation>> = HashMap::new();
     for svc in &raw.services {
         let mut ports = Vec::new();
-        for port in &svc.ports {
+        if svc.ports.len() > MAX_PORTS_PER_SERVICE {
+            warnings.push(format!(
+                "service {} has {} ports, only the first {MAX_PORTS_PER_SERVICE} are read",
+                svc.name,
+                svc.ports.len()
+            ));
+        }
+        for port in svc.ports.iter().take(MAX_PORTS_PER_SERVICE) {
             let Some(binding) = raw.bindings.get(&port.binding) else {
                 warnings.push(format!("port {} references an unknown binding", port.name));
                 continue;
@@ -442,28 +494,17 @@ fn build_model(raw: Raw, schemas: SchemaSet, mut warnings: Vec<String>) -> WsdlM
                     "{{baseUrl}}".to_string()
                 }
             };
-            let mut operations = Vec::new();
-            for bop in &binding.ops {
-                let pt_op = port_type.iter().find(|o| {
-                    o.name == bop.name
-                        && (bop.input_name.is_none() || o.input_name == bop.input_name)
-                });
-                let Some(msg_name) = pt_op.and_then(|o| o.input_message.as_ref()) else {
-                    warnings.push(format!(
-                        "operation {} has no input message, skipped",
-                        bop.name
-                    ));
-                    continue;
-                };
-                let input_parts = raw.messages.get(msg_name).cloned().unwrap_or_default();
-                operations.push(WsdlOperation {
-                    name: bop.name.clone(),
-                    soap_action: bop.soap_action.clone(),
-                    style: bop.style.unwrap_or(binding.style),
-                    rpc_namespace: bop.rpc_ns.clone(),
-                    input_parts,
-                });
+            if !resolved.contains_key(&port.binding) {
+                let ops = resolve_binding_ops(&raw, binding, port_type, &mut warnings);
+                resolved.insert(port.binding.clone(), ops);
             }
+            let mut operations = resolved.get(&port.binding).cloned().unwrap_or_default();
+            let room = MAX_MODEL_OPERATIONS.saturating_sub(total_ops);
+            if operations.len() > room {
+                operations.truncate(room);
+                op_limit_hit = true;
+            }
+            total_ops += operations.len();
             ports.push(WsdlPort {
                 name: port.name.clone(),
                 address,
@@ -475,6 +516,11 @@ fn build_model(raw: Raw, schemas: SchemaSet, mut warnings: Vec<String>) -> WsdlM
             name: svc.name.clone(),
             ports,
         });
+    }
+    if op_limit_hit {
+        warnings.push(format!(
+            "more than {MAX_MODEL_OPERATIONS} operations across ports, the rest are not read"
+        ));
     }
     WsdlModel {
         services,

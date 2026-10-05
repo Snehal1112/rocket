@@ -11,8 +11,20 @@ use crate::wsdl::{
 /// SOAP 1.1 carries the action in a quoted `SOAPAction` header. SOAP 1.2 carries it as the
 /// `action` parameter of the content type and has no `SOAPAction` header.
 pub(crate) fn soap_headers(version: SoapVersion, action: &str) -> Vec<Header> {
-    // A quote cannot appear in a valid action URI, so encode it rather than let it end the value.
-    let action = action.replace('"', "%22");
+    // Quotes, backslashes and control characters cannot appear in a valid action URI.
+    // Percent-encode them so they cannot end the value or break the header.
+    let mut encoded = String::with_capacity(action.len());
+    for c in action.chars() {
+        if c == '"' || c == '\\' || c.is_control() {
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).bytes() {
+                encoded.push_str(&format!("%{b:02X}"));
+            }
+        } else {
+            encoded.push(c);
+        }
+    }
+    let action = encoded;
     match version {
         SoapVersion::V11 => vec![
             Header::new("Content-Type", "text/xml; charset=utf-8"),
@@ -137,7 +149,27 @@ mod tests {
     #[test]
     fn action_with_quote_cannot_break_out_of_the_header() {
         let h = soap_headers(SoapVersion::V12, "a\"b");
-        assert!(!h[0].value.contains("a\"b"), "got: {}", h[0].value);
+        assert_eq!(
+            h[0].value,
+            "application/soap+xml; charset=utf-8; action=\"a%22b\""
+        );
+    }
+
+    #[test]
+    fn action_with_backslash_is_encoded() {
+        let h = soap_headers(SoapVersion::V11, "urn:x\\");
+        assert_eq!(h[1].value, "\"urn:x%5C\"");
+        let h = soap_headers(SoapVersion::V12, "urn:x\\");
+        assert_eq!(
+            h[0].value,
+            "application/soap+xml; charset=utf-8; action=\"urn:x%5C\""
+        );
+    }
+
+    #[test]
+    fn action_with_control_characters_is_encoded() {
+        let h = soap_headers(SoapVersion::V11, "a\nb\r\tc\u{7f}");
+        assert_eq!(h[1].value, "\"a%0Ab%0D%09c%7F\"");
     }
 
     #[test]

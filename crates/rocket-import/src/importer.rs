@@ -580,6 +580,19 @@ impl ImportService {
     /// port, one request per SOAP operation. Non-SOAP bindings and unreadable imports
     /// are reported, not fatal.
     pub fn import_wsdl(&self, path: &Path, _workspace_id: &str) -> ImportResult<ImportReport> {
+        self.import_wsdl_with_limits(path, MAX_WSDL_REQUESTS, MAX_WSDL_BYTES)
+    }
+
+    /// Same as `import_wsdl` with explicit limits, so tests can use small values.
+    ///
+    /// Only creating the collection is fatal. A folder or request that cannot be
+    /// written becomes a skipped item and the import goes on.
+    fn import_wsdl_with_limits(
+        &self,
+        path: &Path,
+        max_requests: usize,
+        max_bytes: usize,
+    ) -> ImportResult<ImportReport> {
         use crate::converter::wsdl as wc;
 
         let model = crate::wsdl::parse_wsdl_file(path)?;
@@ -608,42 +621,89 @@ impl ImportService {
             .map_err(ImportError::DomainError)?;
         report.created_collections.push(col_name.clone());
 
-        let mut used_services: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for service in &model.services {
-            let service_dir = unique_segment(&mut used_services, &service.name);
-            self.collection_repo
+        let total_ops: usize = model
+            .services
+            .iter()
+            .flat_map(|s| &s.ports)
+            .map(|p| p.operations.len())
+            .sum();
+        // Operations handled so far, written or skipped.
+        let mut handled = 0usize;
+        let mut bytes = 0usize;
+        let mut limit_hit = false;
+
+        let mut used_services = std::collections::HashSet::new();
+        'services: for service in &model.services {
+            let (service_dir, _) =
+                unique_segment(&mut used_services, &service.name, SERVICE_RESERVED);
+            let service_failure = self
+                .collection_repo
                 .create_folder(&col_name, &service_dir)
-                .map_err(ImportError::DomainError)?;
-            let mut used_ports: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+                .err()
+                .map(|e| format!("service folder could not be created: {e}"));
+            let mut used_ports = std::collections::HashSet::new();
             for port in &service.ports {
-                let port_dir = format!(
-                    "{service_dir}/{}",
-                    unique_segment(&mut used_ports, &port.name)
-                );
-                self.collection_repo
-                    .create_folder(&col_name, &port_dir)
-                    .map_err(ImportError::DomainError)?;
-                let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let (port_seg, _) = unique_segment(&mut used_ports, &port.name, PORT_RESERVED);
+                let port_dir = format!("{service_dir}/{port_seg}");
+                let port_failure = match &service_failure {
+                    Some(msg) => Some(msg.clone()),
+                    None => self
+                        .collection_repo
+                        .create_folder(&col_name, &port_dir)
+                        .err()
+                        .map(|e| format!("port folder could not be created: {e}")),
+                };
+                if let Some(msg) = port_failure {
+                    report.total_files += port.operations.len();
+                    handled += port.operations.len();
+                    report.skipped.push(SkippedItem {
+                        path: port_dir.clone(),
+                        reason: SkipReason::ParseError(msg),
+                    });
+                    continue;
+                }
+                let mut used = std::collections::HashSet::new();
                 for (i, op) in port.operations.iter().enumerate() {
+                    if handled >= max_requests || bytes >= max_bytes {
+                        limit_hit = true;
+                        break 'services;
+                    }
+                    handled += 1;
                     report.total_files += 1;
                     let mut req = wc::convert_operation(port, op, &model.schemas, (i + 1) as u32);
-                    let base = wsdl_path_segment(&op.name);
-                    let mut slug = base.clone();
-                    let mut n = 2u32;
-                    while !used.insert(slug.clone()) {
-                        slug = format!("{base}-{n}");
-                        n += 1;
+                    bytes += req
+                        .body
+                        .as_ref()
+                        .and_then(|b| b.content.as_ref())
+                        .map_or(0, |c| c.len());
+                    let (slug, k) = unique_segment(&mut used, &op.name, REQUEST_RESERVED);
+                    if k > 1 {
+                        req.name = format!("{} ({k})", op.name);
                     }
-                    if slug != base {
-                        req.name = format!("{} ({n_minus})", op.name, n_minus = n - 1);
+                    let request_path = format!("{port_dir}/{slug}");
+                    match self
+                        .collection_repo
+                        .save_request(&col_name, &request_path, &req)
+                    {
+                        Ok(_) => report.imported += 1,
+                        Err(e) => report.skipped.push(SkippedItem {
+                            path: request_path,
+                            reason: SkipReason::ParseError(format!(
+                                "request could not be written: {e}"
+                            )),
+                        }),
                     }
-                    self.collection_repo
-                        .save_request(&col_name, &format!("{port_dir}/{slug}"), &req)
-                        .map_err(ImportError::DomainError)?;
-                    report.imported += 1;
                 }
             }
+        }
+        if limit_hit {
+            let left = total_ops.saturating_sub(handled);
+            report.skipped.push(SkippedItem {
+                path: file_label,
+                reason: SkipReason::UnsupportedRequestType(format!(
+                    "request limit reached, {left} operations not imported"
+                )),
+            });
         }
         Ok(report)
     }
@@ -750,9 +810,32 @@ fn sanitize_postman_filename(name: &str) -> String {
         .collect()
 }
 
-/// Folder and file name segment for a WSDL name. Never empty.
+/// Longest folder or file name segment, in characters.
+const MAX_SEGMENT_CHARS: usize = 100;
+/// Most requests one WSDL import writes, counted over all services and ports.
+pub(crate) const MAX_WSDL_REQUESTS: usize = 2000;
+/// Most envelope bytes one WSDL import generates, summed over all requests.
+pub(crate) const MAX_WSDL_BYTES: usize = 32 * 1024 * 1024;
+
+/// File stems the collection store treats as metadata, not requests.
+const REQUEST_RESERVED: &[&str] = &[
+    "folder",
+    "_order",
+    "opencollection",
+    "workspace",
+    "collection",
+];
+/// Folder names hidden in the tree at any depth.
+const PORT_RESERVED: &[&str] = &["environments"];
+/// Folder names hidden at the collection root. Services live at the root.
+const SERVICE_RESERVED: &[&str] = &["environments", "flows"];
+
+/// Folder and file name segment for a WSDL name. Never empty, at most 100 characters.
 fn wsdl_path_segment(name: &str) -> String {
-    let s = sanitize_postman_filename(name);
+    let s: String = sanitize_postman_filename(name)
+        .chars()
+        .take(MAX_SEGMENT_CHARS)
+        .collect();
     if s.is_empty() {
         "unnamed".to_string()
     } else {
@@ -760,16 +843,46 @@ fn wsdl_path_segment(name: &str) -> String {
     }
 }
 
-/// A path segment for `name` that is not yet in `used`; records it. Collisions get `-2`, `-3`, ...
-fn unique_segment(used: &mut std::collections::HashSet<String>, name: &str) -> String {
+/// True for names Windows treats as devices, with or without an extension.
+fn is_windows_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").to_ascii_lowercase();
+    match stem.as_str() {
+        "con" | "prn" | "aux" | "nul" => true,
+        _ => {
+            let b = stem.as_bytes();
+            b.len() == 4
+                && (stem.starts_with("com") || stem.starts_with("lpt"))
+                && b[3].is_ascii_digit()
+                && b[3] != b'0'
+        }
+    }
+}
+
+/// A path segment for `name` that is free in `used` and not reserved. Records it.
+///
+/// Matching is case-insensitive. A taken or reserved name gets `-2`, `-3`, ... and is
+/// shortened first so the result stays within the length limit. Returns the segment
+/// and the suffix number (1 when none was needed).
+fn unique_segment(
+    used: &mut std::collections::HashSet<String>,
+    name: &str,
+    reserved: &[&str],
+) -> (String, u32) {
     let base = wsdl_path_segment(name);
     let mut slug = base.clone();
-    let mut n = 2u32;
-    while !used.insert(slug.clone()) {
-        slug = format!("{base}-{n}");
+    let mut n = 1u32;
+    loop {
+        let key = slug.to_lowercase();
+        let blocked = reserved.contains(&key.as_str()) || is_windows_device_name(&key);
+        if !blocked && used.insert(key) {
+            return (slug, n);
+        }
         n += 1;
+        let suffix = format!("-{n}");
+        let keep = MAX_SEGMENT_CHARS.saturating_sub(suffix.len());
+        let head: String = base.chars().take(keep).collect();
+        slug = format!("{head}{suffix}");
     }
-    slug
 }
 
 #[cfg(test)]
@@ -1110,5 +1223,456 @@ mod wsdl_tests {
             2,
             "overloads must not overwrite each other: {files:?}"
         );
+        let text = |name: &str| {
+            let f = files
+                .iter()
+                .find(|p| p.file_name().and_then(|n| n.to_str()) == Some(name))
+                .unwrap_or_else(|| panic!("missing {name} in {files:?}"));
+            std::fs::read_to_string(f).expect("read")
+        };
+        let first = text("Get.yml");
+        let second = text("Get-2.yml");
+        assert!(second.contains("Get (2)"), "got: {second}");
+        assert!(!first.contains("Get (2)"), "got: {first}");
+        assert!(
+            first.contains("a\"") || first.contains("\"a"),
+            "got: {first}"
+        );
+        assert!(
+            second.contains("b\"") || second.contains("\"b"),
+            "got: {second}"
+        );
+        assert_ne!(first, second);
+    }
+
+    /// Build a WSDL with `ports` ports sharing one binding of `ops` operations.
+    fn shared_binding_wsdl(ports: usize, ops: usize) -> String {
+        let mut pt_ops = String::new();
+        let mut b_ops = String::new();
+        for i in 0..ops {
+            pt_ops.push_str(&format!(
+                r#"<operation name="Op{i}"><input message="tns:M"/></operation>"#
+            ));
+            b_ops.push_str(&format!(
+                r#"<operation name="Op{i}"><soap:operation soapAction="a{i}"/><input><soap:body use="literal"/></input></operation>"#
+            ));
+        }
+        let mut port_xml = String::new();
+        for i in 0..ports {
+            port_xml.push_str(&format!(
+                r#"<port name="P{i}" binding="tns:B"><soap:address location="http://h/{i}"/></port>"#
+            ));
+        }
+        format!(
+            r#"<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+            xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+            xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:tns="urn:m" targetNamespace="urn:m">
+          <message name="M"><part name="p" type="xsd:string"/></message>
+          <portType name="PT">{pt_ops}</portType>
+          <binding name="B" type="tns:PT"><soap:binding style="document"/>{b_ops}</binding>
+          <service name="S">{port_xml}</service>
+        </definitions>"#
+        )
+    }
+
+    fn write_wsdl(dir: &Path, file: &str, text: &str) -> PathBuf {
+        let path = dir.join(file);
+        std::fs::write(&path, text).expect("write");
+        path
+    }
+
+    fn limit_items(report: &ImportReport) -> Vec<&SkippedItem> {
+        report
+            .skipped
+            .iter()
+            .filter(|s| {
+                matches!(&s.reason, SkipReason::UnsupportedRequestType(m) if m.contains("request limit reached"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn many_ports_sharing_a_binding_stop_at_the_request_cap() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let path = write_wsdl(src.path(), "many.wsdl", &shared_binding_wsdl(20, 50));
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl_with_limits(&path, 130, usize::MAX)
+            .expect("import should succeed");
+        assert_eq!(report.imported, 130);
+        let items = limit_items(&report);
+        assert_eq!(items.len(), 1, "got: {:?}", report.skipped);
+        assert!(
+            matches!(&items[0].reason, SkipReason::UnsupportedRequestType(m) if m.contains("870 operations not imported")),
+            "got: {:?}",
+            items[0]
+        );
+        let mut files = Vec::new();
+        yml_files(&ws.path().join("collections/many"), &mut files);
+        assert_eq!(files.len(), 130);
+    }
+
+    #[test]
+    fn total_envelope_byte_budget_stops_the_import() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let path = write_wsdl(src.path(), "bytes.wsdl", &shared_binding_wsdl(2, 10));
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl_with_limits(&path, usize::MAX, 1)
+            .expect("import should succeed");
+        assert_eq!(report.imported, 1);
+        assert_eq!(limit_items(&report).len(), 1, "got: {:?}", report.skipped);
+    }
+
+    #[test]
+    fn a_normal_import_hits_no_limit() {
+        let ws = TempDir::new().expect("tempdir");
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&calc_wsdl(), "default")
+            .expect("import should succeed");
+        assert!(limit_items(&report).is_empty());
+    }
+
+    #[test]
+    fn ports_per_service_are_capped_with_a_warning() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let path = write_wsdl(src.path(), "ports.wsdl", &shared_binding_wsdl(300, 1));
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert_eq!(report.imported, 256);
+        assert!(
+            report.skipped.iter().any(|s| matches!(
+                &s.reason,
+                SkipReason::UnsupportedRequestType(m) if m.contains("only the first 256")
+            )),
+            "got: {:?}",
+            report.skipped
+        );
+    }
+
+    /// One operation per name, all in service `S`, port `Pt`.
+    fn named_ops_wsdl(service: &str, port: &str, names: &[&str]) -> String {
+        let mut pt_ops = String::new();
+        let mut b_ops = String::new();
+        for n in names {
+            pt_ops.push_str(&format!(
+                r#"<operation name="{n}"><input message="tns:M"/></operation>"#
+            ));
+            b_ops.push_str(&format!(
+                r#"<operation name="{n}"><soap:operation soapAction="act-{n}"/><input><soap:body use="literal"/></input></operation>"#
+            ));
+        }
+        format!(
+            r#"<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+            xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+            xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:tns="urn:m" targetNamespace="urn:m">
+          <message name="M"><part name="p" type="xsd:string"/></message>
+          <portType name="PT">{pt_ops}</portType>
+          <binding name="B" type="tns:PT"><soap:binding style="document"/>{b_ops}</binding>
+          <service name="{service}"><port name="{port}" binding="tns:B"><soap:address location="http://h/x"/></port></service>
+        </definitions>"#
+        )
+    }
+
+    #[test]
+    fn overlong_operation_names_are_truncated() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let long_a = format!("{}A", "x".repeat(299));
+        let long_b = format!("{}B", "x".repeat(299));
+        let path = write_wsdl(
+            src.path(),
+            "long.wsdl",
+            &named_ops_wsdl("S", "Pt", &[&long_a, &long_b]),
+        );
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert_eq!(report.imported, 2, "got: {:?}", report.skipped);
+        assert!(report.skipped.is_empty(), "got: {:?}", report.skipped);
+        let mut files = Vec::new();
+        yml_files(&ws.path().join("collections/long"), &mut files);
+        assert_eq!(files.len(), 2, "names must stay distinct: {files:?}");
+        for f in &files {
+            let stem = f.file_stem().and_then(|n| n.to_str()).expect("stem");
+            assert!(stem.chars().count() <= 100, "got: {stem}");
+        }
+    }
+
+    #[test]
+    fn overlong_service_and_port_names_are_truncated() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let path = write_wsdl(
+            src.path(),
+            "longdirs.wsdl",
+            &named_ops_wsdl(&"s".repeat(300), &"p".repeat(300), &["Get"]),
+        );
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert_eq!(report.imported, 1, "got: {:?}", report.skipped);
+    }
+
+    #[test]
+    fn unique_segment_stays_unique_and_short_after_truncation() {
+        let mut used = std::collections::HashSet::new();
+        let a = unique_segment(&mut used, &format!("{}1", "x".repeat(200)), &[]);
+        let b = unique_segment(&mut used, &format!("{}2", "x".repeat(200)), &[]);
+        let c = unique_segment(&mut used, &format!("{}3", "x".repeat(200)), &[]);
+        assert_ne!(a.0, b.0);
+        assert_ne!(b.0, c.0);
+        assert_ne!(a.0, c.0);
+        for seg in [&a.0, &b.0, &c.0] {
+            assert!(seg.chars().count() <= 100, "got: {seg}");
+        }
+        assert_eq!((a.1, b.1, c.1), (1, 2, 3));
+    }
+
+    /// Delegates to the real repository but fails to save any request named `Get`.
+    struct FailingRepo(rocket_infra::FsCollectionRepo);
+
+    use rocket_collection::{
+        Collection, CollectionSettings, CollectionSummary, CollectionVariable, Request,
+    };
+    use rocket_shared::error::{DomainError, DomainResult};
+
+    impl CollectionRepository for FailingRepo {
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            self.0.list()
+        }
+        fn get(&self, name: &str) -> DomainResult<Collection> {
+            self.0.get(name)
+        }
+        fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+            self.0.get_summaries(name)
+        }
+        fn create(&self, name: &str) -> DomainResult<Collection> {
+            self.0.create(name)
+        }
+        fn delete(&self, name: &str) -> DomainResult<()> {
+            self.0.delete(name)
+        }
+        fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
+            self.0.rename(old_name, new_name)
+        }
+        fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
+            self.0.get_request(collection, path)
+        }
+        fn save_request(
+            &self,
+            collection: &str,
+            path: &str,
+            request: &Request,
+        ) -> DomainResult<String> {
+            if path.ends_with("/Get") {
+                return Err(DomainError::Io("disk full".to_string()));
+            }
+            self.0.save_request(collection, path, request)
+        }
+        fn rename_request(&self, c: &str, old: &str, new: &str) -> DomainResult<()> {
+            self.0.rename_request(c, old, new)
+        }
+        fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.0.delete_request(collection, path)
+        }
+        fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.0.create_folder(collection, path)
+        }
+        fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.0.delete_folder(collection, path)
+        }
+        fn move_item(&self, sc: &str, sp: &str, dc: &str, dp: &str) -> DomainResult<()> {
+            self.0.move_item(sc, sp, dc, dp)
+        }
+        fn reorder_items(&self, c: &str, f: &str, names: &[String]) -> DomainResult<()> {
+            self.0.reorder_items(c, f, names)
+        }
+        fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
+            self.0.get_settings(name)
+        }
+        fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
+            self.0.save_settings(name, settings)
+        }
+        fn get_folder_chain_variables(
+            &self,
+            collection: &str,
+            request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_folder_chain_variables(collection, request_path)
+        }
+        fn get_folder_variables(
+            &self,
+            collection: &str,
+            folder_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_folder_variables(collection, folder_path)
+        }
+        fn save_folder_variables(
+            &self,
+            collection: &str,
+            folder_path: &str,
+            vars: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            self.0.save_folder_variables(collection, folder_path, vars)
+        }
+        fn get_request_variables(
+            &self,
+            collection: &str,
+            request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_request_variables(collection, request_path)
+        }
+        fn save_request_variables(
+            &self,
+            collection: &str,
+            request_path: &str,
+            vars: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            self.0
+                .save_request_variables(collection, request_path, vars)
+        }
+    }
+
+    #[test]
+    fn a_failed_request_write_is_reported_and_the_rest_are_written() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let path = write_wsdl(
+            src.path(),
+            "fail.wsdl",
+            &named_ops_wsdl("S", "Pt", &["Get", "Put"]),
+        );
+        let mut service = ImportService::new_with_workspace_path(ws.path());
+        service.collection_repo = Box::new(FailingRepo(
+            rocket_infra::FsCollectionRepo::new_standalone(ws.path().join("collections")),
+        ));
+        let report = service
+            .import_wsdl(&path, "default")
+            .expect("import should survive a failed write");
+        assert_eq!(report.created_collections, vec!["fail".to_string()]);
+        assert_eq!(report.imported, 1, "got: {:?}", report.skipped);
+        assert_eq!(report.total_files, 2);
+        assert!(
+            report.skipped.iter().any(|s| s.path.ends_with("Pt/Get")
+                && matches!(&s.reason, SkipReason::ParseError(m) if m.contains("could not be written"))),
+            "got: {:?}",
+            report.skipped
+        );
+        assert!(ws.path().join("collections/fail/S/Pt/Put.yml").is_file());
+    }
+
+    fn read_named(files: &[PathBuf], name: &str) -> String {
+        let f = files
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some(name))
+            .unwrap_or_else(|| panic!("missing {name} in {files:?}"));
+        std::fs::read_to_string(f).expect("read")
+    }
+
+    #[test]
+    fn reserved_and_colliding_operation_names_stay_distinct() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let names = [
+            "folder",
+            "_order",
+            "Get",
+            "get",
+            "opencollection",
+            "NUL",
+            "com1",
+        ];
+        let path = write_wsdl(
+            src.path(),
+            "reserved.wsdl",
+            &named_ops_wsdl("S", "Pt", &names),
+        );
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert_eq!(report.imported, 7, "got: {:?}", report.skipped);
+        assert!(report.skipped.is_empty(), "got: {:?}", report.skipped);
+
+        let port = ws.path().join("collections/reserved/S/Pt");
+        let mut files = Vec::new();
+        yml_files(&port, &mut files);
+        assert_eq!(files.len(), 7, "got: {files:?}");
+        for expected in [
+            "folder-2.yml",
+            "_order-2.yml",
+            "Get.yml",
+            "get-2.yml",
+            "opencollection-2.yml",
+            "NUL-2.yml",
+            "com1-2.yml",
+        ] {
+            let text = read_named(&files, expected);
+            assert!(
+                text.contains("Envelope"),
+                "{expected} is not a request: {text}"
+            );
+        }
+        let folder = std::fs::read_to_string(port.join("folder.yml")).expect("folder.yml");
+        assert!(
+            !folder.contains("Envelope"),
+            "folder.yml was overwritten: {folder}"
+        );
+    }
+
+    #[test]
+    fn reserved_service_and_port_names_get_visible_distinct_folders() {
+        for (service, port, svc_dir, port_dir) in [
+            ("environments", "Pt", "environments-2", "Pt"),
+            ("flows", "Pt", "flows-2", "Pt"),
+            ("CON", "NUL", "CON-2", "NUL-2"),
+            ("S", "environments", "S", "environments-2"),
+        ] {
+            let ws = TempDir::new().expect("tempdir");
+            let src = TempDir::new().expect("tempdir");
+            let path = write_wsdl(
+                src.path(),
+                "svc.wsdl",
+                &named_ops_wsdl(service, port, &["Get"]),
+            );
+            let report = ImportService::new_with_workspace_path(ws.path())
+                .import_wsdl(&path, "default")
+                .expect("import should succeed");
+            assert_eq!(report.imported, 1, "{service}/{port}: {:?}", report.skipped);
+            let file = ws
+                .path()
+                .join(format!("collections/svc/{svc_dir}/{port_dir}/Get.yml"));
+            assert!(file.is_file(), "missing {file:?}");
+        }
+    }
+
+    #[test]
+    fn services_differing_only_by_case_get_distinct_folders() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let one = named_ops_wsdl("Svc", "Pt", &["Get"]);
+        let two = named_ops_wsdl("svc", "Pt", &["Get"]);
+        // Splice the second service into the first document.
+        let svc = two
+            .split("<service")
+            .nth(1)
+            .and_then(|r| r.split("</service>").next())
+            .expect("service block");
+        let merged = one.replace(
+            "</definitions>",
+            &format!("<service{svc}</service></definitions>"),
+        );
+        let path = write_wsdl(src.path(), "case.wsdl", &merged);
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert_eq!(report.imported, 2, "got: {:?}", report.skipped);
+        let base = ws.path().join("collections/case");
+        assert!(base.join("Svc/Pt/Get.yml").is_file());
+        assert!(base.join("svc-2/Pt/Get.yml").is_file());
     }
 }
