@@ -383,14 +383,16 @@ impl HttpExecutor for ReqwestExecutor {
             max_redirects: request.options.max_redirects,
             proxy_generation: proxy.generation,
         };
-        let client = if identity.is_some() {
-            // The shared client cache is keyed without an identity, so this gets its own client.
+        let single_connection = matches!(request.auth, Auth::Ntlm { .. });
+        let client = if identity.is_some() || single_connection {
+            // The shared client cache has no identity and no single-connection mode in its key,
+            // so these get their own client.
             build_client(ClientBuild {
                 key,
                 identity,
                 cookies,
                 proxy,
-                single_connection: false,
+                single_connection,
             })?
         } else {
             self.get_or_build_client(key, cookies, proxy)?
@@ -459,6 +461,9 @@ impl HttpExecutor for ReqwestExecutor {
         // Kept so a Digest challenge can be checked against the origin that was asked.
         let requested_origin = url.origin();
 
+        // NTLM sends message 1 to this URL, without the request body.
+        let ntlm_url = url.clone();
+
         // Apply authentication.
         let builder = apply_auth(
             start_builder(url),
@@ -468,6 +473,7 @@ impl HttpExecutor for ReqwestExecutor {
         .await?;
         let builder = finish_builder(builder)?;
 
+        let http_error = |e: reqwest::Error| DomainError::Http(e.to_string());
         let mut response = match &request.auth {
             // OAuth1 and AWS signing both sign the final request, so they wait until the body is applied.
             Auth::OAuth1(oauth) => {
@@ -475,7 +481,7 @@ impl HttpExecutor for ReqwestExecutor {
                     DomainError::Internal(format!("Cannot build request for signing: {e}"))
                 })?;
                 apply_oauth1(&mut built, &request.method, oauth)?;
-                client.execute(built).await
+                client.execute(built).await.map_err(http_error)?
             }
             Auth::AwsSigV4 {
                 access_key,
@@ -497,11 +503,68 @@ impl HttpExecutor for ReqwestExecutor {
                     DomainError::Internal(format!("Cannot build request for signing: {e}"))
                 })?;
                 apply_aws_sigv4(&mut built, &creds)?;
-                client.execute(built).await
+                client.execute(built).await.map_err(http_error)?
             }
-            _ => builder.send().await,
-        }
-        .map_err(|e| DomainError::Http(e.to_string()))?;
+            Auth::Ntlm {
+                username,
+                password,
+                domain,
+            } => {
+                use rocket_http::ntlm_sig;
+
+                // Message 1 carries no body: the body goes out once, with message 3.
+                let mut first = start_builder(ntlm_url).header(
+                    reqwest::header::AUTHORIZATION,
+                    ntlm_sig::header_value(&ntlm_sig::negotiate_message()),
+                );
+                if request.options.timeout_ms > 0 {
+                    first = first.timeout(Duration::from_millis(request.options.timeout_ms));
+                }
+                let challenged = first.send().await.map_err(http_error)?;
+                let values: Vec<String> = challenged
+                    .headers()
+                    .get_all(reqwest::header::WWW_AUTHENTICATE)
+                    .iter()
+                    .filter_map(|v| v.to_str().ok().map(str::to_string))
+                    .collect();
+                let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+                match (challenged.status(), ntlm_sig::find_token(&refs)) {
+                    // No challenge: the server did not ask for NTLM, or refuses it. Return it as is.
+                    (reqwest::StatusCode::UNAUTHORIZED, Some(token)) => {
+                        let challenge = ntlm_sig::parse_challenge(&token).map_err(|e| {
+                            DomainError::InvalidInput(format!(
+                                "The NTLM challenge could not be read: {e}"
+                            ))
+                        })?;
+                        // The connection returns to the pool only once the body is drained, and
+                        // message 3 must reuse it.
+                        let next_url = challenged.url().clone();
+                        let _ = challenged.bytes().await;
+                        let (user, dom) = ntlm_sig::split_account(username, domain);
+                        let workstation = std::env::var("COMPUTERNAME")
+                            .or_else(|_| std::env::var("HOSTNAME"))
+                            .unwrap_or_else(|_| "ROCKET".to_string())
+                            .to_uppercase();
+                        let message = ntlm_sig::authenticate_message(
+                            &challenge,
+                            &user,
+                            password,
+                            &dom,
+                            &workstation,
+                            ntlm_sig::random_nonce(),
+                            ntlm_sig::file_time_now(),
+                        );
+                        let second = finish_builder(start_builder(next_url))?.header(
+                            reqwest::header::AUTHORIZATION,
+                            ntlm_sig::header_value(&message),
+                        );
+                        second.send().await.map_err(http_error)?
+                    }
+                    _ => challenged,
+                }
+            }
+            _ => builder.send().await.map_err(http_error)?,
+        };
 
         // Digest is challenge-response: the first request goes out unauthenticated, and a 401
         // with a Digest challenge is answered by a second request. A stale nonce gets one more
@@ -985,11 +1048,8 @@ async fn apply_auth(
         Auth::Digest { .. } => {
             // Answered in `execute` once the server's challenge is known.
         }
-        // Fail loudly rather than send the request unauthenticated.
         Auth::Ntlm { .. } => {
-            return Err(DomainError::InvalidInput(
-                "NTLM authentication is not supported yet".into(),
-            ));
+            // A three-step handshake on one connection, done in `execute`.
         }
         Auth::AwsSigV4 { .. } => {
             // Signed in `execute` once the body is known; see `apply_aws_sigv4`.
@@ -1782,20 +1842,6 @@ mod wsse_and_unsupported_auth_tests {
             wsse.contains("Nonce=\"") && wsse.contains("Created=\""),
             "{wsse}"
         );
-    }
-
-    #[tokio::test]
-    async fn ntlm_fails_instead_of_sending_unauthenticated() {
-        let server = server().await;
-        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/r", server.uri()));
-        req.auth = Auth::Ntlm {
-            username: "u".into(),
-            password: "p".into(),
-            domain: "d".into(),
-        };
-        let err = ReqwestExecutor::new().execute(&req).await.unwrap_err();
-        assert!(err.to_string().contains("NTLM"), "{err}");
-        assert!(server.received_requests().await.unwrap().is_empty());
     }
 }
 
@@ -3042,11 +3088,18 @@ mod multipart_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = write(&dir, "a.bin", b"payload");
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
-        req.body = Some(multipart(vec![file_entry("doc", &path, Some("application/x-custom"))]));
+        req.body = Some(multipart(vec![file_entry(
+            "doc",
+            &path,
+            Some("application/x-custom"),
+        )]));
         ReqwestExecutor::new().execute(&req).await.expect("send");
         let body = sent_body(&server).await;
         assert!(body.contains("name=\"doc\"; filename=\"a.bin\""), "{body}");
-        assert!(body.contains("content-type: application/x-custom"), "{body}");
+        assert!(
+            body.contains("content-type: application/x-custom"),
+            "{body}"
+        );
         assert!(body.contains("payload"));
     }
 
@@ -3064,7 +3117,10 @@ mod multipart_tests {
         ReqwestExecutor::new().execute(&req).await.expect("send");
         let body = sent_body(&server).await;
         assert!(body.contains("content-type: image/png"), "{body}");
-        assert!(body.contains("content-type: application/octet-stream"), "{body}");
+        assert!(
+            body.contains("content-type: application/octet-stream"),
+            "{body}"
+        );
     }
 
     #[tokio::test]
@@ -3085,12 +3141,26 @@ mod multipart_tests {
     async fn unreadable_file_part_fails_the_request_and_sends_nothing() {
         let server = server().await;
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
-        req.body = Some(multipart(vec![file_entry("doc", "/definitely/not/here.txt", None)]));
-        let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
+        req.body = Some(multipart(vec![file_entry(
+            "doc",
+            "/definitely/not/here.txt",
+            None,
+        )]));
+        let err = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect_err("must fail");
         let text = err.to_string();
-        assert!(text.contains("doc"), "the message must name the field: {text}");
         assert!(
-            server.received_requests().await.expect("recorded").is_empty(),
+            text.contains("doc"),
+            "the message must name the field: {text}"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .expect("recorded")
+                .is_empty(),
             "no request may go out without the file"
         );
     }
@@ -3109,7 +3179,11 @@ mod multipart_tests {
         let err = exec.execute(&req).await.expect_err("must fail");
         assert!(err.to_string().contains("outside the workspace"), "{err}");
         assert!(err.to_string().contains("doc"), "{err}");
-        assert!(server.received_requests().await.expect("recorded").is_empty());
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty());
     }
 
     #[tokio::test]
@@ -3118,8 +3192,15 @@ mod multipart_tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = write(&dir, "a.txt", b"x");
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
-        req.body = Some(multipart(vec![file_entry("doc", &path, Some("not a mime"))]));
-        let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
+        req.body = Some(multipart(vec![file_entry(
+            "doc",
+            &path,
+            Some("not a mime"),
+        )]));
+        let err = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect_err("must fail");
         assert!(err.to_string().contains("doc"), "{err}");
     }
 
@@ -3135,7 +3216,10 @@ mod multipart_tests {
         std::fs::write(workspace.path().join("files/a.txt"), b"relative-payload").expect("write");
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
         req.body = Some(multipart(vec![file_entry("doc", "files/a.txt", None)]));
-        workspace_exec(&workspace).execute(&req).await.expect("send");
+        workspace_exec(&workspace)
+            .execute(&req)
+            .await
+            .expect("send");
         let body = sent_body(&server).await;
         assert!(body.contains("filename=\"a.txt\""), "{body}");
         assert!(body.contains("relative-payload"), "{body}");
@@ -3153,7 +3237,10 @@ mod multipart_tests {
             form_data: None,
             file_path: Some("b.bin".into()),
         });
-        workspace_exec(&workspace).execute(&req).await.expect("send");
+        workspace_exec(&workspace)
+            .execute(&req)
+            .await
+            .expect("send");
         assert!(sent_body(&server).await.contains("bin-payload"));
     }
 
@@ -3169,7 +3256,11 @@ mod multipart_tests {
         req.body = Some(multipart(vec![file_entry("doc", "../secret.txt", None)]));
         let err = exec.execute(&req).await.expect_err("must fail");
         assert!(err.to_string().contains("outside the workspace"), "{err}");
-        assert!(server.received_requests().await.expect("recorded").is_empty());
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty());
     }
 
     #[tokio::test]
@@ -3178,9 +3269,16 @@ mod multipart_tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
         req.body = Some(multipart(vec![file_entry("doc", "nope/missing.txt", None)]));
-        let err = workspace_exec(&workspace).execute(&req).await.expect_err("must fail");
+        let err = workspace_exec(&workspace)
+            .execute(&req)
+            .await
+            .expect_err("must fail");
         assert!(err.to_string().contains("doc"), "{err}");
-        assert!(server.received_requests().await.expect("recorded").is_empty());
+        assert!(server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty());
     }
 
     #[tokio::test]
@@ -3193,7 +3291,10 @@ mod multipart_tests {
             form_data: None,
             file_path: None,
         });
-        let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
+        let err = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect_err("must fail");
         assert!(err.to_string().contains("no file"), "{err}");
     }
 }
@@ -3396,5 +3497,276 @@ mod proxy_tests {
         let req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
         let err = exec.execute(&req).await.expect_err("must fail");
         assert!(!err.to_string().contains("hunter2"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod ntlm_tests {
+    use super::*;
+    use base64::Engine as _;
+    use http_body_util::{BodyExt, Full};
+    use hyper::body::{Bytes, Incoming};
+    use hyper::service::service_fn;
+    use hyper::{Request, Response};
+    use hyper_util::rt::TokioIo;
+    use rocket_http::ntlm_sig;
+    use rocket_shared::types::HttpMethod;
+
+    /// One log line per request the server saw: (connection id, kind, body length).
+    type Log = Arc<Mutex<Vec<(u32, &'static str, usize)>>>;
+
+    fn challenge_message() -> Vec<u8> {
+        let name: Vec<u8> = "DOMAIN"
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let mut info = Vec::new();
+        info.extend(2u16.to_le_bytes());
+        info.extend((name.len() as u16).to_le_bytes());
+        info.extend(name);
+        info.extend([0, 0, 0, 0]);
+        let mut m = Vec::new();
+        m.extend(b"NTLMSSP\0");
+        m.extend(2u32.to_le_bytes());
+        m.extend([0, 0, 0, 0]);
+        m.extend(48u32.to_le_bytes());
+        m.extend(0xA088_8215u32.to_le_bytes());
+        m.extend([1, 2, 3, 4, 5, 6, 7, 8]);
+        m.extend([0u8; 8]);
+        m.extend((info.len() as u16).to_le_bytes());
+        m.extend((info.len() as u16).to_le_bytes());
+        m.extend(48u32.to_le_bytes());
+        m.extend(&info);
+        m
+    }
+
+    /// A server that speaks NTLM: it answers message 1 with a challenge and accepts message 3
+    /// only when it arrives on the same connection as message 1. With `require_ntlm` off it
+    /// answers 200 to everything.
+    async fn server(require_ntlm: bool) -> (std::net::SocketAddr, Log) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let log: Log = Arc::new(Mutex::new(Vec::new()));
+        let server_log = Arc::clone(&log);
+        tokio::spawn(async move {
+            let mut next_id = 0u32;
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                next_id += 1;
+                let id = next_id;
+                let log = Arc::clone(&server_log);
+                tokio::spawn(async move {
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        let log = Arc::clone(&log);
+                        async move {
+                            let auth = req
+                                .headers()
+                                .get("authorization")
+                                .and_then(|v| v.to_str().ok())
+                                .map(str::to_string);
+                            let body_len = req
+                                .into_body()
+                                .collect()
+                                .await
+                                .map(|b| b.to_bytes().len())
+                                .unwrap_or(0);
+                            let message = auth.as_deref().and_then(ntlm_sig::parse_header);
+                            let builder = Response::builder();
+                            let response = if !require_ntlm {
+                                log.lock().expect("log").push((id, "plain", body_len));
+                                builder.status(200).body(Full::new(Bytes::from("ok")))
+                            } else {
+                                match message.as_deref().and_then(|m| m.get(8).copied()) {
+                                    Some(1) => {
+                                        log.lock().expect("log").push((id, "type1", body_len));
+                                        builder
+                                            .status(401)
+                                            .header(
+                                                "www-authenticate",
+                                                ntlm_sig::header_value(&challenge_message()),
+                                            )
+                                            .body(Full::new(Bytes::from("challenge")))
+                                    }
+                                    Some(3) => {
+                                        let after_type1 = log
+                                            .lock()
+                                            .expect("log")
+                                            .iter()
+                                            .any(|(i, k, _)| *i == id && *k == "type1");
+                                        log.lock().expect("log").push((id, "type3", body_len));
+                                        builder
+                                            .status(if after_type1 { 200 } else { 401 })
+                                            .body(Full::new(Bytes::from("welcome")))
+                                    }
+                                    _ => {
+                                        log.lock().expect("log").push((id, "none", body_len));
+                                        builder
+                                            .status(401)
+                                            .header("www-authenticate", "NTLM")
+                                            .body(Full::new(Bytes::from("denied")))
+                                    }
+                                }
+                            };
+                            Ok::<_, std::convert::Infallible>(
+                                response.unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))),
+                            )
+                        }
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+        (addr, log)
+    }
+
+    fn ntlm_request(addr: std::net::SocketAddr, method: HttpMethod) -> HttpRequest {
+        let mut req = HttpRequest::new(method, format!("http://{addr}/secure"));
+        req.auth = Auth::Ntlm {
+            username: "user".into(),
+            password: "pass".into(),
+            domain: "DOMAIN".into(),
+        };
+        req.options.timeout_ms = 10_000;
+        req
+    }
+
+    #[tokio::test]
+    async fn ntlm_handshake_uses_one_connection() {
+        let (addr, log) = server(true).await;
+        let response = ReqwestExecutor::new()
+            .execute(&ntlm_request(addr, HttpMethod::Get))
+            .await
+            .expect("send");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "welcome");
+        let seen = log.lock().expect("log").clone();
+        let kinds: Vec<_> = seen.iter().map(|(_, k, _)| *k).collect();
+        assert_eq!(kinds, ["type1", "type3"], "{seen:?}");
+        assert_eq!(
+            seen[0].0, seen[1].0,
+            "both messages must share one connection: {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ntlm_sends_the_body_only_with_message_three() {
+        let (addr, log) = server(true).await;
+        let mut req = ntlm_request(addr, HttpMethod::Post);
+        req.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some("{\"a\":1}".into()),
+            form_data: None,
+            file_path: None,
+        });
+        let response = ReqwestExecutor::new().execute(&req).await.expect("send");
+        assert_eq!(response.status, 200);
+        let seen = log.lock().expect("log").clone();
+        assert_eq!(seen[0].1, "type1");
+        assert_eq!(seen[0].2, 0, "message 1 must carry no body");
+        assert_eq!(seen[1].1, "type3");
+        assert_eq!(seen[1].2, 7, "message 3 carries the whole body");
+    }
+
+    #[tokio::test]
+    async fn a_server_without_ntlm_is_not_forced_through_the_handshake() {
+        let (addr, log) = server(false).await;
+        let response = ReqwestExecutor::new()
+            .execute(&ntlm_request(addr, HttpMethod::Get))
+            .await
+            .expect("send");
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            log.lock().expect("log").len(),
+            1,
+            "no second request after a 200"
+        );
+    }
+
+    #[tokio::test]
+    async fn wrong_credentials_return_the_401() {
+        // This server answers the challenge but never accepts message 3 on a new connection:
+        // simulate rejection by asking for NTLM and refusing every message 3.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    let service = service_fn(|req: Request<Incoming>| async move {
+                        let kind = req
+                            .headers()
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(ntlm_sig::parse_header)
+                            .and_then(|m| m.get(8).copied());
+                        let mut b = Response::builder().status(401);
+                        if kind == Some(1) {
+                            b = b.header(
+                                "www-authenticate",
+                                ntlm_sig::header_value(&challenge_message()),
+                            );
+                        } else {
+                            b = b.header("www-authenticate", "NTLM");
+                        }
+                        Ok::<_, std::convert::Infallible>(
+                            b.body(Full::new(Bytes::from("denied")))
+                                .unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))),
+                        )
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+        let response = ReqwestExecutor::new()
+            .execute(&ntlm_request(addr, HttpMethod::Get))
+            .await
+            .expect("a rejected login is a response, not an error");
+        assert_eq!(response.status, 401);
+        assert_eq!(response.body, "denied");
+    }
+
+    #[tokio::test]
+    async fn a_challenge_that_cannot_be_read_is_an_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let service = service_fn(|_req: Request<Incoming>| async move {
+                        let junk = base64::engine::general_purpose::STANDARD.encode(b"garbage!");
+                        Ok::<_, std::convert::Infallible>(
+                            Response::builder()
+                                .status(401)
+                                .header("www-authenticate", format!("NTLM {junk}"))
+                                .body(Full::new(Bytes::new()))
+                                .unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))),
+                        )
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+        let err = ReqwestExecutor::new()
+            .execute(&ntlm_request(addr, HttpMethod::Get))
+            .await
+            .expect_err("must fail");
+        assert!(err.to_string().contains("NTLM"), "{err}");
+        assert!(!err.to_string().contains("pass"), "{err}");
     }
 }

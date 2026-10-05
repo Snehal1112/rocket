@@ -20,6 +20,7 @@ export function authStateForType(authType: AuthState['authType'], prev: AuthStat
   const next: AuthState = { authType };
   if (authType === 'basic') next.basic = prev.basic ?? { username: '', password: '' };
   if (authType === 'digest') next.digest = prev.digest ?? { username: '', password: '' };
+  if (authType === 'ntlm') next.ntlm = prev.ntlm ?? { username: '', password: '', domain: '' };
   if (authType === 'wsse') next.wsse = prev.wsse ?? { username: '', password: '' };
   if (authType === 'bearer') next.bearer = prev.bearer ?? { token: '' };
   if (authType === 'api-key') next.apiKey = prev.apiKey ?? { key: '', value: '', addTo: 'header' };

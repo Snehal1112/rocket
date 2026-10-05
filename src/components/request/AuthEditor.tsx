@@ -204,15 +204,42 @@ export function AuthEditor({
       )}
 
       {auth.authType === 'ntlm' && (
-        <Card className='bg-muted/50'>
-          <CardContent className='px-3 py-2.5'>
-            <p className='text-xs text-muted-foreground'>
-              NTLM authentication is not supported yet, so sending this request fails with an error.
-              The NTLM settings in the request file are kept unchanged. Select a different auth type
-              above to replace them.
-            </p>
-          </CardContent>
-        </Card>
+        <>
+          <UserPasswordCard
+            username={auth.ntlm?.username ?? ''}
+            password={auth.ntlm?.password ?? ''}
+            onChange={(patch) =>
+              onChange({
+                ...auth,
+                ntlm: { username: '', password: '', domain: '', ...auth.ntlm, ...patch },
+              })
+            }
+            variableContext={variableContext}
+            onNavigateToSource={onNavigateToSource}
+          />
+          <Card>
+            <CardContent className='space-y-1.5 p-4'>
+              <Label className='text-xs text-muted-foreground'>Domain</Label>
+              <SingleLineEditor
+                aria-label='Domain'
+                placeholder='Domain (optional)'
+                className='text-sm'
+                value={auth.ntlm?.domain ?? ''}
+                onChange={(domain) =>
+                  onChange({
+                    ...auth,
+                    ntlm: { username: '', password: '', ...auth.ntlm, domain },
+                  })
+                }
+                variableContext={variableContext}
+                onNavigateToSource={onNavigateToSource}
+              />
+              <p className='text-xs text-muted-foreground'>
+                Leave the domain empty and type the user as DOMAIN\user, or fill it in separately.
+              </p>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {auth.authType === 'oauth1' && (

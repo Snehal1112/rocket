@@ -35,7 +35,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
 import { authStateForType } from '@/lib/auth-type-defaults';
-import { OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
+import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
@@ -108,6 +108,7 @@ const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
   { label: 'API Key', value: 'api-key' },
   { label: 'OAuth 2.0', value: 'oauth2' },
   OAUTH1_OPTION,
+  NTLM_OPTION,
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
   { label: 'WSSE', value: 'wsse' },
 ];

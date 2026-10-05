@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { authStateForType } from '@/lib/auth-type-defaults';
-import { OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
+import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import {
@@ -95,6 +95,7 @@ const COLLECTION_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] =
   { label: 'API Key', value: 'api-key' },
   { label: 'OAuth 2.0', value: 'oauth2' },
   OAUTH1_OPTION,
+  NTLM_OPTION,
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
   { label: 'WSSE', value: 'wsse' },
 ];

@@ -46,6 +46,16 @@ describe('authStateForType', () => {
     const back = authStateForType('basic', prev);
     expect(back.bearer).toBeUndefined();
   });
+
+  it('defaults ntlm to empty credentials and keeps existing ones', () => {
+    expect(authStateForType('ntlm', none).ntlm).toEqual({ username: '', password: '', domain: '' });
+    const prev = { authType: 'ntlm', ntlm: { username: 'u', password: 'p', domain: 'D' } } as const;
+    expect(authStateForType('ntlm', prev).ntlm).toEqual({
+      username: 'u',
+      password: 'p',
+      domain: 'D',
+    });
+  });
 });
 
 describe('AUTH_NODE_TYPE_OPTIONS', () => {

@@ -37,14 +37,25 @@ describe('AuthEditor for digest, wsse, ntlm and oauth1', () => {
     });
   });
 
-  it('shows a read-only note for ntlm and does not offer fields', () => {
+  it('edits the ntlm username, password and domain', () => {
+    const onChange = vi.fn();
     const auth: AuthState = {
       authType: 'ntlm',
       ntlm: { username: 'u', password: 'p', domain: 'CORP' },
     };
-    render(<AuthEditor auth={auth} onChange={vi.fn()} />);
-    expect(screen.getByText(/NTLM authentication is not supported yet/)).toBeTruthy();
-    expect(screen.queryByLabelText('Username')).toBeNull();
+    render(<AuthEditor auth={auth} onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'bob' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      authType: 'ntlm',
+      ntlm: { username: 'bob', password: 'p', domain: 'CORP' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'OTHER' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      authType: 'ntlm',
+      ntlm: { username: 'u', password: 'p', domain: 'OTHER' },
+    });
   });
 
   it('shows the oauth1 editor', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withCurrentAuthType } from '@/lib/auth-type-options';
+import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 
 const base = [
   { label: 'None', value: 'none' as const },
@@ -7,17 +7,14 @@ const base = [
 ];
 
 describe('withCurrentAuthType', () => {
-  it('adds ntlm only while the request already uses it', () => {
-    expect(withCurrentAuthType(base, 'ntlm').map((o) => o.value)).toEqual([
-      'none',
-      'basic',
-      'ntlm',
-    ]);
+  it('has no read-only extras left: every auth type is a normal option', () => {
+    for (const current of ['ntlm', 'oauth1', 'digest', 'basic'] as const) {
+      expect(withCurrentAuthType(base, current)).toBe(base);
+    }
   });
 
-  it('leaves the list alone for other types', () => {
-    expect(withCurrentAuthType(base, 'basic')).toBe(base);
-    expect(withCurrentAuthType(base, 'digest')).toBe(base);
-    expect(withCurrentAuthType(base, 'oauth1')).toBe(base);
+  it('exports the shared options with their labels', () => {
+    expect(NTLM_OPTION).toEqual({ label: 'NTLM', value: 'ntlm' });
+    expect(OAUTH1_OPTION).toEqual({ label: 'OAuth 1.0', value: 'oauth1' });
   });
 });
