@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BodyState } from '@/types/pane-types';
@@ -9,7 +9,8 @@ vi.mock('@/components/editor/MonacoWrapper', () => ({
   MonacoWrapper: () => <div data-testid='monaco' />,
 }));
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
+const openDialog = vi.fn();
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: (...a: unknown[]) => openDialog(...a) }));
 
 vi.mock('@/lib/tauri-api', () => ({
   listEnvironments: vi.fn().mockResolvedValue([]),
@@ -17,6 +18,7 @@ vi.mock('@/lib/tauri-api', () => ({
   getGlobalEnvironment: vi.fn().mockResolvedValue(null),
   listGlobalEnvironments: vi.fn().mockResolvedValue([]),
   getProcessEnvVars: vi.fn().mockResolvedValue({}),
+  getActiveWorkspace: vi.fn().mockResolvedValue({ id: 'w', name: 'W', path: '/home/me/ws' }),
 }));
 
 vi.mock('@/stores/env-store', () => ({
@@ -58,5 +60,29 @@ describe('BodyEditor', () => {
     const body = makeBody({ mode: 'sparql', content: 'SELECT * WHERE { ?s ?p ?o }' });
     wrap(<BodyEditor body={body} onChange={vi.fn()} />);
     expect(await screen.findByTestId('monaco')).toBeInTheDocument();
+  });
+
+  it('stores a workspace-relative path for a binary file inside the workspace', async () => {
+    openDialog.mockResolvedValue('/home/me/ws/files/blob.bin');
+    const onChange = vi.fn();
+    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={onChange} />);
+    // Let the active workspace query resolve before picking.
+    await new Promise((r) => setTimeout(r, 50));
+    fireEvent.click(screen.getByRole('button', { name: /choose file/i }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ filePath: 'files/blob.bin', fileName: 'blob.bin' }),
+      ),
+    );
+  });
+
+  it('rejects a binary file outside the workspace with a message', async () => {
+    openDialog.mockResolvedValue('/home/me/other/blob.bin');
+    const onChange = vi.fn();
+    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={onChange} />);
+    await new Promise((r) => setTimeout(r, 50));
+    fireEvent.click(screen.getByRole('button', { name: /choose file/i }));
+    expect(await screen.findByText('Files must be inside the workspace folder')).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

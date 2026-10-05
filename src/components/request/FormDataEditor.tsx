@@ -1,17 +1,20 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { FileUp, Plus, Type, X } from 'lucide-react';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { SingleLineEditor } from '@/components/editor';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
+import { OUTSIDE_WORKSPACE_MESSAGE, toWorkspaceRelativePath } from '@/lib/workspace-file-path';
 import type { KeyValueEntry } from '@/types/pane-types';
 
 interface FormDataEditorProps {
   entries: KeyValueEntry[];
   onChange: (entries: KeyValueEntry[]) => void;
   variableContext?: Map<string, VariableScopeEntry>;
+  /** Workspace folder. When set, picked files must be inside it and are stored relative to it. */
+  workspacePath?: string;
   onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
 }
 
@@ -20,8 +23,10 @@ export function FormDataEditor({
   entries,
   onChange,
   variableContext,
+  workspacePath,
   onNavigateToSource,
 }: FormDataEditorProps) {
+  const [rejectedRowId, setRejectedRowId] = useState<string | null>(null);
   const updateEntry = useCallback(
     (id: string, patch: Partial<KeyValueEntry>) =>
       onChange(entries.map((e) => (e.id === id ? { ...e, ...patch } : e))),
@@ -31,9 +36,22 @@ export function FormDataEditor({
   const pickFile = useCallback(
     async (id: string) => {
       const result = await open({ multiple: false, title: 'Select file for form field' });
-      if (typeof result === 'string') updateEntry(id, { value: result });
+      if (typeof result !== 'string') return;
+      if (!workspacePath) {
+        setRejectedRowId(null);
+        updateEntry(id, { value: result });
+        return;
+      }
+      // The executor only reads files inside the workspace, so store a relative path.
+      const relative = toWorkspaceRelativePath(result, workspacePath);
+      if (relative === null) {
+        setRejectedRowId(id);
+        return;
+      }
+      setRejectedRowId(null);
+      updateEntry(id, { value: relative });
     },
-    [updateEntry],
+    [updateEntry, workspacePath],
   );
 
   const addEntry = useCallback(
@@ -78,15 +96,24 @@ export function FormDataEditor({
             </Button>
             <div className='min-w-0 flex-1'>
               {isFile ? (
-                <Button
-                  variant='outline'
-                  size='sm'
-                  className='h-8 w-full justify-start truncate text-xs'
-                  aria-label={`Choose file for row ${row}`}
-                  onClick={() => pickFile(entry.id)}
-                >
-                  {entry.value ? (entry.value.split(/[\\/]/).pop() ?? entry.value) : 'Choose file'}
-                </Button>
+                <>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-8 w-full justify-start truncate text-xs'
+                    aria-label={`Choose file for row ${row}`}
+                    onClick={() => pickFile(entry.id)}
+                  >
+                    {entry.value
+                      ? (entry.value.split(/[\\/]/).pop() ?? entry.value)
+                      : 'Choose file'}
+                  </Button>
+                  {rejectedRowId === entry.id && (
+                    <p role='alert' className='mt-1 text-xs text-destructive'>
+                      {OUTSIDE_WORKSPACE_MESSAGE}
+                    </p>
+                  )}
+                </>
               ) : (
                 <SingleLineEditor
                   placeholder='Value'

@@ -1,10 +1,12 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { FileUp } from 'lucide-react';
-import { lazy, Suspense, useCallback } from 'react';
+import { lazy, Suspense, useCallback, useState } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useActiveWorkspace } from '@/lib/queries/workspace-queries';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
+import { OUTSIDE_WORKSPACE_MESSAGE, toWorkspaceRelativePath } from '@/lib/workspace-file-path';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
 import { FormDataEditor } from './FormDataEditor';
 import { KeyValueEditor } from './KeyValueEditor';
@@ -29,6 +31,9 @@ export function BodyEditor({
   variableContext,
   onNavigateToSource,
 }: BodyEditorProps) {
+  const { data: activeWorkspace } = useActiveWorkspace();
+  const workspacePath = activeWorkspace?.path;
+  const [fileError, setFileError] = useState<string | null>(null);
   const setContent = useCallback(
     (content: string) => onChange({ ...body, content }),
     [body, onChange],
@@ -45,14 +50,21 @@ export function BodyEditor({
       title: 'Select file for request body',
     });
     if (result) {
-      const path = result as string;
+      const picked = result as string;
+      // The executor only reads files inside the workspace, so store a relative path.
+      const path = workspacePath ? toWorkspaceRelativePath(picked, workspacePath) : picked;
+      if (path === null) {
+        setFileError(OUTSIDE_WORKSPACE_MESSAGE);
+        return;
+      }
+      setFileError(null);
       onChange({
         ...body,
         filePath: path,
-        fileName: path.split('/').pop() ?? 'unknown',
+        fileName: path.split(/[\\/]/).pop() ?? 'unknown',
       });
     }
-  }, [body, onChange]);
+  }, [body, onChange, workspacePath]);
 
   const handleClear = useCallback(() => {
     onChange({ ...body, filePath: undefined, fileName: undefined });
@@ -89,6 +101,7 @@ export function BodyEditor({
           entries={body.formData}
           onChange={setFormData}
           variableContext={variableContext}
+          workspacePath={workspacePath}
           onNavigateToSource={onNavigateToSource}
         />
       )}
@@ -117,10 +130,17 @@ export function BodyEditor({
             </CardContent>
           </Card>
         ) : (
-          <Button variant='outline' onClick={handlePickFile}>
-            <FileUp className='mr-2 size-4' />
-            Choose file
-          </Button>
+          <div className='space-y-1'>
+            <Button variant='outline' onClick={handlePickFile}>
+              <FileUp className='mr-2 size-4' />
+              Choose file
+            </Button>
+            {fileError && (
+              <p role='alert' className='text-xs text-destructive'>
+                {fileError}
+              </p>
+            )}
+          </div>
         ))}
     </div>
   );

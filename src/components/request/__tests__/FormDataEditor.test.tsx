@@ -58,6 +58,53 @@ describe('FormDataEditor', () => {
     );
   });
 
+  it('stores a workspace-relative path for a file inside the workspace', async () => {
+    open.mockResolvedValue('/home/me/ws/assets/pic.png');
+    const onChange = vi.fn();
+    render(
+      <FormDataEditor
+        entries={[{ ...fileRow, value: '' }]}
+        onChange={onChange}
+        workspacePath='/home/me/ws'
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith([{ ...fileRow, value: 'assets/pic.png' }]),
+    );
+  });
+
+  it('normalizes Windows-style paths inside the workspace', async () => {
+    open.mockResolvedValue('C:\\ws\\assets\\pic.png');
+    const onChange = vi.fn();
+    render(
+      <FormDataEditor
+        entries={[{ ...fileRow, value: '' }]}
+        onChange={onChange}
+        workspacePath={'C:\\ws'}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith([{ ...fileRow, value: 'assets/pic.png' }]),
+    );
+  });
+
+  it('stores nothing and explains when the file is outside the workspace', async () => {
+    open.mockResolvedValue('/home/me/other/pic.png');
+    const onChange = vi.fn();
+    render(
+      <FormDataEditor
+        entries={[{ ...fileRow, value: '' }]}
+        onChange={onChange}
+        workspacePath='/home/me/ws'
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
+    expect(await screen.findByText('Files must be inside the workspace folder')).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('edits the content type of a row', () => {
     const onChange = vi.fn();
     render(<FormDataEditor entries={[fileRow]} onChange={onChange} />);

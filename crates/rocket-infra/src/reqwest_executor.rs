@@ -100,6 +100,21 @@ impl ReqwestExecutor {
         }
     }
 
+    /// Joins a relative file path onto the allowed base (the workspace folder).
+    /// Absolute paths, and any path when no base is configured, are returned unchanged.
+    fn resolve_file_path(&self, path: &std::path::Path) -> DomainResult<std::path::PathBuf> {
+        let Some(ref base_lock) = self.allowed_base else {
+            return Ok(path.to_path_buf());
+        };
+        if path.is_absolute() {
+            return Ok(path.to_path_buf());
+        }
+        let base = base_lock
+            .lock()
+            .map_err(|_| DomainError::Internal("workspace path lock poisoned".into()))?;
+        Ok(base.join(path))
+    }
+
     fn get_or_build_client(
         &self,
         follow_redirects: bool,
@@ -178,7 +193,8 @@ impl ReqwestExecutor {
                         "The binary body has no file selected".into(),
                     ));
                 };
-                let path = std::path::Path::new(file_path);
+                let resolved = self.resolve_file_path(std::path::Path::new(file_path))?;
+                let path = resolved.as_path();
                 self.validate_file_path(path)?;
                 let data = std::fs::read(path).map_err(|e| {
                     DomainError::InvalidInput(format!("Cannot read file {file_path}: {e}"))
@@ -217,7 +233,15 @@ impl ReqwestExecutor {
                             .filter(|c| !c.is_empty());
                         let part = match entry.entry_type {
                             rocket_shared::types::FormDataType::File => {
-                                let path = std::path::Path::new(&entry.value);
+                                let resolved = self
+                                    .resolve_file_path(std::path::Path::new(&entry.value))
+                                    .map_err(|e| {
+                                        DomainError::InvalidInput(format!(
+                                            "Form field {}: {e}",
+                                            entry.key
+                                        ))
+                                    })?;
+                                let path = resolved.as_path();
                                 self.validate_file_path(path).map_err(|e| {
                                     DomainError::InvalidInput(format!(
                                         "Form field {}: {e}",
@@ -2913,6 +2937,66 @@ mod multipart_tests {
         req.body = Some(multipart(vec![file_entry("doc", &path, Some("not a mime"))]));
         let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
         assert!(err.to_string().contains("doc"), "{err}");
+    }
+
+    fn workspace_exec(workspace: &tempfile::TempDir) -> ReqwestExecutor {
+        ReqwestExecutor::with_allowed_base(Arc::new(Mutex::new(workspace.path().to_path_buf())))
+    }
+
+    #[tokio::test]
+    async fn relative_file_part_is_read_from_the_workspace() {
+        let server = server().await;
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::create_dir(workspace.path().join("files")).expect("mkdir");
+        std::fs::write(workspace.path().join("files/a.txt"), b"relative-payload").expect("write");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", "files/a.txt", None)]));
+        workspace_exec(&workspace).execute(&req).await.expect("send");
+        let body = sent_body(&server).await;
+        assert!(body.contains("filename=\"a.txt\""), "{body}");
+        assert!(body.contains("relative-payload"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn relative_binary_body_is_read_from_the_workspace() {
+        let server = server().await;
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(workspace.path().join("b.bin"), b"bin-payload").expect("write");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(Body {
+            mode: BodyMode::Binary,
+            content: None,
+            form_data: None,
+            file_path: Some("b.bin".into()),
+        });
+        workspace_exec(&workspace).execute(&req).await.expect("send");
+        assert!(sent_body(&server).await.contains("bin-payload"));
+    }
+
+    #[tokio::test]
+    async fn relative_file_part_escaping_the_workspace_is_rejected() {
+        let server = server().await;
+        let parent = tempfile::tempdir().expect("parent");
+        let workspace = parent.path().join("ws");
+        std::fs::create_dir(&workspace).expect("mkdir");
+        std::fs::write(parent.path().join("secret.txt"), b"nope").expect("write");
+        let exec = ReqwestExecutor::with_allowed_base(Arc::new(Mutex::new(workspace)));
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", "../secret.txt", None)]));
+        let err = exec.execute(&req).await.expect_err("must fail");
+        assert!(err.to_string().contains("outside the workspace"), "{err}");
+        assert!(server.received_requests().await.expect("recorded").is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_relative_file_part_names_the_field() {
+        let server = server().await;
+        let workspace = tempfile::tempdir().expect("workspace");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", "nope/missing.txt", None)]));
+        let err = workspace_exec(&workspace).execute(&req).await.expect_err("must fail");
+        assert!(err.to_string().contains("doc"), "{err}");
+        assert!(server.received_requests().await.expect("recorded").is_empty());
     }
 
     #[tokio::test]
