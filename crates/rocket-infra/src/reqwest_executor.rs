@@ -458,14 +458,6 @@ impl HttpExecutor for ReqwestExecutor {
     }
 }
 
-fn build_client_impl(
-    follow_redirects: bool,
-    verify_ssl: bool,
-    max_redirects: Option<u32>,
-) -> DomainResult<Client> {
-    build_client_with_identity(follow_redirects, verify_ssl, max_redirects, None, None)
-}
-
 /// A loaded TLS identity together with the domain scope of the certificate it came from, which
 /// says which hosts may see it.
 struct ClientIdentity {
@@ -942,7 +934,7 @@ async fn fetch_client_credentials_token(
     certificates: &[ResolvedClientCertificate],
 ) -> DomainResult<String> {
     // Build a dedicated client for the token request. SSL setting here is independent
-    // from the cached executor client (see build_client_impl). The certificate is matched
+    // from the cached executor client (see get_or_build_client). The certificate is matched
     // against the token URL, which can be a different host than the request.
     let identity = identity_for_url(certificates, access_token_url)?;
     let client = build_client_with_identity(true, verify_ssl, None, identity, None)
@@ -1039,7 +1031,7 @@ mod tests {
     #[test]
     fn build_client_impl_respects_ssl_option() {
         // Should not error when building a client that accepts invalid certs.
-        assert!(build_client_impl(true, false, None).is_ok());
+        assert!(build_client_with_identity(true, false, None, None, None).is_ok());
     }
 
     #[test]

@@ -34,6 +34,8 @@ impl LoadTestService {
         crate::client_certificates::unavailable_in_load_tests(
             &mut resolved.options.client_certificates,
         );
+        // Concurrent load must not read every jar file per request or rewrite one per response.
+        resolved.options.use_cookie_jar = false;
         let result = run_load_test_v2(executor, &resolved, &config, app).await;
         Ok(result)
     }
@@ -371,6 +373,93 @@ mod tests {
         // The URL captured by the executor proves variable resolution happened.
         let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
         assert_eq!(url, "https://auth.local/api/data");
+    }
+
+    #[tokio::test]
+    async fn run_turns_the_cookie_jar_off() {
+        struct JarFlagExecutor(Mutex<Vec<bool>>);
+        #[async_trait]
+        impl HttpExecutor for JarFlagExecutor {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0
+                    .lock()
+                    .expect("lock")
+                    .push(req.options.use_cookie_jar);
+                Ok(HttpResponse {
+                    status: 200,
+                    status_text: "OK".into(),
+                    headers: vec![],
+                    body: "{}".into(),
+                    duration_ms: 1,
+                    ttfb_ms: 1,
+                    size_bytes: 2,
+                })
+            }
+        }
+        struct Shared(Arc<JarFlagExecutor>);
+        #[async_trait]
+        impl HttpExecutor for Shared {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.execute(req).await
+            }
+        }
+
+        let flags = Arc::new(JarFlagExecutor(Mutex::new(Vec::new())));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(Environment::new("none"))),
+            Arc::new(Shared(Arc::clone(&flags))),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let input = ExecuteRequestInput {
+            method: HttpMethod::Get,
+            url: "https://h.test/x".to_string(),
+            headers: vec![],
+            query_params: vec![],
+            body: None,
+            auth: rocket_shared::types::Auth::None,
+            options: RequestOptions::default(),
+            environment_name: None,
+            collection: None,
+            request_name: None,
+            request_path: None,
+            pre_request_script: None,
+            post_response_script: None,
+            tests_script: None,
+            global_env_name: None,
+            assertions: vec![],
+            tags: vec![],
+            path_params: vec![],
+            actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+            skip_history: false,
+            flow_vars: std::collections::HashMap::new(),
+        };
+        let config = LoadTestConfigV2 {
+            phases: vec![LoadTestPhase {
+                kind: PhaseKind::Hold,
+                duration_secs: 1,
+                target: PhaseTarget::Concurrency(1),
+            }],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 100,
+            max_requests: None,
+        };
+        let load_exec: Arc<dyn HttpExecutor> = Arc::new(Shared(Arc::clone(&flags)));
+        LoadTestService::run(&svc, load_exec, input, config, None)
+            .await
+            .expect("load test");
+        let seen = flags.0.lock().expect("lock").clone();
+        assert!(!seen.is_empty());
+        assert!(
+            seen.iter().all(|jar_on| !jar_on),
+            "load test requests must not use the jar"
+        );
     }
 
     #[test]
