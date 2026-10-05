@@ -25,6 +25,8 @@ pub struct BruDocument {
 pub struct BruGraphQl {
     pub query: String,
     pub variables: Option<String>,
+    /// Every stored body when the file lists several. `query` and `variables` hold the selected one.
+    pub variants: Vec<rocket_collection::GraphQlBodyVariant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

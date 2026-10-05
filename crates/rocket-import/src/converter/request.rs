@@ -70,6 +70,7 @@ pub fn convert_graphql(doc: &BruDocument) -> (Option<GraphQlRequest>, Vec<SkipRe
         query: gql.query,
         variables: gql.variables.filter(|v| !v.trim().is_empty()),
     };
+    g.body_variants = gql.variants;
 
     if skipped.is_empty() {
         if let Some(auth) = &doc.auth {
@@ -294,6 +295,7 @@ mod tests {
             graphql: Some(BruGraphQl {
                 query: "{ users { id } }".into(),
                 variables: Some("{\"n\": 1}".into()),
+                ..BruGraphQl::default()
             }),
             pre_request_script: Some("// pre".into()),
             ..BruDocument::default()

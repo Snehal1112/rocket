@@ -398,6 +398,24 @@ describe('RequestNode graphql items', () => {
     expect(tauriApi.getRequest).not.toHaveBeenCalled();
   });
 
+  it('uses the uid of the loaded request when the summary has none', async () => {
+    // A GraphQL file without a uid: key reaches the sidebar with an empty uid.
+    vi.mocked(tauriApi.getGraphQlRequest).mockResolvedValue({
+      uid: 'generated-uid',
+      name: 'List Users',
+      method: 'POST',
+      url: 'https://api.example.com/graphql',
+      headers: [],
+      auth: { authType: 'none' },
+      body: { query: '{ users { id } }' },
+    });
+    renderNode({ ...gqlSummary, uid: '' }, 'list-users.yml');
+    await userEvent.click(screen.getByLabelText('Open GQL List Users'));
+    await waitFor(() => {
+      expect(findTabInTree(usePaneStore.getState().root, 'generated-uid')).not.toBeNull();
+    });
+  });
+
   it('is not draggable into a Flow, because Flow requests are HTTP only', () => {
     renderNode(gqlSummary, 'list-users.yml');
     expect(screen.getByTestId('request-item-GQL-List Users').getAttribute('draggable')).toBe(

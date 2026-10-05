@@ -479,3 +479,39 @@ fn bru_graphql_file_imports_as_graphql_item() {
         .expect("orders.yml is a graphql item");
     assert_eq!(o.body.query, "{ orders { id } }");
 }
+
+#[test]
+fn opencollection_graphql_yml_keeps_variants_scripts_and_auth() {
+    use rocket_collection::CollectionRepository;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("gql-full");
+    std::fs::create_dir_all(&src).expect("create source dir");
+    std::fs::write(
+        src.join("bruno.json"),
+        r#"{ "name": "gql-full", "version": "1", "type": "collection" }"#,
+    )
+    .expect("write bruno.json");
+    std::fs::write(
+        src.join("multi.yml"),
+        "info:\n  name: Multi\n  type: graphql\ngraphql:\n  url: https://api.example.com/graphql\n  body:\n    - title: Users\n      body:\n        query: '{ users { id } }'\n    - title: Orders\n      selected: true\n      body:\n        query: '{ orders { id } }'\n  auth:\n    type: bearer\n    token: abc\nruntime:\n  scripts:\n    - type: before-request\n      code: console.log(1)\ndocs: some docs\n",
+    )
+    .expect("write multi.yml");
+
+    let workspace_dir = TempDir::new().expect("tempdir");
+    let service = make_service(workspace_dir.path());
+    let report = service
+        .import_collection(&src, "default")
+        .expect("import");
+    assert_eq!(report.imported, 1, "skipped: {:?}", report.skipped);
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+
+    let repo = FsCollectionRepo::new_standalone(workspace_dir.path().join("collections"));
+    let g = repo
+        .get_graphql_request(&report.created_collections[0], "multi.yml")
+        .expect("multi.yml is a graphql item");
+    assert_eq!(g.body_variants.len(), 2, "every variant is kept");
+    assert_eq!(g.body.query, "{ orders { id } }");
+    assert!(matches!(g.auth, rocket_shared::types::Auth::Bearer { .. }));
+    assert_eq!(g.pre_request_script.as_deref(), Some("console.log(1)"));
+}

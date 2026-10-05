@@ -162,14 +162,18 @@ export function RequestNode({
   // lightweight summary (uid/name/method/fileName) was loaded from the sidebar.
   async function createTab(): Promise<RequestTab> {
     let request: RequestState;
+    let tabId = uid;
     if (kind === 'graphql') {
-      request = mapGraphQlToState(await getGraphQlRequest(collectionName, path));
+      const loaded = await getGraphQlRequest(collectionName, path);
+      // A file without a uid key has an empty summary uid; the loaded request carries a generated one.
+      tabId = uid || loaded.uid;
+      request = mapGraphQlToState(loaded);
     } else {
       const full = itemData.type === 'request' ? itemData : await getRequest(collectionName, path);
       request = mapApiRequestToState(full, true);
     }
     return {
-      id: uid,
+      id: tabId,
       title: name,
       tabType: 'request',
       request,

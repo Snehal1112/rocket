@@ -1,5 +1,6 @@
 use crate::bru::ast::*;
 use crate::error::{ImportError, ImportResult};
+use rocket_collection::{GraphQlBody, GraphQlBodyVariant};
 use serde::Deserialize;
 
 // ─── Request structs ──────────────────────────────────────────────────────────
@@ -12,6 +13,21 @@ pub struct BruYmlRequest {
     pub info: Option<BruYmlMeta>,
     /// OpenCollection-shaped `graphql:` block.
     pub graphql: Option<BruYmlGraphql>,
+    /// OpenCollection-shaped `runtime:` block, read for GraphQL scripts.
+    pub runtime: Option<BruYmlRuntime>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BruYmlRuntime {
+    pub scripts: Option<Vec<BruYmlRuntimeScript>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BruYmlRuntimeScript {
+    #[serde(rename = "type")]
+    pub script_type: Option<String>,
+    #[serde(default)]
+    pub code: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,9 +183,10 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
         http,
         info,
         graphql,
+        runtime,
     } = yml;
     if let Some(gql) = graphql {
-        return adapt_graphql(info.or(meta), gql);
+        return adapt_graphql(info.or(meta), gql, runtime);
     }
     let mut doc = BruDocument::default();
 
@@ -234,7 +251,11 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
     doc
 }
 
-fn adapt_graphql(info: Option<BruYmlMeta>, gql: BruYmlGraphql) -> BruDocument {
+fn adapt_graphql(
+    info: Option<BruYmlMeta>,
+    gql: BruYmlGraphql,
+    runtime: Option<BruYmlRuntime>,
+) -> BruDocument {
     let mut doc = BruDocument::default();
     if let Some(m) = info {
         doc.meta = Some(BruMeta {
@@ -259,44 +280,90 @@ fn adapt_graphql(info: Option<BruYmlMeta>, gql: BruYmlGraphql) -> BruDocument {
             .collect();
     }
     doc.graphql = gql.body.as_ref().and_then(graphql_body_of);
-    // OpenCollection auth is `type:`-tagged, unlike the `mode:`-tagged http block,
-    // so it is reported instead of converted.
+    // OpenCollection auth is `type:`-tagged, unlike the `mode:`-tagged http block.
+    // Bearer and basic convert; anything else is reported.
     if let Some(auth) = gql.auth {
-        let auth_type = auth
-            .get("type")
-            .and_then(|t| t.as_str())
-            .unwrap_or_default()
-            .to_string();
-        doc.unknown_blocks.push(BruRawBlock {
-            name: "auth".into(),
-            subtype: Some(auth_type),
-            content: String::new(),
-        });
+        let text = |key: &str| {
+            auth.get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        match auth.get("type").and_then(|t| t.as_str()) {
+            Some("bearer") => {
+                doc.auth = Some(BruAuth::Bearer {
+                    token: text("token"),
+                })
+            }
+            Some("basic") => {
+                doc.auth = Some(BruAuth::Basic {
+                    username: text("username"),
+                    password: text("password"),
+                })
+            }
+            other => doc.unknown_blocks.push(BruRawBlock {
+                name: "auth".into(),
+                subtype: Some(other.unwrap_or_default().to_string()),
+                content: String::new(),
+            }),
+        }
+    }
+    if let Some(runtime) = runtime {
+        for script in runtime.scripts.unwrap_or_default() {
+            match script.script_type.as_deref() {
+                Some("before-request") => doc.pre_request_script = Some(script.code),
+                Some("after-response") => doc.post_response_script = Some(script.code),
+                _ => {}
+            }
+        }
     }
     doc
 }
 
 /// Reads a GraphQL body that is either a `{query, variables}` mapping or a
-/// list of titled variants. A variant list yields the selected variant, or the first.
+/// list of titled variants. A variant list keeps every variant, and `query` and
+/// `variables` hold the selected one, or the first when none is marked.
 fn graphql_body_of(body: &serde_yaml::Value) -> Option<BruGraphQl> {
-    fn plain(v: &serde_yaml::Value) -> Option<BruGraphQl> {
+    fn plain(v: &serde_yaml::Value) -> Option<(String, Option<String>)> {
         let query = v.get("query")?.as_str()?.to_string();
         let variables = v
             .get("variables")
             .and_then(|x| x.as_str())
             .filter(|s| !s.trim().is_empty())
             .map(String::from);
-        Some(BruGraphQl { query, variables })
+        Some((query, variables))
     }
     match body.as_sequence() {
-        Some(variants) => {
-            let chosen = variants
+        Some(items) => {
+            let mut variants: Vec<GraphQlBodyVariant> = items
                 .iter()
-                .find(|v| v.get("selected").and_then(|s| s.as_bool()).unwrap_or(false))
-                .or_else(|| variants.first())?;
-            plain(chosen.get("body")?)
+                .filter_map(|v| {
+                    let (query, variables) = plain(v.get("body")?)?;
+                    Some(GraphQlBodyVariant {
+                        title: v.get("title")?.as_str()?.to_string(),
+                        selected: v.get("selected").and_then(|s| s.as_bool()).unwrap_or(false),
+                        body: GraphQlBody { query, variables },
+                    })
+                })
+                .collect();
+            if !variants.iter().any(|v| v.selected) {
+                variants.first_mut()?.selected = true;
+            }
+            let active = variants.iter().find(|v| v.selected)?.body.clone();
+            Some(BruGraphQl {
+                query: active.query,
+                variables: active.variables,
+                variants,
+            })
         }
-        None => plain(body),
+        None => {
+            let (query, variables) = plain(body)?;
+            Some(BruGraphQl {
+                query,
+                variables,
+                variants: Vec::new(),
+            })
+        }
     }
 }
 
@@ -589,6 +656,60 @@ graphql:
         assert_eq!(doc.unknown_blocks.len(), 1);
         assert_eq!(doc.unknown_blocks[0].name, "auth");
         assert_eq!(doc.unknown_blocks[0].subtype.as_deref(), Some("oauth2"));
+    }
+
+    #[test]
+    fn opencollection_graphql_keeps_every_variant() {
+        let yml = r#"
+info:
+  name: Multi
+  type: graphql
+graphql:
+  url: https://api.example.com/graphql
+  body:
+    - title: A
+      body:
+        query: "{ a }"
+    - title: B
+      selected: true
+      body:
+        query: "{ b }"
+"#;
+        let gql = bru_document_from_yml_str(yml)
+            .expect("adapt")
+            .graphql
+            .expect("graphql");
+        assert_eq!(gql.variants.len(), 2);
+        assert!(!gql.variants[0].selected);
+        assert!(gql.variants[1].selected);
+        assert_eq!(gql.variants[0].body.query, "{ a }");
+    }
+
+    #[test]
+    fn opencollection_graphql_reads_scripts_and_supported_auth() {
+        let yml = r#"
+info:
+  name: Authed
+  type: graphql
+graphql:
+  url: https://api.example.com/graphql
+  body:
+    query: "{ a }"
+  auth:
+    type: bearer
+    token: abc
+runtime:
+  scripts:
+    - type: before-request
+      code: console.log(1)
+    - type: after-response
+      code: console.log(2)
+"#;
+        let doc = bru_document_from_yml_str(yml).expect("adapt");
+        assert!(doc.unknown_blocks.is_empty(), "{:?}", doc.unknown_blocks);
+        assert!(matches!(&doc.auth, Some(BruAuth::Bearer { token }) if token == "abc"));
+        assert_eq!(doc.pre_request_script.as_deref(), Some("console.log(1)"));
+        assert_eq!(doc.post_response_script.as_deref(), Some("console.log(2)"));
     }
 
     #[test]
