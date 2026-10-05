@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+                  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+                  xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:t="http://example.com/types"
+                  xmlns:tns="http://example.com/calc"
+                  targetNamespace="http://example.com/calc">
+  <wsdl:types>
+    <xsd:schema targetNamespace="http://example.com/calc" elementFormDefault="qualified">
+      <xsd:import namespace="http://example.com/types" schemaLocation="calc-types.xsd"/>
+      <xsd:element name="Add">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="operands" type="t:Operands"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+      <xsd:element name="Subtract">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="operands" type="t:Operands"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+      <xsd:element name="Result" type="xsd:int"/>
+    </xsd:schema>
+  </wsdl:types>
+  <wsdl:message name="AddIn"><wsdl:part name="parameters" element="tns:Add"/></wsdl:message>
+  <wsdl:message name="AddOut"><wsdl:part name="parameters" element="tns:Result"/></wsdl:message>
+  <wsdl:message name="SubtractIn"><wsdl:part name="parameters" element="tns:Subtract"/></wsdl:message>
+  <wsdl:message name="SubtractOut"><wsdl:part name="parameters" element="tns:Result"/></wsdl:message>
+  <wsdl:portType name="CalcPortType">
+    <wsdl:operation name="Add">
+      <wsdl:input message="tns:AddIn"/>
+      <wsdl:output message="tns:AddOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="Subtract">
+      <wsdl:input message="tns:SubtractIn"/>
+      <wsdl:output message="tns:SubtractOut"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="CalcSoap" type="tns:CalcPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="Add">
+      <soap:operation soapAction="http://example.com/calc/Add"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Subtract">
+      <soap:operation soapAction="http://example.com/calc/Subtract"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="CalcSoap12" type="tns:CalcPortType">
+    <soap12:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="Add">
+      <soap12:operation soapAction="http://example.com/calc/Add"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Subtract">
+      <soap12:operation soapAction="http://example.com/calc/Subtract"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="Calculator">
+    <wsdl:port name="CalcSoap" binding="tns:CalcSoap">
+      <soap:address location="http://localhost:8080/calc"/>
+    </wsdl:port>
+    <wsdl:port name="CalcSoap12" binding="tns:CalcSoap12">
+      <soap12:address location="http://localhost:8080/calc12"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

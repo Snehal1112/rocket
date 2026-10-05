@@ -15,6 +15,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tempfile = "3"
 zip = "2"
+roxmltree = "0.20"
 
 [dev-dependencies]
 rocket-infra = { path = "../rocket-infra" }
