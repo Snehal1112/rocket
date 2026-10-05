@@ -5,23 +5,25 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use reqwest::{redirect, Client, Method};
 
+use crate::cookie_store::RepoCookieStore;
 use rocket_http::{
-    CertificateMaterial, CertificateSource, HttpExecutor, HttpRequest, HttpResponse,
-    ResolvedClientCertificate,
+    CertificateMaterial, CertificateSource, CookieRepository, HttpExecutor, HttpRequest,
+    HttpResponse, ResolvedClientCertificate,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, OAuth1Auth};
 
 pub struct ReqwestExecutor {
-    // Cache of reqwest::Clients keyed on (follow_redirects, verify_ssl).
-    // These are the only two HttpRequest options that force a different
-    // Client::builder() configuration; everything else (headers, body,
-    // query, timeout, auth) is applied per-request on the request builder.
-    // At most 4 distinct keys can ever exist.
-    clients: Mutex<HashMap<(bool, bool), Client>>,
+    // Cache of reqwest::Clients keyed on (follow_redirects, verify_ssl, use_cookies).
+    // These are the only HttpRequest options that force a different Client::builder()
+    // configuration; everything else (headers, body, query, timeout, auth) is applied
+    // per-request on the request builder. At most 8 distinct keys can ever exist.
+    clients: Mutex<HashMap<(bool, bool, bool), Client>>,
     /// When set, file reads in Binary/FormData bodies are confined to this directory.
     /// Wrapped in Arc<Mutex<>> so workspace switches are reflected without rebuilding the executor.
     allowed_base: Option<Arc<Mutex<std::path::PathBuf>>>,
+    /// Shared by every client that has cookies on. `None` means no jar is configured.
+    cookie_store: Option<Arc<RepoCookieStore>>,
 }
 
 impl ReqwestExecutor {
@@ -29,6 +31,7 @@ impl ReqwestExecutor {
         Self {
             clients: Mutex::new(HashMap::new()),
             allowed_base: None,
+            cookie_store: None,
         }
     }
 
@@ -37,7 +40,14 @@ impl ReqwestExecutor {
         Self {
             clients: Mutex::new(HashMap::new()),
             allowed_base: Some(base),
+            cookie_store: None,
         }
+    }
+
+    /// Keeps cookies between requests in `repo`, for requests whose `use_cookie_jar` is on.
+    pub fn with_cookie_repo(mut self, repo: Arc<dyn CookieRepository>) -> Self {
+        self.cookie_store = Some(Arc::new(RepoCookieStore::new(repo)));
+        self
     }
 
     /// Rejects any path that resolves outside the allowed base directory.
@@ -94,15 +104,24 @@ impl ReqwestExecutor {
         &self,
         follow_redirects: bool,
         verify_ssl: bool,
+        use_cookies: bool,
     ) -> DomainResult<Client> {
-        let key = (follow_redirects, verify_ssl);
+        // Without a configured jar the cookie flag changes nothing, so it stays out of the key.
+        let use_cookies = use_cookies && self.cookie_store.is_some();
+        let key = (follow_redirects, verify_ssl, use_cookies);
         // The cache only holds clients, so a poisoned lock is safe to recover.
         let mut cache = self.clients.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(c) = cache.get(&key) {
             // reqwest::Client::clone is cheap — internally Arc.
             return Ok(c.clone());
         }
-        let client = build_client_impl(follow_redirects, verify_ssl, None)?;
+        let cookies = if use_cookies {
+            self.cookie_store.clone()
+        } else {
+            None
+        };
+        let client =
+            build_client_with_identity(follow_redirects, verify_ssl, None, None, cookies)?;
         cache.insert(key, client.clone());
         Ok(client)
     }
@@ -233,6 +252,11 @@ impl HttpExecutor for ReqwestExecutor {
         // Mutual TLS: a certificate whose domain matches the URL is loaded up front, so a bad
         // file fails the request instead of being sent without the certificate.
         let identity = identity_for_url(&request.options.client_certificates, &request.url)?;
+        let cookies = if request.options.use_cookie_jar {
+            self.cookie_store.clone()
+        } else {
+            None
+        };
         let client = if identity.is_some() || request.options.max_redirects.is_some() {
             // The shared client cache is keyed without an identity, so this gets its own client.
             build_client_with_identity(
@@ -240,9 +264,14 @@ impl HttpExecutor for ReqwestExecutor {
                 request.options.verify_ssl,
                 request.options.max_redirects,
                 identity,
+                cookies,
             )?
         } else {
-            self.get_or_build_client(request.options.follow_redirects, request.options.verify_ssl)?
+            self.get_or_build_client(
+                request.options.follow_redirects,
+                request.options.verify_ssl,
+                cookies.is_some(),
+            )?
         };
         let method = map_method(&request.method)?;
         let start = Instant::now();
@@ -434,7 +463,7 @@ fn build_client_impl(
     verify_ssl: bool,
     max_redirects: Option<u32>,
 ) -> DomainResult<Client> {
-    build_client_with_identity(follow_redirects, verify_ssl, max_redirects, None)
+    build_client_with_identity(follow_redirects, verify_ssl, max_redirects, None, None)
 }
 
 /// A loaded TLS identity together with the domain scope of the certificate it came from, which
@@ -476,7 +505,7 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
         certificates: &[ResolvedClientCertificate],
     ) -> DomainResult<Client> {
         let identity = identity_for_url(certificates, token_url)?;
-        build_client_with_identity(true, verify_ssl, None, identity)
+        build_client_with_identity(true, verify_ssl, None, identity, None)
     }
 }
 
@@ -490,6 +519,7 @@ fn build_client_with_identity(
     verify_ssl: bool,
     max_redirects: Option<u32>,
     identity: Option<ClientIdentity>,
+    cookies: Option<Arc<RepoCookieStore>>,
 ) -> DomainResult<Client> {
     let limit = max_redirects.unwrap_or(10) as usize;
     let redirect_policy = if !follow_redirects {
@@ -514,6 +544,9 @@ fn build_client_with_identity(
         .danger_accept_invalid_certs(!verify_ssl);
     if let Some(identity) = identity {
         builder = builder.identity(identity.identity);
+    }
+    if let Some(store) = cookies {
+        builder = builder.cookie_provider(store);
     }
     builder
         .build()
@@ -912,7 +945,7 @@ async fn fetch_client_credentials_token(
     // from the cached executor client (see build_client_impl). The certificate is matched
     // against the token URL, which can be a different host than the request.
     let identity = identity_for_url(certificates, access_token_url)?;
-    let client = build_client_with_identity(true, verify_ssl, None, identity)
+    let client = build_client_with_identity(true, verify_ssl, None, identity, None)
         .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
     let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
     if let Some(s) = scope {
@@ -1018,8 +1051,8 @@ mod tests {
     #[test]
     fn executor_caches_client_on_first_use() {
         let exec = ReqwestExecutor::new();
-        let _c1 = exec.get_or_build_client(true, true).unwrap();
-        let _c2 = exec.get_or_build_client(true, true).unwrap();
+        let _c1 = exec.get_or_build_client(true, true, true).unwrap();
+        let _c2 = exec.get_or_build_client(true, true, true).unwrap();
         // Same options → only one cached client.
         assert_eq!(exec.cache_len(), 1);
     }
@@ -1035,20 +1068,20 @@ mod tests {
         })
         .join();
         assert!(exec.clients.is_poisoned(), "the lock should be poisoned");
-        assert!(exec.get_or_build_client(true, true).is_ok());
+        assert!(exec.get_or_build_client(true, true, true).is_ok());
     }
 
     #[test]
     fn executor_builds_different_clients_for_different_options() {
         let exec = ReqwestExecutor::new();
-        let _a = exec.get_or_build_client(true, true).unwrap();
-        let _b = exec.get_or_build_client(true, false).unwrap();
-        let _c = exec.get_or_build_client(false, true).unwrap();
-        let _d = exec.get_or_build_client(false, false).unwrap();
+        let _a = exec.get_or_build_client(true, true, true).unwrap();
+        let _b = exec.get_or_build_client(true, false, true).unwrap();
+        let _c = exec.get_or_build_client(false, true, true).unwrap();
+        let _d = exec.get_or_build_client(false, false, true).unwrap();
         // 4 distinct (redirects, ssl) combinations → 4 cached clients.
         assert_eq!(exec.cache_len(), 4);
         // Re-querying one does not grow the cache.
-        let _a2 = exec.get_or_build_client(true, true).unwrap();
+        let _a2 = exec.get_or_build_client(true, true, true).unwrap();
         assert_eq!(exec.cache_len(), 4);
     }
 

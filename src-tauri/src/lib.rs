@@ -319,7 +319,8 @@ pub fn run() {
                 Box::new(NullEventPublisher),
             );
             let executor: Arc<dyn rocket_http::HttpExecutor> = Arc::new(
-                ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path)),
+                ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))
+                    .with_cookie_repo(Arc::new(FsCookieRepo::new(cookies_dir.clone()))),
             );
 
             // RocketVault external secrets stack — shared Arcs used by both

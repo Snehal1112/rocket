@@ -28,6 +28,10 @@ pub struct RequestOptions {
     /// Override the maximum number of redirects to follow. `None` uses the executor default (10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<u32>,
+    /// Send stored cookies and keep the ones the server sets. On by default. The load test turns
+    /// it off, so a burst of requests does not rewrite a jar file for each response.
+    #[serde(default = "default_true")]
+    pub use_cookie_jar: bool,
     /// Client certificates of the active environment, resolved for this request. The executor
     /// picks the one whose domain matches the request URL and presents it for mutual TLS. It is
     /// never serialized: the environment is the only source, and the material can hold key bytes.
@@ -49,6 +53,7 @@ impl Default for RequestOptions {
             timeout_ms: 30_000,
             verify_ssl: true,
             max_redirects: None,
+            use_cookie_jar: true,
             client_certificates: Vec::new(),
         }
     }
@@ -78,6 +83,15 @@ mod tests {
         assert!(req.options.follow_redirects);
         assert_eq!(req.options.timeout_ms, 30_000);
         assert!(req.options.verify_ssl);
+    }
+
+    #[test]
+    fn use_cookie_jar_defaults_to_true_when_missing_from_ipc_input() {
+        let options: RequestOptions = serde_json::from_str("{}").expect("deserialize");
+        assert!(options.use_cookie_jar);
+        let off: RequestOptions =
+            serde_json::from_str(r#"{"useCookieJar":false}"#).expect("deserialize");
+        assert!(!off.use_cookie_jar);
     }
 
     mod certificate_leaks {

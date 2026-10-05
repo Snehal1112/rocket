@@ -1888,6 +1888,8 @@ impl RequestExecutionService {
         crate::client_certificates::unavailable_in_load_tests(
             &mut resolved.options.client_certificates,
         );
+        // A burst of concurrent requests must not rewrite a jar file for every response.
+        resolved.options.use_cookie_jar = false;
         let executor = Arc::clone(&self.executor);
         Ok(http_run_load_test(executor, &resolved, &config).await)
     }
@@ -3238,6 +3240,57 @@ mod tests {
         // Verify the resolved URL reached the executor.
         let url = exec_arc.last_url.lock().unwrap().clone().unwrap();
         assert_eq!(url, "https://auth.local/api/data");
+    }
+
+    #[tokio::test]
+    async fn run_load_test_turns_the_cookie_jar_off() {
+        struct JarFlagExecutor(Mutex<Vec<bool>>);
+        #[async_trait]
+        impl HttpExecutor for JarFlagExecutor {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.lock().expect("lock").push(req.options.use_cookie_jar);
+                Ok(HttpResponse {
+                    status: 200,
+                    status_text: "OK".into(),
+                    headers: vec![],
+                    body: "{}".into(),
+                    duration_ms: 1,
+                    ttfb_ms: 1,
+                    size_bytes: 2,
+                })
+            }
+        }
+        struct Shared(Arc<JarFlagExecutor>);
+        #[async_trait]
+        impl HttpExecutor for Shared {
+            async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+                self.0.execute(req).await
+            }
+        }
+        let flags = Arc::new(JarFlagExecutor(Mutex::new(Vec::new())));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(Shared(Arc::clone(&flags))),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let config = rocket_http::LoadTestConfig {
+            concurrency: 1,
+            total_requests: 2,
+            interval_ms: 0,
+            duration_cap_secs: None,
+        };
+        svc.run_load_test(sample_input("https://h.test/x", None), config)
+            .await
+            .expect("load test");
+        let seen = flags.0.lock().expect("lock").clone();
+        assert!(!seen.is_empty());
+        assert!(seen.iter().all(|jar_on| !jar_on), "load test requests must not use the jar");
     }
 
     #[tokio::test]

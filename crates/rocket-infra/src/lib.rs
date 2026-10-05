@@ -4,6 +4,7 @@ pub mod azurekeyvault;
 pub mod callback_server;
 pub mod clone_destination_capabilities;
 pub mod contract_records;
+mod cookie_store;
 pub(crate) mod conversions;
 pub mod file_watcher;
 pub mod fs_agent_config_repo;
@@ -40,6 +41,7 @@ pub use clone_destination_capabilities::{
     CloneDestinationCapabilities, CloneDestinationGrant, DEFAULT_CLONE_DESTINATION_CAPABILITY_TTL,
     DEFAULT_CLONE_DESTINATION_MAX_ENTRIES,
 };
+pub use cookie_store::RepoCookieStore;
 pub use file_watcher::NotifyFileWatcher;
 pub use fs_agent_config_repo::FsAgentConfigRepo;
 pub use fs_audit_log_repo::FsAuditLogRepo;

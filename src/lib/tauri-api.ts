@@ -60,6 +60,8 @@ export interface RequestOptions {
   followRedirects: boolean;
   timeoutMs: number;
   verifySsl: boolean;
+  /** Send and keep cookies. On by default; the backend treats a missing value as true. */
+  useCookieJar?: boolean;
 }
 
 export interface CollectionVariable {

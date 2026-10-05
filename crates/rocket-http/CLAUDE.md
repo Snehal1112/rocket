@@ -36,7 +36,7 @@ cargo test -p rocket-http <test_name>
 | `digest_sig` | `select_challenge()` parses `WWW-Authenticate`, `authorize()` builds the Digest `Authorization` value (RFC 7616: MD5, SHA-256, SHA-512-256 and `-sess`, qop auth/auth-int, legacy no-qop form). |
 | `wsse_sig` | `wsse_headers()` → `Authorization` and `X-WSSE` header values (SHA-1 password digest over nonce + created + password). |
 | `aws_sig` | `sign_request()` → `SignedHeaders` — full AWS Signature Version 4 HMAC chain |
-| `cookie` | `Cookie` and `CookieJar` (in-memory, domain-scoped; `add` replaces by name) |
+| `cookie` | `Cookie` and `CookieJar` (in-memory, domain-scoped; `add` replaces by name and path). Also the RFC 6265 pieces the executor's cookie store uses: `parse_set_cookie` -> `SetCookie`, `cookies_for_request`, `cookie_header`, `domain_matches`, `path_matches`. `RequestOptions.use_cookie_jar` (default true) turns the jar off per request; the load test does. |
 | `cookie_repository` | `CookieRepository` trait for persistent cookie storage |
 | `load_test` | Phase-based load testing harness. Each `LoadTestPhase` carries a `PhaseTarget` (either `Concurrency(N)` users or `Rps(N)` requests/sec); a single config must use one unit for all phases. `run_load_test_v2()` branches on the unit: concurrency mode uses a `Semaphore` whose permits are reshaped at phase boundaries, rps mode uses a `RateDriver` token bucket whose rate is updated continuously between checkpoints. Both modes share the same `RingBuffer<RequestLogEntry>`, snapshot task, and `LoadTestProgressEvent` shape. The legacy `run_load_test()` is kept for backwards compatibility with existing tests. |
 
@@ -48,7 +48,7 @@ cargo test -p rocket-http <test_name>
 - Auth is **stateless and functional**: `acquire_token`, `sign_request`, and `generate_pkce` are standalone functions. The service layer (`rocket-app`) calls them during request preparation — nothing here holds token state.
 - `AwsCredentials` and `SignedHeaders` do **not** derive `serde` (they are transient signing artefacts, never serialised for IPC).
 - All other public types derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` for Tauri IPC compatibility.
-- `CookieJar::add` silently replaces a cookie with the same name — upsert semantics.
+- `CookieJar::add` silently replaces a cookie with the same name and path — upsert semantics.
 - `run_load_test` uses a `Semaphore` to cap concurrency and classifies each request as one of three outcomes: `Success` (HTTP status < 400), `StatusFail` (status ≥ 400), or `TransportFail` (executor error). `Success` and `StatusFail` both contribute latency to the stats; only `TransportFail` is excluded (no latency sample). `failed = failed_transport + failed_status`. Optional `interval_ms` on `LoadTestConfig` adds a staggered-start delay between spawns.
 - `LoadTestConfigV2` uses `#[serde(default)]` on `success_rule` and `ring_buffer_size` so callers that omit them get safe defaults (400 / 5 000). The three new fields on `LoadTestResult` (`phase_timeline`, `request_log`, `time_series`) also carry `#[serde(default)]` for backwards-compat with older Tauri call sites.
 - `LoadTestPhase` deserialization is backward-compatible: configs saved before the `PhaseTarget` refactor used `targetConcurrency: number`; the manual `Deserialize` impl accepts that legacy field and rewrites it to `PhaseTarget::Concurrency(value)`. New code should always emit the `target: { kind, value }` shape (Serialize is derived and always uses the new shape).
