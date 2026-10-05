@@ -66,7 +66,10 @@ export function BodyEditor({
         </div>
       )}
 
-      {(body.mode === 'json' || body.mode === 'xml' || body.mode === 'text') && (
+      {(body.mode === 'json' ||
+        body.mode === 'xml' ||
+        body.mode === 'text' ||
+        body.mode === 'sparql') && (
         <div className='flex-1 border rounded-lg overflow-hidden min-h-[200px]'>
           <Suspense fallback={<EditorSkeleton />}>
             <MonacoWrapper

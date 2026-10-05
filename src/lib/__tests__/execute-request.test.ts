@@ -34,6 +34,7 @@ import {
   getEnvInvalidationKeys,
   resolveRequestFieldsForPath,
   toApiAuth,
+  toApiBody,
 } from '@/lib/execute-request';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 
@@ -178,5 +179,13 @@ describe('toApiAuth for digest, wsse, ntlm and oauth1', () => {
     for (const authType of ['digest', 'wsse', 'ntlm', 'oauth1'] as const) {
       expect(toApiAuth({ authType }).authType).not.toBe('none');
     }
+  });
+});
+
+describe('toApiBody', () => {
+  it('passes a sparql body through with its content', () => {
+    expect(
+      toApiBody({ mode: 'sparql', content: 'ASK { ?s ?p ?o }', formData: [] }, (s) => s),
+    ).toEqual({ mode: 'sparql', content: 'ASK { ?s ?p ?o }' });
   });
 });

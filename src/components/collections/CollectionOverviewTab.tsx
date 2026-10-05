@@ -15,7 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useSaveButton } from '@/hooks/use-save-button';
-import { withCurrentAuthType } from '@/lib/auth-type-options';
+import { authStateForType } from '@/lib/auth-type-defaults';
+import { OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import {
@@ -93,6 +94,7 @@ const COLLECTION_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] =
   { label: 'Bearer', value: 'bearer' },
   { label: 'API Key', value: 'api-key' },
   { label: 'OAuth 2.0', value: 'oauth2' },
+  OAUTH1_OPTION,
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
   { label: 'WSSE', value: 'wsse' },
 ];
@@ -275,58 +277,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
   const handleAuthTypeChange = useCallback(
     (authType: AuthState['authType']) => {
-      const next: AuthState = { authType };
-      if (authType === 'basic') next.basic = auth.basic ?? { username: '', password: '' };
-      if (authType === 'digest') next.digest = auth.digest ?? { username: '', password: '' };
-      if (authType === 'wsse') next.wsse = auth.wsse ?? { username: '', password: '' };
-      if (authType === 'bearer') next.bearer = auth.bearer ?? { token: '' };
-      if (authType === 'api-key')
-        next.apiKey = auth.apiKey ?? { key: '', value: '', addTo: 'header' };
-      if (authType === 'oauth2')
-        next.oauth2 = auth.oauth2 ?? {
-          grantType: 'client_credentials',
-          authorizationUrl: '',
-          tokenUrl: '',
-          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
-          clientId: '',
-          clientSecret: '',
-          scope: '',
-          state: '',
-          username: '',
-          password: '',
-          clientAuthentication: 'body',
-          headerPrefix: 'Bearer',
-          addTokenTo: 'header',
-          verifySsl: true,
-          accessToken: '',
-          refreshToken: '',
-          expiresIn: null,
-          tokenAcquiredAt: null,
-          usePkce: true,
-          useSystemBrowser: false,
-          tokenSource: 'accessToken',
-          tokenId: '',
-          refreshTokenUrl: '',
-          autoFetchToken: true,
-          autoRefreshToken: false,
-          authParams: [],
-          tokenParams: [],
-          refreshParams: [],
-          idToken: '',
-          tokenType: '',
-          responseScope: '',
-          idTokenClaims: null,
-          accessTokenClaims: null,
-        };
-      if (authType === 'aws-sig-v4')
-        next.awsSigV4 = auth.awsSigV4 ?? {
-          accessKey: '',
-          secretKey: '',
-          region: '',
-          service: '',
-          sessionToken: '',
-        };
-      setAuth(next);
+      setAuth(authStateForType(authType, auth));
       setIsDirty(true);
     },
     [auth],

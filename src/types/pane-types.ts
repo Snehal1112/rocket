@@ -261,7 +261,7 @@ export interface KeyValueEntry {
 }
 
 export interface BodyState {
-  mode: 'none' | 'json' | 'xml' | 'text' | 'formdata' | 'formurlencoded' | 'binary';
+  mode: 'none' | 'json' | 'xml' | 'text' | 'sparql' | 'formdata' | 'formurlencoded' | 'binary';
   content: string;
   formData: KeyValueEntry[];
   filePath?: string;
@@ -304,7 +304,7 @@ export interface AuthState {
   digest?: { username: string; password: string };
   wsse?: { username: string; password: string };
   ntlm?: { username: string; password: string; domain: string };
-  // OAuth 1.0 has no editor yet. The persisted fields are kept as they are, so a save does not drop them.
+  // Persisted OAuth 1.0 fields as stored. Unknown fields are kept on save.
   oauth1?: Record<string, unknown>;
   bearer?: { token: string };
   apiKey?: { key: string; value: string; addTo: 'header' | 'query' };

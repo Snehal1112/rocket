@@ -20,7 +20,15 @@ export interface Header {
   enabled: boolean;
 }
 
-export type BodyMode = 'none' | 'json' | 'xml' | 'text' | 'formdata' | 'formurlencoded' | 'binary';
+export type BodyMode =
+  | 'none'
+  | 'json'
+  | 'xml'
+  | 'text'
+  | 'sparql'
+  | 'formdata'
+  | 'formurlencoded'
+  | 'binary';
 
 export interface FormDataEntry {
   key: string;

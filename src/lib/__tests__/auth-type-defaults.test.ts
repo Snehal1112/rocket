@@ -4,6 +4,15 @@ import { AUTH_NODE_TYPE_OPTIONS, authStateForType } from '@/lib/auth-type-defaul
 describe('authStateForType', () => {
   const none = { authType: 'none' } as const;
 
+  it('defaults oauth1 to HMAC-SHA1 with the header placement and keeps existing fields', () => {
+    expect(authStateForType('oauth1', none).oauth1).toEqual({
+      signatureMethod: 'HMAC-SHA1',
+      placement: 'header',
+    });
+    const prev = { authType: 'oauth1', oauth1: { consumerKey: 'ck', extra: 1 } } as const;
+    expect(authStateForType('oauth1', prev).oauth1).toEqual({ consumerKey: 'ck', extra: 1 });
+  });
+
   it('gives each type its sub-state', () => {
     expect(authStateForType('basic', none).basic).toEqual({ username: '', password: '' });
     expect(authStateForType('digest', none).digest).toEqual({ username: '', password: '' });

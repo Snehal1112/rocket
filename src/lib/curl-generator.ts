@@ -24,6 +24,8 @@ function contentTypeFor(mode: Body['mode']): string | undefined {
       return 'application/xml';
     case 'text':
       return 'text/plain';
+    case 'sparql':
+      return 'application/sparql-query';
     default:
       return undefined;
   }
@@ -115,7 +117,8 @@ function buildBodyParts(body: Body | undefined, headers: Header[]): BodyParts {
   switch (body.mode) {
     case 'json':
     case 'xml':
-    case 'text': {
+    case 'text':
+    case 'sparql': {
       if (!body.content) return { lines: [] };
       const lines = [`--data ${shellQuote(body.content)}`];
       let extraHeaderLine: string | undefined;

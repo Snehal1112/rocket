@@ -53,4 +53,10 @@ describe('BodyEditor', () => {
     wrap(<BodyEditor body={body} onChange={vi.fn()} />);
     expect(screen.queryByDisplayValue('username')).not.toBeInTheDocument();
   });
+
+  it('renders the code editor for sparql mode', async () => {
+    const body = makeBody({ mode: 'sparql', content: 'SELECT * WHERE { ?s ?p ?o }' });
+    wrap(<BodyEditor body={body} onChange={vi.fn()} />);
+    expect(await screen.findByTestId('monaco')).toBeInTheDocument();
+  });
 });

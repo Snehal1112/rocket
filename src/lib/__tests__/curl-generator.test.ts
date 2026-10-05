@@ -314,4 +314,15 @@ describe('generateCurlCommand', () => {
       expect(() => execSync('bash -n', { input: cmd })).not.toThrow();
     });
   });
+
+  it('sends a sparql body as data with the sparql content type', () => {
+    const cmd = generateCurlCommand(
+      baseResolved({
+        body: { mode: 'sparql', content: 'SELECT * WHERE { ?s ?p ?o }' },
+      }),
+      'POST',
+    );
+    expect(cmd).toContain("--data 'SELECT * WHERE { ?s ?p ?o }'");
+    expect(cmd).toContain('Content-Type: application/sparql-query');
+  });
 });

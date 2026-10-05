@@ -67,5 +67,7 @@ export function authStateForType(authType: AuthState['authType'], prev: AuthStat
       service: '',
       sessionToken: '',
     };
+  if (authType === 'oauth1')
+    next.oauth1 = prev.oauth1 ?? { signatureMethod: 'HMAC-SHA1', placement: 'header' };
   return next;
 }

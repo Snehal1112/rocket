@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { AuthState } from '@/types/pane-types';
+import { OAuth1AuthEditor } from './OAuth1AuthEditor';
 import { OAuth2AuthEditor } from './oauth2/OAuth2AuthEditor';
 
 interface UserPasswordCardProps {
@@ -215,15 +216,12 @@ export function AuthEditor({
       )}
 
       {auth.authType === 'oauth1' && (
-        <Card className='bg-muted/50'>
-          <CardContent className='px-3 py-2.5'>
-            <p className='text-xs text-muted-foreground'>
-              OAuth 1.0 settings come from the request file and cannot be edited here yet. They are
-              kept when you save, and the request is signed when it is sent. Select a different auth
-              type above to replace them.
-            </p>
-          </CardContent>
-        </Card>
+        <OAuth1AuthEditor
+          value={auth.oauth1 ?? {}}
+          onChange={(oauth1) => onChange({ ...auth, oauth1 })}
+          variableContext={variableContext}
+          onNavigateToSource={onNavigateToSource}
+        />
       )}
 
       {auth.authType === 'bearer' && auth.bearer && (

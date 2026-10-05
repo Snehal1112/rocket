@@ -7,17 +7,17 @@ const base = [
 ];
 
 describe('withCurrentAuthType', () => {
-  it('adds ntlm and oauth1 only while the request already uses them', () => {
+  it('adds ntlm only while the request already uses it', () => {
     expect(withCurrentAuthType(base, 'ntlm').map((o) => o.value)).toEqual([
       'none',
       'basic',
       'ntlm',
     ]);
-    expect(withCurrentAuthType(base, 'oauth1').map((o) => o.label)).toContain('OAuth 1.0');
   });
 
   it('leaves the list alone for other types', () => {
     expect(withCurrentAuthType(base, 'basic')).toBe(base);
     expect(withCurrentAuthType(base, 'digest')).toBe(base);
+    expect(withCurrentAuthType(base, 'oauth1')).toBe(base);
   });
 });

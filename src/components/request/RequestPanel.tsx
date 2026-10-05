@@ -34,7 +34,8 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
-import { withCurrentAuthType } from '@/lib/auth-type-options';
+import { authStateForType } from '@/lib/auth-type-defaults';
+import { OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
@@ -93,6 +94,7 @@ export const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
   { label: 'JSON', value: 'json' },
   { label: 'XML', value: 'xml' },
   { label: 'Text', value: 'text' },
+  { label: 'SPARQL', value: 'sparql' },
   { label: 'Form Data', value: 'formdata' },
   { label: 'Form URL Encoded', value: 'formurlencoded' },
   { label: 'Binary', value: 'binary' },
@@ -105,6 +107,7 @@ const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
   { label: 'Bearer', value: 'bearer' },
   { label: 'API Key', value: 'api-key' },
   { label: 'OAuth 2.0', value: 'oauth2' },
+  OAUTH1_OPTION,
   { label: 'AWS Sig v4', value: 'aws-sig-v4' },
   { label: 'WSSE', value: 'wsse' },
 ];
@@ -517,59 +520,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const handleAuthTypeChange = useCallback(
     (authType: AuthState['authType']) => {
-      const prev = request.auth;
-      const next: AuthState = { authType };
-      if (authType === 'basic') next.basic = prev.basic ?? { username: '', password: '' };
-      if (authType === 'digest') next.digest = prev.digest ?? { username: '', password: '' };
-      if (authType === 'wsse') next.wsse = prev.wsse ?? { username: '', password: '' };
-      if (authType === 'bearer') next.bearer = prev.bearer ?? { token: '' };
-      if (authType === 'api-key')
-        next.apiKey = prev.apiKey ?? { key: '', value: '', addTo: 'header' };
-      if (authType === 'oauth2')
-        next.oauth2 = prev.oauth2 ?? {
-          grantType: 'client_credentials',
-          authorizationUrl: '',
-          tokenUrl: '',
-          callbackUrl: 'https://exchange4all.local/webapp/#oidc-callback',
-          clientId: '',
-          clientSecret: '',
-          scope: '',
-          state: '',
-          username: '',
-          password: '',
-          clientAuthentication: 'body',
-          headerPrefix: 'Bearer',
-          addTokenTo: 'header',
-          verifySsl: true,
-          accessToken: '',
-          refreshToken: '',
-          expiresIn: null,
-          tokenAcquiredAt: null,
-          usePkce: true,
-          useSystemBrowser: false,
-          tokenSource: 'accessToken',
-          tokenId: '',
-          refreshTokenUrl: '',
-          autoFetchToken: true,
-          autoRefreshToken: false,
-          authParams: [],
-          tokenParams: [],
-          refreshParams: [],
-          idToken: '',
-          tokenType: '',
-          responseScope: '',
-          idTokenClaims: null,
-          accessTokenClaims: null,
-        };
-      if (authType === 'aws-sig-v4')
-        next.awsSigV4 = prev.awsSigV4 ?? {
-          accessKey: '',
-          secretKey: '',
-          region: '',
-          service: '',
-          sessionToken: '',
-        };
-      updateRequest(tab.id, { auth: next });
+      updateRequest(tab.id, { auth: authStateForType(authType, request.auth) });
     },
     [tab.id, updateRequest, request.auth],
   );

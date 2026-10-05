@@ -47,8 +47,13 @@ describe('AuthEditor for digest, wsse, ntlm and oauth1', () => {
     expect(screen.queryByLabelText('Username')).toBeNull();
   });
 
-  it('shows a read-only note for oauth1 that says the settings are kept', () => {
-    render(<AuthEditor auth={{ authType: 'oauth1', oauth1: {} }} onChange={vi.fn()} />);
-    expect(screen.getByText(/kept when you save/)).toBeTruthy();
+  it('shows the oauth1 editor', () => {
+    render(
+      <AuthEditor
+        auth={{ authType: 'oauth1', oauth1: { consumerKey: 'ck' } }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Consumer key')).toHaveValue('ck');
   });
 });
