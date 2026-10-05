@@ -576,6 +576,78 @@ impl ImportService {
         Ok(())
     }
 
+    /// Import a WSDL 1.1 file as a collection: one folder per service, one folder per
+    /// port, one request per SOAP operation. Non-SOAP bindings and unreadable imports
+    /// are reported, not fatal.
+    pub fn import_wsdl(&self, path: &Path, _workspace_id: &str) -> ImportResult<ImportReport> {
+        use crate::converter::wsdl as wc;
+
+        let model = crate::wsdl::parse_wsdl_file(path)?;
+        let file_label = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "wsdl".to_string());
+        let mut report = ImportReport {
+            detected_type: "collection".to_string(),
+            ..Default::default()
+        };
+        for warning in &model.warnings {
+            report.skipped.push(SkippedItem {
+                path: file_label.clone(),
+                reason: SkipReason::UnsupportedRequestType(warning.clone()),
+            });
+        }
+
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "wsdl".to_string());
+        let col_name = self.resolve_collection_name(&stem)?;
+        self.collection_repo
+            .create(&col_name)
+            .map_err(ImportError::DomainError)?;
+        report.created_collections.push(col_name.clone());
+
+        let mut used_services: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for service in &model.services {
+            let service_dir = unique_segment(&mut used_services, &service.name);
+            self.collection_repo
+                .create_folder(&col_name, &service_dir)
+                .map_err(ImportError::DomainError)?;
+            let mut used_ports: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for port in &service.ports {
+                let port_dir = format!(
+                    "{service_dir}/{}",
+                    unique_segment(&mut used_ports, &port.name)
+                );
+                self.collection_repo
+                    .create_folder(&col_name, &port_dir)
+                    .map_err(ImportError::DomainError)?;
+                let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for (i, op) in port.operations.iter().enumerate() {
+                    report.total_files += 1;
+                    let mut req = wc::convert_operation(port, op, &model.schemas, (i + 1) as u32);
+                    let base = wsdl_path_segment(&op.name);
+                    let mut slug = base.clone();
+                    let mut n = 2u32;
+                    while !used.insert(slug.clone()) {
+                        slug = format!("{base}-{n}");
+                        n += 1;
+                    }
+                    if slug != base {
+                        req.name = format!("{} ({n_minus})", op.name, n_minus = n - 1);
+                    }
+                    self.collection_repo
+                        .save_request(&col_name, &format!("{port_dir}/{slug}"), &req)
+                        .map_err(ImportError::DomainError)?;
+                    report.imported += 1;
+                }
+            }
+        }
+        Ok(report)
+    }
+
     /// Import a Postman environment JSON file into an existing collection.
     pub fn import_postman_environment(
         &self,
@@ -676,6 +748,28 @@ fn sanitize_postman_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Folder and file name segment for a WSDL name. Never empty.
+fn wsdl_path_segment(name: &str) -> String {
+    let s = sanitize_postman_filename(name);
+    if s.is_empty() {
+        "unnamed".to_string()
+    } else {
+        s
+    }
+}
+
+/// A path segment for `name` that is not yet in `used`; records it. Collisions get `-2`, `-3`, ...
+fn unique_segment(used: &mut std::collections::HashSet<String>, name: &str) -> String {
+    let base = wsdl_path_segment(name);
+    let mut slug = base.clone();
+    let mut n = 2u32;
+    while !used.insert(slug.clone()) {
+        slug = format!("{base}-{n}");
+        n += 1;
+    }
+    slug
 }
 
 #[cfg(test)]
@@ -883,5 +977,138 @@ mod detection_tests {
     fn detect_collection_none() {
         let d = TempDir::new().unwrap();
         assert!(detect_collection(d.path()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod wsdl_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn calc_wsdl() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wsdl/calc.wsdl")
+    }
+
+    fn yml_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read dir") {
+            let p = entry.expect("entry").path();
+            if p.is_dir() {
+                yml_files(&p, out);
+            } else if p.extension().and_then(|e| e.to_str()) == Some("yml")
+                && !matches!(
+                    p.file_name().and_then(|n| n.to_str()),
+                    Some("folder.yml" | "opencollection.yml")
+                )
+            {
+                // Folder and collection metadata files are not requests.
+                out.push(p);
+            }
+        }
+    }
+
+    #[test]
+    fn import_wsdl_writes_service_port_operation_tree() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service
+            .import_wsdl(&calc_wsdl(), "default")
+            .expect("import should succeed");
+
+        assert_eq!(report.detected_type, "collection");
+        assert_eq!(report.created_collections, vec!["calc".to_string()]);
+        assert_eq!(report.total_files, 4);
+        assert_eq!(report.imported, 4);
+        assert!(report.skipped.is_empty(), "got: {:?}", report.skipped);
+
+        let col = ws.path().join("collections/calc");
+        assert!(col.join("Calculator/CalcSoap").is_dir());
+        assert!(col.join("Calculator/CalcSoap12").is_dir());
+        let mut files = Vec::new();
+        yml_files(&col.join("Calculator"), &mut files);
+        assert_eq!(files.len(), 4, "got: {files:?}");
+
+        let soap12 = std::fs::read_to_string(
+            files
+                .iter()
+                .find(|p| p.to_string_lossy().contains("CalcSoap12"))
+                .expect("a soap 1.2 request file"),
+        )
+        .expect("read");
+        assert!(soap12.contains("application/soap+xml"), "got: {soap12}");
+        assert!(
+            !soap12.to_lowercase().contains("soapaction"),
+            "got: {soap12}"
+        );
+    }
+
+    #[test]
+    fn import_wsdl_resolves_collection_name_conflicts() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        service.import_wsdl(&calc_wsdl(), "default").expect("first");
+        let second = service
+            .import_wsdl(&calc_wsdl(), "default")
+            .expect("second");
+        assert_eq!(second.created_collections, vec!["calc-1".to_string()]);
+    }
+
+    #[test]
+    fn warnings_become_report_items() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let wsdl = std::fs::read_to_string(calc_wsdl())
+            .expect("read fixture")
+            .replace(
+                r#"<xsd:import namespace="http://example.com/types" schemaLocation="calc-types.xsd"/>"#,
+                r#"<xsd:import namespace="http://example.com/types" schemaLocation="https://example.invalid/t.xsd"/>"#,
+            );
+        let path = src.path().join("remote.wsdl");
+        std::fs::write(&path, wsdl).expect("write");
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert!(
+            report.skipped.iter().any(|s| matches!(
+                &s.reason,
+                SkipReason::UnsupportedRequestType(m) if m.contains("not fetched")
+            )),
+            "got: {:?}",
+            report.skipped
+        );
+    }
+
+    #[test]
+    fn duplicate_operation_names_get_suffixes() {
+        let ws = TempDir::new().expect("tempdir");
+        let src = TempDir::new().expect("tempdir");
+        let wsdl = r#"<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+            xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+            xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:tns="urn:o" targetNamespace="urn:o">
+          <message name="A"><part name="p" type="xsd:string"/></message>
+          <message name="B"><part name="p" type="xsd:int"/></message>
+          <portType name="P">
+            <operation name="Get"><input name="ByName" message="tns:A"/></operation>
+            <operation name="Get"><input name="ById" message="tns:B"/></operation>
+          </portType>
+          <binding name="Bd" type="tns:P"><soap:binding style="document"/>
+            <operation name="Get"><soap:operation soapAction="a"/><input name="ByName"><soap:body use="literal"/></input></operation>
+            <operation name="Get"><soap:operation soapAction="b"/><input name="ById"><soap:body use="literal"/></input></operation>
+          </binding>
+          <service name="S"><port name="Pt" binding="tns:Bd"><soap:address location="http://h/o"/></port></service>
+        </definitions>"#;
+        let path = src.path().join("overload.wsdl");
+        std::fs::write(&path, wsdl).expect("write");
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_wsdl(&path, "default")
+            .expect("import should succeed");
+        assert_eq!(report.imported, 2);
+        let mut files = Vec::new();
+        yml_files(&ws.path().join("collections/overload"), &mut files);
+        assert_eq!(
+            files.len(),
+            2,
+            "overloads must not overwrite each other: {files:?}"
+        );
     }
 }
