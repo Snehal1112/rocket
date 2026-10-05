@@ -144,6 +144,7 @@ fn op_require_module(#[string] name: String) -> String {
         "nanoid" => include_str!("modules/nanoid.js").to_string(),
         "tv4" => include_str!("modules/tv4.js").to_string(),
         "axios" => include_str!("modules/axios.js").to_string(),
+        "lodash" => include_str!("modules/lodash.js").to_string(),
         "atob" | "btoa" => include_str!("modules/atob-btoa.js").to_string(),
         _ => String::new(),
     }
@@ -867,6 +868,27 @@ mod tests {
             .as_ref()
             .expect("error")
             .contains("Module not found"));
+    }
+
+    #[tokio::test]
+    async fn require_lodash_group_by_and_get() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            r#"
+            const _ = require('lodash');
+            const g = _.groupBy([{t:'a'},{t:'b'},{t:'a'}], 't');
+            rok.setVar('n', String(g.a.length));
+            rok.setVar('deep', String(_.get({a:{b:[7]}}, 'a.b[0]')));
+        "#,
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
+        assert_eq!(result.runtime_vars.get("n").expect("n"), "2");
+        assert_eq!(result.runtime_vars.get("deep").expect("deep"), "7");
     }
 
     #[tokio::test]
