@@ -1,0 +1,16 @@
+{
+	"hooks": [
+		"bash \"$CLAUDE_PROJECT_DIR/.claude/harness/hooks/bash-guard\"",
+		"bash \"$CLAUDE_PROJECT_DIR/.claude/harness/hooks/commit-gate\""
+	],
+	"deny": [
+		"Bash(cargo test --workspace:*)",
+		"Bash(git push --force:*)",
+		"Bash(git push -f:*)"
+	],
+	"created": [
+		"permissions",
+		"permissions.deny"
+	],
+	"shortcuts": true
+}

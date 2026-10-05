@@ -12,7 +12,33 @@
 						"command": "bash /home/numericlabs/data/rocket/rocket/.claude/hooks/rust-safety-pretool"
 					}
 				]
+			},
+			{
+				"matcher": "Bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bash \"$CLAUDE_PROJECT_DIR/.claude/harness/hooks/bash-guard\""
+					}
+				]
+			},
+			{
+				"matcher": "Bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "bash \"$CLAUDE_PROJECT_DIR/.claude/harness/hooks/commit-gate\"",
+						"timeout": 600
+					}
+				]
 			}
+		]
+	},
+	"permissions": {
+		"deny": [
+			"Bash(cargo test --workspace:*)",
+			"Bash(git push --force:*)",
+			"Bash(git push -f:*)"
 		]
 	}
 }
