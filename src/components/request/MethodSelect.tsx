@@ -16,10 +16,12 @@ import { cn } from '@/lib/utils';
 interface MethodSelectProps {
   value: string;
   onChange: (method: string) => void;
+  /** Restricts the list and hides the custom-method field. Defaults to every standard method. */
+  methods?: readonly string[];
 }
 
 // Method picker for the URL bar: the standard methods plus a custom-method field.
-export function MethodSelect({ value, onChange }: MethodSelectProps) {
+export function MethodSelect({ value, onChange, methods }: MethodSelectProps) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customText, setCustomText] = useState('');
   const [invalid, setInvalid] = useState(false);
@@ -47,7 +49,7 @@ export function MethodSelect({ value, onChange }: MethodSelectProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {withCurrentMethod(STANDARD_METHODS, value).map((m) => (
+          {withCurrentMethod(methods ?? STANDARD_METHODS, value).map((m) => (
             <SelectItem
               key={m}
               value={m}
@@ -58,7 +60,7 @@ export function MethodSelect({ value, onChange }: MethodSelectProps) {
           ))}
         </SelectContent>
       </Select>
-      {customOpen ? (
+      {methods ? null : customOpen ? (
         <Input
           autoFocus
           aria-label='Custom HTTP method'

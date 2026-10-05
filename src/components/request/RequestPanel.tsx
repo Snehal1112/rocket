@@ -46,6 +46,7 @@ import {
   useGlobalEnvironmentName,
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
+import { requestProfile } from '@/lib/request-profile';
 import {
   type CollectionVariable,
   getCollectionSettings,
@@ -64,6 +65,7 @@ import { useWorkspaceStore } from '@/stores/workspace-store';
 import type {
   AuthState,
   BodyState,
+  GraphQlState,
   HttpMethod,
   KeyValueEntry,
   RequestSettings,
@@ -73,6 +75,7 @@ import { isRequestTab } from '@/types/pane-types';
 import { AssertionsTab } from './AssertionsTab';
 import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
+import { GraphQlEditor } from './GraphQlEditor';
 import { HeadersEditor } from './HeadersEditor';
 import { LoadTestTab } from './load-test/LoadTestTab';
 import { MethodSelect } from './MethodSelect';
@@ -138,12 +141,14 @@ interface RequestPanelProps {
 
 export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { request, response } = tab;
+  const profile = requestProfile(request.requestType);
+  const isGraphQl = request.requestType === 'graphql';
   const updateRequest = usePaneStore((s) => s.updateRequest);
   const requestLayout = useLayoutStore((s) => s.requestLayout);
 
   const { send, sending } = useExecuteRequest(tab.id);
 
-  const [activeSection, setActiveSection] = useState<SectionTab>('params');
+  const [activeSection, setActiveSection] = useState<SectionTab>(profile.initialSection);
   const [docMode, setDocMode] = useState<'edit' | 'preview'>('preview');
   const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
   const [showLoadTest, setShowLoadTest] = useState(false);
@@ -536,6 +541,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     [tab.id, updateRequest],
   );
 
+  const handleGraphQlChange = useCallback(
+    (patch: Partial<GraphQlState>) =>
+      updateRequest(tab.id, {
+        graphql: { ...(request.graphql ?? { query: '', variables: '' }), ...patch },
+      }),
+    [tab.id, updateRequest, request.graphql],
+  );
+
   const handleAuthChange = useCallback(
     (auth: AuthState) => updateRequest(tab.id, { auth }),
     [tab.id, updateRequest],
@@ -639,155 +652,162 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   );
 
   const tabDefs = useMemo(
-    () => [
-      {
-        value: 'params',
-        label: (
-          <>
-            Params
-            {enabledParamCount > 0 && (
-              <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
-                {enabledParamCount}
-              </span>
-            )}
-          </>
-        ),
-        isActive: activeSection === 'params',
-        onClick: () => setActiveSection('params'),
-      },
-      {
-        value: 'body',
-        label: (
-          <>
-            Body
-            {request.body.mode !== 'none' && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'body',
-        onClick: () => setActiveSection('body'),
-      },
-      {
-        value: 'headers',
-        label: (
-          <>
-            Headers
-            {enabledHeaderCount > 0 && (
-              <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
-                {enabledHeaderCount}
-              </span>
-            )}
-          </>
-        ),
-        isActive: activeSection === 'headers',
-        onClick: () => setActiveSection('headers'),
-      },
-      {
-        value: 'auth',
-        label: (
-          <>
-            Auth
-            {request.auth.authType !== 'none' && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'auth',
-        onClick: () => setActiveSection('auth'),
-      },
-      {
-        value: 'variables',
-        label: (
-          <>
-            Variables
-            {requestVariables.length > 0 && (
-              <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
-                {requestVariables.length}
-              </span>
-            )}
-          </>
-        ),
-        isActive: activeSection === 'variables',
-        onClick: () => setActiveSection('variables'),
-      },
-      {
-        value: 'scripts',
-        label: (
-          <>
-            Scripts
-            {(request.preRequestScript || request.postResponseScript || request.testsScript) && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'scripts',
-        onClick: () => setActiveSection('scripts'),
-      },
-      {
-        value: 'assertions',
-        label: (
-          <>
-            Assertions
-            {request.assertions.some((a) => !a.disabled) && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'assertions',
-        onClick: () => setActiveSection('assertions'),
-      },
-      {
-        value: 'vars',
-        label: (
-          <>
-            Vars
-            {request.actions.some((a) => !a.disabled) && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'vars',
-        onClick: () => setActiveSection('vars'),
-      },
-      {
-        value: 'load-test',
-        label: 'Load test',
-        isActive: activeSection === 'load-test',
-        onClick: () => setActiveSection('load-test'),
-      },
-      {
-        value: 'docs',
-        label: (
-          <>
-            Docs
-            {request.docs && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'docs',
-        onClick: () => setActiveSection('docs'),
-      },
-      {
-        value: 'settings',
-        label: (
-          <>
-            Settings
-            {settingsModified && (
-              <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
-            )}
-          </>
-        ),
-        isActive: activeSection === 'settings',
-        onClick: () => setActiveSection('settings'),
-      },
-    ],
+    () =>
+      [
+        {
+          value: 'params',
+          label: (
+            <>
+              Params
+              {enabledParamCount > 0 && (
+                <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
+                  {enabledParamCount}
+                </span>
+              )}
+            </>
+          ),
+          isActive: activeSection === 'params',
+          onClick: () => setActiveSection('params'),
+        },
+        {
+          value: 'body',
+          label: (
+            <>
+              {profile.bodyTabLabel}
+              {(isGraphQl
+                ? request.graphql?.query.trim() !== ''
+                : request.body.mode !== 'none') && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'body',
+          onClick: () => setActiveSection('body'),
+        },
+        {
+          value: 'headers',
+          label: (
+            <>
+              Headers
+              {enabledHeaderCount > 0 && (
+                <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
+                  {enabledHeaderCount}
+                </span>
+              )}
+            </>
+          ),
+          isActive: activeSection === 'headers',
+          onClick: () => setActiveSection('headers'),
+        },
+        {
+          value: 'auth',
+          label: (
+            <>
+              Auth
+              {request.auth.authType !== 'none' && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'auth',
+          onClick: () => setActiveSection('auth'),
+        },
+        {
+          value: 'variables',
+          label: (
+            <>
+              Variables
+              {requestVariables.length > 0 && (
+                <span className='ml-1 inline-flex items-center justify-center min-w-4.5 h-4.5 rounded-full bg-muted px-1.5 text-xs font-semibold'>
+                  {requestVariables.length}
+                </span>
+              )}
+            </>
+          ),
+          isActive: activeSection === 'variables',
+          onClick: () => setActiveSection('variables'),
+        },
+        {
+          value: 'scripts',
+          label: (
+            <>
+              Scripts
+              {(request.preRequestScript || request.postResponseScript || request.testsScript) && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'scripts',
+          onClick: () => setActiveSection('scripts'),
+        },
+        {
+          value: 'assertions',
+          label: (
+            <>
+              Assertions
+              {request.assertions.some((a) => !a.disabled) && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'assertions',
+          onClick: () => setActiveSection('assertions'),
+        },
+        {
+          value: 'vars',
+          label: (
+            <>
+              Vars
+              {request.actions.some((a) => !a.disabled) && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'vars',
+          onClick: () => setActiveSection('vars'),
+        },
+        {
+          value: 'load-test',
+          label: 'Load test',
+          isActive: activeSection === 'load-test',
+          onClick: () => setActiveSection('load-test'),
+        },
+        {
+          value: 'docs',
+          label: (
+            <>
+              Docs
+              {request.docs && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'docs',
+          onClick: () => setActiveSection('docs'),
+        },
+        {
+          value: 'settings',
+          label: (
+            <>
+              Settings
+              {settingsModified && (
+                <span className='ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-primary' />
+              )}
+            </>
+          ),
+          isActive: activeSection === 'settings',
+          onClick: () => setActiveSection('settings'),
+        },
+      ].filter((t) => profile.showLoadTest || t.value !== 'load-test'),
     [
       activeSection,
       enabledParamCount,
       enabledHeaderCount,
       request.body.mode,
+      profile.bodyTabLabel,
+      profile.showLoadTest,
+      isGraphQl,
+      request.graphql?.query,
       request.auth.authType,
       requestVariables.length,
       request.docs,
@@ -802,6 +822,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const tabRightContent = useMemo(() => {
     if (activeSection === 'body') {
+      if (isGraphQl) return undefined;
       return (
         <Select
           value={request.body.mode}
@@ -860,6 +881,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     return undefined;
   }, [
     activeSection,
+    isGraphQl,
     request.body,
     request.auth.authType,
     tab.id,
@@ -875,6 +897,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         <MethodSelect
           value={request.method}
           onChange={(method) => updateRequest(tab.id, { method })}
+          methods={profile.methods}
         />
 
         <SingleLineEditor
@@ -927,27 +950,31 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           {sending ? 'Sending...' : 'Send'}
         </Button>
 
-        <Button
-          variant='outline'
-          size='sm'
-          className='h-7'
-          onClick={() => setShowLoadTest(true)}
-          title='Load test'
-          aria-label='Load test'
-        >
-          <Zap className='h-3.5 w-3.5' aria-hidden='true' />
-        </Button>
+        {profile.showLoadTest && (
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-7'
+            onClick={() => setShowLoadTest(true)}
+            title='Load test'
+            aria-label='Load test'
+          >
+            <Zap className='h-3.5 w-3.5' aria-hidden='true' />
+          </Button>
+        )}
 
-        <Button
-          variant='outline'
-          size='sm'
-          className='h-7'
-          onClick={handleCopyAsCurl}
-          title='Copy as cURL'
-          aria-label='Copy as cURL'
-        >
-          <Code2 className='h-3.5 w-3.5' aria-hidden='true' />
-        </Button>
+        {profile.showCopyAsCurl && (
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-7'
+            onClick={handleCopyAsCurl}
+            title='Copy as cURL'
+            aria-label='Copy as cURL'
+          >
+            <Code2 className='h-3.5 w-3.5' aria-hidden='true' />
+          </Button>
+        )}
 
         {!tab.source && (
           <>
@@ -989,6 +1016,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               void handleSaveDocs(docs);
             }}
             onSwitchToEdit={() => setDocMode('edit')}
+          />
+        </div>
+      ) : null}
+      {activeSection === 'body' && isGraphQl ? (
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <GraphQlEditor
+            state={request.graphql ?? { query: '', variables: '' }}
+            onChange={handleGraphQlChange}
+            variableContext={scopedContext}
           />
         </div>
       ) : null}
@@ -1040,7 +1076,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           activeSection === 'load-test' ||
           activeSection === 'scripts' ||
           activeSection === 'assertions' ||
-          activeSection === 'vars'
+          activeSection === 'vars' ||
+          (activeSection === 'body' && isGraphQl)
             ? 'hidden'
             : 'flex-1 overflow-auto p-3'
         }
@@ -1069,7 +1106,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             onNavigateToSource={handleEditorNavigateToSource}
           />
         )}
-        {activeSection === 'body' && (
+        {activeSection === 'body' && !isGraphQl && (
           <BodyEditor
             body={request.body}
             onChange={handleBodyChange}

@@ -1,4 +1,7 @@
-use rocket_app::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
+use rocket_app::graphql_document::{list_operations, GraphQlOperation};
+use rocket_app::{
+    ExecuteGraphQlInput, ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
+};
 use rocket_scripting::{ConsoleLevel, TestStatus};
 use rocket_shared::error::DomainError;
 use serde::Serialize;
@@ -88,6 +91,23 @@ pub async fn execute_request(
     svc: State<'_, RequestExecutionService>,
 ) -> Result<ExecuteRequestResponse, DomainError> {
     svc.execute(input).await.map(ExecuteRequestResponse::from)
+}
+
+/// Sends a GraphQL operation through the HTTP execution path.
+#[tauri::command]
+pub async fn execute_graphql_request(
+    input: ExecuteGraphQlInput,
+    svc: State<'_, RequestExecutionService>,
+) -> Result<ExecuteRequestResponse, DomainError> {
+    svc.execute_graphql(input)
+        .await
+        .map(ExecuteRequestResponse::from)
+}
+
+/// Lists the operations a GraphQL document defines, for the operation picker.
+#[tauri::command]
+pub fn list_graphql_operations(document: String) -> Vec<GraphQlOperation> {
+    list_operations(&document)
 }
 
 /// Preview-evaluates a jsonq expression against a captured response, for the

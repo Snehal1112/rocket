@@ -931,6 +931,27 @@ export type ExportFormat = 'html' | 'csv' | 'json' | 'pdf';
 export const executeRequest = (input: ExecuteRequestInput) =>
   invoke<ExecuteRequestResponse>('execute_request', { input });
 
+/** A GraphQL send: the HTTP side plus the GraphQL payload. `request.body` is ignored. */
+export interface ExecuteGraphQlInput {
+  request: ExecuteRequestInput;
+  query: string;
+  variables?: string;
+  /** Required when the document defines several operations. */
+  operationName?: string;
+}
+
+export interface GraphQlOperation {
+  /** `null` for an anonymous operation. */
+  name: string | null;
+  kind: 'query' | 'mutation' | 'subscription';
+}
+
+export const executeGraphQlRequest = (input: ExecuteGraphQlInput) =>
+  invoke<ExecuteRequestResponse>('execute_graphql_request', { input });
+
+export const listGraphQlOperations = (document: string) =>
+  invoke<GraphQlOperation[]>('list_graphql_operations', { document });
+
 export const evaluateVarExpression = (
   collectionRoot: string,
   expression: string,

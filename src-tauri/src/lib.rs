@@ -618,6 +618,8 @@ pub fn run() {
             commands::environments::save_global_environment,
             commands::environments::delete_global_environment,
             commands::execution::execute_request,
+            commands::execution::execute_graphql_request,
+            commands::execution::list_graphql_operations,
             commands::execution::evaluate_var_expression,
             commands::runner::run_collection,
             commands::runner::stop_collection_run,

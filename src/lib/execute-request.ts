@@ -1,3 +1,4 @@
+import { dispatchSend, type ResolvedGraphQl } from '@/lib/dispatch-send';
 import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
 import { environmentKeys } from '@/lib/queries/environment-queries';
@@ -8,7 +9,7 @@ import {
   type Auth,
   type Body,
   type CollectionVariable,
-  executeRequest,
+  type ExecuteRequestInput,
   getCollectionSettings,
   getFolderChainVariables,
   getRequestVariables,
@@ -209,6 +210,7 @@ export interface ResolvedRequestFields {
   collection: string | undefined;
   environmentName: string | undefined;
   requestPath: string | undefined;
+  graphql?: ResolvedGraphQl;
 }
 
 // The execution options a request's settings ask for. One place builds them, so a single send,
@@ -335,6 +337,17 @@ export async function resolveRequestFieldsForPath(
     value: a.value !== undefined ? resolve(a.value) : a.value,
   }));
 
+  const resolvedGraphql: ResolvedGraphQl | undefined =
+    request.requestType === 'graphql' && request.graphql
+      ? {
+          query: resolve(request.graphql.query),
+          variables:
+            request.graphql.variables.trim() === ''
+              ? undefined
+              : resolve(request.graphql.variables),
+        }
+      : undefined;
+
   return {
     url: resolvedUrl,
     headers: effectiveHeaders,
@@ -346,6 +359,7 @@ export async function resolveRequestFieldsForPath(
     collection,
     environmentName: useEnvStore.getState().activeEnvId ?? undefined,
     requestPath,
+    graphql: resolvedGraphql,
   };
 }
 
@@ -597,6 +611,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     collection,
     environmentName,
     requestPath,
+    graphql: resolvedGraphql,
   } = await resolveRequestFields(tabId, effectiveRequest);
 
   const globalEnvName = getActiveGlobalEnvName();
@@ -604,7 +619,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
 
   try {
-    const result = await executeRequest({
+    const requestInput: ExecuteRequestInput = {
       method: effectiveRequest.method,
       url: resolvedUrl,
       headers: effectiveHeaders,
@@ -625,7 +640,8 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       tags: effectiveRequest.tags ?? [],
       pathParams: resolvedPathParams,
       requestGuardPolicy,
-    });
+    };
+    const result = await dispatchSend(effectiveRequest, requestInput, resolvedGraphql);
 
     const responseState: ResponseState = {
       status: result.status,
