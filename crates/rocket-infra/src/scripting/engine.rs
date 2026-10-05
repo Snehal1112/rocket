@@ -791,6 +791,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transform_style_body_can_require_uuid() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            r#"
+            const out = (function () {
+                const fn = new Function('response', "const { v4 } = require('uuid'); return v4();");
+                return fn({ body: null });
+            })();
+            rok.setVar('out', out);
+        "#,
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
+        let id = result
+            .runtime_vars
+            .get("out")
+            .expect("out")
+            .as_str()
+            .expect("string");
+        assert_eq!(id.len(), 36);
+    }
+
+    #[tokio::test]
+    async fn transform_style_body_unknown_module_errors() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            r#"
+            const fn = new Function('response', "return require('fs');");
+            fn({ body: null });
+        "#,
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result
+            .error
+            .as_ref()
+            .expect("error expected")
+            .contains("Module not found"));
+    }
+
+    #[tokio::test]
     async fn require_axios_loads_but_calling_it_throws_clear_error() {
         let engine = DenoScriptEngine::new();
         // require() itself must succeed (there's no wiring gap like the old
