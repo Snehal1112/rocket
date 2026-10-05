@@ -512,14 +512,13 @@ impl HttpExecutor for ReqwestExecutor {
             } => {
                 use rocket_http::ntlm_sig;
 
-                // Message 1 carries no body: the body goes out once, with message 3.
-                let mut first = start_builder(ntlm_url).header(
+                // Message 1 carries the real body: a server that does not challenge then gets
+                // the true request, and a 401 challenge means nothing was processed. The cost
+                // is a second upload with message 3.
+                let first = finish_builder(start_builder(ntlm_url))?.header(
                     reqwest::header::AUTHORIZATION,
                     ntlm_sig::header_value(&ntlm_sig::negotiate_message()),
                 );
-                if request.options.timeout_ms > 0 {
-                    first = first.timeout(Duration::from_millis(request.options.timeout_ms));
-                }
                 let challenged = first.send().await.map_err(http_error)?;
                 let values: Vec<String> = challenged
                     .headers()
@@ -528,9 +527,12 @@ impl HttpExecutor for ReqwestExecutor {
                     .filter_map(|v| v.to_str().ok().map(str::to_string))
                     .collect();
                 let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+                // A challenge from another origin, reached through a redirect, is never
+                // answered: that would hand a crackable NTLMv2 response to that host.
+                let same_origin = challenged.url().origin() == requested_origin;
                 match (challenged.status(), ntlm_sig::find_token(&refs)) {
                     // No challenge: the server did not ask for NTLM, or refuses it. Return it as is.
-                    (reqwest::StatusCode::UNAUTHORIZED, Some(token)) => {
+                    (reqwest::StatusCode::UNAUTHORIZED, Some(token)) if same_origin => {
                         let challenge = ntlm_sig::parse_challenge(&token).map_err(|e| {
                             DomainError::InvalidInput(format!(
                                 "The NTLM challenge could not be read: {e}"
@@ -3654,9 +3656,7 @@ mod ntlm_tests {
         );
     }
 
-    #[tokio::test]
-    async fn ntlm_sends_the_body_only_with_message_three() {
-        let (addr, log) = server(true).await;
+    fn post_with_body(addr: std::net::SocketAddr) -> HttpRequest {
         let mut req = ntlm_request(addr, HttpMethod::Post);
         req.body = Some(Body {
             mode: BodyMode::Json,
@@ -3664,13 +3664,120 @@ mod ntlm_tests {
             form_data: None,
             file_path: None,
         });
-        let response = ReqwestExecutor::new().execute(&req).await.expect("send");
+        req
+    }
+
+    #[tokio::test]
+    async fn ntlm_sends_the_body_with_both_messages() {
+        let (addr, log) = server(true).await;
+        let response = ReqwestExecutor::new()
+            .execute(&post_with_body(addr))
+            .await
+            .expect("send");
         assert_eq!(response.status, 200);
         let seen = log.lock().expect("log").clone();
+        assert_eq!(seen.len(), 2, "{seen:?}");
         assert_eq!(seen[0].1, "type1");
-        assert_eq!(seen[0].2, 0, "message 1 must carry no body");
+        assert_eq!(seen[0].2, 7, "message 1 carries the real body");
         assert_eq!(seen[1].1, "type3");
-        assert_eq!(seen[1].2, 7, "message 3 carries the whole body");
+        assert_eq!(seen[1].2, 7, "message 3 carries the whole body again");
+    }
+
+    #[tokio::test]
+    async fn a_post_to_a_server_without_ntlm_sends_the_body_once() {
+        let (addr, log) = server(false).await;
+        let response = ReqwestExecutor::new()
+            .execute(&post_with_body(addr))
+            .await
+            .expect("send");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, "ok");
+        let seen = log.lock().expect("log").clone();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert_eq!(seen[0].2, 7, "the server gets the true request");
+    }
+
+    #[tokio::test]
+    async fn a_body_less_request_sends_no_body_with_either_message() {
+        let (addr, log) = server(true).await;
+        let response = ReqwestExecutor::new()
+            .execute(&ntlm_request(addr, HttpMethod::Get))
+            .await
+            .expect("send");
+        assert_eq!(response.status, 200);
+        let seen = log.lock().expect("log").clone();
+        assert_eq!(seen.iter().map(|s| s.2).collect::<Vec<_>>(), [0, 0]);
+    }
+
+    #[tokio::test]
+    async fn a_challenge_from_another_origin_after_a_redirect_is_not_answered() {
+        // The second server challenges with NTLM and records every Authorization header.
+        let evil = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let evil_addr = evil.local_addr().expect("addr");
+        let evil_auth: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_by_evil = Arc::clone(&evil_auth);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = evil.accept().await {
+                let seen = Arc::clone(&seen_by_evil);
+                tokio::spawn(async move {
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        let seen = Arc::clone(&seen);
+                        async move {
+                            let auth = req
+                                .headers()
+                                .get("authorization")
+                                .and_then(|v| v.to_str().ok())
+                                .map(str::to_string);
+                            seen.lock().expect("log").push(auth);
+                            Ok::<_, std::convert::Infallible>(
+                                Response::builder()
+                                    .status(401)
+                                    .header(
+                                        "www-authenticate",
+                                        ntlm_sig::header_value(&challenge_message()),
+                                    )
+                                    .body(Full::new(Bytes::from("evil")))
+                                    .unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))),
+                            )
+                        }
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+        let origin = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let origin_addr = origin.local_addr().expect("addr");
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = origin.accept().await {
+                tokio::spawn(async move {
+                    let service = service_fn(move |_req: Request<Incoming>| async move {
+                        Ok::<_, std::convert::Infallible>(
+                            Response::builder()
+                                .status(302)
+                                .header("location", format!("http://{evil_addr}/steal"))
+                                .body(Full::new(Bytes::new()))
+                                .unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))),
+                        )
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+        let response = ReqwestExecutor::new()
+            .execute(&ntlm_request(origin_addr, HttpMethod::Get))
+            .await
+            .expect("send");
+        assert_eq!(response.status, 401);
+        assert_eq!(response.body, "evil");
+        let seen = evil_auth.lock().expect("log").clone();
+        assert!(
+            seen.iter().all(|a| a.is_none()),
+            "the other origin must never see an Authorization header: {seen:?}"
+        );
     }
 
     #[tokio::test]
