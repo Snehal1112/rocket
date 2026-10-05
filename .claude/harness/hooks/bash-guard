@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# PreToolUse guard for Bash commands. Part of the removable harness.
+# Reads the hook payload on stdin. Allows on any parse error.
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export HARNESS_LOG_DIR="${HARNESS_LOG_DIR:-$here/../log}"
+export HARNESS_HOOKS_DIR="$here"
+
+read -r -d '' PY <<'PYEOF'
+import os
+import sys
+
+sys.path.insert(0, os.environ["HARNESS_HOOKS_DIR"])
+import _lib
+
+
+def check(toks):
+    if not toks:
+        return None
+    if toks[0] == "cargo":
+        rest = [t for t in toks[1:] if not t.startswith("+")]
+        if not rest:
+            return None
+        sub, args = rest[0], rest[1:]
+        if "--" in args:
+            args = args[: args.index("--")]
+        if sub in ("test", "check", "clippy", "build"):
+            if sub == "test" and ("--workspace" in args or "--all" in args):
+                return ("cargo-test-workspace", "Do not run cargo test with --workspace or --all, it slows the machine. Use targeted -p crate tests.")
+            has_j = any(a.startswith("-j") or a.startswith("--jobs") for a in args)
+            if not has_j:
+                return ("cargo-no-j", "Always pass -j4 to cargo test, check, clippy and build in this repo.")
+        return None
+    if toks[0] == "git":
+        sub, args = _lib.git_args(toks)
+        if sub == "stash":
+            positional = [a for a in args if not a.startswith("-")]
+            if not positional or positional[0] == "pop":
+                return ("git-stash-bare", "The stash stack is shared across worktrees. Use git stash push -u -m <tag>, apply, list or drop instead.")
+        if sub == "add":
+            for a in args:
+                if a in ("-A", "--all", "."):
+                    return ("git-add-all", "Peer sessions share the index. Add explicit paths, not -A, --all or '.'.")
+    return None
+
+
+def main():
+    got = _lib.read_payload()
+    if got is None:
+        return 0
+    cmd = got[0]
+    try:
+        for seg in _lib.split_segments(cmd):
+            res = check(_lib.tokens_of(seg))
+            if res:
+                rule, reason = res
+                _lib.deny(rule, cmd, "[harness:%s] %s" % (rule, reason))
+    except Exception:
+        return 0
+    return 0
+
+
+sys.exit(main())
+PYEOF
+
+python3 -c "$PY"

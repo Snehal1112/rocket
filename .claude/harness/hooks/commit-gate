@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# PreToolUse gate for git commit. Part of the removable harness.
+# Runs checks based on staged file types. Skip with HARNESS_GATE=0.
+
+[ "${HARNESS_GATE:-1}" = "0" ] && exit 0
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export HARNESS_LOG_DIR="${HARNESS_LOG_DIR:-$here/../log}"
+export HARNESS_HOOKS_DIR="$here"
+
+read -r -d '' PY <<'PYEOF'
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.environ["HARNESS_HOOKS_DIR"])
+import _lib
+
+BUDGET = 590
+
+
+def git_out(cwd, *args):
+    p = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True, timeout=30)
+    return p.stdout
+
+
+def main():
+    got = _lib.read_payload()
+    if got is None:
+        return
+    cmd, cwd = got
+    is_commit = False
+    extra = []
+    try:
+        for seg in _lib.split_segments(cmd):
+            toks = _lib.tokens_of(seg)
+            if not toks or toks[0] != "git":
+                continue
+            sub, args = _lib.git_args(toks)
+            if sub == "commit":
+                is_commit = True
+                if "--" in args:
+                    extra += args[args.index("--") + 1:]
+            elif sub == "add":
+                extra += [a for a in args if not a.startswith("-")]
+        if not is_commit:
+            return
+        top = git_out(cwd, "rev-parse", "--show-toplevel").strip()
+        staged = git_out(cwd, "diff", "--cached", "--name-only").split("\n")
+    except Exception:
+        return
+    if not top:
+        return
+    files = [f for f in staged + extra if f]
+    checks = []
+    if any(f.endswith((".ts", ".tsx")) for f in files):
+        checks += [["yarn", "tsc", "--noEmit"], ["yarn", "check"]]
+    if any(f.endswith(".rs") for f in files):
+        checks += [["cargo", "check", "-j4"]]
+    deadline = time.time() + BUDGET
+    for c in checks:
+        name = " ".join(c)
+        left = deadline - time.time()
+        if left <= 0:
+            _lib.deny("commit-gate-timeout", cmd, "[harness:commit-gate] Time budget used up before: %s. Set HARNESS_GATE=0 to skip." % name)
+        try:
+            p = subprocess.run(c, cwd=top, capture_output=True, text=True, timeout=left)
+        except subprocess.TimeoutExpired:
+            _lib.deny("commit-gate-timeout", cmd, "[harness:commit-gate] Timed out running: %s" % name)
+        except OSError as e:
+            _lib.deny("commit-gate-fail", cmd, "[harness:commit-gate] Could not run %s: %s" % (name, e))
+        if p.returncode != 0:
+            tail = "\n".join((p.stdout + p.stderr).splitlines()[-20:])
+            _lib.deny("commit-gate-fail", cmd, "[harness:commit-gate] %s failed:\n%s" % (name, tail))
+
+
+main()
+PYEOF
+
+python3 -c "$PY"
