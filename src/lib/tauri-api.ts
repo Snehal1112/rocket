@@ -2173,3 +2173,32 @@ export const onAgentSessionFailed = (
   handler: (event: AgentSessionFailedEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<AgentSessionFailedEvent>('agent-session-failed', (e) => handler(e.payload));
+
+// ============================================================
+// Proxy
+// ============================================================
+
+export type ProxyMode = 'system' | 'none' | 'custom';
+
+export interface ProxySettings {
+  mode: ProxyMode;
+  httpProxy?: string;
+  httpsProxy?: string;
+  noProxy?: string;
+  username?: string;
+}
+
+/** The saved setting. The password itself is never returned, only whether one is stored. */
+export interface ProxySettingsView extends ProxySettings {
+  hasPassword: boolean;
+}
+
+export type ProxyPasswordChange =
+  | { action: 'keep' }
+  | { action: 'clear' }
+  | { action: 'set'; value: string };
+
+export const getProxySettings = () => invoke<ProxySettingsView>('get_proxy_settings');
+
+export const saveProxySettings = (settings: ProxySettings, password: ProxyPasswordChange) =>
+  invoke<void>('save_proxy_settings', { settings, password });

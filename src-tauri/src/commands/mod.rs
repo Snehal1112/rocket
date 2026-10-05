@@ -14,6 +14,7 @@ pub mod history;
 pub mod import;
 pub mod load_test;
 pub mod oauth2;
+pub mod proxy;
 pub mod runner;
 pub mod secret_managers;
 pub mod templates;

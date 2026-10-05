@@ -34,6 +34,14 @@ impl KeyringSecretStore {
             service: "com.rocketapi.vault-connection",
         }
     }
+
+    /// Backs the proxy password. A separate keychain service from the other namespaces so the
+    /// entries can never collide.
+    pub fn new_proxy() -> Self {
+        Self {
+            service: "com.rocketapi.proxy",
+        }
+    }
 }
 
 impl SecretStore for KeyringSecretStore {

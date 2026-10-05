@@ -1,7 +1,8 @@
 import { type as osType } from '@tauri-apps/plugin-os';
-import { Bot, Settings } from 'lucide-react';
+import { Bot, Globe, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { AgentConfigsDialog } from '@/components/settings/AgentConfigsDialog';
+import { ProxySettingsDialog } from '@/components/settings/ProxySettingsDialog';
 import { SecretManagerConnectionsDialog } from '@/components/settings/SecretManagerConnectionsDialog';
 import { Button } from '@/components/ui/button';
 import { WindowControls } from './WindowControls';
@@ -11,6 +12,7 @@ export function TitleBar() {
   const isMac = osType() === 'macos';
   const [showSecretManagers, setShowSecretManagers] = useState(false);
   const [showAgentConfigs, setShowAgentConfigs] = useState(false);
+  const [showProxy, setShowProxy] = useState(false);
 
   return (
     <div
@@ -42,6 +44,15 @@ export function TitleBar() {
           variant='ghost'
           size='icon'
           className='h-7 w-7'
+          aria-label='Proxy settings'
+          onClick={() => setShowProxy(true)}
+        >
+          <Globe className='h-4 w-4' aria-hidden='true' />
+        </Button>
+        <Button
+          variant='ghost'
+          size='icon'
+          className='h-7 w-7'
           aria-label='AI Agent configurations'
           onClick={() => setShowAgentConfigs(true)}
         >
@@ -55,6 +66,7 @@ export function TitleBar() {
         onOpenChange={setShowSecretManagers}
       />
       <AgentConfigsDialog open={showAgentConfigs} onOpenChange={setShowAgentConfigs} />
+      <ProxySettingsDialog open={showProxy} onOpenChange={setShowProxy} />
     </div>
   );
 }

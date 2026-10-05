@@ -318,9 +318,19 @@ pub fn run() {
                 Box::new(FsCookieRepo::new(cookies_dir.clone())),
                 Box::new(NullEventPublisher),
             );
+            // App-level proxy: the service validates and stores it, the executor reads it.
+            let shared_proxy = rocket_http::new_shared_proxy();
+            let proxy_svc = rocket_app::ProxySettingsService::new(
+                Box::new(rocket_infra::FsProxySettingsRepo::new(
+                    data_dir.join("proxy.yml"),
+                )),
+                Arc::new(rocket_infra::KeyringSecretStore::new_proxy()),
+                Arc::clone(&shared_proxy),
+            );
             let executor: Arc<dyn rocket_http::HttpExecutor> = Arc::new(
                 ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))
-                    .with_cookie_repo(Arc::new(FsCookieRepo::new(cookies_dir.clone()))),
+                    .with_cookie_repo(Arc::new(FsCookieRepo::new(cookies_dir.clone())))
+                    .with_proxy(Arc::clone(&shared_proxy)),
             );
 
             // RocketVault external secrets stack — shared Arcs used by both
@@ -504,6 +514,7 @@ pub fn run() {
             app.manage(history_svc);
             app.manage(template_svc);
             app.manage(cookie_svc);
+            app.manage(proxy_svc);
             app.manage(exec_svc);
             app.manage(secret_manager_svc);
             app.manage(agent_config_svc);
@@ -625,6 +636,8 @@ pub fn run() {
             commands::cookies::get_cookies,
             commands::cookies::set_cookies,
             commands::cookies::clear_cookies,
+            commands::proxy::get_proxy_settings,
+            commands::proxy::save_proxy_settings,
             commands::app::get_app_data_dir,
             commands::app::watch_collections,
             commands::app::stop_watching,
