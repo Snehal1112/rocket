@@ -59,6 +59,7 @@ import type { VariableSource } from '@/lib/url-variables';
 import { buildScopedContext } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
+import { useGraphQlSchemaStore } from '@/stores/graphql-schema-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -75,6 +76,7 @@ import { isRequestTab } from '@/types/pane-types';
 import { AssertionsTab } from './AssertionsTab';
 import { AuthEditor } from './AuthEditor';
 import { BodyEditor } from './BodyEditor';
+import { GraphQlDocsExplorer } from './GraphQlDocsExplorer';
 import { GraphQlEditor } from './GraphQlEditor';
 import { HeadersEditor } from './HeadersEditor';
 import { LoadTestTab } from './load-test/LoadTestTab';
@@ -128,6 +130,7 @@ type SectionTab =
   | 'auth'
   | 'variables'
   | 'docs'
+  | 'schema'
   | 'settings'
   | 'load-test'
   | 'scripts'
@@ -477,6 +480,19 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const activeEnvIdForScope = useEnvStore((s) => s.activeEnvId);
   const activeCollection = useEnvStore((s) => s.activeCollection);
+
+  const schemaEntry = useGraphQlSchemaStore((s) => s.entries[tab.id]);
+  const loadCachedSchema = useGraphQlSchemaStore((s) => s.loadCached);
+  const fetchSchema = useGraphQlSchemaStore((s) => s.fetchSchema);
+
+  // Pick up a schema already fetched for this endpoint, without any network call.
+  // The cache is keyed by endpoint and environment, so those are the triggers.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `request` changes on every keystroke
+  useEffect(() => {
+    if (!isGraphQl) return;
+    void loadCachedSchema(tab.id, request);
+  }, [isGraphQl, tab.id, request.url, activeEnvIdForScope, loadCachedSchema]);
+
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
@@ -785,6 +801,16 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           isActive: activeSection === 'docs',
           onClick: () => setActiveSection('docs'),
         },
+        ...(profile.showSchema
+          ? [
+              {
+                value: 'schema',
+                label: <>Schema</>,
+                isActive: activeSection === 'schema',
+                onClick: () => setActiveSection('schema'),
+              },
+            ]
+          : []),
         {
           value: 'settings',
           label: (
@@ -806,6 +832,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       request.body.mode,
       profile.bodyTabLabel,
       profile.showLoadTest,
+      profile.showSchema,
       isGraphQl,
       request.graphql?.query,
       request.auth.authType,
@@ -1025,6 +1052,18 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             state={request.graphql ?? { query: '', variables: '' }}
             onChange={handleGraphQlChange}
             variableContext={scopedContext}
+            schema={schemaEntry?.schema}
+          />
+        </div>
+      ) : null}
+      {activeSection === 'schema' ? (
+        <div className='flex-1 min-h-0 overflow-hidden'>
+          <GraphQlDocsExplorer
+            schema={schemaEntry?.schema}
+            status={schemaEntry?.status ?? 'idle'}
+            error={schemaEntry?.error}
+            fetchedAt={schemaEntry?.fetchedAt}
+            onFetch={(refresh) => void fetchSchema(tab.id, request, refresh)}
           />
         </div>
       ) : null}
@@ -1077,6 +1116,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           activeSection === 'scripts' ||
           activeSection === 'assertions' ||
           activeSection === 'vars' ||
+          activeSection === 'schema' ||
           (activeSection === 'body' && isGraphQl)
             ? 'hidden'
             : 'flex-1 overflow-auto p-3'

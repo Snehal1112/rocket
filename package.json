@@ -64,6 +64,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "graphql": "16",
+    "graphql-language-service": "5",
     "lucide-react": "^1.0.1",
     "monaco-editor": "^0.55.1",
     "react": "^19.1.0",

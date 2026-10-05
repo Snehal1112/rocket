@@ -6,6 +6,7 @@ export interface RequestProfile {
   showLoadTest: boolean;
   showCopyAsCurl: boolean;
   initialSection: 'params' | 'body';
+  showSchema: boolean;
 }
 
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
@@ -20,6 +21,7 @@ export function requestProfile(kind: RequestState['requestType']): RequestProfil
       showLoadTest: false,
       showCopyAsCurl: false,
       initialSection: 'body',
+      showSchema: true,
     };
   }
   return {
@@ -28,5 +30,6 @@ export function requestProfile(kind: RequestState['requestType']): RequestProfil
     showLoadTest: true,
     showCopyAsCurl: true,
     initialSection: 'params',
+    showSchema: false,
   };
 }

@@ -60,6 +60,17 @@ describe('GraphQlEditor', () => {
     expect(await screen.findByText('Variables must be a JSON object.')).toBeTruthy();
   });
 
+  it('tells the user that a subscription needs the WebSocket client', async () => {
+    vi.mocked(listGraphQlOperations).mockResolvedValue([{ name: 'OnEvent', kind: 'subscription' }]);
+    render(
+      <GraphQlEditor
+        state={{ query: 'subscription OnEvent { event }', variables: '' }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText(/Subscriptions need the WebSocket client/)).toBeTruthy();
+  });
+
   it('does not patch the operation for several anonymous operations', async () => {
     vi.mocked(listGraphQlOperations).mockResolvedValue([
       { name: null, kind: 'query' },

@@ -9,6 +9,7 @@ describe('requestProfile', () => {
     expect(p.showLoadTest).toBe(true);
     expect(p.showCopyAsCurl).toBe(true);
     expect(p.initialSection).toBe('params');
+    expect(p.showSchema).toBe(false);
   });
 
   it('limits graphql to POST and GET and hides what only fits HTTP bodies', () => {
@@ -18,5 +19,6 @@ describe('requestProfile', () => {
     expect(p.showLoadTest).toBe(false);
     expect(p.showCopyAsCurl).toBe(false);
     expect(p.initialSection).toBe('body');
+    expect(p.showSchema).toBe(true);
   });
 });

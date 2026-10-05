@@ -1,5 +1,7 @@
-import { AlertTriangle } from 'lucide-react';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import type { GraphQLSchema } from 'graphql';
+import { AlertTriangle, Info } from 'lucide-react';
+import type * as monacoNs from 'monaco-editor';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import {
   Select,
@@ -24,12 +26,42 @@ interface GraphQlEditorProps {
   state: GraphQlState;
   onChange: (patch: Partial<GraphQlState>) => void;
   variableContext?: Map<string, VariableScopeEntry>;
+  /** Enables schema-aware completion and validation in the query editor. */
+  schema?: GraphQLSchema;
 }
 
 // Query on top, variables below, operation picker in the toolbar when the
 // document defines several operations.
-export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEditorProps) {
+export function GraphQlEditor({ state, onChange, variableContext, schema }: GraphQlEditorProps) {
   const [operations, setOperations] = useState<GraphQlOperation[] | null>(null);
+
+  const schemaRef = useRef<GraphQLSchema | undefined>(schema);
+  const supportRef = useRef<{ revalidate: () => void; dispose: () => void } | null>(null);
+  const unmountedRef = useRef(false);
+
+  // Keep the provider reading the latest schema and refresh the diagnostics.
+  useEffect(() => {
+    schemaRef.current = schema;
+    supportRef.current?.revalidate();
+  }, [schema]);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      supportRef.current?.dispose();
+      supportRef.current = null;
+    };
+  }, []);
+
+  // Monaco is loaded lazily, so the language support is too.
+  const handleQueryEditorReady = useCallback((editor: monacoNs.editor.IStandaloneCodeEditor) => {
+    void import('@/components/editor/graphql-language').then((m) => {
+      if (unmountedRef.current) return;
+      supportRef.current?.dispose();
+      supportRef.current = m.attachGraphQlSupport(editor, () => schemaRef.current);
+    });
+  }, []);
 
   // Ask the backend scanner for the operation list, debounced while typing.
   useEffect(() => {
@@ -71,6 +103,9 @@ export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEdito
 
   const variablesError = validateVariablesText(state.variables);
 
+  const chosen = (operations ?? []).find((o) => o.name === state.operationName) ?? operations?.[0];
+  const isSubscription = chosen?.kind === 'subscription';
+
   return (
     <div className='flex h-full min-h-0 flex-col'>
       {hasSeveral && (
@@ -96,6 +131,13 @@ export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEdito
         </div>
       )}
 
+      {isSubscription && (
+        <div className='flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shrink-0'>
+          <Info className='h-3.5 w-3.5' aria-hidden='true' />
+          Subscriptions need the WebSocket client and cannot be sent over HTTP.
+        </div>
+      )}
+
       <div className='flex-1 min-h-0'>
         <Suspense fallback={<EditorSkeleton />}>
           <MonacoWrapper
@@ -104,6 +146,7 @@ export function GraphQlEditor({ state, onChange, variableContext }: GraphQlEdito
             language='graphql'
             height='100%'
             variableContext={variableContext}
+            onEditorReady={handleQueryEditorReady}
           />
         </Suspense>
       </div>
