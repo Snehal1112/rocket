@@ -76,6 +76,7 @@ fn builtin_sample(local: &str) -> &'static str {
 
 /// Renders sample XML for schema elements and types. Namespace prefixes (`ns1`, `ns2`, ...)
 /// are handed out in first-use order and exposed so the caller can declare them.
+/// The node budget covers the whole sampler, so use one sampler per message body.
 pub(crate) struct Sampler<'a> {
     schemas: &'a SchemaSet,
     prefixes: BTreeMap<String, String>,
@@ -121,7 +122,6 @@ impl<'a> Sampler<'a> {
 
     /// Sample for a top-level element declaration. An unknown element renders empty.
     pub(crate) fn element(&mut self, name: &QName) -> String {
-        self.nodes_left = MAX_NODES;
         let schemas = self.schemas;
         match schemas.elements.get(name) {
             Some(decl) => self.render_decl(decl, 0),
@@ -134,7 +134,6 @@ impl<'a> Sampler<'a> {
 
     /// Unqualified element of a given type, used for `type=` message parts.
     pub(crate) fn typed_element(&mut self, local: &str, ty: &QName) -> String {
-        self.nodes_left = MAX_NODES;
         let local = safe_name(local);
         let content = self.render_named(ty, 0);
         format!("<{local}>{content}</{local}>")
@@ -459,5 +458,56 @@ mod tests {
         let mut s = Sampler::new(&model.schemas);
         let xml = s.element(&QName::new("urn:t", "Root"));
         assert!(xml.contains("<!-- type nesting limit -->"), "got: {xml}");
+    }
+
+    fn fan_out_xsd() -> String {
+        let mut xsd = String::new();
+        for i in 0..8 {
+            let child = if i == 7 {
+                "xsd:string".to_string()
+            } else {
+                format!("t:T{}", i + 1)
+            };
+            xsd.push_str(&format!(r#"<xsd:complexType name="T{i}"><xsd:sequence>"#));
+            for j in 0..10 {
+                xsd.push_str(&format!(r#"<xsd:element name="p{j}" type="{child}"/>"#));
+            }
+            xsd.push_str("</xsd:sequence></xsd:complexType>");
+        }
+        xsd.push_str(r#"<xsd:element name="Root" type="t:T0"/>"#);
+        xsd
+    }
+
+    #[test]
+    fn budget_is_shared_across_calls_on_one_sampler() {
+        // A message with many parts reuses one sampler, so the budget covers the whole body.
+        let model = model_with_schema(&fan_out_xsd());
+        let mut s = Sampler::new(&model.schemas);
+        let t0 = QName::new("urn:t", "T0");
+        let mut body = String::new();
+        for i in 0..200 {
+            if i % 2 == 0 {
+                body.push_str(&s.typed_element("part", &t0));
+            } else {
+                body.push_str(&s.element(&QName::new("urn:t", "Root")));
+            }
+        }
+        assert!(body.contains("<!-- size limit -->"), "marker missing");
+        assert!(body.len() < 1_000_000, "total output was {} bytes", body.len());
+        assert_wellformed(&s, &body);
+    }
+
+    #[test]
+    fn a_fresh_sampler_gets_a_fresh_budget() {
+        let model = model_with_schema(&fan_out_xsd());
+        let mut spent = Sampler::new(&model.schemas);
+        for _ in 0..4 {
+            spent.element(&QName::new("urn:t", "Root"));
+        }
+        let exhausted = spent.element(&QName::new("urn:t", "Root"));
+        assert_eq!(exhausted, "<!-- size limit -->");
+        let mut fresh = Sampler::new(&model.schemas);
+        let first = fresh.element(&QName::new("urn:t", "Root"));
+        assert!(first.starts_with("<ns1:Root>"), "got: {}", &first[..40]);
     }
 }

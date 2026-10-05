@@ -118,7 +118,9 @@ fn in_ns(n: &Node, ns: &str, name: &str) -> bool {
 
 /// URLs and UNC paths are never opened, since a UNC path would reach the network on Windows.
 fn is_remote(loc: &str) -> bool {
-    loc.contains("://") || loc.starts_with("//") || loc.starts_with("\\\\")
+    let mut chars = loc.chars();
+    let sep = |c: Option<char>| matches!(c, Some('/' | '\\'));
+    loc.contains("://") || (sep(chars.next()) && sep(chars.next()))
 }
 
 /// Locations referenced by `wsdl:import`, `xsd:import`, `xsd:include` and `xsd:redefine`.
@@ -859,5 +861,21 @@ mod tests {
             model.warnings
         );
         assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
+    }
+
+    #[test]
+    fn mixed_separator_unc_forms_are_remote() {
+        assert!(is_remote(r"/\host\share\x.xsd"));
+        assert!(is_remote(r"\/host/share/x.xsd"));
+        assert!(!is_remote("/abs/path.xsd"));
+        assert!(!is_remote(r"\single.xsd"));
+    }
+
+    #[test]
+    fn mixed_separator_unc_imports_are_warned_not_opened() {
+        let wsdl = wsdl_importing(&[r"/\host\share\x.xsd", r"\/host/share/y.xsd"]);
+        let model = parse_wsdl_str(&wsdl, Path::new("mixed.wsdl")).expect("parses");
+        let n = model.warnings.iter().filter(|w| w.contains("not fetched")).count();
+        assert_eq!(n, 2, "got: {:?}", model.warnings);
     }
 }
