@@ -1,5 +1,5 @@
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
-import { ChevronDown, ChevronRight, FileJson, Loader2, Plus, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileCode, FileJson, Loader2, Plus, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,9 @@ import {
   importBrunoZip,
   importPostmanCollection,
   importPostmanEnvironment,
+  importWsdl,
 } from '@/lib/tauri-api';
+import { describeSource, type SourceKind } from './importSources';
 
 interface ImportCollectionDialogProps {
   open: boolean;
@@ -32,9 +34,35 @@ interface ImportCollectionDialogProps {
   onImportComplete?: () => void;
 }
 
-type ImportSource = 'bruno' | 'postman';
-type SourceKind = 'folder' | 'zip' | 'postman-json';
+type ImportSource = 'bruno' | 'postman' | 'wsdl';
 type DialogState = 'picking' | 'importing' | 'done';
+
+const IMPORT_DESCRIPTIONS: Record<ImportSource, string> = {
+  bruno:
+    'Select a Bruno collection folder or ZIP archive. Collection or workspace is detected automatically.',
+  postman: 'Select a Postman Collection JSON file (v2.0 or v2.1).',
+  wsdl: 'Select a WSDL 1.1 file. You get one request per SOAP operation, with the envelope and SOAP headers filled in.',
+};
+
+const EMPTY_HEADLINES: Record<ImportSource, string> = {
+  bruno: 'Drop a folder or ZIP here',
+  postman: 'Choose a Postman Collection JSON file',
+  wsdl: 'Choose a WSDL file',
+};
+
+const EMPTY_HINTS: Record<ImportSource, string> = {
+  bruno: 'Collection export or extracted directory',
+  postman: 'Exported via File → Export in Postman',
+  wsdl: 'SOAP 1.1 or 1.2, local XSD imports are followed',
+};
+
+/** Glyph for a selected source. WSDL uses an icon, older kinds keep their emoji. */
+function SourceGlyph({ kind }: { kind: SourceKind }) {
+  if (kind === 'wsdl-file') return <FileCode className='h-4 w-4 text-muted-foreground' />;
+  if (kind === 'zip') return <>🗜️</>;
+  if (kind === 'postman-json') return <>📄</>;
+  return <>📁</>;
+}
 
 interface SelectedSource {
   path: string;
@@ -118,6 +146,19 @@ export function ImportCollectionDialog({
     }
   }
 
+  async function handleChooseWsdl() {
+    const path = await openFilePicker({
+      directory: false,
+      multiple: false,
+      filters: [{ name: 'WSDL', extensions: ['wsdl', 'xml'] }],
+    });
+    if (typeof path === 'string') {
+      const name = path.split('/').pop() ?? path;
+      setSource({ path, kind: 'wsdl-file', name });
+      setError(null);
+    }
+  }
+
   async function handleChooseEnvJson() {
     const path = await openFilePicker({
       directory: false,
@@ -136,7 +177,7 @@ export function ImportCollectionDialog({
       let newWsId: string | null = null;
 
       if (createWorkspace) {
-        const wsName = source.name.replace(/\.zip$/i, '');
+        const wsName = source.name.replace(/\.(zip|wsdl|xml)$/i, '');
         const dataDir = await getAppDataDir();
         const sep = dataDir.includes('\\') ? '\\' : '/';
         const fullPath = dataDir.endsWith(sep) ? dataDir + wsName : dataDir + sep + wsName;
@@ -148,7 +189,9 @@ export function ImportCollectionDialog({
       }
 
       let result: ImportReport;
-      if (importSource === 'postman') {
+      if (importSource === 'wsdl') {
+        result = await importWsdl(source.path, targetWsId);
+      } else if (importSource === 'postman') {
         result = await importPostmanCollection(source.path, targetWsId);
         if (envFilePath && result.createdCollections.length > 0) {
           await importPostmanEnvironment(envFilePath, result.createdCollections[0], targetWsId);
@@ -183,11 +226,7 @@ export function ImportCollectionDialog({
           <>
             <DialogHeader>
               <DialogTitle>Import Collection</DialogTitle>
-              <DialogDescription>
-                {importSource === 'bruno'
-                  ? 'Select a Bruno collection folder or ZIP archive. Collection or workspace is detected automatically.'
-                  : 'Select a Postman Collection JSON file (v2.0 or v2.1).'}
-              </DialogDescription>
+              <DialogDescription>{IMPORT_DESCRIPTIONS[importSource]}</DialogDescription>
             </DialogHeader>
 
             <div className='space-y-3 py-2'>
@@ -208,6 +247,14 @@ export function ImportCollectionDialog({
                 >
                   Postman
                 </Button>
+                <Button
+                  variant={importSource === 'wsdl' ? 'secondary' : 'ghost'}
+                  size='sm'
+                  className='h-7 px-3 text-xs'
+                  onClick={() => switchImportSource('wsdl')}
+                >
+                  WSDL
+                </Button>
               </div>
 
               <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
@@ -226,31 +273,27 @@ export function ImportCollectionDialog({
                 {source ? (
                   <>
                     <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-primary/10 mx-auto text-lg'>
-                      {source.kind === 'zip' ? '🗜️' : source.kind === 'postman-json' ? '📄' : '📁'}
+                      <SourceGlyph kind={source.kind} />
                     </div>
                     <p className='text-sm font-semibold text-foreground'>{source.name}</p>
                     <p className='mt-0.5 text-xs text-muted-foreground'>
-                      {source.kind === 'zip'
-                        ? 'ZIP archive'
-                        : source.kind === 'postman-json'
-                          ? 'Postman Collection JSON'
-                          : 'Folder'}
+                      {describeSource(source.kind)}
                     </p>
                   </>
                 ) : (
                   <>
                     <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-muted mx-auto'>
-                      <Upload className='h-4 w-4 text-muted-foreground' />
+                      {importSource === 'wsdl' ? (
+                        <FileCode className='h-4 w-4 text-muted-foreground' />
+                      ) : (
+                        <Upload className='h-4 w-4 text-muted-foreground' />
+                      )}
                     </div>
                     <p className='text-sm font-medium text-muted-foreground'>
-                      {importSource === 'bruno'
-                        ? 'Drop a folder or ZIP here'
-                        : 'Choose a Postman Collection JSON file'}
+                      {EMPTY_HEADLINES[importSource]}
                     </p>
                     <p className='mt-0.5 text-xs text-muted-foreground'>
-                      {importSource === 'bruno'
-                        ? 'Collection export or extracted directory'
-                        : 'Exported via File → Export in Postman'}
+                      {EMPTY_HINTS[importSource]}
                     </p>
                   </>
                 )}
@@ -296,7 +339,8 @@ export function ImportCollectionDialog({
                         </button>
                       </>
                     )
-                  ) : (
+                  ) : null}
+                  {importSource === 'postman' && (
                     <button
                       type='button'
                       className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
@@ -305,6 +349,16 @@ export function ImportCollectionDialog({
                       {source ? 'change file' : 'choose JSON file'}
                     </button>
                   )}
+                  {importSource === 'wsdl' && (
+                    <Button
+                      variant='link'
+                      size='sm'
+                      className='h-auto p-0 text-xs'
+                      onClick={() => void handleChooseWsdl()}
+                    >
+                      {source ? 'change WSDL file' : 'choose WSDL file'}
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -312,7 +366,7 @@ export function ImportCollectionDialog({
               {source && (
                 <div className='flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5'>
                   <span className='text-xs'>
-                    {source.kind === 'zip' ? '🗜️' : source.kind === 'postman-json' ? '📄' : '📁'}
+                    <SourceGlyph kind={source.kind} />
                   </span>
                   <span className='flex-1 truncate font-mono text-[10px] text-muted-foreground'>
                     {source.path}

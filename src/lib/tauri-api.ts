@@ -1385,6 +1385,9 @@ export const importPostmanEnvironment = (
     targetWorkspaceId,
   });
 
+export const importWsdl = (path: string, targetWorkspaceId: string) =>
+  invoke<ImportReport>('import_wsdl', { path, targetWorkspaceId });
+
 // ============================================================
 // UI state persistence
 // ============================================================
