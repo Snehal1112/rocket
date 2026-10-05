@@ -57,3 +57,30 @@ describe('AuthEditor for digest, wsse, ntlm and oauth1', () => {
     expect(screen.getByLabelText('Consumer key')).toHaveValue('ck');
   });
 });
+
+describe('AuthEditor for aws-sig-v4', () => {
+  it('edits the profile name and keeps the other fields', () => {
+    const onChange = vi.fn();
+    render(
+      <AuthEditor
+        auth={{
+          authType: 'aws-sig-v4',
+          awsSigV4: { accessKey: 'a', secretKey: 's', region: 'r', service: 'x', sessionToken: '' },
+        }}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Profile name'), { target: { value: 'prod' } });
+    expect(onChange).toHaveBeenLastCalledWith({
+      authType: 'aws-sig-v4',
+      awsSigV4: {
+        accessKey: 'a',
+        secretKey: 's',
+        region: 'r',
+        service: 'x',
+        sessionToken: '',
+        profileName: 'prod',
+      },
+    });
+  });
+});

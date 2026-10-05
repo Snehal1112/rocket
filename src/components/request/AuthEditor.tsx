@@ -376,6 +376,23 @@ export function AuthEditor({
                   Only required for temporary credentials.
                 </p>
               </div>
+
+              <div>
+                <Label className='mb-1 block'>Profile name</Label>
+                <SingleLineEditor
+                  aria-label='Profile name'
+                  className='text-sm'
+                  placeholder='(optional) default'
+                  value={auth.awsSigV4.profileName ?? ''}
+                  onChange={(newVal) => patchAWS({ profileName: newVal })}
+                  variableContext={variableContext}
+                  onNavigateToSource={onNavigateToSource}
+                />
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  Reads the keys from this profile of ~/.aws/credentials when the access and secret
+                  key above are empty.
+                </p>
+              </div>
             </CardContent>
           </Card>
 

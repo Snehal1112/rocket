@@ -2121,7 +2121,7 @@ fn resolve_auth(auth: Auth, vars: &std::collections::HashMap<String, String>) ->
             region: r(region),
             service: r(service),
             session_token: session_token.map(&r),
-            profile_name,
+            profile_name: profile_name.map(&r),
         },
         other => other,
     }
@@ -8086,5 +8086,26 @@ mod tests {
             state.var_ctx.runtime.get("TOKEN"),
             Some(&"from-step-1".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_auth_resolves_the_aws_profile_name() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("profile".to_string(), "prod".to_string());
+        let out = resolve_auth(
+            Auth::AwsSigV4 {
+                access_key: String::new(),
+                secret_key: String::new(),
+                region: "us-east-1".into(),
+                service: "s3".into(),
+                session_token: None,
+                profile_name: Some("{{profile}}".into()),
+            },
+            &vars,
+        );
+        assert!(matches!(
+            out,
+            Auth::AwsSigV4 { profile_name: Some(ref n), .. } if n == "prod"
+        ));
     }
 }

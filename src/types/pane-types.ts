@@ -362,7 +362,7 @@ export interface AuthState {
     region: string;
     service: string;
     sessionToken: string;
-    /** No editor UI yet — kept so a value round-trips through save/load instead of being silently dropped. */
+    /** Profile of the shared AWS credentials file, used when the keys above are empty. */
     profileName?: string;
   };
 }

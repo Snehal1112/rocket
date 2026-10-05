@@ -66,6 +66,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **OAuth1.** `ReqwestExecutor::execute` signs the built request via `apply_oauth1` (after the body is applied, since form bodies are part of the signature). Placement is `header` (default), `query` or `body`. RSA-* signature methods fail the request with an error.
 
+**AWS SigV4.** Like OAuth1, signed in `execute` via `apply_aws_sigv4` after the body is applied. The payload hash covers the real body; a streamed (multipart) body is signed as `UNSIGNED-PAYLOAD`. The signed `host` includes a non-default port. Credentials come from `aws_profile::resolve_credentials`: keys typed into the request win, otherwise a profile name is read from `~/.aws/credentials` (or `AWS_SHARED_CREDENTIALS_FILE`); empty keys with no profile fail the request instead of sending it. Errors and `Debug` output never contain keys or tokens.
+
 **`OcAuth` serde design.** `OcAuth` is `#[serde(untagged)]`: the string `"inherit"` deserializes to `OcAuth::Inherit`; an object with a `type` field deserializes to `OcAuth::Typed`. New auth variants must go inside `OcAuthTyped` (tagged by `type`), not as new `OcAuth` variants.
 
 **`OcItem` variant ordering.** The `OcItem` enum uses `#[serde(untagged)]`, so serde tries variants top-to-bottom. More specific types (those with a unique required field) must come before less specific ones — `Http` before `Folder`, etc. Changing variant order breaks deserialization of existing YAML files.

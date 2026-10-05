@@ -203,3 +203,45 @@ describe('toApiBody', () => {
     ).toEqual({ mode: 'sparql', content: 'ASK { ?s ?p ?o }' });
   });
 });
+
+describe('toApiAuth aws-sig-v4', () => {
+  it('sends the credentials instead of falling back to none', () => {
+    const auth = {
+      authType: 'aws-sig-v4',
+      awsSigV4: {
+        accessKey: '{{k}}',
+        secretKey: 's',
+        region: 'us-east-1',
+        service: 's3',
+        sessionToken: '',
+        profileName: 'prod',
+      },
+    } as const;
+    expect(toApiAuth(auth, (s) => s.replace('{{k}}', 'AKIA'))).toEqual({
+      authType: 'aws-sig-v4',
+      accessKey: 'AKIA',
+      secretKey: 's',
+      region: 'us-east-1',
+      service: 's3',
+      sessionToken: undefined,
+      profileName: 'prod',
+    });
+  });
+
+  it('keeps a session token and omits an empty profile name', () => {
+    const auth = {
+      authType: 'aws-sig-v4',
+      awsSigV4: {
+        accessKey: 'a',
+        secretKey: 's',
+        region: 'r',
+        service: 'x',
+        sessionToken: 'tok',
+        profileName: '',
+      },
+    } as const;
+    const out = toApiAuth(auth) as unknown as Record<string, unknown>;
+    expect(out.sessionToken).toBe('tok');
+    expect(out.profileName).toBeUndefined();
+  });
+});

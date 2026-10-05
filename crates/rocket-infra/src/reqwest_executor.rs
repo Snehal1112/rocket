@@ -326,21 +326,43 @@ impl HttpExecutor for ReqwestExecutor {
         let builder = apply_auth(
             start_builder(url),
             &request.auth,
-            &request.method,
             &request.options.client_certificates,
         )
         .await?;
         let builder = finish_builder(builder)?;
 
-        // OAuth1 signs the final request, so it has to wait until the body is applied.
-        let mut response = if let Auth::OAuth1(oauth) = &request.auth {
-            let mut built = builder.build().map_err(|e| {
-                DomainError::Internal(format!("Cannot build request for signing: {e}"))
-            })?;
-            apply_oauth1(&mut built, &request.method, oauth)?;
-            client.execute(built).await
-        } else {
-            builder.send().await
+        let mut response = match &request.auth {
+            // OAuth1 and AWS signing both sign the final request, so they wait until the body is applied.
+            Auth::OAuth1(oauth) => {
+                let mut built = builder.build().map_err(|e| {
+                    DomainError::Internal(format!("Cannot build request for signing: {e}"))
+                })?;
+                apply_oauth1(&mut built, &request.method, oauth)?;
+                client.execute(built).await
+            }
+            Auth::AwsSigV4 {
+                access_key,
+                secret_key,
+                region,
+                service,
+                session_token,
+                profile_name,
+            } => {
+                let creds = crate::aws_profile::resolve_credentials(
+                    access_key,
+                    secret_key,
+                    region,
+                    service,
+                    session_token.as_deref(),
+                    profile_name.as_deref(),
+                )?;
+                let mut built = builder.build().map_err(|e| {
+                    DomainError::Internal(format!("Cannot build request for signing: {e}"))
+                })?;
+                apply_aws_sigv4(&mut built, &creds)?;
+                client.execute(built).await
+            }
+            _ => builder.send().await,
         }
         .map_err(|e| DomainError::Http(e.to_string()))?;
 
@@ -705,7 +727,6 @@ fn map_method(method: &rocket_shared::types::HttpMethod) -> DomainResult<Method>
 async fn apply_auth(
     mut builder: reqwest::RequestBuilder,
     auth: &Auth,
-    method: &rocket_shared::types::HttpMethod,
     certificates: &[ResolvedClientCertificate],
 ) -> DomainResult<reqwest::RequestBuilder> {
     match auth {
@@ -779,63 +800,74 @@ async fn apply_auth(
                 "NTLM authentication is not supported yet".into(),
             ));
         }
-        Auth::AwsSigV4 {
-            access_key,
-            secret_key,
-            region,
-            service,
-            session_token,
-            profile_name: _,
-        } => {
-            use rocket_http::aws_sig::{sign_request, AwsCredentials};
-
-            let creds = AwsCredentials {
-                access_key: access_key.clone(),
-                secret_key: secret_key.clone(),
-                region: region.clone(),
-                service: service.clone(),
-                session_token: session_token.clone(),
-            };
-
-            let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-            let method_str = method.to_string();
-
-            // Build a temporary copy to extract the final URL.
-            let url_str = builder
-                .try_clone()
-                .ok_or_else(|| {
-                    DomainError::Internal("Cannot clone request builder for signing".into())
-                })?
-                .build()
-                .map_err(|e| {
-                    DomainError::Internal(format!("Cannot build request for signing: {e}"))
-                })?
-                .url()
-                .to_string();
-
-            // Include the host header for signing.
-            let host = reqwest::Url::parse(&url_str)
-                .map_err(|e| DomainError::Internal(format!("Invalid URL during signing: {e}")))?
-                .host_str()
-                .unwrap_or("")
-                .to_string();
-
-            let headers: Vec<(String, String)> = vec![("host".to_string(), host)];
-
-            let signed = sign_request(&method_str, &url_str, &headers, b"", &creds, &timestamp)
-                .map_err(|e| DomainError::Internal(format!("AWS signing failed: {e}")))?;
-
-            builder = builder
-                .header("Authorization", &signed.authorization)
-                .header("x-amz-date", &signed.x_amz_date)
-                .header("x-amz-content-sha256", &signed.x_amz_content_sha256);
-
-            if let Some(token) = &signed.x_amz_security_token {
-                builder = builder.header("x-amz-security-token", token);
-            }
+        Auth::AwsSigV4 { .. } => {
+            // Signed in `execute` once the body is known; see `apply_aws_sigv4`.
         }
     }
     Ok(builder)
+}
+
+/// Signs a built request with AWS Signature Version 4 and sets the signing headers.
+///
+/// The payload hash covers the real body. A streamed body (multipart) cannot be hashed up
+/// front, so it is signed as `UNSIGNED-PAYLOAD`. The signed `host` includes the port when the
+/// URL has a non-default one, which is what the server receives.
+fn apply_aws_sigv4(
+    req: &mut reqwest::Request,
+    creds: &rocket_http::aws_sig::AwsCredentials,
+) -> DomainResult<()> {
+    use rocket_http::aws_sig::{hex_sha256, sign_request_with_payload_hash, UNSIGNED_PAYLOAD};
+
+    let payload_hash = match req.body().map(|b| b.as_bytes()) {
+        None => hex_sha256(&[]),
+        Some(Some(bytes)) => hex_sha256(bytes),
+        Some(None) => UNSIGNED_PAYLOAD.to_string(),
+    };
+    let url = req.url().clone();
+    let host = match (url.host_str(), url.port()) {
+        (Some(h), Some(p)) => format!("{h}:{p}"),
+        (Some(h), None) => h.to_string(),
+        _ => {
+            return Err(DomainError::InvalidInput(
+                "AWS Signature V4 needs a URL with a host".into(),
+            ))
+        }
+    };
+    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let signed = sign_request_with_payload_hash(
+        req.method().as_str(),
+        url.as_str(),
+        &[("host".to_string(), host)],
+        &payload_hash,
+        creds,
+        &timestamp,
+    )
+    .map_err(|e| DomainError::Internal(format!("AWS signing failed: {e}")))?;
+
+    let headers = req.headers_mut();
+    set_header(headers, "authorization", &signed.authorization)?;
+    set_header(headers, "x-amz-date", &signed.x_amz_date)?;
+    set_header(
+        headers,
+        "x-amz-content-sha256",
+        &signed.x_amz_content_sha256,
+    )?;
+    if let Some(token) = &signed.x_amz_security_token {
+        set_header(headers, "x-amz-security-token", token)?;
+    }
+    Ok(())
+}
+
+/// Sets one header on a built request. The error names the header but never its value.
+fn set_header(
+    headers: &mut reqwest::header::HeaderMap,
+    name: &'static str,
+    value: &str,
+) -> DomainResult<()> {
+    let value = reqwest::header::HeaderValue::from_str(value)
+        .map_err(|e| DomainError::InvalidInput(format!("Invalid {name} header value: {e}")))?;
+    headers.insert(reqwest::header::HeaderName::from_static(name), value);
+    Ok(())
 }
 
 /// Signs a built request with OAuth 1.0 and writes the `oauth_*` parameters to the
@@ -2552,5 +2584,155 @@ mod binary_response_tests {
         assert!(!response.is_binary);
         assert_eq!(response.body, "{\"a\":1}");
         assert_eq!(response.body_base64, None);
+    }
+}
+
+#[cfg(test)]
+mod sigv4_tests {
+    use super::*;
+    use rocket_http::aws_sig::{hex_sha256, sign_request_with_payload_hash, AwsCredentials};
+    use rocket_shared::types::{FormDataEntry, FormDataType, HttpMethod};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn auth() -> Auth {
+        Auth::AwsSigV4 {
+            access_key: "AKIDEXAMPLE".into(),
+            secret_key: "SECRET".into(),
+            region: "us-east-1".into(),
+            service: "execute-api".into(),
+            session_token: None,
+            profile_name: None,
+        }
+    }
+
+    fn creds() -> AwsCredentials {
+        AwsCredentials {
+            access_key: "AKIDEXAMPLE".into(),
+            secret_key: "SECRET".into(),
+            region: "us-east-1".into(),
+            service: "execute-api".into(),
+            session_token: None,
+        }
+    }
+
+    async fn server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn header(req: &wiremock::Request, name: &str) -> String {
+        req.headers
+            .get(name)
+            .map(|v| v.to_str().unwrap_or_default().to_string())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn signs_the_actual_body_and_host_with_port() {
+        let server = server().await;
+        let url = format!("{}/orders", server.uri());
+        let body = "{\"id\":1}";
+        let mut req = HttpRequest::new(HttpMethod::Post, url.clone());
+        req.auth = auth();
+        req.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some(body.into()),
+            form_data: None,
+            file_path: None,
+        });
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+
+        let received = server.received_requests().await.expect("recorded");
+        let sent = &received[0];
+        assert_eq!(
+            header(sent, "x-amz-content-sha256"),
+            hex_sha256(body.as_bytes())
+        );
+
+        // Recompute the signature the way a verifying server would: with the Host header that
+        // arrived (host and port) and the hash of the body that arrived. The recorded URL has
+        // no port (wiremock rebuilds it as http://localhost{path}), so the header is used.
+        let host = header(sent, "host");
+        let port = reqwest::Url::parse(&server.uri())
+            .expect("server url")
+            .port()
+            .expect("server port");
+        assert!(host.ends_with(&format!(":{port}")), "{host}");
+        let expected = sign_request_with_payload_hash(
+            "POST",
+            sent.url.as_str(),
+            &[("host".to_string(), host)],
+            &hex_sha256(&sent.body),
+            &creds(),
+            &header(sent, "x-amz-date"),
+        )
+        .expect("sign");
+        assert_eq!(header(sent, "authorization"), expected.authorization);
+    }
+
+    #[tokio::test]
+    async fn a_request_without_a_body_signs_the_empty_hash() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/x", server.uri()));
+        req.auth = auth();
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+        let received = server.received_requests().await.expect("recorded");
+        assert_eq!(
+            header(&received[0], "x-amz-content-sha256"),
+            hex_sha256(b"")
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_body_is_signed_as_unsigned_payload() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/upload", server.uri()));
+        req.auth = auth();
+        req.body = Some(Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(vec![FormDataEntry {
+                key: "a".into(),
+                value: "1".into(),
+                entry_type: FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        });
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+        let received = server.received_requests().await.expect("recorded");
+        assert_eq!(
+            header(&received[0], "x-amz-content-sha256"),
+            "UNSIGNED-PAYLOAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_credentials_are_an_error() {
+        let mut req = HttpRequest::new(HttpMethod::Get, "http://127.0.0.1:1/x");
+        req.auth = Auth::AwsSigV4 {
+            access_key: String::new(),
+            secret_key: String::new(),
+            region: "us-east-1".into(),
+            service: "s3".into(),
+            session_token: None,
+            profile_name: None,
+        };
+        let err = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect_err("must fail");
+        assert!(err.to_string().contains("access key"), "{err}");
     }
 }

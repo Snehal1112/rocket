@@ -1,4 +1,5 @@
 pub mod acp_agent_client;
+mod aws_profile;
 mod atomic_write;
 pub mod azurekeyvault;
 pub mod callback_server;

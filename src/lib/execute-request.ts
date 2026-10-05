@@ -142,10 +142,19 @@ export function toApiAuth(auth: AuthState, resolve = (s: string) => s): Auth {
         authType: 'bearer',
         token: resolve(auth.oauth2?.accessToken ?? ''),
       };
-    case 'aws-sig-v4':
-      // AWS Signature V4 is not yet supported by the backend; falling back to none.
-      console.warn('Auth type aws-sig-v4 is not yet supported, falling back to none.');
-      return { authType: 'none' };
+    case 'aws-sig-v4': {
+      const a = auth.awsSigV4;
+      // Option<String> on the Rust side: omit an empty value rather than send ''.
+      return {
+        authType: 'aws-sig-v4',
+        accessKey: resolve(a?.accessKey ?? ''),
+        secretKey: resolve(a?.secretKey ?? ''),
+        region: resolve(a?.region ?? ''),
+        service: resolve(a?.service ?? ''),
+        sessionToken: resolve(a?.sessionToken ?? '') || undefined,
+        profileName: resolve(a?.profileName ?? '') || undefined,
+      };
+    }
     default: {
       const unsupported = (auth as AuthState).authType;
       console.warn(`Unsupported auth type: ${unsupported}, falling back to none.`);
