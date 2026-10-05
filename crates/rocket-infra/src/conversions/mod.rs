@@ -8,6 +8,7 @@ mod param;
 mod request;
 mod request_settings;
 mod variables;
+mod websocket;
 mod workspace;
 
 #[cfg(test)]
@@ -36,5 +37,9 @@ pub use param::{merge_params, split_params};
 pub use request::{oc_http_request_to_request, request_to_oc_http_request};
 #[allow(unused_imports)]
 pub use variables::*;
+#[allow(unused_imports)]
+pub use websocket::{
+    derived_websocket_uid, oc_websocket_to_request, websocket_to_oc_websocket, with_file_identity,
+};
 #[allow(unused_imports)]
 pub use workspace::*;

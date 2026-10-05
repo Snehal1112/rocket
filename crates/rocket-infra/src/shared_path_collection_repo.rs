@@ -5,7 +5,7 @@ use dashmap::DashMap;
 
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    GraphQlRequest, Request, RequestKind,
+    GraphQlRequest, Request, RequestKind, WebSocketRequest,
 };
 use rocket_shared::error::DomainResult;
 
@@ -86,6 +86,23 @@ impl CollectionRepository for SharedPathCollectionRepo {
 
     fn get_graphql_request(&self, collection: &str, path: &str) -> DomainResult<GraphQlRequest> {
         self.repo().get_graphql_request(collection, path)
+    }
+
+    fn get_websocket_request(
+        &self,
+        collection: &str,
+        path: &str,
+    ) -> DomainResult<WebSocketRequest> {
+        self.repo().get_websocket_request(collection, path)
+    }
+
+    fn save_websocket_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &WebSocketRequest,
+    ) -> DomainResult<String> {
+        self.repo().save_websocket_request(collection, path, request)
     }
 
     fn save_graphql_request(

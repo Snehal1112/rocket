@@ -411,6 +411,7 @@ fn reorder_items_writes_order_file_and_get_respects_it() {
             CollectionItem::Request(r) => r.name.as_str(),
             CollectionItem::Folder(f) => f.name.as_str(),
             CollectionItem::GraphQl(g) => g.name.as_str(),
+            CollectionItem::WebSocket(w) => w.name.as_str(),
             CollectionItem::OpaqueItem(o) => o.name.as_str(),
             CollectionItem::Summary(s) => s.name.as_str(),
         }
@@ -1481,14 +1482,17 @@ fn build_folder_tree_loads_non_http_items_as_opaque() {
     ));
 
     let realtime = col.root.find_folder("realtime").unwrap();
-    let ws = opaque_items(realtime);
-    assert_eq!(ws.len(), 1);
-    assert_eq!(ws[0].protocol, "websocket");
-    assert_eq!(ws[0].name, "Chat");
-    assert_eq!(
-        ws[0].raw["websocket"]["url"].as_str(),
-        Some("wss://chat.example.com/ws")
-    );
+    assert!(opaque_items(realtime).is_empty(), "websocket is typed now");
+    let ws = realtime
+        .items
+        .iter()
+        .find_map(|i| match i {
+            rocket_collection::CollectionItem::WebSocket(w) => Some(w),
+            _ => None,
+        })
+        .expect("typed websocket item");
+    assert_eq!(ws.name, "Chat");
+    assert_eq!(ws.url, "wss://chat.example.com/ws");
 }
 
 #[test]
@@ -1572,7 +1576,9 @@ fn get_summaries_skips_http_file_missing_method_instead_of_misreading_it() {
 }
 
 #[test]
-fn websocket_settings_preserved_in_opaque_item() {
+fn websocket_settings_survive_the_typed_load() {
+    use rocket_shared::types::RequestSettingValue;
+
     let (dir, repo) = setup();
     repo.create("my-api").unwrap();
     fs::write(
@@ -1581,21 +1587,10 @@ fn websocket_settings_preserved_in_opaque_item() {
     )
     .unwrap();
 
-    let col = repo.get("my-api").unwrap();
-    let ws = opaque_items(&col.root);
-    assert_eq!(ws.len(), 1);
-    assert_eq!(
-        ws[0].raw["settings"]["timeout"].as_f64(),
-        Some(5000.0),
-        "{:?}",
-        ws[0].raw
-    );
-    assert_eq!(
-        ws[0].raw["settings"]["keepAliveInterval"].as_f64(),
-        Some(30000.0),
-        "{:?}",
-        ws[0].raw
-    );
+    let ws = repo.get_websocket_request("my-api", "chat.yml").unwrap();
+    let settings = ws.settings.expect("settings");
+    assert_eq!(settings.timeout, Some(RequestSettingValue::Value(5000.0)));
+    assert_eq!(settings.keep_alive_interval, Some(RequestSettingValue::Value(30000.0)));
 }
 
 #[test]
@@ -1924,4 +1919,200 @@ fn get_summaries_returns_a_graphql_summary_with_its_kind() {
         }
         other => panic!("expected a summary, got {other:?}"),
     }
+}
+
+#[test]
+fn websocket_roundtrip_through_the_repo_preserves_every_field() {
+    use rocket_collection::websocket::*;
+    use rocket_collection::CollectionVariable;
+    use rocket_shared::description::Description;
+    use rocket_shared::types::{Auth, Header, RequestSettingValue};
+
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+
+    let mut ws = WebSocketRequest::new("Chat", "wss://chat.example.com/ws");
+    ws.description = Some(Description::text("Team chat"));
+    ws.seq = Some(4);
+    ws.tags = vec!["realtime".into()];
+    ws.headers = vec![Header::new("Origin", "https://example.com")];
+    ws.messages = vec![
+        WebSocketMessage { title: "hi".into(), selected: true, kind: WebSocketMessageKind::Json, data: "{}".into() },
+        WebSocketMessage { title: "raw".into(), selected: false, kind: WebSocketMessageKind::Binary, data: "AQID".into() },
+    ];
+    ws.auth = Auth::Bearer { token: "t".into() };
+    ws.runtime_auth = Some(Auth::Basic { username: "u".into(), password: "p".into() });
+    ws.variables = vec![CollectionVariable {
+        key: "room".into(),
+        value: "general".into(),
+        initial_value: "general".into(),
+        enabled: true,
+        secret: false,
+    }];
+    ws.scripts = vec![WebSocketScript { script_type: "before-request".into(), code: "// pre".into() }];
+    ws.settings = Some(WebSocketSettings {
+        timeout: Some(RequestSettingValue::Value(5000.0)),
+        keep_alive_interval: Some(RequestSettingValue::Inherit("inherit".into())),
+    });
+    ws.docs = Some("# Chat".into());
+
+    let written = repo.save_websocket_request("my-api", "chat", &ws).unwrap();
+    assert_eq!(written, "chat.yml");
+
+    let loaded = repo.get_websocket_request("my-api", "chat.yml").unwrap();
+    let mut expected = ws.clone();
+    expected.file_name = Some("chat.yml".into());
+    assert_eq!(loaded, expected);
+}
+
+#[test]
+fn single_untitled_message_is_written_in_the_single_form() {
+    use rocket_collection::websocket::*;
+
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let mut ws = WebSocketRequest::new("Chat", "ws://x");
+    ws.messages = vec![WebSocketMessage {
+        title: String::new(),
+        selected: true,
+        kind: WebSocketMessageKind::Json,
+        data: "{}".into(),
+    }];
+    repo.save_websocket_request("my-api", "chat", &ws).unwrap();
+
+    let raw: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(dir.path().join("my-api/chat.yml")).unwrap()).unwrap();
+    assert!(raw["websocket"]["message"].is_mapping(), "{raw:?}");
+    assert_eq!(raw["websocket"]["message"]["type"].as_str(), Some("json"));
+    assert_eq!(raw["info"]["type"].as_str(), Some("websocket"));
+}
+
+#[test]
+fn several_messages_are_written_as_variants() {
+    use rocket_collection::websocket::*;
+
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let mut ws = WebSocketRequest::new("Chat", "ws://x");
+    ws.messages = vec![
+        WebSocketMessage { title: "a".into(), selected: true, kind: WebSocketMessageKind::Text, data: "1".into() },
+        WebSocketMessage { title: "b".into(), selected: false, kind: WebSocketMessageKind::Text, data: "2".into() },
+    ];
+    repo.save_websocket_request("my-api", "chat", &ws).unwrap();
+
+    let raw: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(dir.path().join("my-api/chat.yml")).unwrap()).unwrap();
+    assert!(raw["websocket"]["message"].is_sequence(), "{raw:?}");
+    assert_eq!(raw["websocket"]["message"][1]["title"].as_str(), Some("b"));
+}
+
+#[test]
+fn a_websocket_file_without_uid_loads_with_the_same_derived_uid_everywhere() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(dir.path().join("my-api/chat.yml"), WEBSOCKET_ITEM_YML).unwrap();
+
+    let by_path = repo.get_websocket_request("my-api", "chat.yml").unwrap();
+    assert_eq!(by_path.uid, "ws-chat.yml");
+
+    let full = repo.get("my-api").unwrap();
+    let in_tree = full
+        .root
+        .items
+        .iter()
+        .find_map(|i| match i {
+            rocket_collection::CollectionItem::WebSocket(w) => Some(w),
+            _ => None,
+        })
+        .expect("websocket item in the full tree");
+    assert_eq!(in_tree.uid, by_path.uid);
+    assert_eq!(in_tree.file_name.as_deref(), Some("chat.yml"));
+}
+
+#[test]
+fn summary_loading_returns_a_websocket_summary_for_the_sidebar() {
+    use rocket_collection::{CollectionItem, RequestKind};
+
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(dir.path().join("my-api/chat.yml"), WEBSOCKET_ITEM_YML).unwrap();
+    fs::write(dir.path().join("my-api/get-user.yml"), GRPC_ITEM_YML).unwrap();
+
+    let col = repo.get_summaries("my-api").unwrap();
+
+    // gRPC is still left out of the summary payload (its own plan owns that).
+    assert_eq!(col.root.items.len(), 1, "{:?}", col.root.items);
+    match &col.root.items[0] {
+        CollectionItem::Summary(s) => {
+            assert_eq!(s.kind, RequestKind::WebSocket);
+            assert_eq!(s.name, "Chat");
+            assert_eq!(s.method, "GET");
+            assert_eq!(s.url, "wss://chat.example.com/ws");
+            assert_eq!(s.file_name.as_deref(), Some("chat.yml"));
+            // The same derived uid as a full load, so a tab opened from the sidebar keeps its id.
+            assert_eq!(s.uid, "ws-chat.yml");
+        }
+        other => panic!("expected a summary, got {other:?}"),
+    }
+}
+
+#[test]
+fn request_kind_reports_websocket_files() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(dir.path().join("my-api/chat.yml"), WEBSOCKET_ITEM_YML).unwrap();
+    assert_eq!(
+        repo.request_kind("my-api", "chat.yml").unwrap(),
+        rocket_collection::RequestKind::WebSocket
+    );
+}
+
+#[test]
+fn saving_a_websocket_request_keeps_runtime_variables_edited_on_their_own_path() {
+    use rocket_collection::CollectionVariable;
+
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let ws = rocket_collection::WebSocketRequest::new("Chat", "ws://x");
+    repo.save_websocket_request("my-api", "chat", &ws).unwrap();
+
+    // Variables are edited through their own commands, not through the request payload.
+    let var = CollectionVariable {
+        key: "room".into(),
+        value: "general".into(),
+        initial_value: "general".into(),
+        enabled: true,
+        secret: false,
+    };
+    repo.save_request_variables("my-api", "chat.yml", vec![var.clone()]).unwrap();
+    assert_eq!(repo.get_request_variables("my-api", "chat.yml").unwrap(), vec![var.clone()]);
+
+    // A later save from the UI sends no variables and must not erase them.
+    let mut again = repo.get_websocket_request("my-api", "chat.yml").unwrap();
+    again.variables = Vec::new();
+    again.name = "Chat v2".into();
+    repo.save_websocket_request("my-api", "chat", &again).unwrap();
+
+    assert_eq!(repo.get_request_variables("my-api", "chat.yml").unwrap(), vec![var]);
+    let after = repo.get_websocket_request("my-api", "chat.yml").unwrap();
+    assert_eq!(after.name, "Chat v2");
+    assert_eq!(after.url, "ws://x", "the file is still a websocket file");
+}
+
+#[test]
+fn get_websocket_on_an_http_file_is_an_error_not_a_panic() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let req = rocket_collection::Request::new("Get", rocket_shared::types::HttpMethod::Get, "https://x");
+    repo.save_request("my-api", "get", &req).unwrap();
+    assert!(repo.get_websocket_request("my-api", "get.yml").is_err());
+}
+
+#[test]
+fn save_websocket_rejects_an_empty_uid() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let mut ws = rocket_collection::WebSocketRequest::new("Chat", "ws://x");
+    ws.uid = String::new();
+    assert!(repo.save_websocket_request("my-api", "chat", &ws).is_err());
 }

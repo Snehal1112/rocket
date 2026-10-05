@@ -31,6 +31,7 @@ const KNOWN_DEFERRED: &[&str] = &[
     "FolderInfo.uid",
     "HttpRequestSettings.verifySsl",
     "GraphQLRequest.uid",
+    "WebSocketRequest.uid",
     "GraphQLRequestSettings.verifySsl",
     "HttpRequestRuntime.auth",
     "Variable.initial",
@@ -749,12 +750,12 @@ fn written_collection_files_only_use_schema_keys() {
                     .expect("serialize GraphQL request");
                 check_graphql_request(&mut v, &g.name, &raw);
             }
-            CollectionItem::OpaqueItem(o) => {
-                protocols.push(o.protocol.clone());
-                match o.protocol.as_str() {
-                    "websocket" => check_websocket_request(&mut v, &o.name, &o.raw),
-                    other => panic!("unexpected protocol {other}"),
-                }
+            CollectionItem::OpaqueItem(o) => panic!("unexpected opaque protocol {}", o.protocol),
+            CollectionItem::WebSocket(ws) => {
+                protocols.push("websocket".to_string());
+                let raw = serde_yaml::to_value(crate::conversions::websocket_to_oc_websocket(ws))
+                    .expect("serialize websocket");
+                check_websocket_request(&mut v, &ws.name, &raw);
             }
             _ => {}
         }

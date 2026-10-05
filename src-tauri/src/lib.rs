@@ -590,6 +590,8 @@ pub fn run() {
             commands::collections::delete_collection,
             commands::collections::rename_collection,
             commands::collections::save_request,
+            commands::collections::get_websocket_request,
+            commands::collections::save_websocket_request,
             commands::collections::save_graphql_request,
             commands::collections::rename_request,
             commands::collections::delete_request,

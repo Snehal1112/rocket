@@ -4,7 +4,7 @@ use rocket_audit::{
 };
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSummary, CollectionVariable, GraphQlRequest,
-    Request, RequestKind,
+    Request, RequestKind, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
@@ -56,6 +56,32 @@ impl CollectionService {
     /// that was loaded via `get_summaries`.
     pub fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
         self.repo.get_request(collection, path)
+    }
+
+    /// Get one WebSocket request by collection and relative path.
+    pub fn get_websocket_request(
+        &self,
+        collection: &str,
+        path: &str,
+    ) -> DomainResult<WebSocketRequest> {
+        self.repo.get_websocket_request(collection, path)
+    }
+
+    /// Save a WebSocket request and return it re-read from disk, like `save_request`.
+    pub fn save_websocket_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &WebSocketRequest,
+    ) -> DomainResult<WebSocketRequest> {
+        let actual_path = self
+            .repo
+            .save_websocket_request(collection, path, request)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: actual_path.clone(),
+        });
+        self.repo.get_websocket_request(collection, &actual_path)
     }
 
     /// Get the full GraphQL request at `path`.
@@ -136,12 +162,25 @@ impl CollectionService {
         old_path: &str,
         new_name: &str,
     ) -> DomainResult<()> {
-        if self.repo.request_kind(collection, old_path)? == RequestKind::GraphQl {
+        let kind = self.repo.request_kind(collection, old_path)?;
+        if kind == RequestKind::GraphQl {
             let mut request = self.repo.get_graphql_request(collection, old_path)?;
             request.name = new_name.to_string();
             let actual_path = self
                 .repo
                 .save_graphql_request(collection, old_path, &request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path,
+            });
+            return Ok(());
+        }
+        if kind == RequestKind::WebSocket {
+            let mut websocket = self.repo.get_websocket_request(collection, old_path)?;
+            websocket.name = new_name.to_string();
+            let actual_path = self
+                .repo
+                .save_websocket_request(collection, old_path, &websocket)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
@@ -166,10 +205,23 @@ impl CollectionService {
         path: &str,
         docs: Option<String>,
     ) -> DomainResult<()> {
-        if self.repo.request_kind(collection, path)? == RequestKind::GraphQl {
+        let kind = self.repo.request_kind(collection, path)?;
+        if kind == RequestKind::GraphQl {
             let mut request = self.repo.get_graphql_request(collection, path)?;
             request.docs = docs.map(Documentation::text);
             let actual_path = self.repo.save_graphql_request(collection, path, &request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path,
+            });
+            return Ok(());
+        }
+        if kind == RequestKind::WebSocket {
+            let mut websocket = self.repo.get_websocket_request(collection, path)?;
+            websocket.docs = docs;
+            let actual_path = self
+                .repo
+                .save_websocket_request(collection, path, &websocket)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
@@ -984,6 +1036,111 @@ mod tests {
             )),
             "expected CollectionDeleted, got {:?}",
             *captured
+        );
+    }
+}
+
+#[cfg(test)]
+mod websocket_tests {
+    use super::*;
+    use rocket_collection::WebSocketRequest;
+    use rocket_shared::events::NullEventPublisher;
+
+    fn service(dir: &std::path::Path) -> CollectionService {
+        CollectionService::new(
+            Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                dir.to_path_buf(),
+            )),
+            Box::new(NullEventPublisher),
+        )
+    }
+
+    #[test]
+    fn rename_request_renames_a_websocket_request_in_place() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let svc = service(dir.path());
+        svc.create("api").expect("create collection");
+        let saved = svc
+            .save_websocket_request(
+                "api",
+                "chat",
+                &WebSocketRequest::new("Chat", "wss://chat.example.com/ws"),
+            )
+            .expect("save");
+        assert_eq!(saved.file_name.as_deref(), Some("chat.yml"));
+
+        svc.rename_request("api", "chat.yml", "Team Chat")
+            .expect("rename");
+
+        let renamed = svc
+            .get_websocket_request("api", "chat.yml")
+            .expect("reload");
+        assert_eq!(renamed.name, "Team Chat");
+        assert_eq!(renamed.uid, saved.uid);
+        assert_eq!(renamed.url, "wss://chat.example.com/ws");
+    }
+
+    #[test]
+    fn update_request_docs_keeps_a_websocket_request_a_websocket_request() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let svc = service(dir.path());
+        svc.create("api").expect("create collection");
+        svc.save_websocket_request("api", "chat", &WebSocketRequest::new("Chat", "wss://x/ws"))
+            .expect("save");
+
+        svc.update_request_docs("api", "chat.yml", Some("# Notes".into()))
+            .expect("update docs");
+
+        let back = svc
+            .get_websocket_request("api", "chat.yml")
+            .expect("reload");
+        assert_eq!(back.docs.as_deref(), Some("# Notes"));
+        assert_eq!(back.url, "wss://x/ws");
+    }
+
+    #[test]
+    fn request_variables_round_trip_for_a_websocket_request() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let svc = service(dir.path());
+        svc.create("api").expect("create collection");
+        svc.save_websocket_request("api", "chat", &WebSocketRequest::new("Chat", "wss://x/ws"))
+            .expect("save");
+        let var = rocket_collection::CollectionVariable {
+            key: "room".into(),
+            value: "general".into(),
+            initial_value: "general".into(),
+            enabled: true,
+            secret: false,
+        };
+
+        svc.save_request_variables("api", "chat.yml", vec![var.clone()])
+            .expect("save vars");
+
+        assert_eq!(
+            svc.get_request_variables("api", "chat.yml")
+                .expect("get vars"),
+            vec![var]
+        );
+        assert!(
+            svc.get_websocket_request("api", "chat.yml").is_ok(),
+            "still a websocket file"
+        );
+    }
+
+    #[test]
+    fn rename_request_still_works_for_an_http_request() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let svc = service(dir.path());
+        svc.create("api").expect("create collection");
+        let req = Request::new("Get", rocket_shared::types::HttpMethod::Get, "https://x");
+        svc.save_request("api", "get", &req).expect("save");
+
+        svc.rename_request("api", "get.yml", "Fetch")
+            .expect("rename");
+
+        assert_eq!(
+            svc.get_request("api", "get.yml").expect("reload").name,
+            "Fetch"
         );
     }
 }

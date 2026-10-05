@@ -7,9 +7,10 @@ use rocket_shared::types::{Auth, Header};
 use super::auth::persisted_oc_auth;
 use super::graphql::{graphql_to_oc, oc_graphql_to_domain};
 use super::request::{oc_http_request_to_request, request_to_oc_http_request};
+use super::websocket::{oc_websocket_to_request, websocket_to_oc_websocket};
 
 /// Converts one parsed OpenCollection item into a domain tree item.
-/// GraphQL becomes a typed `GraphQl` item. gRPC and WebSocket items become
+/// GraphQL and WebSocket become typed items. gRPC items become
 /// `OpaqueItem`s that hold their raw YAML, so nothing is lost on load. Script files are not tree items in the
 /// domain model, so they return `None`.
 pub fn oc_item_to_collection_item(item: OcItem) -> Option<CollectionItem> {
@@ -24,10 +25,9 @@ pub fn oc_item_to_collection_item(item: OcItem) -> Option<CollectionItem> {
             let name = grpc.info.name.clone();
             opaque_item("grpc", name, &OcItem::Grpc(grpc))
         }
-        OcItem::WebSocket(ws) => {
-            let name = ws.info.name.clone();
-            opaque_item("websocket", name, &OcItem::WebSocket(ws))
-        }
+        OcItem::WebSocket(ws) => Some(CollectionItem::WebSocket(Box::new(
+            oc_websocket_to_request(ws),
+        ))),
     }
 }
 
@@ -77,6 +77,9 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
             CollectionItem::GraphQl(g) => Some(OcItem::GraphQL(graphql_to_oc(&g))),
+            CollectionItem::WebSocket(ws) => {
+                Some(OcItem::WebSocket(websocket_to_oc_websocket(&ws)))
+            }
             CollectionItem::OpaqueItem(opaque) => Some(
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
@@ -188,6 +191,9 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
             CollectionItem::GraphQl(g) => Some(OcItem::GraphQL(graphql_to_oc(&g))),
+            CollectionItem::WebSocket(ws) => {
+                Some(OcItem::WebSocket(websocket_to_oc_websocket(&ws)))
+            }
             CollectionItem::OpaqueItem(opaque) => Some(
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {

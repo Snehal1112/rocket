@@ -59,7 +59,7 @@ pub struct OcWebSocketRequestDetails {
 }
 
 /// WebSocket request runtime.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct OcWebSocketRequestRuntime {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<OcVariable>,
@@ -82,6 +82,10 @@ pub struct OcWebSocketRequestSettings {
 /// Complete WebSocket request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcWebSocketRequest {
+    /// Stable identity for tab deduplication across reloads. Not in the
+    /// OpenCollection schema; mirrors `OcHttpRequest.uid`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
     pub info: OcWebSocketRequestInfo,
     pub websocket: OcWebSocketRequestDetails,
     #[serde(default, skip_serializing_if = "Option::is_none")]

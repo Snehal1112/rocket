@@ -6,6 +6,7 @@ use crate::request::Request;
 use crate::request_kind::RequestKind;
 use crate::settings::{CollectionSettings, CollectionVariable};
 use crate::summary::CollectionSummary;
+use crate::websocket::WebSocketRequest;
 
 /// Repository trait for Collection persistence.
 /// Implemented by FsCollectionRepo in rocket-infra.
@@ -69,6 +70,30 @@ pub trait CollectionRepository: Send + Sync {
     /// Which protocol the request file at `path` holds. Repositories that only know HTTP keep this default.
     fn request_kind(&self, _collection: &str, _path: &str) -> DomainResult<RequestKind> {
         Ok(RequestKind::Http)
+    }
+
+    /// Read one WebSocket request file. Repositories that do not store
+    /// WebSocket requests keep this default.
+    fn get_websocket_request(
+        &self,
+        _collection: &str,
+        _path: &str,
+    ) -> DomainResult<WebSocketRequest> {
+        Err(DomainError::InvalidInput(
+            "websocket requests are not supported by this repository".into(),
+        ))
+    }
+
+    /// Save one WebSocket request. Returns the filename actually written.
+    fn save_websocket_request(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &WebSocketRequest,
+    ) -> DomainResult<String> {
+        Err(DomainError::InvalidInput(
+            "websocket requests are not supported by this repository".into(),
+        ))
     }
 
     /// Create a folder within a collection.

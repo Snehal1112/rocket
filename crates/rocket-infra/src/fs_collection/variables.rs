@@ -6,7 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::atomic_write;
 use crate::oc::{
     OcFolder, OcFolderInfo, OcGraphQLRequest, OcGraphQLRequestRuntime, OcHttpRequest,
-    OcHttpRequestRuntime, OcRequestDefaults, OcVariable,
+    OcHttpRequestRuntime, OcRequestDefaults, OcVariable, OcWebSocketRequest,
 };
 
 use super::folder_file::{parse_folder_yml, read_folder_yml, write_folder_yml};
@@ -159,22 +159,25 @@ pub(super) fn get_request_variables(
     Ok(vars)
 }
 
-/// Reads `runtime.variables` from an HTTP or GraphQL request file.
+/// Reads `runtime.variables` from an HTTP, GraphQL or WebSocket request file.
 fn runtime_variables_of(content: &str) -> DomainResult<Vec<OcVariable>> {
     let http_err = match serde_yaml::from_str::<OcHttpRequest>(content) {
         Ok(req) => return Ok(req.runtime.map(|r| r.variables).unwrap_or_default()),
         Err(e) => e,
     };
-    match serde_yaml::from_str::<OcGraphQLRequest>(content) {
-        Ok(g) => Ok(g.runtime.map(|r| r.variables).unwrap_or_default()),
-        // Keep the HTTP error: it is the precise one for a broken HTTP file.
-        Err(_) => Err(DomainError::Internal(format!(
-            "Failed to parse request file: {http_err}"
-        ))),
+    if let Ok(g) = serde_yaml::from_str::<OcGraphQLRequest>(content) {
+        return Ok(g.runtime.map(|r| r.variables).unwrap_or_default());
     }
+    if let Ok(ws) = serde_yaml::from_str::<OcWebSocketRequest>(content) {
+        return Ok(ws.runtime.map(|r| r.variables).unwrap_or_default());
+    }
+    // Keep the HTTP error: it is the precise one for a broken HTTP file.
+    Err(DomainError::Internal(format!(
+        "Failed to parse request file: {http_err}"
+    )))
 }
 
-/// Returns the file content with `runtime.variables` replaced, for an HTTP or GraphQL request file.
+/// Returns the file content with `runtime.variables` replaced, for an HTTP, GraphQL or WebSocket request file.
 fn with_runtime_variables(content: &str, vars: Vec<OcVariable>) -> DomainResult<String> {
     let to_err = |e: serde_yaml::Error| {
         DomainError::Internal(format!("Failed to serialize request file: {e}"))
@@ -190,19 +193,23 @@ fn with_runtime_variables(content: &str, vars: Vec<OcVariable>) -> DomainResult<
         }
         Err(e) => e,
     };
-    match serde_yaml::from_str::<OcGraphQLRequest>(content) {
-        Ok(mut g) => {
-            let runtime = g.runtime.take().unwrap_or_default();
-            g.runtime = Some(OcGraphQLRequestRuntime {
-                variables: vars,
-                ..runtime
-            });
-            serde_yaml::to_string(&g).map_err(to_err)
-        }
-        Err(_) => Err(DomainError::Internal(format!(
-            "Failed to parse request file: {http_err}"
-        ))),
+    if let Ok(mut g) = serde_yaml::from_str::<OcGraphQLRequest>(content) {
+        let runtime = g.runtime.take().unwrap_or_default();
+        g.runtime = Some(OcGraphQLRequestRuntime {
+            variables: vars,
+            ..runtime
+        });
+        return serde_yaml::to_string(&g).map_err(to_err);
     }
+    if let Ok(mut ws) = serde_yaml::from_str::<OcWebSocketRequest>(content) {
+        let mut runtime = ws.runtime.take().unwrap_or_default();
+        runtime.variables = vars;
+        ws.runtime = Some(runtime);
+        return serde_yaml::to_string(&ws).map_err(to_err);
+    }
+    Err(DomainError::Internal(format!(
+        "Failed to parse request file: {http_err}"
+    )))
 }
 
 pub(super) fn save_request_variables(

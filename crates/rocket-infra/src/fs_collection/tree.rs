@@ -29,6 +29,10 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
                 gql.file_name = Some(entry_name.to_string());
                 Ok(Some(CollectionItem::GraphQl(gql)))
             }
+            Ok(Some(CollectionItem::WebSocket(mut ws))) => {
+                crate::conversions::with_file_identity(&mut ws, entry_name);
+                Ok(Some(CollectionItem::WebSocket(ws)))
+            }
             Ok(other) => Ok(other),
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file");
@@ -213,7 +217,7 @@ where
 }
 
 /// Parse only the uid/name/method/url fields from a request file for sidebar display.
-/// GraphQL files return a summary with `kind: GraphQl`. gRPC, WebSocket and ScriptFile
+/// GraphQL and WebSocket files return a summary with their `kind`. gRPC and ScriptFile
 /// .yml files that pass `is_request_file` are recognised via the untagged `OcItem` probe,
 /// just like `load_yaml_item`, and return `Ok(None)` so the caller can skip them silently
 /// (at debug level) instead of reporting them as corrupt. A file that matches only
@@ -262,10 +266,22 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::GraphQl,
             })),
+            Ok(OcItem::WebSocket(ws)) => Ok(Some(RequestSummary {
+                uid: ws
+                    .uid
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or_else(|| crate::conversions::derived_websocket_uid(entry_name)),
+                name: ws.info.name,
+                // A WebSocket handshake is a GET. The sidebar badge comes from `kind`, not this.
+                method: "GET".to_string(),
+                url: ws.websocket.url,
+                file_name: Some(entry_name.to_string()),
+                kind: RequestKind::WebSocket,
+            })),
             Ok(OcItem::Http(_)) | Ok(OcItem::Folder(_)) | Err(_) => Err(DomainError::Internal(
                 format!("Failed to parse request summary: {min_err}"),
             )),
-            Ok(OcItem::Grpc(_) | OcItem::WebSocket(_) | OcItem::ScriptFile(_)) => Ok(None),
+            Ok(OcItem::Grpc(_) | OcItem::ScriptFile(_)) => Ok(None),
         }
     } else {
         // Legacy JSON: full Request deserialization then extract fields.

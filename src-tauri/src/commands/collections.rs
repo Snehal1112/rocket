@@ -1,7 +1,7 @@
 use rocket_app::{CollectionService, ContractService, WorkspaceService};
 use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::{
-    Collection, CollectionSummary, CollectionVariable, GraphQlRequest, Request,
+    Collection, CollectionSummary, CollectionVariable, GraphQlRequest, Request, WebSocketRequest,
 };
 use rocket_shared::error::DomainError;
 use rocket_workspace::RepositoryId;
@@ -142,6 +142,25 @@ pub fn rename_collection(
     svc: State<'_, CollectionService>,
 ) -> Result<(), DomainError> {
     svc.rename(&old_name, &new_name)
+}
+
+#[tauri::command]
+pub fn get_websocket_request(
+    collection: String,
+    path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<WebSocketRequest, DomainError> {
+    svc.get_websocket_request(&collection, &path)
+}
+
+#[tauri::command]
+pub fn save_websocket_request(
+    collection: String,
+    path: String,
+    request: WebSocketRequest,
+    svc: State<'_, CollectionService>,
+) -> Result<WebSocketRequest, DomainError> {
+    svc.save_websocket_request(&collection, &path, &request)
 }
 
 #[tauri::command]

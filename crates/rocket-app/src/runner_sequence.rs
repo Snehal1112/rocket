@@ -144,7 +144,9 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                 }
             }
             // gRPC/WebSocket items and sidebar summaries are not executable.
-            CollectionItem::OpaqueItem(_) | CollectionItem::Summary(_) => {}
+            CollectionItem::OpaqueItem(_)
+            | CollectionItem::WebSocket(_)
+            | CollectionItem::Summary(_) => {}
         }
     }
 }
@@ -502,5 +504,18 @@ mod tests {
             .as_deref()
             .expect("error")
             .contains("query is empty"));
+    }
+
+    #[test]
+    fn websocket_items_are_never_steps() {
+        let mut collection = Collection::new("my-api");
+        collection.root.add_request(req("Login", "login.yml"));
+        collection.root.items.push(rocket_collection::CollectionItem::WebSocket(Box::new(
+            rocket_collection::WebSocketRequest::new("Chat", "wss://x"),
+        )));
+
+        let items = flatten_run_set(&collection, None).expect("flatten");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "Login");
     }
 }

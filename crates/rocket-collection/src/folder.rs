@@ -1,6 +1,7 @@
 use crate::graphql_request::GraphQlRequest;
 use crate::request::Request;
 use crate::request_summary::RequestSummary;
+use crate::websocket::WebSocketRequest;
 use serde::{Deserialize, Serialize};
 
 /// An opaque protocol item stored as raw YAML for lossless roundtrip.
@@ -30,7 +31,10 @@ pub enum CollectionItem {
     /// A GraphQL request. Boxed for the same reason `Request` is.
     #[serde(rename = "graphql")]
     GraphQl(Box<GraphQlRequest>),
-    /// Raw YAML for protocols that have no typed variant yet (gRPC, WebSocket).
+    /// A typed WebSocket request (`info.type: websocket`).
+    #[serde(rename = "websocket")]
+    WebSocket(Box<WebSocketRequest>),
+    /// Raw YAML for protocols that have no typed variant yet (gRPC).
     #[serde(rename = "opaque")]
     OpaqueItem(OpaqueProtocolItem),
     /// Lightweight request placeholder for sidebar loads (no body/auth).
@@ -95,6 +99,7 @@ impl Folder {
             .map(|item| match item {
                 CollectionItem::Request(_) => 1,
                 CollectionItem::GraphQl(_) => 1,
+                CollectionItem::WebSocket(_) => 1,
                 CollectionItem::Summary(_) => 1, // one summary = one request on disk
                 CollectionItem::Folder(f) => f.request_count(),
                 CollectionItem::OpaqueItem(_) => 0,

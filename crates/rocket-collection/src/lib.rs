@@ -8,6 +8,7 @@ pub mod request_kind;
 pub mod request_summary;
 pub mod settings;
 pub mod summary;
+pub mod websocket;
 pub(crate) mod uid;
 
 // Re-export key types at crate root for convenience
@@ -22,4 +23,7 @@ pub use request::{
 pub use request_summary::RequestSummary;
 pub use settings::{CollectionSettings, CollectionVariable};
 pub use summary::CollectionSummary;
+pub use websocket::{
+    WebSocketMessage, WebSocketMessageKind, WebSocketRequest, WebSocketScript, WebSocketSettings,
+};
 pub use uid::generate_uid;
