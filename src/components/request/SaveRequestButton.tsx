@@ -1,8 +1,7 @@
 import { Check, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { buildRequestSavePayload } from '@/lib/request-save-mapper';
-import { saveRequest } from '@/lib/tauri-api';
+import { saveTabRequest } from '@/lib/save-tab-request';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab } from '@/types/pane-types';
 
@@ -18,7 +17,7 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
   const handleSave = useCallback(async () => {
     if (!tab.source) return;
     try {
-      await saveRequest(tab.source.collection, tab.source.path, buildRequestSavePayload(tab));
+      await saveTabRequest(tab.source.collection, tab.source.path, tab);
       markClean(tab.id);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 2000);

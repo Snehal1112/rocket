@@ -28,4 +28,28 @@ describe('collectPaths', () => {
     expect(folders).toEqual(['auth']);
     expect(requests).toEqual(['get-users.yml']);
   });
+
+  it('skips typed graphql items like opaque ones', () => {
+    const folders: string[] = [];
+    const requests: string[] = [];
+    collectPaths(
+      [
+        {
+          type: 'graphql',
+          uid: 'g',
+          name: 'Q',
+          method: 'POST',
+          url: 'https://x/graphql',
+          headers: [],
+          auth: { authType: 'none' },
+          body: { query: '{ a }' },
+          fileName: 'q.yml',
+        },
+      ],
+      '',
+      folders,
+      requests,
+    );
+    expect(requests).toEqual([]);
+  });
 });

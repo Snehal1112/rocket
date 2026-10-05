@@ -251,6 +251,18 @@ export interface RequestState {
   testsScript?: string;
   assertions: import('@/lib/tauri-api').AssertionEntry[];
   actions: import('@/lib/tauri-api').ActionEntry[];
+  /** Present when `requestType` is 'graphql'. */
+  graphql?: GraphQlState;
+}
+
+export interface GraphQlState {
+  query: string;
+  /** JSON text. Empty means no variables. */
+  variables: string;
+  /** The operation to run when the document defines several. Session state, never saved. */
+  operationName?: string;
+  /** Stored body variants, round-tripped so a save keeps them. */
+  bodyVariants?: import('@/lib/tauri-api').GraphQlBodyVariant[];
 }
 
 export interface KeyValueEntry {

@@ -1,8 +1,8 @@
 import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
-import { toPersistedPathParams } from '@/lib/request-save-mapper';
-import { type Request, saveRequest } from '@/lib/tauri-api';
+import { toApiGraphQlRequest, toPersistedPathParams } from '@/lib/request-save-mapper';
+import { type Request, saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
 
@@ -47,11 +47,19 @@ export function scheduleAutoSave(
   const timer = setTimeout(async () => {
     timers.delete(tabId);
     try {
-      await saveRequest(
-        collection,
-        path,
-        toApiRequest(tabId || crypto.randomUUID(), title, request),
-      );
+      if (request.requestType === 'graphql') {
+        await saveGraphQlRequest(
+          collection,
+          path,
+          toApiGraphQlRequest(tabId || crypto.randomUUID(), title, request),
+        );
+      } else {
+        await saveRequest(
+          collection,
+          path,
+          toApiRequest(tabId || crypto.randomUUID(), title, request),
+        );
+      }
       // Mark tab clean after successful save.
       usePaneStore.getState().markClean(tabId);
     } catch (err) {

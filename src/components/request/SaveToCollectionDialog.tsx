@@ -17,9 +17,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { sanitizeFilename } from '@/lib/filename-utils';
-import { buildRequestSavePayload } from '@/lib/request-save-mapper';
+import { saveTabRequest } from '@/lib/save-tab-request';
 import type { CollectionSummary } from '@/lib/tauri-api';
-import { createCollection, listCollections, saveRequest } from '@/lib/tauri-api';
+import { createCollection, listCollections } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab } from '@/types/pane-types';
 
@@ -72,9 +72,10 @@ export function SaveToCollectionDialog({ open, tab, onClose }: SaveToCollectionD
         collectionName = newCollectionName.trim();
       }
 
-      const payload = buildRequestSavePayload(tab, { name: trimmedName, fileName: fsName });
-
-      const saved = await saveRequest(collectionName, fsName, payload);
+      const saved = await saveTabRequest(collectionName, fsName, tab, {
+        name: trimmedName,
+        fileName: fsName,
+      });
 
       const store = usePaneStore.getState();
       store.updateTabSource(tab.id, {

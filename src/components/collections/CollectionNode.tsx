@@ -319,10 +319,12 @@ export function CollectionNode({
   };
 
   const rawItems = collection?.root.items ?? [];
-  // Opaque items (GraphQL/gRPC/WebSocket) never render — see the `item.type === 'opaque'`
-  // guard in the render loop below — so they must never keep an otherwise-empty
-  // container visible under an active filter.
-  const filterableItems = rawItems.filter((item) => item.type !== 'opaque');
+  // Opaque and typed GraphQL full-tree items never render here: the sidebar loads
+  // summaries, where GraphQL arrives as a `summary` with `kind: 'graphql'`. They must
+  // never keep an otherwise-empty container visible under an active filter.
+  const filterableItems = rawItems.filter(
+    (item) => item.type !== 'opaque' && item.type !== 'graphql',
+  );
   const filteredItems = sortItemsFoldersFirst(
     filter
       ? filterableItems.filter(
@@ -580,7 +582,7 @@ export function CollectionNode({
                 />
               );
             }
-            if (item.type === 'opaque') return null;
+            if (item.type === 'opaque' || item.type === 'graphql') return null;
             return (
               <RequestNode
                 key={`request-${item.uid}`}

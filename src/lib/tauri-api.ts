@@ -156,6 +156,41 @@ export interface Request {
   actions?: ActionEntry[];
 }
 
+export type RequestKind = 'http' | 'graphql' | 'grpc' | 'websocket';
+
+export interface GraphQlBody {
+  query: string;
+  /** JSON text, not a parsed object. */
+  variables?: string | null;
+}
+
+export interface GraphQlBodyVariant {
+  title: string;
+  selected: boolean;
+  body: GraphQlBody;
+}
+
+export interface GraphQlRequest {
+  uid: string;
+  name: string;
+  method: HttpMethod;
+  url: string;
+  headers: Header[];
+  body: GraphQlBody;
+  /** Every stored variant. Send it back unchanged so a save keeps the unselected ones. */
+  bodyVariants?: GraphQlBodyVariant[];
+  auth: Auth;
+  fileName?: string;
+  tags?: string[];
+  docs?: string | null;
+  settings?: ApiRequestSettings;
+  preRequestScript?: string | null;
+  postResponseScript?: string | null;
+  tests?: string | null;
+  assertions?: AssertionEntry[];
+  actions?: ActionEntry[];
+}
+
 export interface Folder {
   uid: string;
   name: string;
@@ -171,6 +206,8 @@ export interface RequestSummary {
   method: string;
   url: string;
   fileName?: string;
+  /** Which protocol the file holds. Absent means HTTP. */
+  kind?: RequestKind;
 }
 
 /** Non-HTTP item (GraphQL, gRPC, WebSocket) kept as raw YAML. Not shown or editable in the UI yet. */
@@ -184,6 +221,7 @@ export type CollectionItem =
   | ({ type: 'request' } & Request)
   | ({ type: 'folder' } & Folder)
   | ({ type: 'summary' } & RequestSummary)
+  | ({ type: 'graphql' } & GraphQlRequest)
   | ({ type: 'opaque' } & OpaqueProtocolItem);
 
 export interface Collection {
@@ -722,6 +760,9 @@ export const getCollectionSummaries = (name: string) =>
 export const getRequest = (collection: string, path: string) =>
   invoke<Request>('get_request', { collection, path });
 
+export const getGraphQlRequest = (collection: string, path: string) =>
+  invoke<GraphQlRequest>('get_graphql_request', { collection, path });
+
 export const createCollection = (name: string) => invoke<Collection>('create_collection', { name });
 
 export const deleteCollection = (name: string) => invoke<void>('delete_collection', { name });
@@ -731,6 +772,9 @@ export const renameCollection = (oldName: string, newName: string) =>
 
 export const saveRequest = (collection: string, path: string, request: Request) =>
   invoke<Request>('save_request', { collection, path, request });
+
+export const saveGraphQlRequest = (collection: string, path: string, request: GraphQlRequest) =>
+  invoke<GraphQlRequest>('save_graphql_request', { collection, path, request });
 
 export const renameRequest = (collection: string, oldPath: string, newName: string) =>
   invoke<void>('rename_request', { collection, oldPath, newName });

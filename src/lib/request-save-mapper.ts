@@ -5,8 +5,8 @@
 import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
-import type { Request as ApiRequest } from '@/lib/tauri-api';
-import type { KeyValueEntry, RequestTab } from '@/types/pane-types';
+import type { Request as ApiRequest, GraphQlRequest } from '@/lib/tauri-api';
+import type { KeyValueEntry, RequestState, RequestTab } from '@/types/pane-types';
 
 // Only enabled, named path params are persisted.
 export function toPersistedPathParams(params: KeyValueEntry[]): { name: string; value: string }[] {
@@ -52,4 +52,56 @@ export function buildRequestSavePayload(
     tests: tab.request.testsScript ?? null,
     assertions: tab.request.assertions ?? [],
   };
+}
+
+// Builds the persisted GraphQL payload from tab state. Shared by the Save button,
+// save-to-collection and auto-save, so all three write the same fields.
+export function toApiGraphQlRequest(
+  uid: string,
+  name: string,
+  request: RequestState,
+): GraphQlRequest {
+  const s = request.settings;
+  const gql = request.graphql ?? { query: '', variables: '' };
+  return {
+    uid,
+    name,
+    method: request.method,
+    url: request.url,
+    headers: toPersistedHeaders(request.headers),
+    auth: toPersistedAuth(request.auth),
+    body: {
+      query: gql.query,
+      variables: gql.variables.trim() === '' ? undefined : gql.variables,
+    },
+    bodyVariants: gql.bodyVariants,
+    tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
+    settings: s
+      ? {
+          timeout: s.timeoutMs,
+          followRedirects: s.followRedirects,
+          verifySsl: s.verifySsl,
+          maxRedirects: s.maxRedirects,
+          encodeUrl: s.encodeUrl,
+        }
+      : undefined,
+    docs: request.docs ?? null,
+    preRequestScript: request.preRequestScript ?? null,
+    postResponseScript: request.postResponseScript ?? null,
+    tests: request.testsScript ?? null,
+    assertions: request.assertions ?? [],
+    actions: request.actions ?? [],
+  };
+}
+
+export function buildGraphQlSavePayload(
+  tab: RequestTab,
+  overrides?: RequestSavePayloadOverrides,
+): GraphQlRequest {
+  const payload = toApiGraphQlRequest(
+    tab.id || crypto.randomUUID(),
+    overrides?.name ?? tab.title,
+    tab.request,
+  );
+  return overrides?.fileName !== undefined ? { ...payload, fileName: overrides.fileName } : payload;
 }

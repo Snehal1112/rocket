@@ -13,6 +13,7 @@ vi.mock('@/lib/tauri-api', async () => {
   return {
     ...actual,
     getRequest: vi.fn(),
+    getGraphQlRequest: vi.fn(),
   };
 });
 
@@ -350,5 +351,57 @@ describe('RequestNode click-to-open', () => {
     expect(tauriApi.getRequest).toHaveBeenCalledTimes(1);
     // Still a single leaf — no empty split pane was created for the already-open tab.
     expect(usePaneStore.getState().root.type).toBe('leaf');
+  });
+});
+
+describe('RequestNode graphql items', () => {
+  const gqlSummary: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }> = {
+    type: 'summary',
+    uid: 'g-1',
+    name: 'List Users',
+    method: 'POST',
+    url: 'https://api.example.com/graphql',
+    kind: 'graphql',
+  };
+
+  beforeEach(() => {
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+    vi.mocked(tauriApi.getRequest).mockReset();
+    vi.mocked(tauriApi.getGraphQlRequest).mockReset();
+  });
+
+  it('shows a GQL badge instead of the method', () => {
+    renderNode(gqlSummary, 'list-users.yml');
+    expect(screen.getByText('GQL')).toBeTruthy();
+    expect(screen.queryByText('POST')).toBeNull();
+  });
+
+  it('opens through getGraphQlRequest and yields a graphql tab', async () => {
+    vi.mocked(tauriApi.getGraphQlRequest).mockResolvedValue({
+      uid: 'g-1',
+      name: 'List Users',
+      method: 'POST',
+      url: 'https://api.example.com/graphql',
+      headers: [],
+      auth: { authType: 'none' },
+      body: { query: '{ users { id } }' },
+    });
+    renderNode(gqlSummary, 'list-users.yml');
+    await userEvent.click(screen.getByLabelText('Open GQL List Users'));
+    await waitFor(() => {
+      const found = findTabInTree(usePaneStore.getState().root, 'g-1');
+      expect(found).not.toBeNull();
+    });
+    const tab = findTabInTree(usePaneStore.getState().root, 'g-1')?.tab;
+    expect(tab && 'request' in tab && tab.request.requestType).toBe('graphql');
+    expect(tauriApi.getRequest).not.toHaveBeenCalled();
+  });
+
+  it('is not draggable into a Flow, because Flow requests are HTTP only', () => {
+    renderNode(gqlSummary, 'list-users.yml');
+    expect(screen.getByTestId('request-item-GQL-List Users').getAttribute('draggable')).toBe(
+      'false',
+    );
   });
 });

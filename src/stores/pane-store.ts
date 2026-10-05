@@ -3,7 +3,7 @@ import { scheduleAutoSave } from '@/lib/auto-save';
 import {
   collectAllTabs,
   createDefaultLeaf,
-  createDefaultRequest,
+  createDefaultRequestFor,
   findActiveLeaf,
   findTabInTree,
   removeLeaf,
@@ -312,7 +312,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       id: crypto.randomUUID(),
       title: 'Untitled',
       tabType: 'request',
-      request: { ...createDefaultRequest(), requestType },
+      request: createDefaultRequestFor(requestType),
       response: null,
       isDirty: false,
     };

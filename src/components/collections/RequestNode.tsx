@@ -39,9 +39,14 @@ import {
   FLOW_REQUEST_DRAG_MIME,
   FLOW_REQUEST_DRAG_TEXT_PREFIX,
 } from '@/lib/flow-drag';
-import { collectLeafGroupIds, findTabInTree, mapApiRequestToState } from '@/lib/pane-utils';
+import {
+  collectLeafGroupIds,
+  findTabInTree,
+  mapApiRequestToState,
+  mapGraphQlToState,
+} from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import { getRequest, renameRequest } from '@/lib/tauri-api';
+import { getGraphQlRequest, getRequest, renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
@@ -90,6 +95,9 @@ export function RequestNode({
   onDelete,
   onDuplicate,
 }: RequestNodeProps) {
+  const kind = itemData.type === 'summary' ? (itemData.kind ?? 'http') : 'http';
+  // The badge shows the protocol for GraphQL, the HTTP verb otherwise.
+  const badge = kind === 'graphql' ? 'GQL' : method;
   const root = usePaneStore((s) => s.root);
   const activeGroupId = usePaneStore((s) => s.activeGroupId);
   const openTab = usePaneStore((s) => s.openTab);
@@ -153,8 +161,13 @@ export function RequestNode({
   // Builds a RequestTab, fetching full request data on demand if only a
   // lightweight summary (uid/name/method/fileName) was loaded from the sidebar.
   async function createTab(): Promise<RequestTab> {
-    const full = itemData.type === 'request' ? itemData : await getRequest(collectionName, path);
-    const request: RequestState = mapApiRequestToState(full, true);
+    let request: RequestState;
+    if (kind === 'graphql') {
+      request = mapGraphQlToState(await getGraphQlRequest(collectionName, path));
+    } else {
+      const full = itemData.type === 'request' ? itemData : await getRequest(collectionName, path);
+      request = mapApiRequestToState(full, true);
+    }
     return {
       id: uid,
       title: name,
@@ -241,8 +254,8 @@ export function RequestNode({
             value={uid}
             active={active}
             className='flex-1'
-            data-testid={`request-item-${method}-${name}`}
-            draggable
+            data-testid={`request-item-${badge}-${name}`}
+            draggable={kind === 'http'}
             onDragStart={(e) => {
               const payload = encodeFlowRequestDragPayload({
                 collection: collectionName,
@@ -258,15 +271,15 @@ export function RequestNode({
             <TreeItemContent
               className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
               onClick={handleClick}
-              aria-label={`Open ${method} ${name}`}
+              aria-label={`Open ${badge} ${name}`}
             >
               <span
                 className={cn(
                   'shrink-0 text-[10px] font-semibold uppercase px-1 py-0.5 rounded border',
-                  METHOD_BADGE_COLOR[method.toUpperCase()] ?? METHOD_BADGE_COLOR['GET'],
+                  METHOD_BADGE_COLOR[badge.toUpperCase()] ?? METHOD_BADGE_COLOR['GET'],
                 )}
               >
-                {method}
+                {badge}
               </span>
               {isRenaming ? (
                 <Input

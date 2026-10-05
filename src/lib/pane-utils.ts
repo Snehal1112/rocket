@@ -1,5 +1,5 @@
 import { fromPersistedAuth } from '@/lib/persisted-auth';
-import type { Request as ApiRequest } from '@/lib/tauri-api';
+import type { Request as ApiRequest, GraphQlRequest, RequestKind } from '@/lib/tauri-api';
 import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import type {
   BodyState,
@@ -100,6 +100,39 @@ export function createDefaultRequest(): RequestState {
     assertions: [],
     actions: [],
   };
+}
+
+// A valid document on every GraphQL server, used to seed a new request.
+export const DEFAULT_GRAPHQL_QUERY = '{\n  __typename\n}\n';
+
+// Maps a saved GraphQL request to the tab state. The shared fields reuse the HTTP mapping.
+export function mapGraphQlToState(g: GraphQlRequest): RequestState {
+  const { body, bodyVariants, ...rest } = g;
+  const base = mapApiRequestToState(rest as ApiRequest, true);
+  return {
+    ...base,
+    requestType: 'graphql',
+    method: g.method as RequestState['method'],
+    graphql: {
+      query: body.query,
+      variables: body.variables ?? '',
+      ...(bodyVariants && bodyVariants.length > 0 ? { bodyVariants } : {}),
+    },
+  };
+}
+
+// Builds a blank request of the given kind. Only GraphQL has its own editor state so far.
+export function createDefaultRequestFor(kind: RequestKind): RequestState {
+  const base = createDefaultRequest();
+  if (kind === 'graphql') {
+    return {
+      ...base,
+      requestType: 'graphql',
+      method: 'POST',
+      graphql: { query: DEFAULT_GRAPHQL_QUERY, variables: '' },
+    };
+  }
+  return { ...base, requestType: kind };
 }
 
 // Creates a leaf pane, empty by default (shows branded empty state).

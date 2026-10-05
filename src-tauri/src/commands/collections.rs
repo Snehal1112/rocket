@@ -1,6 +1,8 @@
 use rocket_app::{CollectionService, ContractService, WorkspaceService};
 use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
-use rocket_collection::{Collection, CollectionSummary, CollectionVariable, Request};
+use rocket_collection::{
+    Collection, CollectionSummary, CollectionVariable, GraphQlRequest, Request,
+};
 use rocket_shared::error::DomainError;
 use rocket_workspace::RepositoryId;
 use serde::Serialize;
@@ -95,6 +97,26 @@ pub fn get_request(
     svc: State<'_, CollectionService>,
 ) -> Result<Request, DomainError> {
     svc.get_request(&collection, &path)
+}
+
+#[tauri::command]
+pub fn get_graphql_request(
+    collection: String,
+    path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<GraphQlRequest, DomainError> {
+    svc.get_graphql_request(&collection, &path)
+}
+
+/// Saves a GraphQL request. The contract audit hook is HTTP-only, so it does not run here.
+#[tauri::command]
+pub fn save_graphql_request(
+    collection: String,
+    path: String,
+    request: GraphQlRequest,
+    svc: State<'_, CollectionService>,
+) -> Result<GraphQlRequest, DomainError> {
+    svc.save_graphql_request(&collection, &path, &request)
 }
 
 #[tauri::command]

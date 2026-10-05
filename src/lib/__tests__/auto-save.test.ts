@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tauri-api', () => ({
   saveRequest: vi.fn().mockResolvedValue(undefined),
+  saveGraphQlRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 const markClean = vi.fn();
@@ -11,7 +12,7 @@ vi.mock('@/stores/pane-store', () => ({
   },
 }));
 
-import { saveRequest } from '@/lib/tauri-api';
+import { saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
 import type { RequestState } from '@/types/pane-types';
 import { cancelAutoSave, scheduleAutoSave } from '../auto-save';
 import { createDefaultRequest } from '../pane-utils';
@@ -131,6 +132,22 @@ describe('scheduleAutoSave', () => {
     cancelAutoSave('tab1');
     vi.advanceTimersByTime(500);
 
+    expect(saveRequest).not.toHaveBeenCalled();
+  });
+
+  it('saves a graphql tab through saveGraphQlRequest, never saveRequest', () => {
+    const request = baseRequest({
+      requestType: 'graphql',
+      method: 'POST',
+      graphql: { query: '{ a }', variables: '' },
+    });
+    scheduleAutoSave('tab1', 'my-collection', 'q.yml', 'Q', request);
+    vi.advanceTimersByTime(500);
+    expect(saveGraphQlRequest).toHaveBeenCalledWith(
+      'my-collection',
+      'q.yml',
+      expect.objectContaining({ body: { query: '{ a }', variables: undefined } }),
+    );
     expect(saveRequest).not.toHaveBeenCalled();
   });
 });

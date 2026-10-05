@@ -18,18 +18,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { sanitizeFilename } from '@/lib/filename-utils';
-import { createDefaultRequest } from '@/lib/pane-utils';
-import { saveRequest } from '@/lib/tauri-api';
+import { createDefaultRequest, DEFAULT_GRAPHQL_QUERY, mapGraphQlToState } from '@/lib/pane-utils';
+import { saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { HttpMethod, RequestTab } from '@/types/pane-types';
 
 type RequestType = 'http' | 'graphql' | 'grpc' | 'websocket' | 'curl';
 
-const REQUEST_TYPES: { label: string; value: RequestType }[] = [
+// gRPC and WebSocket used to save an HTTP request under a protocol label. They stay
+// unselectable until their own plans land.
+const REQUEST_TYPES: { label: string; value: RequestType; disabled?: boolean }[] = [
   { label: 'HTTP', value: 'http' },
   { label: 'GraphQL', value: 'graphql' },
-  { label: 'gRPC', value: 'grpc' },
-  { label: 'WebSocket', value: 'websocket' },
+  { label: 'gRPC (coming soon)', value: 'grpc', disabled: true },
+  { label: 'WebSocket (coming soon)', value: 'websocket', disabled: true },
   { label: 'From cURL', value: 'curl' },
 ];
 
@@ -79,6 +81,31 @@ export function CreateRequestDialog({
     try {
       const uid = crypto.randomUUID();
       const filePath = folderPath ? `${folderPath}/${fsName}` : fsName;
+      if (requestType === 'graphql') {
+        const saved = await saveGraphQlRequest(collectionName, filePath, {
+          uid,
+          name: trimmedName,
+          method: 'POST',
+          url,
+          headers: [],
+          auth: { authType: 'none' as const },
+          body: { query: DEFAULT_GRAPHQL_QUERY },
+          fileName: filePath,
+        });
+        const gqlTab: RequestTab = {
+          id: uid,
+          title: trimmedName,
+          tabType: 'request',
+          request: mapGraphQlToState(saved),
+          response: null,
+          isDirty: false,
+          source: { collection: collectionName, path: saved.fileName ?? filePath },
+        };
+        usePaneStore.getState().openTab(gqlTab);
+        reset();
+        onClose();
+        return;
+      }
       const payload = {
         uid,
         name: trimmedName,
@@ -132,7 +159,7 @@ export function CreateRequestDialog({
         <DialogHeader>
           <DialogTitle>New Request</DialogTitle>
           <DialogDescription className='sr-only'>
-            Add a new HTTP request to your collection.
+            Add a new request to your collection.
           </DialogDescription>
         </DialogHeader>
         <div className='flex flex-col gap-4 py-2'>
@@ -146,7 +173,7 @@ export function CreateRequestDialog({
               </SelectTrigger>
               <SelectContent>
                 {REQUEST_TYPES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
+                  <SelectItem key={t.value} value={t.value} disabled={t.disabled}>
                     {t.label}
                   </SelectItem>
                 ))}
