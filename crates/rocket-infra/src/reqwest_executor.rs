@@ -437,6 +437,11 @@ impl HttpExecutor for ReqwestExecutor {
             .map(|(k, v)| Header::new(k.as_str(), v.to_str().unwrap_or("")))
             .collect();
 
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         let body_bytes = response
             .bytes()
             .await
@@ -444,16 +449,22 @@ impl HttpExecutor for ReqwestExecutor {
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let size_bytes = body_bytes.len();
-        let body = String::from_utf8_lossy(&body_bytes).to_string();
+        let payload = rocket_http::response::body_from_bytes(
+            content_type.as_deref(),
+            &body_bytes,
+            rocket_http::response::MAX_BINARY_BODY_BYTES,
+        );
 
         Ok(HttpResponse {
             status,
             status_text,
             headers,
-            body,
+            body: payload.text,
             duration_ms,
             ttfb_ms,
             size_bytes,
+            is_binary: payload.is_binary,
+            body_base64: payload.base64,
         })
     }
 }
@@ -2499,5 +2510,47 @@ mod method_tests {
             )
             .build();
         assert!(built.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod binary_response_tests {
+    use super::*;
+    use base64::Engine;
+    use rocket_shared::types::HttpMethod;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn a_png_body_arrives_byte_exact_as_base64() {
+        let bytes: Vec<u8> = vec![0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x80];
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(bytes.clone(), "image/png"))
+            .mount(&server)
+            .await;
+        let req = HttpRequest::new(HttpMethod::Get, format!("{}/i.png", server.uri()));
+        let response = ReqwestExecutor::new().execute(&req).await.expect("send");
+        assert!(response.is_binary);
+        assert_eq!(response.body, "");
+        assert_eq!(response.size_bytes, bytes.len());
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(response.body_base64.expect("payload"))
+            .expect("valid base64");
+        assert_eq!(decoded, bytes);
+    }
+
+    #[tokio::test]
+    async fn a_json_body_is_still_text() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw("{\"a\":1}", "application/json"))
+            .mount(&server)
+            .await;
+        let req = HttpRequest::new(HttpMethod::Get, format!("{}/j", server.uri()));
+        let response = ReqwestExecutor::new().execute(&req).await.expect("send");
+        assert!(!response.is_binary);
+        assert_eq!(response.body, "{\"a\":1}");
+        assert_eq!(response.body_base64, None);
     }
 }

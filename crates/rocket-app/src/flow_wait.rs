@@ -46,6 +46,7 @@ pub(crate) fn callback_output(call: &ReceivedCall, duration_ms: u64) -> ExecuteR
             duration_ms,
             ttfb_ms: duration_ms,
             size_bytes: call.body.len(),
+            ..Default::default()
         },
         test_results: Vec::new(),
         console_entries: Vec::new(),

@@ -206,6 +206,7 @@ mod tests {
             duration_ms: 0,
             ttfb_ms: 0,
             size_bytes: 0,
+            ..Default::default()
         }
     }
 

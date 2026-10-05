@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { statusBadgeColor, timeColor } from '@/lib/colors';
 import type { ResponseState } from '@/types/pane-types';
+import { BinaryResponsePanel } from './BinaryResponsePanel';
 import { ResponseHeadersTable } from './ResponseHeadersTable';
 import { TestsPanel } from './TestsPanel';
 
@@ -229,6 +230,9 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
 
   const isBodyTab = activeView === 'pretty' || activeView === 'raw';
   const hasBody = Boolean(response.body);
+  const isBinary = response.isBinary === true;
+  const showBinary =
+    isBinary && (activeView === 'pretty' || activeView === 'raw' || activeView === 'preview');
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
@@ -409,8 +413,14 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
 
       {/* ── Tab content ── */}
       <div className='flex-1 min-h-0 overflow-hidden'>
+        {/* Binary body: one panel for the body tabs. */}
+        {showBinary && (
+          <BinaryResponsePanel response={response} sizeLabel={formatBytes(response.sizeBytes)} />
+        )}
+
         {/* Pretty tab. */}
-        {activeView === 'pretty' &&
+        {!showBinary &&
+          activeView === 'pretty' &&
           (hasBody ? (
             <Suspense fallback={<EditorSkeleton />}>
               <MonacoWrapper value={prettyBody} language={language} readOnly height='100%' />
@@ -420,7 +430,8 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           ))}
 
         {/* Raw tab — with optional line-level search overlay. */}
-        {activeView === 'raw' &&
+        {!showBinary &&
+          activeView === 'raw' &&
           (hasBody ? (
             searchQuery && filteredLines ? (
               <div className='h-full overflow-auto p-3 font-mono text-xs'>
@@ -447,7 +458,7 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
           ))}
 
         {/* Preview tab — sandboxed iframe. */}
-        {activeView === 'preview' && (
+        {!showBinary && activeView === 'preview' && (
           <div className='h-full overflow-auto p-3'>
             {/*
              * Security: sandbox="" blocks all permissions (scripts, forms, popups,

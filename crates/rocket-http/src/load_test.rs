@@ -1195,6 +1195,7 @@ mod tests {
                 duration_ms: 10,
                 ttfb_ms: 10,
                 size_bytes: 2,
+                ..Default::default()
             })
         }
     }
@@ -1213,6 +1214,7 @@ mod tests {
                 duration_ms: 5,
                 ttfb_ms: 5,
                 size_bytes: 0,
+                ..Default::default()
             })
         }
     }
@@ -1387,6 +1389,7 @@ mod tests {
                     duration_ms,
                     ttfb_ms: duration_ms,
                     size_bytes: 0,
+                    ..Default::default()
                 })
             }
         }

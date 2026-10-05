@@ -348,6 +348,10 @@ export interface HttpResponse {
   durationMs: number;
   ttfbMs: number;
   sizeBytes: number;
+  /** Set when the body is not text: `body` is empty and the bytes are in `bodyBase64`. */
+  isBinary?: boolean;
+  /** Raw bytes of a binary body, base64. Absent when the body was too large to carry. */
+  bodyBase64?: string;
 }
 
 export interface TestResult {

@@ -588,6 +588,8 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       durationMs: result.durationMs,
       ttfbMs: result.ttfbMs,
       sizeBytes: result.sizeBytes,
+      isBinary: result.isBinary,
+      bodyBase64: result.bodyBase64,
       activeView: result.testResults.length > 0 ? 'tests' : 'pretty',
       testResults: result.testResults,
       consoleEntries: result.consoleEntries,
@@ -630,7 +632,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       requestHeaders: consoleRequestHeaders,
       requestBody: resolvedBody?.content ?? '',
       responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
-      responseBody: result.body,
+      responseBody: result.isBinary ? `(binary, ${result.sizeBytes} bytes)` : result.body,
     });
     // Forward script console.log/warn/error entries to the Console panel, in
     // one update so they keep their original chronological order (a per-entry

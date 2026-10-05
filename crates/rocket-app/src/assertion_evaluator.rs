@@ -319,6 +319,7 @@ mod tests {
             duration_ms: 120,
             ttfb_ms: 60,
             size_bytes: body.len(),
+            ..Default::default()
         }
     }
 

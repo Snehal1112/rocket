@@ -375,6 +375,8 @@ export interface ResponseState {
   durationMs: number;
   ttfbMs: number;
   sizeBytes: number;
+  isBinary?: boolean;
+  bodyBase64?: string;
   activeView: 'pretty' | 'raw' | 'preview' | 'headers' | 'tests';
   testResults?: import('@/lib/tauri-api').TestResult[];
   consoleEntries?: import('@/lib/tauri-api').ConsoleEntry[];

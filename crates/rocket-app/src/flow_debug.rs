@@ -426,6 +426,7 @@ mod tests {
             duration_ms: 12,
             ttfb_ms: 5,
             size_bytes: 30,
+            ..Default::default()
         };
         let d = build_debug_request(
             &request(Auth::None),

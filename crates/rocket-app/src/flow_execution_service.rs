@@ -67,6 +67,7 @@ fn captured_output_response_json(output: &CapturedOutput) -> DomainResult<String
             duration_ms: 0,
             ttfb_ms: 0,
             size_bytes: value.data().len(),
+            ..Default::default()
         },
     };
     serde_json::to_string(&response)
@@ -318,6 +319,7 @@ impl RequestExecutionService {
             body,
             duration_ms: 0,
             ttfb_ms: 0,
+            ..Default::default()
         };
         let response_json = match serde_json::to_string(&carrier) {
             Ok(json) => json,
@@ -2058,6 +2060,7 @@ mod tests {
                 duration_ms: 10,
                 ttfb_ms: 5,
                 size_bytes: 20,
+                ..Default::default()
             },
             test_results: Vec::new(),
             console_entries: Vec::new(),
@@ -2831,6 +2834,7 @@ mod tests {
                 duration_ms: 5,
                 ttfb_ms: 2,
                 size_bytes: 15,
+                ..Default::default()
             })
         }
     }
@@ -2858,6 +2862,7 @@ mod tests {
                 duration_ms: 5,
                 ttfb_ms: 2,
                 size_bytes: 15,
+                ..Default::default()
             })
         }
     }
@@ -6470,6 +6475,7 @@ mod tests {
                 duration_ms: 1,
                 ttfb_ms: 1,
                 size_bytes: body.len(),
+                ..Default::default()
             })
         }
     }
@@ -7925,6 +7931,7 @@ mod tests {
                 headers: Vec::new(),
                 duration_ms: 1,
                 ttfb_ms: 1,
+                ..Default::default()
             })
         }
     }
@@ -8107,6 +8114,7 @@ mod tests {
                 headers: Vec::new(),
                 duration_ms: 1,
                 ttfb_ms: 1,
+                ..Default::default()
             })
         }
     }
