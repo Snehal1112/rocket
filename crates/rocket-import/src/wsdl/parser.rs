@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use roxmltree::{Document, Node};
@@ -9,6 +10,8 @@ use crate::error::{ImportError, ImportResult};
 
 const MAX_SOURCES: usize = 32;
 const MAX_SOURCE_BYTES: u64 = 5 * 1024 * 1024;
+/// roxmltree recurses per nesting level and has no limit of its own.
+const MAX_XML_DEPTH: usize = 256;
 
 fn parse_err(path: &Path, message: impl Into<String>) -> ImportError {
     ImportError::ParseError {
@@ -17,12 +20,92 @@ fn parse_err(path: &Path, message: impl Into<String>) -> ImportError {
     }
 }
 
+fn xml_err(path: &Path, e: roxmltree::Error) -> ImportError {
+    match e {
+        roxmltree::Error::DtdDetected => {
+            parse_err(path, "DTDs are not allowed (found a DOCTYPE declaration)")
+        }
+        other => parse_err(path, other.to_string()),
+    }
+}
+
+/// Deepest element nesting of an XML text, from a light scan that only follows tags.
+fn xml_depth(text: &str) -> usize {
+    let b = text.as_bytes();
+    let (mut i, mut depth, mut max) = (0, 0usize, 0usize);
+    let skip_to = |from: usize, end: &[u8]| -> usize {
+        if from >= b.len() {
+            return b.len();
+        }
+        b[from..]
+            .windows(end.len())
+            .position(|w| w == end)
+            .map_or(b.len(), |p| from + p + end.len())
+    };
+    while i < b.len() {
+        if b[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        let rest = &b[i..];
+        if rest.starts_with(b"<!--") {
+            i = skip_to(i + 4, b"-->");
+        } else if rest.starts_with(b"<![CDATA[") {
+            i = skip_to(i + 9, b"]]>");
+        } else if rest.starts_with(b"<?") {
+            i = skip_to(i + 2, b"?>");
+        } else if rest.starts_with(b"<!") {
+            i = skip_to(i + 2, b">");
+        } else if rest.starts_with(b"</") {
+            depth = depth.saturating_sub(1);
+            i = skip_to(i + 2, b">");
+        } else {
+            // A start tag ends at the first `>` outside a quoted attribute value.
+            let mut j = i + 1;
+            let mut quote: Option<u8> = None;
+            while j < b.len() {
+                match (quote, b[j]) {
+                    (None, b'"') | (None, b'\'') => quote = Some(b[j]),
+                    (Some(q), c) if c == q => quote = None,
+                    (None, b'>') => break,
+                    _ => {}
+                }
+                j += 1;
+            }
+            if !(j > i + 1 && b.get(j - 1) == Some(&b'/')) {
+                depth += 1;
+                max = max.max(depth);
+            }
+            i = j + 1;
+        }
+    }
+    max
+}
+
+/// Parse XML after bounding its nesting. The default options also reject DTDs.
+fn parse_xml<'a>(text: &'a str, path: &Path) -> ImportResult<Document<'a>> {
+    if xml_depth(text) > MAX_XML_DEPTH {
+        return Err(parse_err(
+            path,
+            format!("XML nesting is deeper than {MAX_XML_DEPTH} levels"),
+        ));
+    }
+    Document::parse(text).map_err(|e| xml_err(path, e))
+}
+
+/// Read a regular file of at most `MAX_SOURCE_BYTES`. Devices, pipes and directories are refused.
 fn read_limited(path: &Path) -> ImportResult<String> {
-    let len = std::fs::metadata(path)?.len();
-    if len > MAX_SOURCE_BYTES {
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(parse_err(path, "not a regular file"));
+    }
+    let mut buf = Vec::new();
+    std::fs::File::open(path)?
+        .take(MAX_SOURCE_BYTES + 1)
+        .read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_SOURCE_BYTES {
         return Err(parse_err(path, "file is larger than 5 MiB"));
     }
-    Ok(std::fs::read_to_string(path)?)
+    String::from_utf8(buf).map_err(|_| parse_err(path, "file is not valid UTF-8"))
 }
 
 fn canonical(p: &Path) -> PathBuf {
@@ -33,9 +116,14 @@ fn in_ns(n: &Node, ns: &str, name: &str) -> bool {
     n.is_element() && n.tag_name().namespace() == Some(ns) && n.tag_name().name() == name
 }
 
+/// URLs and UNC paths are never opened, since a UNC path would reach the network on Windows.
+fn is_remote(loc: &str) -> bool {
+    loc.contains("://") || loc.starts_with("//") || loc.starts_with("\\\\")
+}
+
 /// Locations referenced by `wsdl:import`, `xsd:import`, `xsd:include` and `xsd:redefine`.
 fn import_locations(path: &Path, text: &str) -> ImportResult<Vec<String>> {
-    let doc = Document::parse(text).map_err(|e| parse_err(path, e.to_string()))?;
+    let doc = parse_xml(text, path)?;
     let mut out = Vec::new();
     for n in doc.descendants().filter(|n| n.is_element()) {
         let ns = n.tag_name().namespace();
@@ -53,34 +141,65 @@ fn import_locations(path: &Path, text: &str) -> ImportResult<Vec<String>> {
     Ok(out)
 }
 
+struct Source {
+    path: PathBuf,
+    text: String,
+    locations: Vec<String>,
+}
+
 /// Read the root document and every local file it imports. Remote locations are only reported.
+/// The root must be well formed, while a broken import only becomes a warning.
 fn load_sources(
     origin: &Path,
     root_text: String,
     warnings: &mut Vec<String>,
-) -> ImportResult<Vec<(PathBuf, String)>> {
-    let mut out = vec![(origin.to_path_buf(), root_text)];
+) -> ImportResult<Vec<Source>> {
+    let locations = import_locations(origin, &root_text)?;
+    let mut out = vec![Source {
+        path: origin.to_path_buf(),
+        text: root_text,
+        locations,
+    }];
     let mut seen: HashSet<PathBuf> = HashSet::new();
     seen.insert(canonical(origin));
+    let root_parent = origin
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let root_dir = canonical(root_parent);
     let mut i = 0;
     while i < out.len() {
-        let (path, text) = (out[i].0.clone(), out[i].1.clone());
-        for loc in import_locations(&path, &text)? {
-            if loc.contains("://") {
+        let path = out[i].path.clone();
+        for loc in out[i].locations.clone() {
+            if is_remote(&loc) {
                 warnings.push(format!("remote import not fetched: {loc}"));
                 continue;
             }
             let target = path.parent().unwrap_or_else(|| Path::new("")).join(&loc);
-            if !seen.insert(canonical(&target)) {
+            let resolved = canonical(&target);
+            if !seen.insert(resolved.clone()) {
                 continue;
             }
             if out.len() >= MAX_SOURCES {
                 warnings.push(format!("import limit reached, skipped: {loc}"));
                 continue;
             }
-            match read_limited(&target) {
-                Ok(t) => out.push((target, t)),
-                Err(e) => warnings.push(format!("could not read import {loc}: {e}")),
+            if !resolved.starts_with(&root_dir) {
+                warnings.push(format!(
+                    "import outside the WSDL directory was followed: {loc}"
+                ));
+            }
+            let loaded = read_limited(&target).and_then(|text| {
+                let locations = import_locations(&target, &text)?;
+                Ok((text, locations))
+            });
+            match loaded {
+                Ok((text, locations)) => out.push(Source {
+                    path: target,
+                    text,
+                    locations,
+                }),
+                Err(e) => warnings.push(format!("import skipped, {loc}: {e}")),
             }
         }
         i += 1;
@@ -145,12 +264,18 @@ fn style_of(s: Option<&str>) -> Option<BindingStyle> {
 }
 
 impl Raw {
-    fn absorb(&mut self, root: Node, schemas: &mut SchemaSet, path: &Path) -> ImportResult<()> {
+    fn absorb(
+        &mut self,
+        root: Node,
+        schemas: &mut SchemaSet,
+        path: &Path,
+        warnings: &mut Vec<String>,
+    ) -> ImportResult<()> {
         if root.tag_name().namespace() == Some(WSDL2_NS) {
             return Err(parse_err(path, "WSDL 2.0 is not supported, use a WSDL 1.1 document"));
         }
         if in_ns(&root, XSD_NS, "schema") {
-            schemas.add_schema(root);
+            schemas.add_schema(root, warnings);
             return Ok(());
         }
         if !in_ns(&root, WSDL_NS, "definitions") {
@@ -164,7 +289,7 @@ impl Raw {
             match child.tag_name().name() {
                 "types" => {
                     for s in child.children().filter(|n| in_ns(n, XSD_NS, "schema")) {
-                        schemas.add_schema(s);
+                        schemas.add_schema(s, warnings);
                     }
                 }
                 "message" => self.absorb_message(child, &tns),
@@ -368,10 +493,16 @@ pub(crate) fn parse_wsdl_str(text: &str, origin: &Path) -> ImportResult<WsdlMode
     let sources = load_sources(origin, text.to_string(), &mut warnings)?;
     let mut raw = Raw::default();
     let mut schemas = SchemaSet::default();
-    for (path, src) in &sources {
+    for (idx, src) in sources.iter().enumerate() {
         // The default options reject DTDs, which closes XXE and entity expansion.
-        let doc = Document::parse(src).map_err(|e| parse_err(path, e.to_string()))?;
-        raw.absorb(doc.root_element(), &mut schemas, path)?;
+        let result = parse_xml(&src.text, &src.path)
+            .and_then(|doc| raw.absorb(doc.root_element(), &mut schemas, &src.path, &mut warnings));
+        match result {
+            Ok(()) => {}
+            // Only the root document is fatal.
+            Err(e) if idx == 0 => return Err(e),
+            Err(e) => warnings.push(format!("import skipped, {}: {e}", src.path.display())),
+        }
     }
     Ok(build_model(raw, schemas, warnings))
 }
@@ -379,7 +510,7 @@ pub(crate) fn parse_wsdl_str(text: &str, origin: &Path) -> ImportResult<WsdlMode
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wsdl::{BindingStyle, PartKind, SoapVersion};
+    use crate::wsdl::{BindingStyle, PartKind, QName, SoapVersion};
     use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {
@@ -508,7 +639,8 @@ mod tests {
         let wsdl = r#"<?xml version="1.0"?>
 <!DOCTYPE d [<!ENTITY x "boom">]>
 <definitions xmlns="http://schemas.xmlsoap.org/wsdl/">&x;</definitions>"#;
-        assert!(parse_wsdl_str(wsdl, Path::new("dtd.wsdl")).is_err());
+        let err = parse_wsdl_str(wsdl, Path::new("dtd.wsdl")).expect_err("must fail");
+        assert!(err.to_string().contains("DTD"), "got: {err}");
     }
 
     #[test]
@@ -522,5 +654,210 @@ mod tests {
             "got: {:?}",
             model.warnings
         );
+    }
+
+    fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("test file is written");
+        path
+    }
+
+    const GOOD_XSD: &str = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:g">
+        <xs:simpleType name="Good"><xs:restriction base="xs:string"/></xs:simpleType></xs:schema>"#;
+
+    fn wsdl_importing(locations: &[&str]) -> String {
+        let imports: String = locations
+            .iter()
+            .map(|l| format!(r#"<import namespace="urn:o" location="{l}"/>"#))
+            .collect();
+        format!(
+            r#"<definitions xmlns="http://schemas.xmlsoap.org/wsdl/" targetNamespace="urn:r">{imports}</definitions>"#
+        )
+    }
+
+    #[test]
+    fn read_limited_refuses_directories() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let err = read_limited(dir.path()).expect_err("directory must fail");
+        assert!(err.to_string().contains("not a regular file"), "got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_limited_refuses_devices() {
+        let err = read_limited(Path::new("/dev/zero")).expect_err("device must fail");
+        assert!(err.to_string().contains("not a regular file"), "got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_limited_refuses_fifos_without_blocking() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let fifo = dir.path().join("pipe.xsd");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo runs");
+        assert!(status.success());
+        let err = read_limited(&fifo).expect_err("fifo must fail");
+        assert!(err.to_string().contains("not a regular file"), "got: {err}");
+    }
+
+    #[test]
+    fn read_limited_rejects_over_limit_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let big = write(dir.path(), "big.xsd", &"a".repeat(MAX_SOURCE_BYTES as usize + 1));
+        let err = read_limited(&big).expect_err("over limit must fail");
+        assert!(err.to_string().contains("5 MiB"), "got: {err}");
+        let ok = write(dir.path(), "ok.xsd", &"a".repeat(MAX_SOURCE_BYTES as usize));
+        assert!(read_limited(&ok).is_ok());
+    }
+
+    #[test]
+    fn unc_and_url_locations_are_remote() {
+        assert!(is_remote("//host/share/x.xsd"));
+        assert!(is_remote(r"\\host\share\x.xsd"));
+        assert!(is_remote("http://h/x.xsd"));
+        assert!(is_remote("file:///etc/passwd"));
+        assert!(!is_remote("calc-types.xsd"));
+        assert!(!is_remote("../x.xsd"));
+    }
+
+    #[test]
+    fn unc_imports_are_warned_not_opened() {
+        let wsdl = wsdl_importing(&["//host/share/x.xsd", r"\\host\share\y.xsd"]);
+        let model = parse_wsdl_str(&wsdl, Path::new("unc.wsdl")).expect("parses");
+        let n = model.warnings.iter().filter(|w| w.contains("not fetched")).count();
+        assert_eq!(n, 2, "got: {:?}", model.warnings);
+    }
+
+    #[test]
+    fn import_outside_the_wsdl_tree_is_followed_with_a_warning() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir(dir.path().join("inner")).expect("inner dir");
+        write(dir.path(), "outside.xsd", GOOD_XSD);
+        let root = write(&dir.path().join("inner"), "main.wsdl", &wsdl_importing(&["../outside.xsd"]));
+        let model = parse_wsdl_file(&root).expect("parses");
+        assert!(
+            model.warnings.iter().any(|w| w.contains("outside the WSDL directory")),
+            "got: {:?}",
+            model.warnings
+        );
+        assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
+    }
+
+    #[test]
+    fn import_inside_the_tree_has_no_outside_warning() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write(dir.path(), "good.xsd", GOOD_XSD);
+        let root = write(dir.path(), "main.wsdl", &wsdl_importing(&["good.xsd"]));
+        let model = parse_wsdl_file(&root).expect("parses");
+        assert!(model.warnings.is_empty(), "got: {:?}", model.warnings);
+    }
+
+    #[test]
+    fn broken_imports_become_warnings_and_the_rest_imports() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write(dir.path(), "notxml.xsd", "this is not xml");
+        write(
+            dir.path(),
+            "dtd.xsd",
+            "<?xml version=\"1.0\"?>\n<!DOCTYPE d [<!ENTITY x \"boom\">]>\n<d>&x;</d>",
+        );
+        write(dir.path(), "wrongroot.xsd", "<foo/>");
+        std::fs::create_dir(dir.path().join("adir")).expect("dir");
+        write(dir.path(), "good.xsd", GOOD_XSD);
+        let root = write(
+            dir.path(),
+            "main.wsdl",
+            &wsdl_importing(&["notxml.xsd", "dtd.xsd", "wrongroot.xsd", "adir", "missing.xsd", "good.xsd"]),
+        );
+        let model = parse_wsdl_file(&root).expect("a bad import must not abort");
+        let skipped = model.warnings.iter().filter(|w| w.contains("import skipped")).count();
+        assert_eq!(skipped, 5, "got: {:?}", model.warnings);
+        assert!(model.warnings.iter().any(|w| w.contains("DTD")), "got: {:?}", model.warnings);
+        assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
+    }
+
+    #[test]
+    fn root_with_doctype_is_fatal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = write(
+            dir.path(),
+            "main.wsdl",
+            "<?xml version=\"1.0\"?>\n<!DOCTYPE d [<!ENTITY x \"boom\">]>\n<definitions xmlns=\"http://schemas.xmlsoap.org/wsdl/\"/>",
+        );
+        let err = parse_wsdl_file(&root).expect_err("root DTD must fail");
+        assert!(err.to_string().contains("DTD"), "got: {err}");
+    }
+
+    #[test]
+    fn deeply_nested_schema_is_cut_off_with_a_warning() {
+        let mut xsd = String::from(r#"<xsd:complexType name="Deep">"#);
+        for _ in 0..200 {
+            xsd.push_str("<xsd:sequence>");
+        }
+        xsd.push_str(r#"<xsd:element name="leaf" type="xsd:string"/>"#);
+        for _ in 0..200 {
+            xsd.push_str("</xsd:sequence>");
+        }
+        xsd.push_str("</xsd:complexType>");
+        let wsdl = format!(
+            r#"<definitions xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+               <types><xsd:schema targetNamespace="urn:t">{xsd}</xsd:schema></types></definitions>"#
+        );
+        let model = parse_wsdl_str(&wsdl, Path::new("deep.wsdl")).expect("parses");
+        assert!(model.warnings.iter().any(|w| w.contains("nesting")), "got: {:?}", model.warnings);
+    }
+
+    #[test]
+    fn deeply_nested_anonymous_elements_are_bounded() {
+        let mut xsd = String::from(r#"<xsd:element name="Root">"#);
+        for _ in 0..50 {
+            xsd.push_str(r#"<xsd:complexType><xsd:sequence><xsd:element name="n">"#);
+        }
+        for _ in 0..50 {
+            xsd.push_str("</xsd:element></xsd:sequence></xsd:complexType>");
+        }
+        xsd.push_str("</xsd:element>");
+        let wsdl = format!(
+            r#"<definitions xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+               <types><xsd:schema targetNamespace="urn:t">{xsd}</xsd:schema></types></definitions>"#
+        );
+        let model = parse_wsdl_str(&wsdl, Path::new("deep2.wsdl")).expect("parses");
+        assert!(model.warnings.iter().any(|w| w.contains("nesting")), "got: {:?}", model.warnings);
+    }
+
+    fn nested(depth: usize) -> String {
+        format!("{}{}", "<a>".repeat(depth), "</a>".repeat(depth))
+    }
+
+    #[test]
+    fn xml_depth_counts_nesting_and_ignores_non_elements() {
+        assert_eq!(xml_depth(&nested(3)), 3);
+        assert_eq!(xml_depth("<a><b/><c x=\">\"/></a>"), 1);
+        assert_eq!(xml_depth("<a><!-- <b><c> --><![CDATA[<d><e>]]></a>"), 1);
+        assert_eq!(xml_depth("<?pi <x> ?><a><b></b></a>"), 2);
+    }
+
+    #[test]
+    fn ten_thousand_levels_in_the_root_fail_cleanly() {
+        let err = parse_wsdl_str(&nested(10_000), Path::new("deep.wsdl")).expect_err("must fail");
+        assert!(err.to_string().contains("nesting"), "got: {err}");
+    }
+
+    #[test]
+    fn ten_thousand_levels_in_an_import_only_warn() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        write(dir.path(), "deep.xsd", &nested(10_000));
+        write(dir.path(), "good.xsd", GOOD_XSD);
+        let root = write(dir.path(), "main.wsdl", &wsdl_importing(&["deep.xsd", "good.xsd"]));
+        let model = parse_wsdl_file(&root).expect("a deep import must not abort");
+        assert!(
+            model.warnings.iter().any(|w| w.contains("nesting")),
+            "got: {:?}",
+            model.warnings
+        );
+        assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
     }
 }

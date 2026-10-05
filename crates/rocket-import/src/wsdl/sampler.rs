@@ -5,6 +5,14 @@ use super::schema::{ElementDecl, ElementType, SchemaSet, SimpleType, TypeDef};
 
 /// Element nesting beyond this depth is replaced by a marker comment.
 pub(crate) const MAX_DEPTH: usize = 8;
+/// Total elements one sample may contain. Breadth is bounded here, depth by `MAX_DEPTH`.
+const MAX_NODES: usize = 5_000;
+/// Longest element name written into a sample.
+const MAX_NAME_LEN: usize = 128;
+/// Longest text value written into a sample.
+const MAX_VALUE_LEN: usize = 1_024;
+/// Longest chain of nested type definitions followed while rendering.
+const MAX_TYPE_CHAIN: usize = 64;
 
 /// Escape text content.
 pub(crate) fn esc(s: &str) -> String {
@@ -16,9 +24,35 @@ pub(crate) fn esc_attr(s: &str) -> String {
     esc(s).replace('"', "&quot;")
 }
 
-/// Type names may legally contain `--`, which is illegal inside an XML comment.
+/// Type names may legally contain `--` or end in `-`, both illegal inside an XML comment.
 fn comment_safe(s: &str) -> String {
-    s.replace("--", "-")
+    let mut out = s.to_string();
+    while out.contains("--") {
+        out = out.replace("--", "-");
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+/// Turn any string into a valid XML name, so a sample can never carry injected markup.
+fn safe_name(s: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in s.chars().take(MAX_NAME_LEN).enumerate() {
+        let start = c.is_alphabetic() || c == '_';
+        let rest = start || c.is_ascii_digit() || c == '-' || c == '.';
+        if i == 0 && !start {
+            out.push('_');
+        }
+        out.push(if rest { c } else { '_' });
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
+}
+
+/// Escape sample text and cap its length.
+fn text(s: &str) -> String {
+    esc(&s.chars().take(MAX_VALUE_LEN).collect::<String>())
 }
 
 fn builtin_sample(local: &str) -> &'static str {
@@ -46,6 +80,7 @@ pub(crate) struct Sampler<'a> {
     schemas: &'a SchemaSet,
     prefixes: BTreeMap<String, String>,
     stack: Vec<QName>,
+    nodes_left: usize,
 }
 
 impl<'a> Sampler<'a> {
@@ -54,6 +89,7 @@ impl<'a> Sampler<'a> {
             schemas,
             prefixes: BTreeMap::new(),
             stack: Vec::new(),
+            nodes_left: MAX_NODES,
         }
     }
 
@@ -76,14 +112,16 @@ impl<'a> Sampler<'a> {
     }
 
     fn tag(&mut self, ns: &str, local: &str) -> String {
+        let local = safe_name(local);
         match self.prefix_for(ns) {
             Some(p) => format!("{p}:{local}"),
-            None => local.to_string(),
+            None => local,
         }
     }
 
     /// Sample for a top-level element declaration. An unknown element renders empty.
     pub(crate) fn element(&mut self, name: &QName) -> String {
+        self.nodes_left = MAX_NODES;
         let schemas = self.schemas;
         match schemas.elements.get(name) {
             Some(decl) => self.render_decl(decl, 0),
@@ -96,6 +134,8 @@ impl<'a> Sampler<'a> {
 
     /// Unqualified element of a given type, used for `type=` message parts.
     pub(crate) fn typed_element(&mut self, local: &str, ty: &QName) -> String {
+        self.nodes_left = MAX_NODES;
+        let local = safe_name(local);
         let content = self.render_named(ty, 0);
         format!("<{local}>{content}</{local}>")
     }
@@ -107,6 +147,10 @@ impl<'a> Sampler<'a> {
     }
 
     fn render_decl(&mut self, d: &'a ElementDecl, depth: usize) -> String {
+        if self.nodes_left == 0 {
+            return "<!-- size limit -->".to_string();
+        }
+        self.nodes_left -= 1;
         let schemas = self.schemas;
         let d = match &d.reference {
             Some(r) => schemas.elements.get(r).unwrap_or(d),
@@ -117,7 +161,7 @@ impl<'a> Sampler<'a> {
             return format!("<{tag}><!-- depth limit --></{tag}>");
         }
         if let Some(v) = &d.value {
-            return format!("<{tag}>{}</{tag}>", esc(v));
+            return format!("<{tag}>{}</{tag}>", text(v));
         }
         let content = match &d.ty {
             ElementType::Named(q) => self.render_named(q, depth),
@@ -137,6 +181,9 @@ impl<'a> Sampler<'a> {
         };
         if self.stack.contains(q) {
             return format!("<!-- recursive type: {} -->", comment_safe(&q.local));
+        }
+        if self.stack.len() >= MAX_TYPE_CHAIN {
+            return "<!-- type nesting limit -->".to_string();
         }
         self.stack.push(q.clone());
         let out = self.render_def(def, depth);
@@ -170,7 +217,7 @@ impl<'a> Sampler<'a> {
             return esc("string");
         }
         if let Some(e) = &s.first_enum {
-            return esc(e);
+            return text(e);
         }
         match &s.base {
             Some(b) => self.simple_base_text(b, hops + 1),
@@ -283,5 +330,134 @@ mod tests {
     #[test]
     fn comment_safe_strips_double_dash() {
         assert_eq!(comment_safe("a--b"), "a-b");
+    }
+
+    fn assert_wellformed(s: &Sampler, xml: &str) {
+        let decls: String = s
+            .namespaces()
+            .iter()
+            .map(|(uri, p)| format!(r#" xmlns:{p}="{}""#, esc_attr(uri)))
+            .collect();
+        let doc = format!("<r{decls}>{xml}</r>");
+        if let Err(e) = roxmltree::Document::parse(&doc) {
+            panic!("not well formed: {e}: {doc}");
+        }
+    }
+
+    fn has_element(s: &Sampler, xml: &str, name: &str) -> bool {
+        let decls: String = s
+            .namespaces()
+            .iter()
+            .map(|(uri, p)| format!(r#" xmlns:{p}="{}""#, esc_attr(uri)))
+            .collect();
+        let doc = format!("<r{decls}>{xml}</r>");
+        let parsed = roxmltree::Document::parse(&doc).expect("sample is well formed");
+        parsed
+            .descendants()
+            .any(|n| n.is_element() && n.tag_name().name() == name)
+    }
+
+    #[test]
+    fn comment_safe_never_leaves_a_dash_run_or_trailing_dash() {
+        for input in ["---", "a--->", "a-", "a----b", "x---><inj/><!--", "-"] {
+            let out = comment_safe(input);
+            assert!(!out.contains("--"), "{input:?} -> {out:?}");
+            assert!(!out.ends_with('-'), "{input:?} -> {out:?}");
+        }
+        assert_eq!(comment_safe("a--->"), "a->");
+    }
+
+    #[test]
+    fn recursive_type_name_cannot_close_the_comment() {
+        let model = model_with_schema(
+            r#"<xsd:complexType name="x---&gt;&lt;inj/&gt;&lt;!--"><xsd:sequence>
+                 <xsd:element name="child" type="t:x---&gt;&lt;inj/&gt;&lt;!--"/>
+               </xsd:sequence></xsd:complexType>
+               <xsd:element name="Root" type="t:x---&gt;&lt;inj/&gt;&lt;!--"/>"#,
+        );
+        let mut s = Sampler::new(&model.schemas);
+        let xml = s.element(&QName::new("urn:t", "Root"));
+        assert!(xml.contains("<!-- recursive type:"), "got: {xml}");
+        assert!(!has_element(&s, &xml, "inj"), "injected element in: {xml}");
+    }
+
+    #[test]
+    fn hostile_element_names_cannot_inject_markup() {
+        let model = model_with_schema(
+            r#"<xsd:element name="a&gt;&lt;evil/&gt;" type="xsd:string"/>
+               <xsd:element name="Pick"><xsd:complexType><xsd:sequence>
+                 <xsd:element ref="t:b&gt;&lt;evil/&gt;"/>
+                 <xsd:element name="c&gt;&lt;evil/&gt;" type="xsd:string"/>
+               </xsd:sequence></xsd:complexType></xsd:element>"#,
+        );
+        let mut s = Sampler::new(&model.schemas);
+        for name in ["a><evil/>", "Pick", "missing><evil/>"] {
+            let xml = s.element(&QName::new("urn:t", name));
+            assert!(!has_element(&s, &xml, "evil"), "injected element in: {xml}");
+        }
+    }
+
+    #[test]
+    fn hostile_part_and_wrapper_names_cannot_inject_markup() {
+        let model = model_with_schema("");
+        let mut s = Sampler::new(&model.schemas);
+        let typed = s.typed_element(
+            "p><evil/>",
+            &QName::new("http://www.w3.org/2001/XMLSchema", "string"),
+        );
+        let wrapped = s.wrap("urn:t", "w><evil/>", &typed);
+        for xml in [&typed, &wrapped] {
+            assert!(!has_element(&s, xml, "evil"), "injected element in: {xml}");
+        }
+    }
+
+    #[test]
+    fn safe_name_always_yields_a_valid_name() {
+        assert_eq!(safe_name("ok.name-1"), "ok.name-1");
+        assert_eq!(safe_name("1abc"), "_1abc");
+        assert_eq!(safe_name(""), "_");
+        assert_eq!(safe_name("a:b"), "a_b");
+        assert_eq!(safe_name(&"x".repeat(1000)).len(), MAX_NAME_LEN);
+    }
+
+    #[test]
+    fn wide_fan_out_is_bounded_by_the_node_budget() {
+        // Eight distinct types of ten children each would expand to about 10^8 elements.
+        let mut xsd = String::new();
+        for i in 0..8 {
+            let child = if i == 7 {
+                "xsd:string".to_string()
+            } else {
+                format!("t:T{}", i + 1)
+            };
+            xsd.push_str(&format!(r#"<xsd:complexType name="T{i}"><xsd:sequence>"#));
+            for j in 0..10 {
+                xsd.push_str(&format!(r#"<xsd:element name="p{j}" type="{child}"/>"#));
+            }
+            xsd.push_str("</xsd:sequence></xsd:complexType>");
+        }
+        xsd.push_str(r#"<xsd:element name="Root" type="t:T0"/>"#);
+        let model = model_with_schema(&xsd);
+        let mut s = Sampler::new(&model.schemas);
+        let xml = s.element(&QName::new("urn:t", "Root"));
+        assert!(xml.contains("<!-- size limit -->"), "marker missing");
+        assert!(xml.len() < 500_000, "output was {} bytes", xml.len());
+        assert_wellformed(&s, &xml);
+    }
+
+    #[test]
+    fn long_base_type_chain_is_bounded() {
+        let mut xsd = String::new();
+        for i in 0..500 {
+            xsd.push_str(&format!(
+                r#"<xsd:complexType name="C{i}"><xsd:complexContent><xsd:extension base="t:C{}"><xsd:sequence/></xsd:extension></xsd:complexContent></xsd:complexType>"#,
+                i + 1
+            ));
+        }
+        xsd.push_str(r#"<xsd:element name="Root" type="t:C0"/>"#);
+        let model = model_with_schema(&xsd);
+        let mut s = Sampler::new(&model.schemas);
+        let xml = s.element(&QName::new("urn:t", "Root"));
+        assert!(xml.contains("<!-- type nesting limit -->"), "got: {xml}");
     }
 }

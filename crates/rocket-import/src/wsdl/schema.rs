@@ -52,18 +52,32 @@ pub(crate) struct SchemaSet {
     pub types: HashMap<QName, TypeDef>,
 }
 
+/// Schema element nesting beyond this depth is dropped, so hostile input cannot overflow the stack.
+const MAX_SCHEMA_DEPTH: usize = 64;
+const NESTING_WARNING: &str = "schema nesting is too deep, deeper parts were skipped";
+
+fn too_deep(depth: usize, warnings: &mut Vec<String>) -> bool {
+    if depth <= MAX_SCHEMA_DEPTH {
+        return false;
+    }
+    if !warnings.iter().any(|w| w == NESTING_WARNING) {
+        warnings.push(NESTING_WARNING.to_string());
+    }
+    true
+}
+
 fn is_xsd(n: &Node, name: &str) -> bool {
     n.is_element() && n.tag_name().namespace() == Some(XSD_NS) && n.tag_name().name() == name
 }
 
 impl SchemaSet {
     /// Read one `xsd:schema` element. Attributes, wildcards and groups are ignored.
-    pub(crate) fn add_schema(&mut self, schema: Node) {
+    pub(crate) fn add_schema(&mut self, schema: Node, warnings: &mut Vec<String>) {
         let tns = schema.attribute("targetNamespace").unwrap_or("").to_string();
         let qualified = schema.attribute("elementFormDefault") == Some("qualified");
         for child in schema.children().filter(|n| n.is_element()) {
             if is_xsd(&child, "element") {
-                if let Some(decl) = parse_element(child, &tns, qualified, true) {
+                if let Some(decl) = parse_element(child, &tns, qualified, true, 0, warnings) {
                     self.elements
                         .insert(QName::new(tns.clone(), decl.name.clone()), decl);
                 }
@@ -71,7 +85,7 @@ impl SchemaSet {
                 if let Some(name) = child.attribute("name") {
                     self.types.insert(
                         QName::new(tns.clone(), name),
-                        TypeDef::Complex(parse_complex(child, &tns, qualified)),
+                        TypeDef::Complex(parse_complex(child, &tns, qualified, 0, warnings)),
                     );
                 }
             } else if is_xsd(&child, "simpleType") {
@@ -91,7 +105,12 @@ fn parse_element(
     tns: &str,
     qualified_default: bool,
     top: bool,
+    depth: usize,
+    warnings: &mut Vec<String>,
 ) -> Option<ElementDecl> {
+    if too_deep(depth, warnings) {
+        return None;
+    }
     let value = node
         .attribute("fixed")
         .or_else(|| node.attribute("default"))
@@ -124,6 +143,8 @@ fn parse_element(
             c,
             tns,
             qualified_default,
+            depth + 1,
+            warnings,
         ))))
     } else if let Some(s) = node.children().find(|n| is_xsd(n, "simpleType")) {
         ElementType::Inline(Box::new(TypeDef::Simple(parse_simple(s))))
@@ -139,30 +160,49 @@ fn parse_element(
     })
 }
 
-fn handle_particle(n: Node, tns: &str, q: bool, out: &mut Vec<ElementDecl>) {
+fn handle_particle(
+    n: Node,
+    tns: &str,
+    q: bool,
+    depth: usize,
+    out: &mut Vec<ElementDecl>,
+    warnings: &mut Vec<String>,
+) {
+    if too_deep(depth, warnings) {
+        return;
+    }
     if is_xsd(&n, "element") {
-        if let Some(d) = parse_element(n, tns, q, false) {
+        if let Some(d) = parse_element(n, tns, q, false, depth + 1, warnings) {
             out.push(d);
         }
     } else if is_xsd(&n, "sequence") || is_xsd(&n, "all") {
         for c in n.children().filter(|c| c.is_element()) {
-            handle_particle(c, tns, q, out);
+            handle_particle(c, tns, q, depth + 1, out, warnings);
         }
     } else if is_xsd(&n, "choice") {
         if let Some(c) = n.children().find(|c| c.is_element()) {
-            handle_particle(c, tns, q, out);
+            handle_particle(c, tns, q, depth + 1, out, warnings);
         }
     }
 }
 
-fn parse_complex(node: Node, tns: &str, q: bool) -> ComplexType {
+fn parse_complex(
+    node: Node,
+    tns: &str,
+    q: bool,
+    depth: usize,
+    warnings: &mut Vec<String>,
+) -> ComplexType {
     let mut ct = ComplexType::default();
+    if too_deep(depth, warnings) {
+        return ct;
+    }
     for child in node.children().filter(|n| n.is_element()) {
         if is_xsd(&child, "complexContent") {
             for d in child.children().filter(|n| is_xsd(n, "extension")) {
                 ct.base = qname_attr(d, "base");
                 for p in d.children().filter(|n| n.is_element()) {
-                    handle_particle(p, tns, q, &mut ct.particles);
+                    handle_particle(p, tns, q, depth + 1, &mut ct.particles, warnings);
                 }
             }
         } else if is_xsd(&child, "simpleContent") {
@@ -173,7 +213,7 @@ fn parse_complex(node: Node, tns: &str, q: bool) -> ComplexType {
                 ct.simple_base = qname_attr(d, "base");
             }
         } else {
-            handle_particle(child, tns, q, &mut ct.particles);
+            handle_particle(child, tns, q, depth + 1, &mut ct.particles, warnings);
         }
     }
     ct
