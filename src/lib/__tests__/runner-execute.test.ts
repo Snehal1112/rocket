@@ -10,6 +10,7 @@ vi.mock('@/lib/execute-request', () => ({
     url: 'https://example.com/ping',
     headers: [],
     queryParams: [],
+    pathParams: [],
     body: undefined,
     auth: { authType: 'none' },
     collection: 'demo',

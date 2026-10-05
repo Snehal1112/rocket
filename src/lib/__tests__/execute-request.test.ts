@@ -107,6 +107,20 @@ describe('resolveRequestFieldsForPath', () => {
     const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
     expect(resolved.assertions).toEqual([{ expression: 'res.status', operator: 'isDefined' }]);
   });
+
+  it('leaves path params in the url and returns their resolved values for the backend', async () => {
+    const request = {
+      ...baseRequest(),
+      url: '{{baseUrl}}/users/:id',
+      pathParams: [
+        { id: 'p1', key: 'id', value: '{{baseUrl}}', enabled: true },
+        { id: 'p2', key: 'off', value: 'x', enabled: false },
+      ],
+    };
+    const resolved = await resolveRequestFieldsForPath('demo', 'ping.yml', request);
+    expect(resolved.url).toBe('https://collection.example/users/:id');
+    expect(resolved.pathParams).toEqual([{ name: 'id', value: 'https://collection.example' }]);
+  });
 });
 
 describe('getEnvInvalidationKeys', () => {

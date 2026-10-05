@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '../url-params';
+import {
+  applyPathParams,
+  buildUrl,
+  extractPathParams,
+  parseQueryParams,
+  splitUrl,
+} from '../url-params';
 
 // ─── splitUrl ────────────────────────────────────────────────────────────────
 
@@ -190,5 +196,31 @@ describe('roundtrip: parse → build → parse', () => {
 
     expect(reparsed[0]).toMatchObject({ key: 'q', value: 'hello world' });
     expect(reparsed[1]).toMatchObject({ key: 'tag', value: 'a+b' });
+  });
+});
+
+describe('applyPathParams', () => {
+  const p = (name: string, value: string) => ({ name, value });
+
+  it('replaces every occurrence and encodes the value', () => {
+    expect(applyPathParams('https://h.test/a/:id/b/:id', [p('id', 'x y')])).toBe(
+      'https://h.test/a/x%20y/b/x%20y',
+    );
+  });
+
+  it('does not rewrite a longer name, a port, the query or a double-brace variable', () => {
+    expect(applyPathParams('http://localhost:8080/a/:idx/:id', [p('id', '7')])).toBe(
+      'http://localhost:8080/a/:idx/7',
+    );
+    expect(applyPathParams('https://h.test/a?x=:id', [p('id', '7')])).toBe(
+      'https://h.test/a?x=:id',
+    );
+    expect(applyPathParams('https://h.test/{id}/{{id}}', [p('id', '7')])).toBe(
+      'https://h.test/7/{{id}}',
+    );
+  });
+
+  it('ignores params without a value', () => {
+    expect(applyPathParams('https://h.test/:id', [p('id', '')])).toBe('https://h.test/:id');
   });
 });

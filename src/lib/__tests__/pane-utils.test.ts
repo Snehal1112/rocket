@@ -9,6 +9,7 @@ import {
   findFirstLeaf,
   findLeaf,
   findTabInTree,
+  mapApiRequestToState,
   removeLeaf,
   splitLeaf,
   updateLeaf,
@@ -213,5 +214,23 @@ describe('pane-utils', () => {
   it('findActiveLeaf falls back to first leaf when groupId not found', () => {
     const active = findActiveLeaf(splitTree, 'ghost');
     expect(active.groupId).toBe('g1');
+  });
+});
+
+describe('mapApiRequestToState path params', () => {
+  it('restores saved path param values by name', () => {
+    const state = mapApiRequestToState({
+      uid: 'u',
+      name: 'n',
+      method: 'GET',
+      url: 'https://h.test/users/:id/:other',
+      headers: [],
+      auth: { authType: 'none' },
+      pathParams: [{ name: 'id', value: '7' }],
+    });
+    expect(state.pathParams.map((p) => [p.key, p.value])).toEqual([
+      ['id', '7'],
+      ['other', ''],
+    ]);
   });
 });

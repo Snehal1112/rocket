@@ -8,6 +8,7 @@ pub mod jwt;
 pub mod load_test;
 pub mod oauth1_sig;
 pub mod oauth2;
+pub mod path_params;
 pub mod pkce;
 pub mod request;
 pub mod resolved_certificate;
@@ -29,6 +30,7 @@ pub use oauth2::{
     acquire_token, apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthConfig,
     OAuthToken,
 };
+pub use path_params::substitute_path_params;
 pub use pkce::{generate_pkce, PkcePair};
 pub use request::{HttpRequest, RequestOptions};
 pub use resolved_certificate::{

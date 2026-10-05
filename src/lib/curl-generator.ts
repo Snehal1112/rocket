@@ -1,5 +1,6 @@
 import type { ResolvedRequestFields } from '@/lib/execute-request';
 import type { Body, Header } from '@/lib/tauri-api';
+import { applyPathParams } from '@/lib/url-params';
 
 // Characters that are always safe unquoted in a POSIX shell word. Anything
 // else (spaces, quotes, `?`, `&`, `{`, etc.) forces single-quoting. Mirrors
@@ -159,7 +160,10 @@ function buildBodyParts(body: Body | undefined, headers: Header[]): BodyParts {
 // curl command. Mirrors curl-parser.ts's parsing rules in reverse.
 export function generateCurlCommand(resolved: ResolvedRequestFields, method: string): string {
   const { authFlag, authHeaderLines, extraQueryParams } = buildAuthParts(resolved.auth);
-  const url = buildUrlWithQuery(resolved.url, [...resolved.queryParams, ...extraQueryParams]);
+  const url = buildUrlWithQuery(applyPathParams(resolved.url, resolved.pathParams), [
+    ...resolved.queryParams,
+    ...extraQueryParams,
+  ]);
   const headerLines = buildHeaderLines(resolved.headers);
   const { lines: bodyLines, extraHeaderLine } = buildBodyParts(resolved.body, resolved.headers);
 

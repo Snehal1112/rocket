@@ -18,6 +18,7 @@ import {
   oauth2RefreshToken,
   type RequestGuardPolicy,
 } from '@/lib/tauri-api';
+import { applyPathParams } from '@/lib/url-params';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
@@ -176,6 +177,7 @@ export interface ResolvedRequestFields {
   url: string;
   headers: Header[];
   queryParams: { key: string; value: string; enabled: boolean }[];
+  pathParams: { name: string; value: string }[];
   body: ReturnType<typeof toApiBody>;
   auth: Auth;
   assertions: AssertionEntry[];
@@ -239,12 +241,11 @@ export async function resolveRequestFieldsForPath(
   });
   const resolve = (text: string) => resolveWithContext(text, ctx);
 
-  let resolvedUrl = resolve(request.url);
-  for (const p of request.pathParams) {
-    if (p.enabled && p.key && p.value) {
-      resolvedUrl = resolvedUrl.replace(`:${p.key}`, encodeURIComponent(p.value));
-    }
-  }
+  const resolvedUrl = resolve(request.url);
+  // The backend substitutes these into the url, after resolving any {{variables}} again.
+  const resolvedPathParams = request.pathParams
+    .filter((p) => p.enabled && p.key)
+    .map((p) => ({ name: p.key, value: resolve(p.value) }));
 
   const resolvedHeaders: Header[] = request.headers
     .filter((h) => h.enabled)
@@ -282,6 +283,7 @@ export async function resolveRequestFieldsForPath(
     url: resolvedUrl,
     headers: effectiveHeaders,
     queryParams: resolvedQueryParams,
+    pathParams: resolvedPathParams,
     body: resolvedBody,
     auth: resolvedAuth,
     assertions: resolvedAssertions,
@@ -532,6 +534,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     url: resolvedUrl,
     headers: effectiveHeaders,
     queryParams: resolvedQueryParams,
+    pathParams: resolvedPathParams,
     body: resolvedBody,
     auth: resolvedAuth,
     assertions: resolvedAssertions,
@@ -568,9 +571,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       globalEnvName,
       requestName,
       tags: effectiveRequest.tags ?? [],
-      pathParams: effectiveRequest.pathParams
-        .filter((p) => p.enabled && p.key)
-        .map((p) => ({ name: p.key, value: p.value })),
+      pathParams: resolvedPathParams,
       requestGuardPolicy,
     });
 
@@ -621,7 +622,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     ];
     useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
-      url: resolvedUrl,
+      url: applyPathParams(resolvedUrl, resolvedPathParams),
       status: result.status,
       statusText: result.statusText,
       durationMs: result.durationMs,
@@ -673,7 +674,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     });
     useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
-      url: resolvedUrl,
+      url: applyPathParams(resolvedUrl, resolvedPathParams),
       status: 0,
       statusText: 'Error',
       durationMs: 0,

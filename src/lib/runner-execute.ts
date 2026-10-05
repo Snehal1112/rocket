@@ -55,9 +55,7 @@ export async function executeRunnerEntry(
       tags: request.tags,
       actions: request.actions,
       globalEnvName,
-      pathParams: requestState.pathParams
-        .filter((p) => p.enabled && p.key)
-        .map((p) => ({ name: p.key, value: p.value })),
+      pathParams: resolved.pathParams,
       requestGuardPolicy,
     };
 

@@ -8,6 +8,7 @@ function baseResolved(overrides: Partial<ResolvedRequestFields> = {}): ResolvedR
     url: 'https://api.example.com/users',
     headers: [],
     queryParams: [],
+    pathParams: [],
     body: undefined,
     auth: { authType: 'none' },
     assertions: [],
@@ -22,6 +23,17 @@ describe('generateCurlCommand', () => {
   it('leaves a url with no shell-special characters bare (unquoted)', () => {
     const cmd = generateCurlCommand(baseResolved(), 'GET');
     expect(cmd).toBe('curl -X GET https://api.example.com/users');
+  });
+
+  it('substitutes path params for display', () => {
+    const cmd = generateCurlCommand(
+      baseResolved({
+        url: 'https://api.example.com/users/:id',
+        pathParams: [{ name: 'id', value: '7' }],
+      }),
+      'GET',
+    );
+    expect(cmd).toBe('curl -X GET https://api.example.com/users/7');
   });
 
   it('quotes the url when it contains a query string', () => {

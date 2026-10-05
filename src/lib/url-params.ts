@@ -79,3 +79,45 @@ export function extractPathParams(url: string): string[] {
 
   return results;
 }
+
+interface PathParamValue {
+  name: string;
+  value: string;
+}
+
+// Display-only mirror of `substitute_path_params` in rocket-http. The backend does the real
+// substitution when a request is sent; this only builds the URL shown in the cURL copy and
+// the console. Keep the two in step.
+export function applyPathParams(url: string, params: PathParamValue[]): string {
+  const usable = params.filter((p) => p.name && p.value);
+  if (usable.length === 0) return url;
+  const schemeAt = url.indexOf('://');
+  const hasScheme = schemeAt !== -1 && !/[/?#]/.test(url.slice(0, schemeAt));
+  const authorityStart = hasScheme ? schemeAt + 3 : 0;
+  const pathOffset = url.slice(authorityStart).search(/[/?#]/);
+  if (pathOffset === -1) return url;
+  const start = authorityStart + pathOffset;
+  const endOffset = url.slice(start).search(/[?#]/);
+  const end = endOffset === -1 ? url.length : start + endOffset;
+  const path = url
+    .slice(start, end)
+    .split('/')
+    .map((segment) => rewriteSegment(segment, usable))
+    .join('/');
+  return url.slice(0, start) + path + url.slice(end);
+}
+
+function rewriteSegment(segment: string, params: PathParamValue[]): string {
+  let out = segment;
+  const colon = /^:([A-Za-z0-9_]+)/.exec(segment);
+  if (colon) {
+    const match = params.find((p) => p.name === colon[1]);
+    if (match) out = encodeURIComponent(match.value) + segment.slice(colon[0].length);
+  }
+  for (const p of params) {
+    const escaped = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(?<!\\{)\\{${escaped}\\}(?!\\})`, 'g');
+    out = out.replace(pattern, () => encodeURIComponent(p.value));
+  }
+  return out;
+}

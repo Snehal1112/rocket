@@ -27,6 +27,7 @@ cargo test -p rocket-http <test_name>
 | `request` | `HttpRequest` (fully-resolved, ready-to-send) and `RequestOptions` (timeout, SSL, redirect flags) |
 | `response` | `HttpResponse` with status helpers (`is_success`, `is_redirect`, etc.) and case-insensitive `header_value()` |
 | `oauth2` | `OAuthConfig`, `OAuthToken`, and `acquire_token()` — supports `client_credentials`, `password`, `authorization_code` grants |
+| `path_params` | `substitute_path_params()` replaces `:name` (segment start only, so a port is never a param) and `{name}` (never inside `{{var}}`) in the URL path with percent-encoded, already-resolved values. Called by `rocket-app` `resolve_request`; `applyPathParams` in `src/lib/url-params.ts` is its display-only mirror. |
 | `pkce` | `generate_pkce()` → `PkcePair` (verifier + challenge per RFC 7636) |
 | `oauth1_sig` | `sign()` → `oauth_*` params, `authorization_header()` — OAuth 1.0 (RFC 5849) signing for HMAC-SHA1/256/512 and PLAINTEXT. RSA-* returns an error. |
 | `client_cert` | `find_certificate()` picks the environment client certificate whose `domain` matches a URL (host, optional scheme and port, `*` wildcard; an empty domain never matches). `certificate_covers()` checks one certificate against a URL, for redirect targets. |

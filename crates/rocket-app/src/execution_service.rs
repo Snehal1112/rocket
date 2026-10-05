@@ -689,6 +689,32 @@ impl RequestExecutionService {
         // Resolve {{placeholders}} in auth, URL and headers.
         let effective_auth = resolve_auth(effective_auth, &vars);
         let resolved_url = resolve(&input.url, &vars).output;
+        // Path parameter values may hold {{placeholders}}, so they resolve before they are
+        // substituted. The substitution runs on the resolved URL, so a placeholder in the URL
+        // itself never swallows a parameter.
+        let resolved_path_params: Vec<rocket_shared::types::PathParam> = input
+            .path_params
+            .iter()
+            .map(|p| rocket_shared::types::PathParam {
+                name: p.name.clone(),
+                value: resolve(&p.value, &vars).output,
+                description: None,
+            })
+            .collect();
+        let resolved_url =
+            rocket_http::substitute_path_params(&resolved_url, &resolved_path_params);
+        // Query keys and values resolve like headers do, so a runner step or a flow node sends
+        // the same query string as the single send.
+        let resolved_query_params: Vec<QueryParam> = input
+            .query_params
+            .iter()
+            .map(|q| QueryParam {
+                key: resolve(&q.key, &vars).output,
+                value: resolve(&q.value, &vars).output,
+                enabled: q.enabled,
+                description: q.description.clone(),
+            })
+            .collect();
         let resolved_headers: Vec<Header> = effective_headers
             .iter()
             .map(|h| Header {
@@ -730,7 +756,7 @@ impl RequestExecutionService {
             method: input.method.clone(),
             url: resolved_url,
             headers: resolved_headers,
-            query_params: input.query_params.clone(),
+            query_params: resolved_query_params,
             body: resolved_body,
             auth: effective_auth,
             options,
@@ -3236,6 +3262,114 @@ mod tests {
             .resolve_request(&input, &std::collections::HashMap::new())
             .expect("resolve_request");
         assert_eq!(resolved.url, "https://auth.local/api/v1/users");
+    }
+
+    #[tokio::test]
+    async fn resolve_request_resolves_placeholders_in_query_params() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("token", "abc 123"));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let mut input = sample_input("https://api.example.com/items", Some("dev"));
+        input.query_params = vec![
+            QueryParam {
+                key: "{{token}}-k".into(),
+                value: "{{token}}".into(),
+                enabled: true,
+                description: None,
+            },
+            QueryParam {
+                key: "off".into(),
+                value: "{{token}}".into(),
+                enabled: false,
+                description: None,
+            },
+        ];
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        assert_eq!(resolved.query_params[0].key, "abc 123-k");
+        assert_eq!(resolved.query_params[0].value, "abc 123");
+        assert!(resolved.query_params[0].enabled);
+        assert!(
+            !resolved.query_params[1].enabled,
+            "enabled must be preserved"
+        );
+        assert_eq!(resolved.query_params[1].value, "abc 123");
+    }
+
+    #[tokio::test]
+    async fn resolve_request_substitutes_path_params_with_resolved_values() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("userId", "42"));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let mut input = sample_input(
+            "https://api.example.com/users/:id/orders/:id/{kind}",
+            Some("dev"),
+        );
+        input.path_params = vec![
+            rocket_shared::types::PathParam {
+                name: "id".into(),
+                value: "{{userId}}".into(),
+                description: None,
+            },
+            rocket_shared::types::PathParam {
+                name: "kind".into(),
+                value: "a b".into(),
+                description: None,
+            },
+        ];
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        assert_eq!(
+            resolved.url,
+            "https://api.example.com/users/42/orders/42/a%20b"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_request_keeps_a_path_param_placeholder_when_the_value_is_empty() {
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let mut input = sample_input("https://api.example.com/users/:id", None);
+        input.path_params = vec![rocket_shared::types::PathParam {
+            name: "id".into(),
+            value: String::new(),
+            description: None,
+        }];
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        assert_eq!(resolved.url, "https://api.example.com/users/:id");
     }
 
     #[tokio::test]

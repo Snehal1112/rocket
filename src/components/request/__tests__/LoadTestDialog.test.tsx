@@ -14,6 +14,7 @@ vi.mock('@/lib/execute-request', () => ({
     url: req.url,
     headers: req.headers,
     queryParams: req.queryParams,
+    pathParams: [{ name: 'id', value: '7' }],
     body: (req.body as { mode: string } | null)?.mode === 'none' ? null : req.body,
     auth: req.auth,
     collection: undefined,
@@ -96,6 +97,29 @@ describe('LoadTestDialog', () => {
     await waitFor(() => expect(runLoadTest).toHaveBeenCalledTimes(1));
     const configArg = (runLoadTest as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(configArg.intervalMs).toBe(500);
+  });
+
+  it('forwards the resolved path params to runLoadTest', async () => {
+    (runLoadTest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalRequests: 1,
+      succeeded: 1,
+      failed: 0,
+      failedTransport: 0,
+      failedStatus: 0,
+      minLatencyMs: 1,
+      avgLatencyMs: 1,
+      p50LatencyMs: 1,
+      p95LatencyMs: 1,
+      p99LatencyMs: 1,
+      maxLatencyMs: 1,
+      requestsPerSecond: 1,
+      totalDurationMs: 1,
+    });
+    render(<LoadTestDialog open onOpenChange={noop} request={makeRequest()} tabId='t1' />);
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+    await waitFor(() => expect(runLoadTest).toHaveBeenCalledTimes(1));
+    const inputArg = (runLoadTest as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(inputArg.pathParams).toEqual([{ name: 'id', value: '7' }]);
   });
 
   it('shows the failure breakdown when failures exist', async () => {

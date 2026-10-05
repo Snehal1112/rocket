@@ -34,6 +34,7 @@ vi.mock('@/lib/execute-request', () => ({
     url: 'http://localhost',
     headers: [],
     queryParams: [],
+    pathParams: [{ name: 'id', value: '7' }],
     body: undefined,
     auth: { type: 'none' },
     collection: undefined,
@@ -134,6 +135,26 @@ describe('useLoadTestStore', () => {
       await useLoadTestStore.getState().startTest(fakeRequest, 'tab-1');
 
       expect(runLoadTestV2).toHaveBeenCalled();
+    });
+
+    it('forwards the resolved path params to runLoadTestV2', async () => {
+      const { runLoadTestV2 } = await import('@/lib/tauri-api');
+      useLoadTestStore.getState().setMode('simple');
+      const fakeRequest = {
+        method: 'GET',
+        url: 'http://test.local/users/:id',
+        headers: [],
+        queryParams: [],
+        pathParams: [{ id: 'p', key: 'id', value: '7', enabled: true }],
+        body: { bodyType: 'none' },
+        auth: { authType: 'none' },
+        settings: { followRedirects: true, timeoutMs: 30000, verifySsl: true },
+      } as unknown as RequestState;
+
+      await useLoadTestStore.getState().startTest(fakeRequest, 'tab-1');
+
+      const inputArg = vi.mocked(runLoadTestV2).mock.calls[0][0];
+      expect(inputArg.pathParams).toEqual([{ name: 'id', value: '7' }]);
     });
 
     it('populates requestLog from load_test_complete event in simple mode', async () => {

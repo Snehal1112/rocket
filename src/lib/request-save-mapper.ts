@@ -28,6 +28,9 @@ export function buildRequestSavePayload(
     method: tab.request.method,
     url: tab.request.url,
     headers: toPersistedHeaders(tab.request.headers),
+    pathParams: tab.request.pathParams
+      .filter((p) => p.enabled && p.key)
+      .map((p) => ({ name: p.key, value: p.value })),
     body: toApiBody(body),
     auth: toPersistedAuth(tab.request.auth),
     tags: tab.request.tags && tab.request.tags.length > 0 ? tab.request.tags : undefined,

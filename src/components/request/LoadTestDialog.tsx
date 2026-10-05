@@ -52,6 +52,7 @@ export function LoadTestDialog({ open, onOpenChange, request, tabId }: Props) {
           url: resolved.url,
           headers: resolved.headers,
           queryParams: resolved.queryParams,
+          pathParams: resolved.pathParams,
           body: resolved.body ?? null,
           auth: resolved.auth,
           options: {

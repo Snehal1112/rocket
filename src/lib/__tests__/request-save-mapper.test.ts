@@ -69,3 +69,18 @@ describe('buildRequestSavePayload', () => {
     expect(payload.uid).not.toBe('');
   });
 });
+
+describe('buildRequestSavePayload path params', () => {
+  it('saves the enabled path params with their values', () => {
+    const payload = buildRequestSavePayload(
+      makeTab({
+        url: 'https://h.test/users/:id/:skip',
+        pathParams: [
+          { id: 'a', key: 'id', value: '7', enabled: true },
+          { id: 'b', key: 'skip', value: 'x', enabled: false },
+        ],
+      }),
+    );
+    expect(payload.pathParams).toEqual([{ name: 'id', value: '7' }]);
+  });
+});

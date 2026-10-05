@@ -39,7 +39,7 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
     pathParams: extractPathParams(req.url).map((name) => ({
       id: crypto.randomUUID(),
       key: name,
-      value: '',
+      value: req.pathParams?.find((p) => p.name === name)?.value ?? '',
       enabled: true,
     })),
     headers: req.headers.map((h) => ({

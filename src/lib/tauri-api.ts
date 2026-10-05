@@ -134,6 +134,7 @@ export interface Request {
   method: HttpMethod;
   url: string;
   headers: Header[];
+  pathParams?: PathParam[];
   body?: Body;
   auth: Auth;
   fileName?: string;
@@ -887,6 +888,7 @@ export const runLoadTest = (
     url: string;
     headers: Header[];
     queryParams: QueryParam[];
+    pathParams?: PathParam[];
     body?: Body | null;
     auth: Auth;
     options: RequestOptions;
@@ -903,6 +905,7 @@ export const runLoadTestV2 = (
     url: string;
     headers: Header[];
     queryParams: QueryParam[];
+    pathParams?: PathParam[];
     body?: Body | null;
     auth: Auth;
     options: RequestOptions;
