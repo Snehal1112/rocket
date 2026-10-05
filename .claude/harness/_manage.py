@@ -5,8 +5,18 @@ import re
 import shutil
 import sys
 
-GUARD_CMD = 'bash "$CLAUDE_PROJECT_DIR/.claude/harness/hooks/bash-guard"'
-GATE_CMD = 'bash "$CLAUDE_PROJECT_DIR/.claude/harness/hooks/commit-gate"'
+
+
+def hook_cmd(name):
+    """Resolve the hook per checkout and do nothing when the file is absent."""
+    return (
+        'h="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/harness/hooks/%s"; '
+        'if [ -f "$h" ]; then bash "$h"; fi' % name
+    )
+
+
+GUARD_CMD = hook_cmd("bash-guard")
+GATE_CMD = hook_cmd("commit-gate")
 HOOK_MARK = "/.claude/harness/hooks/"
 DENY = [
     "Bash(cargo test --workspace:*)",
@@ -74,9 +84,19 @@ def install(root):
     if "PreToolUse" not in data["hooks"]:
         data["hooks"]["PreToolUse"] = []
         created("hooks.PreToolUse")
-    existing = [h.get("command") for e in data["hooks"]["PreToolUse"] for h in e.get("hooks", [])]
-    for cmd, extra in ((GUARD_CMD, {}), (GATE_CMD, {"timeout": 600})):
-        if cmd in existing:
+    all_hooks = [h for e in data["hooks"]["PreToolUse"] for h in e.get("hooks", [])]
+    for name, cmd, extra in (
+        ("bash-guard", GUARD_CMD, {}),
+        ("commit-gate", GATE_CMD, {"timeout": 600}),
+    ):
+        found = [h for h in all_hooks if HOOK_MARK + name in (h.get("command") or "")]
+        if found:
+            # Migrate old-form commands in place so nothing is duplicated.
+            for h in found:
+                old = h["command"]
+                if old != cmd:
+                    h["command"] = cmd
+                    man["hooks"] = [cmd if m == old else m for m in man["hooks"]]
             continue
         hook = {"type": "command", "command": cmd}
         hook.update(extra)

@@ -127,6 +127,20 @@ else
   fail "gate: staged rs runs cargo check -j4"
 fi
 
+# Hook command strings resolve per checkout and no-op when absent.
+cmd_of() { python3 -c 'import sys;sys.path.insert(0,sys.argv[1]);import _manage;print(getattr(_manage,sys.argv[2]))' "$harness" "$1"; }
+guard_cmd="$(cmd_of GUARD_CMD)"
+plain="$tmp/plain"; mkdir -p "$plain"
+out="$(cd "$plain" && echo '{}' | bash -c "$guard_cmd" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ] && pass "hook cmd: silent no-op outside a git repo" || fail "hook cmd: no-op outside git (rc=$rc)"
+emptyrepo="$tmp/emptyrepo"; mkdir -p "$emptyrepo/sub"; git -C "$emptyrepo" init -q
+out="$(cd "$emptyrepo" && echo '{}' | CLAUDE_PROJECT_DIR=/nonexistent bash -c "$guard_cmd" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ] && pass "hook cmd: silent no-op when hook file is absent" || fail "hook cmd: no-op when absent (rc=$rc)"
+mkdir -p "$emptyrepo/.claude/harness/hooks"
+printf '#!/usr/bin/env bash\ncat\n' >"$emptyrepo/.claude/harness/hooks/bash-guard"
+out="$(cd "$emptyrepo/sub" && echo 'payload-123' | bash -c "$guard_cmd" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && [ "$out" = "payload-123" ] && pass "hook cmd: runs hook from subdir and passes stdin" || fail "hook cmd: stdin passthrough (rc=$rc out=$out)"
+
 # Install and uninstall on a temp copy.
 proj="$tmp/proj"
 mkdir -p "$proj/.claude/rules"
@@ -174,6 +188,52 @@ bash "$ph/uninstall.sh" --root "$proj" >/dev/null && pass "uninstall runs" || fa
 cmp -s "$tmp/settings.orig" "$proj/.claude/settings.json" && pass "settings.json byte-identical after uninstall" || fail "settings.json byte-identical after uninstall"
 cmp -s "$tmp/shortcuts.orig" "$proj/.claude/rules/00-shortcuts.md" && pass "00-shortcuts.md byte-identical after uninstall" || fail "00-shortcuts.md byte-identical after uninstall"
 [ ! -e "$ph/manifest.json" ] && [ -d "$ph/hooks" ] && pass "manifest removed, files left inert" || fail "manifest removed, files left inert"
+
+# Install over old-form entries migrates without duplicates, and uninstall removes the old form.
+bash "$ph/uninstall.sh" --root "$proj" >/dev/null
+bash "$ph/install.sh" --root "$proj" >/dev/null
+oldify() {
+  python3 - "$1" "$2" <<'PYEOF'
+import json, re, sys
+for p in sys.argv[1:]:
+    nl = open(p).read().endswith("\n")
+    d = json.load(open(p))
+    def fix(c):
+        m = re.search(r"/hooks/([a-z-]+)\"", c)
+        return 'bash "$CLAUDE_PROJECT_DIR/.claude/harness/hooks/%s"' % m.group(1) if m else c
+    if "hooks" in d and isinstance(d["hooks"], dict):
+        for e in d["hooks"]["PreToolUse"]:
+            for h in e["hooks"]:
+                if "/.claude/harness/hooks/" in h["command"]:
+                    h["command"] = fix(h["command"])
+    elif isinstance(d.get("hooks"), list):
+        d["hooks"] = [fix(c) for c in d["hooks"]]
+    with open(p, "w") as f:
+        json.dump(d, f, indent="\t")
+        if nl:
+            f.write("\n")
+PYEOF
+}
+oldify "$proj/.claude/settings.json" "$ph/manifest.json"
+grep -q CLAUDE_PROJECT_DIR "$proj/.claude/settings.json" && pass "old-form fixture is in place" || fail "old-form fixture is in place"
+bash "$ph/install.sh" --root "$proj" >/dev/null
+python3 - "$proj/.claude/settings.json" "$ph/manifest.json" <<'PYEOF' && pass "install migrates old-form entries without duplicates" || fail "install migrates old-form entries without duplicates"
+import json, sys
+d = json.load(open(sys.argv[1]))
+cmds = [h["command"] for e in d["hooks"]["PreToolUse"] for h in e["hooks"]]
+hc = [c for c in cmds if "/.claude/harness/hooks/" in c]
+assert len(hc) == 2, hc
+assert not any("CLAUDE_PROJECT_DIR" in c for c in hc), hc
+assert all("git rev-parse --show-toplevel" in c for c in hc)
+m = json.load(open(sys.argv[2]))
+assert sorted(m["hooks"]) == sorted(hc), m["hooks"]
+PYEOF
+cp "$proj/.claude/settings.json" "$tmp/settings.mig"
+bash "$ph/install.sh" --root "$proj" >/dev/null
+cmp -s "$tmp/settings.mig" "$proj/.claude/settings.json" && pass "migrated install is idempotent" || fail "migrated install is idempotent"
+oldify "$proj/.claude/settings.json" "$ph/manifest.json"
+bash "$ph/uninstall.sh" --root "$proj" >/dev/null
+cmp -s "$tmp/settings.orig" "$proj/.claude/settings.json" && pass "uninstall removes the old form" || fail "uninstall removes the old form"
 
 # Uninstall without a manifest still removes entries.
 bash "$ph/install.sh" --root "$proj" >/dev/null

@@ -1,7 +1,7 @@
 {
 	"hooks": [
-		"bash \"$CLAUDE_PROJECT_DIR/.claude/harness/hooks/bash-guard\"",
-		"bash \"$CLAUDE_PROJECT_DIR/.claude/harness/hooks/commit-gate\""
+		"h=\"$(git rev-parse --show-toplevel 2>/dev/null)/.claude/harness/hooks/bash-guard\"; if [ -f \"$h\" ]; then bash \"$h\"; fi",
+		"h=\"$(git rev-parse --show-toplevel 2>/dev/null)/.claude/harness/hooks/commit-gate\"; if [ -f \"$h\" ]; then bash \"$h\"; fi"
 	],
 	"deny": [
 		"Bash(cargo test --workspace:*)",

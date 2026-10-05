@@ -16,6 +16,8 @@ A removable set of guard hooks, a resume skill and orchestration rules.
 
 It backs up `settings.json` once to `backup/settings.json.pre-harness`, adds two `Bash` PreToolUse hooks and three `permissions.deny` entries, adds a link in `rules/00-shortcuts.md`, and writes `manifest.json`. Re-running changes nothing. Existing settings are never altered.
 
+The hook commands look like `h="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/harness/hooks/<name>"; if [ -f "$h" ]; then bash "$h"; fi`. They resolve the hook in the checkout the command runs in, not via `$CLAUDE_PROJECT_DIR` (which points at the main checkout inside a worktree). They exit 0 silently when the file is absent, so the same settings work in the main checkout before merge, in any worktree and after merge. Re-running install migrates the old `$CLAUDE_PROJECT_DIR` form in place, and uninstall removes both forms.
+
 ## Remove
 
 - `bash .claude/harness/uninstall.sh`: removes the entries it added, leaves the files inert.
