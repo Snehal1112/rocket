@@ -23,6 +23,8 @@ pub(crate) mod flow_routing;
 pub mod flow_service;
 pub(crate) mod flow_wait;
 pub mod git_service;
+pub mod graphql_document;
+pub mod graphql_request;
 pub mod history_service;
 pub mod load_test_service;
 pub mod oauth2_service;
@@ -61,6 +63,7 @@ pub use flow_execution_service::{
 };
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;
+pub use graphql_request::ExecuteGraphQlInput;
 pub use history_service::HistoryService;
 pub use load_test_service::LoadTestService;
 pub use oauth2_service::OAuth2Service;

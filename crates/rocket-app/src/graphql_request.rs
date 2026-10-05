@@ -1,0 +1,451 @@
+//! Builds the HTTP request for a GraphQL operation and sends it through the
+//! existing HTTP execution path, so variables, auth, scripts, assertions and
+//! History work exactly as they do for an HTTP request.
+
+use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::types::{Body, BodyMode, HttpMethod, QueryParam};
+use serde::{Deserialize, Serialize};
+
+use crate::execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
+use crate::graphql_document::select_operation;
+
+/// What a GraphQL operation looks like on the wire.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphQlWire {
+    pub method: HttpMethod,
+    /// A JSON body for POST. `None` for GET.
+    pub body: Option<Body>,
+    /// `query`, `operationName` and `variables` for GET. Empty for POST.
+    pub query_params: Vec<QueryParam>,
+}
+
+/// Checks the variables text. Blank is fine and means no variables. Text with a
+/// `{{placeholder}}` is not parsed, because it is not valid JSON until the
+/// placeholder is resolved. Anything else must be a JSON object.
+pub fn validate_variables(variables: &str) -> DomainResult<()> {
+    let text = variables.trim();
+    if text.is_empty() || text.contains("{{") {
+        return Ok(());
+    }
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Object(_)) | Ok(serde_json::Value::Null) => Ok(()),
+        Ok(_) => Err(DomainError::InvalidInput(
+            "variables must be a JSON object".into(),
+        )),
+        Err(e) => Err(DomainError::InvalidInput(format!(
+            "variables are not valid JSON: {e}"
+        ))),
+    }
+}
+
+fn json_string(text: &str) -> DomainResult<String> {
+    serde_json::to_string(text)
+        .map_err(|e| DomainError::Internal(format!("could not encode GraphQL text: {e}")))
+}
+
+fn param(key: &str, value: &str) -> QueryParam {
+    QueryParam {
+        key: key.into(),
+        value: value.into(),
+        enabled: true,
+        description: None,
+    }
+}
+
+/// Builds the wire form of one operation.
+///
+/// The POST body is assembled as text so the variables stay exactly as the
+/// user wrote them, including an unresolved `{{placeholder}}`. The query and
+/// the operation name are JSON-encoded, so quotes, newlines and unicode survive.
+pub fn build_wire(
+    method: HttpMethod,
+    query: &str,
+    variables: Option<&str>,
+    operation_name: Option<&str>,
+) -> DomainResult<GraphQlWire> {
+    if query.trim().is_empty() {
+        return Err(DomainError::InvalidInput("the query is empty".into()));
+    }
+    let variables = variables.map(str::trim).filter(|v| !v.is_empty());
+    if let Some(v) = variables {
+        validate_variables(v)?;
+    }
+    let operation_name = operation_name.map(str::trim).filter(|n| !n.is_empty());
+
+    match method {
+        HttpMethod::Post => {
+            let mut text = String::from("{\"query\":");
+            text.push_str(&json_string(query)?);
+            if let Some(name) = operation_name {
+                text.push_str(",\"operationName\":");
+                text.push_str(&json_string(name)?);
+            }
+            if let Some(vars) = variables {
+                text.push_str(",\"variables\":");
+                text.push_str(vars);
+            }
+            text.push('}');
+            Ok(GraphQlWire {
+                method,
+                body: Some(Body {
+                    mode: BodyMode::Json,
+                    content: Some(text),
+                    form_data: None,
+                    file_path: None,
+                }),
+                query_params: Vec::new(),
+            })
+        }
+        HttpMethod::Get => {
+            let mut params = vec![param("query", query)];
+            if let Some(name) = operation_name {
+                params.push(param("operationName", name));
+            }
+            if let Some(vars) = variables {
+                params.push(param("variables", vars));
+            }
+            Ok(GraphQlWire {
+                method,
+                body: None,
+                query_params: params,
+            })
+        }
+        other => Err(DomainError::InvalidInput(format!(
+            "GraphQL requests use GET or POST, not {other}"
+        ))),
+    }
+}
+
+/// A GraphQL send: the HTTP side of the request plus the GraphQL payload.
+/// `request.body` is ignored; the payload replaces it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteGraphQlInput {
+    pub request: ExecuteRequestInput,
+    pub query: String,
+    #[serde(default)]
+    pub variables: Option<String>,
+    /// The operation to run. Required when the document defines several.
+    #[serde(default)]
+    pub operation_name: Option<String>,
+}
+
+/// Applies the GraphQL payload to an HTTP input: method, body and query parameters.
+pub fn apply_graphql_payload(
+    input: &mut ExecuteRequestInput,
+    query: &str,
+    variables: Option<&str>,
+    operation_name: Option<&str>,
+) -> DomainResult<()> {
+    let chosen = select_operation(query, operation_name, false)?;
+    let wire = build_wire(input.method.clone(), query, variables, chosen.as_deref())?;
+    input.method = wire.method;
+    input.body = wire.body;
+    input.query_params.extend(wire.query_params);
+    Ok(())
+}
+
+impl RequestExecutionService {
+    /// Sends a GraphQL operation through the HTTP execution path.
+    pub async fn execute_graphql(
+        &self,
+        input: ExecuteGraphQlInput,
+    ) -> DomainResult<ExecuteRequestOutput> {
+        let mut request = input.request;
+        apply_graphql_payload(
+            &mut request,
+            &input.query,
+            input.variables.as_deref(),
+            input.operation_name.as_deref(),
+        )?;
+        self.execute(request).await
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_doubles::{
+        EmptySecretManagerRepo, InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo,
+        SharedCollectionRepo, SharedHistoryRepo, StaticEnvRepo,
+    };
+    use rocket_collection::Collection;
+    use rocket_environment::environment::Environment;
+    use rocket_environment::variable::Variable;
+    use rocket_http::RequestOptions;
+    use rocket_shared::types::Auth;
+    use std::sync::Arc;
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn post_body(wire: &GraphQlWire) -> serde_json::Value {
+        let content = wire
+            .body
+            .as_ref()
+            .and_then(|b| b.content.as_deref())
+            .expect("a POST has a JSON body");
+        serde_json::from_str(content).expect("body is valid JSON")
+    }
+
+    #[test]
+    fn validate_variables_accepts_objects_blank_and_null() {
+        assert!(validate_variables("").is_ok());
+        assert!(validate_variables("  \n").is_ok());
+        assert!(validate_variables("{}").is_ok());
+        assert!(validate_variables("{\"a\": [1, 2]}").is_ok());
+        assert!(validate_variables("null").is_ok());
+    }
+
+    #[test]
+    fn validate_variables_rejects_non_objects_and_bad_json() {
+        let err = validate_variables("[1, 2]").expect_err("array");
+        assert!(err.to_string().contains("JSON object"), "got: {err}");
+        let err = validate_variables("{\"a\": ").expect_err("truncated");
+        assert!(err.to_string().contains("not valid JSON"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_variables_allows_an_unquoted_placeholder() {
+        // Not valid JSON until the placeholder is resolved.
+        assert!(validate_variables("{\"n\": {{count}}}").is_ok());
+    }
+
+    #[test]
+    fn build_wire_post_encodes_query_variables_and_operation_name() {
+        let wire = build_wire(
+            HttpMethod::Post,
+            "query A($n: Int) {\n  a(n: $n) # \"quoted\"\n}\n",
+            Some("{\"n\": 5}"),
+            Some("A"),
+        )
+        .expect("wire");
+        assert_eq!(wire.method, HttpMethod::Post);
+        assert!(wire.query_params.is_empty());
+        let body = post_body(&wire);
+        assert_eq!(
+            body["query"],
+            "query A($n: Int) {\n  a(n: $n) # \"quoted\"\n}\n"
+        );
+        assert_eq!(body["operationName"], "A");
+        assert_eq!(body["variables"]["n"], 5);
+        assert_eq!(wire.body.as_ref().map(|b| b.mode.clone()), Some(BodyMode::Json));
+    }
+
+    #[test]
+    fn build_wire_post_omits_blank_variables_and_anonymous_operation() {
+        let wire = build_wire(HttpMethod::Post, "{ a }", Some("  "), None).expect("wire");
+        let body = post_body(&wire);
+        assert_eq!(body["query"], "{ a }");
+        assert!(body.get("variables").is_none());
+        assert!(body.get("operationName").is_none());
+    }
+
+    #[test]
+    fn build_wire_keeps_unicode_intact() {
+        let wire = build_wire(HttpMethod::Post, "{ a(s: \"héllo ✓\") }", None, None).expect("wire");
+        assert_eq!(post_body(&wire)["query"], "{ a(s: \"héllo ✓\") }");
+    }
+
+    #[test]
+    fn build_wire_get_uses_query_parameters_and_no_body() {
+        let wire = build_wire(
+            HttpMethod::Get,
+            "query A { a }",
+            Some("{\"n\": 1}"),
+            Some("A"),
+        )
+        .expect("wire");
+        assert_eq!(wire.method, HttpMethod::Get);
+        assert!(wire.body.is_none());
+        let pairs: Vec<(&str, &str)> = wire
+            .query_params
+            .iter()
+            .map(|p| (p.key.as_str(), p.value.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("query", "query A { a }"),
+                ("operationName", "A"),
+                ("variables", "{\"n\": 1}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_wire_rejects_other_methods_and_an_empty_query() {
+        let err = build_wire(HttpMethod::Put, "{ a }", None, None).expect_err("PUT");
+        assert!(err.to_string().contains("GET or POST"), "got: {err}");
+        let err = build_wire(HttpMethod::Post, "  \n", None, None).expect_err("empty");
+        assert!(err.to_string().contains("query is empty"), "got: {err}");
+    }
+
+    fn input(url: &str) -> ExecuteRequestInput {
+        ExecuteRequestInput {
+            skip_history: false,
+            flow_vars: std::collections::HashMap::new(),
+            method: HttpMethod::Post,
+            url: url.to_string(),
+            headers: vec![],
+            query_params: vec![],
+            body: None,
+            auth: Auth::None,
+            options: RequestOptions::default(),
+            environment_name: None,
+            collection: None,
+            request_name: Some("Users".into()),
+            pre_request_script: None,
+            post_response_script: None,
+            tests_script: None,
+            request_path: None,
+            global_env_name: None,
+            assertions: vec![],
+            tags: vec![],
+            path_params: vec![],
+            actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+        }
+    }
+
+    fn service(env: Environment) -> (RequestExecutionService, Arc<InMemoryHistoryRepo>) {
+        let history = InMemoryHistoryRepo::new();
+        let repo = InMemoryCollectionRepo::new(Collection::new("api"));
+        let svc = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            Arc::new(rocket_infra::ReqwestExecutor::new()),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(SharedCollectionRepo(repo)),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        (svc, history)
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_posts_json_with_the_chosen_operation() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(header("content-type", "application/json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data": {"users": []}})),
+            )
+            .mount(&server)
+            .await;
+        let (svc, history) = service(Environment::new("dev"));
+
+        let out = svc
+            .execute_graphql(ExecuteGraphQlInput {
+                request: input(&format!("{}/graphql", server.uri())),
+                query: "query A { a } query B { b }".into(),
+                variables: Some("{\"n\": 1}".into()),
+                operation_name: Some("B".into()),
+            })
+            .await
+            .expect("execute");
+
+        assert_eq!(out.response.status, 200);
+        let seen = server.received_requests().await.expect("recording is on");
+        assert_eq!(seen.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&seen[0].body).expect("json body");
+        assert_eq!(body["query"], "query A { a } query B { b }");
+        assert_eq!(body["operationName"], "B");
+        assert_eq!(body["variables"]["n"], 1);
+        assert_eq!(history.saved_count(), 1, "a GraphQL send is recorded in History");
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_get_sends_query_string_parameters() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/graphql"))
+            .and(query_param("query", "query A { a }"))
+            .and(query_param("operationName", "A"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        let (svc, _history) = service(Environment::new("dev"));
+        let mut request = input(&format!("{}/graphql", server.uri()));
+        request.method = HttpMethod::Get;
+
+        let out = svc
+            .execute_graphql(ExecuteGraphQlInput {
+                request,
+                query: "query A { a }".into(),
+                variables: None,
+                operation_name: None,
+            })
+            .await
+            .expect("execute");
+        assert_eq!(out.response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_rejects_bad_variables_before_sending() {
+        let server = MockServer::start().await;
+        let (svc, history) = service(Environment::new("dev"));
+
+        let err = svc
+            .execute_graphql(ExecuteGraphQlInput {
+                request: input(&format!("{}/graphql", server.uri())),
+                query: "{ a }".into(),
+                variables: Some("[1]".into()),
+                operation_name: None,
+            })
+            .await
+            .expect_err("bad variables");
+        assert!(err.to_string().contains("variables"), "got: {err}");
+        assert!(server.received_requests().await.expect("recording").is_empty());
+        assert_eq!(history.saved_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_asks_for_a_choice_when_the_document_has_several_operations() {
+        let server = MockServer::start().await;
+        let (svc, _history) = service(Environment::new("dev"));
+        let err = svc
+            .execute_graphql(ExecuteGraphQlInput {
+                request: input(&format!("{}/graphql", server.uri())),
+                query: "query A { a } query B { b }".into(),
+                variables: None,
+                operation_name: None,
+            })
+            .await
+            .expect_err("must choose");
+        assert!(err.to_string().contains("choose one"), "got: {err}");
+        assert!(server.received_requests().await.expect("recording").is_empty());
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_resolves_placeholders_in_query_and_variables() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("id", "42"));
+        env.set_variable(Variable::new("count", "7"));
+        let (svc, _history) = service(env);
+        let mut request = input(&format!("{}/graphql", server.uri()));
+        request.environment_name = Some("dev".into());
+
+        svc.execute_graphql(ExecuteGraphQlInput {
+            request,
+            // Quotes and the compact `}}` must survive; the placeholders must resolve.
+            query: "query Q($n: Int) {a{b(id: \"{{id}}\", n: $n)}}".into(),
+            variables: Some("{\"n\": {{count}}}".into()),
+            operation_name: None,
+        })
+        .await
+        .expect("execute");
+
+        let seen = server.received_requests().await.expect("recording");
+        let body: serde_json::Value = serde_json::from_slice(&seen[0].body).expect("json body");
+        assert_eq!(body["query"], "query Q($n: Int) {a{b(id: \"42\", n: $n)}}");
+        assert_eq!(body["variables"]["n"], 7);
+    }
+}
