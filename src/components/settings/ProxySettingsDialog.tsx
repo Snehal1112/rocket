@@ -31,11 +31,16 @@ const MODES: { value: ProxyMode; label: string; hint: string }[] = [
     hint: 'Use the HTTP_PROXY, HTTPS_PROXY and NO_PROXY variables.',
   },
   { value: 'none', label: 'None', hint: 'Always connect directly.' },
-  { value: 'custom', label: 'Custom', hint: 'Use the proxy URLs below.' },
+  {
+    value: 'custom',
+    label: 'Custom',
+    hint: 'Use the proxy URLs below. A single URL is used for both HTTP and HTTPS.',
+  },
 ];
 
 export function ProxySettingsDialog({ open, onOpenChange }: ProxySettingsDialogProps) {
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<ProxyMode>('system');
   const [httpProxy, setHttpProxy] = useState('');
@@ -50,6 +55,7 @@ export function ProxySettingsDialog({ open, onOpenChange }: ProxySettingsDialogP
     if (!open) return;
     let cancelled = false;
     setLoading(true);
+    setLoadFailed(false);
     getProxySettings()
       .then((s) => {
         if (cancelled) return;
@@ -62,7 +68,12 @@ export function ProxySettingsDialog({ open, onOpenChange }: ProxySettingsDialogP
         setPassword('');
         setRemovePassword(false);
       })
-      .catch(() => toast.error('Could not load the proxy settings'))
+      .catch(() => {
+        if (cancelled) return;
+        // Saving now would overwrite the stored setting with the defaults shown.
+        setLoadFailed(true);
+        toast.error('Could not load the proxy settings');
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -97,6 +108,10 @@ export function ProxySettingsDialog({ open, onOpenChange }: ProxySettingsDialogP
           <div className='flex justify-center p-6'>
             <Loader2 className='h-4 w-4 animate-spin' aria-label='Loading' />
           </div>
+        ) : loadFailed ? (
+          <p role='alert' className='text-sm text-destructive'>
+            Could not load the proxy settings. Close this dialog and try again.
+          </p>
         ) : (
           <div className='space-y-4'>
             <RadioGroup value={mode} onValueChange={(v) => setMode(v as ProxyMode)}>
@@ -193,7 +208,7 @@ export function ProxySettingsDialog({ open, onOpenChange }: ProxySettingsDialogP
           <Button variant='ghost' onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={loading || saving}>
+          <Button onClick={handleSave} disabled={loading || saving || loadFailed}>
             Save
           </Button>
         </DialogFooter>

@@ -47,15 +47,12 @@ describe('FormDataEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith([{ ...textRow, entryType: 'file', value: '' }]);
   });
 
-  it('stores the path chosen in the dialog', async () => {
-    open.mockResolvedValue('/home/me/pic.png');
-    const onChange = vi.fn();
-    render(<FormDataEditor entries={[{ ...fileRow, value: '' }]} onChange={onChange} />);
-    // The file row is the only entry here, so it is row 1.
-    fireEvent.click(screen.getByRole('button', { name: 'Choose file for row 1' }));
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith([{ ...fileRow, value: '/home/me/pic.png' }]),
-    );
+  it('disables the file picker until the workspace path is known', () => {
+    render(<FormDataEditor entries={[{ ...fileRow, value: '' }]} onChange={vi.fn()} />);
+    const choose = screen.getByRole('button', { name: 'Choose file for row 1' });
+    expect(choose).toBeDisabled();
+    fireEvent.click(choose);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('stores a workspace-relative path for a file inside the workspace', async () => {

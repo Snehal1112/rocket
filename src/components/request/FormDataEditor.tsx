@@ -35,13 +35,10 @@ export function FormDataEditor({
 
   const pickFile = useCallback(
     async (id: string) => {
+      // The picker is disabled without a workspace, so this is only a guard.
+      if (!workspacePath) return;
       const result = await open({ multiple: false, title: 'Select file for form field' });
       if (typeof result !== 'string') return;
-      if (!workspacePath) {
-        setRejectedRowId(null);
-        updateEntry(id, { value: result });
-        return;
-      }
       // The executor only reads files inside the workspace, so store a relative path.
       const relative = toWorkspaceRelativePath(result, workspacePath);
       if (relative === null) {
@@ -102,6 +99,8 @@ export function FormDataEditor({
                     size='sm'
                     className='h-8 w-full justify-start truncate text-xs'
                     aria-label={`Choose file for row ${row}`}
+                    disabled={!workspacePath}
+                    title={workspacePath ? undefined : 'Waiting for the workspace to load'}
                     onClick={() => pickFile(entry.id)}
                   >
                     {entry.value

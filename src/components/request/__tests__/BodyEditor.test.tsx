@@ -76,6 +76,13 @@ describe('BodyEditor', () => {
     );
   });
 
+  it('disables the binary file picker until the workspace path is known', async () => {
+    const { getActiveWorkspace } = await import('@/lib/tauri-api');
+    vi.mocked(getActiveWorkspace).mockReturnValueOnce(new Promise(() => undefined));
+    wrap(<BodyEditor body={makeBody({ mode: 'binary' })} onChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /choose file/i })).toBeDisabled();
+  });
+
   it('rejects a binary file outside the workspace with a message', async () => {
     openDialog.mockResolvedValue('/home/me/other/blob.bin');
     const onChange = vi.fn();

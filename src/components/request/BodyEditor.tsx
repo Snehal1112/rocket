@@ -45,6 +45,8 @@ export function BodyEditor({
   );
 
   const handlePickFile = useCallback(async () => {
+    // The picker is disabled without a workspace, so this is only a guard.
+    if (!workspacePath) return;
     const result = await open({
       multiple: false,
       title: 'Select file for request body',
@@ -52,7 +54,7 @@ export function BodyEditor({
     if (result) {
       const picked = result as string;
       // The executor only reads files inside the workspace, so store a relative path.
-      const path = workspacePath ? toWorkspaceRelativePath(picked, workspacePath) : picked;
+      const path = toWorkspaceRelativePath(picked, workspacePath);
       if (path === null) {
         setFileError(OUTSIDE_WORKSPACE_MESSAGE);
         return;
@@ -131,7 +133,7 @@ export function BodyEditor({
           </Card>
         ) : (
           <div className='space-y-1'>
-            <Button variant='outline' onClick={handlePickFile}>
+            <Button variant='outline' onClick={handlePickFile} disabled={!workspacePath}>
               <FileUp className='mr-2 size-4' />
               Choose file
             </Button>

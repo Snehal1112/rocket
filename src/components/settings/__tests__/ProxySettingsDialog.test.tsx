@@ -64,4 +64,17 @@ describe('ProxySettingsDialog', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /custom/i }));
     expect(screen.getByLabelText('HTTP proxy URL')).toBeInTheDocument();
   });
+
+  it('disables Save and shows an error when the saved setting could not be loaded', async () => {
+    getProxySettings.mockRejectedValue(new Error('boom'));
+    render(<ProxySettingsDialog open onOpenChange={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i);
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+  });
+
+  it('says a single proxy URL is used for both schemes', async () => {
+    render(<ProxySettingsDialog open onOpenChange={vi.fn()} />);
+    await screen.findByDisplayValue('http://proxy.corp:8080');
+    expect(screen.getByText(/used for both http and https/i)).toBeInTheDocument();
+  });
 });
