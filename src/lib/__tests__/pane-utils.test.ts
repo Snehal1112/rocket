@@ -234,3 +234,46 @@ describe('mapApiRequestToState path params', () => {
     ]);
   });
 });
+
+describe('mapApiRequestToState body', () => {
+  const base = {
+    uid: 'u',
+    name: 'n',
+    method: 'POST',
+    url: 'https://h.test/up',
+    headers: [],
+    auth: { authType: 'none' as const },
+  };
+
+  it('keeps the type and content type of multipart rows', () => {
+    const state = mapApiRequestToState({
+      ...base,
+      body: {
+        mode: 'formdata',
+        formData: [
+          {
+            key: 'doc',
+            value: '/tmp/a.png',
+            entryType: 'file',
+            enabled: true,
+            contentType: 'image/png',
+          },
+        ],
+      },
+    });
+    expect(state.body.formData[0]).toMatchObject({
+      key: 'doc',
+      entryType: 'file',
+      contentType: 'image/png',
+    });
+  });
+
+  it('restores the file of a binary body and its display name', () => {
+    const state = mapApiRequestToState({
+      ...base,
+      body: { mode: 'binary', filePath: '/tmp/dir/blob.bin' },
+    });
+    expect(state.body.filePath).toBe('/tmp/dir/blob.bin');
+    expect(state.body.fileName).toBe('blob.bin');
+  });
+});

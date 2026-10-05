@@ -149,8 +149,9 @@ function buildBodyParts(body: Body | undefined, headers: Header[]): BodyParts {
       return { lines };
     }
     case 'binary': {
-      if (!body.content) return { lines: [] };
-      return { lines: [`--data-binary ${shellQuote(`@${body.content}`)}`] };
+      const file = body.filePath ?? body.content;
+      if (!file) return { lines: [] };
+      return { lines: [`--data-binary ${shellQuote(`@${file}`)}`] };
     }
     default:
       return { lines: [] };

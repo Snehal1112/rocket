@@ -170,13 +170,23 @@ export function toApiBody(body: BodyState, resolve = (s: string) => s): Body | u
       mode: body.mode,
       formData: body.formData
         .filter((e) => e.enabled)
-        .map((e) => ({
-          key: resolve(e.key),
-          value: resolve(e.value),
-          entryType: 'text' as const,
-          enabled: e.enabled,
-        })),
+        .map((e) => {
+          // Only multipart can carry files and part content types.
+          const isMultipart = body.mode === 'formdata';
+          const contentType = isMultipart ? e.contentType?.trim() : undefined;
+          return {
+            key: resolve(e.key),
+            value: resolve(e.value),
+            entryType:
+              isMultipart && e.entryType === 'file' ? ('file' as const) : ('text' as const),
+            enabled: e.enabled,
+            ...(contentType ? { contentType } : {}),
+          };
+        }),
     };
+  }
+  if (body.mode === 'binary') {
+    return { mode: 'binary', filePath: body.filePath ? resolve(body.filePath) : undefined };
   }
   return { mode: body.mode as Body['mode'], content: resolve(body.content) };
 }

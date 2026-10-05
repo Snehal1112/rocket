@@ -25,7 +25,11 @@ export function mapApiRequestToState(req: ApiRequest, fromCollection = false): R
         key: entry.key,
         value: entry.value,
         enabled: entry.enabled,
+        ...(entry.entryType === 'file' ? { entryType: 'file' as const } : {}),
+        ...(entry.contentType ? { contentType: entry.contentType } : {}),
       })),
+      filePath: req.body.filePath,
+      fileName: req.body.filePath?.split(/[\\/]/).pop(),
     };
   } else {
     body = { mode: 'none', content: '', formData: [] };

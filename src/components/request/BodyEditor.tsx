@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { BodyState, KeyValueEntry } from '@/types/pane-types';
+import { FormDataEditor } from './FormDataEditor';
 import { KeyValueEditor } from './KeyValueEditor';
 
 // Lazy-load Monaco so it stays out of the initial JS bundle.
@@ -84,12 +85,9 @@ export function BodyEditor({
       )}
 
       {body.mode === 'formdata' && (
-        <KeyValueEditor
+        <FormDataEditor
           entries={body.formData}
           onChange={setFormData}
-          keyPlaceholder='Field name'
-          valuePlaceholder='Value'
-          addLabel='Add Field'
           variableContext={variableContext}
           onNavigateToSource={onNavigateToSource}
         />

@@ -202,6 +202,55 @@ describe('toApiBody', () => {
       toApiBody({ mode: 'sparql', content: 'ASK { ?s ?p ?o }', formData: [] }, (s) => s),
     ).toEqual({ mode: 'sparql', content: 'ASK { ?s ?p ?o }' });
   });
+
+  it('sends file rows and content types for multipart bodies', () => {
+    const out = toApiBody(
+      {
+        mode: 'formdata',
+        content: '',
+        formData: [
+          { id: '1', key: 'meta', value: '{{v}}', enabled: true, contentType: 'application/json' },
+          { id: '2', key: 'doc', value: '/tmp/a.png', enabled: true, entryType: 'file' },
+          { id: '3', key: 'off', value: 'x', enabled: false },
+        ],
+      },
+      (s) => s.replace('{{v}}', '1'),
+    );
+    expect(out).toEqual({
+      mode: 'formdata',
+      formData: [
+        {
+          key: 'meta',
+          value: '1',
+          entryType: 'text',
+          enabled: true,
+          contentType: 'application/json',
+        },
+        { key: 'doc', value: '/tmp/a.png', entryType: 'file', enabled: true },
+      ],
+    });
+  });
+
+  it('keeps urlencoded rows as plain text rows', () => {
+    const out = toApiBody(
+      {
+        mode: 'formurlencoded',
+        content: '',
+        formData: [{ id: '1', key: 'a', value: 'b', enabled: true, entryType: 'file' }],
+      },
+      (s) => s,
+    );
+    expect(out?.formData?.[0].entryType).toBe('text');
+  });
+
+  it('sends the chosen file of a binary body', () => {
+    expect(
+      toApiBody(
+        { mode: 'binary', content: '', formData: [], filePath: '/tmp/{{n}}.bin', fileName: 'x' },
+        (s) => s.replace('{{n}}', 'blob'),
+      ),
+    ).toEqual({ mode: 'binary', filePath: '/tmp/blob.bin' });
+  });
 });
 
 describe('toApiAuth aws-sig-v4', () => {

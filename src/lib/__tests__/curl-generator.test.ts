@@ -358,4 +358,12 @@ describe('generateCurlCommand', () => {
     expect(cmd).toContain("--data 'SELECT * WHERE { ?s ?p ?o }'");
     expect(cmd).toContain('Content-Type: application/sparql-query');
   });
+
+  it('sends a binary body from its file path', () => {
+    const cmd = generateCurlCommand(
+      baseResolved({ body: { mode: 'binary', filePath: '/tmp/blob.bin' } }),
+      'POST',
+    );
+    expect(cmd).toContain('--data-binary @/tmp/blob.bin');
+  });
 });

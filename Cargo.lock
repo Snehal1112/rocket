@@ -5097,6 +5097,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "keyring",
+ "mime_guess",
  "notify",
  "pkcs8",
  "rand 0.8.5",

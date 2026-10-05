@@ -258,6 +258,10 @@ export interface KeyValueEntry {
   key: string;
   value: string;
   enabled: boolean;
+  /** Multipart rows only: whether `value` is text or the path of a file to upload. */
+  entryType?: 'text' | 'file';
+  /** Multipart rows only: the part's Content-Type. Empty means "decide automatically". */
+  contentType?: string;
 }
 
 export interface BodyState {

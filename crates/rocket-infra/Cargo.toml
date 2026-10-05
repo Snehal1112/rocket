@@ -47,6 +47,7 @@ rand = "0.8"
 agent-client-protocol = "2.2"
 async-process = "2"
 futures-lite = "2"
+mime_guess = "2"
 
 [[bin]]
 name = "test_acp_agent"

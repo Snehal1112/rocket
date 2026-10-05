@@ -172,28 +172,26 @@ impl ReqwestExecutor {
                 builder = builder.body(content.to_string());
             }
             BodyMode::Binary => {
-                if let Some(file_path) = &body.file_path {
-                    let path = std::path::Path::new(file_path);
-                    self.validate_file_path(path)?;
-                    let data = std::fs::read(path)
-                        .map_err(|e| DomainError::Internal(format!("Failed to read file: {e}")))?;
+                let Some(file_path) = body.file_path.as_deref().filter(|p| !p.trim().is_empty())
+                else {
+                    return Err(DomainError::InvalidInput(
+                        "The binary body has no file selected".into(),
+                    ));
+                };
+                let path = std::path::Path::new(file_path);
+                self.validate_file_path(path)?;
+                let data = std::fs::read(path).map_err(|e| {
+                    DomainError::InvalidInput(format!("Cannot read file {file_path}: {e}"))
+                })?;
 
-                    if !has_explicit_content_type {
-                        // Detect content type from the file extension.
-                        let content_type = match path.extension().and_then(|e| e.to_str()) {
-                            Some("json") => "application/json",
-                            Some("xml") => "application/xml",
-                            Some("png") => "image/png",
-                            Some("jpg" | "jpeg") => "image/jpeg",
-                            Some("gif") => "image/gif",
-                            Some("pdf") => "application/pdf",
-                            Some("zip") => "application/zip",
-                            _ => "application/octet-stream",
-                        };
-                        builder = builder.header("Content-Type", content_type);
-                    }
-                    builder = builder.body(data);
+                if !has_explicit_content_type {
+                    // Detect content type from the file extension.
+                    let content_type = mime_guess::from_path(path)
+                        .first_or_octet_stream()
+                        .to_string();
+                    builder = builder.header("Content-Type", content_type);
                 }
+                builder = builder.body(data);
             }
             BodyMode::FormUrlEncoded => {
                 if let Some(entries) = &body.form_data {
@@ -206,30 +204,65 @@ impl ReqwestExecutor {
                 }
             }
             BodyMode::FormData => {
-                // Multipart form — send each part with proper MIME types.
+                // Multipart form: every part carries its own content type, and a file part that
+                // cannot be sent fails the request instead of being dropped.
                 if let Some(entries) = &body.form_data {
                     use reqwest::multipart;
                     let mut form = multipart::Form::new();
                     for entry in entries.iter().filter(|e| e.enabled) {
-                        match entry.entry_type {
+                        let declared = entry
+                            .content_type
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|c| !c.is_empty());
+                        let part = match entry.entry_type {
                             rocket_shared::types::FormDataType::File => {
                                 let path = std::path::Path::new(&entry.value);
-                                if self.validate_file_path(path).is_ok() {
-                                    if let Ok(file_bytes) = std::fs::read(path) {
-                                        let file_name = path
-                                            .file_name()
-                                            .map(|n| n.to_string_lossy().into_owned())
-                                            .unwrap_or_default();
-                                        let part =
-                                            multipart::Part::bytes(file_bytes).file_name(file_name);
-                                        form = form.part(entry.key.clone(), part);
-                                    }
-                                }
+                                self.validate_file_path(path).map_err(|e| {
+                                    DomainError::InvalidInput(format!(
+                                        "Form field {}: {e}",
+                                        entry.key
+                                    ))
+                                })?;
+                                let bytes = std::fs::read(path).map_err(|e| {
+                                    DomainError::InvalidInput(format!(
+                                        "Form field {}: cannot read file {}: {e}",
+                                        entry.key, entry.value
+                                    ))
+                                })?;
+                                let file_name = path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                let mime = declared.map(str::to_string).unwrap_or_else(|| {
+                                    mime_guess::from_path(path)
+                                        .first_or_octet_stream()
+                                        .to_string()
+                                });
+                                multipart::Part::bytes(bytes)
+                                    .file_name(file_name)
+                                    .mime_str(&mime)
+                                    .map_err(|_| {
+                                        DomainError::InvalidInput(format!(
+                                            "Form field {}: {mime} is not a valid content type",
+                                            entry.key
+                                        ))
+                                    })?
                             }
                             rocket_shared::types::FormDataType::Text => {
-                                form = form.text(entry.key.clone(), entry.value.clone());
+                                let part = multipart::Part::text(entry.value.clone());
+                                match declared {
+                                    Some(mime) => part.mime_str(mime).map_err(|_| {
+                                        DomainError::InvalidInput(format!(
+                                            "Form field {}: {mime} is not a valid content type",
+                                            entry.key
+                                        ))
+                                    })?,
+                                    None => part,
+                                }
                             }
-                        }
+                        };
+                        form = form.part(entry.key.clone(), part);
                     }
                     builder = builder.multipart(form);
                 }
@@ -2734,5 +2767,165 @@ mod sigv4_tests {
             .await
             .expect_err("must fail");
         assert!(err.to_string().contains("access key"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod multipart_tests {
+    use super::*;
+    use rocket_shared::types::{FormDataEntry, FormDataType, HttpMethod};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn file_entry(key: &str, path: &str, content_type: Option<&str>) -> FormDataEntry {
+        FormDataEntry {
+            key: key.into(),
+            value: path.into(),
+            entry_type: FormDataType::File,
+            enabled: true,
+            content_type: content_type.map(str::to_string),
+            description: None,
+        }
+    }
+
+    fn text_entry(key: &str, value: &str, content_type: Option<&str>) -> FormDataEntry {
+        FormDataEntry {
+            key: key.into(),
+            value: value.into(),
+            entry_type: FormDataType::Text,
+            enabled: true,
+            content_type: content_type.map(str::to_string),
+            description: None,
+        }
+    }
+
+    fn multipart(entries: Vec<FormDataEntry>) -> Body {
+        Body {
+            mode: BodyMode::FormData,
+            content: None,
+            form_data: Some(entries),
+            file_path: None,
+        }
+    }
+
+    async fn server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    async fn sent_body(server: &MockServer) -> String {
+        let received = server.received_requests().await.expect("recorded");
+        String::from_utf8_lossy(&received[0].body).to_ascii_lowercase()
+    }
+
+    fn write(dir: &tempfile::TempDir, name: &str, bytes: &[u8]) -> String {
+        let path = dir.path().join(name);
+        std::fs::write(&path, bytes).expect("write fixture");
+        path.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn file_part_uses_the_entry_content_type() {
+        let server = server().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write(&dir, "a.bin", b"payload");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", &path, Some("application/x-custom"))]));
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+        let body = sent_body(&server).await;
+        assert!(body.contains("name=\"doc\"; filename=\"a.bin\""), "{body}");
+        assert!(body.contains("content-type: application/x-custom"), "{body}");
+        assert!(body.contains("payload"));
+    }
+
+    #[tokio::test]
+    async fn file_part_guesses_the_type_from_the_extension_or_falls_back_to_octet_stream() {
+        let server = server().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let png = write(&dir, "pic.png", b"png-bytes");
+        let blob = write(&dir, "data.zzqq", b"blob-bytes");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![
+            file_entry("img", &png, None),
+            file_entry("raw", &blob, Some("  ")),
+        ]));
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+        let body = sent_body(&server).await;
+        assert!(body.contains("content-type: image/png"), "{body}");
+        assert!(body.contains("content-type: application/octet-stream"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn text_part_honors_its_content_type() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![
+            text_entry("meta", "{\"a\":1}", Some("application/json")),
+            text_entry("plain", "hello", None),
+        ]));
+        ReqwestExecutor::new().execute(&req).await.expect("send");
+        let body = sent_body(&server).await;
+        assert!(body.contains("content-type: application/json"), "{body}");
+        assert!(body.contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn unreadable_file_part_fails_the_request_and_sends_nothing() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", "/definitely/not/here.txt", None)]));
+        let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
+        let text = err.to_string();
+        assert!(text.contains("doc"), "the message must name the field: {text}");
+        assert!(
+            server.received_requests().await.expect("recorded").is_empty(),
+            "no request may go out without the file"
+        );
+    }
+
+    #[tokio::test]
+    async fn file_part_outside_the_workspace_is_rejected() {
+        let server = server().await;
+        let workspace = tempfile::tempdir().expect("workspace");
+        let elsewhere = tempfile::tempdir().expect("elsewhere");
+        let path = write(&elsewhere, "secret.txt", b"nope");
+        let exec = ReqwestExecutor::with_allowed_base(Arc::new(Mutex::new(
+            workspace.path().to_path_buf(),
+        )));
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", &path, None)]));
+        let err = exec.execute(&req).await.expect_err("must fail");
+        assert!(err.to_string().contains("outside the workspace"), "{err}");
+        assert!(err.to_string().contains("doc"), "{err}");
+        assert!(server.received_requests().await.expect("recorded").is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_part_content_type_names_the_field() {
+        let server = server().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write(&dir, "a.txt", b"x");
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(multipart(vec![file_entry("doc", &path, Some("not a mime"))]));
+        let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
+        assert!(err.to_string().contains("doc"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn binary_body_without_a_file_is_an_error() {
+        let server = server().await;
+        let mut req = HttpRequest::new(HttpMethod::Post, format!("{}/up", server.uri()));
+        req.body = Some(Body {
+            mode: BodyMode::Binary,
+            content: None,
+            form_data: None,
+            file_path: None,
+        });
+        let err = ReqwestExecutor::new().execute(&req).await.expect_err("must fail");
+        assert!(err.to_string().contains("no file"), "{err}");
     }
 }

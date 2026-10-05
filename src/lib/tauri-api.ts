@@ -35,12 +35,14 @@ export interface FormDataEntry {
   value: string;
   entryType: 'text' | 'file';
   enabled: boolean;
+  contentType?: string;
 }
 
 export interface Body {
   mode: BodyMode;
   content?: string;
   formData?: FormDataEntry[];
+  filePath?: string;
 }
 
 export type Auth =
