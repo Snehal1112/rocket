@@ -832,7 +832,7 @@ mod tests {
             .error
             .as_ref()
             .expect("error expected")
-            .contains("Module not found"));
+            .contains("Module not found: fs"));
     }
 
     #[tokio::test]

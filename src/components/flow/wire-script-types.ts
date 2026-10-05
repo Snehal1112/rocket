@@ -10,7 +10,7 @@ declare const response: {
   duration_ms: number;
 };
 
-/** Modules bundled with the script sandbox. Keep in sync with op_require_module in rocket-infra. */
+/** Modules bundled with the script sandbox. Keep in sync with op_require_module in rocket-infra. axios is intentionally omitted: it loads but cannot make requests. */
 declare function require(name: 'lodash'): any;
 declare function require(name: 'uuid'): any;
 declare function require(name: 'moment'): any;
