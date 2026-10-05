@@ -207,6 +207,7 @@ Bruno's inbuilt libraries are bundled as pre-compiled JS modules resolved via a 
 | `crypto-js` | bundled UMD build |
 | `jsonwebtoken` | bundled UMD build |
 | `uuid` | bundled UMD build |
+| `lodash` | bundled UMD build |
 | `moment` | bundled UMD build |
 | `axios` | bundled UMD build (calls Rust HTTP via op) |
 | `atob` / `btoa` | native V8 globals (no bundle needed) |

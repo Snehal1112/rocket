@@ -100,13 +100,17 @@ A new rule, V-T, mirrors V1 (`check_routing_inputs`):
 
 Downstream wires read the value through `captured_output_response_json`: the returned text is the `response.body`. The script engine's `res.getBody()` parses JSON text, so an object result is read directly (`response.body.plan`), and number or boolean text arrives as a number or boolean.
 
-## 8. Events and IPC
+## 8. Libraries
+
+Transform scripts can `require()` the bundled utilities (chai, crypto-js, jsonwebtoken, uuid, moment, axios, lodash, nanoid, tv4). Local files and npm packages are not supported. Note: axios loads but cannot make requests.
+
+## 9. Events and IPC
 
 - `FlowStepCompleted.value` is already `Option<String>`. It is now also filled for Transform nodes, through `reported_value`. Any cap the executor already applies to reported values applies here too.
 - `FlowNodeKindDto` gains a `Transform { label, script }` variant with `From` impls in both directions. Persistence structs get no camelCase rename.
 - No new events and no new commands.
 
-## 9. Frontend
+## 10. Frontend
 
 - **`TransformNode.tsx`** in `src/components/flow/nodes/`: one target handle (`input`), one source handle (`result`), the label, a one-line preview of the script, and the shared status caption and menu wiring. The script is not edited on the node.
 - **Registration:** the node type map in `FlowCanvas.tsx`, and a `NodePalette.tsx` entry with the default script.
@@ -115,7 +119,7 @@ Downstream wires read the value through `captured_output_response_json`: the ret
 - **Last run:** shows the returned value and the logs, the way it already does for Output and Input nodes.
 - Icons come from `lucide-react`, and every control is a shadcn/ui primitive.
 
-## 10. Errors
+## 11. Errors
 
 | Situation | Result |
 |---|---|
@@ -124,7 +128,7 @@ Downstream wires read the value through `captured_output_response_json`: the ret
 | Blank script or wrong wiring | Rejected at save and at run start by validation |
 | Upstream branch not taken | Node skipped with `branch_not_taken` |
 
-## 11. Testing
+## 12. Testing
 
 - **`rocket-flow`:** round trip of a Transform node; a Phase 1 flow re-saves byte-identically; V-T cases (zero, two and wrongly targeted incoming edges, blank script).
 - **`rocket-app`:** transform results for string, number, object, `null`, no return and a thrown error; console logs captured; fan-out to two consumers; a Transform after a not-taken branch is skipped; a Transform after a failed node is skipped as upstream failed.
@@ -132,7 +136,7 @@ Downstream wires read the value through `captured_output_response_json`: the ret
 - **Frontend (Vitest):** node rendering and handles, palette entry, panel editor edits, wiring rules, Last run value.
 - Verification: `cargo check -j4`, targeted `cargo test -j4 -p rocket-flow` and `-p rocket-app flow`, `yarn tsc --noEmit`, `yarn check`, `yarn test flow`.
 
-## 12. Risks
+## 13. Risks
 
 - A Monaco editor in the properties panel must keep its size and focus while the panel re-renders. It should be built and checked first.
 - Objects are stored as JSON text. Wires see them parsed, because `res.getBody()` parses JSON text, but a returned string that happens to be valid JSON (such as `"123"`) is parsed too. A typed value is a possible later step.
