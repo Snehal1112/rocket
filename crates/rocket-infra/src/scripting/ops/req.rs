@@ -71,39 +71,36 @@ pub fn op_req_get_auth_mode(state: &OpState) -> String {
         Auth::None => "none",
         Auth::Basic { .. } => "basic",
         Auth::Bearer { .. } => "bearer",
-        Auth::ApiKey { .. } => "api-key",
+        Auth::ApiKey { .. } => "apikey",
         Auth::OAuth2(_) => "oauth2",
-        Auth::AwsSigV4 { .. } => "aws-sig-v4",
-        _ => "inherit",
+        Auth::OAuth1(_) => "oauth1",
+        Auth::AwsSigV4 { .. } => "awsv4",
+        Auth::Digest { .. } => "digest",
+        Auth::Wsse { .. } => "wsse",
+        Auth::Ntlm { .. } => "ntlm",
+        Auth::Inherit => "inherit",
     }
     .to_string()
 }
 
+/// Returns a JSON array of `{ key, value, disabled? }` for every request header.
 #[op2]
 #[string]
-pub fn op_req_get_header(state: &OpState, #[string] name: String) -> String {
-    state
+pub fn op_req_get_header_list(state: &OpState) -> String {
+    let items: Vec<serde_json::Value> = state
         .borrow::<ScriptInputState>()
         .request
         .headers
         .iter()
-        .find(|h| h.key.eq_ignore_ascii_case(&name))
-        .map(|h| h.value.clone())
-        .unwrap_or_default()
-}
-
-/// Returns JSON object of all headers as { key: value }.
-#[op2]
-#[string]
-pub fn op_req_get_headers(state: &OpState) -> String {
-    let headers: serde_json::Map<String, serde_json::Value> = state
-        .borrow::<ScriptInputState>()
-        .request
-        .headers
-        .iter()
-        .map(|h| (h.key.clone(), serde_json::Value::String(h.value.clone())))
+        .map(|h| {
+            let mut item = serde_json::json!({ "key": h.key, "value": h.value });
+            if !h.enabled {
+                item["disabled"] = serde_json::Value::Bool(true);
+            }
+            item
+        })
         .collect();
-    serde_json::to_string(&headers).unwrap_or_else(|_| "{}".into())
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
 }
 
 /// Returns request body content as string, or empty if none.

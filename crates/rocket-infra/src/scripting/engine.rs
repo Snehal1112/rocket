@@ -175,8 +175,7 @@ extension!(
         req::op_req_get_query_string,
         req::op_req_get_method,
         req::op_req_get_auth_mode,
-        req::op_req_get_header,
-        req::op_req_get_headers,
+        req::op_req_get_header_list,
         req::op_req_get_body,
         req::op_req_get_timeout,
         req::op_req_get_execution_mode,
@@ -197,8 +196,7 @@ extension!(
         // res ops
         res::op_res_get_status,
         res::op_res_get_status_text,
-        res::op_res_get_header,
-        res::op_res_get_headers,
+        res::op_res_get_header_list,
         res::op_res_get_body,
         res::op_res_get_response_time,
         // console ops
@@ -984,6 +982,360 @@ mod tests {
         let ctx = minimal_ctx("res.getStatus()");
         let result = engine.execute(ctx).await.expect("execute");
         assert!(result.error.is_some(), "expected res unavailable error");
+    }
+
+    fn response_with(
+        headers: Vec<rocket_shared::types::Header>,
+        body: &str,
+    ) -> rocket_http::HttpResponse {
+        rocket_http::HttpResponse {
+            status: 201,
+            status_text: "Created".into(),
+            headers,
+            body: body.into(),
+            duration_ms: 42,
+            ttfb_ms: 0,
+            size_bytes: body.len(),
+        }
+    }
+
+    async fn run_after_response(
+        code: &str,
+        response: rocket_http::HttpResponse,
+    ) -> rocket_scripting::ScriptResult {
+        let mut ctx = minimal_ctx(code);
+        ctx.phase = rocket_scripting::ScriptPhase::AfterResponse;
+        ctx.response = Some(response);
+        DenoScriptEngine::new().execute(ctx).await.expect("execute")
+    }
+
+    fn json_response() -> rocket_http::HttpResponse {
+        use rocket_shared::types::Header;
+        response_with(
+            vec![
+                Header::new("Content-Type", "application/json"),
+                Header::new("X-Req", "abc"),
+            ],
+            r#"{"a":1}"#,
+        )
+    }
+
+    #[tokio::test]
+    async fn res_properties_mirror_the_getters() {
+        let result = run_after_response(
+            "rok.setVar('s', JSON.stringify([res.status, res.statusText, res.body.a, \
+             res.responseTime, res.headers['content-type'], res.headers['Content-Type'] === undefined]))",
+            json_response(),
+        )
+        .await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("s").expect("s"),
+            r#"[201,"Created",1,42,"application/json",true]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn res_body_property_falls_back_to_the_raw_string() {
+        let result = run_after_response(
+            "rok.setVar('b', res.body + '|' + res.getBody({ raw: true }))",
+            response_with(vec![], "plain text"),
+        )
+        .await;
+        assert_eq!(
+            result.runtime_vars.get("b").expect("b"),
+            "plain text|plain text"
+        );
+    }
+
+    #[tokio::test]
+    async fn res_get_header_is_case_insensitive_and_undefined_when_missing() {
+        let result = run_after_response(
+            "rok.setVar('h', res.getHeader('CONTENT-TYPE') + '|' + String(res.getHeader('nope')))",
+            json_response(),
+        )
+        .await;
+        assert_eq!(
+            result.runtime_vars.get("h").expect("h"),
+            "application/json|undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn res_get_headers_lowercases_keys() {
+        let result = run_after_response(
+            "rok.setVar('k', Object.keys(res.getHeaders()).join(','))",
+            json_response(),
+        )
+        .await;
+        assert_eq!(
+            result.runtime_vars.get("k").expect("k"),
+            "content-type,x-req"
+        );
+    }
+
+    #[tokio::test]
+    async fn res_header_list_reads() {
+        let result = run_after_response(
+            "const l = res.headerList;\
+             rok.setVar('r', JSON.stringify([\
+               l.count(), l.get('x-req'), l.one('X-REQ'), l.has('x-req', 'abc'), l.has('x-req', 'no'),\
+               l.has({ key: 'content-type' }), l.find((h) => h.key === 'X-Req').value,\
+               l.filter((h) => h.key.startsWith('X-')).length, l.indexOf('x-req'),\
+               l.map((h) => h.key), l.reduce((n) => n + 1, 0),\
+               l.toString(), l.toJSON().length, Object.keys(l.toObject(false, true))\
+             ]))",
+            json_response(),
+        )
+        .await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("r").expect("r"),
+            r#"[2,"abc",{"key":"X-Req","value":"abc"},true,false,true,"abc",1,1,["Content-Type","X-Req"],2,"Content-Type: application/json\nX-Req: abc",2,["Content-Type","X-Req"]]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn res_header_list_rejects_every_write() {
+        let result = run_after_response(
+            "const l = res.headerList; const out = [];\
+             for (const [name, args] of [['add', ['a', 'b']], ['upsert', ['a', 'b']], ['remove', ['a']],\
+               ['clear', []], ['populate', [[]]], ['repopulate', [[]]], ['assimilate', [[]]]]) {\
+               try { l[name](...args); out.push('no throw ' + name); }\
+               catch (e) { out.push(String(e.message)); }\
+             }\
+             rok.setVar('w', out.join('|'))",
+            json_response(),
+        )
+        .await;
+        let expected = ["HeaderList is read-only"; 7].join("|");
+        assert_eq!(result.runtime_vars.get("w").expect("w"), &expected);
+    }
+
+    #[tokio::test]
+    async fn res_properties_do_not_break_serialising_res_before_the_response_exists() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('j', JSON.stringify(res))");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.runtime_vars.get("j").expect("j"), "{}");
+    }
+
+    fn request_with_headers() -> rocket_scripting::ScriptContext {
+        use rocket_shared::types::Header;
+        let mut ctx = minimal_ctx("");
+        ctx.request.headers = vec![
+            Header::new("Content-Type", "application/json"),
+            Header::disabled("X-Off", "1"),
+        ];
+        ctx
+    }
+
+    #[tokio::test]
+    async fn req_get_header_is_undefined_when_missing_or_disabled() {
+        let mut ctx = request_with_headers();
+        ctx.code =
+            "rok.setVar('h', req.getHeader('content-type') + '|' + String(req.getHeader('nope'))\
+                     + '|' + String(req.getHeader('x-off')))"
+                .into();
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("h").expect("h"),
+            "application/json|undefined|undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn req_get_headers_lowercases_keys_and_skips_disabled() {
+        let mut ctx = request_with_headers();
+        ctx.code = "rok.setVar('k', Object.keys(req.getHeaders()).join(','))".into();
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("k").expect("k"), "content-type");
+    }
+
+    #[tokio::test]
+    async fn req_header_list_keeps_disabled_headers_visible() {
+        let mut ctx = request_with_headers();
+        ctx.code =
+            "rok.setVar('l', JSON.stringify([req.headerList.count(), req.headerList.one('x-off'),\
+                     req.headerList.toObject(true), req.headerList.toString()]))"
+                .into();
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("l").expect("l"),
+            r#"[2,{"key":"X-Off","value":"1","disabled":true},{"content-type":"application/json"},"Content-Type: application/json"]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn req_header_list_writes_queue_mutations_and_read_back() {
+        use rocket_scripting::HeaderMutation;
+        let mut ctx = request_with_headers();
+        ctx.code = "const l = req.headerList;\
+                     const first = l.upsert('x-new', '1');\
+                     const second = l.upsert('X-NEW', '2');\
+                     l.add('Accept: text/plain');\
+                     l.remove('x-off');\
+                     req.setHeader('x-via-set', 'v');\
+                     rok.setVar('r', JSON.stringify([first, second, req.getHeader('x-new'),\
+                       req.getHeader('accept'), l.has('x-off'), req.getHeader('x-via-set'), l.count()]))"
+            .into();
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("r").expect("r"),
+            r#"[true,false,"2","text/plain",false,"v",4]"#
+        );
+        let mutations = result.request_mutations.expect("mutations present");
+        let summary: Vec<String> = mutations
+            .headers
+            .iter()
+            .map(|m| match m {
+                HeaderMutation::Set { name, value } => format!("set {name}={value}"),
+                HeaderMutation::Delete { name } => format!("del {name}"),
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                "set x-new=1",
+                "set X-NEW=2",
+                "set Accept=text/plain",
+                "del x-off",
+                "set x-via-set=v"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn req_header_list_bulk_writes() {
+        let mut ctx = request_with_headers();
+        ctx.code = "const l = req.headerList;\
+                     l.populate([{ key: 'content-type', value: 'ignored' }, { key: 'x-a', value: '1' }]);\
+                     const afterPopulate = l.toObject();\
+                     l.assimilate([{ key: 'x-b', value: '2' }], true);\
+                     const afterAssimilate = l.toObject();\
+                     l.repopulate('x-c: 3\\nx-d: 4');\
+                     const afterRepopulate = l.toObject();\
+                     l.clear();\
+                     rok.setVar('r', JSON.stringify([afterPopulate, afterAssimilate, afterRepopulate, l.count()]))"
+            .into();
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("r").expect("r"),
+            r#"[{"content-type":"application/json","x-off":"1","x-a":"1"},{"x-b":"2"},{"x-c":"3","x-d":"4"},0]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn req_header_list_write_is_rejected_after_response() {
+        let result = run_after_response("req.headerList.add('x-late', '1')", json_response()).await;
+        assert!(result.error.is_some(), "expected phase guard error");
+        assert!(result.request_mutations.is_none());
+    }
+
+    #[tokio::test]
+    async fn req_get_body_returns_object_raw_string_or_undefined() {
+        use rocket_shared::types::{Body, BodyMode};
+        let body = |mode, content: Option<&str>| Body {
+            mode,
+            content: content.map(String::from),
+            form_data: None,
+            file_path: None,
+        };
+        let run = |request_body: Option<Body>| async move {
+            let mut ctx = minimal_ctx(
+                "const b = req.getBody(); rok.setVar('t', typeof b + ':' + (typeof b === 'object' ? JSON.stringify(b) : String(b)))",
+            );
+            ctx.request.body = request_body;
+            let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+            assert!(result.error.is_none(), "{:?}", result.error);
+            result.runtime_vars.get("t").expect("t").clone()
+        };
+        assert_eq!(
+            run(Some(body(BodyMode::Json, Some(r#"{"a":1}"#)))).await,
+            r#"object:{"a":1}"#
+        );
+        assert_eq!(
+            run(Some(body(BodyMode::Text, Some("hello")))).await,
+            "string:hello"
+        );
+        assert_eq!(
+            run(Some(body(BodyMode::Text, None))).await,
+            "undefined:undefined"
+        );
+        assert_eq!(run(None).await, "undefined:undefined");
+    }
+
+    #[tokio::test]
+    async fn req_get_path_params_have_type_path() {
+        let mut ctx = minimal_ctx("rok.setVar('p', JSON.stringify(req.getPathParams().map((p) => [p.name, p.value, p.type])))");
+        ctx.path_params = vec![rocket_shared::types::PathParam {
+            name: "id".into(),
+            value: "7".into(),
+            description: None,
+        }];
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("p").expect("p"),
+            r#"[["id","7","path"]]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn req_get_auth_mode_names_every_auth_type() {
+        use rocket_shared::types::Auth;
+        let pair = || (String::from("u"), String::from("p"));
+        let cases: Vec<(Auth, &str)> = vec![
+            (Auth::None, "none"),
+            (Auth::Inherit, "inherit"),
+            (Auth::Bearer { token: "t".into() }, "bearer"),
+            (
+                Auth::Basic {
+                    username: pair().0,
+                    password: pair().1,
+                },
+                "basic",
+            ),
+            (
+                Auth::Digest {
+                    username: pair().0,
+                    password: pair().1,
+                },
+                "digest",
+            ),
+            (
+                Auth::Wsse {
+                    username: pair().0,
+                    password: pair().1,
+                },
+                "wsse",
+            ),
+            (
+                Auth::Ntlm {
+                    username: pair().0,
+                    password: pair().1,
+                    domain: "d".into(),
+                },
+                "ntlm",
+            ),
+            (
+                Auth::ApiKey {
+                    key: "k".into(),
+                    value: "v".into(),
+                    placement: "header".into(),
+                },
+                "apikey",
+            ),
+            (Auth::OAuth1(Box::default()), "oauth1"),
+        ];
+        for (auth, expected) in cases {
+            let mut ctx = minimal_ctx("rok.setVar('m', req.getAuthMode())");
+            ctx.request.auth = auth;
+            let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+            assert_eq!(result.runtime_vars.get("m").expect("m"), expected);
+        }
     }
 
     #[tokio::test]

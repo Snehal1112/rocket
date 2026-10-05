@@ -449,7 +449,7 @@ declare const rok: {
   /** Read a global environment variable. */
   getGlobalEnvVar(key: string): unknown;
   /** Write a global environment variable. */
-  setGlobalEnvVar(key: string, value: unknown, opts?: { persist?: boolean }): void;
+  setGlobalEnvVar(key: string, value: unknown): void;
   /** Resolve {{var}} tokens using the current variable context. */
   interpolate(template: string): string;
   /**
@@ -468,24 +468,83 @@ declare const rok: {
 };
 `;
 
-const RES_DEFS = `
+const HEADER_LIST_DEFS = `
+interface RokHeader { key: string; value: string; disabled?: boolean }
+interface RokReadonlyHeaderList {
+  /** Value of the first header with this key (case-insensitive), or undefined. */
+  get(name: string): string | undefined;
+  /** The full { key, value } object for this key, or undefined. */
+  one(name: string): RokHeader | undefined;
+  /** A copy of every header, including disabled ones. */
+  all(): RokHeader[];
+  /** Number of headers, including disabled ones. */
+  count(): number;
+  has(name: string, value?: string): boolean;
+  has(header: { key: string }): boolean;
+  find(fn: (header: RokHeader, index: number) => unknown, context?: unknown): RokHeader | undefined;
+  filter(fn: (header: RokHeader, index: number) => unknown, context?: unknown): RokHeader[];
+  indexOf(item: string | RokHeader): number;
+  each(fn: (header: RokHeader, index: number) => void, context?: unknown): void;
+  map<T>(fn: (header: RokHeader, index: number) => T, context?: unknown): T[];
+  reduce<T>(fn: (acc: T, header: RokHeader, index: number) => T, initial?: T, context?: unknown): T;
+  toObject(excludeDisabled?: boolean, caseSensitive?: boolean, multiValue?: boolean, sanitizeKeys?: boolean): Record<string, string | string[]>;
+  /** HTTP wire format, "Key: Value" per line, skipping disabled headers. */
+  toString(): string;
+  toJSON(): RokHeader[];
+}
+interface RokHeaderList extends RokReadonlyHeaderList {
+  /** Sets a header. Takes (name, value), a "Key: Value" string, or a { key, value } object. Overwrites a header with the same key. */
+  add(name: string, value?: string): void;
+  add(header: RokHeader): void;
+  /** Sets or replaces a header. Returns true when it was new, false when updated. */
+  upsert(name: string, value?: string): boolean | null;
+  upsert(header: RokHeader): boolean | null;
+  /** Removes headers by key, { key } object or predicate. */
+  remove(target: string | { key: string } | ((header: RokHeader, index: number) => unknown), context?: unknown): void;
+  clear(): void;
+  /** Adds headers from an array or multi-line string, skipping keys that already exist. */
+  populate(items: RokHeader[] | string): void;
+  /** Clears all headers, then adds the given ones. */
+  repopulate(items: RokHeader[] | string): void;
+  /** Sets every header from the source. With prune, removes headers that are not in the source. */
+  assimilate(source: RokReadonlyHeaderList | RokHeader[], prune?: boolean): void;
+}
+`;
+
+const RES_DEFS =
+  HEADER_LIST_DEFS +
+  `
 declare const res: {
   /** Returns the HTTP status code (e.g. 200). */
   getStatus(): number;
   /** Returns the HTTP status text (e.g. "OK"). */
   getStatusText(): string;
-  /** Returns the value of a response header (case-insensitive). */
+  /** Returns the value of a response header (case-insensitive), or undefined when missing. */
   getHeader(name: string): string | undefined;
-  /** Returns all response headers as a key-value record. */
+  /** Returns all response headers as a key-value record with lowercased keys. */
   getHeaders(): Record<string, string>;
   /** Returns the parsed response body. Pass { raw: true } for the raw string. */
   getBody(opts?: { raw?: boolean }): unknown;
   /** Returns the total response time in milliseconds. */
   getResponseTime(): number;
+  /** The HTTP status code. Same as getStatus(). */
+  readonly status: number;
+  /** The HTTP status text. Same as getStatusText(). */
+  readonly statusText: string;
+  /** All response headers with lowercased keys. Same as getHeaders(). */
+  readonly headers: Record<string, string>;
+  /** The response body, parsed as JSON when possible, otherwise the raw string. */
+  readonly body: any;
+  /** The total response time in milliseconds. Same as getResponseTime(). */
+  readonly responseTime: number;
+  /** Read-only header list. Its write methods throw "HeaderList is read-only". */
+  readonly headerList: RokReadonlyHeaderList;
 };
 `;
 
-const REQ_DEFS = `
+const REQ_DEFS =
+  HEADER_LIST_DEFS +
+  `
 declare const req: {
   getUrl(): string;
   setUrl(url: string): void;
@@ -493,19 +552,25 @@ declare const req: {
   getPath(): string;
   getQueryString(): string;
   /** Path params extracted from the URL (e.g. :id in /users/:id). */
-  getPathParams(): { name: string; value: string; type: string }[];
+  getPathParams(): { name: string; value: string; type: 'path' }[];
   getMethod(): string;
   setMethod(method: string): void;
   getName(): string;
   /** Tags configured on this request. */
   getTags(): string[];
+  /** "none", "inherit", "basic", "bearer", "apikey", "oauth2", "oauth1", "awsv4", "digest", "wsse" or "ntlm". */
   getAuthMode(): string;
+  /** Value of an enabled request header (case-insensitive), or undefined when missing. */
   getHeader(name: string): string | undefined;
+  /** Enabled request headers with lowercased keys. */
   getHeaders(): Record<string, string>;
+  /** Header list with read, search, iterate, transform and write methods. Writes take effect before the request is sent. */
+  readonly headerList: RokHeaderList;
   setHeader(name: string, value: string): void;
   setHeaders(headers: Record<string, string>): void;
   deleteHeader(name: string): void;
   deleteHeaders(names: string[]): void;
+  /** The body parsed as JSON when possible, otherwise the raw string; undefined when there is no body. Pass { raw: true } for the raw string. */
   getBody(opts?: { raw?: boolean }): unknown;
   setBody(body: unknown): void;
   getTimeout(): number;

@@ -45,28 +45,197 @@
     },
   };
 
+  // ── HeaderList (PropertyList) ────────────────────────────────────────────────
+  // One implementation backs req.headerList (writable) and res.headerList
+  // (read-only). `items` is a private array of { key, value, disabled? } objects
+  // and is only ever handed out as clones. `writer` is null for a read-only
+  // list, otherwise { set(key, value), del(key) } calling the req mutation ops.
+  // A write calls its op first, so a phase that forbids the write throws before
+  // the local copy changes. Key lookups are case-insensitive.
+  function _hkey(k) { return String(k).toLowerCase(); }
+
+  function _parseHeaderLine(line) {
+    const i = line.indexOf(':');
+    if (i < 0) return { key: line.trim(), value: '' };
+    return { key: line.slice(0, i).trim(), value: line.slice(i + 1).trim() };
+  }
+
+  // Accepts (name, value), a "Key: Value" string, or a { key, value } object.
+  function _toHeader(a, b) {
+    if (typeof a === 'string') {
+      return b === undefined ? _parseHeaderLine(a) : { key: a, value: String(b) };
+    }
+    if (a && typeof a === 'object' && a.key !== undefined) {
+      return { key: String(a.key), value: a.value === undefined ? '' : String(a.value) };
+    }
+    return null;
+  }
+
+  // Accepts a PropertyList, an array of header-likes, or a multi-line string.
+  function _headerItems(src) {
+    if (typeof src === 'string') {
+      return src.split(/\r?\n/).filter((l) => l.trim() !== '').map(_parseHeaderLine);
+    }
+    if (src && typeof src.all === 'function') return src.all();
+    if (Array.isArray(src)) return src.map((x) => _toHeader(x)).filter(Boolean);
+    return [];
+  }
+
+  function _makeHeaderList(items, writer) {
+    const clone = (h) => Object.assign({}, h);
+    const snap = () => items.map(clone);
+    const idx = (k) => items.findIndex((h) => _hkey(h.key) === _hkey(k));
+    const needWriter = () => {
+      if (!writer) throw new Error('HeaderList is read-only');
+    };
+
+    function put(h) {
+      writer.set(h.key, h.value);
+      const i = idx(h.key);
+      if (i < 0) {
+        items.push({ key: h.key, value: h.value });
+        return true;
+      }
+      items[i] = { key: h.key, value: h.value };
+      return false;
+    }
+
+    function dropKey(key) {
+      writer.del(key);
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (_hkey(items[i].key) === _hkey(key)) items.splice(i, 1);
+      }
+    }
+
+    const list = {
+      // read
+      get: (name) => { const i = idx(name); return i < 0 ? undefined : items[i].value; },
+      one: (name) => { const i = idx(name); return i < 0 ? undefined : clone(items[i]); },
+      all: snap,
+      count: () => items.length,
+      // search
+      has: (a, b) => {
+        const key = (a && typeof a === 'object') ? a.key : a;
+        if (idx(key) < 0) return false;
+        if (b === undefined) return true;
+        return items.some((h) => _hkey(h.key) === _hkey(key) && h.value === b);
+      },
+      find: (fn, ctx) => snap().find((h, i) => fn.call(ctx, h, i)),
+      filter: (fn, ctx) => snap().filter((h, i) => fn.call(ctx, h, i)),
+      indexOf: (item) => {
+        if (typeof item === 'string') return idx(item);
+        if (!item || item.key === undefined) return -1;
+        return items.findIndex((h) => _hkey(h.key) === _hkey(item.key)
+          && (item.value === undefined || h.value === item.value));
+      },
+      // iterate
+      each: (fn, ctx) => { snap().forEach((h, i) => fn.call(ctx, h, i)); },
+      map: (fn, ctx) => snap().map((h, i) => fn.call(ctx, h, i)),
+      reduce: (fn, initial, ctx) => snap().reduce((acc, h, i) => fn.call(ctx, acc, h, i), initial),
+      // transform
+      toObject: (excludeDisabled, caseSensitive, multiValue, sanitizeKeys) => {
+        const out = {};
+        for (const h of items) {
+          if (excludeDisabled && h.disabled) continue;
+          if (sanitizeKeys && !h.key) continue;
+          const k = caseSensitive ? h.key : _hkey(h.key);
+          if (multiValue) (out[k] = out[k] || []).push(h.value);
+          else out[k] = h.value;
+        }
+        return out;
+      },
+      toString: () => items.filter((h) => !h.disabled).map((h) => `${h.key}: ${h.value}`).join('\n'),
+      toJSON: snap,
+      // write
+      add: (a, b) => {
+        needWriter();
+        const h = _toHeader(a, b);
+        if (h) put(h);
+      },
+      upsert: (a, b) => {
+        needWriter();
+        const h = _toHeader(a, b);
+        return h ? put(h) : null;
+      },
+      remove: (target, ctx) => {
+        needWriter();
+        if (typeof target === 'function') {
+          const keys = snap().filter((h, i) => target.call(ctx, h, i)).map((h) => h.key);
+          new Set(keys.map(_hkey)).forEach((k) => dropKey(k));
+          return;
+        }
+        const key = (target && typeof target === 'object') ? target.key : target;
+        if (key !== undefined) dropKey(String(key));
+      },
+      clear: () => {
+        needWriter();
+        new Set(items.map((h) => _hkey(h.key))).forEach((k) => dropKey(k));
+      },
+      populate: (src) => {
+        needWriter();
+        for (const h of _headerItems(src)) if (idx(h.key) < 0) put(h);
+      },
+      repopulate: (src) => {
+        needWriter();
+        list.clear();
+        list.populate(src);
+      },
+      assimilate: (src, prune) => {
+        needWriter();
+        const incoming = _headerItems(src);
+        for (const h of incoming) put(h);
+        if (prune) {
+          const keep = new Set(incoming.map((h) => _hkey(h.key)));
+          new Set(items.map((h) => _hkey(h.key))).forEach((k) => { if (!keep.has(k)) dropKey(k); });
+        }
+      },
+    };
+    return list;
+  }
+
   // ── req ─────────────────────────────────────────────────────────────────────
+  let _reqHeaderList = null;
+  const _reqHeaders = () => _reqHeaderList || (_reqHeaderList = _makeHeaderList(
+    JSON.parse(__ops.op_req_get_header_list()),
+    {
+      set: (k, v) => __ops.op_req_set_header(k, v),
+      del: (k) => __ops.op_req_delete_header(k),
+    },
+  ));
+
   globalThis.req = {
     getUrl:              ()           => __ops.op_req_get_url(),
     setUrl:              (url)        => __ops.op_req_set_url(url),
     getHost:             ()           => __ops.op_req_get_host(),
     getPath:             ()           => __ops.op_req_get_path(),
     getQueryString:      ()           => __ops.op_req_get_query_string(),
-    getPathParams:       ()           => JSON.parse(__ops.op_req_get_path_params()),
+    getPathParams:       ()           => JSON.parse(__ops.op_req_get_path_params())
+                                          .map((p) => Object.assign({}, p, { type: 'path' })),
     getMethod:           ()           => __ops.op_req_get_method(),
     setMethod:           (method)     => __ops.op_req_set_method(method),
     getName:             ()           => __ops.op_req_get_name(),
     getTags:             ()           => JSON.parse(__ops.op_req_get_tags()),
     getAuthMode:         ()           => __ops.op_req_get_auth_mode(),
-    getHeader:           (name)       => __ops.op_req_get_header(name),
-    getHeaders:          ()           => JSON.parse(__ops.op_req_get_headers()),
-    setHeader:           (name, val)  => __ops.op_req_set_header(name, val),
-    setHeaders:          (headers)    => __ops.op_req_set_headers(JSON.stringify(headers)),
-    deleteHeader:        (name)       => __ops.op_req_delete_header(name),
-    deleteHeaders:       (names)      => __ops.op_req_delete_headers(JSON.stringify(names)),
+    getHeader:           (name)       => {
+      const h = _reqHeaders().find((x) => !x.disabled && _hkey(x.key) === _hkey(name));
+      return h ? h.value : undefined;
+    },
+    getHeaders:          ()           => _reqHeaders().toObject(true),
+    setHeader:           (name, val)  => { _reqHeaders().upsert({ key: name, value: val }); },
+    setHeaders:          (headers)    => {
+      const list = _reqHeaders();
+      for (const k of Object.keys(headers || {})) list.upsert({ key: k, value: headers[k] });
+    },
+    deleteHeader:        (name)       => { _reqHeaders().remove(String(name)); },
+    deleteHeaders:       (names)      => {
+      const list = _reqHeaders();
+      for (const n of (names || [])) list.remove(String(n));
+    },
     getBody:             (opts)       => {
-      const raw = __ops.op_req_get_body(!!(opts && opts.raw));
-      return (opts && opts.raw) ? raw : JSON.parse(raw);
+      const raw = __ops.op_req_get_body();
+      if (opts && opts.raw) return raw;
+      if (raw === '') return undefined;
+      try { return JSON.parse(raw); } catch { return raw; }
     },
     setBody:             (body)       => __ops.op_req_set_body(JSON.stringify(body)),
     getTimeout:          ()           => __ops.op_req_get_timeout(),
@@ -76,19 +245,38 @@
     getExecutionPlatform:()           => __ops.op_req_get_execution_platform(),
     onFail:              (_cb)        => { /* no-op in safe mode */ },
   };
+  Object.defineProperty(globalThis.req, 'headerList', { get: _reqHeaders, enumerable: false });
 
   // ── res ─────────────────────────────────────────────────────────────────────
+  // Properties are non-enumerable lazy getters, so a script that logs or
+  // serialises `res` in the before-request phase does not hit the "res is not
+  // available" error; only reading a property does.
+  let _resHeaderList = null;
+  const _resHeaders = () => _resHeaderList || (_resHeaderList = _makeHeaderList(
+    JSON.parse(__ops.op_res_get_header_list()),
+    null,
+  ));
+  const _resBody = (raw) => { try { return JSON.parse(raw); } catch { return raw; } };
+
   globalThis.res = {
     getStatus:        ()      => __ops.op_res_get_status(),
     getStatusText:    ()      => __ops.op_res_get_status_text(),
-    getHeader:        (name)  => __ops.op_res_get_header(name),
-    getHeaders:       ()      => JSON.parse(__ops.op_res_get_headers()),
+    getHeader:        (name)  => _resHeaders().get(name),
+    getHeaders:       ()      => _resHeaders().toObject(),
     getBody:          (opts)  => {
-      const raw = __ops.op_res_get_body(!!(opts && opts.raw));
-      return (opts && opts.raw) ? raw : (() => { try { return JSON.parse(raw); } catch { return raw; } })();
+      const raw = __ops.op_res_get_body();
+      return (opts && opts.raw) ? raw : _resBody(raw);
     },
     getResponseTime:  ()      => __ops.op_res_get_response_time(),
   };
+  Object.defineProperties(globalThis.res, {
+    status:       { get: () => __ops.op_res_get_status(), enumerable: false },
+    statusText:   { get: () => __ops.op_res_get_status_text(), enumerable: false },
+    headers:      { get: () => _resHeaders().toObject(), enumerable: false },
+    body:         { get: () => _resBody(__ops.op_res_get_body()), enumerable: false },
+    responseTime: { get: () => __ops.op_res_get_response_time(), enumerable: false },
+    headerList:   { get: _resHeaders, enumerable: false },
+  });
 
   // ── navigator polyfill ───────────────────────────────────────────────────────
   // jsrsasign's legacy PRNG-seeding code (from jsbn) reads navigator.appName /

@@ -21,29 +21,16 @@ pub fn op_res_get_status_text(state: &OpState) -> Result<String, ScriptOpError> 
     Ok(get_response(state)?.status_text.clone())
 }
 
+/// Returns a JSON array of `{ key, value }` for every response header.
 #[op2]
 #[string]
-pub fn op_res_get_header(state: &OpState, #[string] name: String) -> Result<String, ScriptOpError> {
-    let res = get_response(state)?;
-    Ok(res
+pub fn op_res_get_header_list(state: &OpState) -> Result<String, ScriptOpError> {
+    let items: Vec<serde_json::Value> = get_response(state)?
         .headers
         .iter()
-        .find(|h| h.key.eq_ignore_ascii_case(&name))
-        .map(|h| h.value.clone())
-        .unwrap_or_default())
-}
-
-/// Returns JSON object of all headers as { key: value }.
-#[op2]
-#[string]
-pub fn op_res_get_headers(state: &OpState) -> Result<String, ScriptOpError> {
-    let res = get_response(state)?;
-    let map: serde_json::Map<String, serde_json::Value> = res
-        .headers
-        .iter()
-        .map(|h| (h.key.clone(), serde_json::Value::String(h.value.clone())))
+        .map(|h| serde_json::json!({ "key": h.key, "value": h.value }))
         .collect();
-    Ok(serde_json::to_string(&map).unwrap_or_else(|_| "{}".into()))
+    Ok(serde_json::to_string(&items).unwrap_or_else(|_| "[]".into()))
 }
 
 #[op2]

@@ -93,3 +93,31 @@ describe('ROK_TYPE_DEFS_FOR_PHASE', () => {
     expect(defs).not.toContain('declare function test(');
   });
 });
+
+describe('header list and res property typings', () => {
+  it('pre-request exposes a writable req.headerList and no res', () => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE('pre-request');
+    expect(defs).toContain('readonly headerList: RokHeaderList;');
+    expect(defs).toContain('interface RokHeaderList extends RokReadonlyHeaderList');
+    expect(defs).not.toContain('declare const res');
+  });
+
+  it.each([
+    'post-response',
+    'tests',
+  ] as const)('%s exposes res properties and a read-only headerList', (phase) => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
+    for (const prop of ['status', 'statusText', 'headers', 'body', 'responseTime']) {
+      expect(defs).toContain(`readonly ${prop}:`);
+    }
+    expect(defs).toContain('readonly headerList: RokReadonlyHeaderList;');
+    expect(defs).not.toContain('declare const req');
+  });
+
+  it('declares each shared interface once per phase', () => {
+    for (const phase of ['pre-request', 'post-response', 'tests'] as const) {
+      const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
+      expect(defs.match(/interface RokReadonlyHeaderList/g)?.length).toBe(1);
+    }
+  });
+});
