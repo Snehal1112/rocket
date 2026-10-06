@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
@@ -207,6 +207,20 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       closeTab(tabId, node.groupId);
     }
   };
+
+  // Ctrl+W dispatches this event so a dirty script tab gets the same guard as the X button.
+  const handleCloseTabRef = useRef(handleCloseTab);
+  handleCloseTabRef.current = handleCloseTab;
+  const tabsRef = useRef(node.tabs);
+  tabsRef.current = node.tabs;
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tabId = (e as CustomEvent<{ tabId: string }>).detail?.tabId;
+      if (tabId && tabsRef.current.some((t) => t.id === tabId)) handleCloseTabRef.current(tabId);
+    };
+    window.addEventListener('rocket:request-close-tab', handler);
+    return () => window.removeEventListener('rocket:request-close-tab', handler);
+  }, []);
 
   return (
     // onMouseDown here is intentional UX — tracks which pane the user is clicking into.

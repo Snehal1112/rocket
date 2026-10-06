@@ -6,7 +6,7 @@ import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import type { Workspace } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import { isRequestTab } from '@/types/pane-types';
+import { isRequestTab, isScriptTab } from '@/types/pane-types';
 
 // Registers global keyboard shortcuts for tab management across all pane groups.
 export function useKeyboardShortcuts() {
@@ -66,6 +66,14 @@ export function useKeyboardShortcuts() {
       // Cmd/Ctrl+W — close the active tab in the active group.
       if (e.key === 'w') {
         e.preventDefault();
+        const tab = activeLeaf.tabs.find((t) => t.id === activeLeaf.activeTabId);
+        if (tab && isScriptTab(tab) && tab.isDirty) {
+          // Script tabs have no autosave, so the owning group must confirm first.
+          window.dispatchEvent(
+            new CustomEvent('rocket:request-close-tab', { detail: { tabId: tab.id } }),
+          );
+          return;
+        }
         store.closeTab(activeLeaf.activeTabId, activeGroupId);
         return;
       }
