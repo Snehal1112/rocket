@@ -11,3 +11,6 @@ serde_json.workspace = true
 prost-types = "0.14"
 prost-reflect = { version = "0.16", features = ["serde"] }
 protox = "0.9"
+
+[dev-dependencies]
+prost = "0.14"
