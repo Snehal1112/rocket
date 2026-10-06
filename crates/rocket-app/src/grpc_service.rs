@@ -328,6 +328,24 @@ impl GrpcService {
                 metadata.push(pair);
             }
         }
+        // Collection headers are defaults: the request's metadata and auth take precedence.
+        let defaults = input
+            .collection
+            .as_deref()
+            .and_then(|c| self.collection_repo.get_settings(c).ok())
+            .map(|s| s.headers)
+            .unwrap_or_default();
+        for header in defaults
+            .iter()
+            .filter(|h| h.enabled && !h.key.trim().is_empty())
+        {
+            let name = resolve_text(&header.key, vars, "a collection header name")?;
+            let taken = metadata.iter().any(|m| m.name.eq_ignore_ascii_case(&name));
+            if !taken {
+                let value = resolve_text(&header.value, vars, &format!("header '{name}'"))?;
+                metadata.push(GrpcMetadataPair::new(name, value));
+            }
+        }
         Ok(GrpcCall {
             url,
             full_method,
@@ -795,12 +813,20 @@ message Rep { string message = 1; }
     }
 
     fn harness(collection_auth: Option<Auth>) -> Harness {
+        harness_with_headers(collection_auth, Vec::new())
+    }
+
+    fn harness_with_headers(
+        collection_auth: Option<Auth>,
+        collection_headers: Vec<rocket_shared::types::Header>,
+    ) -> Harness {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let proto_dir = dir.path().join("collections/api/protos");
         std::fs::create_dir_all(&proto_dir).expect("mkdir");
         std::fs::write(proto_dir.join("greeter.proto"), PROTO).expect("write");
         let mut collection = Collection::new("api");
         collection.settings.auth = collection_auth;
+        collection.settings.headers = collection_headers;
         let exec = Arc::new(FakeExecutor::default());
         let loader = Arc::new(FakeLoader::default());
         let events = Arc::new(Recorder::default());
@@ -989,6 +1015,29 @@ message Rep { string message = 1; }
         assert_eq!(
             sent(&h).0.metadata,
             vec![GrpcMetadataPair::new("authorization", "Bearer request")]
+        );
+    }
+
+    #[tokio::test]
+    async fn collection_headers_are_sent_as_metadata_and_the_request_wins() {
+        use rocket_shared::types::Header;
+        let h = harness_with_headers(
+            None,
+            vec![
+                Header::new("x-tenant", "acme"),
+                Header::new("X-Trace", "collection"),
+                Header::disabled("x-off", "no"),
+            ],
+        );
+        let mut r = request(SAY_HELLO);
+        r.metadata = vec![GrpcMetadataEntry::new("x-trace", "request")];
+        h.svc.call_unary(input(r)).await.expect("call");
+        assert_eq!(
+            sent(&h).0.metadata,
+            vec![
+                GrpcMetadataPair::new("x-trace", "request"),
+                GrpcMetadataPair::new("x-tenant", "acme"),
+            ]
         );
     }
 
