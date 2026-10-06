@@ -13,7 +13,11 @@ Design: `docs/superpowers/specs/2026-10-06-js-script-files-design.md`.
   collection path, macOS `/var` vs `/private/var`) are denied. This fails closed.
 - A module that throws while required gets its name added to the error message
   (`Error in module './x' (x.js): ...`, base name only, same error type, non-Errors wrapped
-  with `cause`). Resolution errors are not prefixed.
+  with `cause`). A resolution error raised by the top-level script's own `require` is not
+  prefixed. A module's own failed `require` is reported under that module's name.
+- The require resolver does not apply the tree's hidden-name rule (`.`-prefixed names,
+  `environments`, `node_modules`, root `flows`), because it is read-only and `.js`-only
+  inside the allowed roots.
 - Only `.js` files load. `package.json` `main`, `index.js` and `.json` are not supported.
 - `additionalContextRoots` is stored in `opencollection.yml` at
   `extensions.rocketapi.scripts.additionalContextRoots`. There is no settings UI yet.

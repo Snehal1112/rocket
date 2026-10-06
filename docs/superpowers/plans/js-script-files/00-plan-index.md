@@ -34,8 +34,25 @@ with working, checked software.
   they get no file scope in v1 and `require('./x')` there throws the "local file
   requires are not available" error. This matches the spec's "once they share
   the engine scope" wording.
+- A lexical root check runs before any disk access, so an absolute specifier
+  that reaches a root through a non-canonical alias (symlinked collection path,
+  `/var` vs `/private/var`) is denied, where the spec's "canonicalise both"
+  would allow it.
+- An in-root symlink that points outside still gets a different error than a
+  missing file. This existence signal is accepted, a deliberate deferral.
+- Script file operations share the tree's hidden-name rule via
+  `is_hidden_entry`, but the require resolver does not.
+- A nested module's failed require is reported with the nested module's name
+  prefix.
+- The `.js` extension match is case-sensitive in the tree, the ops and the
+  resolver.
+- JSONQ selector/action scripts (`execution_service.rs` actions and expression
+  eval) also get no file scope, like Flow Transform.
 
-## Carry-over from the plan 01 review
+## Carry-over from the plan 01 review (DONE)
+
+Done: the settings save now preserves `scriptContextRoots` via
+`buildSettingsForSave`, with a test.
 
 - Plan 03 must also fix `CollectionOverviewTab.tsx` `saveSettings`: add
   `scriptContextRoots?: string[]` to the TS `CollectionSettings` type and pass
