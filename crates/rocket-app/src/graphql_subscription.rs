@@ -25,6 +25,7 @@ use tokio::sync::oneshot;
 use crate::execution_service::websocket_resolution::{WebSocketConnectInput, WebSocketScope};
 use crate::execution_service::RequestExecutionService;
 use crate::graphql_document::select_operation;
+use crate::graphql_request::resolve_json_text;
 use protocol::{
     init_message, interpret, pong_message, start_message, stop_messages, Dialect, Incoming,
     SUBPROTOCOL_LEGACY, SUBPROTOCOL_TRANSPORT,
@@ -104,6 +105,37 @@ async fn resolved_text(
     }
 }
 
+/// Resolves the `{{placeholders}}` of JSON text. A value inside a JSON string is escaped, so a
+/// quote, backslash or newline in a variable or secret cannot break the payload.
+async fn resolved_json(
+    exec: &RequestExecutionService,
+    scope: &WebSocketScope,
+    text: &str,
+) -> DomainResult<String> {
+    let mut values: HashMap<String, String> = HashMap::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) if !after[..end].contains('}') => {
+                let placeholder = format!("{{{{{}}}}}", &after[..end]);
+                if !values.contains_key(&placeholder) {
+                    let value = resolved_text(exec, scope, &placeholder).await?;
+                    values.insert(placeholder, value);
+                }
+                rest = &after[end + 2..];
+            }
+            _ => rest = after,
+        }
+    }
+    Ok(resolve_json_text(text, |placeholder| {
+        values
+            .get(placeholder)
+            .cloned()
+            .unwrap_or_else(|| placeholder.to_string())
+    }))
+}
+
 /// Resolves optional JSON object text: blank is `None`, otherwise `{{placeholders}}` are filled
 /// in and the result must parse to a JSON object.
 async fn resolved_object(
@@ -115,7 +147,7 @@ async fn resolved_object(
     let Some(text) = text.map(str::trim).filter(|t| !t.is_empty()) else {
         return Ok(None);
     };
-    let resolved = resolved_text(exec, scope, text).await?;
+    let resolved = resolved_json(exec, scope, text).await?;
     match serde_json::from_str::<Value>(&resolved) {
         Ok(value @ Value::Object(_)) => Ok(Some(value)),
         Ok(_) => Err(DomainError::InvalidInput(format!(
@@ -338,10 +370,23 @@ async fn drive(
                             clean: false,
                             reason: Some(reason),
                         },
-                        None => Finish {
-                            clean: close.clean,
-                            reason: Some(close.reason),
-                        },
+                        // The server ended it without `complete`. Only a normal closure is clean;
+                        // `graphql-transport-ws` rejects with 4xxx codes (4401, 4403, ...).
+                        None => {
+                            let normal = matches!(close.code, Some(1000) | Some(1001));
+                            let mut reason = match close.code {
+                                Some(code) => format!("the server closed the connection ({code})"),
+                                None => "the server closed the connection".to_string(),
+                            };
+                            if !close.reason.is_empty() {
+                                reason.push_str(": ");
+                                reason.push_str(&close.reason);
+                            }
+                            Finish {
+                                clean: normal && close.clean,
+                                reason: if normal { None } else { Some(reason) },
+                            }
+                        }
                     };
                 }
                 Some(WebSocketEvent::Frame(WebSocketFrame::Binary(_))) => {}
@@ -590,6 +635,7 @@ mod resolve_tests {
         env.set_variable(Variable::new("host", "api.example.com"));
         env.set_variable(Variable::new("token", "abc123"));
         env.set_variable(Variable::new("room", "general"));
+        env.set_variable(Variable::new("tricky", "O\"Brien\\ \nline"));
         RequestExecutionService::new(
             Box::new(StaticEnvRepo(env)),
             RecordingExecutor::new(),
@@ -650,6 +696,23 @@ mod resolve_tests {
             start.connect.subprotocols,
             vec!["graphql-transport-ws".to_string(), "graphql-ws".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn resolved_values_are_escaped_inside_json_strings() {
+        let tricky = "O\"Brien\\ \nline";
+        let start = resolve_graphql_subscription(
+            &service(),
+            input(serde_json::json!({
+                "variables": "{\"who\": \"{{tricky}}\", \"n\": {{count}}}".replace("{{count}}", "3"),
+                "connectionParams": "{\"token\": \"{{tricky}}\"}"
+            })),
+        )
+        .await
+        .expect("a value holding quotes, backslashes or newlines must not break the JSON");
+
+        assert_eq!(start.variables, Some(serde_json::json!({ "who": tricky, "n": 3 })));
+        assert_eq!(start.connection_params, Some(serde_json::json!({ "token": tricky })));
     }
 
     #[tokio::test]
@@ -738,6 +801,8 @@ mod session_tests {
     use serde_json::json;
     use tokio::net::TcpListener;
     use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
     use tokio_tungstenite::tungstenite::Message;
 
     /// What the scripted server does after it has acknowledged the connection and received the
@@ -754,6 +819,8 @@ mod session_tests {
         NoAck,
         /// Acknowledge, ping, send one result, then complete.
         PingFirst,
+        /// Reject the connection with a 4403 close code instead of acknowledging it.
+        Reject,
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -789,7 +856,13 @@ mod session_tests {
                 log.lock().expect("lock").push(frame.clone());
                 match frame["type"].as_str() {
                     Some("connection_init") => {
-                        if !matches!(script, Script::NoAck) {
+                        if matches!(script, Script::Reject) {
+                            let frame = CloseFrame {
+                                code: CloseCode::Library(4403),
+                                reason: "Forbidden".into(),
+                            };
+                            let _ = ws.send(Message::Close(Some(frame))).await;
+                        } else if !matches!(script, Script::NoAck) {
                             let _ = ws.send(Message::text(json!({ "type": "connection_ack" }).to_string())).await;
                         }
                     }
@@ -815,7 +888,7 @@ mod session_tests {
                             let _ = ws.send(Message::text(result(1))).await;
                             let _ = ws.send(Message::text(json!({ "id": "1", "type": "complete" }).to_string())).await;
                         }
-                        Script::NoAck => {}
+                        Script::NoAck | Script::Reject => {}
                     },
                     _ => {}
                 }
@@ -1021,6 +1094,24 @@ mod session_tests {
         assert!(seen[0].1.contains("boom"), "{seen:?}");
         assert_eq!(states(&events).last(), Some(&WebSocketSessionState::Failed));
         assert_eq!(svc.session_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_close_code_rejection_ends_as_failed_with_the_code() {
+        let (port, _received) = spawn_server(Script::Reject, Offer::Modern).await;
+        let (svc, publisher) = service();
+
+        svc.start("s1", start_for(port)).await.expect("start");
+        wait_for(&publisher, "terminal status", terminal).await;
+
+        let events = publisher.events();
+        assert_eq!(states(&events).last(), Some(&WebSocketSessionState::Failed));
+        let reason = events.iter().find_map(|e| match e {
+            DomainEvent::GraphQlSubscriptionStatus { state: WebSocketSessionState::Failed, reason, .. } => reason.clone(),
+            _ => None,
+        });
+        let reason = reason.unwrap_or_default();
+        assert!(reason.contains("4403") && reason.contains("Forbidden"), "{reason}");
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import { type GraphQlSubscribeInput, graphqlSubscribe, graphqlUnsubscribe } from '@/lib/tauri-api';
 import { scopeFor } from '@/lib/websocket-session';
-import { useWebSocketStore } from '@/stores/websocket-store';
+import { type ConnectionStatus, useWebSocketStore } from '@/stores/websocket-store';
 import type { RequestTab, Tab } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 
@@ -62,4 +62,20 @@ export function releaseGraphQlSubscriptionTab(tab: Tab): void {
   if (!isRequestTab(tab) || tab.request.requestType !== 'graphql') return;
   void stopSubscription(tab.id);
   useWebSocketStore.getState().forgetTab(tab.id);
+}
+
+export type GraphQlSendMode = 'send' | 'subscribe' | 'stop';
+
+/**
+ * What the Send button of a GraphQL tab does. A live stream always offers Stop, whatever the
+ * document says now, so editing the operation never strands a running subscription.
+ */
+export function graphqlSendMode(
+  isGraphQl: boolean,
+  operationKind: string | null,
+  status: ConnectionStatus,
+): GraphQlSendMode {
+  if (isGraphQl && (status === 'connecting' || status === 'open')) return 'stop';
+  if (isGraphQl && operationKind === 'subscription') return 'subscribe';
+  return 'send';
 }

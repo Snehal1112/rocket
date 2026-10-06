@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSubscribeInput,
+  graphqlSendMode,
   releaseGraphQlSubscriptionTab,
   startSubscription,
   stopSubscription,
@@ -126,5 +127,21 @@ describe('stop and release', () => {
     useWebSocketStore.getState().beginSession('tab-1', 'sess-1');
     releaseGraphQlSubscriptionTab(http);
     expect(tauriApi.graphqlUnsubscribe).not.toHaveBeenCalled();
+  });
+});
+
+describe('graphqlSendMode', () => {
+  it('subscribes for a subscription operation and sends for anything else', () => {
+    expect(graphqlSendMode(true, 'subscription', 'idle')).toBe('subscribe');
+    expect(graphqlSendMode(true, 'query', 'idle')).toBe('send');
+    expect(graphqlSendMode(true, null, 'closed')).toBe('send');
+    expect(graphqlSendMode(false, 'subscription', 'idle')).toBe('send');
+  });
+
+  it('offers Stop while a stream is live, even after the operation was edited to a query', () => {
+    expect(graphqlSendMode(true, 'subscription', 'open')).toBe('stop');
+    expect(graphqlSendMode(true, 'query', 'open')).toBe('stop');
+    expect(graphqlSendMode(true, null, 'connecting')).toBe('stop');
+    expect(graphqlSendMode(false, null, 'open')).toBe('send');
   });
 });

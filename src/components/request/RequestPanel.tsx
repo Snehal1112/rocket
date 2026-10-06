@@ -51,7 +51,11 @@ import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
-import { startSubscription, stopSubscription } from '@/lib/graphql-subscription-session';
+import {
+  graphqlSendMode,
+  startSubscription,
+  stopSubscription,
+} from '@/lib/graphql-subscription-session';
 import { findTabInTree } from '@/lib/pane-utils';
 import {
   useEnvironments,
@@ -167,9 +171,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     isGraphQl ? (request.graphql?.query ?? '') : '',
     request.graphql?.operationName,
   );
-  const isSubscription = isGraphQl && operationKind === 'subscription';
   const subscription = useWebSocketStore((s) => s.byTab[tab.id]) ?? IDLE_SESSION;
-  const subscribed = subscription.status === 'connecting' || subscription.status === 'open';
+  const sendMode = graphqlSendMode(isGraphQl, operationKind, subscription.status);
+  const isSubscription = sendMode !== 'send';
+  const subscribed = sendMode === 'stop';
   const updateRequest = usePaneStore((s) => s.updateRequest);
   const requestLayout = useLayoutStore((s) => s.requestLayout);
 
@@ -1465,8 +1470,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     </div>
   );
 
-  const showSubscription = isGraphQl && (isSubscription || subscription.log.length > 0);
-  const responseArea = showSubscription ? (
+  const responseArea = isSubscription ? (
     <GraphQlSubscriptionPanel
       tab={tab}
       onConnectionParamsChange={(connectionParams) =>
