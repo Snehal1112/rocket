@@ -40,6 +40,7 @@ pub fn parse(input: &str) -> ImportResult<BruDocument> {
 
 fn dispatch_block(doc: &mut BruDocument, name: &str, subtype: Option<&str>, tokens: &[Token]) {
     match (name, subtype) {
+        ("ws", None) => parse_ws_block(doc, tokens),
         ("meta", None) => parse_meta(doc, tokens),
         ("headers", None) => parse_headers(doc, tokens),
         ("vars", None) => parse_vars(doc, tokens),
@@ -109,6 +110,77 @@ fn parse_method_block(doc: &mut BruDocument, tokens: &[Token]) {
     }
 }
 
+fn parse_ws_block(doc: &mut BruDocument, tokens: &[Token]) {
+    let map = kv_map(tokens);
+    if let Some((_, url)) = map.iter().find(|(k, _)| k == "url") {
+        doc.url = Some(url.clone());
+    }
+    if let Some((_, mode)) = map.iter().find(|(k, _)| k == "auth") {
+        doc.ws_auth_mode = Some(mode.clone());
+    }
+}
+
+/// Parses the inside of a `body:ws` block: repeated `name [kind] { content }` entries.
+/// The braces of JSON content are balanced, so the entry ends at the first `}` line that
+/// brings the nesting depth back to zero.
+pub(crate) fn parse_ws_messages(raw: &str) -> Vec<BruWsMessage> {
+    let mut out = Vec::new();
+    let mut lines = raw.lines();
+    while let Some(line) = lines.next() {
+        let Some(header) = line.trim().strip_suffix('{') else {
+            continue;
+        };
+        let header = header.trim();
+        let (name, kind) = match (header.rfind('['), header.rfind(']')) {
+            (Some(open), Some(close)) if open < close => (
+                header[..open].trim().to_string(),
+                header[open + 1..close].trim().to_string(),
+            ),
+            _ => (header.to_string(), "text".to_string()),
+        };
+
+        let mut depth = 1usize;
+        let mut body: Vec<&str> = Vec::new();
+        for inner in lines.by_ref() {
+            let trimmed = inner.trim();
+            if trimmed == "}" && depth == 1 {
+                break;
+            }
+            for ch in trimmed.chars() {
+                match ch {
+                    '{' => depth += 1,
+                    '}' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            body.push(inner);
+        }
+        out.push(BruWsMessage {
+            name,
+            kind,
+            content: dedent(&body),
+        });
+    }
+    out
+}
+
+/// Removes the indentation shared by every non-blank line, then trims the ends.
+fn dedent(lines: &[&str]) -> String {
+    let indent = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|l| if l.len() >= indent { &l[indent..] } else { l.trim_start() })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 fn parse_headers(doc: &mut BruDocument, tokens: &[Token]) {
     for (key, value) in kv_map(tokens) {
         let disabled = key.starts_with('~');
@@ -154,6 +226,10 @@ fn parse_secret_vars(doc: &mut BruDocument, tokens: &[Token]) {
 }
 
 fn parse_body(doc: &mut BruDocument, subtype: &str, tokens: &[Token]) {
+    if subtype == "ws" {
+        doc.ws_messages = parse_ws_messages(&extract_raw_text(tokens).unwrap_or_default());
+        return;
+    }
     let raw = extract_raw_text(tokens).unwrap_or_default();
     doc.body = Some(match subtype {
         "json" => BruBody::Json(raw),
@@ -367,5 +443,89 @@ mod tests {
         let doc = parse("vars:secret [\n  DB_PASSWORD\n  API_SECRET\n]\n");
         assert_eq!(doc.secret_vars.len(), 2);
         assert!(doc.secret_vars.contains(&"DB_PASSWORD".to_string()));
+    }
+
+    const WS_BRU: &str = r#"meta {
+  name: Echo
+  type: ws
+  seq: 2
+}
+
+ws {
+  url: wss://echo.websocket.org
+  body: ws
+  auth: bearer
+}
+
+headers {
+  X-Trace: abc
+  ~X-Off: 1
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:ws {
+  message 1 [json] {
+    {"name":"Bruno","nested":{"a":[1,2]}}
+  }
+
+  message 2 [text] {
+    hello
+  }
+}
+"#;
+
+    #[test]
+    fn parses_a_websocket_request_document() {
+        let doc = parse(WS_BRU);
+        assert!(doc.is_websocket());
+        assert_eq!(doc.meta.as_ref().map(|m| m.name.as_str()), Some("Echo"));
+        assert_eq!(doc.meta.as_ref().and_then(|m| m.seq), Some(2));
+        assert_eq!(doc.url.as_deref(), Some("wss://echo.websocket.org"));
+        assert_eq!(doc.ws_auth_mode.as_deref(), Some("bearer"));
+        assert_eq!(doc.headers.len(), 2);
+        assert!(doc.headers[1].disabled);
+        assert!(matches!(&doc.auth, Some(BruAuth::Bearer { token }) if token == "{{token}}"));
+        assert_eq!(doc.ws_messages.len(), 2);
+    }
+
+    #[test]
+    fn parses_messages_whose_json_contains_braces() {
+        let doc = parse(WS_BRU);
+        assert_eq!(doc.ws_messages[0].name, "message 1");
+        assert_eq!(doc.ws_messages[0].kind, "json");
+        assert_eq!(
+            doc.ws_messages[0].content,
+            r#"{"name":"Bruno","nested":{"a":[1,2]}}"#
+        );
+        assert_eq!(doc.ws_messages[1].name, "message 2");
+        assert_eq!(doc.ws_messages[1].kind, "text");
+        assert_eq!(doc.ws_messages[1].content, "hello");
+    }
+
+
+    #[test]
+    fn multi_line_message_content_keeps_its_relative_indentation() {
+        let raw = "message 1 [json] {\n  {\n    \"a\": 1\n  }\n}\n";
+        let messages = parse_ws_messages(raw);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "{\n  \"a\": 1\n}");
+    }
+
+    #[test]
+    fn a_message_header_without_a_kind_defaults_to_text() {
+        let messages = parse_ws_messages("ping {\n  hi\n}\n");
+        assert_eq!(messages[0].name, "ping");
+        assert_eq!(messages[0].kind, "text");
+        assert_eq!(messages[0].content, "hi");
+    }
+
+    #[test]
+    fn an_http_document_is_not_a_websocket() {
+        let doc = parse("meta {\n  name: A\n  type: http\n}\nget {\n  url: https://x\n}\n");
+        assert!(!doc.is_websocket());
+        assert!(doc.ws_messages.is_empty());
     }
 }

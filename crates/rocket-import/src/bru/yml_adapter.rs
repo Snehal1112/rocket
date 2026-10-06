@@ -9,6 +9,8 @@ use serde::Deserialize;
 pub struct BruYmlRequest {
     pub meta: Option<BruYmlMeta>,
     pub http: Option<BruYmlHttp>,
+    #[serde(alias = "websocket")]
+    pub ws: Option<BruYmlWs>,
     /// OpenCollection-shaped `info:` block, used by GraphQL files.
     pub info: Option<BruYmlMeta>,
     /// OpenCollection-shaped `graphql:` block.
@@ -56,6 +58,25 @@ pub struct BruYmlHttp {
     pub body: Option<BruYmlBody>,
     pub auth: Option<BruYmlAuth>,
     pub script: Option<BruYmlScript>,
+}
+
+/// The WebSocket block of a Bruno YAML request. `websocket` is accepted as an alias of `ws`.
+#[derive(Debug, Deserialize)]
+pub struct BruYmlWs {
+    pub url: Option<String>,
+    pub headers: Option<Vec<BruYmlHeader>>,
+    pub auth: Option<BruYmlAuth>,
+    pub messages: Option<Vec<BruYmlWsMessage>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BruYmlWsMessage {
+    #[serde(alias = "title")]
+    pub name: Option<String>,
+    #[serde(rename = "type", alias = "format")]
+    pub kind: Option<String>,
+    #[serde(alias = "body", alias = "data")]
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,6 +202,7 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
     let BruYmlRequest {
         meta,
         http,
+        ws,
         info,
         graphql,
         runtime,
@@ -194,7 +216,7 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
     if let Some(m) = meta {
         let request_type = m.request_type.clone().unwrap_or_default();
         // Non-http types go to unknown_blocks immediately.
-        if !matches!(request_type.as_str(), "http" | "" | "graphql") {
+        if !matches!(request_type.as_str(), "http" | "" | "graphql" | "ws" | "websocket") {
             doc.unknown_blocks.push(BruRawBlock {
                 name: "unsupported_type".into(),
                 subtype: Some(request_type.clone()),
@@ -246,6 +268,34 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
                 }
             }
         }
+    }
+
+    if let Some(ws) = ws {
+        doc.url = ws.url;
+        doc.headers = ws
+            .headers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|h| BruKeyValue {
+                key: h.name,
+                value: h.value,
+                disabled: h.disabled,
+            })
+            .collect();
+        if let Some(auth) = ws.auth {
+            doc.ws_auth_mode = auth.mode.clone();
+            doc.auth = adapt_auth(auth, &mut doc.unknown_blocks);
+        }
+        doc.ws_messages = ws
+            .messages
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| BruWsMessage {
+                name: m.name.unwrap_or_default(),
+                kind: m.kind.unwrap_or_else(|| "text".into()),
+                content: m.content.unwrap_or_default(),
+            })
+            .collect();
     }
 
     doc
@@ -718,5 +768,48 @@ runtime:
         let doc = bru_document_from_yml_str(yml).expect("adapt");
         assert_eq!(doc.unknown_blocks.len(), 1);
         assert_eq!(doc.unknown_blocks[0].name, "unsupported_type");
+    }
+
+    #[test]
+    fn websocket_yml_request_is_parsed_not_flagged_unsupported() {
+        let yml = r#"
+meta:
+  name: Chat
+  type: ws
+ws:
+  url: wss://chat.example.com/ws
+  headers:
+    - name: Origin
+      value: https://example.com
+  auth:
+    mode: bearer
+    bearer:
+      token: t0k
+  messages:
+    - name: hello
+      type: json
+      body: '{"hi":true}'
+    - name: ping
+      type: text
+      content: ping
+"#;
+        let doc = bru_document_from_yml_str(yml).unwrap();
+        assert!(doc.is_websocket());
+        assert!(doc.unknown_blocks.is_empty(), "{:?}", doc.unknown_blocks);
+        assert_eq!(doc.url.as_deref(), Some("wss://chat.example.com/ws"));
+        assert_eq!(doc.headers.len(), 1);
+        assert!(matches!(&doc.auth, Some(BruAuth::Bearer { token }) if token == "t0k"));
+        assert_eq!(doc.ws_messages.len(), 2);
+        assert_eq!(doc.ws_messages[0].kind, "json");
+        assert_eq!(doc.ws_messages[0].content, "{\"hi\":true}");
+        assert_eq!(doc.ws_messages[1].content, "ping");
+    }
+
+    #[test]
+    fn websocket_yml_accepts_the_websocket_key_alias() {
+        let yml = "meta:\n  name: Chat\n  type: websocket\nwebsocket:\n  url: ws://x\n";
+        let doc = bru_document_from_yml_str(yml).unwrap();
+        assert!(doc.is_websocket());
+        assert_eq!(doc.url.as_deref(), Some("ws://x"));
     }
 }

@@ -14,10 +14,32 @@ pub struct BruDocument {
     pub secret_vars: Vec<String>,
     pub pre_request_script: Option<String>,
     pub post_response_script: Option<String>,
+    /// Messages from a `body:ws` block (WebSocket requests only).
+    pub ws_messages: Vec<BruWsMessage>,
+    /// The `auth:` mode named inside a `ws {}` block, such as `inherit`, `none` or `bearer`.
+    pub ws_auth_mode: Option<String>,
     /// The query and variables of a GraphQL request (`body:graphql` and `body:graphql:vars`).
     pub graphql: Option<BruGraphQl>,
     /// Unrecognised or unsupported blocks — fed into ImportReport.
     pub unknown_blocks: Vec<BruRawBlock>,
+}
+
+impl BruDocument {
+    /// True for a Bruno WebSocket request (`meta.type` is `ws` or `websocket`).
+    pub fn is_websocket(&self) -> bool {
+        self.meta
+            .as_ref()
+            .is_some_and(|m| matches!(m.request_type.as_str(), "ws" | "websocket"))
+    }
+}
+
+/// One saved WebSocket message from a `body:ws` block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BruWsMessage {
+    pub name: String,
+    /// Bruno's format tag: `json`, `text` or `xml`. Anything else is passed through.
+    pub kind: String,
+    pub content: String,
 }
 
 /// A GraphQL body: the query text and the optional variables JSON.

@@ -380,6 +380,15 @@ impl ImportService {
                                 }),
                             }
                         }
+                        Some(req_converter::Converted::WebSocket(ws)) => {
+                            match repo.save_websocket_request(collection_name, &out_path, &ws) {
+                                Ok(_) => report.imported += 1,
+                                Err(e) => report.skipped.push(SkippedItem {
+                                    path: rel_str.clone(),
+                                    reason: SkipReason::ParseError(e.to_string()),
+                                }),
+                            }
+                        }
                         None => {}
                     }
                 }

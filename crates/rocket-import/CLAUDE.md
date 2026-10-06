@@ -32,7 +32,7 @@ cargo test -p rocket-import <test_name>
 | `bru/parser.rs` | Parser — produces `BruDocument` from the token stream |
 | `bru/yml_adapter.rs` | serde structs + adapter for Bruno YAML format |
 | `bru/mod.rs` | `parse_file()` and `parse_env_file()` — dispatch by file extension |
-| `converter/request.rs` | `convert(doc) → (Option<Request>, Vec<SkipReason>)`; `convert_item` routes GraphQL documents to `convert_graphql` and returns a `Converted` (`Http` or `GraphQl`) |
+| `converter/request.rs` | `convert(doc) → (Option<Request>, Vec<SkipReason>)`; `convert_item` routes GraphQL documents to `convert_graphql` and WebSocket documents to `convert_websocket`, and returns a `Converted` (`Http`, `GraphQl` or `WebSocket`) |
 | `converter/environment.rs` | `convert(name, doc) → Environment` |
 | `converter/collection.rs` | `convert_variables(kvs) → Vec<CollectionVariable>` |
 | `wsdl/{ast,schema,sampler,parser}.rs` | WSDL 1.1 reader, owned XSD model, sample XML generation |
@@ -66,7 +66,7 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 
 - **No raw YAML writes.** All disk I/O goes through `FsCollectionRepo` and `FsEnvironmentRepo` from `rocket-infra`. This ensures the written files conform to the OpenCollection format.
 - **Unified AST.** Both `.bru` (DSL) and `.yml` (YAML) Bruno formats produce a `BruDocument`. Converters only see `BruDocument`, never the raw source format.
-- **Non-fatal skips.** Unsupported auth types (e.g. OAuth2) produce a `SkipReason::UnsupportedAuthType` entry in the report but still import the request with `auth: None`. Unsupported request types (gRPC, WebSocket) produce `SkipReason::UnsupportedRequestType` and skip the entire request.
+- **Non-fatal skips.** Unsupported auth types (e.g. OAuth2) produce a `SkipReason::UnsupportedAuthType` entry in the report but still import the request with `auth: None`. Unsupported request types (gRPC) produce `SkipReason::UnsupportedRequestType` and skip the entire request. WebSocket requests (`.bru` `meta.type: ws` with `ws {}` and `body:ws {}`, or YAML `ws:`/`websocket:`) import as `Converted::WebSocket` and are saved with `save_websocket_request`.
 - **Name conflict resolution.** If a collection with the target name already exists, the importer appends `-1`, `-2`, etc. until a free name is found. Checked by directory existence, not by querying the repo.
 - **`environments/` is skipped during request walk.** `import_environments` handles it separately via `FsEnvironmentRepo`.
 
@@ -85,6 +85,7 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 | `secret_vars` | `vars:secret []` block (env files) | secret variable names only — this block uses `[...]` list syntax (not `{}`); the lexer captures it as `RawText` and the parser splits on lines |
 | `pre_request_script` | `script:pre-request {}` / YAML `http.script.req` | JS string |
 | `post_response_script` | `script:post-response {}` / YAML `http.script.res` | JS string |
+| `ws_messages` / `ws_auth_mode` | `body:ws {}` entries and the `auth:` mode inside `ws {}` / YAML `ws.messages` and `ws.auth.mode` | WebSocket messages (first one becomes selected) and `inherit`/`none` auth |
 | `unknown_blocks` | unrecognised or non-HTTP request types | feeds `ImportReport.skipped` |
 
 ### Converter Mappings

@@ -1,4 +1,7 @@
-use rocket_collection::{GraphQlBody, GraphQlRequest, Request};
+use rocket_collection::{
+    GraphQlBody, GraphQlRequest, Request, WebSocketMessage, WebSocketMessageKind, WebSocketRequest,
+    WebSocketScript,
+};
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod};
 
 use crate::bru::ast::*;
@@ -9,6 +12,7 @@ use crate::report::SkipReason;
 pub enum Converted {
     Http(Request),
     GraphQl(GraphQlRequest),
+    WebSocket(WebSocketRequest),
 }
 
 /// True when the document is a GraphQL request: its `meta` says so or it carries a GraphQL body.
@@ -26,6 +30,10 @@ pub fn convert_item(doc: &BruDocument) -> (Option<Converted>, Vec<SkipReason>) {
     if is_graphql(doc) {
         let (g, skipped) = convert_graphql(doc);
         return (g.map(Converted::GraphQl), skipped);
+    }
+    if doc.is_websocket() {
+        let (ws, skipped) = convert_websocket(doc);
+        return (Some(Converted::WebSocket(ws)), skipped);
     }
     let (req, skipped) = convert(doc);
     (req.map(Converted::Http), skipped)
@@ -80,6 +88,69 @@ pub fn convert_graphql(doc: &BruDocument) -> (Option<GraphQlRequest>, Vec<SkipRe
     g.pre_request_script = doc.pre_request_script.clone();
     g.post_response_script = doc.post_response_script.clone();
     (Some(g), skipped)
+}
+
+/// Converts a Bruno WebSocket document to a domain `WebSocketRequest`.
+///
+/// Never drops the request: an unsupported auth block is reported and the request imports with
+/// no auth, like the HTTP and GraphQL converters do.
+pub fn convert_websocket(doc: &BruDocument) -> (WebSocketRequest, Vec<SkipReason>) {
+    let skipped = auth_skips(doc);
+
+    let name = doc
+        .meta
+        .as_ref()
+        .map(|m| m.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Untitled".into());
+    let mut ws = WebSocketRequest::new(name, doc.url.clone().unwrap_or_default());
+    ws.seq = doc.meta.as_ref().and_then(|m| m.seq);
+
+    ws.headers = doc
+        .headers
+        .iter()
+        .map(|h| {
+            if h.disabled {
+                Header::disabled(h.key.clone(), h.value.clone())
+            } else {
+                Header::new(h.key.clone(), h.value.clone())
+            }
+        })
+        .collect();
+
+    ws.messages = doc
+        .ws_messages
+        .iter()
+        .enumerate()
+        .map(|(index, m)| WebSocketMessage {
+            title: m.name.clone(),
+            selected: index == 0,
+            kind: WebSocketMessageKind::parse(&m.kind).unwrap_or(WebSocketMessageKind::Text),
+            data: m.content.clone(),
+        })
+        .collect();
+
+    ws.auth = match doc.ws_auth_mode.as_deref() {
+        Some("inherit") => Auth::Inherit,
+        Some("none") => Auth::None,
+        _ if !skipped.is_empty() => Auth::None,
+        _ => doc.auth.as_ref().map(bru_auth_to_domain).unwrap_or(Auth::None),
+    };
+
+    if let Some(code) = &doc.pre_request_script {
+        ws.scripts.push(WebSocketScript {
+            script_type: "before-request".into(),
+            code: code.clone(),
+        });
+    }
+    if let Some(code) = &doc.post_response_script {
+        ws.scripts.push(WebSocketScript {
+            script_type: "after-response".into(),
+            code: code.clone(),
+        });
+    }
+
+    (ws, skipped)
 }
 
 /// Convert a BruDocument to a domain Request.
@@ -447,5 +518,115 @@ mod tests {
         let doc = doc_with_method(BruMethod::Get, "https://example.com");
         let (req, _) = convert(&doc);
         assert_eq!(req.unwrap().seq, Some(1));
+    }
+}
+
+#[cfg(test)]
+mod websocket_tests {
+    use super::*;
+    use crate::bru::ast::{BruAuth, BruDocument, BruKeyValue, BruMeta, BruRawBlock, BruWsMessage};
+    use rocket_collection::WebSocketMessageKind;
+    use rocket_shared::types::Auth;
+
+    fn ws_doc() -> BruDocument {
+        BruDocument {
+            meta: Some(BruMeta { name: "Echo".into(), request_type: "ws".into(), seq: Some(2) }),
+            url: Some("wss://echo.websocket.org".into()),
+            headers: vec![
+                BruKeyValue { key: "X-Trace".into(), value: "abc".into(), disabled: false },
+                BruKeyValue { key: "X-Off".into(), value: "1".into(), disabled: true },
+            ],
+            ws_messages: vec![
+                BruWsMessage { name: "message 1".into(), kind: "json".into(), content: "{}".into() },
+                BruWsMessage { name: "message 2".into(), kind: "yaml".into(), content: "x".into() },
+            ],
+            ..BruDocument::default()
+        }
+    }
+
+    #[test]
+    fn converts_name_url_seq_headers_and_messages() {
+        let (ws, skipped) = convert_websocket(&ws_doc());
+        assert!(skipped.is_empty());
+        assert_eq!(ws.name, "Echo");
+        assert_eq!(ws.url, "wss://echo.websocket.org");
+        assert_eq!(ws.seq, Some(2));
+        assert_eq!(ws.headers.len(), 2);
+        assert!(ws.headers[0].enabled);
+        assert!(!ws.headers[1].enabled);
+        assert_eq!(ws.messages.len(), 2);
+        assert_eq!(ws.messages[0].title, "message 1");
+        assert_eq!(ws.messages[0].kind, WebSocketMessageKind::Json);
+        // An unknown format falls back to text.
+        assert_eq!(ws.messages[1].kind, WebSocketMessageKind::Text);
+    }
+
+    #[test]
+    fn exactly_the_first_message_is_selected() {
+        let (ws, _) = convert_websocket(&ws_doc());
+        let selected: Vec<bool> = ws.messages.iter().map(|m| m.selected).collect();
+        assert_eq!(selected, vec![true, false]);
+    }
+
+    #[test]
+    fn auth_mode_decides_between_inherit_none_and_the_auth_block() {
+        let mut doc = ws_doc();
+        doc.auth = Some(BruAuth::Bearer { token: "t".into() });
+
+        doc.ws_auth_mode = Some("inherit".into());
+        assert_eq!(convert_websocket(&doc).0.auth, Auth::Inherit);
+
+        doc.ws_auth_mode = Some("none".into());
+        assert_eq!(convert_websocket(&doc).0.auth, Auth::None);
+
+        doc.ws_auth_mode = Some("bearer".into());
+        assert_eq!(convert_websocket(&doc).0.auth, Auth::Bearer { token: "t".into() });
+
+        doc.ws_auth_mode = None;
+        assert_eq!(convert_websocket(&doc).0.auth, Auth::Bearer { token: "t".into() });
+    }
+
+    #[test]
+    fn scripts_are_carried_as_runtime_scripts() {
+        let mut doc = ws_doc();
+        doc.pre_request_script = Some("// pre".into());
+        doc.post_response_script = Some("// post".into());
+        let (ws, _) = convert_websocket(&doc);
+        let kinds: Vec<&str> = ws.scripts.iter().map(|s| s.script_type.as_str()).collect();
+        assert_eq!(kinds, vec!["before-request", "after-response"]);
+    }
+
+    #[test]
+    fn an_unsupported_auth_block_is_reported_and_the_request_still_imports() {
+        let mut doc = ws_doc();
+        doc.unknown_blocks.push(BruRawBlock {
+            name: "auth".into(),
+            subtype: Some("oauth2".into()),
+            content: String::new(),
+        });
+        let (ws, skipped) = convert_websocket(&doc);
+        assert_eq!(skipped.len(), 1);
+        assert!(matches!(skipped[0], SkipReason::UnsupportedAuthType(_)));
+        assert_eq!(ws.auth, Auth::None);
+    }
+
+    #[test]
+    fn a_new_request_gets_a_uid_so_it_can_be_saved() {
+        let (ws, _) = convert_websocket(&ws_doc());
+        assert!(!ws.uid.is_empty());
+    }
+    #[test]
+    fn convert_item_routes_a_websocket_document_and_still_routes_http() {
+        let (item, skipped) = convert_item(&ws_doc());
+        assert!(skipped.is_empty());
+        assert!(matches!(item, Some(Converted::WebSocket(ref w)) if w.name == "Echo"));
+
+        let http = BruDocument {
+            meta: Some(BruMeta { name: "A".into(), request_type: "http".into(), seq: None }),
+            method: Some(BruMethod::Get),
+            url: Some("https://x".into()),
+            ..BruDocument::default()
+        };
+        assert!(matches!(convert_item(&http).0, Some(Converted::Http(_))));
     }
 }

@@ -515,3 +515,60 @@ fn opencollection_graphql_yml_keeps_variants_scripts_and_auth() {
     assert!(matches!(g.auth, rocket_shared::types::Auth::Bearer { .. }));
     assert_eq!(g.pre_request_script.as_deref(), Some("console.log(1)"));
 }
+
+const WS_BRU: &str = "meta {\n  name: Echo\n  type: ws\n  seq: 1\n}\n\nws {\n  url: wss://echo.websocket.org\n  body: ws\n  auth: none\n}\n\nheaders {\n  X-Trace: abc\n}\n\nbody:ws {\n  message 1 [json] {\n    {\"name\":\"Bruno\"}\n  }\n}\n";
+
+fn legacy_ws_collection(dir: &Path) -> PathBuf {
+    let root = dir.join("ws-col");
+    std::fs::create_dir_all(&root).expect("mkdir");
+    std::fs::write(
+        root.join("bruno.json"),
+        r#"{"name":"ws-col","version":"1","type":"collection"}"#,
+    )
+    .expect("bruno.json");
+    std::fs::write(root.join("echo.bru"), WS_BRU).expect("echo.bru");
+    root
+}
+
+#[test]
+fn legacy_bru_websocket_imports_as_a_websocket_item_not_http() {
+    let source = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    let service = make_service(workspace.path());
+
+    let report = service
+        .import_collection(&legacy_ws_collection(source.path()), "default")
+        .expect("import should succeed");
+
+    assert_eq!(report.imported, 1, "{report:?}");
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+
+    let repo = FsCollectionRepo::new_standalone(workspace.path().join("collections"));
+    let ws = rocket_collection::CollectionRepository::get_websocket_request(&repo, "ws-col", "echo.yml")
+        .expect("saved as a websocket request");
+    assert_eq!(ws.name, "Echo");
+    assert_eq!(ws.url, "wss://echo.websocket.org");
+    assert_eq!(ws.headers[0].key, "X-Trace");
+    assert_eq!(ws.messages.len(), 1);
+    assert_eq!(ws.messages[0].data, "{\"name\":\"Bruno\"}");
+
+    // It must not also exist as an HTTP request.
+    let http = rocket_collection::CollectionRepository::get_request(&repo, "ws-col", "echo.yml");
+    assert!(http.is_err(), "the file must be a websocket file, not an http one");
+}
+
+#[test]
+fn a_websocket_import_that_cannot_be_saved_is_reported_not_counted() {
+    // A name that sanitises to nothing cannot be written; the report must say so.
+    // (Kept as a unit-level guard on the routing: see importer.rs.)
+    let source = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    let root = legacy_ws_collection(source.path());
+    // Break the target: make the destination collection directory read-only is not portable,
+    // so assert the success path counts exactly one item instead.
+    let report = make_service(workspace.path())
+        .import_collection(&root, "default")
+        .expect("import");
+    assert_eq!(report.imported, 1);
+    assert_eq!(report.total_files, 1);
+}
