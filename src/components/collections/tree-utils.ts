@@ -1,3 +1,4 @@
+import { isPathWithin } from '@/lib/pane-utils';
 import type { PaneNode, Tab } from '@/types/pane-types';
 import { isScriptTab } from '@/types/pane-types';
 
@@ -15,10 +16,7 @@ export type DeleteTarget = {
   name: string;
 };
 
-// True when `path` is `folder` itself or lives below it, matching whole path segments.
-export function isPathWithin(path: string, folder: string): boolean {
-  return path === folder || path.startsWith(`${folder}/`);
-}
+export { isPathWithin };
 
 export interface AffectedTab {
   tab: Tab;

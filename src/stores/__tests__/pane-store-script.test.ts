@@ -92,4 +92,23 @@ describe('pane-store script tabs', () => {
     usePaneStore.getState().updateTabTitle(id, 'other.js');
     expect(renameRequest).not.toHaveBeenCalled();
   });
+  it('retargets script tabs under a renamed folder and keeps ids', async () => {
+    vi.mocked(readScriptFile).mockResolvedValue('x');
+    await usePaneStore.getState().openScriptTab('col', 'lib/a.js');
+    await usePaneStore.getState().openScriptTab('col', 'lib/deep/b.js');
+    await usePaneStore.getState().openScriptTab('col', 'lib2/x.js');
+    const idA = findTab('col', 'lib/a.js')?.tab.id;
+    expect(idA).toBeDefined();
+
+    usePaneStore.getState().renameScriptTabs('col', 'lib', 'helpers');
+
+    expect(findTab('col', 'helpers/a.js')?.tab.id).toBe(idA);
+    expect(findTab('col', 'helpers/a.js')?.tab.source).toEqual({
+      collection: 'col',
+      path: 'helpers/a.js',
+    });
+    expect(findTab('col', 'helpers/deep/b.js')).not.toBeNull();
+    expect(findTab('col', 'lib2/x.js')).not.toBeNull();
+    expect(findTab('col', 'lib/a.js')).toBeNull();
+  });
 });

@@ -16,6 +16,7 @@ Design: `docs/superpowers/specs/2026-10-06-js-script-files-design.md`.
   `create/read/save/rename/delete_script_file`. The file watcher reports changes.
 - Sidebar delete closes affected script tabs by whole path segments
   (`findAffectedTabs` in `tree-utils.ts`) and warns when one has unsaved edits.
+- `renameScriptTabs` retargets a renamed file or every script tab under a renamed folder.
 - Not covered yet: Flow Transform scripts, OpenCollection `.yml` `ScriptFile` items,
-  a delete warning for referenced scripts, renaming a folder does not retarget open
-  script tabs, open tabs do not reload when the file changes on disk.
+  a delete warning for referenced scripts, open tabs do not reload when the file
+  changes on disk.

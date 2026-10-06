@@ -6,6 +6,7 @@ import {
   createDefaultRequestFor,
   findActiveLeaf,
   findScriptTab,
+  findScriptTabsWithin,
   findTabInTree,
   removeLeaf,
   splitLeaf,
@@ -694,20 +695,27 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   renameScriptTabs(collection, oldPath, newPath) {
-    // Matching by path (not id) keeps the id stable, so panes keep their active tab.
-    const found = findScriptTab(get().root, collection, oldPath);
-    if (!found) return;
-    set(
-      updateTabEverywhere(get(), found.tab.id, (tab) => {
-        if (!isScriptTab(tab)) return tab;
-        return {
-          ...tab,
-          scriptPath: newPath,
-          title: newPath.split('/').pop() ?? newPath,
-          source: { collection, path: newPath },
-        };
-      }),
-    );
+    // Matches the file itself or any script below a renamed folder, by whole segments.
+    // Matching by tab id keeps the id stable, so panes keep their active tab.
+    const tabs = findScriptTabsWithin(get().root, collection, oldPath);
+    if (tabs.length === 0) return;
+    let next = get();
+    for (const found of tabs) {
+      const target = `${newPath}${found.scriptPath.slice(oldPath.length)}`;
+      next = {
+        ...next,
+        ...updateTabEverywhere(next, found.id, (tab) => {
+          if (!isScriptTab(tab)) return tab;
+          return {
+            ...tab,
+            scriptPath: target,
+            title: target.split('/').pop() ?? target,
+            source: { collection, path: target },
+          };
+        }),
+      };
+    }
+    set({ root: next.root, collectionTabState: next.collectionTabState });
   },
 
   async openRunnerTab(collectionName, folderPath) {

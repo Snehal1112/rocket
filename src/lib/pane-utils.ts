@@ -232,6 +232,29 @@ export function findTabInTree(node: PaneNode, tabId: string): { leaf: LeafNode; 
   return findTabInTree(node.children[0], tabId) ?? findTabInTree(node.children[1], tabId);
 }
 
+// True when `path` is `folder` itself or lives below it, matching whole path segments.
+export function isPathWithin(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(`${folder}/`);
+}
+
+// Collects every open script tab of a collection whose path is within `path`.
+export function findScriptTabsWithin(
+  node: PaneNode,
+  collection: string,
+  path: string,
+): ScriptTab[] {
+  if (node.type !== 'leaf') {
+    return [
+      ...findScriptTabsWithin(node.children[0], collection, path),
+      ...findScriptTabsWithin(node.children[1], collection, path),
+    ];
+  }
+  return node.tabs.filter(
+    (tab): tab is ScriptTab =>
+      isScriptTab(tab) && tab.collectionName === collection && isPathWithin(tab.scriptPath, path),
+  );
+}
+
 // Finds the open script tab for a collection-relative path, if any.
 export function findScriptTab(
   node: PaneNode,

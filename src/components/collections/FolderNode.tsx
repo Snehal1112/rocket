@@ -113,6 +113,7 @@ export function FolderNode({
     renameInFlight.current = true;
     try {
       await moveItem(collectionName, basePath, collectionName, newPath);
+      usePaneStore.getState().renameScriptTabs(collectionName, basePath, newPath);
       // Prevent the blur (fired when Input unmounts) from triggering a second rename.
       renameCancelled.current = true;
     } catch (err) {

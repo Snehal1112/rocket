@@ -80,9 +80,9 @@ export function CollectionsSidebar() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   // Warn when the delete would discard unsaved edits in an open script tab.
-  const deleteHasDirtyScripts = deleteTarget
-    ? hasDirtyScriptTabs(usePaneStore.getState().root, deleteTarget)
-    : false;
+  const deleteHasDirtyScripts = usePaneStore((s) =>
+    deleteTarget ? hasDirtyScriptTabs(s.root, deleteTarget) : false,
+  );
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
