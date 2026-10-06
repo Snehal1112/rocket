@@ -34,3 +34,10 @@ with working, checked software.
   they get no file scope in v1 and `require('./x')` there throws the "local file
   requires are not available" error. This matches the spec's "once they share
   the engine scope" wording.
+
+## Carry-over from the plan 01 review
+
+- Plan 03 must also fix `CollectionOverviewTab.tsx` `saveSettings`: add
+  `scriptContextRoots?: string[]` to the TS `CollectionSettings` type and pass
+  `current.scriptContextRoots` through, with a test like the sandboxMode one.
+  Otherwise a UI save wipes hand-edited `additionalContextRoots` from the yml.
