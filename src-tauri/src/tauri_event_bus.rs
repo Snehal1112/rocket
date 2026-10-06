@@ -38,6 +38,9 @@ impl EventPublisher for TauriEventBus {
             // WebSocket sessions: one channel for frames, one for lifecycle.
             DomainEvent::WebSocketMessage { .. } => "ws:message",
             DomainEvent::WebSocketStatus { .. } => "ws:status",
+            // GraphQL subscriptions: one channel for results, one for lifecycle.
+            DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
+            DomainEvent::GraphQlSubscriptionStatus { .. } => "graphql:subscription-status",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",

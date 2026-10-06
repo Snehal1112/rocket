@@ -10,6 +10,7 @@ pub mod environments;
 pub mod execution;
 pub mod flow;
 pub mod git;
+pub mod graphql_subscription;
 pub mod graphql_schema;
 pub mod history;
 pub mod import;

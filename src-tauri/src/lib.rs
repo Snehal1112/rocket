@@ -114,6 +114,9 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
             if let Some(websocket_svc) = app_handle.try_state::<rocket_app::WebSocketService>() {
                 websocket_svc.end_all_sessions().await;
             }
+            if let Some(svc) = app_handle.try_state::<rocket_app::GraphQlSubscriptionService>() {
+                svc.end_all().await;
+            }
             app_handle.exit(0);
         }
     });
@@ -403,6 +406,11 @@ pub fn run() {
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
+            let graphql_subscription_svc = rocket_app::GraphQlSubscriptionService::new(
+                Arc::new(rocket_infra::TungsteniteWebSocketClient::new()),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            );
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(FsEnvironmentRepo::with_secret_store(
                     environments_dir.clone(),
@@ -532,6 +540,7 @@ pub fn run() {
             app.manage(agent_config_svc);
             app.manage(acp_session_svc);
             app.manage(websocket_svc);
+            app.manage(graphql_subscription_svc);
             app.manage(runner_svc);
             app.manage(flow_exec_svc);
             app.manage(executor);
@@ -774,6 +783,8 @@ pub fn run() {
             commands::websocket::ws_connect,
             commands::websocket::ws_send,
             commands::websocket::ws_disconnect,
+            commands::graphql_subscription::graphql_subscribe,
+            commands::graphql_subscription::graphql_unsubscribe,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -789,6 +800,9 @@ pub fn run() {
                 }
                 if let Some(websocket_svc) = app_handle.try_state::<rocket_app::WebSocketService>() {
                     tauri::async_runtime::block_on(websocket_svc.end_all_sessions());
+                }
+                if let Some(svc) = app_handle.try_state::<rocket_app::GraphQlSubscriptionService>() {
+                    tauri::async_runtime::block_on(svc.end_all());
                 }
             }
         });

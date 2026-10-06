@@ -23,6 +23,7 @@ pub(crate) mod flow_routing;
 pub mod flow_service;
 pub(crate) mod flow_wait;
 pub mod git_service;
+pub mod graphql_subscription;
 pub mod graphql_document;
 pub mod graphql_request;
 pub mod graphql_schema;
@@ -80,3 +81,7 @@ pub use template_service::TemplateService;
 pub use websocket_service::WebSocketService;
 pub use vault_secret_resolution::resolve_vault_secret_value;
 pub use workspace_service::WorkspaceService;
+pub use graphql_subscription::{
+    resolve_graphql_subscription, to_websocket_url, GraphQlSubscribeInput,
+    GraphQlSubscriptionService, GraphQlSubscriptionStart,
+};

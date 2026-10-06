@@ -93,6 +93,15 @@ pub enum WebSocketPayloadKind {
     Binary,
 }
 
+/// What a GraphQL subscription result line is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphQlSubscriptionEventKind {
+    Next,
+    Error,
+    Complete,
+}
+
 /// Lifecycle of a streaming session. `Closed` is a clean close; `Failed` is a
 /// refused connect or an unclean end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,6 +382,22 @@ pub enum DomainEvent {
         state: WebSocketSessionState,
         subprotocol: Option<String>,
         code: Option<u16>,
+        reason: Option<String>,
+    },
+    // GraphQL subscription events
+    /// One result, error or completion of a GraphQL subscription.
+    GraphQlSubscriptionMessage {
+        session_id: String,
+        event: GraphQlSubscriptionEventKind,
+        /// Pretty-printed JSON. Empty for `complete`.
+        data: String,
+        timestamp_ms: i64,
+    },
+    /// A subscription changed state. `dialect` is the subprotocol the server selected.
+    GraphQlSubscriptionStatus {
+        session_id: String,
+        state: WebSocketSessionState,
+        dialect: Option<String>,
         reason: Option<String>,
     },
 
@@ -1209,6 +1234,33 @@ mod tests {
             json,
             r#"{"type":"acpSessionFailed","session_id":"sess-1","error":"agent process exited unexpectedly"}"#
         );
+    }
+
+    #[test]
+    fn graphql_subscription_events_serialize_like_the_websocket_ones() {
+        let message = DomainEvent::GraphQlSubscriptionMessage {
+            session_id: "s1".into(),
+            event: GraphQlSubscriptionEventKind::Next,
+            data: "{}".into(),
+            timestamp_ms: 7,
+        };
+        let json = serde_json::to_value(&message).expect("serialize");
+        assert_eq!(json["type"], "graphQlSubscriptionMessage");
+        assert_eq!(json["session_id"], "s1");
+        assert_eq!(json["event"], "next");
+        assert_eq!(json["timestamp_ms"], 7);
+
+        let status = DomainEvent::GraphQlSubscriptionStatus {
+            session_id: "s1".into(),
+            state: WebSocketSessionState::Open,
+            dialect: Some("graphql-transport-ws".into()),
+            reason: None,
+        };
+        let json = serde_json::to_value(&status).expect("serialize");
+        assert_eq!(json["type"], "graphQlSubscriptionStatus");
+        assert_eq!(json["state"], "open");
+        assert_eq!(json["dialect"], "graphql-transport-ws");
+        assert!(json["reason"].is_null());
     }
 
     #[test]
