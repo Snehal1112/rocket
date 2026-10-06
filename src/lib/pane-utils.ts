@@ -1,9 +1,15 @@
 import { fromPersistedAuth } from '@/lib/persisted-auth';
-import type { Request as ApiRequest, GraphQlRequest, RequestKind } from '@/lib/tauri-api';
+import type {
+  Request as ApiRequest,
+  GraphQlRequest,
+  GrpcRequest,
+  RequestKind,
+} from '@/lib/tauri-api';
 import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import { createDefaultWebSocketDraft } from '@/lib/websocket-messages';
 import type {
   BodyState,
+  GrpcState,
   LeafNode,
   PaneNode,
   RequestState,
@@ -122,7 +128,61 @@ export function mapGraphQlToState(g: GraphQlRequest): RequestState {
   };
 }
 
-// Builds a blank request of the given kind. Only GraphQL has its own editor state so far.
+// The editor state of a gRPC request that has nothing saved yet.
+export function createDefaultGrpcState(): GrpcState {
+  return {
+    method: '',
+    methodType: 'unary',
+    protoFilePath: '',
+    messages: [{ id: crypto.randomUUID(), title: '', content: DEFAULT_GRPC_MESSAGE }],
+    activeMessage: 0,
+    passthrough: {},
+  };
+}
+
+// An empty message is valid protobuf JSON for every message type.
+export const DEFAULT_GRPC_MESSAGE = '{}';
+
+// Maps a saved gRPC request to the tab state. The URL, metadata, auth, tags and docs reuse the
+// HTTP fields, so the metadata and auth editors work unchanged.
+export function mapGrpcToState(g: GrpcRequest): RequestState {
+  const saved = g.messages ?? [];
+  const messages = saved.map((m) => ({
+    id: crypto.randomUUID(),
+    title: m.title,
+    content: m.content,
+  }));
+  const selected = saved.findIndex((m) => m.selected);
+  return {
+    ...createDefaultRequest(),
+    requestType: 'grpc',
+    method: 'POST',
+    url: g.url,
+    headers: (g.metadata ?? []).map((h) => ({
+      id: crypto.randomUUID(),
+      key: h.key,
+      value: h.value,
+      enabled: h.enabled,
+    })),
+    auth: fromPersistedAuth(g.auth, 'inherit'),
+    tags: g.tags ?? [],
+    docs: g.docs ?? null,
+    assertions: g.assertions ?? [],
+    grpc: {
+      method: g.method ?? '',
+      methodType: g.methodType,
+      protoFilePath: g.protoFilePath ?? '',
+      messages:
+        messages.length > 0
+          ? messages
+          : [{ id: crypto.randomUUID(), title: '', content: DEFAULT_GRPC_MESSAGE }],
+      activeMessage: selected >= 0 ? selected : 0,
+      passthrough: { seq: g.seq, description: g.description, scripts: g.scripts },
+    },
+  };
+}
+
+// Builds a blank request of the given kind. GraphQL, gRPC and WebSocket have their own editor state.
 export function createDefaultRequestFor(kind: RequestKind): RequestState {
   const base = createDefaultRequest();
   if (kind === 'graphql') {
@@ -135,6 +195,9 @@ export function createDefaultRequestFor(kind: RequestKind): RequestState {
   }
   if (kind === 'websocket') {
     return { ...base, requestType: 'websocket', websocket: createDefaultWebSocketDraft() };
+  }
+  if (kind === 'grpc') {
+    return { ...base, requestType: 'grpc', method: 'POST', grpc: createDefaultGrpcState() };
   }
   return { ...base, requestType: kind };
 }

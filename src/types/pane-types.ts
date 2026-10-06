@@ -257,6 +257,35 @@ export interface RequestState {
   graphql?: GraphQlState;
   /** Present when `requestType` is 'websocket'. */
   websocket?: WebSocketDraft;
+  /** Present when `requestType` is 'grpc'. The URL, metadata (as `headers`) and auth live in the shared fields. */
+  grpc?: GrpcState;
+}
+
+/** One saved message of a gRPC request. */
+export interface GrpcMessageState {
+  id: string;
+  title: string;
+  /** Protobuf JSON text. */
+  content: string;
+}
+
+/** Saved fields the gRPC editor never changes. They are sent back unchanged, so a save loses nothing. */
+export interface GrpcPassthrough {
+  seq?: number;
+  description?: unknown;
+  scripts?: import('@/lib/tauri-api').GrpcScript[];
+}
+
+export interface GrpcState {
+  /** `package.Service/Method`. Empty until a method is picked. */
+  method: string;
+  methodType: import('@/lib/tauri-api').GrpcMethodType;
+  /** Path of the `.proto` file. Empty means use server reflection. */
+  protoFilePath: string;
+  messages: GrpcMessageState[];
+  /** Index of the message the editor shows. It is also the one a save marks as selected. */
+  activeMessage: number;
+  passthrough: GrpcPassthrough;
 }
 
 export interface WebSocketDraftMessage {

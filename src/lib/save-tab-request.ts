@@ -1,9 +1,15 @@
 import {
   buildGraphQlSavePayload,
+  buildGrpcSavePayload,
   buildRequestSavePayload,
   type RequestSavePayloadOverrides,
 } from '@/lib/request-save-mapper';
-import { saveGraphQlRequest, saveRequest, saveWebSocketRequest } from '@/lib/tauri-api';
+import {
+  saveGraphQlRequest,
+  saveGrpcRequest,
+  saveRequest,
+  saveWebSocketRequest,
+} from '@/lib/tauri-api';
 import { buildWebSocketSavePayload } from '@/lib/websocket-mapper';
 import type { RequestTab } from '@/types/pane-types';
 
@@ -17,6 +23,9 @@ export async function saveTabRequest(
 ): Promise<{ fileName?: string }> {
   if (tab.request.requestType === 'graphql') {
     return saveGraphQlRequest(collection, path, buildGraphQlSavePayload(tab, overrides));
+  }
+  if (tab.request.requestType === 'grpc') {
+    return saveGrpcRequest(collection, path, buildGrpcSavePayload(tab, overrides));
   }
   if (tab.request.requestType === 'websocket') {
     return saveWebSocketRequest(collection, path, buildWebSocketSavePayload(tab, overrides));

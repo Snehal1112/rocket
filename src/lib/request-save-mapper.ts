@@ -5,7 +5,7 @@
 import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
-import type { Request as ApiRequest, GraphQlRequest } from '@/lib/tauri-api';
+import type { Request as ApiRequest, GraphQlRequest, GrpcRequest } from '@/lib/tauri-api';
 import type { KeyValueEntry, RequestState, RequestTab } from '@/types/pane-types';
 
 // Only enabled, named path params are persisted.
@@ -99,6 +99,46 @@ export function buildGraphQlSavePayload(
   overrides?: RequestSavePayloadOverrides,
 ): GraphQlRequest {
   const payload = toApiGraphQlRequest(
+    tab.id || crypto.randomUUID(),
+    overrides?.name ?? tab.title,
+    tab.request,
+  );
+  return overrides?.fileName !== undefined ? { ...payload, fileName: overrides.fileName } : payload;
+}
+
+// Builds the persisted gRPC payload from tab state. Shared by the Save button,
+// save-to-collection and auto-save, so all three write the same fields. Request
+// variables are not sent: they are saved on their own path and an empty list keeps them.
+export function toApiGrpcRequest(uid: string, name: string, request: RequestState): GrpcRequest {
+  const g = request.grpc;
+  return {
+    uid,
+    name,
+    url: request.url,
+    method: g?.method ? g.method : undefined,
+    methodType: g?.methodType ?? 'unary',
+    protoFilePath: g?.protoFilePath.trim() ? g.protoFilePath.trim() : undefined,
+    metadata: toPersistedHeaders(request.headers),
+    messages: (g?.messages ?? []).map((m, i) => ({
+      title: m.title,
+      selected: i === g?.activeMessage,
+      content: m.content,
+    })),
+    auth: toPersistedAuth(request.auth),
+    tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
+    docs: request.docs ?? null,
+    assertions: request.assertions ?? [],
+    seq: g?.passthrough.seq,
+    description: g?.passthrough.description,
+    scripts: g?.passthrough.scripts,
+  };
+}
+
+export function buildGrpcSavePayload(
+  tab: RequestTab,
+  overrides?: RequestSavePayloadOverrides,
+): GrpcRequest {
+  const payload = toApiGrpcRequest(
     tab.id || crypto.randomUUID(),
     overrides?.name ?? tab.title,
     tab.request,

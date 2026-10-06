@@ -15,6 +15,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getRequest: vi.fn(),
     getGraphQlRequest: vi.fn(),
     getWebSocketRequest: vi.fn(),
+    getGrpcRequest: vi.fn(),
   };
 });
 
@@ -500,30 +501,57 @@ describe('RequestNode websocket rows', () => {
   });
 });
 
-describe('RequestNode grpc rows', () => {
+describe('RequestNode grpc items', () => {
   const grpcSummary: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }> = {
     type: 'summary',
     uid: 'g-1',
     name: 'Say Hello',
     method: 'GRPC',
     url: 'localhost:50051',
-    fileName: 'say-hello.yml',
     kind: 'grpc',
   };
 
   beforeEach(() => {
+    vi.setConfig({ testTimeout: 10000 });
     const leaf = createDefaultLeaf();
     usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
     vi.mocked(tauriApi.getRequest).mockReset();
-    vi.mocked(toast.error).mockReset();
+    vi.mocked(tauriApi.getGrpcRequest).mockReset();
   });
 
-  it('never parses a gRPC file as an HTTP request when it is clicked', async () => {
+  it('shows a gRPC badge instead of the method', () => {
     renderNode(grpcSummary, 'say-hello.yml');
+    expect(screen.getByText('gRPC')).toBeTruthy();
+    expect(screen.queryByText('GRPC')).toBeNull();
+  });
 
-    await userEvent.setup().click(screen.getByText('Say Hello'));
+  it('opens through getGrpcRequest and yields a grpc tab', async () => {
+    vi.mocked(tauriApi.getGrpcRequest).mockResolvedValue({
+      uid: 'g-1',
+      name: 'Say Hello',
+      url: 'localhost:50051',
+      method: 'demo.Greeter/SayHello',
+      methodType: 'unary',
+      auth: { authType: 'none' },
+      messages: [{ title: '', selected: true, content: '{"name":"ada"}' }],
+    });
+    renderNode(grpcSummary, 'say-hello.yml');
+    await userEvent.click(screen.getByLabelText('Open gRPC Say Hello'));
 
+    await waitFor(() => {
+      expect(findTabInTree(usePaneStore.getState().root, 'g-1')).not.toBeNull();
+    });
+    const tab = findTabInTree(usePaneStore.getState().root, 'g-1')?.tab;
+    expect(tab && 'request' in tab && tab.request.requestType).toBe('grpc');
+    expect(tab && 'request' in tab && tab.request.grpc?.method).toBe('demo.Greeter/SayHello');
+    expect(tauriApi.getGrpcRequest).toHaveBeenCalledWith('my-api', 'say-hello.yml');
     expect(tauriApi.getRequest).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('gRPC'));
+  });
+
+  it('is not draggable into a Flow, because Flow requests are HTTP only', () => {
+    renderNode(grpcSummary, 'say-hello.yml');
+    expect(screen.getByTestId('request-item-gRPC-Say Hello').getAttribute('draggable')).toBe(
+      'false',
+    );
   });
 });

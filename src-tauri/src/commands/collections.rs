@@ -1,7 +1,8 @@
 use rocket_app::{CollectionService, ContractService, WorkspaceService};
 use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::{
-    Collection, CollectionSummary, CollectionVariable, GraphQlRequest, Request, WebSocketRequest,
+    Collection, CollectionSummary, CollectionVariable, GraphQlRequest, GrpcRequest, Request,
+    WebSocketRequest,
 };
 use rocket_shared::error::DomainError;
 use rocket_workspace::RepositoryId;
@@ -142,6 +143,26 @@ pub fn rename_collection(
     svc: State<'_, CollectionService>,
 ) -> Result<(), DomainError> {
     svc.rename(&old_name, &new_name)
+}
+
+#[tauri::command]
+pub fn get_grpc_request(
+    collection: String,
+    path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<GrpcRequest, DomainError> {
+    svc.get_grpc_request(&collection, &path)
+}
+
+/// Saves a gRPC request. The contract audit hook is HTTP-only, so it does not run here.
+#[tauri::command]
+pub fn save_grpc_request(
+    collection: String,
+    path: String,
+    request: GrpcRequest,
+    svc: State<'_, CollectionService>,
+) -> Result<GrpcRequest, DomainError> {
+    svc.save_grpc_request(&collection, &path, &request)
 }
 
 #[tauri::command]

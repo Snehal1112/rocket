@@ -1,10 +1,15 @@
 import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
-import { toApiGraphQlRequest, toPersistedPathParams } from '@/lib/request-save-mapper';
+import {
+  toApiGraphQlRequest,
+  toApiGrpcRequest,
+  toPersistedPathParams,
+} from '@/lib/request-save-mapper';
 import {
   type Request,
   saveGraphQlRequest,
+  saveGrpcRequest,
   saveRequest,
   saveWebSocketRequest,
 } from '@/lib/tauri-api';
@@ -58,6 +63,12 @@ export function scheduleAutoSave(
           collection,
           path,
           toApiGraphQlRequest(tabId || crypto.randomUUID(), title, request),
+        );
+      } else if (request.requestType === 'grpc') {
+        await saveGrpcRequest(
+          collection,
+          path,
+          toApiGrpcRequest(tabId || crypto.randomUUID(), title, request),
         );
       } else if (request.requestType === 'websocket') {
         await saveWebSocketRequest(

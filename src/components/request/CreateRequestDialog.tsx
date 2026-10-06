@@ -18,20 +18,24 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { sanitizeFilename } from '@/lib/filename-utils';
-import { createDefaultRequest, DEFAULT_GRAPHQL_QUERY, mapGraphQlToState } from '@/lib/pane-utils';
-import { saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
+import {
+  createDefaultRequest,
+  DEFAULT_GRAPHQL_QUERY,
+  DEFAULT_GRPC_MESSAGE,
+  mapGraphQlToState,
+  mapGrpcToState,
+} from '@/lib/pane-utils';
+import { saveGraphQlRequest, saveGrpcRequest, saveRequest } from '@/lib/tauri-api';
 import { createWebSocketItem } from '@/lib/websocket-create';
 import { usePaneStore } from '@/stores/pane-store';
 import type { HttpMethod, RequestTab } from '@/types/pane-types';
 
 type RequestType = 'http' | 'graphql' | 'grpc' | 'websocket' | 'curl';
 
-// gRPC used to save an HTTP request under a protocol label. It stays unselectable until
-// its own plan lands.
 const REQUEST_TYPES: { label: string; value: RequestType; disabled?: boolean }[] = [
   { label: 'HTTP', value: 'http' },
   { label: 'GraphQL', value: 'graphql' },
-  { label: 'gRPC (coming soon)', value: 'grpc', disabled: true },
+  { label: 'gRPC', value: 'grpc' },
   { label: 'WebSocket', value: 'websocket' },
   { label: 'From cURL', value: 'curl' },
 ];
@@ -103,6 +107,30 @@ export function CreateRequestDialog({
           source: { collection: collectionName, path: saved.fileName ?? filePath },
         };
         usePaneStore.getState().openTab(gqlTab);
+        reset();
+        onClose();
+        return;
+      }
+      if (requestType === 'grpc') {
+        const saved = await saveGrpcRequest(collectionName, filePath, {
+          uid,
+          name: trimmedName,
+          url,
+          methodType: 'unary',
+          messages: [{ title: '', selected: true, content: DEFAULT_GRPC_MESSAGE }],
+          auth: { authType: 'none' as const },
+          fileName: filePath,
+        });
+        const grpcTab: RequestTab = {
+          id: uid,
+          title: trimmedName,
+          tabType: 'request',
+          request: mapGrpcToState(saved),
+          response: null,
+          isDirty: false,
+          source: { collection: collectionName, path: saved.fileName ?? filePath },
+        };
+        usePaneStore.getState().openTab(grpcTab);
         reset();
         onClose();
         return;
@@ -234,7 +262,9 @@ export function CreateRequestDialog({
             </Label>
             <Input
               id='crd-url'
-              placeholder='https://api.example.com/users'
+              placeholder={
+                requestType === 'grpc' ? 'localhost:50051' : 'https://api.example.com/users'
+              }
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className='h-9 font-mono text-sm'

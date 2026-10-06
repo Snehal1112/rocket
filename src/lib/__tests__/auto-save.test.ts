@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/tauri-api', () => ({
   saveRequest: vi.fn().mockResolvedValue(undefined),
   saveGraphQlRequest: vi.fn().mockResolvedValue(undefined),
+  saveGrpcRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
 const markClean = vi.fn();
@@ -12,10 +13,10 @@ vi.mock('@/stores/pane-store', () => ({
   },
 }));
 
-import { saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
+import { saveGraphQlRequest, saveGrpcRequest, saveRequest } from '@/lib/tauri-api';
 import type { RequestState } from '@/types/pane-types';
 import { cancelAutoSave, scheduleAutoSave } from '../auto-save';
-import { createDefaultRequest } from '../pane-utils';
+import { createDefaultRequest, createDefaultRequestFor } from '../pane-utils';
 
 function baseRequest(overrides: Partial<RequestState> = {}): RequestState {
   return { ...createDefaultRequest(), ...overrides };
@@ -29,6 +30,21 @@ describe('scheduleAutoSave', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('saves a grpc tab through saveGrpcRequest, never saveRequest', () => {
+    const request = createDefaultRequestFor('grpc');
+    request.url = 'localhost:50051';
+
+    scheduleAutoSave('tab1', 'my-collection', 'call.yml', 'Call', request);
+    vi.advanceTimersByTime(500);
+
+    expect(saveGrpcRequest).toHaveBeenCalledWith(
+      'my-collection',
+      'call.yml',
+      expect.objectContaining({ uid: 'tab1', url: 'localhost:50051', methodType: 'unary' }),
+    );
+    expect(saveRequest).not.toHaveBeenCalled();
   });
 
   // Regression test: auto-save used to filter headers by `enabled` (dropping

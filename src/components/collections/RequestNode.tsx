@@ -44,9 +44,16 @@ import {
   findTabInTree,
   mapApiRequestToState,
   mapGraphQlToState,
+  mapGrpcToState,
 } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import { getGraphQlRequest, getRequest, getWebSocketRequest, renameRequest } from '@/lib/tauri-api';
+import {
+  getGraphQlRequest,
+  getGrpcRequest,
+  getRequest,
+  getWebSocketRequest,
+  renameRequest,
+} from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { mapWebSocketToState } from '@/lib/websocket-mapper';
 import { useContractStore } from '@/stores/contract-store';
@@ -97,8 +104,9 @@ export function RequestNode({
   onDuplicate,
 }: RequestNodeProps) {
   const kind = itemData.type === 'summary' ? (itemData.kind ?? 'http') : 'http';
-  // The badge shows the protocol for GraphQL, the HTTP verb otherwise.
-  const badge = kind === 'graphql' ? 'GQL' : kind === 'websocket' ? 'WS' : method;
+  // The badge shows the protocol for GraphQL, gRPC and WebSocket, the HTTP verb otherwise.
+  const badge =
+    kind === 'graphql' ? 'GQL' : kind === 'grpc' ? 'gRPC' : kind === 'websocket' ? 'WS' : method;
   const root = usePaneStore((s) => s.root);
   const activeGroupId = usePaneStore((s) => s.activeGroupId);
   const openTab = usePaneStore((s) => s.openTab);
@@ -165,10 +173,11 @@ export function RequestNode({
     let request: RequestState;
     let tabId = uid;
     if (kind === 'grpc') {
-      // The gRPC editor ships later. Reading the file as HTTP would only fail.
-      throw new Error('gRPC requests cannot be opened in this version yet');
-    }
-    if (kind === 'graphql') {
+      const loaded = await getGrpcRequest(collectionName, path);
+      // A file without a uid key has an empty summary uid; the loaded item carries a derived one.
+      tabId = uid || loaded.uid;
+      request = mapGrpcToState(loaded);
+    } else if (kind === 'graphql') {
       const loaded = await getGraphQlRequest(collectionName, path);
       // A file without a uid key has an empty summary uid; the loaded request carries a generated one.
       tabId = uid || loaded.uid;
