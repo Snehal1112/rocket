@@ -357,7 +357,8 @@ export function FolderNode({
               item.type === 'opaque' ||
               item.type === 'graphql' ||
               item.type === 'websocket' ||
-              item.type === 'grpc'
+              item.type === 'grpc' ||
+              item.type === 'scriptFile'
             )
               return null;
             const fileName = item.fileName ?? item.name;

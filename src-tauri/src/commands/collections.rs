@@ -270,6 +270,54 @@ pub fn delete_folder(
 }
 
 #[tauri::command]
+pub fn create_script_file(
+    collection: String,
+    folder_path: String,
+    name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<String, DomainError> {
+    svc.create_script_file(&collection, &folder_path, &name)
+}
+
+#[tauri::command]
+pub fn read_script_file(
+    collection: String,
+    path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<String, DomainError> {
+    svc.read_script_file(&collection, &path)
+}
+
+#[tauri::command]
+pub fn save_script_file(
+    collection: String,
+    path: String,
+    content: String,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.save_script_file(&collection, &path, &content)
+}
+
+#[tauri::command]
+pub fn rename_script_file(
+    collection: String,
+    path: String,
+    new_name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<String, DomainError> {
+    svc.rename_script_file(&collection, &path, &new_name)
+}
+
+#[tauri::command]
+pub fn delete_script_file(
+    collection: String,
+    path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.delete_script_file(&collection, &path)
+}
+
+#[tauri::command]
 pub fn move_item(
     src_collection: String,
     src_path: String,

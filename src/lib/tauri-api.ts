@@ -294,6 +294,11 @@ export interface OpaqueProtocolItem {
   raw: unknown;
 }
 
+export interface ScriptFileItem {
+  fileName: string;
+  name: string;
+}
+
 export type CollectionItem =
   | ({ type: 'request' } & Request)
   | ({ type: 'folder' } & Folder)
@@ -301,7 +306,8 @@ export type CollectionItem =
   | ({ type: 'graphql' } & GraphQlRequest)
   | ({ type: 'websocket' } & WebSocketRequest)
   | ({ type: 'grpc' } & GrpcRequest)
-  | ({ type: 'opaque' } & OpaqueProtocolItem);
+  | ({ type: 'opaque' } & OpaqueProtocolItem)
+  | ({ type: 'scriptFile' } & ScriptFileItem);
 
 export interface Collection {
   name: string;
@@ -878,6 +884,21 @@ export const createFolder = (collection: string, path: string) =>
 
 export const deleteFolder = (collection: string, path: string) =>
   invoke<void>('delete_folder', { collection, path });
+
+export const createScriptFile = (collection: string, folderPath: string, name: string) =>
+  invoke<string>('create_script_file', { collection, folderPath, name });
+
+export const readScriptFile = (collection: string, path: string) =>
+  invoke<string>('read_script_file', { collection, path });
+
+export const saveScriptFile = (collection: string, path: string, content: string) =>
+  invoke<void>('save_script_file', { collection, path, content });
+
+export const renameScriptFile = (collection: string, path: string, newName: string) =>
+  invoke<string>('rename_script_file', { collection, path, newName });
+
+export const deleteScriptFile = (collection: string, path: string) =>
+  invoke<void>('delete_script_file', { collection, path });
 
 export const moveItem = (
   srcCollection: string,
