@@ -1,4 +1,5 @@
 use crate::ScriptPhase;
+use std::path::PathBuf;
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
@@ -38,6 +39,19 @@ pub enum SandboxMode {
     #[default]
     Safe,
     Developer,
+}
+
+/// Where a script may load local `.js` files from.
+///
+/// Plain data only. `rocket-infra` does the file reading and the root checks.
+/// Whether `additional_roots` is honoured depends on `ScriptContext.sandbox_mode`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptFileScope {
+    /// Absolute path of the collection directory.
+    pub collection_root: PathBuf,
+    /// Extra roots from `additionalContextRoots`. Relative entries are resolved
+    /// against `collection_root` by the engine.
+    pub additional_roots: Vec<PathBuf>,
 }
 
 /// Everything the JS sandbox needs to read at execution time.
@@ -84,6 +98,9 @@ pub struct ScriptContext {
 
     /// Path parameters on the request being executed, for `req.getPathParams()`.
     pub path_params: Vec<PathParam>,
+
+    /// Local-file `require()` scope. `None` disables local requires.
+    pub file_scope: Option<ScriptFileScope>,
 }
 
 impl ScriptContext {
@@ -111,6 +128,7 @@ impl ScriptContext {
             request_name,
             request_tags,
             path_params,
+            file_scope: None,
         }
     }
 
@@ -139,6 +157,7 @@ impl ScriptContext {
             request_name,
             request_tags,
             path_params,
+            file_scope: None,
         }
     }
 
@@ -167,6 +186,7 @@ impl ScriptContext {
             request_name,
             request_tags,
             path_params,
+            file_scope: None,
         }
     }
 
@@ -182,6 +202,13 @@ impl ScriptContext {
     /// from the collection's `sandbox_mode` setting for every phase.
     pub fn with_sandbox_mode(mut self, mode: SandboxMode) -> Self {
         self.sandbox_mode = mode;
+        self
+    }
+
+    /// Sets the local-file `require()` scope. `rocket-app` builds it from the
+    /// collection's location and `additionalContextRoots` setting.
+    pub fn with_file_scope(mut self, scope: Option<ScriptFileScope>) -> Self {
+        self.file_scope = scope;
         self
     }
 }
@@ -208,6 +235,26 @@ mod tests {
             size_bytes: 0,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn file_scope_defaults_to_none_and_can_be_set() {
+        let ctx = ScriptContext::before_request(
+            String::new(),
+            VariableContext::default(),
+            stub_request(),
+            None,
+            String::new(),
+            vec![],
+            vec![],
+        );
+        assert!(ctx.file_scope.is_none());
+        let scope = ScriptFileScope {
+            collection_root: "/tmp/col".into(),
+            additional_roots: vec!["../shared".into()],
+        };
+        let ctx = ctx.with_file_scope(Some(scope.clone()));
+        assert_eq!(ctx.file_scope, Some(scope));
     }
 
     #[test]

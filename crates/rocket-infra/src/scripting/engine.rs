@@ -345,6 +345,7 @@ mod tests {
             request_tags: vec![],
             path_params: vec![],
             sandbox_mode: SandboxMode::Safe,
+            file_scope: None,
         }
     }
 
@@ -1573,6 +1574,7 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = ScriptContext {
             sandbox_mode: SandboxMode::Developer,
+            file_scope: None,
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
@@ -1597,6 +1599,7 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = ScriptContext {
             sandbox_mode: SandboxMode::Developer,
+            file_scope: None,
             ..minimal_ctx(
                 "const result = process.exec('echo', ['hello-from-script']); \
                  rok.setVar('stdout', result.stdout); \
@@ -1634,6 +1637,7 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = ScriptContext {
             sandbox_mode: SandboxMode::Developer,
+            file_scope: None,
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
