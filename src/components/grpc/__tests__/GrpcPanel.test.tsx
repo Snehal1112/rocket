@@ -315,4 +315,16 @@ describe('GrpcPanel streaming', () => {
 
     expect(await screen.findByRole('list', { name: 'Message log' })).toHaveTextContent('early');
   });
+
+  it('follows the call shape the server reports over a wrong stored one', async () => {
+    vi.mocked(tauriApi.grpcStartSession).mockImplementation(async (_input, id) => id);
+    // Stored as server-streaming, but the method is really bidirectional.
+    mount(grpcTab('server-streaming'));
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(tauriApi.grpcStartSession).toHaveBeenCalled());
+    emit('grpc-session-started', { session_id: startedId(), method_type: 'bidi-streaming' });
+
+    expect(await screen.findByRole('button', { name: 'Send message' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'End requests' })).toBeInTheDocument();
+  });
 });

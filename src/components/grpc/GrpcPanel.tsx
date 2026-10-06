@@ -85,8 +85,9 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
 
   const running = session?.status === 'running';
   const sending = unary?.status === 'sending';
-  const streamsRequests =
-    grpc.methodType === 'client-streaming' || grpc.methodType === 'bidi-streaming';
+  // Once a call is open, the server's call shape wins over the stored one.
+  const liveType = session?.methodType ? session.methodType : grpc.methodType;
+  const streamsRequests = liveType === 'client-streaming' || liveType === 'bidi-streaming';
   const requestsEnded = session !== undefined && endedFor === session.id;
 
   const handlePick = (method: GrpcMethodInfo) =>
@@ -218,6 +219,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
       <div className='border-b border-border/60 px-3 py-2'>
         <GrpcMethodPicker
           method={grpc.method}
+          methodType={grpc.methodType}
           protoFilePath={grpc.protoFilePath}
           onProtoFilePathChange={(protoFilePath) => patchGrpc({ protoFilePath })}
           onPick={handlePick}

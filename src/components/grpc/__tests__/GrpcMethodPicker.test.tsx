@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GrpcExecuteInput, GrpcServiceInfo } from '@/lib/tauri-api';
@@ -69,6 +69,7 @@ const input: GrpcExecuteInput = {
 function renderPicker(overrides: Partial<React.ComponentProps<typeof GrpcMethodPicker>> = {}) {
   const props = {
     method: '',
+    methodType: 'unary' as const,
     protoFilePath: 'protos/greeter.proto',
     onProtoFilePathChange: vi.fn(),
     onPick: vi.fn(),
@@ -158,5 +159,54 @@ describe('GrpcMethodPicker', () => {
     expect(dialog.open).toHaveBeenCalledWith(
       expect.objectContaining({ filters: [{ name: 'Protocol Buffers', extensions: ['proto'] }] }),
     );
+  });
+
+  it('drops a list that arrives after the source changed', async () => {
+    let resolveOld: (list: GrpcServiceInfo[]) => void = () => undefined;
+    vi.mocked(tauriApi.grpcListServices).mockReturnValueOnce(
+      new Promise<GrpcServiceInfo[]>((resolve) => {
+        resolveOld = resolve;
+      }),
+    );
+    vi.mocked(tauriApi.grpcListServices).mockResolvedValue([]);
+    const { rerender, props } = renderPicker();
+    await userEvent.click(screen.getByLabelText('Reload methods'));
+    await waitFor(() => expect(tauriApi.grpcListServices).toHaveBeenCalledTimes(1));
+
+    // The URL changes while the first list is still on its way.
+    rerender(<GrpcMethodPicker {...props} sourceKey='b' />);
+    await act(async () => resolveOld(services));
+
+    await userEvent.click(screen.getByLabelText('Method'));
+    await waitFor(() => expect(tauriApi.grpcListServices).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('SayHello')).toBeNull();
+  });
+
+  it('corrects the stored call shape when the loaded list disagrees with it', async () => {
+    vi.mocked(tauriApi.grpcListServices).mockResolvedValue(services);
+    const { props } = renderPicker({
+      method: 'demo.greeter.v1.Greeter/Chat',
+      methodType: 'unary',
+    });
+    await userEvent.click(screen.getByLabelText('Reload methods'));
+    await waitFor(() =>
+      expect(props.onPick).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fullName: 'demo.greeter.v1.Greeter/Chat',
+          methodType: 'bidi-streaming',
+        }),
+      ),
+    );
+  });
+
+  it('leaves the stored call shape alone when the loaded list agrees with it', async () => {
+    vi.mocked(tauriApi.grpcListServices).mockResolvedValue(services);
+    const { props } = renderPicker({
+      method: 'demo.greeter.v1.Greeter/Chat',
+      methodType: 'bidi-streaming',
+    });
+    await userEvent.click(screen.getByLabelText('Reload methods'));
+    await waitFor(() => expect(tauriApi.grpcListServices).toHaveBeenCalledTimes(1));
+    expect(props.onPick).not.toHaveBeenCalled();
   });
 });

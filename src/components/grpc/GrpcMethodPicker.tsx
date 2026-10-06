@@ -1,6 +1,6 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { FolderOpen, Loader2, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SingleLineEditor } from '@/components/editor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,8 @@ export const METHOD_TYPE_LABEL: Record<GrpcMethodType, string> = {
 interface GrpcMethodPickerProps {
   /** `package.Service/Method`, empty until one is picked. */
   method: string;
+  /** The call shape stored with the request. A loaded list corrects it when it disagrees. */
+  methodType: GrpcMethodType;
   protoFilePath: string;
   onProtoFilePathChange: (path: string) => void;
   onPick: (method: GrpcMethodInfo) => void;
@@ -48,6 +50,7 @@ interface GrpcMethodPickerProps {
  */
 export function GrpcMethodPicker({
   method,
+  methodType,
   protoFilePath,
   onProtoFilePathChange,
   onPick,
@@ -59,26 +62,40 @@ export function GrpcMethodPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Each source gets its own generation. A list that was asked for before the file or URL
+  // changed must not land on the new source, whenever it arrives.
+  const generation = useRef(0);
+
   // A different file or URL means the loaded list may no longer apply.
   // biome-ignore lint/correctness/useExhaustiveDependencies: sourceKey is the trigger on purpose.
   useEffect(() => {
+    generation.current += 1;
     setServices(null);
     setError('');
+    setLoading(false);
   }, [sourceKey]);
 
   const load = useCallback(
     async (refresh: boolean) => {
+      const mine = generation.current;
       setLoading(true);
       setError('');
       try {
-        setServices(await grpcListServices(buildInput(), refresh));
+        const list = await grpcListServices(buildInput(), refresh);
+        if (generation.current !== mine) return;
+        setServices(list);
+        // The server knows the real call shape. Selecting the method that is already
+        // chosen does not fire the select's change event, so fix a wrong stored shape here.
+        const listed = list.flatMap((s) => s.methods).find((x) => x.fullName === method);
+        if (listed && listed.methodType !== methodType) onPick(listed);
       } catch (err) {
+        if (generation.current !== mine) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setLoading(false);
+        if (generation.current === mine) setLoading(false);
       }
     },
-    [buildInput],
+    [buildInput, method, methodType, onPick],
   );
 
   const handleBrowse = useCallback(async () => {
