@@ -192,6 +192,19 @@ export function isFlowTab(tab: Tab): tab is FlowTab {
   return tab.tabType === 'flow';
 }
 
+export interface ScriptTab extends BaseTab {
+  tabType: 'script';
+  collectionName: string;
+  /** Collection-relative path, for example `lib/utils.js`. */
+  scriptPath: string;
+  content: string;
+  savedContent: string;
+}
+
+export function isScriptTab(tab: Tab): tab is ScriptTab {
+  return tab.tabType === 'script';
+}
+
 export function isCollectionTab(tab: Tab): tab is CollectionTab {
   return tab.tabType === 'collection';
 }
@@ -206,7 +219,8 @@ export type Tab =
   | ContractTab
   | ContractDiffTab
   | RunnerTab
-  | FlowTab;
+  | FlowTab
+  | ScriptTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';

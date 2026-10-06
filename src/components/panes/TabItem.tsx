@@ -1,9 +1,24 @@
-import { BoxIcon, FileLock, GitBranch, Globe, LayoutDashboard, ShieldCheck, X } from 'lucide-react';
+import {
+  BoxIcon,
+  FileCode,
+  FileLock,
+  GitBranch,
+  Globe,
+  LayoutDashboard,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { Tab } from '@/types/pane-types';
-import { isContractTab, isGitTab, isRequestTab, isWorkspaceTab } from '@/types/pane-types';
+import {
+  isContractTab,
+  isGitTab,
+  isRequestTab,
+  isScriptTab,
+  isWorkspaceTab,
+} from '@/types/pane-types';
 
 function getTabTitle(tab: Tab): string {
   if (tab.title && tab.title !== 'New request') return tab.title;
@@ -93,6 +108,8 @@ export function TabItem({
         </>
       ) : isContractTab(tab) ? (
         <FileLock aria-hidden='true' className='h-4 w-4 shrink-0' />
+      ) : isScriptTab(tab) ? (
+        <FileCode aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : (
         <BoxIcon aria-hidden='true' className='h-4 w-4 shrink-0' />
       )}

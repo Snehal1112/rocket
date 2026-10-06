@@ -5,6 +5,7 @@ import {
   createDefaultLeaf,
   createDefaultRequestFor,
   findActiveLeaf,
+  findScriptTab,
   findTabInTree,
   removeLeaf,
   splitLeaf,
@@ -21,6 +22,7 @@ import {
   type FlowNodeStatus,
   getCollection,
   getFlow,
+  readScriptFile,
   renameRequest,
 } from '@/lib/tauri-api';
 import { useEnvStore } from '@/stores/env-store';
@@ -39,12 +41,13 @@ import type {
   ResponseState,
   RunnerRequestEntry,
   RunnerTab,
+  ScriptTab,
   SplitNode,
   Tab,
   WorkspaceTab,
   WorkspaceTabSection,
 } from '@/types/pane-types';
-import { isFlowTab, isRequestTab, isRunnerTab } from '@/types/pane-types';
+import { isFlowTab, isRequestTab, isRunnerTab, isScriptTab } from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
@@ -235,6 +238,10 @@ export interface PaneState {
 
   // Contract tab.
   openContractTab: (collectionName: string, collectionRoot: string) => void;
+  openScriptTab: (collectionName: string, path: string) => Promise<void>;
+  updateScriptContent: (tabId: string, content: string) => void;
+  markScriptSaved: (tabId: string, content: string) => void;
+  renameScriptTabs: (collection: string, oldPath: string, newPath: string) => void;
 
   // Focus tracking.
   setActiveGroup: (groupId: string) => void;
@@ -638,6 +645,69 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       isDirty: false,
     };
     get().openTab(tab);
+  },
+
+  async openScriptTab(collectionName, path) {
+    // An open tab only needs focusing, so skip reading the file again.
+    const existing = findScriptTab(get().root, collectionName, path);
+    if (existing) {
+      get().openTab(existing.tab);
+      return;
+    }
+    const content = await readScriptFile(collectionName, path);
+    // A concurrent call may have opened the same file while the read was in flight.
+    const raced = findScriptTab(get().root, collectionName, path);
+    if (raced) {
+      get().openTab(raced.tab);
+      return;
+    }
+    const tab: ScriptTab = {
+      id: `script:${crypto.randomUUID()}`,
+      title: path.split('/').pop() ?? path,
+      tabType: 'script',
+      collectionName,
+      scriptPath: path,
+      content,
+      savedContent: content,
+      isDirty: false,
+      source: { collection: collectionName, path },
+    };
+    get().openTab(tab);
+  },
+
+  updateScriptContent(tabId, content) {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
+        if (!isScriptTab(tab)) return tab;
+        return { ...tab, content, isDirty: content !== tab.savedContent };
+      }),
+    );
+  },
+
+  markScriptSaved(tabId, content) {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
+        if (!isScriptTab(tab)) return tab;
+        return { ...tab, savedContent: content, isDirty: tab.content !== content };
+      }),
+    );
+  },
+
+  renameScriptTabs(collection, oldPath, newPath) {
+    // Matching by path (not id) keeps the id stable, so panes keep their active tab.
+    const found = findScriptTab(get().root, collection, oldPath);
+    if (!found) return;
+    set(
+      updateTabEverywhere(get(), found.tab.id, (tab) => {
+        if (!isScriptTab(tab)) return tab;
+        return {
+          ...tab,
+          scriptPath: newPath,
+          title: newPath.split('/').pop() ?? newPath,
+          source: { collection, path: newPath },
+        };
+      }),
+    );
   },
 
   async openRunnerTab(collectionName, folderPath) {

@@ -13,9 +13,11 @@ import type {
   LeafNode,
   PaneNode,
   RequestState,
+  ScriptTab,
   SplitNode,
   Tab,
 } from '@/types/pane-types';
+import { isScriptTab } from '@/types/pane-types';
 
 // Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
 export function mapApiRequestToState(req: ApiRequest, fromCollection = false): RequestState {
@@ -228,6 +230,26 @@ export function findTabInTree(node: PaneNode, tabId: string): { leaf: LeafNode; 
     return tab ? { leaf: node, tab } : null;
   }
   return findTabInTree(node.children[0], tabId) ?? findTabInTree(node.children[1], tabId);
+}
+
+// Finds the open script tab for a collection-relative path, if any.
+export function findScriptTab(
+  node: PaneNode,
+  collection: string,
+  path: string,
+): { leaf: LeafNode; tab: ScriptTab } | null {
+  if (node.type === 'leaf') {
+    for (const tab of node.tabs) {
+      if (isScriptTab(tab) && tab.collectionName === collection && tab.scriptPath === path) {
+        return { leaf: node, tab };
+      }
+    }
+    return null;
+  }
+  return (
+    findScriptTab(node.children[0], collection, path) ??
+    findScriptTab(node.children[1], collection, path)
+  );
 }
 
 // Returns the leftmost/topmost leaf in the tree.

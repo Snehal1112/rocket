@@ -18,6 +18,10 @@ const GitPanel = lazy(() =>
 const ContractsTab = lazy(() =>
   import('@/components/contracts/ContractsTab').then((m) => ({ default: m.ContractsTab })),
 );
+const ScriptFilePane = lazy(() =>
+  import('@/components/scripts/ScriptFilePane').then((m) => ({ default: m.ScriptFilePane })),
+);
+
 const ContractDiffPane = lazy(() =>
   import('@/components/contracts/ContractDiffPane').then((m) => ({ default: m.ContractDiffPane })),
 );
@@ -65,6 +69,7 @@ import {
   isGitTab,
   isRequestTab,
   isRunnerTab,
+  isScriptTab,
   isWorkspaceTab,
 } from '@/types/pane-types';
 import { BreadcrumbBar } from './BreadcrumbBar';
@@ -242,6 +247,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
                 collectionId={activeTab.collectionId}
                 contractId={activeTab.contractId}
               />
+            </Suspense>
+          ) : isScriptTab(activeTab) ? (
+            <Suspense fallback={<EditorSkeleton />}>
+              <ScriptFilePane key={activeTab.id} tab={activeTab} />
             </Suspense>
           ) : isWorkspaceTab(activeTab) ? (
             activeTab.activeSection === 'overview' ? (

@@ -1,6 +1,7 @@
 import {
   BookOpen,
   ChevronRight,
+  FileCode,
   FileLock,
   FolderOpen,
   GitBranch,
@@ -32,6 +33,7 @@ import {
   isGitTab,
   isRequestTab,
   isRunnerTab,
+  isScriptTab,
   isWorkspaceTab,
 } from '@/types/pane-types';
 
@@ -436,6 +438,26 @@ function deriveSegments(
 
   if (isFlowTab(tab)) {
     return [{ label: tab.collectionName || 'Flow' }];
+  }
+
+  if (isScriptTab(tab)) {
+    return [
+      {
+        label: tab.collectionName,
+        picker: {
+          loadItems: async () => {
+            const summaries = await listCollections();
+            return summaries.map((s) => ({
+              id: s.name,
+              label: s.name,
+              isActive: s.name === tab.collectionName,
+            }));
+          },
+          onSelect: (item) => nav.switchCollection(item.id),
+        },
+      },
+      { label: tab.scriptPath, icon: <FileCode className='h-3 w-3' /> },
+    ];
   }
 
   const _exhaustive: never = tab;
