@@ -20,7 +20,10 @@ This is the authoritative spec reference for RocketAPI infrastructure decisions.
 
 The codebase has these Rust crates:
 `rocket-shared`, `rocket-collection`, `rocket-environment`, `rocket-http`,
-`rocket-history`, `rocket-app`, `rocket-infra`, `rocket-git`, `rocket-import`, `rocket-workspace`
+`rocket-history`, `rocket-app`, `rocket-infra`, `rocket-git`, `rocket-import`, `rocket-workspace`,
+`rocket-audit` (audit trail), `rocket-scripting` (script sandbox), `rocket-acp` (AI agent sessions),
+`rocket-flow` (visual workflow builder) and `rocket-grpc` (gRPC protocol engine: `.proto` parsing,
+JSON to protobuf, call types; no I/O).
 
 ---
 
@@ -137,6 +140,13 @@ settings:
 docs: string
 ```
 
+Rocket also writes, and the schema guard knows about (`KNOWN_DEFERRED` in `schema_shape_tests.rs`):
+- a top-level `uid`, the same deviation as HTTP requests. A file without one gets an in-memory uid on load, and `uid` is written on the next save;
+- `settings.verifySsl` (`GraphQLRequestSettings.verifySsl`);
+- `graphql.auth`, the request-level auth, same shape as `http.auth`.
+
+`runtime.auth` is written for GraphQL but is not verified against the upstream schema (the guard does not inspect GraphQL `runtime`; the HTTP equivalent, `HttpRequestRuntime.auth`, is in `KNOWN_DEFERRED`).
+
 ### 2.5 GrpcRequest
 
 ```yaml
@@ -156,7 +166,12 @@ runtime:
 docs: string
 ```
 
-Rocket also writes a top-level `uid` for gRPC requests, the same deviation as HTTP requests (`KNOWN_DEFERRED` in `schema_shape_tests.rs`). gRPC auth lives in the `grpc` block; the schema allows only `variables`, `scripts` and `assertions` in `runtime`.
+Rocket also writes a top-level `uid` for gRPC requests, the same deviation as HTTP requests (`KNOWN_DEFERRED` in `schema_shape_tests.rs`). gRPC auth lives in the `grpc` block; the schema allows only `variables`, `scripts` and `assertions` in `runtime`. A legacy `runtime.auth` is still read, and never written.
+
+- Rocket always writes `info.type` and `grpc.methodType`, and omits `grpc.auth` when there is no auth.
+- A single untitled message is written as a plain string, and every other shape as `GrpcMessageVariant`s. A plain string reads back as the selected message.
+- `runtime.variables` may carry Rocket's `initial` key, the same as HTTP (`Variable.initial` in `KNOWN_DEFERRED`).
+- The schema guard does not check gRPC `runtime.assertions` keys.
 
 ### 2.6 WebSocketRequest
 
@@ -177,6 +192,8 @@ settings:
   keepAliveInterval: number | "inherit"
 docs: string
 ```
+
+Rocket also writes a top-level `uid` (the same deviation as HTTP requests; a file without one gets the derived uid `ws-<file name>` on load) and `websocket.auth`, the request-level auth, same shape as `http.auth`. The schema guard does not inspect WebSocket `runtime`.
 
 ### 2.7 Folder
 
@@ -203,6 +220,24 @@ script: string          # the JS code
 ---
 
 ### 2.9 Shared Sub-Types
+
+#### Message and body variants (GraphQL, WebSocket, gRPC)
+```yaml
+# GraphQLBodyVariant
+title: string
+selected: bool        # optional, default false
+body: { query: string, variables: string }
+
+# WebSocketMessageVariant
+title: string
+selected: bool        # optional, default false
+message: { type: "text" | "json" | "xml" | "binary", data: string }
+
+# GrpcMessageVariant
+title: string
+selected: bool        # optional, default false
+message: string       # protobuf JSON text
+```
 
 #### HttpRequestHeader
 ```yaml
@@ -312,6 +347,8 @@ disabled: bool
 ```yaml
 auth: inherit    # string literal — inherits from parent folder/collection
 ```
+
+**Known difference from Bruno.** Rocket writes `Auth::None` by leaving `auth` out, and an absent `auth` loads as `None`. At send time `None` and `Inherit` behave the same: both take the collection's auth (`merge_auth`; the WebSocket and gRPC paths do the same). Bruno keeps `none` and `inherit` as separate modes, so a Bruno request set to `none` sends no auth. Do not change `None` to mean "send no auth" on its own. New requests default to `None`, and Postman and Bruno requests with no auth field import as `None`, so they would all stop inheriting the collection's auth. A safe change needs `none` stored explicitly, an absent `auth` read as inherit, and the importers mapping a missing auth to inherit.
 
 ### 3.2 AWS Signature V4
 ```yaml
