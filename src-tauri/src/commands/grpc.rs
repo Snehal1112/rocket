@@ -79,11 +79,12 @@ pub async fn grpc_unary_call(
 #[tauri::command]
 pub async fn grpc_start_session(
     input: GrpcExecuteDto,
+    session_id: String,
     svc: State<'_, GrpcService>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<String, DomainError> {
     let input = resolve_input(input, &exec).await?;
-    svc.start_session(input).await
+    svc.start_session(input, session_id).await
 }
 
 #[tauri::command]

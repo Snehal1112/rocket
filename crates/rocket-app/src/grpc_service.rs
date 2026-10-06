@@ -67,6 +67,9 @@ pub struct GrpcService {
     workspace_path: Arc<Mutex<PathBuf>>,
     events: Arc<dyn EventPublisher>,
     sessions: Sessions,
+    /// Sessions that are still connecting, with their start time. A cancel in this
+    /// state has no call to abort yet, so it only takes the entry out.
+    connecting: Mutex<HashMap<String, Instant>>,
     registries: Mutex<HashMap<String, ProtoRegistry>>,
 }
 
@@ -85,6 +88,7 @@ impl GrpcService {
             workspace_path,
             events,
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            connecting: Mutex::new(HashMap::new()),
             registries: Mutex::new(HashMap::new()),
         }
     }
@@ -109,13 +113,86 @@ impl GrpcService {
         Ok(self.registry_for(&input, refresh).await?.services())
     }
 
-    /// Opens a client-streaming, server-streaming or bidirectional call and
-    /// returns its session id. Everything the server sends arrives as
-    /// `GrpcSession*` domain events.
-    pub async fn start_session(&self, input: GrpcExecuteInput) -> DomainResult<String> {
+    /// Opens a client-streaming, server-streaming or bidirectional call under the
+    /// id the caller chose, so the caller can listen for the `GrpcSession*` events
+    /// and cancel before the connection is up. An id already in use is a conflict.
+    pub async fn start_session(
+        &self,
+        input: GrpcExecuteInput,
+        session_id: String,
+    ) -> DomainResult<String> {
+        let started = Instant::now();
+        {
+            let sessions = lock(&self.sessions);
+            let mut connecting = lock(&self.connecting);
+            if sessions.contains_key(&session_id) || connecting.contains_key(&session_id) {
+                return Err(DomainError::Conflict(format!(
+                    "gRPC session '{session_id}' already exists"
+                )));
+            }
+            connecting.insert(session_id.clone(), started);
+        }
         let input = input.with_request_variables();
-        let call = self.prepare_call(&input, true)?;
-        let registry = self.registry_for(&input, false).await?;
+        let prepared = self.prepare_session(&input).await;
+        let (call, registry, method_type, input_type, initial) = match prepared {
+            Ok(prepared) => prepared,
+            Err(e) => {
+                lock(&self.connecting).remove(&session_id);
+                return Err(e);
+            }
+        };
+        let opened = self.executor.open_stream(&call, &registry, initial).await;
+        let handle = {
+            // Lock order is sessions, then connecting. Whoever takes the pending entry
+            // owns the outcome: a cancel that came in while connecting took it already.
+            let mut sessions = lock(&self.sessions);
+            let still_ours = lock(&self.connecting).remove(&session_id).is_some();
+            let handle = opened?;
+            if !still_ours {
+                handle.abort.abort();
+                return Err(DomainError::Conflict(
+                    "the call was cancelled while it was connecting".into(),
+                ));
+            }
+            sessions.insert(
+                session_id.clone(),
+                SessionEntry {
+                    outbound: handle.outbound,
+                    input: input_type,
+                    variables: input.variables.clone(),
+                    abort: handle.abort,
+                    started,
+                },
+            );
+            handle.events
+        };
+        self.events.publish(DomainEvent::GrpcSessionStarted {
+            session_id: session_id.clone(),
+            method_type: method_type.as_str().to_string(),
+        });
+        tokio::spawn(forward_events(
+            Arc::clone(&self.sessions),
+            Arc::clone(&self.events),
+            session_id.clone(),
+            handle,
+        ));
+        Ok(session_id)
+    }
+
+    /// Everything a streaming call needs before it connects: the transport call,
+    /// the descriptors, the call shape and the first message of a server stream.
+    async fn prepare_session(
+        &self,
+        input: &GrpcExecuteInput,
+    ) -> DomainResult<(
+        GrpcCall,
+        ProtoRegistry,
+        GrpcMethodType,
+        MessageDescriptor,
+        Option<String>,
+    )> {
+        let call = self.prepare_call(input, true)?;
+        let registry = self.registry_for(input, false).await?;
         let method = registry.method(&call.full_method)?;
         let method_type = GrpcMethodType::from_streaming_flags(
             method.is_client_streaming(),
@@ -130,35 +207,11 @@ impl GrpcService {
         // A server-streaming call has exactly one request. The other shapes take
         // their messages one by one through `send_message`.
         let initial = if method_type == GrpcMethodType::ServerStreaming {
-            Some(self.prepare_message(&input)?)
+            Some(self.prepare_message(input)?)
         } else {
             None
         };
-        let handle = self.executor.open_stream(&call, &registry, initial).await?;
-
-        let session_id = ulid::Ulid::new().to_string();
-        let started = Instant::now();
-        lock(&self.sessions).insert(
-            session_id.clone(),
-            SessionEntry {
-                outbound: handle.outbound,
-                input: method.input(),
-                variables: input.variables.clone(),
-                abort: handle.abort,
-                started,
-            },
-        );
-        self.events.publish(DomainEvent::GrpcSessionStarted {
-            session_id: session_id.clone(),
-            method_type: method_type.as_str().to_string(),
-        });
-        tokio::spawn(forward_events(
-            Arc::clone(&self.sessions),
-            Arc::clone(&self.events),
-            session_id.clone(),
-            handle.events,
-        ));
-        Ok(session_id)
+        Ok((call, registry, method_type, method.input(), initial))
     }
 
     /// Sends one message on a client-streaming or bidirectional call. Variables
@@ -196,19 +249,31 @@ impl GrpcService {
         Ok(())
     }
 
-    /// Cancels the call and reports it as finished with CANCELLED.
+    /// Cancels the call and reports it as finished with CANCELLED. A session that
+    /// is still connecting is cancelled too: its call is aborted once it opens.
     pub fn cancel(&self, session_id: &str) -> DomainResult<()> {
-        let entry = lock(&self.sessions)
-            .remove(session_id)
-            .ok_or_else(|| DomainError::NotFound(format!("gRPC session '{session_id}'")))?;
-        entry.abort.abort();
+        let (started, abort) = {
+            let mut sessions = lock(&self.sessions);
+            match sessions.remove(session_id) {
+                Some(entry) => (entry.started, Some(entry.abort)),
+                None => match lock(&self.connecting).remove(session_id) {
+                    Some(started) => (started, None),
+                    None => {
+                        return Err(DomainError::NotFound(format!("gRPC session '{session_id}'")))
+                    }
+                },
+            }
+        };
+        if let Some(abort) = abort {
+            abort.abort();
+        }
         self.events.publish(DomainEvent::GrpcSessionFinished {
             session_id: session_id.to_string(),
             code: 1,
             code_name: "CANCELLED".into(),
             message: "cancelled by the user".into(),
             trailers: vec![],
-            duration_ms: entry.started.elapsed().as_millis() as u64,
+            duration_ms: started.elapsed().as_millis() as u64,
         });
         Ok(())
     }
@@ -218,6 +283,8 @@ impl GrpcService {
         for (_, entry) in lock(&self.sessions).drain() {
             entry.abort.abort();
         }
+        // A connect still in flight finds its entry gone and aborts its own call.
+        lock(&self.connecting).clear();
     }
 
     /// Builds the transport call: resolved URL, metadata and auth.
@@ -462,16 +529,26 @@ async fn forward_events(
     let mut index: u64 = 0;
     while let Some(event) = stream.recv().await {
         match event {
-            GrpcStreamEvent::Headers(headers) => events.publish(DomainEvent::GrpcSessionHeaders {
-                session_id: session_id.clone(),
-                headers,
-            }),
+            GrpcStreamEvent::Headers(headers) => {
+                if !publish_while_open(&sessions, &events, &session_id, || {
+                    DomainEvent::GrpcSessionHeaders {
+                        session_id: session_id.clone(),
+                        headers,
+                    }
+                }) {
+                    return;
+                }
+            }
             GrpcStreamEvent::Message(json) => {
-                events.publish(DomainEvent::GrpcSessionMessage {
-                    session_id: session_id.clone(),
-                    index,
-                    json,
-                });
+                if !publish_while_open(&sessions, &events, &session_id, || {
+                    DomainEvent::GrpcSessionMessage {
+                        session_id: session_id.clone(),
+                        index,
+                        json,
+                    }
+                }) {
+                    return;
+                }
                 index += 1;
             }
             GrpcStreamEvent::Finished { status, trailers } => {
@@ -498,6 +575,24 @@ async fn forward_events(
         "the call ended unexpectedly",
         vec![],
     );
+}
+
+/// Publishes a session event only while the session is in the table. A cancel
+/// takes the session out before it publishes `Finished`, and the check and the
+/// publish share the table lock, so no event can follow the terminal one.
+/// Returns false when the session has ended.
+fn publish_while_open(
+    sessions: &Sessions,
+    events: &Arc<dyn EventPublisher>,
+    session_id: &str,
+    event: impl FnOnce() -> DomainEvent,
+) -> bool {
+    let sessions = lock(sessions);
+    if !sessions.contains_key(session_id) {
+        return false;
+    }
+    events.publish(event());
+    true
 }
 
 /// Publishes `GrpcSessionFinished` once. Whoever removes the session first wins.
@@ -619,6 +714,8 @@ message Rep { string message = 1; }
         streams: Mutex<Vec<(GrpcCall, Option<String>)>>,
         next_stream: Mutex<Option<GrpcStreamHandle>>,
         reflects: AtomicUsize,
+        /// When set, `open_stream` waits for it, like a slow connect.
+        open_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     }
 
     #[async_trait]
@@ -646,6 +743,10 @@ message Rep { string message = 1; }
             initial_json: Option<String>,
         ) -> DomainResult<GrpcStreamHandle> {
             lock(&self.streams).push((call.clone(), initial_json));
+            let gate = lock(&self.open_gate).clone();
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
             lock(&self.next_stream)
                 .take()
                 .ok_or_else(|| DomainError::Internal("no stream prepared".into()))
@@ -1059,7 +1160,7 @@ message Rep { string message = 1; }
         let fx = prepare_stream(&h, false);
         let mut i = input(request("demo.v1.Greeter/List"));
         i.message = Some(r#"{"name":"n"}"#.into());
-        let id = h.svc.start_session(i).await.expect("start");
+        let id = h.svc.start_session(i, "s1".to_string()).await.expect("start");
         assert_eq!(
             lock(&h.exec.streams)[0].1.as_deref(),
             Some(r#"{"name":"n"}"#)
@@ -1110,7 +1211,7 @@ message Rep { string message = 1; }
         let mut fx = prepare_stream(&h, true);
         let mut i = input(request("demo.v1.Greeter/Collect"));
         i.variables = HashMap::from([("who".into(), "ada".into())]);
-        let id = h.svc.start_session(i).await.expect("start");
+        let id = h.svc.start_session(i, "s1".to_string()).await.expect("start");
         assert_eq!(
             lock(&h.exec.streams)[0].1,
             None,
@@ -1142,7 +1243,7 @@ message Rep { string message = 1; }
         let mut fx = prepare_stream(&h, true);
         let id = h
             .svc
-            .start_session(input(request("demo.v1.Greeter/Chat")))
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string())
             .await
             .expect("start");
         h.svc.end_requests(&id).expect("end");
@@ -1166,7 +1267,7 @@ message Rep { string message = 1; }
         let fx = prepare_stream(&h, true);
         let id = h
             .svc
-            .start_session(input(request("demo.v1.Greeter/Chat")))
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string())
             .await
             .expect("start");
         h.svc.cancel(&id).expect("cancel");
@@ -1192,7 +1293,7 @@ message Rep { string message = 1; }
         let h = harness(None);
         let fx = prepare_stream(&h, true);
         h.svc
-            .start_session(input(request("demo.v1.Greeter/Chat")))
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string())
             .await
             .expect("start");
         drop(fx.events_tx);
@@ -1200,11 +1301,81 @@ message Rep { string message = 1; }
     }
 
     #[tokio::test]
+    async fn nothing_is_published_after_the_terminal_event_of_a_cancel() {
+        let h = harness(None);
+        let fx = prepare_stream(&h, true);
+        // Replies already buffered when the user cancels.
+        fx.events_tx
+            .send(GrpcStreamEvent::Headers(vec![]))
+            .await
+            .expect("send");
+        fx.events_tx
+            .send(GrpcStreamEvent::Message("{}".into()))
+            .await
+            .expect("send");
+        let id = h
+            .svc
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string())
+            .await
+            .expect("start");
+        h.svc.cancel(&id).expect("cancel");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            h.events.tags(),
+            vec!["started:bidi-streaming", "finished:CANCELLED"],
+            "Finished must be the last event of a session"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_can_be_cancelled_while_it_is_still_connecting() {
+        let h = harness(None);
+        let fx = prepare_stream(&h, true);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        *lock(&h.exec.open_gate) = Some(gate.clone());
+        let start = h
+            .svc
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string());
+        let cancel = async {
+            while lock(&h.exec.streams).is_empty() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            h.svc.cancel("s1").expect("cancel while connecting");
+            gate.notify_one();
+        };
+        let (started, ()) = tokio::join!(start, cancel);
+        assert!(started.is_err(), "a cancelled connect is not a session");
+        assert!(
+            fx.task.await.expect_err("aborted").is_cancelled(),
+            "the call that finished opening is aborted"
+        );
+        assert_eq!(h.events.tags(), vec!["finished:CANCELLED"]);
+        assert!(matches!(h.svc.cancel("s1"), Err(DomainError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn a_session_id_in_use_is_rejected() {
+        let h = harness(None);
+        let _fx = prepare_stream(&h, true);
+        h.svc
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string())
+            .await
+            .expect("start");
+        let err = h
+            .svc
+            .start_session(input(request("demo.v1.Greeter/Chat")), "s1".to_string())
+            .await
+            .expect_err("same id twice");
+        assert!(matches!(err, DomainError::Conflict(_)), "{err:?}");
+        assert_eq!(lock(&h.exec.streams).len(), 1, "no second call was opened");
+    }
+
+    #[tokio::test]
     async fn the_wrong_entry_point_for_the_call_shape_is_rejected() {
         let h = harness(None);
         let err = h
             .svc
-            .start_session(input(request(SAY_HELLO)))
+            .start_session(input(request(SAY_HELLO)), "s1".to_string())
             .await
             .expect_err("unary method");
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -1212,7 +1383,7 @@ message Rep { string message = 1; }
         let _fx = prepare_stream(&h, false);
         let id = h
             .svc
-            .start_session(input(request("demo.v1.Greeter/List")))
+            .start_session(input(request("demo.v1.Greeter/List")), "s1".to_string())
             .await
             .expect("start");
         let err = h

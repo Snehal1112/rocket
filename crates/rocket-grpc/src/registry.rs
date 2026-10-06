@@ -58,6 +58,10 @@ impl FileResolver for ReaderResolver {
     }
 }
 
+/// The most files `from_file_descriptors` accepts. A reflection server chooses
+/// how many files it sends, so the count is bounded here.
+pub const MAX_DESCRIPTOR_FILES: usize = 4096;
+
 /// A set of parsed protobuf descriptors. Cheap to clone.
 #[derive(Clone)]
 pub struct ProtoRegistry {
@@ -85,6 +89,12 @@ impl ProtoRegistry {
     /// reflection server returns. Every import must be in `files`, except the
     /// well-known `google/protobuf/*` files, which are added when missing.
     pub fn from_file_descriptors(files: Vec<FileDescriptorProto>) -> DomainResult<Self> {
+        if files.len() > MAX_DESCRIPTOR_FILES {
+            return Err(DomainError::InvalidInput(format!(
+                "the descriptor set has too many files ({}, the limit is {MAX_DESCRIPTOR_FILES})",
+                files.len()
+            )));
+        }
         let mut by_name: HashMap<String, FileDescriptorProto> = HashMap::new();
         for file in files {
             by_name.insert(file.name().to_string(), file);
@@ -151,20 +161,34 @@ impl ProtoRegistry {
     }
 }
 
+/// Adds `start` and the files it imports to `out`, imports first. It keeps its own
+/// stack, so a long import chain cannot overflow the call stack.
 fn visit(
-    name: &str,
+    start: &str,
     files: &HashMap<String, FileDescriptorProto>,
     seen: &mut HashSet<String>,
     out: &mut Vec<FileDescriptorProto>,
 ) {
-    if !seen.insert(name.to_string()) {
+    if !seen.insert(start.to_string()) {
         return;
     }
-    if let Some(file) = files.get(name) {
-        for dependency in &file.dependency {
-            visit(dependency, files, seen, out);
+    let Some(first) = files.get(start) else {
+        return;
+    };
+    // Each entry is a file and how many of its imports have been looked at.
+    let mut stack: Vec<(&FileDescriptorProto, usize)> = vec![(first, 0)];
+    while let Some((file, next)) = stack.pop() {
+        match file.dependency.get(next) {
+            Some(dependency) => {
+                stack.push((file, next + 1));
+                if seen.insert(dependency.clone()) {
+                    if let Some(imported) = files.get(dependency.as_str()) {
+                        stack.push((imported, 0));
+                    }
+                }
+            }
+            None => out.push(file.clone()),
         }
-        out.push(file.clone());
     }
 }
 
@@ -311,5 +335,45 @@ mod tests {
             .pool()
             .get_message_by_name("google.protobuf.Timestamp")
             .is_some());
+    }
+
+    /// `f0.proto` imports `f1.proto`, which imports `f2.proto`, and so on.
+    fn import_chain(len: usize) -> Vec<FileDescriptorProto> {
+        (0..len)
+            .map(|i| FileDescriptorProto {
+                name: Some(format!("f{i}.proto")),
+                syntax: Some("proto3".into()),
+                dependency: if i + 1 < len {
+                    vec![format!("f{}.proto", i + 1)]
+                } else {
+                    vec![]
+                },
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_descriptor_set_with_too_many_files_is_rejected() {
+        let err = ProtoRegistry::from_file_descriptors(import_chain(4097))
+            .err()
+            .expect("too many files");
+        assert!(
+            matches!(&err, DomainError::InvalidInput(m) if m.contains("too many")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_import_chain_does_not_use_the_call_stack() {
+        // A small stack proves the walk is iterative: one stack frame per import
+        // would overflow it long before 3000 files.
+        let outcome = std::thread::Builder::new()
+            .stack_size(192 * 1024)
+            .spawn(|| ProtoRegistry::from_file_descriptors(import_chain(3000)).map(|_| ()))
+            .expect("spawn")
+            .join()
+            .expect("no stack overflow");
+        outcome.expect("a chain below the limit builds");
     }
 }
