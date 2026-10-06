@@ -26,6 +26,7 @@ function activeTabId(): string {
 }
 
 describe('Ctrl+W close guard', () => {
+  const realCloseTab = usePaneStore.getState().closeTab;
   let closeTab: ReturnType<typeof vi.fn>;
   let requested: string[];
   const listener = (e: Event) => requested.push((e as CustomEvent).detail.tabId);
@@ -37,7 +38,10 @@ describe('Ctrl+W close guard', () => {
     requested = [];
     window.addEventListener('rocket:request-close-tab', listener);
   });
-  afterEach(() => window.removeEventListener('rocket:request-close-tab', listener));
+  afterEach(() => {
+    window.removeEventListener('rocket:request-close-tab', listener);
+    usePaneStore.setState({ closeTab: realCloseTab });
+  });
 
   it('requests a guarded close for a dirty script tab', async () => {
     await usePaneStore.getState().openScriptTab('col', 'a.js');

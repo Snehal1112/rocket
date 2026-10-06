@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findScriptTab } from '@/lib/pane-utils';
 import { saveScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -61,7 +61,9 @@ describe('EditorGroup unsaved script close dialog', () => {
 });
 
 describe('EditorGroup rocket:request-close-tab event', () => {
+  const realCloseTab = usePaneStore.getState().closeTab;
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => usePaneStore.setState({ closeTab: realCloseTab }));
 
   async function setupDirty() {
     usePaneStore.getState().reset();
@@ -97,18 +99,46 @@ describe('EditorGroup rocket:request-close-tab event', () => {
   });
 
   it('ignores the event in a group that does not own the tab', async () => {
-    const { root } = await setupDirty();
-    renderGroup(root);
-    request('someone-elses-tab');
+    const { tab, root } = await setupDirty();
+    const closeTab = vi.fn();
+    usePaneStore.setState({ closeTab } as never);
+    const otherGroup = { ...root, id: 'leaf-other', groupId: 'group-other', tabs: [] };
+    renderGroup(otherGroup);
+    request(tab.id);
+    expect(closeTab).not.toHaveBeenCalled();
+    expect(saveScriptFile).not.toHaveBeenCalled();
     expect(screen.queryByText(/This script has unsaved changes/)).not.toBeInTheDocument();
   });
 
-  it('stops listening after unmount', async () => {
-    const { tab, root } = await setupDirty();
+  it('removes its listener on unmount', async () => {
+    const { root } = await setupDirty();
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
     const view = renderGroup(root);
+    const added = add.mock.calls.find(([type]) => type === 'rocket:request-close-tab');
+    expect(added).toBeDefined();
     view.unmount();
+    const removed = remove.mock.calls.find(([type]) => type === 'rocket:request-close-tab');
+    expect(removed?.[1]).toBe(added?.[1]);
+    add.mockRestore();
+    remove.mockRestore();
+  });
+
+  it('shows exactly one dialog when two groups are mounted', async () => {
+    const { tab, root } = await setupDirty();
+    const groupA = { ...root, id: 'leaf-a', groupId: 'group-a', tabs: [] };
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <EditorGroup node={groupA} />
+        <EditorGroup node={root} />
+      </QueryClientProvider>,
+    );
     request(tab.id);
-    expect(screen.queryByText(/This script has unsaved changes/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/This script has unsaved changes/)).toHaveLength(1);
+    // The dialog is portalled, so the close below proves group B owns it.
+    expect(screen.getAllByRole('alertdialog')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(findScriptTab(usePaneStore.getState().root, 'col', 'a.js')).toBeNull();
   });
 
   it('keeps the tab on Cancel', async () => {
