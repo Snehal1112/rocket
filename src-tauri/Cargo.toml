@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 rocket-shared.workspace = true
 rocket-acp.workspace = true
 rocket-collection.workspace = true
+rocket-grpc.workspace = true
 rocket-environment.workspace = true
 rocket-http.workspace = true
 rocket-history.workspace = true

@@ -527,9 +527,21 @@ pub fn run() {
                 audit_publisher.clone(),
             );
 
+            // gRPC calls. The workspace path is shared with the collection repo, so relative
+            // proto paths follow a workspace switch.
+            let grpc_svc = rocket_app::GrpcService::new(
+                Arc::new(rocket_infra::TonicGrpcExecutor),
+                Arc::new(rocket_infra::FsProtoLoader),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Arc::clone(&active_workspace_path),
+            );
+
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
             app.manage(contract_svc);
+            app.manage(grpc_svc);
             app.manage(history_svc);
             app.manage(template_svc);
             app.manage(cookie_svc);
@@ -699,6 +711,7 @@ pub fn run() {
             commands::git::git_log_v2,
             commands::git::git_push_v2,
             commands::git::git_pull_v2,
+            commands::grpc::grpc_unary_call,
             commands::git::git_fetch_v2,
             commands::git::git_branches_v2,
             commands::git::git_switch_branch_v2,

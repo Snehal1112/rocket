@@ -3,6 +3,7 @@ pub mod assertion;
 pub mod certificate;
 pub mod description;
 pub mod error;
+pub mod grpc;
 pub mod events;
 pub mod oauth2;
 pub mod proxy;
