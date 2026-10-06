@@ -28,17 +28,6 @@ pub struct ResolvedModule {
     pub source: String,
 }
 
-/// Returns true for `./x`, `../x`, `/abs` and their backslash forms.
-pub fn is_local_specifier(name: &str) -> bool {
-    name == "."
-        || name == ".."
-        || name.starts_with("./")
-        || name.starts_with("../")
-        || name.starts_with('/')
-        || name.starts_with(".\\")
-        || name.starts_with("..\\")
-}
-
 /// Builds the allowed roots. Safe mode allows the collection root only.
 /// Developer mode adds each existing `additional_roots` entry.
 pub fn build_roots(scope: &ScriptFileScope, mode: SandboxMode) -> Result<LocalRoots, String> {
@@ -114,7 +103,7 @@ fn normalize_parts<'a>(parts: impl IntoIterator<Item = Part<'a>>) -> Option<Path
 /// A leading prefix (such as the verbatim prefix of a canonical Windows root)
 /// is kept. The root check then decides, so a UNC or drive specifier fails it.
 /// Returns `None` for a misplaced prefix or a `..` above the root or prefix.
-pub(crate) fn lexical_normalize(path: &Path) -> Option<PathBuf> {
+fn lexical_normalize(path: &Path) -> Option<PathBuf> {
     normalize_parts(path.components().map(|c| match c {
         Component::Prefix(p) => Part::Prefix(p.as_os_str()),
         Component::RootDir => Part::Root,
@@ -353,16 +342,6 @@ mod tests {
             additional_roots: vec![],
         };
         assert!(build_roots(&scope, SandboxMode::Safe).is_err());
-    }
-
-    #[test]
-    fn local_specifier_detection() {
-        assert!(is_local_specifier("./a"));
-        assert!(is_local_specifier("../a"));
-        assert!(is_local_specifier("/abs/a.js"));
-        assert!(is_local_specifier(".\\a"));
-        assert!(!is_local_specifier("lodash"));
-        assert!(!is_local_specifier("crypto-js"));
     }
 
     fn denial(r: &LocalRoots, name: &str) -> String {

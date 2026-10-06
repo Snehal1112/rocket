@@ -267,10 +267,16 @@ fn run_script(
         current + (current / 4)
     });
 
-    let local_roots = ctx
-        .file_scope
-        .as_ref()
-        .and_then(|scope| build_roots(scope, sandbox_mode).ok());
+    let local_roots = ctx.file_scope.as_ref().and_then(|scope| {
+        match build_roots(scope, sandbox_mode) {
+            Ok(roots) => Some(roots),
+            Err(reason) => {
+                // Fail closed: the script runs without local file access.
+                tracing::warn!(%reason, "local script roots unavailable, file requires disabled");
+                None
+            }
+        }
+    });
 
     // Seed OpState with input and output state.
     {
@@ -1131,12 +1137,40 @@ mod tests {
     #[tokio::test]
     async fn require_local_same_error_through_the_same_frame_is_prefixed_once() {
         let (_tmp, lines) = run_logs(
-            &[("keep.js", "globalThis.__saved = globalThis.__saved; throw globalThis.__err;")],
+            &[("keep.js", "throw globalThis.__err;")],
             "globalThis.__err = new Error('boom'); for (let i = 0; i < 2; i++) { try { require('./keep'); } catch (e) { console.log(e.message); } }",
         )
         .await;
         assert_eq!(lines[0], "Error in module './keep' (keep.js): boom");
         assert_eq!(lines[1], lines[0]);
+    }
+
+    #[tokio::test]
+    async fn require_local_nested_resolution_error_names_the_module() {
+        let (_tmp, lines) = run_logs(
+            &[("b.js", "require('./nope');")],
+            "try { require('./b'); } catch (e) { console.log(e.message); }",
+        )
+        .await;
+        assert_eq!(
+            lines[0],
+            "Error in module './b' (b.js): Cannot find module './nope'"
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_uncaught_module_throw_reports_the_module() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(tmp.path(), "bad.js", "throw new Error('boom');");
+        let result = run(scoped_ctx(
+            "require('./bad');",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        ))
+        .await;
+        let err = result.error.expect("error present");
+        assert!(err.contains("Error in module"), "{err}");
     }
 
     #[tokio::test]
