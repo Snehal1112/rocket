@@ -20,6 +20,12 @@ pub struct BruDocument {
     pub ws_auth_mode: Option<String>,
     /// The query and variables of a GraphQL request (`body:graphql` and `body:graphql:vars`).
     pub graphql: Option<BruGraphQl>,
+    /// The `grpc {}` block of a gRPC request.
+    pub grpc: Option<BruGrpc>,
+    /// Entries of the `metadata {}` block of a gRPC request.
+    pub grpc_metadata: Vec<BruKeyValue>,
+    /// One entry per `body:grpc {}` block, in file order.
+    pub grpc_messages: Vec<BruGrpcMessage>,
     /// Unrecognised or unsupported blocks — fed into ImportReport.
     pub unknown_blocks: Vec<BruRawBlock>,
 }
@@ -31,6 +37,27 @@ impl BruDocument {
             .as_ref()
             .is_some_and(|m| matches!(m.request_type.as_str(), "ws" | "websocket"))
     }
+}
+
+/// The `grpc {}` block: where to call and which method.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BruGrpc {
+    pub url: Option<String>,
+    /// `/package.Service/Method` in Bruno files.
+    pub method: Option<String>,
+    /// `unary`, `client-streaming`, `server-streaming` or `bidi-streaming`.
+    pub method_type: Option<String>,
+    /// `protoPath` in `.bru` files, `protoFilePath` in OpenCollection YAML.
+    pub proto_path: Option<String>,
+    /// The `auth:` mode named in the block, such as `none` or `inherit`.
+    pub auth_mode: Option<String>,
+}
+
+/// One saved gRPC message (`body:grpc {}` block).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BruGrpcMessage {
+    pub title: String,
+    pub content: String,
 }
 
 /// One saved WebSocket message from a `body:ws` block.

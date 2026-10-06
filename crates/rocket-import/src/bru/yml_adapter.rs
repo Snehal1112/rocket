@@ -17,6 +17,8 @@ pub struct BruYmlRequest {
     pub graphql: Option<BruYmlGraphql>,
     /// OpenCollection-shaped `runtime:` block, read for GraphQL scripts.
     pub runtime: Option<BruYmlRuntime>,
+    /// The `grpc:` block of a gRPC request, read leniently as raw YAML.
+    pub grpc: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,7 +208,11 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
         info,
         graphql,
         runtime,
+        grpc,
     } = yml;
+    if let Some(grpc) = &grpc {
+        return adapt_grpc(info.or(meta), grpc);
+    }
     if let Some(gql) = graphql {
         return adapt_graphql(info.or(meta), gql, runtime);
     }
@@ -298,6 +304,114 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
             .collect();
     }
 
+    doc
+}
+
+/// Reads a gRPC request. The block is read as loose YAML because the same keys
+/// appear in two spellings: `protoFilePath` (OpenCollection) and `protoPath` (Bruno),
+/// a message that is one string or a list, and metadata flagged `disabled` or `enabled`.
+fn adapt_grpc(info: Option<BruYmlMeta>, grpc: &serde_yaml::Value) -> BruDocument {
+    use serde_yaml::Value;
+
+    let text = |v: &Value, keys: &[&str]| -> Option<String> {
+        keys.iter()
+            .find_map(|k| v.get(*k).and_then(Value::as_str))
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+    };
+
+    let mut doc = BruDocument::default();
+    if let Some(m) = info {
+        doc.meta = Some(BruMeta {
+            name: m.name.unwrap_or_default(),
+            request_type: "grpc".into(),
+            seq: m.seq,
+        });
+    }
+
+    let mut section = BruGrpc {
+        url: text(grpc, &["url"]),
+        method: text(grpc, &["method"]),
+        method_type: text(grpc, &["methodType", "method_type"]),
+        proto_path: text(grpc, &["protoFilePath", "protoPath"]),
+        auth_mode: None,
+    };
+
+    for entry in grpc
+        .get("metadata")
+        .and_then(Value::as_sequence)
+        .into_iter()
+        .flatten()
+    {
+        let (Some(key), Some(value)) = (
+            text(entry, &["name"]),
+            entry.get("value").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let disabled = entry
+            .get("disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || entry.get("enabled").and_then(Value::as_bool) == Some(false);
+        doc.grpc_metadata.push(BruKeyValue {
+            key,
+            value: value.to_string(),
+            disabled,
+        });
+    }
+
+    match grpc.get("message") {
+        Some(Value::String(content)) => doc.grpc_messages.push(BruGrpcMessage {
+            title: String::new(),
+            content: content.clone(),
+        }),
+        Some(Value::Sequence(items)) => {
+            for item in items {
+                let content = match item {
+                    Value::String(s) => Some(s.clone()),
+                    _ => text(item, &["message", "content"]),
+                };
+                if let Some(content) = content {
+                    doc.grpc_messages.push(BruGrpcMessage {
+                        title: text(item, &["title", "name"]).unwrap_or_default(),
+                        content,
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(auth) = grpc.get("auth") {
+        match auth.get("type").and_then(Value::as_str).or(auth.as_str()) {
+            Some("none") => section.auth_mode = Some("none".into()),
+            Some("inherit") => section.auth_mode = Some("inherit".into()),
+            Some("bearer") => {
+                doc.auth = Some(BruAuth::Bearer {
+                    token: text(auth, &["token"]).unwrap_or_default(),
+                });
+            }
+            Some("basic") => {
+                doc.auth = Some(BruAuth::Basic {
+                    username: text(auth, &["username"]).unwrap_or_default(),
+                    password: text(auth, &["password"]).unwrap_or_default(),
+                });
+            }
+            Some(other) => doc.unknown_blocks.push(BruRawBlock {
+                name: "auth".into(),
+                subtype: Some(other.to_string()),
+                content: String::new(),
+            }),
+            None => {
+                // The `mode:` spelling that the HTTP block uses.
+                if let Ok(parsed) = serde_yaml::from_value::<BruYmlAuth>(auth.clone()) {
+                    doc.auth = adapt_auth(parsed, &mut doc.unknown_blocks);
+                }
+            }
+        }
+    }
+    doc.grpc = Some(section);
     doc
 }
 
@@ -811,5 +925,102 @@ ws:
         let doc = bru_document_from_yml_str(yml).unwrap();
         assert!(doc.is_websocket());
         assert_eq!(doc.url.as_deref(), Some("ws://x"));
+    }
+
+    #[test]
+    fn opencollection_grpc_request_is_adapted() {
+        let yml = r#"
+info:
+  name: Say Hello
+  type: grpc
+  seq: 3
+grpc:
+  url: grpcs://api.example.com:443
+  method: demo.greeter.v1.Greeter/SayHello
+  methodType: server-streaming
+  protoFilePath: protos/greeter.proto
+  metadata:
+    - name: x-trace
+      value: abc
+    - name: x-off
+      value: "1"
+      disabled: true
+  message: '{"name": "ada"}'
+  auth:
+    type: bearer
+    token: "{{tok}}"
+"#;
+        let doc = bru_document_from_yml_str(yml).unwrap();
+        assert!(doc.unknown_blocks.is_empty(), "{:?}", doc.unknown_blocks);
+        let meta = doc.meta.as_ref().expect("meta");
+        assert_eq!(
+            (meta.name.as_str(), meta.request_type.as_str(), meta.seq),
+            ("Say Hello", "grpc", Some(3))
+        );
+        let grpc = doc.grpc.as_ref().expect("grpc");
+        assert_eq!(grpc.url.as_deref(), Some("grpcs://api.example.com:443"));
+        assert_eq!(grpc.method_type.as_deref(), Some("server-streaming"));
+        assert_eq!(grpc.proto_path.as_deref(), Some("protos/greeter.proto"));
+        assert_eq!(doc.grpc_metadata.len(), 2);
+        assert!(doc.grpc_metadata[1].disabled);
+        assert_eq!(doc.grpc_messages.len(), 1);
+        assert_eq!(doc.grpc_messages[0].content, "{\"name\": \"ada\"}");
+        assert!(matches!(doc.auth, Some(BruAuth::Bearer { ref token }) if token == "{{tok}}"));
+    }
+
+    #[test]
+    fn bruno_spellings_of_the_grpc_block_are_accepted() {
+        let yml = r#"
+meta:
+  name: Old Style
+  type: grpc
+grpc:
+  url: localhost:50051
+  method: /demo.Svc/Do
+  protoPath: ../protos/svc.proto
+  metadata:
+    - name: k
+      value: v
+      enabled: false
+  message:
+    - title: one
+      content: '{"a": 1}'
+    - title: two
+      message: '{"a": 2}'
+  auth:
+    mode: bearer
+    bearer:
+      token: t
+"#;
+        let doc = bru_document_from_yml_str(yml).unwrap();
+        assert_eq!(
+            doc.grpc.as_ref().and_then(|g| g.proto_path.as_deref()),
+            Some("../protos/svc.proto")
+        );
+        assert!(
+            doc.grpc_metadata[0].disabled,
+            "enabled: false disables the entry"
+        );
+        let titles: Vec<&str> = doc.grpc_messages.iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(titles, vec!["one", "two"]);
+        assert_eq!(doc.grpc_messages[1].content, "{\"a\": 2}");
+        assert!(matches!(doc.auth, Some(BruAuth::Bearer { ref token }) if token == "t"));
+    }
+
+    #[test]
+    fn grpc_auth_that_cannot_be_converted_is_reported_not_dropped() {
+        let yml = "info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\n  auth:\n    type: oauth2\n";
+        let doc = bru_document_from_yml_str(yml).unwrap();
+        assert_eq!(doc.unknown_blocks.len(), 1);
+        assert_eq!(doc.unknown_blocks[0].name, "auth");
+        assert_eq!(doc.unknown_blocks[0].subtype.as_deref(), Some("oauth2"));
+    }
+
+    #[test]
+    fn a_grpc_type_without_a_grpc_block_is_still_unsupported() {
+        let yml = "meta:\n  name: G\n  type: grpc\nhttp:\n  method: POST\n  url: grpc://x\n";
+        let doc = bru_document_from_yml_str(yml).unwrap();
+        assert_eq!(doc.unknown_blocks.len(), 1);
+        assert_eq!(doc.unknown_blocks[0].name, "unsupported_type");
     }
 }

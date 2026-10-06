@@ -330,6 +330,21 @@ impl ImportService {
             }
 
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+            // A gRPC request points at a `.proto` file by path, so the proto files
+            // travel with the requests. They are not requests and are not counted.
+            if ext == "proto" {
+                let rel = p.strip_prefix(root).unwrap_or(&p);
+                let dest = self
+                    .workspace_path
+                    .join("collections")
+                    .join(collection_name)
+                    .join(rel);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&p, &dest)?;
+                continue;
+            }
             if !matches!(ext, "bru" | "yml" | "yaml") {
                 continue;
             }
@@ -373,6 +388,22 @@ impl ImportService {
                         }
                         Some(req_converter::Converted::GraphQl(gql)) => {
                             match repo.save_graphql_request(collection_name, &out_path, &gql) {
+                                Ok(_) => report.imported += 1,
+                                Err(e) => report.skipped.push(SkippedItem {
+                                    path: rel_str.clone(),
+                                    reason: SkipReason::ParseError(e.to_string()),
+                                }),
+                            }
+                        }
+                        Some(req_converter::Converted::Grpc(mut grpc)) => {
+                            // Point the proto path at the copy inside the new collection.
+                            if let Some(raw) = grpc.proto_file_path.clone() {
+                                let bru_dir = p.parent().unwrap_or(root);
+                                if let Some(rebased) = rebase_proto_path(root, bru_dir, &raw) {
+                                    grpc.proto_file_path = Some(rebased);
+                                }
+                            }
+                            match repo.save_grpc_request(collection_name, &out_path, &grpc) {
                                 Ok(_) => report.imported += 1,
                                 Err(e) => report.skipped.push(SkippedItem {
                                     path: rel_str.clone(),
@@ -789,6 +820,15 @@ impl ImportService {
             }
 
             let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            // gRPC requests refer to `.proto` files by path, so copy them as well.
+            // They are not requests and are not counted.
+            if ext == "proto" {
+                if let Some(parent) = dest_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&src_path, &dest_path)?;
+                continue;
+            }
             if !matches!(ext, "yml" | "yaml") {
                 continue;
             }
@@ -816,6 +856,31 @@ impl ImportService {
         }
         Ok(())
     }
+}
+
+/// Finds the `.proto` file a Bruno request names and returns its path relative to
+/// the collection root, with forward slashes. Bruno paths are relative to the
+/// request file or to the collection root, so both are tried. Returns `None` for an
+/// absolute path, a missing file, or a file outside the collection, and the caller
+/// keeps the path as written.
+fn rebase_proto_path(root: &Path, request_dir: &Path, raw: &str) -> Option<String> {
+    let raw_path = Path::new(raw);
+    if raw_path.is_absolute() {
+        return None;
+    }
+    let canonical_root = root.canonicalize().ok()?;
+    [request_dir.join(raw_path), root.join(raw_path)]
+        .iter()
+        .filter_map(|candidate| candidate.canonicalize().ok())
+        .find(|real| real.is_file() && real.starts_with(&canonical_root))
+        .and_then(|real| {
+            real.strip_prefix(&canonical_root).ok().map(|rel| {
+                rel.components()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+        })
 }
 
 /// Sanitize a Postman item name for use as a folder/file path component.
@@ -1695,5 +1760,71 @@ mod wsdl_tests {
         let base = ws.path().join("collections/case");
         assert!(base.join("Svc/Pt/Get.yml").is_file());
         assert!(base.join("svc-2/Pt/Get.yml").is_file());
+    }
+}
+
+#[cfg(test)]
+mod proto_path_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn layout() -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("protos")).expect("mkdir");
+        std::fs::create_dir_all(dir.path().join("calls")).expect("mkdir");
+        std::fs::write(
+            dir.path().join("protos/greeter.proto"),
+            "syntax = \"proto3\";\n",
+        )
+        .expect("write");
+        dir
+    }
+
+    #[test]
+    fn a_path_relative_to_the_request_file_is_rebased_to_the_collection_root() {
+        let dir = layout();
+        let rebased = rebase_proto_path(
+            dir.path(),
+            &dir.path().join("calls"),
+            "../protos/greeter.proto",
+        );
+        assert_eq!(rebased.as_deref(), Some("protos/greeter.proto"));
+    }
+
+    #[test]
+    fn a_path_relative_to_the_collection_root_is_found_too() {
+        let dir = layout();
+        let rebased = rebase_proto_path(
+            dir.path(),
+            &dir.path().join("calls"),
+            "protos/greeter.proto",
+        );
+        assert_eq!(rebased.as_deref(), Some("protos/greeter.proto"));
+    }
+
+    #[test]
+    fn missing_absolute_and_outside_paths_stay_as_written() {
+        let dir = layout();
+        let outside = TempDir::new().expect("tempdir");
+        std::fs::write(outside.path().join("other.proto"), "syntax = \"proto3\";\n")
+            .expect("write");
+        let calls = dir.path().join("calls");
+        assert_eq!(
+            rebase_proto_path(dir.path(), &calls, "protos/missing.proto"),
+            None
+        );
+        assert_eq!(
+            rebase_proto_path(
+                dir.path(),
+                &calls,
+                &outside.path().join("other.proto").to_string_lossy()
+            ),
+            None
+        );
+        let escaping = format!(
+            "../../{}/other.proto",
+            outside.path().file_name().expect("name").to_string_lossy()
+        );
+        assert_eq!(rebase_proto_path(dir.path(), &calls, &escaping), None);
     }
 }

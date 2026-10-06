@@ -572,3 +572,122 @@ fn a_websocket_import_that_cannot_be_saved_is_reported_not_counted() {
     assert_eq!(report.imported, 1);
     assert_eq!(report.total_files, 1);
 }
+
+#[test]
+fn bru_grpc_file_imports_as_a_grpc_item_and_copies_its_proto() {
+    use rocket_collection::{CollectionRepository, GrpcMethodType};
+
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("grpc-api");
+    std::fs::create_dir_all(root.join("protos")).unwrap();
+    std::fs::create_dir_all(root.join("calls")).unwrap();
+    std::fs::write(
+        root.join("bruno.json"),
+        r#"{ "name": "grpc-api", "version": "1", "type": "collection" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("protos/greeter.proto"),
+        "syntax = \"proto3\";\npackage demo.v1;\nservice Greeter { rpc SayHello (Req) returns (Rep); }\nmessage Req { string name = 1; }\nmessage Rep { string message = 1; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("calls/say-hello.bru"),
+        "meta {\n  name: Say Hello\n  type: grpc\n  seq: 1\n}\n\ngrpc {\n  url: localhost:50051\n  method: /demo.v1.Greeter/SayHello\n  body: grpc\n  auth: none\n  methodType: unary\n  protoPath: ../protos/greeter.proto\n}\n\nmetadata {\n  x-trace: abc\n  ~x-off: 1\n}\n\nbody:grpc {\n  name: message 1\n  content: '''\n    {\n      \"name\": \"ada\"\n    }\n  '''\n}\n",
+    )
+    .unwrap();
+
+    let workspace_dir = TempDir::new().unwrap();
+    let service = make_service(workspace_dir.path());
+    let report = service.import_collection(&root, "default").unwrap();
+
+    assert_eq!(report.imported, 1, "skipped: {:?}", report.skipped);
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+
+    let name = &report.created_collections[0];
+    let repo = FsCollectionRepo::new_standalone(workspace_dir.path().join("collections"));
+    let g = repo.get_grpc_request(name, "calls/say-hello.yml").unwrap();
+    assert_eq!(g.url, "localhost:50051");
+    assert_eq!(g.method.as_deref(), Some("demo.v1.Greeter/SayHello"));
+    assert_eq!(g.method_type, GrpcMethodType::Unary);
+    assert_eq!(g.proto_file_path.as_deref(), Some("protos/greeter.proto"));
+    assert_eq!(g.metadata.len(), 2);
+    assert!(!g.metadata[1].enabled);
+    assert!(g.messages[0].content.contains("\"name\": \"ada\""));
+    assert!(
+        workspace_dir
+            .path()
+            .join("collections")
+            .join(name)
+            .join("protos/greeter.proto")
+            .exists(),
+        "the proto file travels with the requests"
+    );
+}
+
+#[test]
+fn opencollection_grpc_collection_imports_with_its_proto() {
+    use rocket_collection::CollectionRepository;
+
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("oc-grpc");
+    std::fs::create_dir_all(root.join("protos")).unwrap();
+    std::fs::write(root.join("opencollection.yml"), "opencollection: 1.0.0\ninfo:\n  name: oc-grpc\n").unwrap();
+    std::fs::write(root.join("protos/greeter.proto"), "syntax = \"proto3\";\n").unwrap();
+    std::fs::write(
+        root.join("say-hello.yml"),
+        "info:\n  name: Say Hello\n  type: grpc\ngrpc:\n  url: localhost:50051\n  method: demo.v1.Greeter/SayHello\n  methodType: unary\n  protoFilePath: protos/greeter.proto\n  message: '{}'\n",
+    )
+    .unwrap();
+
+    let workspace_dir = TempDir::new().unwrap();
+    let service = make_service(workspace_dir.path());
+    let report = service.import_collection(&root, "default").unwrap();
+    assert_eq!(report.imported, 1, "the proto file is not counted as a request");
+
+    let name = &report.created_collections[0];
+    let repo = FsCollectionRepo::new_standalone(workspace_dir.path().join("collections"));
+    let g = repo.get_grpc_request(name, "say-hello.yml").unwrap();
+    assert_eq!(g.proto_file_path.as_deref(), Some("protos/greeter.proto"));
+    assert!(workspace_dir
+        .path()
+        .join("collections")
+        .join(name)
+        .join("protos/greeter.proto")
+        .exists());
+}
+
+#[test]
+fn bru_file_of_an_unsupported_type_is_skipped_not_imported_as_an_empty_get() {
+    use rocket_import::SkipReason;
+
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("ws-api");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("bruno.json"),
+        r#"{ "name": "ws-api", "version": "1", "type": "collection" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("chat.bru"),
+        "meta {\n  name: Chat\n  type: mqtt\n}\n\nmqtt {\n  url: mqtt://example.com\n}\n",
+    )
+    .unwrap();
+
+    let workspace_dir = TempDir::new().unwrap();
+    let service = make_service(workspace_dir.path());
+    let report = service.import_collection(&root, "default").unwrap();
+
+    assert_eq!(report.imported, 0);
+    assert!(matches!(
+        report.skipped.as_slice(),
+        [item] if matches!(&item.reason, SkipReason::UnsupportedRequestType(t) if t == "mqtt")
+    ), "{:?}", report.skipped);
+    assert!(!workspace_dir
+        .path()
+        .join("collections")
+        .join(&report.created_collections[0])
+        .join("chat.yml")
+        .exists());
+}

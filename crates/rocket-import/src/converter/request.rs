@@ -1,5 +1,5 @@
 use rocket_collection::{
-    GraphQlBody, GraphQlRequest, Request, WebSocketMessage, WebSocketMessageKind, WebSocketRequest,
+    GraphQlBody, GraphQlRequest, GrpcRequest, Request, WebSocketMessage, WebSocketMessageKind, WebSocketRequest,
     WebSocketScript,
 };
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod};
@@ -13,6 +13,7 @@ pub enum Converted {
     Http(Request),
     GraphQl(GraphQlRequest),
     WebSocket(WebSocketRequest),
+    Grpc(GrpcRequest),
 }
 
 /// True when the document is a GraphQL request: its `meta` says so or it carries a GraphQL body.
@@ -25,8 +26,12 @@ fn is_graphql(doc: &BruDocument) -> bool {
 }
 
 /// Converts a Bruno document to whichever domain item it describes.
-/// Unsupported request types (gRPC, WebSocket) still produce `(None, [skip])`.
+/// Unsupported request types still produce `(None, [skip])`.
 pub fn convert_item(doc: &BruDocument) -> (Option<Converted>, Vec<SkipReason>) {
+    if super::grpc::is_grpc(doc) {
+        let (grpc, skipped) = super::grpc::convert(doc);
+        return (grpc.map(Converted::Grpc), skipped);
+    }
     if is_graphql(doc) {
         let (g, skipped) = convert_graphql(doc);
         return (g.map(Converted::GraphQl), skipped);
@@ -172,6 +177,19 @@ pub fn convert(doc: &BruDocument) -> (Option<Request>, Vec<SkipReason>) {
         }
     }
 
+    // A `.bru` file names its type in `meta`, and the parser never records an
+    // `unsupported_type` block for it, so check the meta too. Without this, a
+    // WebSocket file became an empty GET request.
+    if let Some(meta) = &doc.meta {
+        let t = meta.request_type.as_str();
+        let already = skipped
+            .iter()
+            .any(|s| matches!(s, SkipReason::UnsupportedRequestType(_)));
+        if !already && !matches!(t, "http" | "") {
+            skipped.push(SkipReason::UnsupportedRequestType(t.to_string()));
+        }
+    }
+
     // Unsupported type: bail entirely, no Request produced.
     if skipped
         .iter()
@@ -304,7 +322,7 @@ fn bru_body_to_domain(body: &BruBody) -> Body {
     }
 }
 
-fn bru_auth_to_domain(auth: &BruAuth) -> Auth {
+pub(crate) fn bru_auth_to_domain(auth: &BruAuth) -> Auth {
     match auth {
         BruAuth::Bearer { token } => Auth::Bearer {
             token: token.clone(),
@@ -518,6 +536,44 @@ mod tests {
         let doc = doc_with_method(BruMethod::Get, "https://example.com");
         let (req, _) = convert(&doc);
         assert_eq!(req.unwrap().seq, Some(1));
+    }
+
+    #[test]
+    fn a_bru_file_of_an_unsupported_type_is_skipped_instead_of_becoming_an_empty_get() {
+        // The `.bru` parser never records an `unsupported_type` block, only `meta`.
+        let doc = BruDocument {
+            meta: Some(BruMeta {
+                name: "Chat".into(),
+                request_type: "websocket".into(),
+                seq: None,
+            }),
+            ..BruDocument::default()
+        };
+        let (req, skipped) = convert(&doc);
+        assert!(req.is_none());
+        assert!(matches!(
+            skipped.as_slice(),
+            [SkipReason::UnsupportedRequestType(t)] if t == "websocket"
+        ));
+    }
+
+    #[test]
+    fn convert_item_routes_grpc_documents_to_the_grpc_converter() {
+        let doc = BruDocument {
+            meta: Some(BruMeta {
+                name: "G".into(),
+                request_type: "grpc".into(),
+                seq: None,
+            }),
+            grpc: Some(BruGrpc::default()),
+            ..BruDocument::default()
+        };
+        let (item, skipped) = convert_item(&doc);
+        assert!(skipped.is_empty());
+        assert!(matches!(item, Some(Converted::Grpc(_))));
+
+        let http = doc_with_method(BruMethod::Get, "https://example.com");
+        assert!(matches!(convert_item(&http).0, Some(Converted::Http(_))));
     }
 }
 

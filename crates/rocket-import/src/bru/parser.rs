@@ -47,6 +47,9 @@ fn dispatch_block(doc: &mut BruDocument, name: &str, subtype: Option<&str>, toke
         ("vars", None) => parse_vars(doc, tokens),
         ("vars", Some("secret")) => parse_secret_vars(doc, tokens),
         ("auth", Some(st)) => parse_auth(doc, st, tokens),
+        ("grpc", None) => parse_grpc(doc, tokens),
+        ("metadata", None) => parse_grpc_metadata(doc, tokens),
+        ("body", Some("grpc")) => parse_grpc_message(doc, tokens),
         ("body", Some(st)) => parse_body(doc, st, tokens),
         ("script", Some("pre-request")) => {
             doc.pre_request_script = extract_raw_text(tokens);
@@ -109,6 +112,79 @@ fn parse_method_block(doc: &mut BruDocument, tokens: &[Token]) {
     if let Some((_, url)) = map.iter().find(|(k, _)| k == "url") {
         doc.url = Some(url.clone());
     }
+}
+
+/// The `grpc {}` block, for example `url`, `method`, `methodType` and `protoPath`.
+fn parse_grpc(doc: &mut BruDocument, tokens: &[Token]) {
+    let map = kv_map(tokens);
+    let get = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| map.iter().find(|(key, _)| key == k))
+            .map(|(_, v)| v.clone())
+            .filter(|v| !v.is_empty())
+    };
+    doc.grpc = Some(BruGrpc {
+        url: get(&["url"]),
+        method: get(&["method"]),
+        method_type: get(&["methodType"]),
+        proto_path: get(&["protoPath", "protoFilePath"]),
+        auth_mode: get(&["auth"]),
+    });
+}
+
+/// The `metadata {}` block: one `name: value` per line, `~` marks a disabled entry.
+fn parse_grpc_metadata(doc: &mut BruDocument, tokens: &[Token]) {
+    for (key, value) in kv_map(tokens) {
+        let disabled = key.starts_with('~');
+        doc.grpc_metadata.push(BruKeyValue {
+            key: key.trim_start_matches('~').to_string(),
+            value,
+            disabled,
+        });
+    }
+}
+
+/// A `body:grpc {}` block holds `name: <title>` and `content: '''<json>'''`.
+fn parse_grpc_message(doc: &mut BruDocument, tokens: &[Token]) {
+    let raw = extract_raw_text(tokens).unwrap_or_default();
+    doc.grpc_messages.push(grpc_message_from(&raw));
+}
+
+fn grpc_message_from(raw: &str) -> BruGrpcMessage {
+    const QUOTES: &str = "'''";
+    let mut message = BruGrpcMessage::default();
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if let Some(title) = line.strip_prefix("name:") {
+            message.title = title.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("content:") {
+            let rest = rest.trim();
+            match rest.strip_prefix(QUOTES) {
+                // The whole value is on this line: content: '''{"a":1}'''
+                Some(inline) if inline.ends_with(QUOTES) && inline.len() >= QUOTES.len() => {
+                    message.content = inline[..inline.len() - QUOTES.len()].trim().to_string();
+                }
+                // A block that runs to the closing quotes.
+                Some(first) => {
+                    let mut body: Vec<&str> = Vec::new();
+                    if !first.trim().is_empty() {
+                        body.push(first);
+                    }
+                    i += 1;
+                    while i < lines.len() && lines[i].trim() != QUOTES {
+                        body.push(lines[i]);
+                        i += 1;
+                    }
+                    message.content = dedent(&body);
+                }
+                None => message.content = rest.to_string(),
+            }
+        }
+        i += 1;
+    }
+    message
 }
 
 fn parse_ws_block(doc: &mut BruDocument, tokens: &[Token]) {
@@ -444,6 +520,71 @@ mod tests {
   name: Echo
   type: ws
   seq: 2
+
+    const GRPC_BRU: &str = "meta {\n  name: Say Hello\n  type: grpc\n  seq: 2\n}\n\ngrpc {\n  url: localhost:50051\n  method: /demo.greeter.v1.Greeter/SayHello\n  body: grpc\n  auth: none\n  methodType: unary\n  protoPath: protos/greeter.proto\n}\n\nmetadata {\n  x-trace: abc\n  ~x-off: 1\n}\n\nbody:grpc {\n  name: message 1\n  content: '''\n    {\n      \"name\": \"ada\"\n    }\n  '''\n}\n";
+
+    #[test]
+    fn parses_a_grpc_request() {
+        let doc = parse(GRPC_BRU);
+        let meta = doc.meta.expect("meta");
+        assert_eq!(
+            (meta.name.as_str(), meta.request_type.as_str()),
+            ("Say Hello", "grpc")
+        );
+        assert_eq!(meta.seq, Some(2));
+        let grpc = doc.grpc.expect("grpc block");
+        assert_eq!(grpc.url.as_deref(), Some("localhost:50051"));
+        assert_eq!(
+            grpc.method.as_deref(),
+            Some("/demo.greeter.v1.Greeter/SayHello")
+        );
+        assert_eq!(grpc.method_type.as_deref(), Some("unary"));
+        assert_eq!(grpc.proto_path.as_deref(), Some("protos/greeter.proto"));
+        assert_eq!(grpc.auth_mode.as_deref(), Some("none"));
+        assert!(
+            doc.unknown_blocks.is_empty(),
+            "a gRPC file has no unknown blocks: {:?}",
+            doc.unknown_blocks
+        );
+        assert!(doc.body.is_none(), "a gRPC message is not an HTTP body");
+    }
+
+    #[test]
+    fn parses_grpc_metadata_with_disabled_entries() {
+        let doc = parse(GRPC_BRU);
+        assert_eq!(doc.grpc_metadata.len(), 2);
+        assert_eq!(doc.grpc_metadata[0].key, "x-trace");
+        assert!(!doc.grpc_metadata[0].disabled);
+        assert_eq!(doc.grpc_metadata[1].key, "x-off");
+        assert!(doc.grpc_metadata[1].disabled);
+    }
+
+    #[test]
+    fn parses_a_multi_line_grpc_message_and_keeps_its_indentation_shape() {
+        let doc = parse(GRPC_BRU);
+        assert_eq!(doc.grpc_messages.len(), 1);
+        assert_eq!(doc.grpc_messages[0].title, "message 1");
+        assert_eq!(doc.grpc_messages[0].content, "{\n  \"name\": \"ada\"\n}");
+    }
+
+    #[test]
+    fn parses_several_and_inline_grpc_messages_in_file_order() {
+        let doc = parse(
+            "grpc {\n  url: h:1\n}\n\nbody:grpc {\n  name: first\n  content: '''{\"a\": 1}'''\n}\n\nbody:grpc {\n  name: second\n  content: '''\n    {\"b\": 2}\n  '''\n}\n",
+        );
+        let titles: Vec<&str> = doc.grpc_messages.iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(titles, vec!["first", "second"]);
+        assert_eq!(doc.grpc_messages[0].content, "{\"a\": 1}");
+        assert_eq!(doc.grpc_messages[1].content, "{\"b\": 2}");
+    }
+
+    #[test]
+    fn grpc_auth_blocks_still_reach_the_auth_parser() {
+        let doc =
+            parse("grpc {\n  url: h:1\n  auth: bearer\n}\n\nauth:bearer {\n  token: {{tok}}\n}\n");
+        assert!(matches!(doc.auth, Some(BruAuth::Bearer { ref token }) if token == "{{tok}}"));
+        assert_eq!(doc.grpc.expect("grpc").auth_mode.as_deref(), Some("bearer"));
+    }
 }
 
 ws {
