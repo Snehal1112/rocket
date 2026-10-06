@@ -155,15 +155,17 @@ export function FolderNode({
     }
   };
 
-  // Opaque and typed GraphQL full-tree items never render here: the sidebar loads
-  // summaries, where GraphQL arrives as a `summary` with `kind: 'graphql'`. They must
-  // never keep an otherwise-empty folder visible under an active filter.
+  // Opaque, typed GraphQL/WebSocket/gRPC full-tree items and script files never render
+  // here: the sidebar loads summaries, where GraphQL arrives as a `summary` with
+  // `kind: 'graphql'`. They must never keep an otherwise-empty folder visible under an
+  // active filter.
   const filterableItems = items.filter(
     (item) =>
       item.type !== 'opaque' &&
       item.type !== 'graphql' &&
       item.type !== 'websocket' &&
-      item.type !== 'grpc',
+      item.type !== 'grpc' &&
+      item.type !== 'scriptFile',
   );
   const filteredItems = sortItemsFoldersFirst(
     filter

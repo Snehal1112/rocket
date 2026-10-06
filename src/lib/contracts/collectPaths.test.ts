@@ -89,4 +89,22 @@ describe('collectPaths', () => {
     collectPaths(items, '', folders, requests);
     expect(requests).toEqual([]);
   });
+
+  it('skips script files so they are never treated as request paths', () => {
+    const items: CollectionItem[] = [
+      { type: 'scriptFile', fileName: 'helpers.js', name: 'helpers' },
+      {
+        type: 'folder',
+        uid: 'f1',
+        name: 'lib',
+        dirName: 'lib',
+        items: [{ type: 'scriptFile', fileName: 'util.js', name: 'util' }],
+      },
+    ];
+    const folders: string[] = [];
+    const requests: string[] = [];
+    collectPaths(items, '', folders, requests);
+    expect(folders).toEqual(['lib']);
+    expect(requests).toEqual([]);
+  });
 });
