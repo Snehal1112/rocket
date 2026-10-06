@@ -499,3 +499,31 @@ describe('RequestNode websocket rows', () => {
     });
   });
 });
+
+describe('RequestNode grpc rows', () => {
+  const grpcSummary: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }> = {
+    type: 'summary',
+    uid: 'g-1',
+    name: 'Say Hello',
+    method: 'GRPC',
+    url: 'localhost:50051',
+    fileName: 'say-hello.yml',
+    kind: 'grpc',
+  };
+
+  beforeEach(() => {
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+    vi.mocked(tauriApi.getRequest).mockReset();
+    vi.mocked(toast.error).mockReset();
+  });
+
+  it('never parses a gRPC file as an HTTP request when it is clicked', async () => {
+    renderNode(grpcSummary, 'say-hello.yml');
+
+    await userEvent.setup().click(screen.getByText('Say Hello'));
+
+    expect(tauriApi.getRequest).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('gRPC'));
+  });
+});

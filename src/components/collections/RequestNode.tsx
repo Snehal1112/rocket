@@ -164,6 +164,10 @@ export function RequestNode({
   async function createTab(): Promise<RequestTab> {
     let request: RequestState;
     let tabId = uid;
+    if (kind === 'grpc') {
+      // The gRPC editor ships later. Reading the file as HTTP would only fail.
+      throw new Error('gRPC requests cannot be opened in this version yet');
+    }
     if (kind === 'graphql') {
       const loaded = await getGraphQlRequest(collectionName, path);
       // A file without a uid key has an empty summary uid; the loaded request carries a generated one.

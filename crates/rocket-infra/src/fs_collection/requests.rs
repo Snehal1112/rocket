@@ -9,7 +9,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::conversions::{
-    graphql_to_oc, grpc_to_oc, oc_graphql_to_domain, oc_grpc_to_domain, oc_http_request_to_request,
+    derived_grpc_uid, graphql_to_oc, grpc_to_oc, oc_graphql_to_domain, oc_grpc_to_domain, oc_http_request_to_request,
     oc_websocket_to_request, request_to_oc_http_request, websocket_to_oc_websocket,
     with_file_identity,
 };
@@ -351,13 +351,16 @@ pub(super) fn get_grpc_request(
     let oc: OcGrpcRequest = serde_yaml::from_str(&content)
         .map_err(|e| DomainError::Internal(format!("Failed to parse gRPC request: {e}")))?;
     let mut request = oc_grpc_to_domain(oc);
-    request.file_name = file_path
+    let file_name = file_path
         .file_name()
-        .map(|n| n.to_string_lossy().to_string());
-    // A uid-less file gets an in-memory uid only; the next save persists it.
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // A uid-less file gets a uid derived from its name, the same one the sidebar summary
+    // carries. It is in memory only; the next save persists it.
     if request.uid.is_empty() {
-        request.uid = generate_uid();
+        request.uid = derived_grpc_uid(&file_name);
     }
+    request.file_name = Some(file_name);
     Ok(request)
 }
 

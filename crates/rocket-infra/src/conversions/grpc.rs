@@ -96,6 +96,12 @@ pub fn oc_grpc_to_domain(oc: OcGrpcRequest) -> GrpcRequest {
     }
 }
 
+/// The uid a file with no `uid` key gets. Stable across loads, so a tab opened from the sidebar
+/// summary keeps its id when the full request is read.
+pub fn derived_grpc_uid(file_name: &str) -> String {
+    format!("grpc-{file_name}")
+}
+
 /// Convert a domain gRPC request back to the OC struct.
 pub fn grpc_to_oc(g: &GrpcRequest) -> OcGrpcRequest {
     // One untitled message is the plain string form. Anything else keeps its titles.

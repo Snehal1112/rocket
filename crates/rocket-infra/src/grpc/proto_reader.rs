@@ -62,10 +62,16 @@ impl ProtoLoader for FsProtoLoader {
                 proto_file.display()
             )));
         }
-        let parent = proto_file.parent().ok_or_else(|| {
+        // The file the user picked is trusted, so follow a symlink to its real location. Its
+        // real directory is the first include directory; imports stay confined to the include
+        // directories (see `FsProtoFileReader`).
+        let real = proto_file.canonicalize().map_err(|e| {
+            DomainError::InvalidInput(format!("could not resolve '{}': {e}", proto_file.display()))
+        })?;
+        let parent = real.parent().ok_or_else(|| {
             DomainError::InvalidInput(format!("'{}' has no directory", proto_file.display()))
         })?;
-        let entry = proto_file
+        let entry = real
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| {
@@ -160,5 +166,36 @@ mod tests {
             .expect("symlink");
         let reader = FsProtoFileReader::new(vec![inner]);
         assert!(reader.read("link.proto").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_entry_file_is_compiled_from_its_real_location() {
+        let dir = TempDir::new().expect("tempdir");
+        let real = dir.path().join("real");
+        let link_dir = dir.path().join("link");
+        let other = dir.path().join("other");
+        for d in [&real, &link_dir, &other] {
+            fs::create_dir_all(d).expect("mkdir");
+        }
+        fs::write(
+            real.join("greeter.proto"),
+            "syntax = \"proto3\";\npackage real.pkg;\nmessage M { string v = 1; }\n",
+        )
+        .expect("write");
+        fs::write(
+            other.join("greeter.proto"),
+            "syntax = \"proto3\";\npackage other.pkg;\nmessage M { string v = 1; }\n",
+        )
+        .expect("write");
+        std::os::unix::fs::symlink(real.join("greeter.proto"), link_dir.join("greeter.proto"))
+            .expect("symlink");
+
+        let registry = FsProtoLoader
+            .load(&link_dir.join("greeter.proto"), &[other])
+            .expect("load");
+
+        assert!(registry.pool().get_message_by_name("real.pkg.M").is_some());
+        assert!(registry.pool().get_message_by_name("other.pkg.M").is_none());
     }
 }

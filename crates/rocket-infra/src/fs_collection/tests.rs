@@ -2361,3 +2361,26 @@ fn rename_item_and_move_keep_working_for_a_grpc_file() {
     repo.delete_request("my-api", "users/get-user.yml").unwrap();
     assert!(!dir.path().join("my-api/users/get-user.yml").exists());
 }
+
+#[test]
+fn a_uid_less_grpc_file_has_one_stable_uid_everywhere() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create");
+    fs::write(dir.path().join("my-api/get-user.yml"), grpc_item_yml("")).expect("write");
+
+    let summary_uid = match &repo.get_summaries("my-api").expect("summaries").root.items[0] {
+        rocket_collection::CollectionItem::Summary(s) => s.uid.clone(),
+        other => panic!("expected a summary, got {other:?}"),
+    };
+    let loaded = repo.get_grpc_request("my-api", "get-user.yml").expect("get");
+    let again = repo.get_grpc_request("my-api", "get-user.yml").expect("get again");
+    let tree_uid = match &repo.get("my-api").expect("tree").root.items[0] {
+        rocket_collection::CollectionItem::Grpc(g) => g.uid.clone(),
+        other => panic!("expected a grpc item, got {other:?}"),
+    };
+
+    assert!(!summary_uid.is_empty(), "the sidebar needs an id to open the tab by");
+    assert_eq!(summary_uid, loaded.uid);
+    assert_eq!(loaded.uid, again.uid, "a read must give the same uid every time");
+    assert_eq!(loaded.uid, tree_uid);
+}

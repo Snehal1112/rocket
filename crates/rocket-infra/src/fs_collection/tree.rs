@@ -35,6 +35,9 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             }
             Ok(Some(CollectionItem::Grpc(mut grpc))) => {
                 grpc.file_name = Some(entry_name.to_string());
+                if grpc.uid.is_empty() {
+                    grpc.uid = crate::conversions::derived_grpc_uid(entry_name);
+                }
                 Ok(Some(CollectionItem::Grpc(grpc)))
             }
             Ok(other) => Ok(other),
@@ -284,7 +287,10 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
             })),
             // A gRPC file is small, so the summary reads the few fields the sidebar needs.
             Ok(OcItem::Grpc(grpc)) => Ok(Some(RequestSummary {
-                uid: grpc.uid.unwrap_or_default(),
+                uid: grpc
+                    .uid
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or_else(|| crate::conversions::derived_grpc_uid(entry_name)),
                 name: grpc.info.name,
                 method: "GRPC".to_string(),
                 url: grpc.grpc.url,
