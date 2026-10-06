@@ -38,7 +38,6 @@ pub(crate) fn fixture_registry() -> ProtoRegistry {
         .expect("fixture proto compiles")
 }
 
-#[allow(dead_code)] // V1 and V1Alpha are used by the reflection tests.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Reflection {
     None,

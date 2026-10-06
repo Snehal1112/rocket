@@ -134,6 +134,10 @@ impl GrpcExecutor for TonicGrpcExecutor {
             abort: task.abort_handle(),
         })
     }
+
+    async fn reflect(&self, call: &GrpcCall) -> DomainResult<ProtoRegistry> {
+        super::reflection::reflect(call).await
+    }
 }
 
 type UnaryParts = (

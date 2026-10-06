@@ -37,6 +37,8 @@ cargo check -p rocket-infra
 | `FsWorkspaceConfigRepo` | `WorkspaceConfigRepository` | Reads/writes per-workspace `workspace.yml` (collections list, description, environment settings). |
 | `ReqwestExecutor` | `HttpExecutor` | Executes HTTP requests via `reqwest`. Handles all auth schemes, body types, and AWS SigV4 signing. |
 | `TungsteniteWebSocketClient` | `WebSocketClient` | `tokio-tungstenite` (native-tls) client in `websocket_client.rs`. `connect` handshakes, then a pump task owns the socket and the caller uses the channels in `WebSocketHandle`. Errors name header names, never values or the URL. `verify_ssl: false` builds a permissive native-tls connector, otherwise the OS store is used like reqwest. |
+| `TonicGrpcExecutor` | `rocket_grpc::GrpcExecutor` | Unary calls, streaming sessions and server reflection over tonic with rustls and the OS root certificates. Messages are `DynamicMessage`s, so there is no code generation. |
+| `FsProtoFileReader`, `FsProtoLoader` | `ProtoFileReader`, `ProtoLoader` | Read `.proto` files. Import paths are confined to their include directories. |
 | `NotifyFileWatcher` | — | Wraps the `notify` crate; publishes `DomainEvent::FileChanged` via `EventPublisher` when collection files change. |
 
 ## Internal modules
@@ -72,6 +74,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 **`OcAuth` serde design.** `OcAuth` is `#[serde(untagged)]`: the string `"inherit"` deserializes to `OcAuth::Inherit`; an object with a `type` field deserializes to `OcAuth::Typed`. New auth variants must go inside `OcAuthTyped` (tagged by `type`), not as new `OcAuth` variants.
 
 **`OcItem` variant ordering.** The `OcItem` enum uses `#[serde(untagged)]`, so serde tries variants top-to-bottom. More specific types (those with a unique required field) must come before less specific ones — `Http` before `Folder`, etc. Changing variant order breaks deserialization of existing YAML files.
+
+**gRPC transport (`grpc/`).** `Grpc::ready()` must run before every call, or the call panics (`send_item called without first calling poll_reserve`). `Request::set_timeout` only writes the `grpc-timeout` header, so the executor wraps the call in `tokio::time::timeout` and reports `DEADLINE_EXCEEDED` itself. tonic accepts bytes above `0x7e` in an ASCII metadata value and gRPC does not, so `apply_metadata` checks for printable ASCII. `Grpc::unary` returns no trailers, so unary calls go through the streaming API (one request, one reply) and read `Streaming::trailers()` after the last message. A reflection server may answer a symbol with only the file that defines it, so `reflection.rs` keeps asking for missing imports by file name; it tries v1 first and falls back to v1alpha on `UNIMPLEMENTED`. Do not log message bodies, metadata values or credentials. The tests run an in-process server (`test_server.rs`) that serves `test-fixtures/grpc/greeter.proto` through the same dynamic codec.
 
 ## Testing
 

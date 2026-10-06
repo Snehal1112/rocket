@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use rocket_app::{GrpcExecuteInput, GrpcService, RequestExecutionService};
 use rocket_collection::GrpcRequest;
-use rocket_grpc::GrpcUnaryResponse;
+use rocket_grpc::{GrpcServiceInfo, GrpcUnaryResponse};
 use rocket_shared::error::DomainError;
 use serde::Deserialize;
 use tauri::State;
@@ -109,6 +109,19 @@ pub fn grpc_cancel_session(
     svc: State<'_, GrpcService>,
 ) -> Result<(), DomainError> {
     svc.cancel(&session_id)
+}
+
+/// Lists the services and methods of the request's `.proto` file, or of the live server
+/// through reflection when the request has no file. `refresh` skips the descriptor cache.
+#[tauri::command]
+pub async fn grpc_list_services(
+    input: GrpcExecuteDto,
+    refresh: bool,
+    svc: State<'_, GrpcService>,
+    exec: State<'_, RequestExecutionService>,
+) -> Result<Vec<GrpcServiceInfo>, DomainError> {
+    let input = resolve_input(input, &exec).await?;
+    svc.list_services(input, refresh).await
 }
 
 #[cfg(test)]

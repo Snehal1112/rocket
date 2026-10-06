@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use std::time::Instant;
+use std::time::{Duration, SystemTime};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use rocket_collection::GrpcMethodType;
 use rocket_collection::{CollectionRepository, GrpcRequest};
 use rocket_environment::resolve;
+use rocket_grpc::GrpcServiceInfo;
 use rocket_grpc::{json_to_message, GrpcStreamEvent, MessageDescriptor};
 use rocket_grpc::{GrpcCall, GrpcExecutor, GrpcUnaryResponse, ProtoLoader, ProtoRegistry};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -17,6 +18,9 @@ use rocket_shared::grpc::GrpcMetadataPair;
 use rocket_shared::types::Auth;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
+
+/// Descriptor caches stop growing at this many entries and start over.
+const MAX_CACHED_REGISTRIES: usize = 32;
 
 /// What the UI sends for one call. `request` is the editor state, which may be unsaved.
 #[derive(Debug, Clone)]
@@ -63,6 +67,7 @@ pub struct GrpcService {
     workspace_path: Arc<Mutex<PathBuf>>,
     events: Arc<dyn EventPublisher>,
     sessions: Sessions,
+    registries: Mutex<HashMap<String, ProtoRegistry>>,
 }
 
 impl GrpcService {
@@ -80,6 +85,7 @@ impl GrpcService {
             workspace_path,
             events,
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            registries: Mutex::new(HashMap::new()),
         }
     }
 
@@ -88,8 +94,19 @@ impl GrpcService {
         let input = input.with_request_variables();
         let call = self.prepare_call(&input, true)?;
         let message = self.prepare_message(&input)?;
-        let registry = self.registry_for(&input).await?;
+        let registry = self.registry_for(&input, false).await?;
         self.executor.unary(&call, &registry, &message).await
+    }
+
+    /// Lists the services and methods of the request's `.proto` file, or, when it
+    /// has none, of the live server through reflection. `refresh` skips the cache.
+    pub async fn list_services(
+        &self,
+        input: GrpcExecuteInput,
+        refresh: bool,
+    ) -> DomainResult<Vec<GrpcServiceInfo>> {
+        let input = input.with_request_variables();
+        Ok(self.registry_for(&input, refresh).await?.services())
     }
 
     /// Opens a client-streaming, server-streaming or bidirectional call and
@@ -98,7 +115,7 @@ impl GrpcService {
     pub async fn start_session(&self, input: GrpcExecuteInput) -> DomainResult<String> {
         let input = input.with_request_variables();
         let call = self.prepare_call(&input, true)?;
-        let registry = self.registry_for(&input).await?;
+        let registry = self.registry_for(&input, false).await?;
         let method = registry.method(&call.full_method)?;
         let method_type = GrpcMethodType::from_streaming_flags(
             method.is_client_streaming(),
@@ -315,24 +332,86 @@ impl GrpcService {
         }
     }
 
-    /// Finds the descriptors from the request's `.proto` file.
-    async fn registry_for(&self, input: &GrpcExecuteInput) -> DomainResult<ProtoRegistry> {
-        let raw = input
+    /// Finds the descriptors: from the `.proto` file when the request has one,
+    /// else from server reflection.
+    async fn registry_for(
+        &self,
+        input: &GrpcExecuteInput,
+        refresh: bool,
+    ) -> DomainResult<ProtoRegistry> {
+        let raw_path = input
             .request
             .proto_file_path
             .as_deref()
             .map(str::trim)
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| {
-                DomainError::InvalidInput("set a .proto file for this request".into())
-            })?;
+            .filter(|p| !p.is_empty());
+        match raw_path {
+            Some(raw) => self.registry_from_file(input, raw, refresh).await,
+            None => self.registry_from_reflection(input, refresh).await,
+        }
+    }
+
+    async fn registry_from_file(
+        &self,
+        input: &GrpcExecuteInput,
+        raw: &str,
+        refresh: bool,
+    ) -> DomainResult<ProtoRegistry> {
         let resolved = resolve_text(raw, &input.variables, "the proto file path")?;
         let (path, include_dirs) =
             self.resolve_proto_path(input.collection.as_deref(), &resolved)?;
+        let modified = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos());
+        let key = modified.map(|nanos| format!("proto:{}:{nanos}", path.display()));
+        if let (Some(key), false) = (&key, refresh) {
+            if let Some(hit) = lock(&self.registries).get(key) {
+                return Ok(hit.clone());
+            }
+        }
         let loader = Arc::clone(&self.proto_loader);
-        tokio::task::spawn_blocking(move || loader.load(&path, &include_dirs))
+        let registry = tokio::task::spawn_blocking(move || loader.load(&path, &include_dirs))
             .await
-            .map_err(|e| DomainError::Internal(format!("proto loading stopped: {e}")))?
+            .map_err(|e| DomainError::Internal(format!("proto loading stopped: {e}")))??;
+        if let Some(key) = key {
+            self.cache(key, registry.clone());
+        }
+        Ok(registry)
+    }
+
+    async fn registry_from_reflection(
+        &self,
+        input: &GrpcExecuteInput,
+        refresh: bool,
+    ) -> DomainResult<ProtoRegistry> {
+        let call = self.prepare_call(input, false)?;
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            for pair in &call.metadata {
+                pair.name.hash(&mut hasher);
+                pair.value.hash(&mut hasher);
+            }
+            format!("reflect:{}:{:x}", call.url, hasher.finish())
+        };
+        if !refresh {
+            if let Some(hit) = lock(&self.registries).get(&key) {
+                return Ok(hit.clone());
+            }
+        }
+        let registry = self.executor.reflect(&call).await?;
+        self.cache(key, registry.clone());
+        Ok(registry)
+    }
+
+    fn cache(&self, key: String, registry: ProtoRegistry) {
+        let mut cache = lock(&self.registries);
+        if cache.len() >= MAX_CACHED_REGISTRIES {
+            cache.clear();
+        }
+        cache.insert(key, registry);
     }
 
     /// A relative path is inside the collection and may not climb out of it. An
@@ -486,7 +565,9 @@ fn lock_path(m: &Mutex<PathBuf>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::time::SystemTime;
 
     use async_trait::async_trait;
     use rocket_collection::{Collection, GrpcMessage, GrpcMetadataEntry};
@@ -537,6 +618,7 @@ message Rep { string message = 1; }
         unary: Mutex<Vec<(GrpcCall, String)>>,
         streams: Mutex<Vec<(GrpcCall, Option<String>)>>,
         next_stream: Mutex<Option<GrpcStreamHandle>>,
+        reflects: AtomicUsize,
     }
 
     #[async_trait]
@@ -567,6 +649,11 @@ message Rep { string message = 1; }
             lock(&self.next_stream)
                 .take()
                 .ok_or_else(|| DomainError::Internal("no stream prepared".into()))
+        }
+
+        async fn reflect(&self, _call: &GrpcCall) -> DomainResult<ProtoRegistry> {
+            self.reflects.fetch_add(1, Ordering::SeqCst);
+            Ok(registry())
         }
     }
 
@@ -1134,5 +1221,92 @@ message Rep { string message = 1; }
             .await
             .expect_err("server stream takes no messages");
         assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    // ---- descriptors -------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_request_without_a_proto_file_uses_reflection_and_caches_the_result() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = None;
+        h.svc.call_unary(input(r.clone())).await.expect("first");
+        h.svc.call_unary(input(r.clone())).await.expect("second");
+        assert_eq!(
+            h.exec.reflects.load(Ordering::SeqCst),
+            1,
+            "the second call reuses the descriptors"
+        );
+        assert!(lock(&h.loader.loads).is_empty());
+
+        let services = h.svc.list_services(input(r), true).await.expect("refresh");
+        assert_eq!(
+            h.exec.reflects.load(Ordering::SeqCst),
+            2,
+            "refresh asks the server again"
+        );
+        assert_eq!(services[0].name, "demo.v1.Greeter");
+    }
+
+    #[tokio::test]
+    async fn different_credentials_do_not_share_reflected_descriptors() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = None;
+        r.auth = Auth::Bearer {
+            token: "one".into(),
+        };
+        h.svc.call_unary(input(r.clone())).await.expect("first");
+        r.auth = Auth::Bearer {
+            token: "two".into(),
+        };
+        h.svc.call_unary(input(r)).await.expect("second");
+        assert_eq!(h.exec.reflects.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_changed_proto_file_is_compiled_again_but_an_unchanged_one_is_not() {
+        let h = harness(None);
+        h.svc
+            .call_unary(input(request(SAY_HELLO)))
+            .await
+            .expect("first");
+        h.svc
+            .call_unary(input(request(SAY_HELLO)))
+            .await
+            .expect("second");
+        assert_eq!(
+            lock(&h.loader.loads).len(),
+            1,
+            "an unchanged file is compiled once"
+        );
+
+        let file = h.dir.path().join("collections/api/protos/greeter.proto");
+        let handle = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .expect("open");
+        handle
+            .set_modified(SystemTime::now() + Duration::from_secs(60))
+            .expect("touch");
+        h.svc
+            .call_unary(input(request(SAY_HELLO)))
+            .await
+            .expect("third");
+        assert_eq!(
+            lock(&h.loader.loads).len(),
+            2,
+            "a new modification time forces a new compile"
+        );
+
+        h.svc
+            .list_services(input(request(SAY_HELLO)), true)
+            .await
+            .expect("refresh");
+        assert_eq!(
+            lock(&h.loader.loads).len(),
+            3,
+            "refresh always compiles again"
+        );
     }
 }

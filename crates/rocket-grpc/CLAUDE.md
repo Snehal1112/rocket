@@ -17,7 +17,7 @@ cargo test -j4 -p rocket-grpc <test_name>
 |---|---|
 | `registry.rs` | `ProtoRegistry` (descriptor pool, services, methods), `ProtoFileReader`, `ProtoLoader`, the `GrpcServiceInfo` and `GrpcMethodInfo` view types. |
 | `codec.rs` | `json_to_message`, `message_to_json`, `empty_message_json`. |
-| `call.rs` | Plan 12: `GrpcCall`, `GrpcExecutor`, the status and stream event types. |
+| `call.rs` | `GrpcCall`, `GrpcExecutor` (`unary`, `open_stream` and `reflect`), `GrpcStatus`, `GrpcUnaryResponse`, `GrpcStreamEvent` and `GrpcStreamHandle`. |
 
 ## Rules
 

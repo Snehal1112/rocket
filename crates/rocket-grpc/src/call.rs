@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::grpc::GrpcMetadataPair;
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -129,6 +129,13 @@ pub trait GrpcExecutor: Send + Sync {
         registry: &ProtoRegistry,
         initial_json: Option<String>,
     ) -> DomainResult<GrpcStreamHandle>;
+
+    /// Reads the descriptors a live server publishes through server reflection.
+    async fn reflect(&self, _call: &GrpcCall) -> DomainResult<ProtoRegistry> {
+        Err(DomainError::InvalidInput(
+            "this executor does not support server reflection".into(),
+        ))
+    }
 }
 
 #[cfg(test)]

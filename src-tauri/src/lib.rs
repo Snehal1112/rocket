@@ -720,6 +720,7 @@ pub fn run() {
             commands::grpc::grpc_send_message,
             commands::grpc::grpc_end_requests,
             commands::grpc::grpc_cancel_session,
+            commands::grpc::grpc_list_services,
             commands::git::git_fetch_v2,
             commands::git::git_branches_v2,
             commands::git::git_switch_branch_v2,
