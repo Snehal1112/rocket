@@ -197,13 +197,7 @@ where
     for entry in entries {
         let path = entry.path();
         let entry_name = entry.file_name().to_string_lossy().to_string();
-        if entry_name.starts_with('.')
-            || entry_name == "environments"
-            || entry_name == "node_modules"
-        {
-            continue;
-        }
-        if is_collection_root && entry_name == "flows" {
+        if is_hidden_entry(&entry_name, is_collection_root) {
             continue;
         }
         if path.is_dir() {
@@ -236,6 +230,15 @@ where
     }
 
     Ok(folder)
+}
+
+/// True for names the tree never shows. Script file operations use it too, so a
+/// script is never created or opened where the tree would not list it.
+pub(super) fn is_hidden_entry(name: &str, at_collection_root: bool) -> bool {
+    name.starts_with('.')
+        || name == "environments"
+        || name == "node_modules"
+        || (at_collection_root && name == "flows")
 }
 
 /// True for a `.js` file. Dot-files never reach here because the skip above drops them.

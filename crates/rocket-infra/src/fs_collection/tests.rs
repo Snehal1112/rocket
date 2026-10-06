@@ -2684,3 +2684,89 @@ fn script_rename_and_delete() {
         .is_err());
     assert!(dir.path().join("col/opencollection.yml").exists());
 }
+
+#[test]
+fn script_create_returns_a_normalised_relative_path() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_folder("col", "lib").expect("lib");
+    repo.create_folder("col", "b").expect("b");
+    repo.create_folder("col", "a").expect("a");
+
+    assert_eq!(
+        repo.create_script_file("col", "./lib", "one").expect("dot"),
+        "lib/one.js"
+    );
+    assert_eq!(
+        repo.create_script_file("col", "a/../b", "two")
+            .expect("dotdot"),
+        "b/two.js"
+    );
+    assert_eq!(
+        repo.create_script_file("col", "lib/", "three")
+            .expect("slash"),
+        "lib/three.js"
+    );
+    let abs = dir.path().join("col/lib");
+    if let Ok(rel) = repo.create_script_file("col", &abs.to_string_lossy(), "four") {
+        assert_eq!(rel, "lib/four.js");
+    }
+}
+
+#[test]
+fn script_ops_reject_folders_the_tree_hides() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let hidden_dirs = [
+        ".git",
+        "node_modules",
+        "environments",
+        "flows",
+        "lib/.cache",
+    ];
+    for hidden in hidden_dirs {
+        fs::create_dir_all(dir.path().join("col").join(hidden)).expect("dir");
+    }
+    for hidden in hidden_dirs {
+        assert!(
+            repo.create_script_file("col", hidden, "x").is_err(),
+            "create in {hidden}"
+        );
+        let rel = format!("{hidden}/x.js");
+        fs::write(dir.path().join("col").join(&rel), "data").expect("fixture");
+        assert!(repo.read_script_file("col", &rel).is_err(), "read {rel}");
+        assert!(
+            repo.save_script_file("col", &rel, "y").is_err(),
+            "save {rel}"
+        );
+        assert!(
+            repo.rename_script_file("col", &rel, "z").is_err(),
+            "rename {rel}"
+        );
+        assert!(
+            repo.delete_script_file("col", &rel).is_err(),
+            "delete {rel}"
+        );
+        assert_eq!(text_of(&dir, &format!("col/{rel}")), "data");
+    }
+    // A nested `flows` folder is visible in the tree, so scripts there are allowed.
+    fs::create_dir_all(dir.path().join("col/lib/flows")).expect("nested flows");
+    assert_eq!(
+        repo.create_script_file("col", "lib/flows", "ok")
+            .expect("nested flows"),
+        "lib/flows/ok.js"
+    );
+}
+
+#[test]
+fn script_rename_returns_a_normalised_path() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_folder("col", "lib").expect("lib");
+    repo.create_script_file("col", "lib", "a").expect("a");
+    assert_eq!(
+        repo.rename_script_file("col", "./lib/../lib/a.js", "b")
+            .expect("rename"),
+        "lib/b.js"
+    );
+}

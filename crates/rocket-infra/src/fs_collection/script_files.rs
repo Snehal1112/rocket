@@ -5,14 +5,44 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rocket_collection::{normalize_script_name, Collection, SCRIPT_TEMPLATE};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 
+use super::tree::is_hidden_entry;
 use super::FsCollectionRepo;
+
+/// Returns the clean, `/`-separated path of `full` under `collection_dir`.
+/// Fails when any segment is one the folder tree hides.
+fn visible_relative(collection_dir: &Path, full: &Path) -> DomainResult<String> {
+    let canonical_base = collection_dir
+        .canonicalize()
+        .map_err(|_| DomainError::NotFound("Collection not found".into()))?;
+    let rel = full
+        .strip_prefix(&canonical_base)
+        .map_err(|_| DomainError::InvalidInput("Path traversal detected".into()))?;
+    let mut parts: Vec<String> = Vec::new();
+    for component in rel.components() {
+        match component {
+            Component::Normal(seg) => {
+                let seg = seg.to_string_lossy().to_string();
+                if is_hidden_entry(&seg, parts.is_empty()) {
+                    return Err(DomainError::InvalidInput(format!(
+                        "'{seg}' is not a folder that holds script files"
+                    )));
+                }
+                parts.push(seg);
+            }
+            _ => {
+                return Err(DomainError::InvalidInput("Invalid script path".into()));
+            }
+        }
+    }
+    Ok(parts.join("/"))
+}
 
 /// Resolves an existing script file and checks it is a regular, non-symlink `.js` file.
 fn resolve_existing(
@@ -37,6 +67,7 @@ fn resolve_existing(
             "'{path}' is not a regular script file"
         )));
     }
+    visible_relative(&collection_dir, &full)?;
     Ok((collection_dir, full))
 }
 
@@ -64,6 +95,8 @@ pub(super) fn create_script_file(
             "Folder '{folder_path}' not found"
         )));
     }
+    // The canonical folder gives a clean relative path, whatever form the input had.
+    let folder_rel = visible_relative(&collection_dir, &folder)?;
     let mutex = repo.collection_mutex(collection);
     let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
     let target = folder.join(&file_name);
@@ -81,7 +114,7 @@ pub(super) fn create_script_file(
             }
         })?;
     file.write_all(template.as_bytes())?;
-    Ok(relative_path(folder_path, &file_name))
+    Ok(relative_path(&folder_rel, &file_name))
 }
 
 pub(super) fn read_script_file(
@@ -105,9 +138,10 @@ pub(super) fn save_script_file(
     path: &str,
     content: &str,
 ) -> DomainResult<()> {
-    let (_, full) = resolve_existing(repo, collection, path)?;
+    // Lock before resolving so the checked file cannot change underneath us.
     let mutex = repo.collection_mutex(collection);
     let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    let (_, full) = resolve_existing(repo, collection, path)?;
     atomic_write(&full, content.as_bytes())?;
     Ok(())
 }
@@ -118,25 +152,27 @@ pub(super) fn rename_script_file(
     path: &str,
     new_name: &str,
 ) -> DomainResult<String> {
-    let (_, full) = resolve_existing(repo, collection, path)?;
     let new_file_name = normalize_script_name(new_name)?;
+    // Lock before resolving so the checked file cannot change underneath us.
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    let (collection_dir, full) = resolve_existing(repo, collection, path)?;
     let parent = full
         .parent()
         .ok_or_else(|| DomainError::InvalidInput("Script has no parent folder".into()))?;
     let target = parent.join(&new_file_name);
-    let mutex = repo.collection_mutex(collection);
-    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
     if target.exists() {
         return Err(DomainError::InvalidInput(format!(
             "'{new_file_name}' already exists"
         )));
     }
+    let folder_rel = if parent == collection_dir.canonicalize()? {
+        String::new()
+    } else {
+        visible_relative(&collection_dir, parent)?
+    };
     fs::rename(&full, &target)?;
-    let folder_part = Path::new(path)
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    Ok(relative_path(&folder_part, &new_file_name))
+    Ok(relative_path(&folder_rel, &new_file_name))
 }
 
 pub(super) fn delete_script_file(
@@ -144,9 +180,10 @@ pub(super) fn delete_script_file(
     collection: &str,
     path: &str,
 ) -> DomainResult<()> {
-    let (_, full) = resolve_existing(repo, collection, path)?;
+    // Lock before resolving so the checked file cannot change underneath us.
     let mutex = repo.collection_mutex(collection);
     let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    let (_, full) = resolve_existing(repo, collection, path)?;
     fs::remove_file(&full)?;
     Ok(())
 }
