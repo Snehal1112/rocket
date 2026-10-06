@@ -520,71 +520,6 @@ mod tests {
   name: Echo
   type: ws
   seq: 2
-
-    const GRPC_BRU: &str = "meta {\n  name: Say Hello\n  type: grpc\n  seq: 2\n}\n\ngrpc {\n  url: localhost:50051\n  method: /demo.greeter.v1.Greeter/SayHello\n  body: grpc\n  auth: none\n  methodType: unary\n  protoPath: protos/greeter.proto\n}\n\nmetadata {\n  x-trace: abc\n  ~x-off: 1\n}\n\nbody:grpc {\n  name: message 1\n  content: '''\n    {\n      \"name\": \"ada\"\n    }\n  '''\n}\n";
-
-    #[test]
-    fn parses_a_grpc_request() {
-        let doc = parse(GRPC_BRU);
-        let meta = doc.meta.expect("meta");
-        assert_eq!(
-            (meta.name.as_str(), meta.request_type.as_str()),
-            ("Say Hello", "grpc")
-        );
-        assert_eq!(meta.seq, Some(2));
-        let grpc = doc.grpc.expect("grpc block");
-        assert_eq!(grpc.url.as_deref(), Some("localhost:50051"));
-        assert_eq!(
-            grpc.method.as_deref(),
-            Some("/demo.greeter.v1.Greeter/SayHello")
-        );
-        assert_eq!(grpc.method_type.as_deref(), Some("unary"));
-        assert_eq!(grpc.proto_path.as_deref(), Some("protos/greeter.proto"));
-        assert_eq!(grpc.auth_mode.as_deref(), Some("none"));
-        assert!(
-            doc.unknown_blocks.is_empty(),
-            "a gRPC file has no unknown blocks: {:?}",
-            doc.unknown_blocks
-        );
-        assert!(doc.body.is_none(), "a gRPC message is not an HTTP body");
-    }
-
-    #[test]
-    fn parses_grpc_metadata_with_disabled_entries() {
-        let doc = parse(GRPC_BRU);
-        assert_eq!(doc.grpc_metadata.len(), 2);
-        assert_eq!(doc.grpc_metadata[0].key, "x-trace");
-        assert!(!doc.grpc_metadata[0].disabled);
-        assert_eq!(doc.grpc_metadata[1].key, "x-off");
-        assert!(doc.grpc_metadata[1].disabled);
-    }
-
-    #[test]
-    fn parses_a_multi_line_grpc_message_and_keeps_its_indentation_shape() {
-        let doc = parse(GRPC_BRU);
-        assert_eq!(doc.grpc_messages.len(), 1);
-        assert_eq!(doc.grpc_messages[0].title, "message 1");
-        assert_eq!(doc.grpc_messages[0].content, "{\n  \"name\": \"ada\"\n}");
-    }
-
-    #[test]
-    fn parses_several_and_inline_grpc_messages_in_file_order() {
-        let doc = parse(
-            "grpc {\n  url: h:1\n}\n\nbody:grpc {\n  name: first\n  content: '''{\"a\": 1}'''\n}\n\nbody:grpc {\n  name: second\n  content: '''\n    {\"b\": 2}\n  '''\n}\n",
-        );
-        let titles: Vec<&str> = doc.grpc_messages.iter().map(|m| m.title.as_str()).collect();
-        assert_eq!(titles, vec!["first", "second"]);
-        assert_eq!(doc.grpc_messages[0].content, "{\"a\": 1}");
-        assert_eq!(doc.grpc_messages[1].content, "{\"b\": 2}");
-    }
-
-    #[test]
-    fn grpc_auth_blocks_still_reach_the_auth_parser() {
-        let doc =
-            parse("grpc {\n  url: h:1\n  auth: bearer\n}\n\nauth:bearer {\n  token: {{tok}}\n}\n");
-        assert!(matches!(doc.auth, Some(BruAuth::Bearer { ref token }) if token == "{{tok}}"));
-        assert_eq!(doc.grpc.expect("grpc").auth_mode.as_deref(), Some("bearer"));
-    }
 }
 
 ws {
@@ -675,5 +610,70 @@ body:ws {
         assert_eq!(doc.ws_messages[1].content, "{\"open\":\"{\"}");
         assert_eq!(doc.ws_messages[2].content, "ok");
         assert_eq!(doc.headers.len(), 1, "blocks after body:ws must still parse");
+    }
+
+    const GRPC_BRU: &str = "meta {\n  name: Say Hello\n  type: grpc\n  seq: 2\n}\n\ngrpc {\n  url: localhost:50051\n  method: /demo.greeter.v1.Greeter/SayHello\n  body: grpc\n  auth: none\n  methodType: unary\n  protoPath: protos/greeter.proto\n}\n\nmetadata {\n  x-trace: abc\n  ~x-off: 1\n}\n\nbody:grpc {\n  name: message 1\n  content: '''\n    {\n      \"name\": \"ada\"\n    }\n  '''\n}\n";
+
+    #[test]
+    fn parses_a_grpc_request() {
+        let doc = parse(GRPC_BRU);
+        let meta = doc.meta.expect("meta");
+        assert_eq!(
+            (meta.name.as_str(), meta.request_type.as_str()),
+            ("Say Hello", "grpc")
+        );
+        assert_eq!(meta.seq, Some(2));
+        let grpc = doc.grpc.expect("grpc block");
+        assert_eq!(grpc.url.as_deref(), Some("localhost:50051"));
+        assert_eq!(
+            grpc.method.as_deref(),
+            Some("/demo.greeter.v1.Greeter/SayHello")
+        );
+        assert_eq!(grpc.method_type.as_deref(), Some("unary"));
+        assert_eq!(grpc.proto_path.as_deref(), Some("protos/greeter.proto"));
+        assert_eq!(grpc.auth_mode.as_deref(), Some("none"));
+        assert!(
+            doc.unknown_blocks.is_empty(),
+            "a gRPC file has no unknown blocks: {:?}",
+            doc.unknown_blocks
+        );
+        assert!(doc.body.is_none(), "a gRPC message is not an HTTP body");
+    }
+
+    #[test]
+    fn parses_grpc_metadata_with_disabled_entries() {
+        let doc = parse(GRPC_BRU);
+        assert_eq!(doc.grpc_metadata.len(), 2);
+        assert_eq!(doc.grpc_metadata[0].key, "x-trace");
+        assert!(!doc.grpc_metadata[0].disabled);
+        assert_eq!(doc.grpc_metadata[1].key, "x-off");
+        assert!(doc.grpc_metadata[1].disabled);
+    }
+
+    #[test]
+    fn parses_a_multi_line_grpc_message_and_keeps_its_indentation_shape() {
+        let doc = parse(GRPC_BRU);
+        assert_eq!(doc.grpc_messages.len(), 1);
+        assert_eq!(doc.grpc_messages[0].title, "message 1");
+        assert_eq!(doc.grpc_messages[0].content, "{\n  \"name\": \"ada\"\n}");
+    }
+
+    #[test]
+    fn parses_several_and_inline_grpc_messages_in_file_order() {
+        let doc = parse(
+            "grpc {\n  url: h:1\n}\n\nbody:grpc {\n  name: first\n  content: '''{\"a\": 1}'''\n}\n\nbody:grpc {\n  name: second\n  content: '''\n    {\"b\": 2}\n  '''\n}\n",
+        );
+        let titles: Vec<&str> = doc.grpc_messages.iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(titles, vec!["first", "second"]);
+        assert_eq!(doc.grpc_messages[0].content, "{\"a\": 1}");
+        assert_eq!(doc.grpc_messages[1].content, "{\"b\": 2}");
+    }
+
+    #[test]
+    fn grpc_auth_blocks_still_reach_the_auth_parser() {
+        let doc =
+            parse("grpc {\n  url: h:1\n  auth: bearer\n}\n\nauth:bearer {\n  token: {{tok}}\n}\n");
+        assert!(matches!(doc.auth, Some(BruAuth::Bearer { ref token }) if token == "{{tok}}"));
+        assert_eq!(doc.grpc.expect("grpc").auth_mode.as_deref(), Some("bearer"));
     }
 }

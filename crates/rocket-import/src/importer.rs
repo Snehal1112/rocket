@@ -339,10 +339,7 @@ impl ImportService {
                     .join("collections")
                     .join(collection_name)
                     .join(rel);
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::copy(&p, &dest)?;
+                copy_proto_file(&p, &dest, rel, report);
                 continue;
             }
             if !matches!(ext, "bru" | "yml" | "yaml") {
@@ -823,10 +820,7 @@ impl ImportService {
             // gRPC requests refer to `.proto` files by path, so copy them as well.
             // They are not requests and are not counted.
             if ext == "proto" {
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::copy(&src_path, &dest_path)?;
+                copy_proto_file(&src_path, &dest_path, rel, report);
                 continue;
             }
             if !matches!(ext, "yml" | "yaml") {
@@ -855,6 +849,36 @@ impl ImportService {
             }
         }
         Ok(())
+    }
+}
+
+/// Copies a `.proto` file next to the requests. A symlink is never followed, because a
+/// cloned collection could point one at a private file, and a copy that fails is reported
+/// instead of aborting the whole import.
+fn copy_proto_file(src: &Path, dest: &Path, rel: &Path, report: &mut ImportReport) {
+    let mut skip = |why: String| {
+        report.skipped.push(SkippedItem {
+            path: rel.to_string_lossy().to_string(),
+            reason: SkipReason::ParseError(why),
+        });
+    };
+    match std::fs::symlink_metadata(src) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            skip("a symlinked .proto file is not copied".into());
+        }
+        Ok(meta) if meta.is_file() => {
+            if let Some(parent) = dest.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    skip(format!("could not copy the .proto file: {e}"));
+                    return;
+                }
+            }
+            if let Err(e) = std::fs::copy(src, dest) {
+                skip(format!("could not copy the .proto file: {e}"));
+            }
+        }
+        Ok(_) => {}
+        Err(e) => skip(format!("could not read the .proto file: {e}")),
     }
 }
 

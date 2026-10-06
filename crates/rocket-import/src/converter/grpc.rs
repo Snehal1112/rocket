@@ -1,4 +1,4 @@
-use rocket_collection::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest};
+use rocket_collection::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript};
 use rocket_shared::types::Auth;
 
 use crate::bru::ast::*;
@@ -69,6 +69,18 @@ pub fn convert(doc: &BruDocument) -> (Option<GrpcRequest>, Vec<SkipReason>) {
         if let Some(auth) = &doc.auth {
             g.auth = bru_auth_to_domain(auth);
         }
+    }
+    if let Some(code) = &doc.pre_request_script {
+        g.scripts.push(GrpcScript {
+            script_type: "before-request".into(),
+            code: code.clone(),
+        });
+    }
+    if let Some(code) = &doc.post_response_script {
+        g.scripts.push(GrpcScript {
+            script_type: "after-response".into(),
+            code: code.clone(),
+        });
     }
     (Some(g), skipped)
 }
@@ -218,5 +230,22 @@ mod tests {
         };
         assert!(is_grpc(&doc));
         assert!(!is_grpc(&BruDocument::default()));
+    }
+
+    #[test]
+    fn scripts_are_carried_as_runtime_scripts() {
+        let mut doc = grpc_doc();
+        doc.pre_request_script = Some("// pre".into());
+        doc.post_response_script = Some("// post".into());
+        let (g, _) = convert(&doc);
+        let scripts = g.expect("request").scripts;
+        let kinds: Vec<(&str, &str)> = scripts
+            .iter()
+            .map(|s| (s.script_type.as_str(), s.code.as_str()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![("before-request", "// pre"), ("after-response", "// post")]
+        );
     }
 }

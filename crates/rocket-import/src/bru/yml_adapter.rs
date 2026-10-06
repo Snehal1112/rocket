@@ -211,7 +211,7 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
         grpc,
     } = yml;
     if let Some(grpc) = &grpc {
-        return adapt_grpc(info.or(meta), grpc);
+        return adapt_grpc(info.or(meta), grpc, runtime);
     }
     if let Some(gql) = graphql {
         return adapt_graphql(info.or(meta), gql, runtime);
@@ -310,7 +310,11 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
 /// Reads a gRPC request. The block is read as loose YAML because the same keys
 /// appear in two spellings: `protoFilePath` (OpenCollection) and `protoPath` (Bruno),
 /// a message that is one string or a list, and metadata flagged `disabled` or `enabled`.
-fn adapt_grpc(info: Option<BruYmlMeta>, grpc: &serde_yaml::Value) -> BruDocument {
+fn adapt_grpc(
+    info: Option<BruYmlMeta>,
+    grpc: &serde_yaml::Value,
+    runtime: Option<BruYmlRuntime>,
+) -> BruDocument {
     use serde_yaml::Value;
 
     let text = |v: &Value, keys: &[&str]| -> Option<String> {
@@ -412,6 +416,16 @@ fn adapt_grpc(info: Option<BruYmlMeta>, grpc: &serde_yaml::Value) -> BruDocument
         }
     }
     doc.grpc = Some(section);
+    if let Some(runtime) = runtime {
+        for script in runtime.scripts.unwrap_or_default() {
+            match script.script_type.as_deref() {
+                Some("before-request") => doc.pre_request_script = Some(script.code),
+                Some("after-response") => doc.post_response_script = Some(script.code),
+                _ => {}
+            }
+        }
+    }
+
     doc
 }
 
@@ -1022,5 +1036,13 @@ grpc:
         let doc = bru_document_from_yml_str(yml).unwrap();
         assert_eq!(doc.unknown_blocks.len(), 1);
         assert_eq!(doc.unknown_blocks[0].name, "unsupported_type");
+    }
+
+    #[test]
+    fn grpc_runtime_scripts_are_kept() {
+        let yml = "info:\n  name: G\n  type: grpc\ngrpc:\n  url: h:1\nruntime:\n  scripts:\n    - type: before-request\n      code: // pre\n    - type: after-response\n      code: // post\n";
+        let doc = bru_document_from_yml_str(yml).expect("adapts");
+        assert_eq!(doc.pre_request_script.as_deref(), Some("// pre"));
+        assert_eq!(doc.post_response_script.as_deref(), Some("// post"));
     }
 }

@@ -691,3 +691,65 @@ fn bru_file_of_an_unsupported_type_is_skipped_not_imported_as_an_empty_get() {
         .join("chat.yml")
         .exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_proto_is_not_copied_and_does_not_abort_a_bruno_import() {
+    let src = TempDir::new().expect("tempdir");
+    let root = src.path().join("grpc-api");
+    std::fs::create_dir_all(root.join("protos")).expect("mkdir");
+    std::fs::write(
+        root.join("bruno.json"),
+        r#"{ "name": "grpc-api", "version": "1", "type": "collection" }"#,
+    )
+    .expect("write");
+    std::fs::write(root.join("protos/real.proto"), "syntax = \"proto3\";\n").expect("write");
+    // A file outside the collection that must never travel with it.
+    let secret = src.path().join("id_rsa");
+    std::fs::write(&secret, "PRIVATE KEY").expect("write");
+    std::os::unix::fs::symlink(&secret, root.join("protos/leak.proto")).expect("symlink");
+    std::os::unix::fs::symlink(src.path().join("missing"), root.join("protos/dangling.proto"))
+        .expect("symlink");
+
+    let workspace_dir = TempDir::new().expect("tempdir");
+    let service = make_service(workspace_dir.path());
+    let report = service.import_collection(&root, "default").expect("import");
+
+    let name = &report.created_collections[0];
+    let copied = workspace_dir.path().join("collections").join(name).join("protos");
+    assert!(copied.join("real.proto").exists());
+    assert!(!copied.join("leak.proto").exists(), "a symlink is not followed");
+    assert!(!copied.join("dangling.proto").exists());
+    let skipped: Vec<&str> = report.skipped.iter().map(|s| s.path.as_str()).collect();
+    assert!(
+        skipped.iter().any(|p| p.ends_with("leak.proto")),
+        "the user is told: {skipped:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_proto_is_not_copied_by_an_opencollection_import() {
+    let src = TempDir::new().expect("tempdir");
+    let root = src.path().join("oc-grpc");
+    std::fs::create_dir_all(root.join("protos")).expect("mkdir");
+    std::fs::write(
+        root.join("opencollection.yml"),
+        "opencollection: 1.0.0\ninfo:\n  name: oc-grpc\n",
+    )
+    .expect("write");
+    let secret = src.path().join("id_rsa");
+    std::fs::write(&secret, "PRIVATE KEY").expect("write");
+    std::os::unix::fs::symlink(&secret, root.join("protos/leak.proto")).expect("symlink");
+    std::os::unix::fs::symlink(src.path().join("missing"), root.join("protos/dangling.proto"))
+        .expect("symlink");
+
+    let workspace_dir = TempDir::new().expect("tempdir");
+    let service = make_service(workspace_dir.path());
+    let report = service.import_collection(&root, "default").expect("import");
+
+    let name = &report.created_collections[0];
+    let copied = workspace_dir.path().join("collections").join(name).join("protos");
+    assert!(!copied.join("leak.proto").exists(), "a symlink is not followed");
+    assert!(!copied.join("dangling.proto").exists());
+}
