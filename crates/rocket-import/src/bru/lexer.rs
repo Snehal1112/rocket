@@ -15,6 +15,44 @@ pub enum Token {
     BlockClose,
 }
 
+/// Applies one line's braces to a nesting depth. With `skip_strings`, braces inside a
+/// double-quoted string are ignored, so JSON such as `{"p":"}"}` balances. A string never spans
+/// lines, so an unmatched quote cannot leak into the next line.
+pub(crate) fn nested_depth(
+    mut depth: usize,
+    line: &str,
+    open: char,
+    close: char,
+    skip_strings: bool,
+) -> usize {
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in line.chars() {
+        if skip_strings {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            if ch == '"' {
+                in_string = true;
+                continue;
+            }
+        }
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth = depth.saturating_sub(1);
+        }
+    }
+    depth
+}
+
 /// Raw-text blocks — their content is captured verbatim rather than parsed as key-values.
 const RAW_TEXT_BLOCK_NAMES: &[&str] = &["body", "script", "docs"];
 
@@ -44,6 +82,8 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
 
             // List blocks and raw-text blocks both capture content verbatim.
             let is_raw = is_list || RAW_TEXT_BLOCK_NAMES.contains(&name.as_str());
+            // WebSocket messages are usually JSON, so their string contents must not move the depth.
+            let skip_strings = name == "body" && subtype.as_deref() == Some("ws");
             tokens.push(Token::BlockOpen {
                 name: name.clone(),
                 subtype,
@@ -92,13 +132,8 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
                         if is_raw {
                             raw_lines.push(inner);
                             // Track nesting depth for inner braces.
-                            for ch in inner_trimmed.chars() {
-                                if ch == open_ch {
-                                    raw_depth += 1;
-                                } else if ch == close_ch {
-                                    raw_depth = raw_depth.saturating_sub(1);
-                                }
-                            }
+                            raw_depth =
+                                nested_depth(raw_depth, inner_trimmed, open_ch, close_ch, skip_strings);
                         } else if !inner_trimmed.is_empty() {
                             // Key-value: `key: value` (value may contain colons)
                             if let Some((k, v)) = inner_trimmed.split_once(':') {

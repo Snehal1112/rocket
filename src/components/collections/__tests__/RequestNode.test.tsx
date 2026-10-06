@@ -480,4 +480,22 @@ describe('RequestNode websocket rows', () => {
     renderNode(wsSummary, 'chat.yml');
     expect(screen.getByTestId('request-item-WS-Chat')).not.toHaveAttribute('draggable', 'true');
   });
+
+  it('uses the loaded uid for the tab when the summary has none', async () => {
+    vi.mocked(tauriApi.getWebSocketRequest).mockResolvedValue({
+      uid: 'generated-uid',
+      name: 'Chat',
+      url: 'wss://x',
+      headers: [],
+      messages: [],
+      auth: { authType: 'none' },
+    });
+    renderNode({ ...wsSummary, uid: '' }, 'chat.yml');
+
+    await userEvent.setup().click(screen.getByLabelText('Open WS Chat'));
+
+    await waitFor(() => {
+      expect(findTabInTree(usePaneStore.getState().root, 'generated-uid')).toBeTruthy();
+    });
+  });
 });

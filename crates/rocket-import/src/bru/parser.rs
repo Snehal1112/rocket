@@ -1,3 +1,4 @@
+use super::lexer::nested_depth;
 use crate::bru::ast::*;
 use crate::bru::lexer::{tokenise, Token};
 use crate::error::ImportResult;
@@ -146,13 +147,7 @@ pub(crate) fn parse_ws_messages(raw: &str) -> Vec<BruWsMessage> {
             if trimmed == "}" && depth == 1 {
                 break;
             }
-            for ch in trimmed.chars() {
-                match ch {
-                    '{' => depth += 1,
-                    '}' => depth = depth.saturating_sub(1),
-                    _ => {}
-                }
-            }
+            depth = nested_depth(depth, trimmed, '{', '}', true);
             body.push(inner);
         }
         out.push(BruWsMessage {
@@ -527,5 +522,17 @@ body:ws {
         let doc = parse("meta {\n  name: A\n  type: http\n}\nget {\n  url: https://x\n}\n");
         assert!(!doc.is_websocket());
         assert!(doc.ws_messages.is_empty());
+    }
+
+    #[test]
+    fn braces_inside_json_strings_do_not_end_a_message() {
+        let doc = parse(
+            "meta {\n  name: A\n  type: ws\n}\n\nbody:ws {\n  one [json] {\n    {\"pattern\":\"}\"}\n  }\n\n  two [json] {\n    {\"open\":\"{\"}\n  }\n\n  three [text] {\n    ok\n  }\n}\n\nheaders {\n  X-A: 1\n}\n",
+        );
+        assert_eq!(doc.ws_messages.len(), 3, "{:?}", doc.ws_messages);
+        assert_eq!(doc.ws_messages[0].content, "{\"pattern\":\"}\"}");
+        assert_eq!(doc.ws_messages[1].content, "{\"open\":\"{\"}");
+        assert_eq!(doc.ws_messages[2].content, "ok");
+        assert_eq!(doc.headers.len(), 1, "blocks after body:ws must still parse");
     }
 }

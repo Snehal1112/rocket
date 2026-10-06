@@ -44,11 +44,13 @@ export function MessageLog({
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the entry count changes.
+  // Follow the newest entry. The count stops changing once the log is capped, so key on the id.
+  const lastId = entries.length > 0 ? entries[entries.length - 1].id : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the newest entry changes.
   useEffect(() => {
     const el = scroller.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [entries.length]);
+  }, [lastId]);
 
   const handleScroll = () => {
     const el = scroller.current;

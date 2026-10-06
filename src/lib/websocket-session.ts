@@ -60,7 +60,7 @@ export async function connectTab(tab: RequestTab): Promise<void> {
   try {
     await wsConnect(sessionId, buildConnectInput(tab));
   } catch (err) {
-    useWebSocketStore.getState().failSession(tab.id, errorText(err));
+    useWebSocketStore.getState().failSession(tab.id, sessionId, errorText(err));
   }
 }
 

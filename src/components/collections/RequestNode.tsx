@@ -170,7 +170,10 @@ export function RequestNode({
       tabId = uid || loaded.uid;
       request = mapGraphQlToState(loaded);
     } else if (kind === 'websocket') {
-      request = mapWebSocketToState(await getWebSocketRequest(collectionName, path));
+      const loaded = await getWebSocketRequest(collectionName, path);
+      // A file without a uid key has an empty summary uid; the loaded item carries a generated one.
+      tabId = uid || loaded.uid;
+      request = mapWebSocketToState(loaded);
     } else {
       const full = itemData.type === 'request' ? itemData : await getRequest(collectionName, path);
       request = mapApiRequestToState(full, true);

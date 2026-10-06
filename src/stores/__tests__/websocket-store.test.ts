@@ -90,7 +90,7 @@ describe('websocket-store', () => {
 
   it('failSession reports a rejected connect once, even if the failed event also arrives', () => {
     useWebSocketStore.getState().beginSession('tab-1', 'sess-1');
-    useWebSocketStore.getState().failSession('tab-1', 'boom');
+    useWebSocketStore.getState().failSession('tab-1', 'sess-1', 'boom');
     useWebSocketStore.getState().applyStatus(status('sess-1', 'failed', { reason: 'boom' }));
 
     expect(tab().status).toBe('failed');
@@ -100,7 +100,7 @@ describe('websocket-store', () => {
   it('failSession does nothing once the event already marked the session failed', () => {
     useWebSocketStore.getState().beginSession('tab-1', 'sess-1');
     useWebSocketStore.getState().applyStatus(status('sess-1', 'failed', { reason: 'boom' }));
-    useWebSocketStore.getState().failSession('tab-1', 'boom');
+    useWebSocketStore.getState().failSession('tab-1', 'sess-1', 'boom');
     expect(tab().log.filter((e) => e.data.startsWith('Failed')).length).toBe(1);
   });
 
@@ -143,5 +143,15 @@ describe('websocket-store', () => {
     useWebSocketStore.getState().beginSession('tab-1', 'sess-1');
     useWebSocketStore.getState().applyMessage(message('sess-1', 'ping', 'out'));
     expect(tab().log[0]).toMatchObject({ direction: 'out', size: 4, timestampMs: 1000 });
+  });
+
+  it("a late rejection from an old connect never fails the tab's newer session", () => {
+    useWebSocketStore.getState().beginSession('tab-1', 'old');
+    useWebSocketStore.getState().beginSession('tab-1', 'new');
+    useWebSocketStore.getState().failSession('tab-1', 'old', 'cancelled');
+
+    expect(tab().status).toBe('connecting');
+    expect(tab().sessionId).toBe('new');
+    expect(useWebSocketStore.getState().tabBySession.new).toBe('tab-1');
   });
 });

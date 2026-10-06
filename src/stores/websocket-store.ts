@@ -57,7 +57,7 @@ interface WebSocketStoreState {
   applyMessage: (event: WebSocketMessageEvent) => void;
   applyStatus: (event: WebSocketStatusEvent) => void;
   /** A rejected connect call. A no-op when a status event already ended the session. */
-  failSession: (tabId: string, error: string) => void;
+  failSession: (tabId: string, sessionId: string, error: string) => void;
   clearLog: (tabId: string) => void;
   forgetTab: (tabId: string) => void;
 }
@@ -151,10 +151,11 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
     });
   },
 
-  failSession(tabId, error) {
+  failSession(tabId, sessionId, error) {
     const { byTab, tabBySession } = get();
     const session = byTab[tabId];
-    if (!session || session.status !== 'connecting') return;
+    // A late rejection from an older connect must not fail the tab's newer session.
+    if (!session || session.status !== 'connecting' || session.sessionId !== sessionId) return;
     set({
       byTab: {
         ...byTab,
