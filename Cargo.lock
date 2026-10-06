@@ -5395,6 +5395,7 @@ dependencies = [
  "rocket-shared",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

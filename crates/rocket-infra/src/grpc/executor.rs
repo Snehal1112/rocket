@@ -7,12 +7,21 @@ use rocket_grpc::{
     json_to_message, message_to_json, GrpcCall, GrpcExecutor, GrpcStatus, GrpcUnaryResponse,
     ProtoRegistry,
 };
+use rocket_grpc::{GrpcStreamEvent, GrpcStreamHandle};
 use rocket_shared::error::{DomainError, DomainResult};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tonic::codegen::http::uri::PathAndQuery;
 use tonic::{Code, Request, Status};
 
 use super::channel::{apply_metadata, connect, describe_error, pairs_from};
 use super::codec::DynCodec;
+
+/// Buffer between the network task and the UI for response events.
+const EVENT_BUFFER: usize = 256;
+/// Buffer for request messages the UI sends before the network takes them.
+const OUTBOUND_BUFFER: usize = 64;
 
 /// Runs gRPC calls over tonic with messages encoded at runtime.
 pub struct TonicGrpcExecutor;
@@ -70,6 +79,59 @@ impl GrpcExecutor for TonicGrpcExecutor {
             message_json,
             status,
             duration_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
+    async fn open_stream(
+        &self,
+        call: &GrpcCall,
+        registry: &ProtoRegistry,
+        initial_json: Option<String>,
+    ) -> DomainResult<GrpcStreamHandle> {
+        let method = registry.method(&call.full_method)?;
+        let client_streams = method.is_client_streaming();
+        if !client_streams && !method.is_server_streaming() {
+            return Err(DomainError::InvalidInput(format!(
+                "{} is a unary method, send it as a normal call",
+                call.full_method
+            )));
+        }
+        let input = method.input();
+        let initial = match (client_streams, initial_json) {
+            (false, None) => {
+                return Err(DomainError::InvalidInput(
+                    "a server-streaming call needs one request message".into(),
+                ))
+            }
+            (_, Some(json)) => Some(json_to_message(&input, &json)?),
+            (true, None) => None,
+        };
+        let path = method_path(&call.full_method)?;
+        let channel = connect(call).await?;
+
+        let (events_tx, events_rx) = mpsc::channel(EVENT_BUFFER);
+        let (outbound_tx, outbound_rx) = if client_streams {
+            let (tx, rx) = mpsc::channel::<String>(OUTBOUND_BUFFER);
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        let driver = StreamDriver {
+            channel,
+            path,
+            call: call.clone(),
+            input,
+            output: method.output(),
+            initial,
+            outbound: outbound_rx,
+            events: events_tx,
+        };
+        let task = tokio::spawn(driver.run());
+        Ok(GrpcStreamHandle {
+            outbound: outbound_tx,
+            events: events_rx,
+            abort: task.abort_handle(),
         })
     }
 }
@@ -157,6 +219,124 @@ async fn run_unary(
     Ok((headers, message_json, GrpcStatus::ok(), trailers))
 }
 
+struct StreamDriver {
+    channel: tonic::transport::Channel,
+    path: PathAndQuery,
+    call: GrpcCall,
+    input: MessageDescriptor,
+    output: MessageDescriptor,
+    initial: Option<DynamicMessage>,
+    outbound: Option<mpsc::Receiver<String>>,
+    events: mpsc::Sender<GrpcStreamEvent>,
+}
+
+impl StreamDriver {
+    async fn run(self) {
+        let events = self.events.clone();
+        let limit = self.call.timeout;
+        let work = self.drive();
+        let finished = match limit {
+            Some(limit) => tokio::time::timeout(limit, work).await.unwrap_or_else(|_| {
+                Some(GrpcStreamEvent::Finished {
+                    status: deadline_exceeded(),
+                    trailers: vec![],
+                })
+            }),
+            None => work.await,
+        };
+        if let Some(event) = finished {
+            let _ = events.send(event).await;
+        }
+    }
+
+    /// Returns the closing event, or `None` when the receiver went away first.
+    async fn drive(self) -> Option<GrpcStreamEvent> {
+        let StreamDriver {
+            channel,
+            path,
+            call,
+            input,
+            output,
+            initial,
+            outbound,
+            events,
+        } = self;
+        let mut client = tonic::client::Grpc::new(channel);
+        if let Err(e) = client.ready().await {
+            return Some(failed(Code::Unavailable, &describe_error(&e)));
+        }
+        // The request side is one stream for every shape. A server-streaming call
+        // is a stream of one message, which is the same on the wire.
+        let first = tokio_stream::iter(initial);
+        let rest = outbound.map(|rx| {
+            ReceiverStream::new(rx).map_while(move |json| json_to_message(&input, &json).ok())
+        });
+        let request_stream: std::pin::Pin<
+            Box<dyn tokio_stream::Stream<Item = DynamicMessage> + Send>,
+        > = match rest {
+            Some(rest) => Box::pin(first.chain(rest)),
+            None => Box::pin(first),
+        };
+        let mut request = Request::new(request_stream);
+        if let Err(e) = apply_metadata(request.metadata_mut(), &call.metadata) {
+            return Some(failed(Code::InvalidArgument, &e.to_string()));
+        }
+        let response = match client.streaming(request, path, DynCodec::new(output)).await {
+            Ok(response) => response,
+            Err(status) => {
+                return Some(GrpcStreamEvent::Finished {
+                    status: status_of(&status),
+                    trailers: pairs_from(status.metadata()),
+                })
+            }
+        };
+        let (metadata, mut stream, _) = response.into_parts();
+        if events
+            .send(GrpcStreamEvent::Headers(pairs_from(&metadata)))
+            .await
+            .is_err()
+        {
+            return None;
+        }
+        loop {
+            match stream.message().await {
+                Ok(Some(message)) => {
+                    let json = match message_to_json(&message) {
+                        Ok(json) => json,
+                        Err(e) => return Some(failed(Code::Internal, &e.to_string())),
+                    };
+                    if events.send(GrpcStreamEvent::Message(json)).await.is_err() {
+                        return None;
+                    }
+                }
+                Ok(None) => {
+                    let trailers = match stream.trailers().await {
+                        Ok(Some(map)) => pairs_from(&map),
+                        _ => vec![],
+                    };
+                    return Some(GrpcStreamEvent::Finished {
+                        status: GrpcStatus::ok(),
+                        trailers,
+                    });
+                }
+                Err(status) => {
+                    return Some(GrpcStreamEvent::Finished {
+                        status: status_of(&status),
+                        trailers: pairs_from(status.metadata()),
+                    })
+                }
+            }
+        }
+    }
+}
+
+fn failed(code: Code, message: &str) -> GrpcStreamEvent {
+    GrpcStreamEvent::Finished {
+        status: GrpcStatus::new(code as i32, message),
+        trailers: vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -168,6 +348,8 @@ mod tests {
 
     const SAY_HELLO: &str = "demo.greeter.v1.Greeter/SayHello";
     const LIST: &str = "demo.greeter.v1.Greeter/ListGreetings";
+    const COLLECT: &str = "demo.greeter.v1.Greeter/CollectNames";
+    const CHAT: &str = "demo.greeter.v1.Greeter/Chat";
 
     fn call(server: &TestServer, method: &str) -> GrpcCall {
         GrpcCall {
@@ -291,6 +473,12 @@ mod tests {
             .await
             .expect_err("streaming method");
         assert!(matches!(unary_on_stream, DomainError::InvalidInput(_)));
+        let stream_on_unary = TonicGrpcExecutor
+            .open_stream(&call(&server, SAY_HELLO), &server.registry, Some(name("x")))
+            .await
+            .err()
+            .expect("unary method");
+        assert!(matches!(stream_on_unary, DomainError::InvalidInput(_)));
         let unknown = TonicGrpcExecutor
             .unary(
                 &call(&server, "demo.greeter.v1.Greeter/Nope"),
@@ -331,5 +519,161 @@ mod tests {
             matches!(&err, DomainError::Http(m) if m.contains("UnknownIssuer")),
             "{err:?}"
         );
+    }
+
+    async fn collect(handle: &mut GrpcStreamHandle) -> Vec<GrpcStreamEvent> {
+        let mut out = Vec::new();
+        while let Some(event) = handle.events.recv().await {
+            let done = matches!(event, GrpcStreamEvent::Finished { .. });
+            out.push(event);
+            if done {
+                break;
+            }
+        }
+        out
+    }
+
+    fn messages(events: &[GrpcStreamEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                GrpcStreamEvent::Message(json) => {
+                    let v: serde_json::Value = serde_json::from_str(json).expect("json");
+                    v["message"].as_str().map(str::to_string)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_server_stream_delivers_headers_messages_then_finished() {
+        let server = start(None, Reflection::None).await;
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&call(&server, LIST), &server.registry, Some(name("n")))
+            .await
+            .expect("open");
+        assert!(handle.outbound.is_none());
+        let events = tokio::time::timeout(Duration::from_secs(5), collect(&mut handle))
+            .await
+            .expect("stream ends");
+        assert!(
+            matches!(events.first(), Some(GrpcStreamEvent::Headers(_))),
+            "{events:?}"
+        );
+        assert_eq!(messages(&events), vec!["n-0", "n-1", "n-2"]);
+        match events.last() {
+            Some(GrpcStreamEvent::Finished { status, .. }) => assert!(status.is_ok()),
+            other => panic!("expected Finished, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_stream_without_a_request_message_is_rejected() {
+        let server = start(None, Reflection::None).await;
+        let err = TonicGrpcExecutor
+            .open_stream(&call(&server, LIST), &server.registry, None)
+            .await
+            .err()
+            .expect("needs a message");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn a_client_stream_sends_every_message_and_ends_when_the_sender_drops() {
+        let server = start(None, Reflection::None).await;
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&call(&server, COLLECT), &server.registry, None)
+            .await
+            .expect("open");
+        let outbound = handle
+            .outbound
+            .take()
+            .expect("client streaming has a sender");
+        for n in ["a", "b", "c"] {
+            outbound.send(name(n)).await.expect("send");
+        }
+        drop(outbound);
+        let events = tokio::time::timeout(Duration::from_secs(5), collect(&mut handle))
+            .await
+            .expect("stream ends");
+        assert_eq!(messages(&events), vec!["a,b,c"]);
+        assert!(
+            matches!(events.last(), Some(GrpcStreamEvent::Finished { status, .. }) if status.is_ok())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bidi_stream_answers_each_message_while_it_stays_open() {
+        let server = start(None, Reflection::None).await;
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&call(&server, CHAT), &server.registry, None)
+            .await
+            .expect("open");
+        let outbound = handle.outbound.clone().expect("bidi has a sender");
+        let mut seen = Vec::new();
+        for n in ["x", "y"] {
+            outbound.send(name(n)).await.expect("send");
+            loop {
+                match tokio::time::timeout(Duration::from_secs(5), handle.events.recv())
+                    .await
+                    .expect("event in time")
+                {
+                    Some(GrpcStreamEvent::Message(json)) => {
+                        seen.push(json);
+                        break;
+                    }
+                    Some(GrpcStreamEvent::Headers(_)) => continue,
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+        }
+        assert!(
+            seen[0].contains("echo x") && seen[1].contains("echo y"),
+            "{seen:?}"
+        );
+        handle.outbound = None;
+        drop(outbound);
+        let tail = tokio::time::timeout(Duration::from_secs(5), collect(&mut handle))
+            .await
+            .expect("stream ends after half-close");
+        assert!(
+            matches!(tail.last(), Some(GrpcStreamEvent::Finished { status, .. }) if status.is_ok())
+        );
+    }
+
+    #[tokio::test]
+    async fn aborting_the_task_stops_the_events() {
+        let server = start(None, Reflection::None).await;
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&call(&server, CHAT), &server.registry, None)
+            .await
+            .expect("open");
+        handle.abort.abort();
+        let next = tokio::time::timeout(Duration::from_secs(5), handle.events.recv())
+            .await
+            .expect("channel closes");
+        assert!(
+            next.is_none(),
+            "an aborted driver sends nothing more: {next:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stream_deadline_ends_with_deadline_exceeded() {
+        let server = start(None, Reflection::None).await;
+        let mut c = call(&server, CHAT);
+        c.timeout = Some(Duration::from_millis(150));
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&c, &server.registry, None)
+            .await
+            .expect("open");
+        let events = tokio::time::timeout(Duration::from_secs(5), collect(&mut handle))
+            .await
+            .expect("deadline ends the stream");
+        match events.last() {
+            Some(GrpcStreamEvent::Finished { status, .. }) => assert_eq!(status.code, 4),
+            other => panic!("expected Finished, got {other:?}"),
+        }
     }
 }

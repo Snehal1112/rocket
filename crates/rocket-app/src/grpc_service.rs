@@ -2,15 +2,21 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::time::Instant;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use rocket_collection::GrpcMethodType;
 use rocket_collection::{CollectionRepository, GrpcRequest};
 use rocket_environment::resolve;
+use rocket_grpc::{json_to_message, GrpcStreamEvent, MessageDescriptor};
 use rocket_grpc::{GrpcCall, GrpcExecutor, GrpcUnaryResponse, ProtoLoader, ProtoRegistry};
 use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::grpc::GrpcMetadataPair;
 use rocket_shared::types::Auth;
+use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 
 /// What the UI sends for one call. `request` is the editor state, which may be unsaved.
 #[derive(Debug, Clone)]
@@ -38,6 +44,16 @@ impl GrpcExecuteInput {
     }
 }
 
+struct SessionEntry {
+    outbound: Option<mpsc::Sender<String>>,
+    input: MessageDescriptor,
+    variables: HashMap<String, String>,
+    abort: AbortHandle,
+    started: Instant,
+}
+
+type Sessions = Arc<Mutex<HashMap<String, SessionEntry>>>;
+
 /// Runs gRPC calls: resolves variables and auth, finds the descriptors, and keeps
 /// the table of running streaming sessions.
 pub struct GrpcService {
@@ -45,6 +61,8 @@ pub struct GrpcService {
     proto_loader: Arc<dyn ProtoLoader>,
     collection_repo: Arc<dyn CollectionRepository>,
     workspace_path: Arc<Mutex<PathBuf>>,
+    events: Arc<dyn EventPublisher>,
+    sessions: Sessions,
 }
 
 impl GrpcService {
@@ -53,12 +71,15 @@ impl GrpcService {
         proto_loader: Arc<dyn ProtoLoader>,
         collection_repo: Arc<dyn CollectionRepository>,
         workspace_path: Arc<Mutex<PathBuf>>,
+        events: Arc<dyn EventPublisher>,
     ) -> Self {
         Self {
             executor,
             proto_loader,
             collection_repo,
             workspace_path,
+            events,
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -69,6 +90,117 @@ impl GrpcService {
         let message = self.prepare_message(&input)?;
         let registry = self.registry_for(&input).await?;
         self.executor.unary(&call, &registry, &message).await
+    }
+
+    /// Opens a client-streaming, server-streaming or bidirectional call and
+    /// returns its session id. Everything the server sends arrives as
+    /// `GrpcSession*` domain events.
+    pub async fn start_session(&self, input: GrpcExecuteInput) -> DomainResult<String> {
+        let input = input.with_request_variables();
+        let call = self.prepare_call(&input, true)?;
+        let registry = self.registry_for(&input).await?;
+        let method = registry.method(&call.full_method)?;
+        let method_type = GrpcMethodType::from_streaming_flags(
+            method.is_client_streaming(),
+            method.is_server_streaming(),
+        );
+        if method_type == GrpcMethodType::Unary {
+            return Err(DomainError::InvalidInput(format!(
+                "{} is a unary method, send it as a normal call",
+                call.full_method
+            )));
+        }
+        // A server-streaming call has exactly one request. The other shapes take
+        // their messages one by one through `send_message`.
+        let initial = if method_type == GrpcMethodType::ServerStreaming {
+            Some(self.prepare_message(&input)?)
+        } else {
+            None
+        };
+        let handle = self.executor.open_stream(&call, &registry, initial).await?;
+
+        let session_id = ulid::Ulid::new().to_string();
+        let started = Instant::now();
+        lock(&self.sessions).insert(
+            session_id.clone(),
+            SessionEntry {
+                outbound: handle.outbound,
+                input: method.input(),
+                variables: input.variables.clone(),
+                abort: handle.abort,
+                started,
+            },
+        );
+        self.events.publish(DomainEvent::GrpcSessionStarted {
+            session_id: session_id.clone(),
+            method_type: method_type.as_str().to_string(),
+        });
+        tokio::spawn(forward_events(
+            Arc::clone(&self.sessions),
+            Arc::clone(&self.events),
+            session_id.clone(),
+            handle.events,
+        ));
+        Ok(session_id)
+    }
+
+    /// Sends one message on a client-streaming or bidirectional call. Variables
+    /// resolve with the values the session started with. A message that does not
+    /// fit the request type is rejected here and never reaches the server.
+    pub async fn send_message(&self, session_id: &str, json: &str) -> DomainResult<()> {
+        let (sender, input, variables) = {
+            let sessions = lock(&self.sessions);
+            let entry = sessions
+                .get(session_id)
+                .ok_or_else(|| DomainError::NotFound(format!("gRPC session '{session_id}'")))?;
+            let sender = entry.outbound.clone().ok_or_else(|| {
+                DomainError::InvalidInput(
+                    "this call does not take messages after it starts, or its request side is closed"
+                        .into(),
+                )
+            })?;
+            (sender, entry.input.clone(), entry.variables.clone())
+        };
+        let text = resolve_text(json, &variables, "the message")?;
+        json_to_message(&input, &text)?;
+        sender
+            .send(text)
+            .await
+            .map_err(|_| DomainError::Conflict("the call has already finished".into()))
+    }
+
+    /// Ends the request side of the call (half-close). The server may keep sending.
+    pub fn end_requests(&self, session_id: &str) -> DomainResult<()> {
+        let mut sessions = lock(&self.sessions);
+        let entry = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| DomainError::NotFound(format!("gRPC session '{session_id}'")))?;
+        entry.outbound = None;
+        Ok(())
+    }
+
+    /// Cancels the call and reports it as finished with CANCELLED.
+    pub fn cancel(&self, session_id: &str) -> DomainResult<()> {
+        let entry = lock(&self.sessions)
+            .remove(session_id)
+            .ok_or_else(|| DomainError::NotFound(format!("gRPC session '{session_id}'")))?;
+        entry.abort.abort();
+        self.events.publish(DomainEvent::GrpcSessionFinished {
+            session_id: session_id.to_string(),
+            code: 1,
+            code_name: "CANCELLED".into(),
+            message: "cancelled by the user".into(),
+            trailers: vec![],
+            duration_ms: entry.started.elapsed().as_millis() as u64,
+        });
+        Ok(())
+    }
+
+    /// Aborts every running call. Used when the app exits.
+    pub fn end_all(&self) {
+        for (_, entry) in lock(&self.sessions).drain() {
+            entry.abort.abort();
+        }
     }
 
     /// Builds the transport call: resolved URL, metadata and auth.
@@ -241,6 +373,77 @@ impl GrpcService {
     }
 }
 
+/// Publishes what a session's call reports until it finishes.
+async fn forward_events(
+    sessions: Sessions,
+    events: Arc<dyn EventPublisher>,
+    session_id: String,
+    mut stream: mpsc::Receiver<GrpcStreamEvent>,
+) {
+    let mut index: u64 = 0;
+    while let Some(event) = stream.recv().await {
+        match event {
+            GrpcStreamEvent::Headers(headers) => events.publish(DomainEvent::GrpcSessionHeaders {
+                session_id: session_id.clone(),
+                headers,
+            }),
+            GrpcStreamEvent::Message(json) => {
+                events.publish(DomainEvent::GrpcSessionMessage {
+                    session_id: session_id.clone(),
+                    index,
+                    json,
+                });
+                index += 1;
+            }
+            GrpcStreamEvent::Finished { status, trailers } => {
+                finish(
+                    &sessions,
+                    &events,
+                    &session_id,
+                    status.code,
+                    &status.code_name,
+                    &status.message,
+                    trailers,
+                );
+                return;
+            }
+        }
+    }
+    // The call stopped without a closing event. Report it unless a cancel already did.
+    finish(
+        &sessions,
+        &events,
+        &session_id,
+        2,
+        "UNKNOWN",
+        "the call ended unexpectedly",
+        vec![],
+    );
+}
+
+/// Publishes `GrpcSessionFinished` once. Whoever removes the session first wins.
+fn finish(
+    sessions: &Sessions,
+    events: &Arc<dyn EventPublisher>,
+    session_id: &str,
+    code: i32,
+    code_name: &str,
+    message: &str,
+    trailers: Vec<GrpcMetadataPair>,
+) {
+    let Some(entry) = lock(sessions).remove(session_id) else {
+        return;
+    };
+    events.publish(DomainEvent::GrpcSessionFinished {
+        session_id: session_id.to_string(),
+        code,
+        code_name: code_name.to_string(),
+        message: message.to_string(),
+        trailers,
+        duration_ms: entry.started.elapsed().as_millis() as u64,
+    });
+}
+
 /// Resolves `{{name}}` placeholders. A placeholder with no value is an error,
 /// because sending the literal text to a server is never what the user wants.
 fn resolve_text(text: &str, vars: &HashMap<String, String>, what: &str) -> DomainResult<String> {
@@ -287,6 +490,7 @@ mod tests {
 
     use async_trait::async_trait;
     use rocket_collection::{Collection, GrpcMessage, GrpcMetadataEntry};
+    use rocket_grpc::GrpcStreamHandle;
     use rocket_grpc::{GrpcStatus, ProtoFileReader};
 
     use super::*;
@@ -331,6 +535,8 @@ message Rep { string message = 1; }
     #[derive(Default)]
     struct FakeExecutor {
         unary: Mutex<Vec<(GrpcCall, String)>>,
+        streams: Mutex<Vec<(GrpcCall, Option<String>)>>,
+        next_stream: Mutex<Option<GrpcStreamHandle>>,
     }
 
     #[async_trait]
@@ -350,12 +556,53 @@ message Rep { string message = 1; }
                 duration_ms: 1,
             })
         }
+
+        async fn open_stream(
+            &self,
+            call: &GrpcCall,
+            _registry: &ProtoRegistry,
+            initial_json: Option<String>,
+        ) -> DomainResult<GrpcStreamHandle> {
+            lock(&self.streams).push((call.clone(), initial_json));
+            lock(&self.next_stream)
+                .take()
+                .ok_or_else(|| DomainError::Internal("no stream prepared".into()))
+        }
+    }
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<DomainEvent>>);
+
+    impl EventPublisher for Recorder {
+        fn publish(&self, event: DomainEvent) {
+            lock(&self.0).push(event);
+        }
+    }
+
+    impl Recorder {
+        fn tags(&self) -> Vec<String> {
+            lock(&self.0)
+                .iter()
+                .map(|e| match e {
+                    DomainEvent::GrpcSessionStarted { method_type, .. } => {
+                        format!("started:{method_type}")
+                    }
+                    DomainEvent::GrpcSessionHeaders { .. } => "headers".to_string(),
+                    DomainEvent::GrpcSessionMessage { index, .. } => format!("message:{index}"),
+                    DomainEvent::GrpcSessionFinished { code_name, .. } => {
+                        format!("finished:{code_name}")
+                    }
+                    _ => "other".to_string(),
+                })
+                .collect()
+        }
     }
 
     struct Harness {
         svc: GrpcService,
         exec: Arc<FakeExecutor>,
         loader: Arc<FakeLoader>,
+        events: Arc<Recorder>,
         dir: tempfile::TempDir,
     }
 
@@ -368,16 +615,19 @@ message Rep { string message = 1; }
         collection.settings.auth = collection_auth;
         let exec = Arc::new(FakeExecutor::default());
         let loader = Arc::new(FakeLoader::default());
+        let events = Arc::new(Recorder::default());
         let svc = GrpcService::new(
             exec.clone(),
             loader.clone(),
             InMemoryCollectionRepo::new(collection),
             Arc::new(Mutex::new(dir.path().to_path_buf())),
+            events.clone(),
         );
         Harness {
             svc,
             exec,
             loader,
+            events,
             dir,
         }
     }
@@ -674,5 +924,215 @@ message Rep { string message = 1; }
             "{err:?}"
         );
         assert!(lock(&h.loader.loads).is_empty());
+    }
+
+    // ---- sessions ----------------------------------------------------------
+
+    struct StreamFixture {
+        events_tx: mpsc::Sender<GrpcStreamEvent>,
+        outbound_rx: Option<mpsc::Receiver<String>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    /// Prepares the handle the fake executor hands out for the next stream.
+    fn prepare_stream(h: &Harness, with_outbound: bool) -> StreamFixture {
+        let (events_tx, events_rx) = mpsc::channel(16);
+        let (outbound, outbound_rx) = if with_outbound {
+            let (tx, rx) = mpsc::channel(16);
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+        let task = tokio::spawn(std::future::pending::<()>());
+        *lock(&h.exec.next_stream) = Some(GrpcStreamHandle {
+            outbound,
+            events: events_rx,
+            abort: task.abort_handle(),
+        });
+        StreamFixture {
+            events_tx,
+            outbound_rx,
+            task,
+        }
+    }
+
+    async fn wait_for_tags(h: &Harness, expected: &[&str]) {
+        for _ in 0..200 {
+            if h.events.tags() == expected {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(h.events.tags(), expected);
+    }
+
+    #[tokio::test]
+    async fn a_server_stream_session_publishes_its_events_in_order_and_then_forgets_the_session() {
+        let h = harness(None);
+        let fx = prepare_stream(&h, false);
+        let mut i = input(request("demo.v1.Greeter/List"));
+        i.message = Some(r#"{"name":"n"}"#.into());
+        let id = h.svc.start_session(i).await.expect("start");
+        assert_eq!(
+            lock(&h.exec.streams)[0].1.as_deref(),
+            Some(r#"{"name":"n"}"#)
+        );
+
+        fx.events_tx
+            .send(GrpcStreamEvent::Headers(vec![]))
+            .await
+            .expect("send");
+        fx.events_tx
+            .send(GrpcStreamEvent::Message("{}".into()))
+            .await
+            .expect("send");
+        fx.events_tx
+            .send(GrpcStreamEvent::Message("{}".into()))
+            .await
+            .expect("send");
+        fx.events_tx
+            .send(GrpcStreamEvent::Finished {
+                status: GrpcStatus::ok(),
+                trailers: vec![],
+            })
+            .await
+            .expect("send");
+        wait_for_tags(
+            &h,
+            &[
+                "started:server-streaming",
+                "headers",
+                "message:0",
+                "message:1",
+                "finished:OK",
+            ],
+        )
+        .await;
+
+        let err = h
+            .svc
+            .send_message(&id, "{}")
+            .await
+            .expect_err("session is gone");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn a_client_stream_message_is_resolved_validated_and_forwarded() {
+        let h = harness(None);
+        let mut fx = prepare_stream(&h, true);
+        let mut i = input(request("demo.v1.Greeter/Collect"));
+        i.variables = HashMap::from([("who".into(), "ada".into())]);
+        let id = h.svc.start_session(i).await.expect("start");
+        assert_eq!(
+            lock(&h.exec.streams)[0].1,
+            None,
+            "a client stream starts with no message"
+        );
+
+        h.svc
+            .send_message(&id, r#"{"name": "{{who}}"}"#)
+            .await
+            .expect("send");
+        let rx = fx.outbound_rx.as_mut().expect("receiver");
+        assert_eq!(rx.recv().await.as_deref(), Some(r#"{"name": "ada"}"#));
+
+        let err = h
+            .svc
+            .send_message(&id, r#"{"nope": 1}"#)
+            .await
+            .expect_err("bad message");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(
+            rx.try_recv().is_err(),
+            "a rejected message never reaches the call"
+        );
+    }
+
+    #[tokio::test]
+    async fn ending_the_requests_closes_the_outbound_side() {
+        let h = harness(None);
+        let mut fx = prepare_stream(&h, true);
+        let id = h
+            .svc
+            .start_session(input(request("demo.v1.Greeter/Chat")))
+            .await
+            .expect("start");
+        h.svc.end_requests(&id).expect("end");
+        assert_eq!(
+            fx.outbound_rx.as_mut().expect("receiver").recv().await,
+            None
+        );
+        let err = h.svc.send_message(&id, "{}").await.expect_err("closed");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        // The server can still answer: the session stays until it finishes.
+        fx.events_tx
+            .send(GrpcStreamEvent::Message("{}".into()))
+            .await
+            .expect("send");
+        wait_for_tags(&h, &["started:bidi-streaming", "message:0"]).await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_aborts_the_call_and_reports_cancelled_exactly_once() {
+        let h = harness(None);
+        let fx = prepare_stream(&h, true);
+        let id = h
+            .svc
+            .start_session(input(request("demo.v1.Greeter/Chat")))
+            .await
+            .expect("start");
+        h.svc.cancel(&id).expect("cancel");
+        assert!(fx.task.await.expect_err("aborted").is_cancelled());
+        // A late closing event from the call must not produce a second Finished.
+        let _ = fx
+            .events_tx
+            .send(GrpcStreamEvent::Finished {
+                status: GrpcStatus::ok(),
+                trailers: vec![],
+            })
+            .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            h.events.tags(),
+            vec!["started:bidi-streaming", "finished:CANCELLED"]
+        );
+        assert!(matches!(h.svc.cancel(&id), Err(DomainError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn a_call_that_stops_without_a_closing_event_is_reported_as_unknown() {
+        let h = harness(None);
+        let fx = prepare_stream(&h, true);
+        h.svc
+            .start_session(input(request("demo.v1.Greeter/Chat")))
+            .await
+            .expect("start");
+        drop(fx.events_tx);
+        wait_for_tags(&h, &["started:bidi-streaming", "finished:UNKNOWN"]).await;
+    }
+
+    #[tokio::test]
+    async fn the_wrong_entry_point_for_the_call_shape_is_rejected() {
+        let h = harness(None);
+        let err = h
+            .svc
+            .start_session(input(request(SAY_HELLO)))
+            .await
+            .expect_err("unary method");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+
+        let _fx = prepare_stream(&h, false);
+        let id = h
+            .svc
+            .start_session(input(request("demo.v1.Greeter/List")))
+            .await
+            .expect("start");
+        let err = h
+            .svc
+            .send_message(&id, "{}")
+            .await
+            .expect_err("server stream takes no messages");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 }

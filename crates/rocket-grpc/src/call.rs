@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use rocket_shared::error::DomainResult;
 use rocket_shared::grpc::GrpcMetadataPair;
 use serde::Serialize;
+use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 
 use crate::registry::ProtoRegistry;
 
@@ -84,6 +86,28 @@ pub struct GrpcUnaryResponse {
     pub duration_ms: u64,
 }
 
+/// What a running stream reports back, in order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GrpcStreamEvent {
+    Headers(Vec<GrpcMetadataPair>),
+    Message(String),
+    /// Always the last event of a stream that ends by itself.
+    Finished {
+        status: GrpcStatus,
+        trailers: Vec<GrpcMetadataPair>,
+    },
+}
+
+/// A running streaming call.
+pub struct GrpcStreamHandle {
+    /// JSON messages to send. `None` for a server-streaming call. Dropping the
+    /// sender ends the request side of the call (half-close).
+    pub outbound: Option<mpsc::Sender<String>>,
+    pub events: mpsc::Receiver<GrpcStreamEvent>,
+    /// Aborting the task cancels the call.
+    pub abort: AbortHandle,
+}
+
 /// Runs gRPC calls. Implemented by `TonicGrpcExecutor` in `rocket-infra`.
 #[async_trait]
 pub trait GrpcExecutor: Send + Sync {
@@ -95,6 +119,16 @@ pub trait GrpcExecutor: Send + Sync {
         registry: &ProtoRegistry,
         request_json: &str,
     ) -> DomainResult<GrpcUnaryResponse>;
+
+    /// Starts a client-streaming, server-streaming or bidirectional call.
+    /// `initial_json` is the one request of a server-streaming call, and an
+    /// optional first message of the other two.
+    async fn open_stream(
+        &self,
+        call: &GrpcCall,
+        registry: &ProtoRegistry,
+        initial_json: Option<String>,
+    ) -> DomainResult<GrpcStreamHandle>;
 }
 
 #[cfg(test)]

@@ -117,6 +117,9 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
             if let Some(svc) = app_handle.try_state::<rocket_app::GraphQlSubscriptionService>() {
                 svc.end_all().await;
             }
+            if let Some(grpc_svc) = app_handle.try_state::<rocket_app::GrpcService>() {
+                grpc_svc.end_all();
+            }
             app_handle.exit(0);
         }
     });
@@ -536,6 +539,7 @@ pub fn run() {
                     &active_workspace_path,
                 ))),
                 Arc::clone(&active_workspace_path),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
             // Register all services as Tauri managed state.
@@ -712,6 +716,10 @@ pub fn run() {
             commands::git::git_push_v2,
             commands::git::git_pull_v2,
             commands::grpc::grpc_unary_call,
+            commands::grpc::grpc_start_session,
+            commands::grpc::grpc_send_message,
+            commands::grpc::grpc_end_requests,
+            commands::grpc::grpc_cancel_session,
             commands::git::git_fetch_v2,
             commands::git::git_branches_v2,
             commands::git::git_switch_branch_v2,
@@ -816,6 +824,10 @@ pub fn run() {
                 }
                 if let Some(svc) = app_handle.try_state::<rocket_app::GraphQlSubscriptionService>() {
                     tauri::async_runtime::block_on(svc.end_all());
+                }
+                if let Some(grpc_svc) = app_handle.try_state::<rocket_app::GrpcService>() {
+                    // Best-effort, like the ACP cleanup: the process is about to end.
+                    grpc_svc.end_all();
                 }
             }
         });

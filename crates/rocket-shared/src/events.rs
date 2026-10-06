@@ -364,6 +364,35 @@ pub enum DomainEvent {
         error: String,
     },
 
+    // gRPC session events
+    /// Emitted once a streaming gRPC call has been opened.
+    GrpcSessionStarted {
+        session_id: String,
+        /// `client-streaming`, `server-streaming` or `bidi-streaming`.
+        method_type: String,
+    },
+    /// Emitted when the response headers arrive.
+    GrpcSessionHeaders {
+        session_id: String,
+        headers: Vec<crate::grpc::GrpcMetadataPair>,
+    },
+    /// Emitted for every response message, as protobuf JSON. `index` counts from 0.
+    GrpcSessionMessage {
+        session_id: String,
+        index: u64,
+        json: String,
+    },
+    /// Emitted once when the call ends, for any reason. `code` is the gRPC status
+    /// code, and 1 (CANCELLED) when the user cancelled.
+    GrpcSessionFinished {
+        session_id: String,
+        code: i32,
+        code_name: String,
+        message: String,
+        trailers: Vec<crate::grpc::GrpcMetadataPair>,
+        duration_ms: u64,
+    },
+
     // WebSocket session events
     /// One frame sent or received on a WebSocket session.
     WebSocketMessage {

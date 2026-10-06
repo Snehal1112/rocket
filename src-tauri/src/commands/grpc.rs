@@ -74,6 +74,43 @@ pub async fn grpc_unary_call(
     svc.call_unary(input).await
 }
 
+/// Opens a client-streaming, server-streaming or bidirectional call. The id it returns
+/// names the session in the `grpc-session-*` events.
+#[tauri::command]
+pub async fn grpc_start_session(
+    input: GrpcExecuteDto,
+    svc: State<'_, GrpcService>,
+    exec: State<'_, RequestExecutionService>,
+) -> Result<String, DomainError> {
+    let input = resolve_input(input, &exec).await?;
+    svc.start_session(input).await
+}
+
+#[tauri::command]
+pub async fn grpc_send_message(
+    session_id: String,
+    message: String,
+    svc: State<'_, GrpcService>,
+) -> Result<(), DomainError> {
+    svc.send_message(&session_id, &message).await
+}
+
+#[tauri::command]
+pub fn grpc_end_requests(
+    session_id: String,
+    svc: State<'_, GrpcService>,
+) -> Result<(), DomainError> {
+    svc.end_requests(&session_id)
+}
+
+#[tauri::command]
+pub fn grpc_cancel_session(
+    session_id: String,
+    svc: State<'_, GrpcService>,
+) -> Result<(), DomainError> {
+    svc.cancel(&session_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

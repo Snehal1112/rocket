@@ -35,6 +35,11 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
             DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
             DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
+            // gRPC session events — each variant gets its own channel, like the ACP and Flow events.
+            DomainEvent::GrpcSessionStarted { .. } => "grpc-session-started",
+            DomainEvent::GrpcSessionHeaders { .. } => "grpc-session-headers",
+            DomainEvent::GrpcSessionMessage { .. } => "grpc-session-message",
+            DomainEvent::GrpcSessionFinished { .. } => "grpc-session-finished",
             // WebSocket sessions: one channel for frames, one for lifecycle.
             DomainEvent::WebSocketMessage { .. } => "ws:message",
             DomainEvent::WebSocketStatus { .. } => "ws:status",
