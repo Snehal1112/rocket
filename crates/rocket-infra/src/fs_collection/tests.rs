@@ -2384,3 +2384,36 @@ fn a_uid_less_grpc_file_has_one_stable_uid_everywhere() {
     assert_eq!(loaded.uid, again.uid, "a read must give the same uid every time");
     assert_eq!(loaded.uid, tree_uid);
 }
+
+#[test]
+fn saving_collection_settings_keeps_scripts_metadata_and_request_settings() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create");
+    let file = dir.path().join("my-api/opencollection.yml");
+    fs::write(
+        &file,
+        "opencollection: 1.0.0\ninfo:\n  name: my-api\nrequest:\n  headers:\n    - name: X-A\n      value: \"1\"\n  scripts:\n    - type: before-request\n      code: \"// collection script\"\n  metadata:\n    - name: x-meta\n      value: m\n  settings:\n    timeout: 5000\n",
+    )
+    .expect("write");
+
+    let mut settings = repo.get_settings("my-api").expect("settings");
+    settings.headers.clear();
+    repo.save_settings("my-api", &settings).expect("save");
+
+    let saved = fs::read_to_string(&file).expect("read");
+    assert!(saved.contains("// collection script"), "scripts kept: {saved}");
+    assert!(saved.contains("x-meta"), "metadata kept: {saved}");
+    assert!(saved.contains("timeout: 5000"), "request settings kept: {saved}");
+    assert!(!saved.contains("X-A"), "the edited header list is respected: {saved}");
+}
+
+#[test]
+fn saving_settings_without_defaults_writes_no_request_block() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create");
+    repo.save_settings("my-api", &CollectionSettings::default())
+        .expect("save");
+    let saved = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).expect("read");
+    assert!(!saved.contains("request:"), "{saved}");
+}
+

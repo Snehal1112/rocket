@@ -753,3 +753,48 @@ fn a_symlinked_proto_is_not_copied_by_an_opencollection_import() {
     assert!(!copied.join("leak.proto").exists(), "a symlink is not followed");
     assert!(!copied.join("dangling.proto").exists());
 }
+
+#[test]
+fn opencollection_import_keeps_collection_level_defaults_and_docs() {
+    use rocket_collection::CollectionRepository;
+
+    let src = TempDir::new().expect("tempdir");
+    let root = src.path().join("oc-defaults");
+    std::fs::create_dir_all(&root).expect("mkdir");
+    std::fs::write(
+        root.join("opencollection.yml"),
+        "opencollection: 1.0.0\ninfo:\n  name: oc-defaults\nrequest:\n  headers:\n    - name: X-Tenant\n      value: acme\n  scripts:\n    - type: before-request\n      code: \"// collection script\"\n  metadata:\n    - name: x-meta\n      value: m\ndocs: Collection notes\n",
+    )
+    .expect("write");
+    std::fs::write(
+        root.join("get-user.yml"),
+        "info:\n  name: Get user\n  type: http\nhttp:\n  method: GET\n  url: https://example.com/u\n",
+    )
+    .expect("write");
+
+    let workspace_dir = TempDir::new().expect("tempdir");
+    let service = make_service(workspace_dir.path());
+    let report = service.import_collection(&root, "default").expect("import");
+
+    let name = &report.created_collections[0];
+    let saved = std::fs::read_to_string(
+        workspace_dir
+            .path()
+            .join("collections")
+            .join(name)
+            .join("opencollection.yml"),
+    )
+    .expect("read");
+    assert!(saved.contains("X-Tenant"), "collection headers kept: {saved}");
+    assert!(saved.contains("// collection script"), "scripts kept: {saved}");
+    assert!(saved.contains("x-meta"), "metadata kept: {saved}");
+    assert!(saved.contains("Collection notes"), "docs kept: {saved}");
+    // The destination keeps its own identity, even when the name was changed on a conflict.
+    assert!(saved.contains(&format!("name: {name}")), "{saved}");
+
+    let repo = FsCollectionRepo::new_standalone(workspace_dir.path().join("collections"));
+    let settings = repo.get_settings(name).expect("settings");
+    assert_eq!(settings.headers.len(), 1);
+    assert_eq!(settings.docs.as_deref(), Some("Collection notes"));
+}
+

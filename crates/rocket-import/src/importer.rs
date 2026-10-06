@@ -793,7 +793,8 @@ impl ImportService {
     /// Recursively copy `.yml` files from `src_dir` into `dest_root`, preserving structure.
     ///
     /// Skips:
-    ///   - `opencollection.yml` at the collection root (written by `repo.create`).
+    ///   - `opencollection.yml` at the collection root, except that its collection-level
+    ///     defaults and docs are merged into the file `repo.create` wrote.
     ///   - `workspace.yml` anywhere (workspace marker, not a request).
     ///   - `_order.yml` (Bruno internal ordering file).
     ///     Files inside `environments/` are counted separately and not added to `report.imported`.
@@ -829,8 +830,10 @@ impl ImportService {
 
             let name = src_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-            // Root opencollection.yml is already written by repo.create().
+            // The root file was written by repo.create(), which owns the identity keys. The
+            // collection-level defaults and docs of the source are merged into it.
             if src_path == src_root.join("opencollection.yml") {
+                merge_root_defaults(&src_path, &dest_path, report);
                 continue;
             }
             if name == "workspace.yml" || name == "_order.yml" {
@@ -849,6 +852,55 @@ impl ImportService {
             }
         }
         Ok(())
+    }
+}
+
+/// Keys of a source `opencollection.yml` that carry collection-level content. The identity
+/// keys (`opencollection`, `info`, `uid`) stay as `repo.create` wrote them.
+const ROOT_CONTENT_KEYS: [&str; 5] = ["request", "docs", "config", "bundled", "extensions"];
+
+/// Copies the collection-level headers, auth, variables, scripts, docs and config of a source
+/// root file into the new root file. A file that cannot be read or parsed is reported and the
+/// import goes on without it.
+fn merge_root_defaults(src: &Path, dest: &Path, report: &mut ImportReport) {
+    let mut skip = |why: String| {
+        report.skipped.push(SkippedItem {
+            path: "opencollection.yml".to_string(),
+            reason: SkipReason::ParseError(why),
+        });
+    };
+    let parse = |path: &Path| -> Result<serde_yaml::Value, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        serde_yaml::from_str(&text).map_err(|e| e.to_string())
+    };
+    let source = match parse(src) {
+        Ok(v) => v,
+        Err(e) => return skip(format!("collection-level settings were not imported: {e}")),
+    };
+    let mut target = match parse(dest) {
+        Ok(v) => v,
+        Err(e) => return skip(format!("collection-level settings were not imported: {e}")),
+    };
+    let (Some(from), Some(into)) = (source.as_mapping(), target.as_mapping_mut()) else {
+        return;
+    };
+    let mut changed = false;
+    for key in ROOT_CONTENT_KEYS {
+        if let Some(value) = from.get(key) {
+            into.insert(serde_yaml::Value::from(key), value.clone());
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    match serde_yaml::to_string(&target) {
+        Ok(text) => {
+            if let Err(e) = std::fs::write(dest, text) {
+                skip(format!("collection-level settings were not imported: {e}"));
+            }
+        }
+        Err(e) => skip(format!("collection-level settings were not imported: {e}")),
     }
 }
 

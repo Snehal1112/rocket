@@ -137,44 +137,40 @@ pub(super) fn save_settings(
         }
     };
 
-    // Build OcRequestDefaults from settings. "No auth" is written by omission.
+    // Only headers, auth and variables are edited through CollectionSettings. Start from what
+    // the file already has, so scripts, metadata and request settings written by Bruno or by
+    // hand are kept. "No auth" is written by omission.
     let auth = settings.auth.clone().and_then(persisted_oc_auth);
-    let has_defaults =
-        !settings.headers.is_empty() || auth.is_some() || !settings.variables.is_empty();
-
-    oc.request = if has_defaults {
-        Some(OcRequestDefaults {
-            headers: if settings.headers.is_empty() {
-                None
-            } else {
-                Some(
-                    settings
-                        .headers
-                        .iter()
-                        .cloned()
-                        .map(OcHttpRequestHeader::from)
-                        .collect(),
-                )
-            },
-            metadata: None,
-            auth,
-            variables: if settings.variables.is_empty() {
-                None
-            } else {
-                Some(
-                    settings
-                        .variables
-                        .iter()
-                        .cloned()
-                        .map(OcVariable::from)
-                        .collect(),
-                )
-            },
-            scripts: None,
-            settings: None,
-        })
-    } else {
+    let mut defaults = oc.request.take().unwrap_or_default();
+    defaults.headers = if settings.headers.is_empty() {
         None
+    } else {
+        Some(
+            settings
+                .headers
+                .iter()
+                .cloned()
+                .map(OcHttpRequestHeader::from)
+                .collect(),
+        )
+    };
+    defaults.auth = auth;
+    defaults.variables = if settings.variables.is_empty() {
+        None
+    } else {
+        Some(
+            settings
+                .variables
+                .iter()
+                .cloned()
+                .map(OcVariable::from)
+                .collect(),
+        )
+    };
+    oc.request = if defaults == OcRequestDefaults::default() {
+        None
+    } else {
+        Some(defaults)
     };
     oc.docs = settings.docs.clone();
     oc.extensions = set_sandbox_mode_in_extensions(oc.extensions.take(), settings.sandbox_mode);
