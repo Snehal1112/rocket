@@ -1026,6 +1026,133 @@ mod tests {
         assert_eq!(result.console_entries[0].message, "2");
     }
 
+    /// Runs `code` against a temp collection and returns the console lines.
+    async fn run_logs(files: &[(&str, &str)], code: &str) -> (tempfile::TempDir, Vec<String>) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for (rel, content) in files {
+            write_file(tmp.path(), rel, content);
+        }
+        let result = run(scoped_ctx(code, tmp.path(), vec![], SandboxMode::Safe)).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        let lines = result
+            .console_entries
+            .iter()
+            .map(|e| e.message.clone())
+            .collect();
+        (tmp, lines)
+    }
+
+    #[tokio::test]
+    async fn require_local_throw_names_the_file_without_the_path() {
+        let (tmp, lines) = run_logs(
+            &[("bad.js", "throw new Error('boom');")],
+            "try { require('./bad'); } catch (e) { console.log(e.message); }",
+        )
+        .await;
+        assert_eq!(lines[0], "Error in module './bad' (bad.js): boom");
+        assert!(!lines[0].contains(&*tmp.path().to_string_lossy()));
+    }
+
+    #[tokio::test]
+    async fn require_local_throw_keeps_the_error_type() {
+        let (_tmp, lines) = run_logs(
+            &[("bad.js", "null.x;")],
+            "try { require('./bad'); } catch (e) { console.log(String(e instanceof TypeError) + '|' + e.message); }",
+        )
+        .await;
+        assert!(
+            lines[0].starts_with("true|Error in module './bad' (bad.js): "),
+            "{}",
+            lines[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_thrown_non_errors_are_wrapped_with_cause() {
+        let (_tmp, lines) = run_logs(
+            &[
+                ("s.js", "throw 'plain';"),
+                ("o.js", "throw { code: 7 };"),
+            ],
+            "for (const n of ['./s', './o']) { try { require(n); } catch (e) { console.log(String(e instanceof Error) + '|' + e.message + '|' + JSON.stringify(e.cause)); } }",
+        )
+        .await;
+        assert_eq!(
+            lines[0],
+            "true|Error in module './s' (s.js): plain|\"plain\""
+        );
+        assert_eq!(
+            lines[1],
+            "true|Error in module './o' (o.js): [object Object]|{\"code\":7}"
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_syntax_error_names_the_file() {
+        let (_tmp, lines) = run_logs(
+            &[("syn.js", "const = ;")],
+            "try { require('./syn'); } catch (e) { console.log(String(e instanceof SyntaxError) + '|' + e.message); }",
+        )
+        .await;
+        assert!(
+            lines[0].starts_with("true|Error in module './syn' (syn.js): "),
+            "{}",
+            lines[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_nested_failure_names_each_file_once() {
+        let (_tmp, lines) = run_logs(
+            &[
+                ("b.js", "require('./c');"),
+                ("c.js", "throw new Error('boom');"),
+            ],
+            "try { require('./b'); } catch (e) { console.log(e.message); }",
+        )
+        .await;
+        assert_eq!(
+            lines[0],
+            "Error in module './b' (b.js): Error in module './c' (c.js): boom"
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_retry_does_not_accumulate_prefixes() {
+        let (_tmp, lines) = run_logs(
+            &[("bad.js", "throw new Error('boom');")],
+            "for (let i = 0; i < 2; i++) { try { require('./bad'); } catch (e) { console.log(e.message); } }",
+        )
+        .await;
+        assert_eq!(lines[0], "Error in module './bad' (bad.js): boom");
+        assert_eq!(lines[1], lines[0]);
+    }
+
+    #[tokio::test]
+    async fn require_local_same_error_through_the_same_frame_is_prefixed_once() {
+        let (_tmp, lines) = run_logs(
+            &[("keep.js", "globalThis.__saved = globalThis.__saved; throw globalThis.__err;")],
+            "globalThis.__err = new Error('boom'); for (let i = 0; i < 2; i++) { try { require('./keep'); } catch (e) { console.log(e.message); } }",
+        )
+        .await;
+        assert_eq!(lines[0], "Error in module './keep' (keep.js): boom");
+        assert_eq!(lines[1], lines[0]);
+    }
+
+    #[tokio::test]
+    async fn require_local_resolution_errors_are_not_prefixed() {
+        let (_tmp, lines) = run_logs(
+            &[],
+            "try { require('./nope'); } catch (e) { console.log(e.message); }",
+        )
+        .await;
+        assert!(
+            lines[0].starts_with("Cannot find module './nope'"),
+            "{}",
+            lines[0]
+        );
+    }
+
     #[tokio::test]
     async fn require_local_modules_cannot_see_ops() {
         let tmp = tempfile::tempdir().expect("tempdir");

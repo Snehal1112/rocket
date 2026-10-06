@@ -374,6 +374,31 @@
     };
   };
 
+  // Records which modules already named themselves on an error object, so the
+  // same error passing the same require frame again is not prefixed twice.
+  const prefixedBy = new WeakMap();
+
+  const nameModuleInError = function(e, name, path) {
+    const base = path.split(/[\\/]/).pop();
+    const prefix = `Error in module '${name}' (${base}): `;
+    const isObj = e !== null && (typeof e === 'object' || typeof e === 'function');
+    if (isObj && prefixedBy.get(e)?.has(path)) return e;
+    let out = e;
+    if (e instanceof Error) {
+      try {
+        e.message = prefix + e.message;
+      } catch (_) {
+        out = null;
+      }
+      if (out !== null && !String(e.message).startsWith(prefix)) out = null;
+      if (out === null) out = new Error(prefix + e.message, { cause: e });
+    } else {
+      out = new Error(prefix + String(e), { cause: e });
+    }
+    prefixedBy.set(out, new Set([...(prefixedBy.get(e) || []), path]));
+    return out;
+  };
+
   const loadLocal = function(fromDir, name) {
     const info = JSON.parse(__ops.op_require_local(fromDir, name));
     const cached = localCache.get(info.path);
@@ -387,7 +412,7 @@
       fn(mod, mod.exports, makeRequire(info.dir), info.path, info.dir);
     } catch (e) {
       localCache.delete(info.path);
-      throw e;
+      throw nameModuleInError(e, name, info.path);
     }
     return mod.exports;
   };
