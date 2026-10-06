@@ -40,6 +40,7 @@ const WorkspaceGitTab = lazy(() =>
 );
 
 import { MousePointer2 } from 'lucide-react';
+import { GrpcPanel } from '@/components/grpc/GrpcPanel';
 import { RocketLaunch } from '@/components/illustrations';
 import { RequestPanel } from '@/components/request/RequestPanel';
 import {
@@ -215,6 +216,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           ) : isRequestTab(activeTab) ? (
             activeTab.request.requestType === 'websocket' ? (
               <WebSocketPanel tab={activeTab} groupId={node.groupId} />
+            ) : activeTab.request.requestType === 'grpc' ? (
+              <GrpcPanel tab={activeTab} groupId={node.groupId} />
             ) : (
               <RequestPanel tab={activeTab} groupId={node.groupId} />
             )

@@ -131,7 +131,9 @@ function endActiveSessions(tabs: Tab[]): void {
     // Stream sessions are keyed by tab id, so the same tab id is released once.
     if (
       isRequestTab(tab) &&
-      (tab.request.requestType === 'websocket' || tab.request.requestType === 'graphql') &&
+      (tab.request.requestType === 'websocket' ||
+        tab.request.requestType === 'graphql' ||
+        tab.request.requestType === 'grpc') &&
       !seen.has(tab.id)
     ) {
       seen.add(tab.id);

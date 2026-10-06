@@ -50,11 +50,4 @@ describe('CreateRequestDialog graphql', () => {
     expect(payload.method).toBe('POST');
     expect(payload.body.query).toContain('__typename');
   });
-
-  it('does not offer gRPC or WebSocket until their plans land', async () => {
-    render(<CreateRequestDialog open collectionName='api' onClose={vi.fn()} />);
-    await userEvent.click(screen.getByRole('combobox', { name: /request type/i }));
-    const grpc = await screen.findByRole('option', { name: /gRPC/ });
-    expect(grpc.getAttribute('aria-disabled')).toBe('true');
-  });
 });

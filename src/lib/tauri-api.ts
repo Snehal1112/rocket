@@ -2512,3 +2512,130 @@ export const onGraphQlSubscriptionStatus = (
   handler: (event: GraphQlSubscriptionStatusEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<GraphQlSubscriptionStatusEvent>('graphql:subscription-status', (e) => handler(e.payload));
+
+// ============================================================
+// gRPC calls
+// ============================================================
+
+/** One metadata (header or trailer) line. Binary values are base64 text. */
+export interface GrpcPair {
+  name: string;
+  value: string;
+}
+
+export interface GrpcStatus {
+  /** Canonical gRPC code, 0 is OK. */
+  code: number;
+  codeName: string;
+  message: string;
+}
+
+export interface GrpcUnaryResponse {
+  headers: GrpcPair[];
+  trailers: GrpcPair[];
+  /** Protobuf JSON of the reply. Absent when the call failed. */
+  messageJson?: string | null;
+  status: GrpcStatus;
+  durationMs: number;
+}
+
+export interface GrpcMethodInfo {
+  name: string;
+  /** `package.Service/Method`, the value stored in a request. */
+  fullName: string;
+  methodType: GrpcMethodType;
+  inputType: string;
+  outputType: string;
+}
+
+export interface GrpcServiceInfo {
+  name: string;
+  methods: GrpcMethodInfo[];
+}
+
+/** What the gRPC tab sends. `request` is the editor state, which may be unsaved. */
+export interface GrpcExecuteInput {
+  collection?: string;
+  request: GrpcRequest;
+  /** The message to send. Omitted means the selected saved message. */
+  message?: string;
+  environmentName?: string;
+  globalEnvName?: string;
+  requestPath?: string;
+  /** Deadline in milliseconds. 0 or absent means none. */
+  timeoutMs?: number;
+}
+
+export const grpcUnaryCall = (input: GrpcExecuteInput) =>
+  invoke<GrpcUnaryResponse>('grpc_unary_call', { input });
+
+/**
+ * Opens a streaming call under `sessionId`, which the caller chooses so it can listen and
+ * cancel before the connection is up. Messages arrive as events. Resolves to the same id.
+ */
+export const grpcStartSession = (input: GrpcExecuteInput, sessionId: string) =>
+  invoke<string>('grpc_start_session', { input, sessionId });
+
+export const grpcSendMessage = (sessionId: string, message: string) =>
+  invoke<void>('grpc_send_message', { sessionId, message });
+
+/** Ends the request side of a streaming call (half-close). */
+export const grpcEndRequests = (sessionId: string) =>
+  invoke<void>('grpc_end_requests', { sessionId });
+
+export const grpcCancelSession = (sessionId: string) =>
+  invoke<void>('grpc_cancel_session', { sessionId });
+
+/** Lists services from the request's .proto file, or from server reflection when it has none. */
+export const grpcListServices = (input: GrpcExecuteInput, refresh: boolean) =>
+  invoke<GrpcServiceInfo[]>('grpc_list_services', { input, refresh });
+
+// Event fields stay snake_case on the wire, like the agent session events.
+export interface GrpcSessionStartedEvent {
+  type: 'grpcSessionStarted';
+  session_id: string;
+  method_type: string;
+}
+
+export interface GrpcSessionHeadersEvent {
+  type: 'grpcSessionHeaders';
+  session_id: string;
+  headers: GrpcPair[];
+}
+
+export interface GrpcSessionMessageEvent {
+  type: 'grpcSessionMessage';
+  session_id: string;
+  index: number;
+  json: string;
+}
+
+export interface GrpcSessionFinishedEvent {
+  type: 'grpcSessionFinished';
+  session_id: string;
+  code: number;
+  code_name: string;
+  message: string;
+  trailers: GrpcPair[];
+  duration_ms: number;
+}
+
+export const onGrpcSessionStarted = (
+  handler: (event: GrpcSessionStartedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<GrpcSessionStartedEvent>('grpc-session-started', (e) => handler(e.payload));
+
+export const onGrpcSessionHeaders = (
+  handler: (event: GrpcSessionHeadersEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<GrpcSessionHeadersEvent>('grpc-session-headers', (e) => handler(e.payload));
+
+export const onGrpcSessionMessage = (
+  handler: (event: GrpcSessionMessageEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<GrpcSessionMessageEvent>('grpc-session-message', (e) => handler(e.payload));
+
+export const onGrpcSessionFinished = (
+  handler: (event: GrpcSessionFinishedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<GrpcSessionFinishedEvent>('grpc-session-finished', (e) => handler(e.payload));
