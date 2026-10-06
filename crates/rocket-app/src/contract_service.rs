@@ -996,6 +996,8 @@ fn walk_folder<'a>(
             CollectionItem::OpaqueItem(_) => {}
             // Summary items carry no file content; skip for contract audit.
             CollectionItem::Summary(_) => {}
+            // Script files are not requests; skip for contract audit.
+            CollectionItem::ScriptFile(_) => {}
         }
     }
 }

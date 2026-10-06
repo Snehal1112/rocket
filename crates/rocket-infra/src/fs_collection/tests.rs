@@ -418,6 +418,7 @@ fn reorder_items_writes_order_file_and_get_respects_it() {
             CollectionItem::Grpc(g) => g.name.as_str(),
             CollectionItem::OpaqueItem(o) => o.name.as_str(),
             CollectionItem::Summary(s) => s.name.as_str(),
+            CollectionItem::ScriptFile(s) => s.name.as_str(),
         }
     }
 
@@ -2474,4 +2475,82 @@ fn collection_root_path_returns_the_directory_and_rejects_unknown() {
     assert!(path.is_dir());
     assert!(repo.collection_root_path("missing").is_err());
     assert!(repo.collection_root_path("../escape").is_err());
+}
+
+fn script_names(items: &[rocket_collection::CollectionItem]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            rocket_collection::CollectionItem::ScriptFile(s) => Some(s.file_name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn tree_lists_js_files_at_root_and_in_folders() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = dir.path().join("col");
+    fs::write(root.join("utils.js"), "module.exports = 1;").expect("write");
+    repo.create_folder("col", "lib").expect("folder");
+    fs::write(root.join("lib/helper.js"), "module.exports = 2;").expect("write");
+    fs::write(root.join("notes.txt"), "not a script").expect("write");
+
+    for collection in [
+        repo.get("col").expect("get"),
+        repo.get_summaries("col").expect("summaries"),
+    ] {
+        assert_eq!(script_names(&collection.root.items), vec!["utils.js"]);
+        let lib = collection
+            .root
+            .items
+            .iter()
+            .find_map(|i| match i {
+                rocket_collection::CollectionItem::Folder(f) if f.name == "lib" => Some(f),
+                _ => None,
+            })
+            .expect("lib folder");
+        assert_eq!(script_names(&lib.items), vec!["helper.js"]);
+    }
+}
+
+#[test]
+fn tree_follows_order_file_for_scripts() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = dir.path().join("col");
+    fs::write(root.join("a.js"), "").expect("write");
+    fs::write(root.join("b.js"), "").expect("write");
+    fs::write(root.join("_order.yml"), "- b.js\n- a.js\n").expect("write order");
+    let collection = repo.get("col").expect("get");
+    assert_eq!(script_names(&collection.root.items), vec!["b.js", "a.js"]);
+}
+
+#[test]
+fn tree_skips_node_modules_and_dot_files() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = dir.path().join("col");
+    fs::create_dir_all(root.join("node_modules/pkg")).expect("mkdir");
+    fs::write(root.join("node_modules/pkg/index.js"), "").expect("write");
+    fs::write(root.join(".hidden.js"), "").expect("write");
+    let collection = repo.get("col").expect("get");
+    assert!(script_names(&collection.root.items).is_empty());
+    assert!(collection.root.items.iter().all(
+        |i| !matches!(i, rocket_collection::CollectionItem::Folder(f) if f.name == "node_modules")
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn tree_skips_symlinked_js_files() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = dir.path().join("col");
+    let outside = dir.path().join("outside.js");
+    fs::write(&outside, "module.exports = 1;").expect("write");
+    std::os::unix::fs::symlink(&outside, root.join("link.js")).expect("symlink");
+    let collection = repo.get("col").expect("get");
+    assert!(script_names(&collection.root.items).is_empty());
 }

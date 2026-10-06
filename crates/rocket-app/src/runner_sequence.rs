@@ -144,11 +144,12 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                 }
             }
             // Plans 12 and 13 do not run gRPC from the Collection Runner. WebSocket items,
-            // opaque items and sidebar summaries are not executable either.
+            // opaque items, sidebar summaries and script files are not executable either.
             CollectionItem::OpaqueItem(_)
             | CollectionItem::WebSocket(_)
             | CollectionItem::Grpc(_)
-            | CollectionItem::Summary(_) => {}
+            | CollectionItem::Summary(_)
+            | CollectionItem::ScriptFile(_) => {}
         }
     }
 }

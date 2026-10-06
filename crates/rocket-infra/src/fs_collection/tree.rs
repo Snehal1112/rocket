@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use rocket_collection::{CollectionItem, Folder, RequestKind, RequestSummary};
+use rocket_collection::{CollectionItem, Folder, RequestKind, RequestSummary, ScriptFileItem};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::conversions::{oc_http_request_to_request, oc_item_to_collection_item};
@@ -197,7 +197,10 @@ where
     for entry in entries {
         let path = entry.path();
         let entry_name = entry.file_name().to_string_lossy().to_string();
-        if entry_name.starts_with('.') || entry_name == "environments" {
+        if entry_name.starts_with('.')
+            || entry_name == "environments"
+            || entry_name == "node_modules"
+        {
             continue;
         }
         if is_collection_root && entry_name == "flows" {
@@ -213,6 +216,18 @@ where
                 continue;
             }
             folder.add_subfolder(build_tree(&path, load_item)?);
+        } else if is_script_file(&path) {
+            // Symlinked scripts are skipped, as symlinked directories are above.
+            let is_symlink = std::fs::symlink_metadata(&path)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(true);
+            if is_symlink {
+                tracing::warn!(path = %path.display(), "skipping symlinked script file");
+                continue;
+            }
+            folder
+                .items
+                .push(CollectionItem::ScriptFile(ScriptFileItem::new(&entry_name)));
         } else if is_request_file(&path) {
             if let Some(item) = load_item(&path, &entry_name)? {
                 folder.items.push(item);
@@ -221,6 +236,11 @@ where
     }
 
     Ok(folder)
+}
+
+/// True for a `.js` file. Dot-files never reach here because the skip above drops them.
+fn is_script_file(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "js")
 }
 
 /// Parse only the uid/name/method/url fields from a request file for sidebar display.

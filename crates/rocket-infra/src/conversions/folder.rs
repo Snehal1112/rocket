@@ -68,6 +68,8 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
             CollectionItem::WebSocket(ws) => {
                 Some(OcItem::WebSocket(websocket_to_oc_websocket(&ws)))
             }
+            // A script file is never serialised as a collection item.
+            CollectionItem::ScriptFile(_) => None,
             CollectionItem::OpaqueItem(opaque) => Some(
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {
@@ -184,6 +186,8 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
             CollectionItem::WebSocket(ws) => {
                 Some(OcItem::WebSocket(websocket_to_oc_websocket(&ws)))
             }
+            // A script file is never serialised as a collection item.
+            CollectionItem::ScriptFile(_) => None,
             CollectionItem::OpaqueItem(opaque) => Some(
                 serde_yaml::from_value::<OcItem>(opaque.raw.clone()).unwrap_or_else(|_| {
                     OcItem::Folder(OcFolder {

@@ -44,6 +44,9 @@ pub enum CollectionItem {
     /// Lightweight request placeholder for sidebar loads (no body/auth).
     #[serde(rename = "summary")]
     Summary(RequestSummary),
+    /// A `.js` file that scripts load with `require()`. Not a request.
+    #[serde(rename = "scriptFile")]
+    ScriptFile(crate::ScriptFileItem),
 }
 
 /// A folder containing requests and sub-folders.
@@ -108,6 +111,7 @@ impl Folder {
                 CollectionItem::Summary(_) => 1, // one summary = one request on disk
                 CollectionItem::Folder(f) => f.request_count(),
                 CollectionItem::OpaqueItem(_) => 0,
+                CollectionItem::ScriptFile(_) => 0,
             })
             .sum()
     }
