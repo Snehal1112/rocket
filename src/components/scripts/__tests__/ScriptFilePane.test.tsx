@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ScriptFilePane } from '@/components/scripts/ScriptFilePane';
 import { findScriptTab } from '@/lib/pane-utils';
@@ -76,6 +77,7 @@ describe('ScriptFilePane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
     await waitFor(() => expect(saveScriptFile).toHaveBeenCalled());
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(findScriptTab(usePaneStore.getState().root, 'col', 'lib/utils.js')?.tab.isDirty).toBe(
       true,
     );
@@ -85,5 +87,58 @@ describe('ScriptFilePane', () => {
     const tab = await openTab();
     render(<ScriptFilePane tab={tab} />);
     expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+  });
+
+  async function dirtyTab(): Promise<ScriptTab> {
+    const tab = await openTab();
+    usePaneStore.getState().updateScriptContent(tab.id, 'edited');
+    const edited = findScriptTab(usePaneStore.getState().root, 'col', 'lib/utils.js')?.tab;
+    if (!edited) throw new Error('missing tab');
+    return edited;
+  }
+
+  it('saves when the rocket:save-draft event targets its tab', async () => {
+    vi.mocked(saveScriptFile).mockResolvedValue(undefined);
+    const edited = await dirtyTab();
+    render(<ScriptFilePane tab={edited} />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('rocket:save-draft', { detail: { tabId: 'other' } }));
+    });
+    expect(saveScriptFile).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new CustomEvent('rocket:save-draft', { detail: { tabId: edited.id } }));
+    });
+    await waitFor(() => expect(saveScriptFile).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores a second save while one is in flight', async () => {
+    let resolveSave: () => void = () => undefined;
+    vi.mocked(saveScriptFile).mockReturnValue(new Promise<void>((r) => (resolveSave = r)));
+    const edited = await dirtyTab();
+    render(<ScriptFilePane tab={edited} />);
+
+    act(() => {
+      for (let i = 0; i < 2; i++) {
+        window.dispatchEvent(
+          new CustomEvent('rocket:save-draft', { detail: { tabId: edited.id } }),
+        );
+      }
+    });
+    expect(saveScriptFile).toHaveBeenCalledTimes(1);
+    await act(async () => resolveSave());
+  });
+
+  it('does not let Ctrl+S inside the pane reach the global handler', async () => {
+    vi.mocked(saveScriptFile).mockResolvedValue(undefined);
+    const edited = await dirtyTab();
+    const windowKeydown = vi.fn();
+    window.addEventListener('keydown', windowKeydown);
+    render(<ScriptFilePane tab={edited} />);
+
+    fireEvent.keyDown(screen.getByLabelText('editor'), { key: 's', ctrlKey: true });
+    window.removeEventListener('keydown', windowKeydown);
+    await waitFor(() => expect(saveScriptFile).toHaveBeenCalledTimes(1));
+    expect(windowKeydown).not.toHaveBeenCalled();
   });
 });

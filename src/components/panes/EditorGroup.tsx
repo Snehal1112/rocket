@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from 'react';
+import { toast } from 'sonner';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { WebSocketPanel } from '@/components/request/websocket/WebSocketPanel';
@@ -58,8 +59,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
+import { saveScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import type { LeafNode } from '@/types/pane-types';
+import type { LeafNode, ScriptTab } from '@/types/pane-types';
 import {
   isConflictTab,
   isContractDiffTab,
@@ -179,6 +181,21 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       : 'default';
 
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null);
+  const markScriptSaved = usePaneStore((s) => s.markScriptSaved);
+  const pendingTab = pendingCloseTabId ? node.tabs.find((t) => t.id === pendingCloseTabId) : null;
+  const pendingScript = pendingTab && isScriptTab(pendingTab) ? pendingTab : null;
+
+  const saveScriptAndClose = async (tab: ScriptTab) => {
+    try {
+      await saveScriptFile(tab.collectionName, tab.scriptPath, tab.content);
+      markScriptSaved(tab.id, tab.content);
+      closeTab(tab.id, node.groupId);
+    } catch (err) {
+      toast.error(
+        `Could not save "${tab.title}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
 
   const handleCloseTab = (tabId: string) => {
     const tab = node.tabs.find((t) => t.id === tabId);
@@ -299,6 +316,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               {(() => {
                 if (!pendingCloseTabId) return null;
                 const found = node.tabs.find((t) => t.id === pendingCloseTabId);
+                if (found && isScriptTab(found)) {
+                  return 'This script has unsaved changes. Save them before closing?';
+                }
                 if (found && isRequestTab(found) && !found.source) {
                   return 'This request has never been saved to a collection. Closing it will discard all changes. Close anyway?';
                 }
@@ -308,6 +328,17 @@ export function EditorGroup({ node }: { node: LeafNode }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {pendingScript && (
+              <AlertDialogAction
+                onClick={(e) => {
+                  // Keep the dialog open until the save finishes.
+                  e.preventDefault();
+                  void saveScriptAndClose(pendingScript).then(() => setPendingCloseTabId(null));
+                }}
+              >
+                Save and close
+              </AlertDialogAction>
+            )}
             <AlertDialogAction
               onClick={() => {
                 if (pendingCloseTabId) closeTab(pendingCloseTabId, node.groupId);

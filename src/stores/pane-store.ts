@@ -1180,7 +1180,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     });
     // Persist rename to disk. The file watcher detects the write and
     // emits collection-changed, which refreshes the sidebar automatically.
-    if (found?.tab.source) {
+    // Script files are renamed from the sidebar, never through the request rename.
+    if (found?.tab.source && !isScriptTab(found.tab)) {
       renameRequest(found.tab.source.collection, found.tab.source.path, title).catch((err) =>
         console.error('[pane-store] rename failed:', err),
       );

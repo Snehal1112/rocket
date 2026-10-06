@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findScriptTab } from '@/lib/pane-utils';
-import { readScriptFile } from '@/lib/tauri-api';
+import { readScriptFile, renameRequest } from '@/lib/tauri-api';
 import { isScriptTab } from '@/types/pane-types';
 import { usePaneStore } from '../pane-store';
 
 vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn() }));
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, getCollection: vi.fn(), readScriptFile: vi.fn(), endAgentSession: vi.fn() };
+  return {
+    ...actual,
+    getCollection: vi.fn(),
+    readScriptFile: vi.fn(),
+    renameRequest: vi.fn().mockResolvedValue(undefined),
+    endAgentSession: vi.fn(),
+  };
 });
 
 function findTab(collection: string, path: string) {
@@ -77,5 +83,13 @@ describe('pane-store script tabs', () => {
       collection: 'col',
       path: 'lib/b.js',
     });
+  });
+
+  it('never renames a request file when a script tab title changes', async () => {
+    vi.mocked(readScriptFile).mockResolvedValue('x');
+    await usePaneStore.getState().openScriptTab('col', 'a.js');
+    const id = findTab('col', 'a.js')?.tab.id ?? '';
+    usePaneStore.getState().updateTabTitle(id, 'other.js');
+    expect(renameRequest).not.toHaveBeenCalled();
   });
 });

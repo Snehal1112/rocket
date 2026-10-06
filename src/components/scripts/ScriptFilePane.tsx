@@ -1,5 +1,5 @@
 import { FileCode, Save } from 'lucide-react';
-import { lazy, Suspense, useCallback, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
@@ -25,11 +25,14 @@ export function ScriptFilePane({ tab }: ScriptFilePaneProps) {
   const updateScriptContent = usePaneStore((s) => s.updateScriptContent);
   const markScriptSaved = usePaneStore((s) => s.markScriptSaved);
   const [saving, setSaving] = useState(false);
+  // A ref blocks overlapping saves even before the state update renders.
+  const savingRef = useRef(false);
 
   const save = useCallback(async () => {
     // Read the latest content from the store, since the keyboard handler can be stale.
     const latest = findTabInTree(usePaneStore.getState().root, tab.id)?.tab;
-    if (!latest || !isScriptTab(latest) || !latest.isDirty) return;
+    if (!latest || !isScriptTab(latest) || !latest.isDirty || savingRef.current) return;
+    savingRef.current = true;
     const content = latest.content;
     setSaving(true);
     try {
@@ -38,13 +41,26 @@ export function ScriptFilePane({ tab }: ScriptFilePaneProps) {
     } catch (err) {
       toast.error(`Could not save "${latest.title}": ${errorMessage(err)}`);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }, [tab.id, markScriptSaved]);
 
+  // The tab context menu and the global Ctrl+S shortcut dispatch this event.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId?: string }>).detail;
+      if (detail?.tabId === tab.id) void save();
+    };
+    window.addEventListener('rocket:save-draft', handler);
+    return () => window.removeEventListener('rocket:save-draft', handler);
+  }, [tab.id, save]);
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
+      // Stop the global shortcut from dispatching a second save.
+      e.stopPropagation();
       void save();
     }
   };
