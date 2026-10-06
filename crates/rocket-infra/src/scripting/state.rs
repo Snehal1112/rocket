@@ -1,3 +1,4 @@
+use crate::scripting::local_modules::LocalRoots;
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
@@ -20,6 +21,9 @@ pub struct ScriptInputState {
     pub request_name: String,
     pub request_tags: Vec<String>,
     pub path_params: Vec<PathParam>,
+    /// Allowed roots for local `require()`. `None` when the context has no file
+    /// scope or the collection directory is unavailable.
+    pub local_roots: Option<LocalRoots>,
     /// Values that must be redacted if they appear in script-emitted
     /// console/test-error text. Copied from `variables.secret_values` when
     /// this state is seeded in `run_script` (engine.rs) — kept as its own

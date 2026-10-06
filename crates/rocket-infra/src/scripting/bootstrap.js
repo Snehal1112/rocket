@@ -338,7 +338,19 @@
   // vendored module cannot see `__ops` — and does not need to. None of them
   // reference the Deno global; they use globalThis.crypto, navigator, btoa and
   // atob, all of which survive this file untouched.
-  globalThis.require = function(name) {
+  //
+  // Bare names load vendored modules. `./x`, `../x` and absolute paths load local
+  // `.js` files through op_require_local, which enforces the allowed roots.
+  const isLocalSpecifier = (name) =>
+    name === '.' ||
+    name === '..' ||
+    name.startsWith('./') ||
+    name.startsWith('../') ||
+    name.startsWith('/') ||
+    name.startsWith('.\\') ||
+    name.startsWith('..\\');
+
+  const loadBundled = function(name) {
     const src = __ops.op_require_module(name);
     if (!src) throw new Error(`Module not found: ${name}`);
     const mod = { exports: {} };
@@ -346,6 +358,41 @@
     fn(mod, mod.exports, globalThis.require);
     return mod.exports;
   };
+
+  // One entry per canonical file path for the lifetime of this script run. The
+  // entry is stored before the module body runs, so circular requires see the
+  // partial exports. A module that throws is evicted so a later require retries.
+  const localCache = new Map();
+
+  const makeRequire = function(fromDir) {
+    return function require(name) {
+      if (typeof name !== 'string') {
+        throw new TypeError('require() expects a string module name');
+      }
+      if (isLocalSpecifier(name)) return loadLocal(fromDir, name);
+      return loadBundled(name);
+    };
+  };
+
+  const loadLocal = function(fromDir, name) {
+    const info = JSON.parse(__ops.op_require_local(fromDir, name));
+    const cached = localCache.get(info.path);
+    if (cached) return cached.exports;
+    const mod = { exports: {} };
+    localCache.set(info.path, mod);
+    try {
+      const fn = new Function(
+        "module", "exports", "require", "__filename", "__dirname", info.source
+      );
+      fn(mod, mod.exports, makeRequire(info.dir), info.path, info.dir);
+    } catch (e) {
+      localCache.delete(info.path);
+      throw e;
+    }
+    return mod.exports;
+  };
+
+  globalThis.require = makeRequire('');
 
   // ── test() + expect() ────────────────────────────────────────────────────────
   // Delegate to bundled Chai for full API parity.

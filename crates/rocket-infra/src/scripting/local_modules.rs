@@ -120,8 +120,8 @@ pub fn resolve_local_module(
         return Err(format!("Only .js files can be required: '{name}'"));
     }
 
-    let source = std::fs::read_to_string(&found)
-        .map_err(|e| format!("Cannot read module '{name}': {e}"))?;
+    let source =
+        std::fs::read_to_string(&found).map_err(|e| format!("Cannot read module '{name}': {e}"))?;
     let dir = found
         .parent()
         .map(Path::to_path_buf)
@@ -209,8 +209,14 @@ mod tests {
         let f = fixture();
         let r = roots(&f, SandboxMode::Safe);
         let err = resolve_local_module(&r, &r.collection_root, "../outer.js").expect_err("escape");
-        assert!(err.contains("outside the allowed script roots"), "got: {err}");
-        assert!(err.contains(&f.col.display().to_string()), "lists roots: {err}");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
+        assert!(
+            err.contains(&f.col.display().to_string()),
+            "lists roots: {err}"
+        );
     }
 
     #[test]
@@ -219,7 +225,10 @@ mod tests {
         let r = roots(&f, SandboxMode::Safe);
         let abs = f.outer.join("outer.js").display().to_string();
         let err = resolve_local_module(&r, &r.collection_root, &abs).expect_err("absolute");
-        assert!(err.contains("outside the allowed script roots"), "got: {err}");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
     }
 
     #[cfg(unix)]
@@ -230,7 +239,10 @@ mod tests {
             .expect("symlink");
         let r = roots(&f, SandboxMode::Safe);
         let err = resolve_local_module(&r, &r.collection_root, "./link.js").expect_err("symlink");
-        assert!(err.contains("outside the allowed script roots"), "got: {err}");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -248,7 +260,10 @@ mod tests {
         let safe = roots(&f, SandboxMode::Safe);
         let err = resolve_local_module(&safe, &safe.collection_root, "../shared/common.js")
             .expect_err("safe denies");
-        assert!(err.contains("outside the allowed script roots"), "got: {err}");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
 
         let dev = roots(&f, SandboxMode::Developer);
         let m = resolve_local_module(&dev, &dev.collection_root, "../shared/common.js")

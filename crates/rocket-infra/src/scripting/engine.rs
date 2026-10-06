@@ -5,7 +5,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
-use crate::scripting::ops::{console, fs, process, redact, req, res, rok};
+use crate::scripting::local_modules::build_roots;
+use crate::scripting::ops::{console, fs, modules, process, redact, req, res, rok};
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 
 /// JS scripting engine backed by `deno_core` (V8).
@@ -209,6 +210,7 @@ extension!(
         op_test_pass,
         op_test_fail,
         op_require_module,
+        modules::op_require_local,
     ],
 );
 
@@ -265,6 +267,11 @@ fn run_script(
         current + (current / 4)
     });
 
+    let local_roots = ctx
+        .file_scope
+        .as_ref()
+        .and_then(|scope| build_roots(scope, sandbox_mode).ok());
+
     // Seed OpState with input and output state.
     {
         let op_state = runtime.op_state();
@@ -281,6 +288,7 @@ fn run_script(
             request_name: ctx.request_name,
             request_tags: ctx.request_tags,
             path_params: ctx.path_params,
+            local_roots,
             secret_values,
         });
         state.put(ScriptOutputState::default());
@@ -869,6 +877,258 @@ mod tests {
             .as_ref()
             .expect("error")
             .contains("Module not found"));
+    }
+
+    use rocket_scripting::ScriptFileScope;
+
+    /// Builds a context with a local-file scope rooted at `root`.
+    fn scoped_ctx(
+        code: &str,
+        root: &std::path::Path,
+        additional: Vec<std::path::PathBuf>,
+        mode: SandboxMode,
+    ) -> ScriptContext {
+        let mut ctx = minimal_ctx(code);
+        ctx.sandbox_mode = mode;
+        ctx.file_scope = Some(ScriptFileScope {
+            collection_root: root.to_path_buf(),
+            additional_roots: additional,
+        });
+        ctx
+    }
+
+    fn write_file(root: &std::path::Path, rel: &str, content: &str) {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
+        std::fs::write(path, content).expect("write file");
+    }
+
+    async fn run(ctx: ScriptContext) -> rocket_scripting::ScriptResult {
+        DenoScriptEngine::new().execute(ctx).await.expect("execute")
+    }
+
+    #[tokio::test]
+    async fn require_local_sibling_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(
+            tmp.path(),
+            "utils.js",
+            "module.exports = { greet: (n) => 'hi ' + n };",
+        );
+        let ctx = scoped_ctx(
+            "const { greet } = require('./utils.js'); console.log(greet('bob'));",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries[0].message, "hi bob");
+    }
+
+    #[tokio::test]
+    async fn require_local_nested_resolves_from_the_requiring_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(tmp.path(), "root.js", "module.exports = 'root';");
+        write_file(tmp.path(), "lib/b.js", "module.exports = 'b';");
+        write_file(
+            tmp.path(),
+            "lib/a.js",
+            "module.exports = require('./b') + '+' + require('../root');",
+        );
+        let ctx = scoped_ctx(
+            "console.log(require('./lib/a'));",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries[0].message, "b+root");
+    }
+
+    #[tokio::test]
+    async fn require_local_supports_module_exports_reassignment_and_dirname() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(
+            tmp.path(),
+            "lib/fn.js",
+            "module.exports = function () { return __dirname.endsWith('lib') && __filename.endsWith('fn.js'); };",
+        );
+        let ctx = scoped_ctx(
+            "console.log(String(require('./lib/fn')()));",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries[0].message, "true");
+    }
+
+    #[tokio::test]
+    async fn require_local_circular_gets_partial_exports() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(
+            tmp.path(),
+            "a.js",
+            "exports.early = 1; const b = require('./b'); exports.fromB = b.sawEarly;",
+        );
+        write_file(
+            tmp.path(),
+            "b.js",
+            "const a = require('./a'); exports.sawEarly = a.early;",
+        );
+        let ctx = scoped_ctx(
+            "console.log(String(require('./a').fromB));",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries[0].message, "1");
+    }
+
+    #[tokio::test]
+    async fn require_local_runs_a_module_once_per_script_run() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(
+            tmp.path(),
+            "once.js",
+            "console.log('loaded'); module.exports = {};",
+        );
+        let ctx = scoped_ctx(
+            "require('./once'); require('./once.js'); require('./once');",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn require_local_failed_load_is_retried_not_cached() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(tmp.path(), "bad.js", "throw new Error('boom');");
+        let ctx = scoped_ctx(
+            "let n = 0; for (let i = 0; i < 2; i++) { try { require('./bad'); } catch (e) { n++; } } console.log(String(n));",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries[0].message, "2");
+    }
+
+    #[tokio::test]
+    async fn require_local_missing_file_reports_cannot_find() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let ctx = scoped_ctx("require('./nope');", tmp.path(), vec![], SandboxMode::Safe);
+        let result = run(ctx).await;
+        let err = result.error.expect("must fail");
+        assert!(err.contains("Cannot find module './nope'"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn require_local_without_scope_is_an_error() {
+        let result = run(minimal_ctx("require('./x');")).await;
+        let err = result.error.expect("must fail");
+        assert!(
+            err.contains("local file requires are not available"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_parent_escape_is_denied() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let base = tmp.path().canonicalize().expect("canonicalize");
+        write_file(&base, "outer.js", "module.exports = 1;");
+        let col = base.join("col");
+        std::fs::create_dir_all(&col).expect("mkdir col");
+        let ctx = scoped_ctx("require('../outer.js');", &col, vec![], SandboxMode::Safe);
+        let result = run(ctx).await;
+        let err = result.error.expect("must fail");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn require_local_symlink_escape_is_denied() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let base = tmp.path().canonicalize().expect("canonicalize");
+        write_file(&base, "outer.js", "module.exports = 1;");
+        let col = base.join("col");
+        std::fs::create_dir_all(&col).expect("mkdir col");
+        std::os::unix::fs::symlink(base.join("outer.js"), col.join("link.js")).expect("symlink");
+        let ctx = scoped_ctx("require('./link.js');", &col, vec![], SandboxMode::Safe);
+        let result = run(ctx).await;
+        let err = result.error.expect("must fail");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn require_local_non_js_file_is_rejected() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(tmp.path(), "data.txt", "TOPSECRET");
+        let ctx = scoped_ctx(
+            "require('./data.txt');",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        let err = result.error.expect("must fail");
+        assert!(err.contains("Only .js files can be required"), "got: {err}");
+        assert!(!err.contains("TOPSECRET"), "must not echo content: {err}");
+    }
+
+    #[tokio::test]
+    async fn additional_roots_are_developer_mode_only() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let base = tmp.path().canonicalize().expect("canonicalize");
+        write_file(&base, "shared/common.js", "module.exports = 'shared';");
+        let col = base.join("col");
+        std::fs::create_dir_all(&col).expect("mkdir col");
+        let extra = vec![std::path::PathBuf::from("../shared")];
+        let code = "console.log(require('../shared/common.js'));";
+
+        let safe = run(scoped_ctx(code, &col, extra.clone(), SandboxMode::Safe)).await;
+        let err = safe.error.expect("safe must deny");
+        assert!(
+            err.contains("outside the allowed script roots"),
+            "got: {err}"
+        );
+
+        let dev = run(scoped_ctx(code, &col, extra, SandboxMode::Developer)).await;
+        assert!(dev.error.is_none(), "error: {:?}", dev.error);
+        assert_eq!(dev.console_entries[0].message, "shared");
+    }
+
+    #[tokio::test]
+    async fn bundled_modules_still_resolve_with_a_scope_present() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let ctx = scoped_ctx(
+            "console.log(typeof require('lodash').get);",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        assert_eq!(result.console_entries[0].message, "function");
     }
 
     #[tokio::test]

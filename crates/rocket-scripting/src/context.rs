@@ -1,8 +1,8 @@
 use crate::ScriptPhase;
-use std::path::PathBuf;
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
+use std::path::PathBuf;
 
 /// How the request carrying a script was dispatched.
 ///
