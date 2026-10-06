@@ -1111,6 +1111,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn require_local_outside_absolute_paths_give_identical_denials() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let base = tmp.path().canonicalize().expect("canonicalize");
+        write_file(&base, "outer.js", "TOPSECRET");
+        let col = base.join("col");
+        std::fs::create_dir_all(&col).expect("mkdir col");
+        let mut messages = Vec::new();
+        for file in ["outer.js", "missing.js"] {
+            let path = base.join(file).display().to_string();
+            let ctx = scoped_ctx(
+                &format!("require('{path}');"),
+                &col,
+                vec![],
+                SandboxMode::Safe,
+            );
+            let err = run(ctx).await.error.expect("must fail");
+            assert!(
+                err.contains("outside the allowed script roots"),
+                "got: {err}"
+            );
+            assert!(!err.contains("TOPSECRET"), "must not echo content: {err}");
+            messages.push(err.replace(&path, "<path>"));
+        }
+        assert_eq!(messages[0], messages[1]);
+    }
+
+    #[tokio::test]
     async fn require_local_non_js_file_is_rejected() {
         let tmp = tempfile::tempdir().expect("tempdir");
         write_file(tmp.path(), "data.txt", "TOPSECRET");

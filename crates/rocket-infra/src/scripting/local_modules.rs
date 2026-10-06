@@ -1,9 +1,10 @@
 //! Pure path logic for `require()` of local `.js` files.
 //!
-//! Every path is canonicalised before the root check, so `..` segments and
-//! symlinks cannot escape the allowed roots.
+//! The specifier is first normalised lexically and checked against the roots
+//! without touching the disk. Only then is the path canonicalised and checked
+//! again, so `..` segments and symlinks cannot escape the allowed roots.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rocket_scripting::{SandboxMode, ScriptFileScope};
 
@@ -73,6 +74,43 @@ fn with_js_suffix(path: &Path) -> PathBuf {
     PathBuf::from(os)
 }
 
+/// Resolves `.` and `..` textually, with no disk access.
+///
+/// Returns `None` for a path with a prefix (UNC or drive) or a `..` above the root.
+pub(crate) fn lexical_normalize(path: &Path) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    let mut depth = 0usize;
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) => return None,
+            Component::RootDir => out.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                out.pop();
+            }
+            Component::Normal(part) => {
+                depth += 1;
+                out.push(part);
+            }
+        }
+    }
+    Some(out)
+}
+
+fn denied(roots: &LocalRoots, name: &str) -> String {
+    let allowed = roots
+        .roots
+        .iter()
+        .map(|r| r.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Access to '{name}' is outside the allowed script roots: {allowed}")
+}
+
 /// Resolves `name` against `from_dir` and loads the file.
 ///
 /// Lookup order: the name as written when it has an extension, then `name.js`.
@@ -87,6 +125,12 @@ pub fn resolve_local_module(
         requested.to_path_buf()
     } else {
         from_dir.join(requested)
+    };
+
+    // The root check below depends only on the specifier text, never on the disk.
+    let base = match lexical_normalize(&base) {
+        Some(normal) if roots.roots.iter().any(|root| normal.starts_with(root)) => normal,
+        _ => return Err(denied(roots, &name)),
     };
 
     let mut tries = Vec::new();
@@ -106,15 +150,7 @@ pub fn resolve_local_module(
         .ok_or_else(|| format!("Cannot find module '{name}'"))?;
 
     if !roots.roots.iter().any(|root| found.starts_with(root)) {
-        let allowed = roots
-            .roots
-            .iter()
-            .map(|r| r.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!(
-            "Access to '{name}' is outside the allowed script roots: {allowed}"
-        ));
+        return Err(denied(roots, &name));
     }
     if found.extension().and_then(|e| e.to_str()) != Some("js") {
         return Err(format!("Only .js files can be required: '{name}'"));
@@ -301,5 +337,75 @@ mod tests {
         assert!(is_local_specifier(".\\a"));
         assert!(!is_local_specifier("lodash"));
         assert!(!is_local_specifier("crypto-js"));
+    }
+
+    fn denial(r: &LocalRoots, name: &str) -> String {
+        let allowed = r
+            .roots
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("Access to '{name}' is outside the allowed script roots: {allowed}")
+    }
+
+    #[test]
+    fn outside_paths_give_the_same_denial_whether_or_not_they_exist() {
+        let f = fixture();
+        let r = roots(&f, SandboxMode::Safe);
+        let existing = f.outer.join("outer.js").display().to_string();
+        let missing = f.outer.join("missing.js").display().to_string();
+        let a = resolve_local_module(&r, &r.collection_root, &existing).expect_err("existing");
+        let b = resolve_local_module(&r, &r.collection_root, &missing).expect_err("missing");
+        assert_eq!(a, denial(&r, &existing));
+        assert_eq!(b, denial(&r, &missing));
+    }
+
+    #[test]
+    fn lexical_escapes_are_denied_without_the_file_existing() {
+        let f = fixture();
+        let r = roots(&f, SandboxMode::Safe);
+        for name in ["/etc/../etc/hostname", "./../../x", "./../nope-missing.js"] {
+            let err = resolve_local_module(&r, &r.collection_root, name).expect_err(name);
+            assert_eq!(err, denial(&r, name));
+        }
+    }
+
+    #[test]
+    fn unc_style_specifiers_are_denied() {
+        let f = fixture();
+        let r = roots(&f, SandboxMode::Safe);
+        for name in ["//attacker/share/x.js", "\\\\attacker\\share\\x.js"] {
+            let err = resolve_local_module(&r, &r.collection_root, name).expect_err(name);
+            assert_eq!(err, denial(&r, &name.replace('\\', "/")));
+        }
+    }
+
+    #[test]
+    fn in_root_dotdot_segments_still_load() {
+        let f = fixture();
+        fs::create_dir_all(f.col.join("a")).expect("mkdir a");
+        fs::write(f.col.join("b.js"), "module.exports = 5;").expect("write b");
+        let r = roots(&f, SandboxMode::Safe);
+        let m = resolve_local_module(&r, &r.collection_root, "./a/../b.js").expect("loads");
+        assert_eq!(m.source, "module.exports = 5;");
+    }
+
+    #[test]
+    fn lexical_normalize_resolves_dots_without_the_disk() {
+        let n = |s: &str| lexical_normalize(Path::new(s));
+        assert_eq!(n("/a/./b/../c"), Some(PathBuf::from("/a/c")));
+        assert_eq!(n("/a/b/.."), Some(PathBuf::from("/a")));
+        assert_eq!(n("/a/../.."), None);
+        assert_eq!(n("/.."), None);
+        assert_eq!(n("a/../../b"), None);
+        assert_eq!(n("//host/share/x"), Some(PathBuf::from("/host/share/x")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn lexical_normalize_rejects_prefixes() {
+        assert_eq!(lexical_normalize(Path::new(r"\\host\share\x")), None);
+        assert_eq!(lexical_normalize(Path::new(r"C:\x")), None);
     }
 }

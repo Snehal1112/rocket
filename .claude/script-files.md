@@ -7,6 +7,8 @@ Design: `docs/superpowers/specs/2026-10-06-js-script-files-design.md`.
   `op_require_local`; the JS loader is in `scripting/bootstrap.js`.
 - Allowed roots: the collection directory (Safe mode) plus `additionalContextRoots`
   (Developer mode only). Paths are canonicalised, so `..` and symlinks cannot escape.
+  The specifier is normalised lexically and checked against the roots before any disk
+  access (no existence oracle), then canonicalised and re-checked (symlinks).
 - Only `.js` files load. `package.json` `main`, `index.js` and `.json` are not supported.
 - `additionalContextRoots` is stored in `opencollection.yml` at
   `extensions.rocketapi.scripts.additionalContextRoots`. There is no settings UI yet.
