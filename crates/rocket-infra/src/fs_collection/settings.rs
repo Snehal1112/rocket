@@ -61,6 +61,66 @@ fn set_sandbox_mode_in_extensions(
     Some(serde_yaml::Value::Mapping(root))
 }
 
+/// Reads `extensions.rocketapi.scripts.additionalContextRoots`. Non-string entries
+/// are dropped and a missing key gives an empty list.
+fn script_roots_from_extensions(extensions: &Option<serde_yaml::Value>) -> Vec<String> {
+    extensions
+        .as_ref()
+        .and_then(|v| v.get("rocketapi"))
+        .and_then(|v| v.get("scripts"))
+        .and_then(|v| v.get("additionalContextRoots"))
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Writes the roots into `extensions.rocketapi.scripts.additionalContextRoots`, keeping
+/// every other key. An empty list removes the `scripts` key it owns so no empty stub is left.
+fn set_script_roots_in_extensions(
+    extensions: Option<serde_yaml::Value>,
+    roots: &[String],
+) -> Option<serde_yaml::Value> {
+    let mut root = match extensions {
+        Some(serde_yaml::Value::Mapping(map)) => map,
+        _ => serde_yaml::Mapping::new(),
+    };
+    let rocketapi_key = serde_yaml::Value::String("rocketapi".into());
+    let mut rocketapi = match root.get(&rocketapi_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    let scripts_key = serde_yaml::Value::String("scripts".into());
+    let mut scripts = match rocketapi.get(&scripts_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    let roots_key = serde_yaml::Value::String("additionalContextRoots".into());
+    if roots.is_empty() {
+        scripts.remove(&roots_key);
+    } else {
+        scripts.insert(
+            roots_key,
+            serde_yaml::Value::Sequence(
+                roots
+                    .iter()
+                    .map(|r| serde_yaml::Value::String(r.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    if scripts.is_empty() {
+        rocketapi.remove(&scripts_key);
+    } else {
+        rocketapi.insert(scripts_key, serde_yaml::Value::Mapping(scripts));
+    }
+    root.insert(rocketapi_key, serde_yaml::Value::Mapping(rocketapi));
+    Some(serde_yaml::Value::Mapping(root))
+}
+
 pub(super) fn get_settings(
     repo: &FsCollectionRepo,
     name: &str,
@@ -75,6 +135,7 @@ pub(super) fn get_settings(
         .map_err(|e| DomainError::Internal(format!("Failed to parse opencollection.yml: {e}")))?;
 
     let sandbox_mode = sandbox_mode_from_extensions(&oc.extensions);
+    let script_context_roots = script_roots_from_extensions(&oc.extensions);
 
     if let Some(defaults) = oc.request {
         Ok(CollectionSettings {
@@ -93,11 +154,13 @@ pub(super) fn get_settings(
                 .map(CollectionVariable::from)
                 .collect(),
             sandbox_mode,
+            script_context_roots,
         })
     } else {
         Ok(CollectionSettings {
             docs: oc.docs,
             sandbox_mode,
+            script_context_roots,
             ..CollectionSettings::default()
         })
     }
@@ -174,6 +237,8 @@ pub(super) fn save_settings(
     };
     oc.docs = settings.docs.clone();
     oc.extensions = set_sandbox_mode_in_extensions(oc.extensions.take(), settings.sandbox_mode);
+    oc.extensions =
+        set_script_roots_in_extensions(oc.extensions.take(), &settings.script_context_roots);
 
     let yaml = serde_yaml::to_string(&oc).map_err(|e| {
         DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}"))
@@ -233,5 +298,16 @@ mod tests {
         assert!(serialized.contains("someOtherTool"));
         assert!(serialized.contains("foo: bar"));
         assert!(serialized.contains("unrelatedFlag: true"));
+    }
+
+    #[test]
+    fn script_roots_from_extensions_ignores_non_string_entries() {
+        let yaml = "rocketapi:\n  scripts:\n    additionalContextRoots:\n      - ../shared\n      - 42\n      - ./more\n";
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(
+            script_roots_from_extensions(&Some(value)),
+            vec!["../shared".to_string(), "./more".to_string()]
+        );
+        assert!(script_roots_from_extensions(&None).is_empty());
     }
 }

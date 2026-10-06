@@ -16,7 +16,7 @@ use rocket_http::{
 };
 use rocket_scripting::{
     context::SandboxMode, ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext,
-    ScriptEngine, ScriptResult, TestResult, TestStatus,
+    ScriptEngine, ScriptFileScope, ScriptResult, TestResult, TestStatus,
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -240,6 +240,8 @@ pub(crate) struct PhaseState {
     /// Resolved once in `begin_phases` from the collection's `sandbox_mode`
     /// setting, applied to every phase's `ScriptContext`.
     pub sandbox_mode: SandboxMode,
+    /// Local-file `require()` scope, resolved once in `begin_phases`.
+    pub file_scope: Option<ScriptFileScope>,
 }
 
 impl PhaseState {
@@ -1374,17 +1376,29 @@ impl RequestExecutionService {
         // variables. A script that sets the same key later still wins.
         var_ctx.runtime.extend(input.flow_vars.clone());
 
-        let sandbox_mode = match input.collection.as_deref() {
-            Some(col) => match self
-                .collection_repo
-                .get_settings(col)
-                .unwrap_or_default()
-                .sandbox_mode
-            {
-                CollectionSandboxMode::Safe => SandboxMode::Safe,
-                CollectionSandboxMode::Developer => SandboxMode::Developer,
-            },
-            None => SandboxMode::Safe,
+        let (sandbox_mode, file_scope) = match input.collection.as_deref() {
+            Some(col) => {
+                let settings = self.collection_repo.get_settings(col).unwrap_or_default();
+                let mode = match settings.sandbox_mode {
+                    CollectionSandboxMode::Safe => SandboxMode::Safe,
+                    CollectionSandboxMode::Developer => SandboxMode::Developer,
+                };
+                // A collection whose directory cannot be resolved just gets no scope.
+                let scope = self
+                    .collection_repo
+                    .collection_root_path(col)
+                    .ok()
+                    .map(|root| ScriptFileScope {
+                        collection_root: root,
+                        additional_roots: settings
+                            .script_context_roots
+                            .iter()
+                            .map(std::path::PathBuf::from)
+                            .collect(),
+                    });
+                (mode, scope)
+            }
+            None => (SandboxMode::Safe, None),
         };
 
         Ok(PhaseState {
@@ -1397,6 +1411,7 @@ impl RequestExecutionService {
             skip_request: false,
             vault_forms: crate::redaction::secret_forms(external_secrets.values()),
             sandbox_mode,
+            file_scope,
         })
     }
 
@@ -1427,7 +1442,8 @@ impl RequestExecutionService {
                     input.path_params.clone(),
                 )
                 .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode);
+                .with_sandbox_mode(state.sandbox_mode)
+                .with_file_scope(state.file_scope.clone());
                 let result = self
                     .run_script_phase(
                         code,
@@ -1634,7 +1650,8 @@ impl RequestExecutionService {
                     input.path_params.clone(),
                 )
                 .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode);
+                .with_sandbox_mode(state.sandbox_mode)
+                .with_file_scope(state.file_scope.clone());
                 let result = self
                     .run_script_phase(
                         code,
@@ -1689,7 +1706,8 @@ impl RequestExecutionService {
                     input.path_params.clone(),
                 )
                 .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode);
+                .with_sandbox_mode(state.sandbox_mode)
+                .with_file_scope(state.file_scope.clone());
                 let result = self
                     .run_script_phase(code, ctx, &request_name, "tests", &mut state.console)
                     .await;
@@ -2418,6 +2436,7 @@ mod tests {
         settings: CollectionSettings,
         folder_vars: Vec<CollectionVariable>,
         request_vars: Vec<CollectionVariable>,
+        root: Option<std::path::PathBuf>,
     }
 
     impl StubCollectionRepo {
@@ -2426,6 +2445,7 @@ mod tests {
                 settings: CollectionSettings::default(),
                 folder_vars: vec![],
                 request_vars: vec![],
+                root: None,
             }
         }
 
@@ -2434,7 +2454,13 @@ mod tests {
                 settings,
                 folder_vars: vec![],
                 request_vars: vec![],
+                root: None,
             }
+        }
+
+        fn with_root(mut self, root: &str) -> Self {
+            self.root = Some(root.into());
+            self
         }
 
         fn with_folder_vars(mut self, vars: Vec<CollectionVariable>) -> Self {
@@ -2493,6 +2519,11 @@ mod tests {
         }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.clone())
+        }
+        fn collection_root_path(&self, _: &str) -> DomainResult<std::path::PathBuf> {
+            self.root
+                .clone()
+                .ok_or_else(|| DomainError::NotFound("no root".into()))
         }
         fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
             Ok(())
@@ -4625,6 +4656,7 @@ mod tests {
             headers: vec![],
             variables: vec![],
             sandbox_mode: rocket_collection::settings::SandboxMode::Safe,
+            ..Default::default()
         };
 
         // Use a mock executor that captures the request auth.
@@ -8151,6 +8183,73 @@ mod tests {
             modes,
             vec![rocket_scripting::context::SandboxMode::Developer]
         );
+    }
+
+    struct ScopeProbeEngine {
+        seen: Mutex<Vec<Option<rocket_scripting::ScriptFileScope>>>,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for ScopeProbeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.seen.lock().expect("lock").push(ctx.file_scope.clone());
+            Ok(ScriptResult::default())
+        }
+    }
+
+    struct SharedScopeProbe(Arc<ScopeProbeEngine>);
+    #[async_trait]
+    impl ScriptEngine for SharedScopeProbe {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.0.execute(ctx).await
+        }
+    }
+
+    #[tokio::test]
+    async fn scripts_receive_the_collection_file_scope_in_every_phase() {
+        let engine = Arc::new(ScopeProbeEngine {
+            seen: Mutex::new(vec![]),
+        });
+        let repo = StubCollectionRepo::with_settings(CollectionSettings {
+            script_context_roots: vec!["../shared".into()],
+            ..Default::default()
+        })
+        .with_root("/work/my-api");
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(repo),
+            Box::new(SharedScopeProbe(Arc::clone(&engine))),
+        );
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("// pre".into());
+        input.post_response_script = Some("// post".into());
+        input.tests_script = Some("// tests".into());
+        svc.execute(input).await.expect("execute");
+
+        let expected = Some(rocket_scripting::ScriptFileScope {
+            collection_root: "/work/my-api".into(),
+            additional_roots: vec!["../shared".into()],
+        });
+        let seen = engine.seen.lock().expect("lock").clone();
+        assert_eq!(seen, vec![expected.clone(), expected.clone(), expected]);
+    }
+
+    #[tokio::test]
+    async fn scripts_get_no_file_scope_without_a_collection() {
+        let engine = Arc::new(ScopeProbeEngine {
+            seen: Mutex::new(vec![]),
+        });
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedScopeProbe(Arc::clone(&engine))),
+        );
+        let mut input = sample_input("https://example.com", None);
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute");
+        assert_eq!(engine.seen.lock().expect("lock").clone(), vec![None]);
     }
 
     #[tokio::test]

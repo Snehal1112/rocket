@@ -180,6 +180,7 @@ fn settings_roundtrip() {
         headers: vec![Header::new("X-Tenant", "acme")],
         variables: vec![],
         sandbox_mode: SandboxMode::Safe,
+        ..Default::default()
     };
     repo.save_settings("my-api", &original).unwrap();
     let loaded = repo.get_settings("my-api").unwrap();
@@ -200,6 +201,7 @@ fn settings_file_not_counted_as_request() {
         headers: vec![],
         variables: vec![],
         sandbox_mode: SandboxMode::Safe,
+        ..Default::default()
     };
     repo.save_settings("my-api", &settings).unwrap();
 
@@ -222,6 +224,7 @@ fn settings_stored_in_opencollection_yml() {
         headers: vec![Header::new("X-Tenant", "acme")],
         variables: vec![],
         sandbox_mode: SandboxMode::Safe,
+        ..Default::default()
     };
     repo.save_settings("my-api", &settings).unwrap();
 
@@ -2417,3 +2420,58 @@ fn saving_settings_without_defaults_writes_no_request_block() {
     assert!(!saved.contains("request:"), "{saved}");
 }
 
+#[test]
+fn settings_script_context_roots_roundtrip_and_keep_other_extensions() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let path = repo.settings_path("col");
+    let existing = std::fs::read_to_string(&path).expect("read");
+    let with_other = format!(
+        "{existing}extensions:\n  rocketapi:\n    sandboxMode: safe\n    keep: me\n  other:\n    x: 1\n"
+    );
+    std::fs::write(&path, with_other).expect("write fixture");
+
+    let mut settings = repo.get_settings("col").expect("get");
+    assert!(settings.script_context_roots.is_empty());
+    settings.script_context_roots = vec!["../shared".into(), "./more".into()];
+    repo.save_settings("col", &settings).expect("save");
+
+    let loaded = repo.get_settings("col").expect("reload");
+    assert_eq!(loaded.script_context_roots, vec!["../shared", "./more"]);
+    let yaml = std::fs::read_to_string(&path).expect("read back");
+    assert!(
+        yaml.contains("keep: me"),
+        "other rocketapi keys kept: {yaml}"
+    );
+    assert!(yaml.contains("other:"), "other extensions kept: {yaml}");
+    assert!(
+        yaml.contains("additionalContextRoots"),
+        "key written: {yaml}"
+    );
+}
+
+#[test]
+fn settings_script_context_roots_empty_removes_the_key() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let mut settings = repo.get_settings("col").expect("get");
+    settings.script_context_roots = vec!["../shared".into()];
+    repo.save_settings("col", &settings).expect("save");
+    settings.script_context_roots.clear();
+    repo.save_settings("col", &settings).expect("save empty");
+    let yaml = std::fs::read_to_string(repo.settings_path("col")).expect("read");
+    assert!(
+        !yaml.contains("additionalContextRoots"),
+        "key removed: {yaml}"
+    );
+}
+
+#[test]
+fn collection_root_path_returns_the_directory_and_rejects_unknown() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let path = repo.collection_root_path("col").expect("exists");
+    assert!(path.is_dir());
+    assert!(repo.collection_root_path("missing").is_err());
+    assert!(repo.collection_root_path("../escape").is_err());
+}

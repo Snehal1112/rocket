@@ -150,6 +150,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
                 .map(CollectionVariable::from)
                 .collect(),
             sandbox_mode: SandboxMode::Safe,
+            script_context_roots: vec![],
         }
     } else {
         CollectionSettings {

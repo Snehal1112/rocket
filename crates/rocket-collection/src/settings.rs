@@ -52,6 +52,12 @@ pub struct CollectionSettings {
     /// JS sandbox capability level for scripts in this collection.
     #[serde(default)]
     pub sandbox_mode: SandboxMode,
+
+    /// Extra directories scripts may `require()` from, in Developer sandbox mode only.
+    /// Relative entries resolve against the collection directory.
+    /// Persisted at `extensions.rocketapi.scripts.additionalContextRoots`.
+    #[serde(default)]
+    pub script_context_roots: Vec<String>,
 }
 
 /// Merge a folder ancestor chain into a single deduplicated, sorted variable set.

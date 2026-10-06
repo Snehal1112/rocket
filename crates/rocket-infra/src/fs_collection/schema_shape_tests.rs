@@ -731,6 +731,7 @@ fn written_collection_files_only_use_schema_keys() {
                 secret: false,
             }],
             sandbox_mode: SandboxMode::Developer,
+            ..Default::default()
         },
     )
     .unwrap();

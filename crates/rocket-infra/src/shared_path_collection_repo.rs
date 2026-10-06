@@ -164,6 +164,10 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().get_settings(name)
     }
 
+    fn collection_root_path(&self, name: &str) -> DomainResult<std::path::PathBuf> {
+        self.repo().collection_root_path(name)
+    }
+
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
         self.repo().save_settings(name, settings)
     }

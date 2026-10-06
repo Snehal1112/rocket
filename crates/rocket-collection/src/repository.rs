@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection::Collection;
@@ -144,6 +146,14 @@ pub trait CollectionRepository: Send + Sync {
     /// Read collection-level settings (auth, headers) from collection.json.
     /// Returns default settings if the file does not exist.
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings>;
+
+    /// Absolute directory of a collection. Used to scope local-file `require()`.
+    /// The default body keeps test doubles compiling; real repositories override it.
+    fn collection_root_path(&self, _name: &str) -> DomainResult<PathBuf> {
+        Err(DomainError::Internal(
+            "collection root path is not available".into(),
+        ))
+    }
 
     /// Persist collection-level settings to collection.json.
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()>;

@@ -100,6 +100,17 @@ impl FsCollectionRepo {
 }
 
 impl CollectionRepository for FsCollectionRepo {
+    fn collection_root_path(&self, name: &str) -> DomainResult<PathBuf> {
+        Collection::validate_name(name)?;
+        let path = self.collection_path(name);
+        if !path.is_dir() {
+            return Err(DomainError::NotFound(format!(
+                "Collection '{name}' not found"
+            )));
+        }
+        Ok(path)
+    }
+
     fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
         folders::list(self)
     }
