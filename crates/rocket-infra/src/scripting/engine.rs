@@ -1063,6 +1063,8 @@ mod tests {
             duration_ms: 42,
             ttfb_ms: 0,
             size_bytes: body.len(),
+            is_binary: false,
+            body_base64: None,
         }
     }
 

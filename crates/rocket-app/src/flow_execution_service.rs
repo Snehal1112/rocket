@@ -5774,7 +5774,11 @@ mod tests {
             .expect("all response fields must be defined");
 
         assert!(value.starts_with("OK10"), "unexpected value: {value}");
-        assert!(value.contains("X-Id"), "unexpected value: {value}");
+        // The script engine lowercases header names.
+        assert!(
+            value.to_ascii_lowercase().contains("x-id"),
+            "unexpected value: {value}"
+        );
     }
 
     #[tokio::test]
