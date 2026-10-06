@@ -155,6 +155,53 @@ pub trait CollectionRepository: Send + Sync {
         ))
     }
 
+    /// Creates `name` (`.js` appended when missing) in `folder_path` with starter
+    /// content. `folder_path` is relative to the collection root, `""` for the root.
+    /// Returns the collection-relative path of the new file.
+    fn create_script_file(
+        &self,
+        _collection: &str,
+        _folder_path: &str,
+        _name: &str,
+    ) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "script files are not supported".into(),
+        ))
+    }
+
+    /// Reads a script file by collection-relative path.
+    fn read_script_file(&self, _collection: &str, _path: &str) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "script files are not supported".into(),
+        ))
+    }
+
+    /// Overwrites an existing script file. Never creates a file.
+    fn save_script_file(&self, _collection: &str, _path: &str, _content: &str) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "script files are not supported".into(),
+        ))
+    }
+
+    /// Renames a script file inside its folder. Returns the new relative path.
+    fn rename_script_file(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _new_name: &str,
+    ) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "script files are not supported".into(),
+        ))
+    }
+
+    /// Deletes a script file.
+    fn delete_script_file(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "script files are not supported".into(),
+        ))
+    }
+
     /// Persist collection-level settings to collection.json.
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()>;
 

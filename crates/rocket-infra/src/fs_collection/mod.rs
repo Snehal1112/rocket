@@ -13,6 +13,7 @@ pub(crate) mod folder_file;
 mod folders;
 mod paths;
 mod requests;
+mod script_files;
 mod settings;
 mod tree;
 mod variables;
@@ -109,6 +110,36 @@ impl CollectionRepository for FsCollectionRepo {
             )));
         }
         Ok(path)
+    }
+
+    fn create_script_file(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        name: &str,
+    ) -> DomainResult<String> {
+        script_files::create_script_file(self, collection, folder_path, name)
+    }
+
+    fn read_script_file(&self, collection: &str, path: &str) -> DomainResult<String> {
+        script_files::read_script_file(self, collection, path)
+    }
+
+    fn save_script_file(&self, collection: &str, path: &str, content: &str) -> DomainResult<()> {
+        script_files::save_script_file(self, collection, path, content)
+    }
+
+    fn rename_script_file(
+        &self,
+        collection: &str,
+        path: &str,
+        new_name: &str,
+    ) -> DomainResult<String> {
+        script_files::rename_script_file(self, collection, path, new_name)
+    }
+
+    fn delete_script_file(&self, collection: &str, path: &str) -> DomainResult<()> {
+        script_files::delete_script_file(self, collection, path)
     }
 
     fn list(&self) -> DomainResult<Vec<CollectionSummary>> {

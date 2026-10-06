@@ -2554,3 +2554,133 @@ fn tree_skips_symlinked_js_files() {
     let collection = repo.get("col").expect("get");
     assert!(script_names(&collection.root.items).is_empty());
 }
+
+fn text_of(dir: &TempDir, rel: &str) -> String {
+    fs::read_to_string(dir.path().join(rel)).expect("read file")
+}
+
+#[test]
+fn script_create_writes_template_at_root_and_in_folder() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_folder("col", "lib").expect("folder");
+
+    let root_path = repo.create_script_file("col", "", "utils").expect("root");
+    assert_eq!(root_path, "utils.js");
+    let nested = repo
+        .create_script_file("col", "lib", "helper.js")
+        .expect("nested");
+    assert_eq!(nested, "lib/helper.js");
+
+    let text = text_of(&dir, "col/lib/helper.js");
+    assert!(text.contains("module.exports"));
+    assert!(
+        text.contains("helper.js"),
+        "template names the file: {text}"
+    );
+    assert_eq!(
+        repo.read_script_file("col", "utils.js").expect("read"),
+        text_of(&dir, "col/utils.js")
+    );
+}
+
+#[test]
+fn script_create_rejects_duplicates_bad_names_and_bad_folders() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_script_file("col", "", "utils").expect("first");
+    fs::write(dir.path().join("col/utils.js"), "keep me").expect("overwrite fixture");
+
+    assert!(repo.create_script_file("col", "", "utils").is_err());
+    assert_eq!(
+        text_of(&dir, "col/utils.js"),
+        "keep me",
+        "existing file untouched"
+    );
+    assert!(repo.create_script_file("col", "", "../evil").is_err());
+    assert!(repo.create_script_file("col", "", "a/b").is_err());
+    assert!(repo
+        .create_script_file("col", "no-such-folder", "x")
+        .is_err());
+    assert!(repo.create_script_file("col", "../..", "x").is_err());
+}
+
+#[test]
+fn script_save_and_read_roundtrip_and_reject_non_scripts() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_script_file("col", "", "utils")
+        .expect("create script");
+
+    repo.save_script_file("col", "utils.js", "module.exports = 42;")
+        .expect("save");
+    assert_eq!(
+        repo.read_script_file("col", "utils.js").expect("read"),
+        "module.exports = 42;"
+    );
+
+    let settings_before = text_of(&dir, "col/opencollection.yml");
+    assert!(repo
+        .save_script_file("col", "opencollection.yml", "x")
+        .is_err());
+    assert_eq!(text_of(&dir, "col/opencollection.yml"), settings_before);
+    assert!(repo.save_script_file("col", "missing.js", "x").is_err());
+    assert!(
+        !dir.path().join("col/missing.js").exists(),
+        "save must not create files"
+    );
+    assert!(repo.save_script_file("col", "../outside.js", "x").is_err());
+    assert!(repo.read_script_file("col", "opencollection.yml").is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn script_ops_reject_symlinks_and_directories() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let outside = dir.path().join("outside.js");
+    fs::write(&outside, "secret").expect("write");
+    std::os::unix::fs::symlink(&outside, dir.path().join("col/link.js")).expect("symlink");
+    fs::create_dir_all(dir.path().join("col/dir.js")).expect("dir named .js");
+
+    assert!(repo.read_script_file("col", "link.js").is_err());
+    assert!(repo.save_script_file("col", "link.js", "x").is_err());
+    assert!(repo.delete_script_file("col", "link.js").is_err());
+    assert_eq!(fs::read_to_string(&outside).expect("read"), "secret");
+    assert!(repo.read_script_file("col", "dir.js").is_err());
+    assert!(repo.delete_script_file("col", "dir.js").is_err());
+}
+
+#[test]
+fn script_rename_and_delete() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_folder("col", "lib").expect("folder");
+    repo.create_script_file("col", "lib", "a").expect("a");
+    repo.create_script_file("col", "lib", "b").expect("b");
+    fs::write(dir.path().join("col/lib/b.js"), "b content").expect("fixture");
+
+    let renamed = repo
+        .rename_script_file("col", "lib/a.js", "c")
+        .expect("rename");
+    assert_eq!(renamed, "lib/c.js");
+    assert!(!dir.path().join("col/lib/a.js").exists());
+    assert!(dir.path().join("col/lib/c.js").exists());
+
+    assert!(repo.rename_script_file("col", "lib/c.js", "b").is_err());
+    assert_eq!(
+        text_of(&dir, "col/lib/b.js"),
+        "b content",
+        "target untouched"
+    );
+    assert!(dir.path().join("col/lib/c.js").exists(), "source untouched");
+    assert!(repo.rename_script_file("col", "lib/c.js", "../x").is_err());
+
+    repo.delete_script_file("col", "lib/c.js").expect("delete");
+    assert!(!dir.path().join("col/lib/c.js").exists());
+    assert!(repo.delete_script_file("col", "lib/c.js").is_err());
+    assert!(repo
+        .delete_script_file("col", "opencollection.yml")
+        .is_err());
+    assert!(dir.path().join("col/opencollection.yml").exists());
+}

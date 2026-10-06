@@ -168,6 +168,37 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().collection_root_path(name)
     }
 
+    fn create_script_file(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        name: &str,
+    ) -> DomainResult<String> {
+        self.repo()
+            .create_script_file(collection, folder_path, name)
+    }
+
+    fn read_script_file(&self, collection: &str, path: &str) -> DomainResult<String> {
+        self.repo().read_script_file(collection, path)
+    }
+
+    fn save_script_file(&self, collection: &str, path: &str, content: &str) -> DomainResult<()> {
+        self.repo().save_script_file(collection, path, content)
+    }
+
+    fn rename_script_file(
+        &self,
+        collection: &str,
+        path: &str,
+        new_name: &str,
+    ) -> DomainResult<String> {
+        self.repo().rename_script_file(collection, path, new_name)
+    }
+
+    fn delete_script_file(&self, collection: &str, path: &str) -> DomainResult<()> {
+        self.repo().delete_script_file(collection, path)
+    }
+
     fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
         self.repo().save_settings(name, settings)
     }
