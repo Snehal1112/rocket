@@ -74,31 +74,54 @@ fn with_js_suffix(path: &Path) -> PathBuf {
     PathBuf::from(os)
 }
 
-/// Resolves `.` and `..` textually, with no disk access.
-///
-/// Returns `None` for a path with a prefix (UNC or drive) or a `..` above the root.
-pub(crate) fn lexical_normalize(path: &Path) -> Option<PathBuf> {
+/// One path component, in a form that is testable on every platform.
+enum Part<'a> {
+    Prefix(&'a std::ffi::OsStr),
+    Root,
+    Cur,
+    Parent,
+    Normal(&'a std::ffi::OsStr),
+}
+
+/// Folds components textually. A prefix is only allowed as the first component.
+fn normalize_parts<'a>(parts: impl IntoIterator<Item = Part<'a>>) -> Option<PathBuf> {
     let mut out = PathBuf::new();
     let mut depth = 0usize;
-    for component in path.components() {
-        match component {
-            Component::Prefix(_) => return None,
-            Component::RootDir => out.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
+    for (index, part) in parts.into_iter().enumerate() {
+        match part {
+            Part::Prefix(prefix) if index == 0 => out.push(prefix),
+            Part::Prefix(_) => return None,
+            Part::Root => out.push(std::path::MAIN_SEPARATOR_STR),
+            Part::Cur => {}
+            Part::Parent => {
                 if depth == 0 {
                     return None;
                 }
                 depth -= 1;
                 out.pop();
             }
-            Component::Normal(part) => {
+            Part::Normal(name) => {
                 depth += 1;
-                out.push(part);
+                out.push(name);
             }
         }
     }
     Some(out)
+}
+
+/// Resolves `.` and `..` textually, with no disk access.
+///
+/// A leading prefix (such as the verbatim prefix of a canonical Windows root)
+/// is kept. The root check then decides, so a UNC or drive specifier fails it.
+/// Returns `None` for a misplaced prefix or a `..` above the root or prefix.
+pub(crate) fn lexical_normalize(path: &Path) -> Option<PathBuf> {
+    normalize_parts(path.components().map(|c| match c {
+        Component::Prefix(p) => Part::Prefix(p.as_os_str()),
+        Component::RootDir => Part::Root,
+        Component::CurDir => Part::Cur,
+        Component::ParentDir => Part::Parent,
+        Component::Normal(n) => Part::Normal(n),
+    }))
 }
 
 fn denied(roots: &LocalRoots, name: &str) -> String {
@@ -127,9 +150,10 @@ pub fn resolve_local_module(
         from_dir.join(requested)
     };
 
+    let under_root = |p: &Path| roots.roots.iter().any(|root| p.starts_with(root));
     // The root check below depends only on the specifier text, never on the disk.
     let base = match lexical_normalize(&base) {
-        Some(normal) if roots.roots.iter().any(|root| normal.starts_with(root)) => normal,
+        Some(normal) if under_root(&normal) => normal,
         _ => return Err(denied(roots, &name)),
     };
 
@@ -138,6 +162,8 @@ pub fn resolve_local_module(
         tries.push(base.clone());
     }
     tries.push(with_js_suffix(&base));
+    // Every candidate is checked lexically, so `<root>.js` is never probed.
+    tries.retain(|candidate| under_root(candidate));
 
     let found = tries
         .iter()
@@ -404,8 +430,62 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn lexical_normalize_rejects_prefixes() {
-        assert_eq!(lexical_normalize(Path::new(r"\\host\share\x")), None);
-        assert_eq!(lexical_normalize(Path::new(r"C:\x")), None);
+    fn lexical_normalize_keeps_a_leading_verbatim_prefix() {
+        assert_eq!(
+            lexical_normalize(Path::new(r"\\?\C:\col\a\..\b.js")),
+            Some(PathBuf::from(r"\\?\C:\col\b.js"))
+        );
+        assert_eq!(lexical_normalize(Path::new(r"\\?\C:\..")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unc_and_drive_specifiers_are_denied_against_a_verbatim_root() {
+        let r = LocalRoots {
+            collection_root: PathBuf::from(r"\\?\C:\col"),
+            roots: vec![PathBuf::from(r"\\?\C:\col")],
+        };
+        for name in [r"\\host\share\x.js", "//host/share/x.js", r"C:\x.js"] {
+            let err = resolve_local_module(&r, &r.collection_root, name).expect_err(name);
+            assert_eq!(err, denial(&r, &name.replace('\\', "/")));
+        }
+    }
+
+    #[test]
+    fn dot_specifier_never_probes_the_root_sibling_js_file() {
+        let f = fixture();
+        let r = roots(&f, SandboxMode::Safe);
+        let sibling = f.outer.join("col.js");
+        let mut errs = Vec::new();
+        for exists in [false, true] {
+            if exists {
+                fs::write(&sibling, "module.exports = 9;").expect("write sibling");
+            }
+            for name in [".", "./", ".."] {
+                errs.push((name, resolve_local_module(&r, &r.collection_root, name)));
+            }
+        }
+        let (first, second) = errs.split_at(3);
+        for ((n, a), (_, b)) in first.iter().zip(second) {
+            assert_eq!(a.as_ref().expect_err(n), b.as_ref().expect_err(n));
+        }
+    }
+
+    #[test]
+    fn normalize_parts_allows_only_a_leading_prefix() {
+        use std::ffi::OsStr;
+        let p = |s: &'static str| Part::Prefix(OsStr::new(s));
+        let n = |s: &'static str| Part::Normal(OsStr::new(s));
+        // Leading prefix is kept and `..` folds inside it.
+        let ok = normalize_parts([p("pfx"), Part::Root, n("col"), n("a"), Part::Parent, n("b")]);
+        let expected: PathBuf = ["pfx", std::path::MAIN_SEPARATOR_STR, "col", "b"]
+            .iter()
+            .collect();
+        assert_eq!(ok, Some(expected));
+        // Climbing above the prefix and root is rejected.
+        assert_eq!(normalize_parts([p("pfx"), Part::Root, Part::Parent]), None);
+        // A prefix that is not first is rejected.
+        assert_eq!(normalize_parts([Part::Root, n("a"), p("pfx")]), None);
+        assert_eq!(normalize_parts([n("a"), p("pfx")]), None);
     }
 }
