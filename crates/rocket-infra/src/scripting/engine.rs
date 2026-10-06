@@ -1027,6 +1027,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn require_local_modules_cannot_see_ops() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_file(
+            tmp.path(),
+            "probe.js",
+            "module.exports = [typeof __ops, typeof Deno, typeof __bootstrap];",
+        );
+        write_file(
+            tmp.path(),
+            "lib/outer.js",
+            "module.exports = require('./inner');",
+        );
+        write_file(
+            tmp.path(),
+            "lib/inner.js",
+            "module.exports = [typeof __ops, typeof Deno, typeof __bootstrap];",
+        );
+        let ctx = scoped_ctx(
+            "console.log(JSON.stringify(require('./probe'))); console.log(JSON.stringify(require('./lib/outer')));",
+            tmp.path(),
+            vec![],
+            SandboxMode::Safe,
+        );
+        let result = run(ctx).await;
+        assert!(result.error.is_none(), "error: {:?}", result.error);
+        let expected = r#"["undefined","undefined","undefined"]"#;
+        assert_eq!(result.console_entries[0].message, expected);
+        assert_eq!(result.console_entries[1].message, expected);
+    }
+
+    #[tokio::test]
     async fn require_local_missing_file_reports_cannot_find() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let ctx = scoped_ctx("require('./nope');", tmp.path(), vec![], SandboxMode::Safe);
