@@ -142,7 +142,7 @@ impl RequestExecutionService {
         let secrets = self
             .resolve_external_secrets(scope.collection.as_deref(), scope.environment_name.as_deref())
             .await?;
-        let vars = self.build_variable_context(
+        let vars = self.build_variable_context_with_process_env(
             scope.global_env_name.as_deref(),
             scope.collection.as_deref(),
             scope.environment_name.as_deref(),
@@ -205,7 +205,7 @@ impl RequestExecutionService {
         } else {
             std::collections::HashMap::new()
         };
-        let vars = self.build_variable_context(
+        let vars = self.build_variable_context_with_process_env(
             scope.global_env_name.as_deref(),
             scope.collection.as_deref(),
             scope.environment_name.as_deref(),
@@ -310,6 +310,18 @@ mod tests {
         assert_eq!(header(&resolved, "X-Team"), Some("core"));
         assert_eq!(header(&resolved, "X-Token"), Some("request"));
         assert_eq!(header(&resolved, "Authorization"), Some("Bearer from-collection"));
+    }
+
+    #[tokio::test]
+    async fn process_env_placeholders_resolve_in_the_url_and_headers() {
+        std::env::set_var("ROCKET_WS_TEST_TOKEN", "from-os");
+        let svc = service(dev_env(), CollectionSettings::default());
+        let mut i = input("wss://h/ws");
+        i.headers = vec![Header::new("X-Token", "{{process.env.ROCKET_WS_TEST_TOKEN}}")];
+
+        let resolved = svc.resolve_websocket(&i).await.expect("resolve");
+
+        assert_eq!(header(&resolved, "X-Token"), Some("from-os"));
     }
 
     #[tokio::test]

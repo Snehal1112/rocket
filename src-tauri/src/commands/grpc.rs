@@ -54,7 +54,7 @@ async fn resolve_input(
     let secrets = exec
         .resolve_external_secrets(dto.collection.as_deref(), dto.environment_name.as_deref())
         .await?;
-    let variables = exec.build_variable_context(
+    let variables = exec.build_variable_context_with_process_env(
         dto.global_env_name.as_deref(),
         dto.collection.as_deref(),
         dto.environment_name.as_deref(),

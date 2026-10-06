@@ -660,6 +660,28 @@ impl RequestExecutionService {
         .flatten()
     }
 
+    /// Same as `build_variable_context`, plus the OS environment as `process.env.NAME`
+    /// (lowest priority). HTTP requests get these from the frontend, so the protocols
+    /// that resolve in the backend (WebSocket, GraphQL subscriptions, gRPC) use this.
+    pub fn build_variable_context_with_process_env(
+        &self,
+        global_env_name: Option<&str>,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
+        let mut scopes = self.build_variable_scopes(
+            global_env_name,
+            collection,
+            environment_name,
+            request_path,
+            external_secrets,
+        );
+        scopes.process_env = std::env::vars().collect();
+        scopes.flatten_with_process_env()
+    }
+
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
     /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
     /// `run_load_test` so resolution logic is never duplicated.
