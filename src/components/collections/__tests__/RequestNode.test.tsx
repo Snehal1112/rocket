@@ -14,6 +14,7 @@ vi.mock('@/lib/tauri-api', async () => {
     ...actual,
     getRequest: vi.fn(),
     getGraphQlRequest: vi.fn(),
+    getWebSocketRequest: vi.fn(),
   };
 });
 
@@ -421,5 +422,62 @@ describe('RequestNode graphql items', () => {
     expect(screen.getByTestId('request-item-GQL-List Users').getAttribute('draggable')).toBe(
       'false',
     );
+  });
+});
+
+const wsSummary: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }> = {
+  type: 'summary',
+  uid: 'ws-1',
+  name: 'Chat',
+  method: 'GET',
+  url: 'wss://chat.example.com/ws',
+  fileName: 'chat.yml',
+  kind: 'websocket',
+};
+
+describe('RequestNode websocket rows', () => {
+  beforeEach(() => {
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+    vi.mocked(tauriApi.getRequest).mockReset();
+    vi.mocked(tauriApi.getWebSocketRequest).mockReset();
+  });
+
+  it('shows a WS badge, not the HTTP verb', () => {
+    renderNode(wsSummary, 'chat.yml');
+    expect(screen.getByText('WS')).toBeInTheDocument();
+    expect(screen.queryByText('GET')).not.toBeInTheDocument();
+  });
+
+  it('opens a websocket tab through getWebSocketRequest, never getRequest', async () => {
+    vi.mocked(tauriApi.getWebSocketRequest).mockResolvedValue({
+      uid: 'ws-1',
+      name: 'Chat',
+      url: 'wss://chat.example.com/ws',
+      headers: [{ key: 'Origin', value: 'https://example.com', enabled: true }],
+      messages: [{ title: 'hello', selected: true, kind: 'json', data: '{}' }],
+      auth: { authType: 'none' },
+    });
+    renderNode(wsSummary, 'chat.yml');
+
+    await userEvent.setup().click(screen.getByLabelText('Open WS Chat'));
+
+    await waitFor(() => {
+      expect(tauriApi.getWebSocketRequest).toHaveBeenCalledWith('my-api', 'chat.yml');
+    });
+    await waitFor(() => {
+      const found = findTabInTree(usePaneStore.getState().root, 'ws-1');
+      expect(found?.tab.tabType).toBe('request');
+      if (found?.tab.tabType !== 'request') return;
+      expect(found.tab.request.requestType).toBe('websocket');
+      expect(found.tab.request.url).toBe('wss://chat.example.com/ws');
+      expect(found.tab.request.websocket?.messages[0].data).toBe('{}');
+    });
+    expect(tauriApi.getRequest).not.toHaveBeenCalled();
+  });
+
+  it('is not draggable into a Flow, which only runs HTTP requests', () => {
+    renderNode(wsSummary, 'chat.yml');
+    expect(screen.getByTestId('request-item-WS-Chat')).not.toHaveAttribute('draggable', 'true');
   });
 });

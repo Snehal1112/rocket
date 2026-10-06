@@ -323,7 +323,7 @@ export function CollectionNode({
   // summaries, where GraphQL arrives as a `summary` with `kind: 'graphql'`. They must
   // never keep an otherwise-empty container visible under an active filter.
   const filterableItems = rawItems.filter(
-    (item) => item.type !== 'opaque' && item.type !== 'graphql',
+    (item) => item.type !== 'opaque' && item.type !== 'graphql' && item.type !== 'websocket',
   );
   const filteredItems = sortItemsFoldersFirst(
     filter
@@ -582,7 +582,8 @@ export function CollectionNode({
                 />
               );
             }
-            if (item.type === 'opaque' || item.type === 'graphql') return null;
+            if (item.type === 'opaque' || item.type === 'graphql' || item.type === 'websocket')
+              return null;
             return (
               <RequestNode
                 key={`request-${item.uid}`}

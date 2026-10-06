@@ -211,6 +211,44 @@ export interface RequestSummary {
 }
 
 /** Non-HTTP item (GraphQL, gRPC, WebSocket) kept as raw YAML. Not shown or editable in the UI yet. */
+export type WebSocketMessageKind = 'text' | 'json' | 'xml' | 'binary';
+
+export interface WebSocketMessage {
+  title: string;
+  selected: boolean;
+  kind: WebSocketMessageKind;
+  /** Text as is. For `binary` this is base64. */
+  data: string;
+}
+
+export interface WebSocketSettings {
+  /** Connect timeout in ms, or 'inherit' for the 30 s default. 0 waits forever. */
+  timeout?: number | 'inherit';
+  /** Ms between client pings, or 'inherit' for none. */
+  keepAliveInterval?: number | 'inherit';
+}
+
+/** Mirrors the Rust `WebSocketRequest` (rocket-collection). */
+export interface WebSocketRequest {
+  uid: string;
+  name: string;
+  /** String, `{ content, type }` or null. Kept verbatim, never edited here. */
+  description?: unknown;
+  seq?: number;
+  tags?: string[];
+  url: string;
+  headers: Header[];
+  messages: WebSocketMessage[];
+  auth: Auth;
+  runtimeAuth?: Auth;
+  /** Edited through the request-variables commands, so a save from the tab never sends it. */
+  variables?: CollectionVariable[];
+  scripts?: { scriptType: string; code: string }[];
+  settings?: WebSocketSettings;
+  docs?: string | null;
+  fileName?: string;
+}
+
 export interface OpaqueProtocolItem {
   protocol: 'graphql' | 'grpc' | 'websocket';
   name: string;
@@ -222,6 +260,7 @@ export type CollectionItem =
   | ({ type: 'folder' } & Folder)
   | ({ type: 'summary' } & RequestSummary)
   | ({ type: 'graphql' } & GraphQlRequest)
+  | ({ type: 'websocket' } & WebSocketRequest)
   | ({ type: 'opaque' } & OpaqueProtocolItem);
 
 export interface Collection {
@@ -775,6 +814,12 @@ export const saveRequest = (collection: string, path: string, request: Request) 
 
 export const saveGraphQlRequest = (collection: string, path: string, request: GraphQlRequest) =>
   invoke<GraphQlRequest>('save_graphql_request', { collection, path, request });
+
+export const getWebSocketRequest = (collection: string, path: string) =>
+  invoke<WebSocketRequest>('get_websocket_request', { collection, path });
+
+export const saveWebSocketRequest = (collection: string, path: string, request: WebSocketRequest) =>
+  invoke<WebSocketRequest>('save_websocket_request', { collection, path, request });
 
 export const renameRequest = (collection: string, oldPath: string, newName: string) =>
   invoke<void>('rename_request', { collection, oldPath, newName });
@@ -2257,6 +2302,71 @@ export const onAgentSessionFinished = (
   handler: (event: AgentSessionFinishedEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<AgentSessionFinishedEvent>('agent-session-finished', (e) => handler(e.payload));
+
+// ============================================================
+// WebSocket sessions
+// ============================================================
+
+/** Where `{{variables}}` come from for a connect or send. */
+export interface WebSocketScopeInput {
+  collection?: string;
+  environmentName?: string;
+  globalEnvName?: string;
+  requestPath?: string;
+}
+
+export interface WebSocketConnectInput extends WebSocketScopeInput {
+  url: string;
+  headers: Header[];
+  auth?: Auth;
+  subprotocols?: string[];
+  timeoutMs?: number;
+  keepAliveMs?: number;
+  verifySsl?: boolean;
+}
+
+export interface WebSocketSendInput extends WebSocketScopeInput {
+  kind: WebSocketMessageKind;
+  data: string;
+}
+
+/** `ws_connect` only reports whether the connect worked. Frames arrive as events. */
+export const wsConnect = (sessionId: string, input: WebSocketConnectInput) =>
+  invoke<void>('ws_connect', { sessionId, input });
+
+export const wsSend = (sessionId: string, input: WebSocketSendInput) =>
+  invoke<void>('ws_send', { sessionId, input });
+
+export const wsDisconnect = (sessionId: string) => invoke<void>('ws_disconnect', { sessionId });
+
+/** Payload of the `ws:message` event. Fields are snake_case, like every `DomainEvent`. */
+export interface WebSocketMessageEvent {
+  type: 'webSocketMessage';
+  session_id: string;
+  direction: 'in' | 'out';
+  kind: 'text' | 'binary';
+  /** Text as is, or base64 for binary frames. */
+  data: string;
+  size: number;
+  timestamp_ms: number;
+}
+
+export interface WebSocketStatusEvent {
+  type: 'webSocketStatus';
+  session_id: string;
+  state: 'connecting' | 'open' | 'closed' | 'failed';
+  subprotocol: string | null;
+  code: number | null;
+  reason: string | null;
+}
+
+export const onWebSocketMessage = (
+  handler: (event: WebSocketMessageEvent) => void,
+): Promise<UnlistenFn> => listen<WebSocketMessageEvent>('ws:message', (e) => handler(e.payload));
+
+export const onWebSocketStatus = (
+  handler: (event: WebSocketStatusEvent) => void,
+): Promise<UnlistenFn> => listen<WebSocketStatusEvent>('ws:status', (e) => handler(e.payload));
 
 export interface AgentSessionFailedEvent {
   type: 'acpSessionFailed';

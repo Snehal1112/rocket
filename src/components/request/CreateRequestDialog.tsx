@@ -20,18 +20,19 @@ import {
 import { sanitizeFilename } from '@/lib/filename-utils';
 import { createDefaultRequest, DEFAULT_GRAPHQL_QUERY, mapGraphQlToState } from '@/lib/pane-utils';
 import { saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
+import { createWebSocketItem } from '@/lib/websocket-create';
 import { usePaneStore } from '@/stores/pane-store';
 import type { HttpMethod, RequestTab } from '@/types/pane-types';
 
 type RequestType = 'http' | 'graphql' | 'grpc' | 'websocket' | 'curl';
 
-// gRPC and WebSocket used to save an HTTP request under a protocol label. They stay
-// unselectable until their own plans land.
+// gRPC used to save an HTTP request under a protocol label. It stays unselectable until
+// its own plan lands.
 const REQUEST_TYPES: { label: string; value: RequestType; disabled?: boolean }[] = [
   { label: 'HTTP', value: 'http' },
   { label: 'GraphQL', value: 'graphql' },
   { label: 'gRPC (coming soon)', value: 'grpc', disabled: true },
-  { label: 'WebSocket (coming soon)', value: 'websocket', disabled: true },
+  { label: 'WebSocket', value: 'websocket' },
   { label: 'From cURL', value: 'curl' },
 ];
 
@@ -102,6 +103,13 @@ export function CreateRequestDialog({
           source: { collection: collectionName, path: saved.fileName ?? filePath },
         };
         usePaneStore.getState().openTab(gqlTab);
+        reset();
+        onClose();
+        return;
+      }
+      if (requestType === 'websocket') {
+        const wsTab = await createWebSocketItem(collectionName, folderPath, trimmedName, url);
+        usePaneStore.getState().openTab(wsTab);
         reset();
         onClose();
         return;

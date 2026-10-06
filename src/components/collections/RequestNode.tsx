@@ -46,8 +46,9 @@ import {
   mapGraphQlToState,
 } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import { getGraphQlRequest, getRequest, renameRequest } from '@/lib/tauri-api';
+import { getGraphQlRequest, getRequest, getWebSocketRequest, renameRequest } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { mapWebSocketToState } from '@/lib/websocket-mapper';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
@@ -97,7 +98,7 @@ export function RequestNode({
 }: RequestNodeProps) {
   const kind = itemData.type === 'summary' ? (itemData.kind ?? 'http') : 'http';
   // The badge shows the protocol for GraphQL, the HTTP verb otherwise.
-  const badge = kind === 'graphql' ? 'GQL' : method;
+  const badge = kind === 'graphql' ? 'GQL' : kind === 'websocket' ? 'WS' : method;
   const root = usePaneStore((s) => s.root);
   const activeGroupId = usePaneStore((s) => s.activeGroupId);
   const openTab = usePaneStore((s) => s.openTab);
@@ -168,6 +169,8 @@ export function RequestNode({
       // A file without a uid key has an empty summary uid; the loaded request carries a generated one.
       tabId = uid || loaded.uid;
       request = mapGraphQlToState(loaded);
+    } else if (kind === 'websocket') {
+      request = mapWebSocketToState(await getWebSocketRequest(collectionName, path));
     } else {
       const full = itemData.type === 'request' ? itemData : await getRequest(collectionName, path);
       request = mapApiRequestToState(full, true);
@@ -334,9 +337,11 @@ export function RequestNode({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
-                <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
-              </DropdownMenuItem>
+              {kind === 'http' && (
+                <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
+                  <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => {
                   setRenameValue(name);
@@ -409,9 +414,11 @@ export function RequestNode({
 
       {/* Right-click context menu — same actions, power-user shortcut. */}
       <ContextMenuContent className='w-48'>
-        <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
-          <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
-        </ContextMenuItem>
+        {kind === 'http' && (
+          <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
+            <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onClick={() => {
             setRenameValue(name);

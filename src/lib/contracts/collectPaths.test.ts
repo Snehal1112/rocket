@@ -52,4 +52,23 @@ describe('collectPaths', () => {
     );
     expect(requests).toEqual([]);
   });
+
+  it('skips typed websocket items so they are never treated as request paths', () => {
+    const items: CollectionItem[] = [
+      {
+        type: 'websocket',
+        uid: 'ws1',
+        name: 'Chat',
+        url: 'wss://x',
+        headers: [],
+        messages: [],
+        auth: { authType: 'none' },
+        fileName: 'chat.yml',
+      },
+    ];
+    const folders: string[] = [];
+    const requests: string[] = [];
+    collectPaths(items, '', folders, requests);
+    expect(requests).toEqual([]);
+  });
 });

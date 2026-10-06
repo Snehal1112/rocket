@@ -255,6 +255,38 @@ export interface RequestState {
   actions: import('@/lib/tauri-api').ActionEntry[];
   /** Present when `requestType` is 'graphql'. */
   graphql?: GraphQlState;
+  /** Present when `requestType` is 'websocket'. */
+  websocket?: WebSocketDraft;
+}
+
+export interface WebSocketDraftMessage {
+  id: string;
+  title: string;
+  selected: boolean;
+  kind: import('@/lib/tauri-api').WebSocketMessageKind;
+  /** Text as is. For `binary` this is base64. */
+  data: string;
+}
+
+/**
+ * Saved WebSocket fields with no editor yet. They are kept as loaded and written back unchanged,
+ * so saving from the UI never drops them. Runtime variables are not here: they are edited and
+ * saved through their own commands, and the backend keeps them when a save carries none.
+ */
+export interface WebSocketPassthrough {
+  description?: unknown;
+  seq?: number;
+  runtimeAuth?: import('@/lib/tauri-api').Auth;
+  scripts?: { scriptType: string; code: string }[];
+}
+
+export interface WebSocketDraft {
+  messages: WebSocketDraftMessage[];
+  /** Connect timeout in ms, or 'inherit'. */
+  timeoutMs: number | 'inherit';
+  /** Ms between pings, or 'inherit' (none). */
+  keepAliveMs: number | 'inherit';
+  passthrough: WebSocketPassthrough;
 }
 
 export interface GraphQlState {

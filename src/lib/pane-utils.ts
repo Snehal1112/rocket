@@ -1,6 +1,7 @@
 import { fromPersistedAuth } from '@/lib/persisted-auth';
 import type { Request as ApiRequest, GraphQlRequest, RequestKind } from '@/lib/tauri-api';
 import { extractPathParams, parseQueryParams } from '@/lib/url-params';
+import { createDefaultWebSocketDraft } from '@/lib/websocket-messages';
 import type {
   BodyState,
   LeafNode,
@@ -131,6 +132,9 @@ export function createDefaultRequestFor(kind: RequestKind): RequestState {
       method: 'POST',
       graphql: { query: DEFAULT_GRAPHQL_QUERY, variables: '' },
     };
+  }
+  if (kind === 'websocket') {
+    return { ...base, requestType: 'websocket', websocket: createDefaultWebSocketDraft() };
   }
   return { ...base, requestType: kind };
 }

@@ -2,7 +2,13 @@ import { toApiBody } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import { toApiGraphQlRequest, toPersistedPathParams } from '@/lib/request-save-mapper';
-import { type Request, saveGraphQlRequest, saveRequest } from '@/lib/tauri-api';
+import {
+  type Request,
+  saveGraphQlRequest,
+  saveRequest,
+  saveWebSocketRequest,
+} from '@/lib/tauri-api';
+import { toApiWebSocketRequest } from '@/lib/websocket-mapper';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
 
@@ -52,6 +58,12 @@ export function scheduleAutoSave(
           collection,
           path,
           toApiGraphQlRequest(tabId || crypto.randomUUID(), title, request),
+        );
+      } else if (request.requestType === 'websocket') {
+        await saveWebSocketRequest(
+          collection,
+          path,
+          toApiWebSocketRequest(tabId || crypto.randomUUID(), title, request),
         );
       } else {
         await saveRequest(

@@ -23,6 +23,7 @@ export const METHOD_BADGE_COLOR: Record<string, string> = {
   DELETE: 'text-red-500 dark:text-red-400 border-red-500/30 bg-red-500/10 dark:bg-red-500/20',
   OPTIONS: 'text-cyan-500 dark:text-cyan-400 border-cyan-500/30 bg-cyan-500/10 dark:bg-cyan-500/20',
   HEAD: 'text-pink-500 dark:text-pink-400 border-pink-500/30 bg-pink-500/10 dark:bg-pink-500/20',
+  WS: 'text-teal-500 dark:text-teal-400 border-teal-500/30 bg-teal-500/10 dark:bg-teal-500/20',
   GQL: 'text-fuchsia-500 dark:text-fuchsia-400 border-fuchsia-500/30 bg-fuchsia-500/10 dark:bg-fuchsia-500/20',
 };
 
