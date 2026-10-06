@@ -20,7 +20,7 @@ use rocket_scripting::{
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
-use rocket_shared::types::{Auth, Body, Header, HttpMethod, QueryParam};
+use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -732,7 +732,15 @@ impl RequestExecutionService {
         // are left untouched.
         let resolved_body = input.body.clone().map(|mut body| {
             if let Some(content) = &body.content {
-                body.content = Some(resolve(content, &vars).output);
+                body.content = Some(if body.mode == BodyMode::GraphQl {
+                    crate::graphql_request::resolve_json_text(content, |p| resolve(p, &vars).output)
+                } else {
+                    resolve(content, &vars).output
+                });
+            }
+            // Past resolution it is plain JSON for the rest of the pipeline.
+            if body.mode == BodyMode::GraphQl {
+                body.mode = BodyMode::Json;
             }
             if let Some(entries) = &body.form_data {
                 body.form_data = Some(

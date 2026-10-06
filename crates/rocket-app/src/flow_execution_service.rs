@@ -516,7 +516,7 @@ fn apply_body_override(
     match body.mode {
         // A `none` body sends nothing, so it is promoted to JSON.
         BodyMode::None => body.mode = BodyMode::Json,
-        BodyMode::Json | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql => {}
+        BodyMode::Json | BodyMode::GraphQl | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql => {}
         // These modes never read `content`, so writing it would do nothing.
         BodyMode::FormUrlEncoded | BodyMode::FormData | BodyMode::Binary => {
             return Err(DomainError::InvalidInput(format!(

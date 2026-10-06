@@ -213,7 +213,7 @@ impl ReqwestExecutor {
 
         match &body.mode {
             BodyMode::None => {}
-            BodyMode::Json => {
+            BodyMode::Json | BodyMode::GraphQl => {
                 let content = body.content.as_deref().unwrap_or("");
                 if !has_explicit_content_type {
                     builder = builder.header("Content-Type", "application/json");

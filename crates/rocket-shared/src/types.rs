@@ -180,6 +180,10 @@ pub enum BodyMode {
     None,
     #[serde(rename = "json")]
     Json,
+    /// A JSON GraphQL payload built by the app. Resolution escapes values inside its strings and
+    /// then turns it into `Json`.
+    #[serde(rename = "graphql")]
+    GraphQl,
     #[serde(rename = "xml")]
     Xml,
     #[serde(rename = "text")]

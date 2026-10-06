@@ -86,7 +86,7 @@ fn multipart_to_entry(p: OcMultipartFormPart) -> FormDataEntry {
 impl From<Body> for OcHttpRequestBody {
     fn from(b: Body) -> Self {
         match b.mode {
-            BodyMode::Json => OcHttpRequestBody::Json {
+            BodyMode::Json | BodyMode::GraphQl => OcHttpRequestBody::Json {
                 data: b.content.unwrap_or_default(),
             },
             BodyMode::Text => OcHttpRequestBody::Text {

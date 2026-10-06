@@ -159,7 +159,9 @@ fn extract_body_content(body: &Option<Body>) -> Option<String> {
         return None;
     };
     match body.mode {
-        BodyMode::Json | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql => body.content.clone(),
+        BodyMode::Json | BodyMode::GraphQl | BodyMode::Xml | BodyMode::Text | BodyMode::Sparql => {
+            body.content.clone()
+        }
         BodyMode::Binary => body.file_path.clone(),
         BodyMode::FormUrlEncoded | BodyMode::FormData | BodyMode::None => None,
     }

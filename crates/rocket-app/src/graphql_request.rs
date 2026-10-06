@@ -66,6 +66,50 @@ pub fn validate_variables(variables: &str) -> DomainResult<()> {
     }
 }
 
+/// Resolves each `{{placeholder}}` in JSON text. A placeholder inside a JSON string gets its value
+/// JSON-escaped, so a quote, backslash or newline in the value cannot break the body. A
+/// placeholder outside a string is a JSON value and is spliced in as written.
+pub fn resolve_json_text(text: &str, resolve: impl Fn(&str) -> String) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut rest = text;
+    while let Some(ch) = rest.chars().next() {
+        if rest.starts_with("{{") {
+            if let Some(end) = rest[2..].find("}}") {
+                let name = &rest[2..2 + end];
+                if !name.contains('}') {
+                    let placeholder = &rest[..end + 4];
+                    let value = resolve(placeholder);
+                    if in_string {
+                        // `to_string` on a string always succeeds; the quotes are dropped.
+                        let encoded = serde_json::to_string(&value).unwrap_or_default();
+                        out.push_str(encoded.trim_matches('"'));
+                    } else {
+                        out.push_str(&value);
+                    }
+                    rest = &rest[end + 4..];
+                    continue;
+                }
+            }
+        }
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+        } else if ch == '"' {
+            in_string = true;
+        }
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+    out
+}
+
 fn json_string(text: &str) -> DomainResult<String> {
     serde_json::to_string(text)
         .map_err(|e| DomainError::Internal(format!("could not encode GraphQL text: {e}")))
@@ -116,7 +160,7 @@ pub fn build_wire(
             Ok(GraphQlWire {
                 method,
                 body: Some(Body {
-                    mode: BodyMode::Json,
+                    mode: BodyMode::GraphQl,
                     content: Some(text),
                     form_data: None,
                     file_path: None,
@@ -396,7 +440,7 @@ mod tests {
         assert_eq!(body["variables"]["n"], 5);
         assert_eq!(
             wire.body.as_ref().map(|b| b.mode.clone()),
-            Some(BodyMode::Json)
+            Some(BodyMode::GraphQl)
         );
     }
 
@@ -614,6 +658,51 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&seen[0].body).expect("json body");
         assert_eq!(body["query"], "query Q($n: Int) {a{b(id: \"42\", n: $n)}}");
         assert_eq!(body["variables"]["n"], 7);
+    }
+
+    #[tokio::test]
+    async fn execute_graphql_escapes_resolved_values_inside_json_strings() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        let tricky = "O\"Brien\\ \nline";
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("name", tricky));
+        env.set_variable(Variable::new("count", "7"));
+        let (svc, _history) = service(env);
+        let mut request = input(&format!("{}/graphql", server.uri()));
+        request.environment_name = Some("dev".into());
+
+        svc.execute_graphql(ExecuteGraphQlInput {
+            request,
+            query: "{ user(name: \"{{name}}\") { id } }".into(),
+            variables: Some("{\"who\": \"{{name}}\", \"n\": {{count}}}".into()),
+            operation_name: None,
+            fallback_first: false,
+        })
+        .await
+        .expect("execute");
+
+        let seen = server.received_requests().await.expect("recording");
+        let body: serde_json::Value = serde_json::from_slice(&seen[0].body)
+            .expect("the body must stay valid JSON whatever the value holds");
+        assert_eq!(
+            body["query"],
+            format!("{{ user(name: \"{tricky}\") {{ id }} }}")
+        );
+        assert_eq!(body["variables"]["who"], tricky);
+        assert_eq!(body["variables"]["n"], 7, "a value position stays raw JSON");
+    }
+
+    #[test]
+    fn resolve_json_text_escapes_only_inside_strings() {
+        let out = resolve_json_text("{\"a\":\"{{x}}\",\"b\":{{y}}}", |p| match p {
+            "{{x}}" => "q\"z".to_string(),
+            _ => "[1,2]".to_string(),
+        });
+        assert_eq!(out, "{\"a\":\"q\\\"z\",\"b\":[1,2]}");
     }
 
     #[test]
