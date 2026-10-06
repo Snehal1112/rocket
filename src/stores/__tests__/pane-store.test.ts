@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { scheduleAutoSave } from '@/lib/auto-save';
-import { createDefaultRequest } from '@/lib/pane-utils';
+import { createDefaultLeaf, createDefaultRequest } from '@/lib/pane-utils';
 import { type FlowNode, getFlow } from '@/lib/tauri-api';
 import type {
   CollectionTab,
@@ -1394,5 +1394,30 @@ describe('closeAll/openWorkspaceTabs — end agent sessions of dropped tabs', ()
     expect(endAgentSession).not.toHaveBeenCalledWith('session-kept');
     const snapshot = usePaneStore.getState().collectionTabState['col-a'];
     expect(snapshot.tabs.map((t) => t.id)).toEqual([kept.id]);
+  });
+});
+
+describe('websocket tab cleanup', () => {
+  it('closing a websocket tab disconnects its session', async () => {
+    const session = await import('@/lib/websocket-session');
+    const release = vi.spyOn(session, 'releaseWebSocketTab').mockImplementation(() => undefined);
+    const { createDefaultWebSocketRequestState } = await import('@/lib/websocket-mapper');
+
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+    usePaneStore.getState().openTab({
+      id: 'ws-tab',
+      title: 'Chat',
+      tabType: 'request',
+      request: createDefaultWebSocketRequestState('wss://x'),
+      response: null,
+      isDirty: false,
+    });
+
+    usePaneStore.getState().closeTab('ws-tab', leaf.groupId);
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0][0]).toMatchObject({ id: 'ws-tab' });
+    release.mockRestore();
   });
 });

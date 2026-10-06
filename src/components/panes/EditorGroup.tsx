@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
+import { WebSocketPanel } from '@/components/request/websocket/WebSocketPanel';
 
 // Lazy-load tabs that aren't shown on a default/cold launch, so their code
 // (and anything heavy they pull in, e.g. GitPanel's diff libs or RunnerPane's
@@ -212,7 +213,11 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               <DiffViewer diffState={activeTab.diffState} />
             </Suspense>
           ) : isRequestTab(activeTab) ? (
-            <RequestPanel tab={activeTab} groupId={node.groupId} />
+            activeTab.request.requestType === 'websocket' ? (
+              <WebSocketPanel tab={activeTab} groupId={node.groupId} />
+            ) : (
+              <RequestPanel tab={activeTab} groupId={node.groupId} />
+            )
           ) : isGitTab(activeTab) ? (
             <Suspense fallback={<EditorSkeleton />}>
               <GitPanel

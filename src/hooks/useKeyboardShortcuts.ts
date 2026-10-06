@@ -31,7 +31,14 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         const tab = activeLeaf.tabs.find((t) => t.id === activeLeaf.activeTabId);
         if (tab && isRequestTab(tab)) {
-          sendRequest(tab.id, tab.request);
+          if (tab.request.requestType === 'websocket') {
+            // A WebSocket tab sends its selected message; it must never fire an HTTP request.
+            window.dispatchEvent(
+              new CustomEvent('rocket:websocket-send', { detail: { tabId: tab.id } }),
+            );
+          } else {
+            sendRequest(tab.id, tab.request);
+          }
         }
         return;
       }

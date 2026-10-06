@@ -18,6 +18,7 @@ import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
 import { getActiveWorkspace, listWorkspaces, type Workspace } from '@/lib/tauri-api';
 import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
+import { useWebSocketEventBridge } from '@/lib/websocket-event-bridge';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -37,6 +38,7 @@ function App() {
 
   useKeyboardShortcuts();
   useAgentSessionEventBridge();
+  useWebSocketEventBridge();
   useBackendLogs();
 
   useEffect(() => {

@@ -22,6 +22,7 @@ import {
   getFlow,
   renameRequest,
 } from '@/lib/tauri-api';
+import { releaseWebSocketTab } from '@/lib/websocket-session';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type {
@@ -113,6 +114,7 @@ function updateTabEverywhere(
 // Subproject B only sweeps sessions on whole-app exit. A session still
 // mid-handshake has no real session id yet, so there is nothing to end.
 function endSessionIfActive(tab: Tab): void {
+  releaseWebSocketTab(tab);
   if (isRequestTab(tab) && tab.agentSession?.status === 'active') {
     Promise.resolve(endAgentSession(tab.agentSession.sessionId)).catch((err) => {
       console.error('[pane-store] failed to end agent session', err);
@@ -126,6 +128,11 @@ function endSessionIfActive(tab: Tab): void {
 function endActiveSessions(tabs: Tab[]): void {
   const seen = new Set<string>();
   for (const tab of tabs) {
+    // WebSocket sessions are keyed by tab id, so the same tab id is released once.
+    if (isRequestTab(tab) && tab.request.requestType === 'websocket' && !seen.has(tab.id)) {
+      seen.add(tab.id);
+      releaseWebSocketTab(tab);
+    }
     if (!isRequestTab(tab) || tab.agentSession?.status !== 'active') continue;
     if (seen.has(tab.agentSession.sessionId)) continue;
     seen.add(tab.agentSession.sessionId);
