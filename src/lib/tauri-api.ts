@@ -86,6 +86,8 @@ export interface CollectionSettings {
   headers: Header[];
   variables: CollectionVariable[];
   sandboxMode: SandboxMode;
+  /** Extra directories scripts may require() from, in Developer mode only. */
+  scriptContextRoots?: string[];
 }
 
 export interface CollectionSummary {

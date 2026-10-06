@@ -17,6 +17,7 @@ import {
 import { useSaveButton } from '@/hooks/use-save-button';
 import { authStateForType } from '@/lib/auth-type-defaults';
 import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
+import { buildSettingsForSave } from '@/lib/collection-settings-save';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import {
@@ -255,19 +256,21 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   }, [auth, collectionName, setCollectionAuth, isLoaded]);
 
   // Persist all settings to disk (no auto-save). saveCollectionSettings is a full
-  // replace on the backend, so sandboxMode is read fresh here immediately before
+  // replace on the backend, so sandboxMode and scriptContextRoots are read fresh here immediately before
   // saving rather than from `collection` (loaded once on mount) — otherwise a mode
   // change made via the toolbar's SandboxPopover in the meantime would be silently
   // wiped by this save.
   const saveSettings = useCallback(async () => {
     const current = await getCollectionSettings(collectionName);
-    await saveCollectionSettings(collectionName, {
-      auth: toPersistedAuth(auth),
-      headers: toPersistedHeaders(headers),
-      docs: docs || undefined,
-      variables,
-      sandboxMode: current.sandboxMode,
-    });
+    await saveCollectionSettings(
+      collectionName,
+      buildSettingsForSave(current, {
+        auth: toPersistedAuth(auth),
+        headers: toPersistedHeaders(headers),
+        docs: docs || undefined,
+        variables,
+      }),
+    );
     setIsDirty(false);
   }, [collectionName, auth, headers, docs, variables]);
 
