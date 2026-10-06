@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -121,6 +122,18 @@ impl GrpcService {
         input: GrpcExecuteInput,
         session_id: String,
     ) -> DomainResult<String> {
+        self.start_session_with(session_id, async move { Ok(input) })
+            .await
+    }
+
+    /// Like `start_session`, but the id is reserved first and the input is produced
+    /// afterwards. Resolving variables and vault secrets can take a while, and a cancel
+    /// during that time stops the start before any connection is made.
+    pub async fn start_session_with(
+        &self,
+        session_id: String,
+        resolve: impl Future<Output = DomainResult<GrpcExecuteInput>>,
+    ) -> DomainResult<String> {
         let started = Instant::now();
         {
             let sessions = lock(&self.sessions);
@@ -132,7 +145,19 @@ impl GrpcService {
             }
             connecting.insert(session_id.clone(), started);
         }
-        let input = input.with_request_variables();
+        let input = match resolve.await {
+            Ok(input) => input.with_request_variables(),
+            Err(e) => {
+                lock(&self.connecting).remove(&session_id);
+                return Err(e);
+            }
+        };
+        // A cancel while resolving took the pending entry: do not connect.
+        if !lock(&self.connecting).contains_key(&session_id) {
+            return Err(DomainError::Conflict(
+                "the call was cancelled before it started".into(),
+            ));
+        }
         let prepared = self.prepare_session(&input).await;
         let (call, registry, method_type, input_type, initial) = match prepared {
             Ok(prepared) => prepared,
@@ -1400,6 +1425,28 @@ message Rep { string message = 1; }
         );
         assert_eq!(h.events.tags(), vec!["finished:CANCELLED"]);
         assert!(matches!(h.svc.cancel("s1"), Err(DomainError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn a_session_can_be_cancelled_while_its_input_is_still_resolving() {
+        let h = harness(None);
+        let _fx = prepare_stream(&h, true);
+        let (release, gate) = tokio::sync::oneshot::channel::<()>();
+        let resolve = async {
+            let _ = gate.await;
+            Ok(input(request("demo.v1.Greeter/Chat")))
+        };
+        let start = h.svc.start_session_with("s1".to_string(), resolve);
+        let cancel = async {
+            // The id is reserved before the slow resolve finishes.
+            tokio::task::yield_now().await;
+            h.svc.cancel("s1").expect("cancel while resolving");
+            let _ = release.send(());
+        };
+        let (started, ()) = tokio::join!(start, cancel);
+        assert!(started.is_err(), "a cancelled start is not a session");
+        assert!(lock(&h.exec.streams).is_empty(), "no call was opened");
+        assert_eq!(h.events.tags(), vec!["finished:CANCELLED"]);
     }
 
     #[tokio::test]

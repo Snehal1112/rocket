@@ -83,8 +83,9 @@ pub async fn grpc_start_session(
     svc: State<'_, GrpcService>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<String, DomainError> {
-    let input = resolve_input(input, &exec).await?;
-    svc.start_session(input, session_id).await
+    // The id is reserved before resolving, so a cancel during a slow vault fetch works.
+    svc.start_session_with(session_id, resolve_input(input, &exec))
+        .await
 }
 
 #[tauri::command]

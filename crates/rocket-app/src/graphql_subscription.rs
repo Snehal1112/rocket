@@ -4,6 +4,7 @@
 pub mod protocol;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -499,6 +500,17 @@ impl GraphQlSubscriptionService {
         session_id: &str,
         start: GraphQlSubscriptionStart,
     ) -> DomainResult<()> {
+        self.start_with(session_id, async move { Ok(start) }).await
+    }
+
+    /// Like `start`, but the id is reserved first and the request is produced afterwards.
+    /// Resolving variables and vault secrets can take a while, and a `stop` during that time
+    /// cancels the start before any socket is opened.
+    pub async fn start_with(
+        &self,
+        session_id: &str,
+        resolve: impl Future<Output = DomainResult<GraphQlSubscriptionStart>>,
+    ) -> DomainResult<()> {
         if session_id.trim().is_empty() {
             return Err(DomainError::InvalidInput("session id is required".into()));
         }
@@ -519,6 +531,30 @@ impl GraphQlSubscriptionService {
             None,
             None,
         );
+
+        let start = match resolve.await {
+            Ok(start) => start,
+            Err(error) => {
+                if release(&self.sessions, session_id, generation) {
+                    publish_status(
+                        self.events.as_ref(),
+                        session_id,
+                        WebSocketSessionState::Failed,
+                        None,
+                        Some(error.to_string()),
+                    );
+                }
+                return Err(error);
+            }
+        };
+        // A stop while resolving removed the slot: do not open a socket nobody wants.
+        if !self
+            .lock()
+            .get(session_id)
+            .is_some_and(|slot| slot.generation() == generation)
+        {
+            return Err(DomainError::Conflict("subscription was cancelled".into()));
+        }
 
         let mut connect = start.connect.clone();
         if connect.subprotocols.is_empty() {
@@ -967,6 +1003,32 @@ mod session_tests {
             .iter()
             .filter_map(|f| f["type"].as_str().map(str::to_string))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_stop_while_the_start_is_still_resolving_opens_no_socket() {
+        let (port, received) = spawn_server(Script::Finite, Offer::Modern).await;
+        let (svc, _publisher) = service();
+        let (release, gate) = tokio::sync::oneshot::channel::<()>();
+        let resolve = async {
+            let _ = gate.await;
+            Ok(start_for(port))
+        };
+
+        let start = svc.start_with("s1", resolve);
+        let stop = async {
+            // The id is reserved before the slow resolve finishes.
+            tokio::task::yield_now().await;
+            assert_eq!(svc.session_count(), 1, "the id is reserved while resolving");
+            svc.stop("s1").await.expect("stop");
+            let _ = release.send(());
+        };
+        let (started, ()) = tokio::join!(start, stop);
+
+        assert!(started.is_err(), "a cancelled start is not a session");
+        assert_eq!(svc.session_count(), 0);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(types(&received).is_empty(), "the server saw no connection");
     }
 
     #[tokio::test]

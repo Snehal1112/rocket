@@ -15,8 +15,10 @@ pub async fn graphql_subscribe(
     exec: State<'_, RequestExecutionService>,
     subscriptions: State<'_, GraphQlSubscriptionService>,
 ) -> Result<(), DomainError> {
-    let start = resolve_graphql_subscription(&exec, input).await?;
-    subscriptions.start(&session_id, start).await
+    // The id is reserved before resolving, so a stop during a slow vault fetch works.
+    subscriptions
+        .start_with(&session_id, resolve_graphql_subscription(&exec, input))
+        .await
 }
 
 #[tauri::command]
