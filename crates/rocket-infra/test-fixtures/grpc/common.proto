@@ -1,0 +1,4 @@
+syntax = "proto3";
+package demo.common;
+enum Mood { MOOD_UNSPECIFIED = 0; HAPPY = 1; GRUMPY = 2; }
+message Address { string street = 1; string city = 2; }

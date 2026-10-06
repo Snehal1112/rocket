@@ -1,0 +1,13 @@
+[package]
+name = "rocket-grpc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared.workspace = true
+rocket-collection.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+prost-types = "0.14"
+prost-reflect = { version = "0.16", features = ["serde"] }
+protox = "0.9"

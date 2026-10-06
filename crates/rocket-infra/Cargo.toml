@@ -16,6 +16,7 @@ rocket-collection.workspace = true
 rocket-environment.workspace = true
 rocket-acp.workspace = true
 rocket-flow.workspace = true
+rocket-grpc = { path = "../rocket-grpc" }
 rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-workspace.workspace = true

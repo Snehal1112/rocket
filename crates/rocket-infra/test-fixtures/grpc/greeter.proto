@@ -1,0 +1,27 @@
+syntax = "proto3";
+package demo.greeter.v1;
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply);
+  rpc ListGreetings (HelloRequest) returns (stream HelloReply);
+  rpc CollectNames (stream HelloRequest) returns (HelloReply);
+  rpc Chat (stream HelloRequest) returns (stream HelloReply);
+}
+
+message HelloRequest {
+  string name = 1;
+  repeated string tags = 2;
+  demo.common.Mood mood = 3;
+  map<string, int64> counters = 4;
+  oneof contact { string email = 5; string phone = 6; }
+  demo.common.Address address = 7;
+  google.protobuf.Timestamp sent_at = 8;
+  bytes blob = 9;
+  int64 big = 10;
+  repeated demo.common.Address stops = 11;
+  map<int32, demo.common.Address> by_id = 12;
+}
+
+message HelloReply { string message = 1; int32 sequence = 2; }
