@@ -1,4 +1,5 @@
 import {
+  FileCode,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -9,6 +10,8 @@ import {
   Variable,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
+import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import {
   ContextMenu,
@@ -81,6 +84,7 @@ export function FolderNode({
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
   const [varsOpen, setVarsOpen] = useState(false);
+  const [newScriptOpen, setNewScriptOpen] = useState(false);
   const renameInFlight = useRef(false);
   // Set to true on Escape or after a successful rename to block the
   // blur event that fires when the Input unmounts.
@@ -155,23 +159,22 @@ export function FolderNode({
     }
   };
 
-  // Opaque, typed GraphQL/WebSocket/gRPC full-tree items and script files never render
-  // here: the sidebar loads summaries, where GraphQL arrives as a `summary` with
+  // Opaque and typed GraphQL/WebSocket/gRPC full-tree items never render here: the
+  // sidebar loads summaries, where GraphQL arrives as a `summary` with
   // `kind: 'graphql'`. They must never keep an otherwise-empty folder visible under an
-  // active filter.
+  // active filter. Script files do render, so they stay.
   const filterableItems = items.filter(
     (item) =>
       item.type !== 'opaque' &&
       item.type !== 'graphql' &&
       item.type !== 'websocket' &&
-      item.type !== 'grpc' &&
-      item.type !== 'scriptFile',
+      item.type !== 'grpc',
   );
   const filteredItems = sortItemsFoldersFirst(
     filter
       ? filterableItems.filter(
           (item) =>
-            (item.type !== 'request' && item.type !== 'summary') ||
+            (item.type !== 'request' && item.type !== 'summary' && item.type !== 'scriptFile') ||
             item.name.toLowerCase().includes(filter.toLowerCase()),
         )
       : filterableItems,
@@ -245,6 +248,9 @@ export function FolderNode({
                 <DropdownMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
                   <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setNewScriptOpen(true)}>
+                  <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setVarsOpen(true)}>
                   <Variable className='h-3.5 w-3.5 mr-2' /> Variables
@@ -289,6 +295,9 @@ export function FolderNode({
           </ContextMenuItem>
           <ContextMenuItem onClick={() => void onNewFolder(collectionName, basePath)}>
             <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => setNewScriptOpen(true)}>
+            <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => setVarsOpen(true)}>
@@ -355,12 +364,22 @@ export function FolderNode({
                 />
               );
             }
+            if (item.type === 'scriptFile') {
+              return (
+                <ScriptNode
+                  key={`script-${basePath}/${item.fileName}`}
+                  name={item.name}
+                  collectionName={collectionName}
+                  path={`${basePath}/${item.fileName}`}
+                  onDelete={onDelete}
+                />
+              );
+            }
             if (
               item.type === 'opaque' ||
               item.type === 'graphql' ||
               item.type === 'websocket' ||
-              item.type === 'grpc' ||
-              item.type === 'scriptFile'
+              item.type === 'grpc'
             )
               return null;
             const fileName = item.fileName ?? item.name;
@@ -401,6 +420,12 @@ export function FolderNode({
           )}
         </div>
       )}
+      <NewScriptDialog
+        open={newScriptOpen}
+        collectionName={collectionName}
+        folderPath={basePath}
+        onClose={() => setNewScriptOpen(false)}
+      />
     </div>
   );
 }

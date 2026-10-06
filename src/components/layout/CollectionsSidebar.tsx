@@ -3,6 +3,7 @@ import { FilePlus, Layers, LayoutDashboard, Plus, Search, Upload } from 'lucide-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { DeleteTarget } from '@/components/collections/tree-utils';
+import { findAffectedTabs, hasDirtyScriptTabs } from '@/components/collections/tree-utils';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
 import { RocketBook } from '@/components/illustrations';
 import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
@@ -31,6 +32,7 @@ import {
   deleteCollection,
   deleteFolder,
   deleteRequest,
+  deleteScriptFile,
   getCollection,
   moveItem,
   onCollectionChanged,
@@ -40,7 +42,6 @@ import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import type { PaneNode } from '@/types/pane-types';
 import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
@@ -78,6 +79,11 @@ export function CollectionsSidebar() {
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
+  // Warn when the delete would discard unsaved edits in an open script tab.
+  const deleteHasDirtyScripts = deleteTarget
+    ? hasDirtyScriptTabs(usePaneStore.getState().root, deleteTarget)
+    : false;
+
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     try {
@@ -86,33 +92,18 @@ export function CollectionsSidebar() {
       } else if (deleteTarget.type === 'folder') {
         if (!deleteTarget.path) return;
         await deleteFolder(deleteTarget.collection, deleteTarget.path);
+      } else if (deleteTarget.type === 'script') {
+        if (!deleteTarget.path) return;
+        await deleteScriptFile(deleteTarget.collection, deleteTarget.path);
       } else {
         if (!deleteTarget.path) return;
         await deleteRequest(deleteTarget.collection, deleteTarget.path);
       }
-      // Close open tabs for deleted items.
+      // Close open tabs for deleted items, matching whole path segments.
       const store = usePaneStore.getState();
-      const closeTabs = (node: PaneNode): void => {
-        if (node.type === 'leaf') {
-          for (const tab of node.tabs) {
-            if (!tab.source) continue;
-            const matches =
-              (deleteTarget.type === 'collection' &&
-                tab.source.collection === deleteTarget.collection) ||
-              (deleteTarget.type === 'request' &&
-                tab.source.collection === deleteTarget.collection &&
-                tab.source.path === deleteTarget.path) ||
-              (deleteTarget.type === 'folder' &&
-                tab.source.collection === deleteTarget.collection &&
-                tab.source.path.startsWith(deleteTarget.path ?? ''));
-            if (matches) store.closeTab(tab.id, node.groupId);
-          }
-        } else {
-          closeTabs(node.children[0]);
-          closeTabs(node.children[1]);
-        }
-      };
-      closeTabs(store.root);
+      for (const { tab, groupId } of findAffectedTabs(store.root, deleteTarget)) {
+        store.closeTab(tab.id, groupId);
+      }
       void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     } catch (err) {
       console.error('Delete failed:', err);
@@ -625,7 +616,10 @@ export function CollectionsSidebar() {
                 ? `Delete collection '${deleteTarget.name}'? This removes all requests inside it.`
                 : deleteTarget?.type === 'folder'
                   ? `Delete folder '${deleteTarget.name}' and all requests inside it?`
-                  : `Delete request '${deleteTarget?.name}'?`}
+                  : deleteTarget?.type === 'script'
+                    ? `Delete script '${deleteTarget.name}'?`
+                    : `Delete request '${deleteTarget?.name}'?`}
+              {deleteHasDirtyScripts && ' An open script has unsaved changes that will be lost.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

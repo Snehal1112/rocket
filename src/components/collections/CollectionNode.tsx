@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  FileCode,
   FolderPlus,
   LayoutGrid,
   Lock,
@@ -14,6 +15,8 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
+import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
@@ -102,6 +105,7 @@ export function CollectionNode({
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
+  const [newScriptOpen, setNewScriptOpen] = useState(false);
 
   // Derive the filesystem path of this collection so we can talk to the
   // contract IPC commands. The backend stores contract metadata under
@@ -319,23 +323,22 @@ export function CollectionNode({
   };
 
   const rawItems = collection?.root.items ?? [];
-  // Opaque, typed GraphQL/WebSocket/gRPC full-tree items and script files never render
-  // here: the sidebar loads summaries, where GraphQL arrives as a `summary` with
+  // Opaque and typed GraphQL/WebSocket/gRPC full-tree items never render here: the
+  // sidebar loads summaries, where GraphQL arrives as a `summary` with
   // `kind: 'graphql'`. They must never keep an otherwise-empty container visible under
-  // an active filter.
+  // an active filter. Script files do render, so they stay.
   const filterableItems = rawItems.filter(
     (item) =>
       item.type !== 'opaque' &&
       item.type !== 'graphql' &&
       item.type !== 'websocket' &&
-      item.type !== 'grpc' &&
-      item.type !== 'scriptFile',
+      item.type !== 'grpc',
   );
   const filteredItems = sortItemsFoldersFirst(
     filter
       ? filterableItems.filter(
           (item) =>
-            (item.type !== 'request' && item.type !== 'summary') ||
+            (item.type !== 'request' && item.type !== 'summary' && item.type !== 'scriptFile') ||
             item.name.toLowerCase().includes(filter.toLowerCase()),
         )
       : filterableItems,
@@ -477,6 +480,9 @@ export function CollectionNode({
               >
                 <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setNewScriptOpen(true)}>
+                <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
@@ -533,6 +539,9 @@ export function CollectionNode({
         <ContextMenuItem onClick={() => void onNewFolder(summary.name, '')}>
           <FolderPlus className='h-3.5 w-3.5 mr-2' /> New Folder
         </ContextMenuItem>
+        <ContextMenuItem onClick={() => setNewScriptOpen(true)}>
+          <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => {
@@ -588,12 +597,22 @@ export function CollectionNode({
                 />
               );
             }
+            if (item.type === 'scriptFile') {
+              return (
+                <ScriptNode
+                  key={`script-${item.fileName}`}
+                  name={item.name}
+                  collectionName={summary.name}
+                  path={item.fileName}
+                  onDelete={onDelete}
+                />
+              );
+            }
             if (
               item.type === 'opaque' ||
               item.type === 'graphql' ||
               item.type === 'websocket' ||
-              item.type === 'grpc' ||
-              item.type === 'scriptFile'
+              item.type === 'grpc'
             )
               return null;
             return (
@@ -636,6 +655,12 @@ export function CollectionNode({
         open={createRequestOpen}
         collectionName={summary.name}
         onClose={() => setCreateRequestOpen(false)}
+      />
+      <NewScriptDialog
+        open={newScriptOpen}
+        collectionName={summary.name}
+        folderPath=''
+        onClose={() => setNewScriptOpen(false)}
       />
     </ContextMenu>
   );

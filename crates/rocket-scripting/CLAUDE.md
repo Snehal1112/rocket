@@ -28,6 +28,7 @@ Never imports `rocket-infra`, `rocket-app`, or `src-tauri`.
 | `EnvVarWrite` | `result.rs` | `rok.setEnvVar` writes; `persist` flag controls disk write |
 | `TestResult` | `result.rs` | Outcome of a single `rok.test()` block |
 | `ConsoleEntry` | `result.rs` | Captured `console.log/warn/error` output |
+| `ScriptFileScope` | `context.rs` | Collection root and extra roots for local-file `require()`; plain data, `rocket-infra` does the I/O |
 
 ## Execution model
 

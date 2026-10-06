@@ -58,6 +58,7 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 
 Rules in `.claude/rules/` — start with `.claude/rules/00-shortcuts.md` for a pointer map.
 See `.claude/frontend.md` for Zustand/tabs/UI state. See `.claude/tauri-commands.md` for IPC modules.
+See `.claude/script-files.md` for shared .js script files and local require().
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
 
