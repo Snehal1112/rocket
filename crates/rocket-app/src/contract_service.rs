@@ -992,6 +992,7 @@ fn walk_folder<'a>(
             // Contracts describe HTTP request signatures only.
             CollectionItem::GraphQl(_) => {}
             CollectionItem::WebSocket(_) => {}
+            CollectionItem::Grpc(_) => {}
             CollectionItem::OpaqueItem(_) => {}
             // Summary items carry no file content; skip for contract audit.
             CollectionItem::Summary(_) => {}
@@ -2241,6 +2242,17 @@ mod tests {
         let tags = &doc["paths"]["/login"]["get"]["tags"];
         assert!(tags.is_sequence());
         assert_eq!(tags[0].as_str(), Some("auth"));
+    }
+
+    #[test]
+    fn walk_folder_skips_grpc_items() {
+        let mut folder = Folder::new("root");
+        folder.items.push(CollectionItem::Grpc(Box::new(
+            rocket_collection::GrpcRequest::new("Say Hello", "localhost:50051"),
+        )));
+        let mut out = Vec::new();
+        walk_folder(&folder, Path::new(""), &mut out);
+        assert!(out.is_empty());
     }
 }
 

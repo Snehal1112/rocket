@@ -2,6 +2,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection::Collection;
 use crate::graphql_request::GraphQlRequest;
+use crate::grpc_request::GrpcRequest;
 use crate::request::Request;
 use crate::request_kind::RequestKind;
 use crate::settings::{CollectionSettings, CollectionVariable};
@@ -93,6 +94,25 @@ pub trait CollectionRepository: Send + Sync {
     ) -> DomainResult<String> {
         Err(DomainError::InvalidInput(
             "websocket requests are not supported by this repository".into(),
+        ))
+    }
+
+    /// Read one gRPC request file. Repositories without gRPC support keep this default.
+    fn get_grpc_request(&self, _collection: &str, _path: &str) -> DomainResult<GrpcRequest> {
+        Err(DomainError::InvalidInput(
+            "this repository does not support gRPC requests".into(),
+        ))
+    }
+
+    /// Save a gRPC request. Returns the actual filename written, like `save_request`.
+    fn save_grpc_request(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &GrpcRequest,
+    ) -> DomainResult<String> {
+        Err(DomainError::InvalidInput(
+            "this repository does not support gRPC requests".into(),
         ))
     }
 

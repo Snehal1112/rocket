@@ -28,6 +28,7 @@ use super::FsCollectionRepo;
 /// section. Remove an entry as soon as its fix lands.
 const KNOWN_DEFERRED: &[&str] = &[
     "HttpRequest.uid",
+    "GrpcRequest.uid",
     "FolderInfo.uid",
     "HttpRequestSettings.verifySsl",
     "GraphQLRequest.uid",
@@ -73,6 +74,19 @@ const SCRIPT: &[&str] = &["type", "code"];
 const GRAPHQL_REQUEST: &[&str] = &["info", "graphql", "runtime", "settings", "docs"];
 const GRAPHQL_DETAILS: &[&str] = &["method", "url", "headers", "params", "body", "auth"];
 const GRAPHQL_BODY: &[&str] = &["query", "variables"];
+const GRPC_REQUEST: &[&str] = &["info", "grpc", "runtime", "docs"];
+const GRPC_DETAILS: &[&str] = &[
+    "url",
+    "method",
+    "methodType",
+    "protoFilePath",
+    "metadata",
+    "message",
+    "auth",
+];
+const GRPC_RUNTIME: &[&str] = &["variables", "scripts", "assertions"];
+const GRPC_METADATA: &[&str] = &["name", "value", "description", "disabled"];
+const GRPC_MESSAGE_VARIANT: &[&str] = &["title", "selected", "message"];
 const WEBSOCKET_REQUEST: &[&str] = &["info", "websocket", "runtime", "settings", "docs"];
 const WEBSOCKET_DETAILS: &[&str] = &["url", "headers", "message", "auth"];
 const WEBSOCKET_SETTINGS: &[&str] = &["timeout", "keepAliveInterval"];
@@ -410,6 +424,34 @@ fn check_websocket_request(v: &mut Violations, at: &str, doc: &Value) {
     }
     if let Some(settings) = doc.get("settings") {
         v.keys("WebSocketRequestSettings", at, settings, WEBSOCKET_SETTINGS);
+    }
+}
+
+fn check_grpc_request(v: &mut Violations, at: &str, doc: &Value) {
+    v.keys("GrpcRequest", at, doc, GRPC_REQUEST);
+    if let Some(info) = doc.get("info") {
+        v.keys("GrpcRequestInfo", at, info, ITEM_INFO);
+    }
+    if let Some(grpc) = doc.get("grpc") {
+        v.keys("GrpcRequestDetails", at, grpc, GRPC_DETAILS);
+        for m in seq(grpc.get("metadata")) {
+            v.keys("GrpcMetadata", at, m, GRPC_METADATA);
+        }
+        for m in seq(grpc.get("message")) {
+            v.keys("GrpcMessageVariant", at, m, GRPC_MESSAGE_VARIANT);
+        }
+        if let Some(auth) = grpc.get("auth") {
+            check_auth(v, at, auth);
+        }
+    }
+    if let Some(runtime) = doc.get("runtime") {
+        v.keys("GrpcRequestRuntime", at, runtime, GRPC_RUNTIME);
+        for s in seq(runtime.get("scripts")) {
+            v.keys("Script", at, s, SCRIPT);
+        }
+        for var in seq(runtime.get("variables")) {
+            v.keys("Variable", at, var, VARIABLE);
+        }
     }
 }
 
@@ -903,4 +945,49 @@ fn environment_client_certificates_use_schema_keys_plus_rocket_extensions() {
         v.keys("ClientCertificate", &at, cert, &allowed);
     }
     assert!(v.0.is_empty(), "{:#?}", v.0);
+}
+
+#[test]
+fn saved_grpc_request_only_uses_schema_keys_besides_deferred() {
+    use rocket_collection::{
+        GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript,
+    };
+
+    let (dir, repo) = setup();
+    repo.create("api").unwrap();
+    let mut g = GrpcRequest::new("Say Hello", "localhost:50051");
+    g.method = Some("demo.Greeter/SayHello".into());
+    g.method_type = GrpcMethodType::BidiStreaming;
+    g.proto_file_path = Some("protos/greeter.proto".into());
+    g.metadata = vec![GrpcMetadataEntry::new("x-trace", "abc")];
+    g.messages = vec![
+        GrpcMessage {
+            title: "first".into(),
+            selected: true,
+            content: "{}".into(),
+        },
+        GrpcMessage {
+            title: "second".into(),
+            selected: false,
+            content: "{}".into(),
+        },
+    ];
+    g.auth = Auth::Bearer { token: "t".into() };
+    g.variables = vec![CollectionVariable {
+        key: "tenant".into(),
+        value: "acme".into(),
+        initial_value: String::new(),
+        enabled: true,
+        secret: false,
+    }];
+    g.scripts = vec![GrpcScript {
+        script_type: "before-request".into(),
+        code: "x".into(),
+    }];
+    g.docs = Some("docs".into());
+    let rel = repo.save_grpc_request("api", "say-hello.yml", &g).unwrap();
+
+    let mut v = Violations::default();
+    check_grpc_request(&mut v, &rel, &read_yaml(&dir.path().join("api").join(&rel)));
+    assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
 }

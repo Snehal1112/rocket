@@ -149,11 +149,14 @@ grpc:
   methodType: "unary" | "client-streaming" | "server-streaming" | "bidi-streaming"
   protoFilePath: string
   metadata: [GrpcMetadata]
-  message: GrpcMessage | [GrpcMessageVariant]
+  message: GrpcMessage | [GrpcMessageVariant]   # GrpcMessage is a string
+  auth: Auth
 runtime:
-  variables, scripts, assertions, auth
+  variables, scripts, assertions
 docs: string
 ```
+
+Rocket also writes a top-level `uid` for gRPC requests, the same deviation as HTTP requests (`KNOWN_DEFERRED` in `schema_shape_tests.rs`). gRPC auth lives in the `grpc` block; the schema allows only `variables`, `scripts` and `assertions` in `runtime`.
 
 ### 2.6 WebSocketRequest
 

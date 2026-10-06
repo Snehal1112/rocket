@@ -191,6 +191,45 @@ export interface GraphQlRequest {
   actions?: ActionEntry[];
 }
 
+export type GrpcMethodType = 'unary' | 'client-streaming' | 'server-streaming' | 'bidi-streaming';
+
+export interface GrpcMessage {
+  /** Empty for the single untitled message of a simple request. */
+  title: string;
+  /** The message the editor shows first and a unary call sends. */
+  selected: boolean;
+  /** Protobuf JSON text. */
+  content: string;
+}
+
+export interface GrpcScript {
+  type: string;
+  code: string;
+}
+
+/** A saved gRPC request. Empty lists are absent, like the Rust side skips them. */
+export interface GrpcRequest {
+  uid: string;
+  name: string;
+  fileName?: string;
+  seq?: number;
+  tags?: string[];
+  /** Polymorphic on the Rust side (string or typed). Passed back unchanged. */
+  description?: unknown;
+  url: string;
+  /** `package.Service/Method`. */
+  method?: string;
+  methodType: GrpcMethodType;
+  protoFilePath?: string;
+  metadata?: Header[];
+  messages?: GrpcMessage[];
+  auth: Auth;
+  variables?: CollectionVariable[];
+  scripts?: GrpcScript[];
+  assertions?: AssertionEntry[];
+  docs?: string | null;
+}
+
 export interface Folder {
   uid: string;
   name: string;
@@ -261,6 +300,7 @@ export type CollectionItem =
   | ({ type: 'summary' } & RequestSummary)
   | ({ type: 'graphql' } & GraphQlRequest)
   | ({ type: 'websocket' } & WebSocketRequest)
+  | ({ type: 'grpc' } & GrpcRequest)
   | ({ type: 'opaque' } & OpaqueProtocolItem);
 
 export interface Collection {

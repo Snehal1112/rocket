@@ -243,3 +243,49 @@ describe('CollectionNode filter hides folders that only contain opaque items', (
     expect(screen.queryByText('GraphQL Stuff')).not.toBeInTheDocument();
   });
 });
+
+describe('CollectionNode full-tree gRPC items', () => {
+  // A full tree (get_collection) carries typed gRPC items. The sidebar renders summaries, so a
+  // typed item must never reach RequestNode, which only takes request and summary items.
+  const collectionWithGrpcItem: tauriApi.Collection = {
+    name: 'my-collection',
+    root: {
+      uid: 'root',
+      name: 'my-collection',
+      items: [
+        {
+          type: 'summary',
+          uid: 'req-1',
+          name: 'List Orders',
+          method: 'GET',
+          url: 'https://api.example.com/orders',
+          fileName: 'list-orders.yml',
+        },
+        {
+          type: 'grpc',
+          uid: 'g-1',
+          name: 'Say Hello',
+          url: 'localhost:50051',
+          methodType: 'unary',
+          auth: { authType: 'none' },
+          fileName: 'say-hello.yml',
+        },
+      ],
+    },
+    settings: { headers: [], variables: [], sandboxMode: 'safe' },
+  };
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue(collectionWithGrpcItem);
+    usePaneStore.setState({ activeCollection: summary.name });
+  });
+
+  it('does not render a typed gRPC item as a request row', async () => {
+    renderNode();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('request-item-GET-List Orders')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Say Hello')).not.toBeInTheDocument();
+  });
+});

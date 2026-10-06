@@ -71,4 +71,22 @@ describe('collectPaths', () => {
     collectPaths(items, '', folders, requests);
     expect(requests).toEqual([]);
   });
+
+  it('skips typed gRPC items like opaque ones', () => {
+    const items: CollectionItem[] = [
+      {
+        type: 'grpc',
+        uid: 'g1',
+        name: 'Say Hello',
+        url: 'localhost:50051',
+        methodType: 'unary',
+        auth: { authType: 'none' },
+        fileName: 'say-hello.yml',
+      },
+    ];
+    const folders: string[] = [];
+    const requests: string[] = [];
+    collectPaths(items, '', folders, requests);
+    expect(requests).toEqual([]);
+  });
 });

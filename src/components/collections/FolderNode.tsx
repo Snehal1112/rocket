@@ -159,7 +159,11 @@ export function FolderNode({
   // summaries, where GraphQL arrives as a `summary` with `kind: 'graphql'`. They must
   // never keep an otherwise-empty folder visible under an active filter.
   const filterableItems = items.filter(
-    (item) => item.type !== 'opaque' && item.type !== 'graphql' && item.type !== 'websocket',
+    (item) =>
+      item.type !== 'opaque' &&
+      item.type !== 'graphql' &&
+      item.type !== 'websocket' &&
+      item.type !== 'grpc',
   );
   const filteredItems = sortItemsFoldersFirst(
     filter
@@ -349,7 +353,12 @@ export function FolderNode({
                 />
               );
             }
-            if (item.type === 'opaque' || item.type === 'graphql' || item.type === 'websocket')
+            if (
+              item.type === 'opaque' ||
+              item.type === 'graphql' ||
+              item.type === 'websocket' ||
+              item.type === 'grpc'
+            )
               return null;
             const fileName = item.fileName ?? item.name;
             const requestPath = `${basePath}/${fileName}`;

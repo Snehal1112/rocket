@@ -70,7 +70,7 @@ pub struct OcGrpcRequestDetails {
 }
 
 /// gRPC request runtime.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OcGrpcRequestRuntime {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<OcVariable>,
@@ -85,6 +85,9 @@ pub struct OcGrpcRequestRuntime {
 /// Complete gRPC request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcGrpcRequest {
+    /// Stable identity for tab deduplication across reloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
     pub info: OcGrpcRequestInfo,
     pub grpc: OcGrpcRequestDetails,
     #[serde(default, skip_serializing_if = "Option::is_none")]

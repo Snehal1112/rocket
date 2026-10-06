@@ -4,7 +4,7 @@ use rocket_audit::{
 };
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSummary, CollectionVariable, GraphQlRequest,
-    Request, RequestKind, WebSocketRequest,
+    GrpcRequest, Request, RequestKind, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
@@ -108,6 +108,26 @@ impl CollectionService {
         self.repo.get_graphql_request(collection, &actual_path)
     }
 
+    /// Get the full gRPC request at `path`.
+    pub fn get_grpc_request(&self, collection: &str, path: &str) -> DomainResult<GrpcRequest> {
+        self.repo.get_grpc_request(collection, path)
+    }
+
+    /// Save a gRPC request and return it as stored (the file name may differ from `path`).
+    pub fn save_grpc_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GrpcRequest,
+    ) -> DomainResult<GrpcRequest> {
+        let actual_path = self.repo.save_grpc_request(collection, path, request)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: actual_path.clone(),
+        });
+        self.repo.get_grpc_request(collection, &actual_path)
+    }
+
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
         let collection = self.repo.create(name)?;
@@ -187,6 +207,16 @@ impl CollectionService {
             });
             return Ok(());
         }
+        if kind == RequestKind::Grpc {
+            let mut request = self.repo.get_grpc_request(collection, old_path)?;
+            request.name = new_name.to_string();
+            let actual_path = self.repo.save_grpc_request(collection, old_path, &request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path,
+            });
+            return Ok(());
+        }
         // Only update the name field inside the JSON. The filename stays the same.
         // This produces a single Modify filesystem event.
         let mut request = self.repo.get_request(collection, old_path)?;
@@ -222,6 +252,16 @@ impl CollectionService {
             let actual_path = self
                 .repo
                 .save_websocket_request(collection, path, &websocket)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path,
+            });
+            return Ok(());
+        }
+        if kind == RequestKind::Grpc {
+            let mut request = self.repo.get_grpc_request(collection, path)?;
+            request.docs = docs;
+            let actual_path = self.repo.save_grpc_request(collection, path, &request)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
@@ -1036,6 +1076,63 @@ mod tests {
             )),
             "expected CollectionDeleted, got {:?}",
             *captured
+        );
+    }
+
+    #[test]
+    fn rename_request_keeps_a_grpc_item_grpc() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        repo.create("api").expect("create collection");
+        let g = GrpcRequest::new("Old", "localhost:50051");
+        repo.save_grpc_request("api", "call.yml", &g).expect("save");
+
+        let svc = CollectionService::new(Box::new(repo), Box::new(NullEventPublisher));
+        svc.rename_request("api", "call.yml", "New").expect("rename");
+
+        let back = svc.get_grpc_request("api", "call.yml").expect("get");
+        assert_eq!(back.name, "New");
+        assert_eq!(back.url, "localhost:50051");
+        assert_eq!(back.uid, g.uid);
+    }
+
+    #[test]
+    fn update_request_docs_keeps_a_grpc_item_grpc() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        repo.create("api").expect("create collection");
+        repo.save_grpc_request("api", "call.yml", &GrpcRequest::new("A", "h:1"))
+            .expect("save");
+
+        let svc = CollectionService::new(Box::new(repo), Box::new(NullEventPublisher));
+        svc.update_request_docs("api", "call.yml", Some("Calls the greeter".into()))
+            .expect("docs");
+
+        let back = svc.get_grpc_request("api", "call.yml").expect("get");
+        assert_eq!(back.docs.as_deref(), Some("Calls the greeter"));
+    }
+
+    #[test]
+    fn save_grpc_request_returns_the_stored_request_and_publishes_an_event() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        repo.create("api").expect("create collection");
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = CollectionService::new(
+            Box::new(repo),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+
+        let saved = svc
+            .save_grpc_request("api", "call.yml", &GrpcRequest::new("A", "h:1"))
+            .expect("save");
+        assert_eq!(saved.file_name.as_deref(), Some("call.yml"));
+        let events = publisher.events.lock().expect("lock");
+        assert!(
+            matches!(events.as_slice(), [DomainEvent::RequestSaved { path, .. }] if path == "call.yml"),
+            "{events:?}"
         );
     }
 }

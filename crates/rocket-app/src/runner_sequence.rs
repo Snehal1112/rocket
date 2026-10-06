@@ -143,9 +143,11 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                     )),
                 }
             }
-            // gRPC/WebSocket items and sidebar summaries are not executable.
+            // Plans 12 and 13 do not run gRPC from the Collection Runner. WebSocket items,
+            // opaque items and sidebar summaries are not executable either.
             CollectionItem::OpaqueItem(_)
             | CollectionItem::WebSocket(_)
+            | CollectionItem::Grpc(_)
             | CollectionItem::Summary(_) => {}
         }
     }
@@ -513,6 +515,22 @@ mod tests {
         collection.root.items.push(rocket_collection::CollectionItem::WebSocket(Box::new(
             rocket_collection::WebSocketRequest::new("Chat", "wss://x"),
         )));
+
+        let items = flatten_run_set(&collection, None).expect("flatten");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "Login");
+    }
+
+    #[test]
+    fn grpc_items_are_never_steps() {
+        let mut collection = Collection::new("my-api");
+        collection.root.add_request(req("Login", "login.yml"));
+        collection
+            .root
+            .items
+            .push(rocket_collection::CollectionItem::Grpc(Box::new(
+                rocket_collection::GrpcRequest::new("Say Hello", "localhost:50051"),
+            )));
 
         let items = flatten_run_set(&collection, None).expect("flatten");
         assert_eq!(items.len(), 1);

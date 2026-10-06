@@ -1,11 +1,12 @@
 use crate::oc::*;
 use rocket_collection::collection::Collection;
-use rocket_collection::folder::{CollectionItem, Folder, OpaqueProtocolItem};
+use rocket_collection::folder::{CollectionItem, Folder};
 use rocket_collection::settings::{CollectionSettings, CollectionVariable, SandboxMode};
 use rocket_shared::types::{Auth, Header};
 
 use super::auth::persisted_oc_auth;
 use super::graphql::{graphql_to_oc, oc_graphql_to_domain};
+use super::grpc::{grpc_to_oc, oc_grpc_to_domain};
 use super::request::{oc_http_request_to_request, request_to_oc_http_request};
 use super::websocket::{oc_websocket_to_request, websocket_to_oc_websocket};
 
@@ -21,25 +22,11 @@ pub fn oc_item_to_collection_item(item: OcItem) -> Option<CollectionItem> {
         OcItem::Folder(f) => Some(CollectionItem::Folder(oc_folder_to_folder(f))),
         OcItem::ScriptFile(_) => None,
         OcItem::GraphQL(gql) => Some(CollectionItem::GraphQl(Box::new(oc_graphql_to_domain(gql)))),
-        OcItem::Grpc(grpc) => {
-            let name = grpc.info.name.clone();
-            opaque_item("grpc", name, &OcItem::Grpc(grpc))
-        }
+        OcItem::Grpc(grpc) => Some(CollectionItem::Grpc(Box::new(oc_grpc_to_domain(grpc)))),
         OcItem::WebSocket(ws) => Some(CollectionItem::WebSocket(Box::new(
             oc_websocket_to_request(ws),
         ))),
     }
-}
-
-/// Wraps a non-HTTP item as an opaque tree item holding its raw YAML.
-fn opaque_item(protocol: &str, name: String, item: &OcItem) -> Option<CollectionItem> {
-    serde_yaml::to_value(item).ok().map(|raw| {
-        CollectionItem::OpaqueItem(OpaqueProtocolItem {
-            protocol: protocol.into(),
-            name,
-            raw,
-        })
-    })
 }
 
 /// Convert an OC folder to a domain Folder, recursively converting items.
@@ -76,6 +63,7 @@ pub fn folder_to_oc_folder(folder: Folder) -> OcFolder {
             CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
+            CollectionItem::Grpc(g) => Some(OcItem::Grpc(grpc_to_oc(&g))),
             CollectionItem::GraphQl(g) => Some(OcItem::GraphQL(graphql_to_oc(&g))),
             CollectionItem::WebSocket(ws) => {
                 Some(OcItem::WebSocket(websocket_to_oc_websocket(&ws)))
@@ -190,6 +178,7 @@ pub fn collection_to_oc_collection(col: Collection) -> OcCollection {
             CollectionItem::Folder(f) => Some(OcItem::Folder(folder_to_oc_folder(f))),
             // Summary items carry no body/auth — they must not be serialized to disk.
             CollectionItem::Summary(_) => None,
+            CollectionItem::Grpc(g) => Some(OcItem::Grpc(grpc_to_oc(&g))),
             CollectionItem::GraphQl(g) => Some(OcItem::GraphQL(graphql_to_oc(&g))),
             CollectionItem::WebSocket(ws) => {
                 Some(OcItem::WebSocket(websocket_to_oc_websocket(&ws)))

@@ -1612,3 +1612,174 @@ fn graphql_to_oc_drops_blank_variables_and_empty_uid() {
     };
     assert!(b.variables.is_none());
 }
+
+const FULL_GRPC_YAML: &str = r#"
+uid: grpc-1
+info:
+  name: Say Hello
+  type: grpc
+  seq: 2
+  tags:
+    - smoke
+grpc:
+  url: grpcs://api.example.com:443
+  method: demo.greeter.v1.Greeter/SayHello
+  methodType: server-streaming
+  protoFilePath: protos/greeter.proto
+  metadata:
+    - name: x-trace
+      value: abc
+    - name: x-off
+      value: '1'
+      disabled: true
+  message: '{"name": "ada"}'
+  auth:
+    type: bearer
+    token: t
+runtime:
+  variables:
+    - name: tenant
+      value: acme
+  scripts:
+    - type: before-request
+      code: console.log(1)
+docs: Greets people
+"#;
+
+#[test]
+fn oc_grpc_request_converts_to_the_domain_type() {
+    use rocket_collection::{GrpcMethodType, GrpcRequest};
+
+    let oc: OcGrpcRequest = serde_yaml::from_str(FULL_GRPC_YAML).expect("parse");
+    let g: GrpcRequest = oc_grpc_to_domain(oc);
+    assert_eq!(g.uid, "grpc-1");
+    assert_eq!(g.name, "Say Hello");
+    assert_eq!(g.seq, Some(2));
+    assert_eq!(g.tags, vec!["smoke".to_string()]);
+    assert_eq!(g.url, "grpcs://api.example.com:443");
+    assert_eq!(
+        g.method.as_deref(),
+        Some("demo.greeter.v1.Greeter/SayHello")
+    );
+    assert_eq!(g.method_type, GrpcMethodType::ServerStreaming);
+    assert_eq!(g.proto_file_path.as_deref(), Some("protos/greeter.proto"));
+    assert_eq!(g.metadata.len(), 2);
+    assert!(g.metadata[0].enabled);
+    assert!(
+        !g.metadata[1].enabled,
+        "disabled: true becomes enabled: false"
+    );
+    assert_eq!(g.messages.len(), 1);
+    assert_eq!(g.messages[0].title, "");
+    assert!(g.messages[0].selected);
+    assert_eq!(g.messages[0].content, "{\"name\": \"ada\"}");
+    assert!(matches!(g.auth, Auth::Bearer { .. }));
+    assert_eq!(g.variables.len(), 1);
+    assert_eq!(g.scripts.len(), 1);
+    assert_eq!(g.docs.as_deref(), Some("Greets people"));
+}
+
+#[test]
+fn a_grpc_request_survives_domain_oc_yaml_and_back() {
+    let oc: OcGrpcRequest = serde_yaml::from_str(FULL_GRPC_YAML).expect("parse");
+    let g = oc_grpc_to_domain(oc);
+
+    let yaml = serde_yaml::to_string(&grpc_to_oc(&g)).expect("serialize");
+    let again: OcGrpcRequest = serde_yaml::from_str(&yaml).expect("reparse");
+    assert_eq!(oc_grpc_to_domain(again), g, "{yaml}");
+}
+
+#[test]
+fn a_single_untitled_message_is_written_as_a_string_and_titled_ones_as_variants() {
+    use rocket_collection::{GrpcMessage, GrpcRequest};
+
+    let mut g = GrpcRequest::new("A", "h:1");
+    g.messages = vec![GrpcMessage {
+        title: String::new(),
+        selected: true,
+        content: "{}".into(),
+    }];
+    assert!(matches!(
+        grpc_to_oc(&g).grpc.message,
+        Some(OcGrpcMessageOrVariants::Single(ref s)) if s == "{}"
+    ));
+
+    g.messages = vec![
+        GrpcMessage {
+            title: "first".into(),
+            selected: false,
+            content: "{\"a\": 1}".into(),
+        },
+        GrpcMessage {
+            title: "second".into(),
+            selected: true,
+            content: "{\"a\": 2}".into(),
+        },
+    ];
+    let Some(OcGrpcMessageOrVariants::Variants(v)) = grpc_to_oc(&g).grpc.message else {
+        panic!("expected variants");
+    };
+    assert_eq!(v.len(), 2);
+    assert!(!v[0].selected);
+    assert!(v[1].selected);
+    assert_eq!(v[1].message, "{\"a\": 2}");
+
+    g.messages.clear();
+    assert!(grpc_to_oc(&g).grpc.message.is_none());
+}
+
+#[test]
+fn an_unknown_method_type_loads_as_unary() {
+    use rocket_collection::GrpcMethodType;
+
+    let yaml = "info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\n  methodType: duplex\n";
+    let oc: OcGrpcRequest = serde_yaml::from_str(yaml).expect("parse");
+    assert_eq!(oc_grpc_to_domain(oc).method_type, GrpcMethodType::Unary);
+}
+
+#[test]
+fn auth_is_written_in_the_grpc_block_never_in_runtime() {
+    // The schema allows auth in `grpc` only. An auth that an older file kept in `runtime`
+    // is read, then written back in its schema position.
+    let yaml = "info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\nruntime:\n  auth:\n    type: bearer\n    token: t\n";
+    let oc: OcGrpcRequest = serde_yaml::from_str(yaml).expect("parse");
+    let g = oc_grpc_to_domain(oc);
+    assert!(matches!(g.auth, Auth::Bearer { .. }));
+
+    let back = grpc_to_oc(&g);
+    assert!(back.grpc.auth.is_some());
+    assert!(back.runtime.is_none(), "{:?}", back.runtime);
+}
+
+#[test]
+fn an_empty_uid_is_not_written_and_a_missing_one_loads_empty() {
+    let oc: OcGrpcRequest =
+        serde_yaml::from_str("info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\n").expect("parse");
+    let mut g = oc_grpc_to_domain(oc);
+    assert_eq!(g.uid, "");
+    assert!(grpc_to_oc(&g).uid.is_none());
+    g.uid = "u1".into();
+    assert_eq!(grpc_to_oc(&g).uid.as_deref(), Some("u1"));
+}
+
+#[test]
+fn grpc_items_are_typed_in_a_folder_and_written_back_as_grpc() {
+    let yaml = r#"
+info:
+  name: Mixed
+  type: folder
+items:
+  - info:
+      name: Say Hello
+      type: grpc
+    grpc:
+      url: "localhost:50051"
+      method: demo.Greeter/SayHello
+"#;
+    let oc: OcFolder = serde_yaml::from_str(yaml).unwrap();
+    let folder = oc_folder_to_folder(oc);
+    assert!(matches!(&folder.items[0], CollectionItem::Grpc(g) if g.name == "Say Hello"));
+
+    let back = folder_to_oc_folder(folder);
+    assert!(matches!(&back.items.unwrap()[0], OcItem::Grpc(_)));
+}

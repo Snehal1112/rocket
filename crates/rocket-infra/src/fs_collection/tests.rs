@@ -412,6 +412,7 @@ fn reorder_items_writes_order_file_and_get_respects_it() {
             CollectionItem::Folder(f) => f.name.as_str(),
             CollectionItem::GraphQl(g) => g.name.as_str(),
             CollectionItem::WebSocket(w) => w.name.as_str(),
+            CollectionItem::Grpc(g) => g.name.as_str(),
             CollectionItem::OpaqueItem(o) => o.name.as_str(),
             CollectionItem::Summary(s) => s.name.as_str(),
         }
@@ -1475,8 +1476,11 @@ fn build_folder_tree_loads_non_http_items_as_opaque() {
         .map(|o| (o.protocol.as_str(), o.name.as_str()))
         .collect();
     root.sort();
-    // GraphQL is typed now (see full_tree_loads_graphql_as_a_typed_item_with_its_file_name).
-    assert_eq!(root, vec![("grpc", "Get User")]);
+    // GraphQL and gRPC are typed now. Only WebSocket stays opaque.
+    assert!(root.is_empty(), "no opaque item at the root: {root:?}");
+    assert!(col.root.items.iter().any(
+        |i| matches!(i, rocket_collection::CollectionItem::Grpc(g) if g.name == "Get User")
+    ));
     assert!(col.root.items.iter().any(
         |i| matches!(i, rocket_collection::CollectionItem::GraphQl(g) if g.name == "List Users")
     ));
@@ -1530,22 +1534,6 @@ fn build_folder_tree_skips_http_file_missing_method_instead_of_misreading_it() {
 
     let col = repo.get("my-api").unwrap();
     assert!(col.root.items.is_empty(), "{:?}", col.root.items);
-}
-
-#[test]
-fn get_summaries_skips_grpc_items_without_error() {
-    let (dir, repo) = setup();
-    repo.create("my-api").expect("create collection");
-    fs::write(dir.path().join("my-api/list-users.yml"), GRPC_ITEM_YML).expect("write grpc item");
-    let req = rocket_collection::Request::new("Good", HttpMethod::Get, "https://example.com");
-    repo.save_request("my-api", "good.yml", &req).unwrap();
-
-    let col = repo.get_summaries("my-api").unwrap();
-    assert_eq!(col.root.items.len(), 1);
-    assert!(matches!(
-        &col.root.items[0],
-        rocket_collection::CollectionItem::Summary(s) if s.name == "Good"
-    ));
 }
 
 #[test]
@@ -1907,18 +1895,25 @@ fn get_summaries_returns_a_graphql_summary_with_its_kind() {
     .expect("write gql");
     fs::write(dir.path().join("my-api/get-user.yml"), GRPC_ITEM_YML).expect("write grpc");
 
-    let col = repo.get_summaries("my-api").expect("summaries");
-    assert_eq!(col.root.items.len(), 1, "gRPC is still skipped: {:?}", col.root.items);
-    match &col.root.items[0] {
-        rocket_collection::CollectionItem::Summary(s) => {
-            assert_eq!(s.kind, rocket_collection::RequestKind::GraphQl);
-            assert_eq!(s.uid, "g1");
-            assert_eq!(s.method, "POST");
-            assert_eq!(s.url, "https://api.example.com/graphql");
-            assert_eq!(s.file_name.as_deref(), Some("list-users.yml"));
-        }
-        other => panic!("expected a summary, got {other:?}"),
-    }
+    let col = repo.get_summaries("my-api").unwrap();
+    assert_eq!(col.root.items.len(), 2, "GraphQL and gRPC both listed: {:?}", col.root.items);
+    let s = col
+        .root
+        .items
+        .iter()
+        .find_map(|i| match i {
+            rocket_collection::CollectionItem::Summary(s)
+                if s.kind == rocket_collection::RequestKind::GraphQl =>
+            {
+                Some(s)
+            }
+            _ => None,
+        })
+        .expect("a GraphQL summary");
+    assert_eq!(s.uid, "g1");
+    assert_eq!(s.method, "POST");
+    assert_eq!(s.url, "https://api.example.com/graphql");
+    assert_eq!(s.file_name.as_deref(), Some("list-users.yml"));
 }
 
 #[test]
@@ -2036,11 +2031,9 @@ fn summary_loading_returns_a_websocket_summary_for_the_sidebar() {
     let (dir, repo) = setup();
     repo.create("my-api").unwrap();
     fs::write(dir.path().join("my-api/chat.yml"), WEBSOCKET_ITEM_YML).unwrap();
-    fs::write(dir.path().join("my-api/get-user.yml"), GRPC_ITEM_YML).unwrap();
 
     let col = repo.get_summaries("my-api").unwrap();
 
-    // gRPC is still left out of the summary payload (its own plan owns that).
     assert_eq!(col.root.items.len(), 1, "{:?}", col.root.items);
     match &col.root.items[0] {
         CollectionItem::Summary(s) => {
@@ -2115,4 +2108,256 @@ fn save_websocket_rejects_an_empty_uid() {
     let mut ws = rocket_collection::WebSocketRequest::new("Chat", "ws://x");
     ws.uid = String::new();
     assert!(repo.save_websocket_request("my-api", "chat", &ws).is_err());
+}
+
+fn grpc_item_yml(uid_line: &str) -> String {
+    format!(
+        "{uid_line}info:\n  name: Get User\n  type: grpc\ngrpc:\n  url: grpc://api.example.com\n  method: users.UserService/GetUser\n  methodType: unary\n"
+    )
+}
+
+fn sample_grpc_request() -> rocket_collection::GrpcRequest {
+    use rocket_collection::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType};
+
+    let mut g = rocket_collection::GrpcRequest::new("Say Hello", "localhost:50051");
+    g.method = Some("demo.greeter.v1.Greeter/SayHello".into());
+    g.method_type = GrpcMethodType::ServerStreaming;
+    g.proto_file_path = Some("protos/greeter.proto".into());
+    g.metadata = vec![GrpcMetadataEntry::new("x-trace", "abc")];
+    g.messages = vec![GrpcMessage {
+        title: String::new(),
+        selected: true,
+        content: "{\"name\": \"ada\"}".into(),
+    }];
+    g
+}
+
+#[test]
+fn grpc_request_round_trips_through_the_repo() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let g = sample_grpc_request();
+
+    let saved = repo
+        .save_grpc_request("my-api", "say-hello.yml", &g)
+        .unwrap();
+    assert_eq!(saved, "say-hello.yml");
+
+    let back = repo.get_grpc_request("my-api", "say-hello.yml").unwrap();
+    assert_eq!(back.uid, g.uid);
+    assert_eq!(back.method, g.method);
+    assert_eq!(back.method_type, g.method_type);
+    assert_eq!(back.proto_file_path, g.proto_file_path);
+    assert_eq!(back.metadata, g.metadata);
+    assert_eq!(back.messages, g.messages);
+    assert_eq!(back.file_name.as_deref(), Some("say-hello.yml"));
+
+    let raw = read_yaml_value(&dir.path().join("my-api/say-hello.yml"));
+    assert_eq!(raw["info"]["type"].as_str(), Some("grpc"), "{raw:?}");
+    assert!(raw.get("grpc").is_some(), "{raw:?}");
+    assert!(raw.get("http").is_none(), "{raw:?}");
+    assert_eq!(
+        raw["grpc"]["methodType"].as_str(),
+        Some("server-streaming"),
+        "{raw:?}"
+    );
+}
+
+#[test]
+fn a_single_untitled_message_is_saved_as_a_plain_string() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.save_grpc_request("my-api", "a.yml", &sample_grpc_request())
+        .unwrap();
+    let raw = read_yaml_value(&dir.path().join("my-api/a.yml"));
+    assert_eq!(
+        raw["grpc"]["message"].as_str(),
+        Some("{\"name\": \"ada\"}"),
+        "{raw:?}"
+    );
+}
+
+#[test]
+fn get_grpc_request_gives_a_uid_less_file_an_in_memory_uid() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let path = dir.path().join("my-api/get-user.yml");
+    fs::write(&path, grpc_item_yml("")).unwrap();
+
+    let g = repo.get_grpc_request("my-api", "get-user.yml").unwrap();
+    assert!(!g.uid.is_empty());
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        grpc_item_yml(""),
+        "a read must not rewrite the file"
+    );
+}
+
+#[test]
+fn an_opaque_era_grpc_file_keeps_its_call_description_through_load_and_save() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(dir.path().join("my-api/get-user.yml"), grpc_item_yml("")).unwrap();
+
+    let g = repo.get_grpc_request("my-api", "get-user.yml").unwrap();
+    repo.save_grpc_request("my-api", "get-user.yml", &g)
+        .unwrap();
+
+    let raw = read_yaml_value(&dir.path().join("my-api/get-user.yml"));
+    assert_eq!(raw["info"]["name"].as_str(), Some("Get User"), "{raw:?}");
+    assert_eq!(
+        raw["grpc"]["url"].as_str(),
+        Some("grpc://api.example.com"),
+        "{raw:?}"
+    );
+    assert_eq!(
+        raw["grpc"]["method"].as_str(),
+        Some("users.UserService/GetUser"),
+        "{raw:?}"
+    );
+    assert_eq!(raw["grpc"]["methodType"].as_str(), Some("unary"), "{raw:?}");
+    assert!(
+        raw["uid"].as_str().is_some(),
+        "the save persists the uid: {raw:?}"
+    );
+}
+
+#[test]
+fn save_grpc_request_rejects_an_empty_uid() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let mut g = sample_grpc_request();
+    g.uid = String::new();
+    assert!(repo.save_grpc_request("my-api", "a.yml", &g).is_err());
+}
+
+#[test]
+fn save_grpc_request_keeps_stored_variables_when_the_payload_has_none() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/get-user.yml"),
+        "uid: g1\ninfo:\n  name: Get User\n  type: grpc\ngrpc:\n  url: h:1\nruntime:\n  variables:\n  - name: tenant\n    value: acme\n",
+    )
+    .unwrap();
+
+    let mut g = repo.get_grpc_request("my-api", "get-user.yml").unwrap();
+    g.variables.clear();
+    g.name = "Renamed".into();
+    repo.save_grpc_request("my-api", "get-user.yml", &g)
+        .unwrap();
+
+    let yaml = fs::read_to_string(dir.path().join("my-api/get-user.yml")).unwrap();
+    assert!(yaml.contains("name: tenant"), "{yaml}");
+    assert!(yaml.contains("name: Renamed"), "{yaml}");
+}
+
+#[test]
+fn request_variables_work_for_a_grpc_file() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/get-user.yml"),
+        grpc_item_yml("uid: g1\n"),
+    )
+    .unwrap();
+
+    let vars = vec![CollectionVariable {
+        key: "tenant".into(),
+        value: "acme".into(),
+        initial_value: String::new(),
+        enabled: true,
+        secret: false,
+    }];
+    repo.save_request_variables("my-api", "get-user.yml", vars)
+        .unwrap();
+    let back = repo
+        .get_request_variables("my-api", "get-user.yml")
+        .unwrap();
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].key, "tenant");
+
+    // The save must not turn the file into an HTTP request.
+    let g = repo.get_grpc_request("my-api", "get-user.yml").unwrap();
+    assert_eq!(g.url, "grpc://api.example.com");
+    assert_eq!(g.variables.len(), 1);
+}
+
+#[test]
+fn request_kind_reports_grpc_for_a_grpc_file() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(dir.path().join("my-api/get-user.yml"), grpc_item_yml("")).unwrap();
+    assert_eq!(
+        repo.request_kind("my-api", "get-user.yml").unwrap(),
+        rocket_collection::RequestKind::Grpc
+    );
+}
+
+#[test]
+fn full_tree_loads_grpc_as_a_typed_item_with_its_file_name() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "users").unwrap();
+    fs::write(
+        dir.path().join("my-api/users/get-user.yml"),
+        grpc_item_yml("uid: g1\n"),
+    )
+    .unwrap();
+
+    let col = repo.get("my-api").unwrap();
+    let users = col.root.find_folder("users").unwrap();
+    let found = users.items.iter().find_map(|i| match i {
+        rocket_collection::CollectionItem::Grpc(g) => Some(g),
+        _ => None,
+    });
+    let g = found.expect("a typed Grpc item");
+    assert_eq!(g.name, "Get User");
+    assert_eq!(g.uid, "g1");
+    assert_eq!(g.url, "grpc://api.example.com");
+    assert_eq!(g.file_name.as_deref(), Some("get-user.yml"));
+    assert_eq!(col.root.request_count(), 1);
+}
+
+#[test]
+fn get_summaries_returns_a_grpc_summary_with_its_kind() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    fs::write(
+        dir.path().join("my-api/get-user.yml"),
+        grpc_item_yml("uid: g1\n"),
+    )
+    .unwrap();
+
+    let col = repo.get_summaries("my-api").unwrap();
+    assert_eq!(col.root.items.len(), 1, "{:?}", col.root.items);
+    match &col.root.items[0] {
+        rocket_collection::CollectionItem::Summary(s) => {
+            assert_eq!(s.kind, rocket_collection::RequestKind::Grpc);
+            assert_eq!(s.uid, "g1");
+            assert_eq!(s.name, "Get User");
+            assert_eq!(s.method, "GRPC");
+            assert_eq!(s.url, "grpc://api.example.com");
+            assert_eq!(s.file_name.as_deref(), Some("get-user.yml"));
+        }
+        other => panic!("expected a summary, got {other:?}"),
+    }
+}
+
+#[test]
+fn rename_item_and_move_keep_working_for_a_grpc_file() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "users").unwrap();
+    fs::write(
+        dir.path().join("my-api/get-user.yml"),
+        grpc_item_yml("uid: g1\n"),
+    )
+    .unwrap();
+
+    repo.move_item("my-api", "get-user.yml", "my-api", "users/get-user.yml")
+        .unwrap();
+    assert!(dir.path().join("my-api/users/get-user.yml").exists());
+    repo.delete_request("my-api", "users/get-user.yml").unwrap();
+    assert!(!dir.path().join("my-api/users/get-user.yml").exists());
 }

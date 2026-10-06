@@ -33,6 +33,10 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
                 crate::conversions::with_file_identity(&mut ws, entry_name);
                 Ok(Some(CollectionItem::WebSocket(ws)))
             }
+            Ok(Some(CollectionItem::Grpc(mut grpc))) => {
+                grpc.file_name = Some(entry_name.to_string());
+                Ok(Some(CollectionItem::Grpc(grpc)))
+            }
             Ok(other) => Ok(other),
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file");
@@ -217,7 +221,7 @@ where
 }
 
 /// Parse only the uid/name/method/url fields from a request file for sidebar display.
-/// GraphQL and WebSocket files return a summary with their `kind`. gRPC and ScriptFile
+/// GraphQL, WebSocket and gRPC files return a summary with their `kind`. ScriptFile
 /// .yml files that pass `is_request_file` are recognised via the untagged `OcItem` probe,
 /// just like `load_yaml_item`, and return `Ok(None)` so the caller can skip them silently
 /// (at debug level) instead of reporting them as corrupt. A file that matches only
@@ -278,10 +282,19 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::WebSocket,
             })),
+            // A gRPC file is small, so the summary reads the few fields the sidebar needs.
+            Ok(OcItem::Grpc(grpc)) => Ok(Some(RequestSummary {
+                uid: grpc.uid.unwrap_or_default(),
+                name: grpc.info.name,
+                method: "GRPC".to_string(),
+                url: grpc.grpc.url,
+                file_name: Some(entry_name.to_string()),
+                kind: RequestKind::Grpc,
+            })),
             Ok(OcItem::Http(_)) | Ok(OcItem::Folder(_)) | Err(_) => Err(DomainError::Internal(
                 format!("Failed to parse request summary: {min_err}"),
             )),
-            Ok(OcItem::Grpc(_) | OcItem::ScriptFile(_)) => Ok(None),
+            Ok(OcItem::ScriptFile(_)) => Ok(None),
         }
     } else {
         // Legacy JSON: full Request deserialization then extract fields.

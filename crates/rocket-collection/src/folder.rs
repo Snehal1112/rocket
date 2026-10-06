@@ -1,4 +1,5 @@
 use crate::graphql_request::GraphQlRequest;
+use crate::grpc_request::GrpcRequest;
 use crate::request::Request;
 use crate::request_summary::RequestSummary;
 use crate::websocket::WebSocketRequest;
@@ -34,7 +35,10 @@ pub enum CollectionItem {
     /// A typed WebSocket request (`info.type: websocket`).
     #[serde(rename = "websocket")]
     WebSocket(Box<WebSocketRequest>),
-    /// Raw YAML for protocols that have no typed variant yet (gRPC).
+    /// A typed gRPC request. Boxed for the same reason `Request` is.
+    #[serde(rename = "grpc")]
+    Grpc(Box<GrpcRequest>),
+    /// Raw YAML for protocols that have no typed variant yet.
     #[serde(rename = "opaque")]
     OpaqueItem(OpaqueProtocolItem),
     /// Lightweight request placeholder for sidebar loads (no body/auth).
@@ -100,6 +104,7 @@ impl Folder {
                 CollectionItem::Request(_) => 1,
                 CollectionItem::GraphQl(_) => 1,
                 CollectionItem::WebSocket(_) => 1,
+                CollectionItem::Grpc(_) => 1,
                 CollectionItem::Summary(_) => 1, // one summary = one request on disk
                 CollectionItem::Folder(f) => f.request_count(),
                 CollectionItem::OpaqueItem(_) => 0,
@@ -212,5 +217,18 @@ mod tests {
         root.add_subfolder(inner);
 
         assert_eq!(root.request_count(), 3);
+    }
+
+    #[test]
+    fn grpc_item_counts_as_a_request_and_serializes_with_the_grpc_tag() {
+        let mut root = Folder::new("root");
+        root.items.push(CollectionItem::Grpc(Box::new(crate::GrpcRequest::new(
+            "Say Hello",
+            "localhost:50051",
+        ))));
+        assert_eq!(root.request_count(), 1);
+        let v = serde_json::to_value(&root.items[0]).expect("serialize");
+        assert_eq!(v["type"], "grpc");
+        assert_eq!(v["name"], "Say Hello");
     }
 }

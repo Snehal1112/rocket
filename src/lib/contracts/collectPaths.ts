@@ -17,7 +17,12 @@ export function collectPaths(
       const path = prefix ? `${prefix}/${seg}` : seg;
       folders.push(path);
       collectPaths(item.items, path, folders, requests);
-    } else if (item.type !== 'opaque' && item.type !== 'graphql' && item.type !== 'websocket') {
+    } else if (
+      item.type !== 'opaque' &&
+      item.type !== 'graphql' &&
+      item.type !== 'websocket' &&
+      item.type !== 'grpc'
+    ) {
       const seg = item.fileName ?? item.name;
       const path = prefix ? `${prefix}/${seg}` : seg;
       requests.push(path);

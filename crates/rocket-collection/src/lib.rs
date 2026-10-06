@@ -2,6 +2,7 @@ pub mod collection;
 pub mod contract;
 pub mod folder;
 pub mod graphql_request;
+pub mod grpc_request;
 pub mod repository;
 pub mod request;
 pub mod request_kind;
@@ -15,6 +16,9 @@ pub(crate) mod uid;
 pub use collection::Collection;
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
+pub use grpc_request::{
+    GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript,
+};
 pub use repository::CollectionRepository;
 pub use request_kind::RequestKind;
 pub use request::{
