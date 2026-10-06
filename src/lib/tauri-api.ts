@@ -2407,3 +2407,62 @@ export const getProxySettings = () => invoke<ProxySettingsView>('get_proxy_setti
 
 export const saveProxySettings = (settings: ProxySettings, password: ProxyPasswordChange) =>
   invoke<void>('save_proxy_settings', { settings, password });
+
+// ============================================================
+// GraphQL subscriptions
+// ============================================================
+
+export interface GraphQlSubscribeInput extends WebSocketScopeInput {
+  /** The request URL. `http` and `https` are turned into `ws` and `wss`. */
+  url: string;
+  /** Where subscriptions are served when that differs from `url`. */
+  subscriptionUrl?: string;
+  query: string;
+  /** JSON object text. */
+  variables?: string;
+  operationName?: string;
+  /** JSON object text sent with `connection_init`. */
+  connectionParams?: string;
+  headers: Header[];
+  auth?: Auth;
+  verifySsl?: boolean;
+  timeoutMs?: number;
+}
+
+/** `graphql_subscribe` only reports whether the socket opened. Results arrive as events. */
+export const graphqlSubscribe = (sessionId: string, input: GraphQlSubscribeInput) =>
+  invoke<void>('graphql_subscribe', { sessionId, input });
+
+export const graphqlUnsubscribe = (sessionId: string) =>
+  invoke<void>('graphql_unsubscribe', { sessionId });
+
+/** Payload of `graphql:subscription-message`. Fields are snake_case, like every `DomainEvent`. */
+export interface GraphQlSubscriptionMessageEvent {
+  type: 'graphQlSubscriptionMessage';
+  session_id: string;
+  event: 'next' | 'error' | 'complete';
+  /** Pretty-printed JSON. Empty for `complete`. */
+  data: string;
+  timestamp_ms: number;
+}
+
+export interface GraphQlSubscriptionStatusEvent {
+  type: 'graphQlSubscriptionStatus';
+  session_id: string;
+  state: 'connecting' | 'open' | 'closed' | 'failed';
+  /** The subprotocol the server selected. */
+  dialect: string | null;
+  reason: string | null;
+}
+
+export const onGraphQlSubscriptionMessage = (
+  handler: (event: GraphQlSubscriptionMessageEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<GraphQlSubscriptionMessageEvent>('graphql:subscription-message', (e) =>
+    handler(e.payload),
+  );
+
+export const onGraphQlSubscriptionStatus = (
+  handler: (event: GraphQlSubscriptionStatusEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<GraphQlSubscriptionStatusEvent>('graphql:subscription-status', (e) => handler(e.payload));

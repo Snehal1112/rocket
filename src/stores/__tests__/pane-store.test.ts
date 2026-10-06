@@ -1420,4 +1420,28 @@ describe('websocket tab cleanup', () => {
     expect(release.mock.calls[0][0]).toMatchObject({ id: 'ws-tab' });
     release.mockRestore();
   });
+
+  it('closing a graphql tab ends its subscription', async () => {
+    const session = await import('@/lib/graphql-subscription-session');
+    const release = vi
+      .spyOn(session, 'releaseGraphQlSubscriptionTab')
+      .mockImplementation(() => undefined);
+    const { createDefaultRequestFor } = await import('@/lib/pane-utils');
+
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+    usePaneStore.getState().openTab({
+      id: 'gql-tab',
+      title: 'Updates',
+      tabType: 'request',
+      request: createDefaultRequestFor('graphql'),
+      response: null,
+      isDirty: false,
+    });
+
+    usePaneStore.getState().closeTab('gql-tab', leaf.groupId);
+
+    expect(release).toHaveBeenCalledTimes(1);
+    release.mockRestore();
+  });
 });

@@ -295,6 +295,8 @@ export interface GraphQlState {
   variables: string;
   /** The operation to run when the document defines several. Session state, never saved. */
   operationName?: string;
+  /** JSON object text sent with `connection_init` for subscriptions. Session state, never saved. */
+  connectionParams?: string;
   /** Stored body variants, round-tripped so a save keeps them. */
   bodyVariants?: import('@/lib/tauri-api').GraphQlBodyVariant[];
 }

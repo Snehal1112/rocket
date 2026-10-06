@@ -1,4 +1,15 @@
-import { Braces, Code2, Loader2, Send, ShieldCheck, Tag, X, Zap } from 'lucide-react';
+import {
+  Braces,
+  Code2,
+  Loader2,
+  Radio,
+  Send,
+  ShieldCheck,
+  Square,
+  Tag,
+  X,
+  Zap,
+} from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SingleLineEditor } from '@/components/editor';
@@ -34,11 +45,13 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
+import { useSelectedOperationKind } from '@/hooks/useSelectedOperationKind';
 import { authStateForType } from '@/lib/auth-type-defaults';
 import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
+import { startSubscription, stopSubscription } from '@/lib/graphql-subscription-session';
 import { findTabInTree } from '@/lib/pane-utils';
 import {
   useEnvironments,
@@ -62,6 +75,7 @@ import { useEnvStore } from '@/stores/env-store';
 import { useGraphQlSchemaStore } from '@/stores/graphql-schema-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { IDLE_SESSION, useWebSocketStore } from '@/stores/websocket-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type {
   AuthState,
@@ -79,6 +93,7 @@ import { BodyEditor } from './BodyEditor';
 import { GraphQlDocsExplorer } from './GraphQlDocsExplorer';
 import { GraphQlEditor } from './GraphQlEditor';
 import { GraphQlQueryBuilder } from './GraphQlQueryBuilder';
+import { GraphQlSubscriptionPanel } from './GraphQlSubscriptionPanel';
 import { HeadersEditor } from './HeadersEditor';
 import { LoadTestTab } from './load-test/LoadTestTab';
 import { MethodSelect } from './MethodSelect';
@@ -147,6 +162,14 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { request, response } = tab;
   const profile = requestProfile(request.requestType);
   const isGraphQl = request.requestType === 'graphql';
+  // A GraphQL tab whose selected operation is a subscription streams instead of sending once.
+  const operationKind = useSelectedOperationKind(
+    isGraphQl ? (request.graphql?.query ?? '') : '',
+    request.graphql?.operationName,
+  );
+  const isSubscription = isGraphQl && operationKind === 'subscription';
+  const subscription = useWebSocketStore((s) => s.byTab[tab.id]) ?? IDLE_SESSION;
+  const subscribed = subscription.status === 'connecting' || subscription.status === 'open';
   const updateRequest = usePaneStore((s) => s.updateRequest);
   const requestLayout = useLayoutStore((s) => s.requestLayout);
 
@@ -920,6 +943,41 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     docMode,
   ]);
 
+  const handleSend = useCallback(() => {
+    if (isSubscription) {
+      if (subscribed) void stopSubscription(tab.id);
+      else void startSubscription(tab);
+      return;
+    }
+    const url = request.url.trim();
+    if (!url) {
+      setUrlError('URL is required');
+      return;
+    }
+    // Skip URL format check when the URL has unresolved template vars;
+    // the backend resolves them before making the HTTP call.
+    if (!url.includes('{{')) {
+      try {
+        new URL(url);
+      } catch {
+        setUrlError('Invalid URL — include http:// or https://');
+        return;
+      }
+    }
+    setUrlError('');
+    send(request);
+  }, [isSubscription, subscribed, tab, request, send]);
+
+  // Ctrl or Cmd+Enter on a GraphQL tab goes through the same decision as the Send button.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId: string }>).detail;
+      if (detail?.tabId === tab.id) handleSend();
+    };
+    window.addEventListener('rocket:graphql-send', handler);
+    return () => window.removeEventListener('rocket:graphql-send', handler);
+  }, [tab.id, handleSend]);
+
   const urlBar = (
     <>
       <div className='flex items-center gap-2 border-b border-border px-3 py-2 bg-card'>
@@ -935,7 +993,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             setUrlError('');
             handleUrlChange(val);
           }}
-          onSubmit={() => send(request)}
+          onSubmit={() => (isSubscription ? handleSend() : send(request))}
           onCurlImport={handleCurlImport}
           variableContext={scopedContext}
           pathParams={pathParamMap}
@@ -954,29 +1012,27 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         <Button
           size='sm'
           className='h-8 px-3'
-          disabled={sending}
-          onClick={() => {
-            const url = request.url.trim();
-            if (!url) {
-              setUrlError('URL is required');
-              return;
-            }
-            // Skip URL format check when the URL has unresolved template vars;
-            // the backend resolves them before making the HTTP call.
-            if (!url.includes('{{')) {
-              try {
-                new URL(url);
-              } catch {
-                setUrlError('Invalid URL — include http:// or https://');
-                return;
-              }
-            }
-            setUrlError('');
-            send(request);
-          }}
+          disabled={isSubscription ? subscription.status === 'connecting' : sending}
+          onClick={handleSend}
         >
-          <Send className='mr-1 h-3.5 w-3.5' />
-          {sending ? 'Sending...' : 'Send'}
+          {isSubscription ? (
+            subscribed ? (
+              <Square className='mr-1 h-3.5 w-3.5' />
+            ) : (
+              <Radio className='mr-1 h-3.5 w-3.5' />
+            )
+          ) : (
+            <Send className='mr-1 h-3.5 w-3.5' />
+          )}
+          {isSubscription
+            ? subscribed
+              ? 'Stop'
+              : subscription.status === 'connecting'
+                ? 'Connecting...'
+                : 'Subscribe'
+            : sending
+              ? 'Sending...'
+              : 'Send'}
         </Button>
 
         {profile.showLoadTest && (
@@ -1409,7 +1465,17 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     </div>
   );
 
-  const responseArea = sending ? (
+  const showSubscription = isGraphQl && (isSubscription || subscription.log.length > 0);
+  const responseArea = showSubscription ? (
+    <GraphQlSubscriptionPanel
+      tab={tab}
+      onConnectionParamsChange={(connectionParams) =>
+        updateRequest(tab.id, {
+          graphql: { ...(request.graphql ?? { query: '', variables: '' }), connectionParams },
+        })
+      }
+    />
+  ) : sending ? (
     <div className='flex flex-1 flex-col items-center justify-center gap-3'>
       <Loader2 className='h-5 w-5 animate-spin text-primary' />
       <p className='text-sm text-muted-foreground'>Sending request...</p>

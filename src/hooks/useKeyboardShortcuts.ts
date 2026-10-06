@@ -36,6 +36,11 @@ export function useKeyboardShortcuts() {
             window.dispatchEvent(
               new CustomEvent('rocket:websocket-send', { detail: { tabId: tab.id } }),
             );
+          } else if (tab.request.requestType === 'graphql') {
+            // A GraphQL tab decides between Send and Subscribe itself.
+            window.dispatchEvent(
+              new CustomEvent('rocket:graphql-send', { detail: { tabId: tab.id } }),
+            );
           } else {
             sendRequest(tab.id, tab.request);
           }

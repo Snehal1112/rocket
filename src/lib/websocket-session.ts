@@ -21,7 +21,7 @@ function errorText(err: unknown): string {
 }
 
 // Where {{variables}} come from. Read from the stores at call time, like the HTTP send path.
-function scopeFor(tab: RequestTab): WebSocketScopeInput {
+export function scopeFor(tab: RequestTab): WebSocketScopeInput {
   return {
     collection: tab.source?.collection,
     environmentName: useEnvStore.getState().activeEnvId ?? undefined,

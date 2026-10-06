@@ -55,6 +55,8 @@ interface WebSocketStoreState {
   /** Registers a session for a tab before `ws_connect` is invoked, so no early event is lost. */
   beginSession: (tabId: string, sessionId: string) => void;
   applyMessage: (event: WebSocketMessageEvent) => void;
+  /** Appends a prebuilt log entry to the tab that owns the session (GraphQL subscription results). */
+  appendEntry: (sessionId: string, entry: Omit<MessageLogEntry, 'id'>) => void;
   applyStatus: (event: WebSocketStatusEvent) => void;
   /** A rejected connect call. A no-op when a status event already ended the session. */
   failSession: (tabId: string, sessionId: string, error: string) => void;
@@ -101,6 +103,16 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
       timestampMs: event.timestamp_ms,
     };
     set({ byTab: { ...byTab, [tabId]: { ...session, log: appendCapped(session.log, entry) } } });
+  },
+
+  appendEntry(sessionId, entry) {
+    const { byTab, tabBySession } = get();
+    const tabId = tabBySession[sessionId];
+    if (!tabId) return;
+    const session = byTab[tabId];
+    if (!session) return;
+    const withId: MessageLogEntry = { ...entry, id: nextEntryId() };
+    set({ byTab: { ...byTab, [tabId]: { ...session, log: appendCapped(session.log, withId) } } });
   },
 
   applyStatus(event) {
