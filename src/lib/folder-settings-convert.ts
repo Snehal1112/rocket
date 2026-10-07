@@ -66,13 +66,30 @@ export function stateToFolderAuth(state: AuthState): Auth | undefined {
 }
 
 /**
+ * Whether two auth states are the same OAuth2 config: grant type, token URL and client id.
+ * The implicit grant gets its token from the authorization URL, so that is compared too.
+ * A token fetched for one config must never be sent for another.
+ */
+export function sameOAuth2Config(a: AuthState, b: AuthState): boolean {
+  if (a.authType !== 'oauth2' || b.authType !== 'oauth2' || !a.oauth2 || !b.oauth2) return false;
+  const x = a.oauth2;
+  const y = b.oauth2;
+  if (x.grantType !== y.grantType || x.tokenUrl !== y.tokenUrl || x.clientId !== y.clientId) {
+    return false;
+  }
+  return x.grantType !== 'implicit' || x.authorizationUrl === y.authorizationUrl;
+}
+
+/**
  * Copies the OAuth2 token fields of an in-memory state onto the state read from disk, which
  * never holds tokens. Mirrors what CollectionOverviewTab does on load. A disk copy that
- * already has an access token is returned unchanged.
+ * already has an access token is returned unchanged. A cached token is only copied when it
+ * was fetched for the same OAuth2 config (`sameOAuth2Config`), so a stale one is dropped.
  */
 export function restoreOAuth2Tokens(disk: AuthState, cached: AuthState | undefined): AuthState {
   if (disk.authType !== 'oauth2' || !disk.oauth2 || disk.oauth2.accessToken) return disk;
   if (cached?.authType !== 'oauth2' || !cached.oauth2?.accessToken) return disk;
+  if (!sameOAuth2Config(disk, cached)) return disk;
   return {
     ...disk,
     oauth2: {

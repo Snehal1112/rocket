@@ -18,8 +18,22 @@ vi.mock('@/components/editor', () => ({
   }) => <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />,
 }));
 vi.mock('@/components/request/oauth2/OAuth2AuthEditor', () => ({
-  OAuth2AuthEditor: ({ oauth2 }: { oauth2: { accessToken: string } }) => (
-    <div data-testid='oauth2-token'>{oauth2.accessToken}</div>
+  OAuth2AuthEditor: ({
+    oauth2,
+    patchOAuth2,
+  }: {
+    oauth2: { accessToken: string };
+    patchOAuth2: (patch: { accessToken?: string; clientId?: string }) => void;
+  }) => (
+    <div>
+      <div data-testid='oauth2-token'>{oauth2.accessToken}</div>
+      <button type='button' onClick={() => patchOAuth2({ accessToken: 'fetched' })}>
+        Fetch token
+      </button>
+      <button type='button' onClick={() => patchOAuth2({ clientId: 'edited' })}>
+        Edit client id
+      </button>
+    </div>
   ),
 }));
 vi.mock('@/hooks/useFolderVariableContext', () => ({
@@ -130,6 +144,46 @@ describe('AuthSection', () => {
     renderSection({ authType: 'bearer', token: 'a' }, onChange);
     fireEvent.click(screen.getByRole('button', { name: 'Inherit' }));
     expect(onChange).toHaveBeenLastCalledWith({ auth: undefined });
+  });
+
+  it('choosing Inherit removes the folder entry from the auth store', () => {
+    renderSection(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Bearer' }));
+    expect(useFolderAuthStore.getState().getFolderAuth('demo', 'api')?.authType).toBe('bearer');
+    fireEvent.click(screen.getByRole('button', { name: 'Inherit' }));
+    expect(useFolderAuthStore.getState().getFolderAuth('demo', 'api')).toBeUndefined();
+  });
+
+  it('a fetched OAuth2 token is cached without marking the folder changed', () => {
+    const onChange = vi.fn();
+    const state = authStateForType('oauth2', { authType: 'none' });
+    renderSection(stateToFolderAuth(state), onChange);
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch token' }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(useFolderAuthStore.getState().getFolderAuth('demo', 'api')?.oauth2?.accessToken).toBe(
+      'fetched',
+    );
+    expect(screen.getByTestId('oauth2-token')).toHaveTextContent('fetched');
+  });
+
+  it('an OAuth2 config edit still marks the folder changed', () => {
+    const onChange = vi.fn();
+    const state = authStateForType('oauth2', { authType: 'none' });
+    renderSection(stateToFolderAuth(state), onChange);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit client id' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restore a cached token fetched for another OAuth2 config', () => {
+    const state = authStateForType('oauth2', { authType: 'none' });
+    const fields = state.oauth2 as NonNullable<typeof state.oauth2>;
+    useFolderAuthStore.getState().setFolderAuth('demo', 'api', {
+      ...state,
+      oauth2: { ...fields, clientId: 'old-client', accessToken: 'stale' },
+    });
+    renderSection(stateToFolderAuth({ ...state, oauth2: { ...fields, clientId: 'new-client' } }));
+    expect(screen.getByTestId('oauth2-token')).toHaveTextContent('');
+    expect(screen.getByTestId('oauth2-token')).not.toHaveTextContent('stale');
   });
 
   it('restores a cached OAuth2 token into the editor', () => {

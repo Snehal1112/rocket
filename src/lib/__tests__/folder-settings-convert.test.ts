@@ -7,6 +7,7 @@ import {
   folderChainPath,
   headersToEntries,
   restoreOAuth2Tokens,
+  sameOAuth2Config,
   stateToFolderAuth,
 } from '@/lib/folder-settings-convert';
 
@@ -120,9 +121,44 @@ describe('restoreOAuth2Tokens', () => {
     expect(restoreOAuth2Tokens(withToken, cached)).toBe(withToken);
   });
 
+  it.each([
+    ['grant type', { grantType: 'password' as const }],
+    ['token url', { tokenUrl: 'https://other.example/token' }],
+    ['client id', { clientId: 'other-client' }],
+  ])('does not restore a token whose %s differs from the disk config', (_name, patch) => {
+    const stale = { ...cached, oauth2: { ...cached.oauth2, ...patch } };
+    expect(restoreOAuth2Tokens(disk, stale)).toBe(disk);
+  });
+
+  it('restores a token when only fields outside the fingerprint differ', () => {
+    const other = { ...cached, oauth2: { ...cached.oauth2, scope: 'read' } };
+    expect(restoreOAuth2Tokens(disk, other).oauth2?.accessToken).toBe('tok');
+  });
+
   it('leaves non-OAuth2 state and a missing cache alone', () => {
     const bearer = { authType: 'bearer', bearer: { token: 't' } } as const;
     expect(restoreOAuth2Tokens(bearer, cached)).toBe(bearer);
     expect(restoreOAuth2Tokens(disk, undefined)).toBe(disk);
+  });
+});
+
+describe('sameOAuth2Config', () => {
+  const base = authStateForType('oauth2', { authType: 'none' });
+  const fields = base.oauth2 as NonNullable<typeof base.oauth2>;
+  const make = (patch: Partial<typeof fields>) => ({ ...base, oauth2: { ...fields, ...patch } });
+
+  it('matches the same grant type, token url and client id', () => {
+    expect(sameOAuth2Config(make({ scope: 'a' }), make({ scope: 'b' }))).toBe(true);
+  });
+
+  it('does not match when either side is not OAuth2', () => {
+    expect(sameOAuth2Config(base, { authType: 'inherit' })).toBe(false);
+    expect(sameOAuth2Config({ authType: 'bearer', bearer: { token: '' } }, base)).toBe(false);
+  });
+
+  it('compares the authorization url for the implicit grant', () => {
+    const a = make({ grantType: 'implicit', authorizationUrl: 'https://a.example/auth' });
+    const b = make({ grantType: 'implicit', authorizationUrl: 'https://b.example/auth' });
+    expect(sameOAuth2Config(a, b)).toBe(false);
   });
 });

@@ -67,6 +67,9 @@ export function AuthSection({
   targetRef.current = { collectionName, folderPath };
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // The last committed state, so a commit can tell whether the persisted shape changed.
+  const authRef = useRef(auth);
+  authRef.current = auth;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: only an outside change to settings.auth or a new folder resets the editor; the local state is compared inside.
   useEffect(() => {
@@ -76,10 +79,22 @@ export function AuthSection({
   }, [settings.auth, collectionName, folderPath]);
 
   const commit = useCallback((next: AuthState) => {
+    const previous = stateToFolderAuth(authRef.current);
+    authRef.current = next;
     setAuth(next);
     const target = targetRef.current;
-    useFolderAuthStore.getState().setFolderAuth(target.collectionName, target.folderPath, next);
-    onChangeRef.current({ auth: stateToFolderAuth(next) });
+    const store = useFolderAuthStore.getState();
+    // Inherit means no folder auth, so nothing is kept for this folder.
+    if (next.authType === 'inherit') {
+      store.clearFolderAuth(target.collectionName, target.folderPath);
+    } else {
+      store.setFolderAuth(target.collectionName, target.folderPath, next);
+    }
+    // A fetched OAuth2 token is not saved to folder.yml, so it does not change the folder.
+    const persisted = stateToFolderAuth(next);
+    if (authFingerprint(persisted) !== authFingerprint(previous)) {
+      onChangeRef.current({ auth: persisted });
+    }
   }, []);
 
   const handleTypeChange = useCallback(
