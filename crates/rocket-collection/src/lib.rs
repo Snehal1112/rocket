@@ -17,7 +17,10 @@ pub(crate) mod uid;
 // Re-export key types at crate root for convenience
 pub use collection::Collection;
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
-pub use folder_settings::{FolderSettings, ScriptFlow, ScriptPhase};
+pub use folder_settings::{
+    chain_scripts, inherited_headers, resolve_folder_auth, FolderSettings, ScriptFlow,
+    ScriptPhase,
+};
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{
     GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript,
