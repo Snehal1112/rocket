@@ -10,7 +10,7 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 |---|---|---|
 | A | Sync, state-only gaps | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-a-sync-design.md`. No plan yet. |
 | B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`. No plan yet. |
-| C | Cookies: `rok.cookies.*`, `jar()` | Not designed |
+| C | Cookies: `rok.cookies.*`, `jar()` | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Depends on B's `ScriptHost`. No plan yet. |
 | D | `runner.iterationData`, `iterationIndex`, `totalIterations` | Deferred. Needs a runner CSV/JSON data-file feature first. |
 | E | `rok.grpc.*` | Deferred. Needs the gRPC protocol-parity plans merged. |
 
