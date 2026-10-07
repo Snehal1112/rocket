@@ -9,6 +9,7 @@ import {
 } from '@/components/editor/rok-types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 import type { AgentChatSession } from '@/types/pane-types';
 import { AgentChatPanel } from './AgentChatPanel';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
@@ -178,7 +179,7 @@ export function ScriptsTab({
           <Button
             variant='ghost'
             size='sm'
-            className='h-7 gap-1 text-xs'
+            className={cn('h-7 gap-1 text-xs', !agentAssist && 'ml-auto')}
             onClick={toggleSidebar}
             disabled={!canShowSidebar}
             aria-pressed={showSidebar}

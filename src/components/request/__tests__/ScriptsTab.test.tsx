@@ -183,4 +183,34 @@ describe('ScriptsTab phases and agentAssist props', () => {
     await waitFor(() => expect(screen.getByTestId('monaco-pre-request')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'AI Assist' })).toBeInTheDocument();
   });
+
+  it('right-aligns Snippets when AI Assist is hidden', async () => {
+    renderWith({ agentAssist: false });
+    await waitFor(() => expect(screen.getByTestId('monaco-pre-request')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Snippets' })).toHaveClass('ml-auto');
+  });
+
+  it('leaves Snippets unshifted when AI Assist is shown', async () => {
+    renderWith();
+    await waitFor(() => expect(screen.getByTestId('monaco-pre-request')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Snippets' })).not.toHaveClass('ml-auto');
+  });
+
+  it('falls back to a visible phase when phases change on rerender', async () => {
+    const props = {
+      tabId: 'tab-1',
+      preRequestScript: '',
+      postResponseScript: '',
+      testsScript: '',
+      onChangePreRequest: vi.fn(),
+      onChangePostResponse: vi.fn(),
+      onChangeTests: vi.fn(),
+    };
+    const { rerender } = render(<ScriptsTab {...props} />);
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Tests' }));
+    await waitFor(() => expect(screen.getByTestId('monaco-tests')).toBeInTheDocument());
+    rerender(<ScriptsTab {...props} phases={['pre-request', 'post-response']} />);
+    await waitFor(() => expect(screen.getByTestId('monaco-pre-request')).toBeInTheDocument());
+    expect(screen.queryByTestId('monaco-tests')).not.toBeInTheDocument();
+  });
 });
