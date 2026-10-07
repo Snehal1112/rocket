@@ -1162,9 +1162,10 @@ impl FlowExecutionService {
                     .await;
                 logs.extend(outcome.logs);
                 let value = outcome.result?;
-                // Wires get the raw value. The step shows Auth tokens masked.
-                let reported =
-                    crate::redaction::redact_secrets(&value, &credentials.secret_forms());
+                // Wires get the raw value. The step shows every secret masked.
+                let mut masked = secret_values.clone();
+                masked.extend(credentials.secret_forms());
+                let reported = crate::redaction::redact_secrets(&value, &masked);
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
                     ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(value)))
@@ -6388,8 +6389,8 @@ mod tests {
         );
         assert_eq!(
             step_of(&summary, "out").value.as_deref(),
-            Some("sk-live-123456"),
-            "the downstream wire still gets the real value"
+            Some(crate::redaction::REDACTED),
+            "the output step masks the secret"
         );
     }
 
@@ -7638,8 +7639,8 @@ mod tests {
         );
         assert_eq!(
             step_of(&summary, "out").value.as_deref(),
-            Some("sk-live-123456"),
-            "the downstream wire still gets the real value"
+            Some(crate::redaction::REDACTED),
+            "the output step masks the secret"
         );
     }
 
