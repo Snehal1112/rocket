@@ -95,6 +95,20 @@ export interface CollectionSettings {
   scriptFlow?: ScriptFlow;
 }
 
+/** One folder's own settings from its folder.yml. Mirrors `FolderSettingsDto` in Rust. */
+export interface FolderSettings {
+  headers: Header[];
+  /** Absent or `inherit` both mean the folder sets no auth. */
+  auth?: Auth;
+  /** Pre-request folder variables. */
+  variables: CollectionVariable[];
+  preRequestScript?: string;
+  postResponseScript?: string;
+  testsScript?: string;
+  /** Markdown docs content. */
+  docs?: string;
+}
+
 export interface CollectionSummary {
   uid: string;
   repositoryId: string;
@@ -1337,6 +1351,9 @@ export const loadGitCredentials = (repositoryId: string): Promise<GitCredentials
 export const onFileChange = (handler: (event: FileChangedEvent) => void): Promise<UnlistenFn> =>
   listen<FileChangedEvent>('collection-changed', (e) => handler(e.payload));
 
+/** `type` of the collection-changed payload sent after a folder settings save. */
+export const FOLDER_SETTINGS_SAVED_EVENT = 'folderSettingsSaved';
+
 export interface CollectionChangedEvent {
   type: string;
   /** Null when a watched file is outside any collection. */
@@ -1345,6 +1362,8 @@ export interface CollectionChangedEvent {
   oldName?: string;
   newName?: string;
   path?: string;
+  /** Set by folder events. Snake case, because Rust event fields are sent as is. */
+  folder_path?: string;
   eventType?: string;
 }
 
@@ -1531,6 +1550,15 @@ export const saveFolderVariables = (
   folderPath: string,
   variables: CollectionVariable[],
 ) => invoke<void>('save_folder_variables', { collection, folderPath, vars: variables });
+
+// Folder settings: headers, auth, vars, scripts and docs of one folder.yml (no chain walk).
+export const getFolderSettings = (collection: string, folderPath: string) =>
+  invoke<FolderSettings>('get_folder_settings', { collection, folderPath });
+export const saveFolderSettings = (
+  collection: string,
+  folderPath: string,
+  settings: FolderSettings,
+) => invoke<void>('save_folder_settings', { collection, folderPath, settings });
 
 // Request variables
 export const getRequestVariables = (collection: string, requestPath: string) =>
