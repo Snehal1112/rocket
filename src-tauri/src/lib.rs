@@ -647,6 +647,8 @@ pub fn run() {
             commands::collections::get_folder_chain_variables,
             commands::collections::get_folder_variables,
             commands::collections::save_folder_variables,
+            commands::collections::get_folder_settings,
+            commands::collections::save_folder_settings,
             commands::collections::get_request_variables,
             commands::collections::save_request_variables,
             commands::collections::update_request_docs,
