@@ -1339,4 +1339,12 @@ git commit --only -m "feat(request): honor folder headers and auth on the fronte
 
 ## Next Plan
 
+**Execution order:** this is plan 05 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 06: Runtime script and test chain](2026-10-07-folder-settings-plan-06-runtime-script-chain.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 06 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [2026-10-07-folder-settings-plan-06-runtime-script-chain.md](2026-10-07-folder-settings-plan-06-runtime-script-chain.md): runtime script and test chain. It should load the chain once in `begin_phases` with `folder_chain`, keep it in `PhaseState`, and pass it to `resolve_request_with_chain`, so headers, auth and scripts share one read of the folder chain per execution.

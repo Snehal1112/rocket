@@ -1229,4 +1229,12 @@ Suggested subject: `feat(ui): open folder settings from the sidebar`.
 
 ## Next Plan
 
+**Execution order:** this is plan 08 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 09: Settings hook, Vars and Docs sub-tabs](2026-10-07-folder-settings-plan-09-settings-hook-vars-docs.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 09 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [Plan 09: Settings hook, Vars and Docs sub-tabs](2026-10-07-folder-settings-plan-09-settings-hook-vars-docs.md). It depends on this plan (`FolderTab`, `FolderSettingsTab`, the section files under `folder-settings/`) and on Plan 04 (`getFolderSettings`, `saveFolderSettings`). It replaces `VarsSection.tsx` and `DocsSection.tsx`, adds `src/hooks/useFolderSettings.ts`, and deletes `FolderVariablesPopover.tsx`. Chain to it automatically when this one finishes.

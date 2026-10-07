@@ -711,4 +711,12 @@ git commit --only -m "test(infra): guard script flow placement in opencollection
 
 ## Next Plan
 
+**Execution order:** this is plan 03 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 04: IPC commands, DTOs, event and TS bindings](2026-10-07-folder-settings-plan-04-ipc-commands-and-bindings.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 04 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 `docs/superpowers/plans/folder-settings/2026-10-07-folder-settings-plan-04-ipc-commands-and-bindings.md` (Plan 04: IPC commands, DTOs, `FolderSettingsSaved` event and TS bindings). Plan 06 reads `CollectionSettings.script_flow` through the path this plan made reliable and passes it to `chain_scripts`.

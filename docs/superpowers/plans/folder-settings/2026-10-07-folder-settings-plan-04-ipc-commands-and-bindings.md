@@ -875,4 +875,12 @@ Expected: all PASS. No UI exists yet, so there is no manual check in this plan. 
 
 ## Next Plan
 
+**Execution order:** this is plan 04 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 05: Runtime header and auth inheritance](2026-10-07-folder-settings-plan-05-runtime-headers-auth.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 05 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [Plan 05: Runtime header and auth inheritance](2026-10-07-folder-settings-plan-05-runtime-headers-auth.md). It depends on Plans 01 and 02, not on this plan. Plans 08 to 11 depend only on this plan, so they may run next instead (see the recommended order in [00-plan-index.md](00-plan-index.md)). Chain to the next plan automatically when this one finishes.

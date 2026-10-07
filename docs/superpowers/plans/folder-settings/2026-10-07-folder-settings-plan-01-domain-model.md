@@ -1042,4 +1042,12 @@ Commit with the same pathspec (`git commit --only -m "..." -- crates/rocket-coll
 
 ## Next Plan
 
+**Execution order:** this is plan 01 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 02: folder.yml persistence](2026-10-07-folder-settings-plan-02-folder-yml-persistence.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 02 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [Plan 02: folder.yml persistence](2026-10-07-folder-settings-plan-02-folder-yml-persistence.md). It depends on this plan (`FolderSettings`, the three defaulted `CollectionRepository` methods) and implements them in `rocket-infra` (`fs_collection/folder_file.rs`, `fs_collection/variables.rs`, `fs_collection/folders.rs`). Chain to it automatically when this one finishes.

@@ -1881,4 +1881,12 @@ Commit with the same pathspec and a conventional message such as `feat(app): sca
 
 ## Next Plan
 
+**Execution order:** this is plan 06 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 07: Folder variable access from scripts](2026-10-07-folder-settings-plan-07-folder-var-script-api.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 07 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [Plan 07: Folder variable access from scripts](2026-10-07-folder-settings-plan-07-folder-var-script-api.md). It depends on this plan (folder scripts run through `chain_scripts` with the shared `PhaseState.var_ctx`) and on plan 02. Its `input()` helper in `folder_var_script_tests.rs` builds an `ExecuteRequestInput` literal, which needs the `skip_folder_scripts: false` field this plan adds. Chain to it automatically when this one finishes.

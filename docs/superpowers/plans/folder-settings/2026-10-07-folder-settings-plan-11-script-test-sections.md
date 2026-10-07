@@ -613,4 +613,12 @@ Pathspec commit of those paths, message such as `feat(folder-settings): explain 
 
 ## Next Plan
 
+**Execution order:** this is plan 11 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 12: Bruno compatibility verification and docs](2026-10-07-folder-settings-plan-12-bruno-compat-verification-docs.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 12 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 `docs/superpowers/plans/folder-settings/2026-10-07-folder-settings-plan-12-bruno-compat-verification-docs.md` (Bruno compatibility verification and docs, depends on all earlier plans). Chain to it once this plan is complete. Plan 10 (Headers and Auth sub-tabs) is independent of this plan and may run before or after it.

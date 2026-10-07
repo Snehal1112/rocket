@@ -1215,6 +1215,12 @@ Report any failing item with the folder tab's state and the `folder.yml` text, s
 
 ## Next Plan
 
+**Execution order:** this is plan 12 of 12, the last plan. There is no next plan to start.
+
+**Instruction for the executing Claude:** when every task in this plan is done, record it in the ledger at `.superpowers/sdd/folder-settings/progress.md`, run the final whole-branch review, and then **stop and report to the user**. Do not start any other work, and do not merge until the user has finished the manual checklist in Task 3 and approved.
+
+**Notes (from the plan author):**
+
 None. This is plan 12 of 12, so the folder settings series is complete. Mark it done in the plan ledger (`.superpowers/sdd/folder-settings/progress.md`) and merge after the user finishes the manual checklist in Task 3 step 10 and a final whole-branch review.
 
 Deferred follow-ups from the spec, each to be planned on its own when wanted:

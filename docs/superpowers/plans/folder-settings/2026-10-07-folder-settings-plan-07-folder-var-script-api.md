@@ -546,4 +546,12 @@ Suggested subject: `feat(scripts): offer rok.getFolderVar in IntelliSense and sn
 
 ## Next Plan
 
+**Execution order:** this is plan 07 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 08: Folder tab shell, store action and sidebar click](2026-10-07-folder-settings-plan-08-folder-tab-shell.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 08 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [Plan 08: Folder tab shell, store action, sidebar click](2026-10-07-folder-settings-plan-08-folder-tab-shell.md). It depends on plan 04 only. Chain to it automatically when this one finishes.

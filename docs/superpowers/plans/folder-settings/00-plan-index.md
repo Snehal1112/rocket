@@ -23,7 +23,7 @@
 | 11 | Script and Test sub-tabs | frontend | 09 |
 | 12 | Bruno compatibility verification and docs | infra tests, docs | all |
 
-Recommended order: 01 to 12. Plans 08, 09 and 11 only need plan 04, so they can run before 05 to 07 if wanted. Plan 10 must run after plan 05, because both rewrite the auth block in `resolveRequestFieldsForPath`.
+**Execution order is fixed: 01, 02, 03, ..., 12, one plan at a time.** Each plan's Next Plan section names the next plan and tells the executing Claude to start it without asking for consent, and to stop and report only on a failed check, a missing prerequisite, a contract deviation, or after plan 12. Progress is tracked in `.superpowers/sdd/folder-settings/progress.md`. Plan 10 must stay after plan 05, because both rewrite the auth block in `resolveRequestFieldsForPath`.
 
 ## Locked contract
 

@@ -1199,4 +1199,12 @@ Pathspec commit with these paths, including the deleted file: `src/components/co
 
 ## Next Plan
 
+**Execution order:** this is plan 09 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 10: Headers and Auth sub-tabs](2026-10-07-folder-settings-plan-10-headers-auth-sections.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 10 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 `docs/superpowers/plans/folder-settings/2026-10-07-folder-settings-plan-10-headers-auth-sections.md` (Plan 10: Headers and Auth sub-tabs). It builds on the `useFolderSettings` hook and the `onChange(patch)` convention from this plan. Plan 11 (Script and Test sub-tabs) also depends on this plan and can run after Plan 10.

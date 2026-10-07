@@ -1427,4 +1427,12 @@ Suggested subject: `feat(infra): load the folder settings chain for a request`.
 
 ## Next Plan
 
+**Execution order:** this is plan 02 of 12. The series runs strictly one plan at a time, in numeric order (see [00-plan-index.md](00-plan-index.md)).
+
+**Next to execute:** [Plan 03: Script flow setting](2026-10-07-folder-settings-plan-03-script-flow-setting.md).
+
+**Instruction for the executing Claude:** when every task in this plan is done and its verification commands (listed in the last step of each task) pass, record "Task N: complete" for each task in the ledger at `.superpowers/sdd/folder-settings/progress.md`, then open Plan 03 and start its first task immediately. Do not ask the user for consent between plans. Stop and report to the user instead if a verification command fails, if a plan's stated prerequisite is missing, or if you must deviate from the locked contract in the index.
+
+**Notes for the next plan (from the plan author):**
+
 [Plan 03: Script flow setting](2026-10-07-folder-settings-plan-03-script-flow-setting.md) (`extensions.bruno.scripts.flow` in `opencollection.yml`, `CollectionSettings.script_flow`). It depends on Plans 01 and 02. Chain to it automatically when this plan finishes. Plan 04 (IPC commands) also only needs this plan.
