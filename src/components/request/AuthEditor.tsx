@@ -77,6 +77,8 @@ interface AuthEditorProps {
   collection?: string;
   environmentName?: string;
   requestPath?: string;
+  /** Replaces the text of the Inherit card, for callers that know where auth comes from. */
+  inheritMessage?: string;
 }
 
 export function AuthEditor({
@@ -87,6 +89,7 @@ export function AuthEditor({
   collection,
   environmentName,
   requestPath,
+  inheritMessage,
 }: AuthEditorProps) {
   const patchOAuth2 = useCallback(
     (patch: Partial<NonNullable<AuthState['oauth2']>>) => {
@@ -114,8 +117,8 @@ export function AuthEditor({
         <Card className='bg-muted/50'>
           <CardContent className='px-3 py-2.5'>
             <p className='text-xs text-muted-foreground'>
-              This request inherits authorization from the collection settings. To override, select
-              a different auth type above.
+              {inheritMessage ??
+                'This request inherits authorization from the collection settings. To override, select a different auth type above.'}
             </p>
           </CardContent>
         </Card>

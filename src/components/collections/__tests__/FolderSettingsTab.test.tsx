@@ -8,6 +8,10 @@ import type { FolderTab } from '@/types/pane-types';
 import { isFolderTab } from '@/types/pane-types';
 
 vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn() }));
+// The sections read environments through react-query, which this test does not provide.
+vi.mock('@/hooks/useFolderVariableContext', () => ({
+  useFolderVariableContext: () => ({ variableContext: new Map(), environmentName: undefined }),
+}));
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
   return {
@@ -76,6 +80,6 @@ describe('FolderSettingsTab', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Auth' }));
     expect(storedTab().activeSection).toBe('auth');
     expect(screen.getByRole('tab', { name: 'Auth' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('Auth for this folder will be editable here.')).toBeInTheDocument();
+    expect(screen.getByText(/No authorization is set on this folder/)).toBeInTheDocument();
   });
 });

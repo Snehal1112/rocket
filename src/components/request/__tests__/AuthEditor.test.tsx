@@ -95,3 +95,22 @@ describe('AuthEditor for aws-sig-v4', () => {
     });
   });
 });
+
+describe('AuthEditor inherit message', () => {
+  it('shows the request wording by default', () => {
+    render(<AuthEditor auth={{ authType: 'inherit' }} onChange={vi.fn()} />);
+    expect(screen.getByText(/This request inherits authorization/)).toBeInTheDocument();
+  });
+
+  it('shows a custom message when one is given', () => {
+    render(
+      <AuthEditor
+        auth={{ authType: 'inherit' }}
+        onChange={vi.fn()}
+        inheritMessage='Inherited from the folder "api".'
+      />,
+    );
+    expect(screen.getByText('Inherited from the folder "api".')).toBeInTheDocument();
+    expect(screen.queryByText(/This request inherits authorization/)).toBeNull();
+  });
+});
