@@ -202,4 +202,23 @@ mod tests {
         let round: CollectionSettings = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(round.script_flow, ScriptFlow::Sequential);
     }
+
+    #[test]
+    fn ipc_json_carries_script_flow_and_defaults_when_absent() {
+        let settings = CollectionSettings {
+            script_flow: ScriptFlow::Sequential,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&settings).expect("serialize");
+        assert_eq!(json["scriptFlow"], "sequential");
+
+        let round: CollectionSettings = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(round.script_flow, ScriptFlow::Sequential);
+
+        // A payload from a frontend that does not know the field yet.
+        let old: CollectionSettings =
+            serde_json::from_str(r#"{"headers":[],"variables":[],"sandboxMode":"safe"}"#)
+                .expect("old payload deserializes");
+        assert_eq!(old.script_flow, ScriptFlow::Sandwich);
+    }
 }

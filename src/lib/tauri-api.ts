@@ -80,6 +80,9 @@ export interface CollectionVariable {
 
 export type SandboxMode = 'safe' | 'developer';
 
+/** Script order across collection, folders and request. Absent means sandwich. */
+export type ScriptFlow = 'sandwich' | 'sequential';
+
 export interface CollectionSettings {
   docs?: string;
   auth?: Auth;
@@ -88,6 +91,8 @@ export interface CollectionSettings {
   sandboxMode: SandboxMode;
   /** Extra directories scripts may require() from, in Developer mode only. */
   scriptContextRoots?: string[];
+  /** Persisted at extensions.bruno.scripts.flow in opencollection.yml. */
+  scriptFlow?: ScriptFlow;
 }
 
 export interface CollectionSummary {

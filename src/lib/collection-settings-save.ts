@@ -15,5 +15,6 @@ export function buildSettingsForSave(
     ...edited,
     sandboxMode: current.sandboxMode,
     scriptContextRoots: current.scriptContextRoots,
+    scriptFlow: current.scriptFlow,
   };
 }
