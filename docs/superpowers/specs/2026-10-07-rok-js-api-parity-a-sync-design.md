@@ -17,7 +17,7 @@ A script written from Bruno's JavaScript API Reference runs in Rocket with `bru`
 
 ## Decisions
 
-- Persistence keeps Rocket semantics. Env and collection writes stay in memory unless `{ persist: true }` is passed. Global env writes keep persisting. `setVar` is runtime-only. New set and delete APIs follow the same rule.
+- Persistence keeps Rocket semantics, meaning what the code does today: every script write except `rok.setVar` already persists (`apply_script_side_effects` always passes `force_persist = true` for env and global writes, and collection writes are always saved). `EnvVarWrite.persist` is inert. New set and delete APIs persist the same way, and `{ persist: true }` stays accepted and inert. `setVar` and `deleteVar` are runtime-only. An earlier draft of this spec described the opposite (in-memory unless `persist`), which was wrong.
 - No new architecture. Each API is a `bootstrap.js` wrapper, an op in `crates/rocket-infra/src/scripting/ops/`, a field on `ScriptInputState` or `ScriptOutputState`, and a typing in `src/components/editor/rok-types.ts`.
 
 ## Design
@@ -44,22 +44,28 @@ A script written from Bruno's JavaScript API Reference runs in Rocket with `bru`
 
 - `collection_name` for `rok.getCollectionName()`.
 - `rok.isSafeMode()` from the existing `sandbox_mode`.
-- `rok.cwd()`, `__dirname`, `__filename`: Developer mode only, derived from the collection root and the executing script path. They reuse `local_roots`. In Safe mode they are unavailable, as in Bruno.
-- `rok.getTestResults()` and `getAssertionResults()`: a snapshot of results recorded before the script ran, available in the test phase only.
-- `rok.getOauth2CredentialVar(key)`: reads a snapshot of the stored token for the request. `rok.resetOauth2Credential(id)` sets an output flag the host applies after the script returns.
+- `rok.cwd()` and `__dirname`: Developer mode only, both the collection root. `__filename` is `undefined`, because the executing script's own path is not in `ScriptContext`; per-folder `__dirname` is a follow-up. In Safe mode `cwd()` throws and `__dirname` is undefined. Local modules loaded with `require` keep their own `__dirname` and `__filename`.
+- `rok.getTestResults()`: the tests recorded so far by the current script. `rok.getAssertionResults()`: declarative assertion outcomes, computed before the tests script runs (the evaluation is a pure function of the assertions and the response, so the existing execution order is unchanged). Both are for the tests phase.
+- `rok.getOauth2CredentialVar(key)` and `rok.resetOauth2Credential(id)` are deferred to a follow-up. OAuth2 tokens live in `OAuth2Service` and the frontend token flow, which `ScriptContext` cannot reach, so this needs its own design.
 
 ### 4. Response and runner extras
 
-- `res.url`, `res.getUrl()`, `res.getSize()` returning `{ body, headers, total }`.
+- `res.url` and `res.getUrl()` return the request URL, since `HttpResponse` does not track the final redirect URL. `res.getSize()` returns `{ body, headers, total }`.
 - `res.setBody(body)`: changes what later scripts and tests see, not the stored response.
 - `rok.setNextRequest(name)` as an alias of `rok.runner.setNextRequest`.
-- `rok.runner.stopExecution()`: new output flag that the collection runner honors. Standalone runs ignore it.
+- `rok.runner.stopExecution()`: reuses the runner's existing stop path (`NextRequest::Stop`, plus `skip_request` in the before-request phase). No runner change. Standalone runs ignore it.
 - `rok.runner.iterationIndex` returns 0 and `totalIterations` returns 1 until `iterationData` exists. `iterationData` itself is deferred.
 
 ### Non-goals
 
 - `req.onFail` stays a no-op (B revisits it).
 - No `bru` alias, no importer rewrite.
+
+## Added while planning
+
+- Reads see the same script's earlier writes (a small overlay in `bootstrap.js`). Today they read only the snapshot.
+- Non-string runtime variables (numbers, objects) are kept as JSON text when merged between phases. Today they are silently dropped.
+- Risk: `getProcessEnv` reads a snapshot of the whole host environment (`std::env::vars()`), so in Safe mode a script from an untrusted collection can read host variables. Implemented as specified. Gating it to Developer mode is a one-line change.
 
 ## Errors and safety
 
