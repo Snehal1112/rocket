@@ -1,6 +1,6 @@
 //! Reads and writes the folder tab's sections of `folder.yml`.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rocket_collection::{Collection, FolderSettings};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -117,6 +117,49 @@ pub(super) fn save_folder_settings(
     edit_folder_yml(repo, collection, folder_path, true, |folder| {
         apply_folder_settings(folder, settings)
     })
+}
+
+/// Settings of every ancestor folder of a request, outermost first. A folder
+/// without `folder.yml` gives `FolderSettings::default()`, so there is one entry
+/// per folder level. A `folder.yml` that does not parse is an error naming that
+/// folder; unlike `get_folder_chain_variables`, nothing is skipped.
+pub(super) fn get_folder_chain_settings(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    request_path: &str,
+) -> DomainResult<Vec<FolderSettings>> {
+    Collection::validate_name(collection)?;
+    let collection_dir = repo.collection_path(collection);
+    let parent = Path::new(request_path)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let mut segments = Vec::new();
+    for component in parent.components() {
+        match component {
+            Component::Normal(segment) => segments.push(segment),
+            Component::CurDir => {}
+            _ => {
+                return Err(DomainError::InvalidInput(format!(
+                    "Invalid request path '{request_path}'"
+                )))
+            }
+        }
+    }
+
+    let mut chain = Vec::with_capacity(segments.len());
+    let mut rel = PathBuf::new();
+    for segment in segments {
+        rel.push(segment);
+        let dir = repo.validate_path(&collection_dir, &rel)?;
+        let path = dir.join("folder.yml");
+        if path.exists() {
+            let folder = read_named(&path, &rel.to_string_lossy())?;
+            chain.push(oc_folder_to_folder_settings(&folder));
+        } else {
+            chain.push(FolderSettings::default());
+        }
+    }
+    Ok(chain)
 }
 
 #[cfg(test)]
@@ -374,5 +417,71 @@ mod tests {
             repo.get_folder_variables("api", "users").expect("vars"),
             vars
         );
+    }
+
+    #[test]
+    fn chain_has_one_entry_per_folder_outermost_first() {
+        let (_dir, repo) = setup();
+        // `users/bare` gets no folder.yml; create_folder only writes one for `inner`.
+        repo.create_folder("api", "users/bare/inner")
+            .expect("create inner");
+        let outer = FolderSettings {
+            headers: vec![Header::new("X-Outer", "1")],
+            ..FolderSettings::default()
+        };
+        let inner = FolderSettings {
+            headers: vec![Header::new("X-Inner", "2")],
+            ..FolderSettings::default()
+        };
+        repo.save_folder_settings("api", "users", &outer)
+            .expect("save outer");
+        repo.save_folder_settings("api", "users/bare/inner", &inner)
+            .expect("save inner");
+
+        let chain = repo
+            .get_folder_chain_settings("api", "users/bare/inner/list.yml")
+            .expect("chain");
+
+        assert_eq!(chain, vec![outer, FolderSettings::default(), inner]);
+    }
+
+    #[test]
+    fn chain_of_a_root_level_request_is_empty() {
+        let (_dir, repo) = setup();
+        assert!(repo
+            .get_folder_chain_settings("api", "list.yml")
+            .expect("chain")
+            .is_empty());
+    }
+
+    #[test]
+    fn chain_reports_a_corrupt_folder_by_name() {
+        let (dir, repo) = setup();
+        repo.create_folder("api", "users/admin")
+            .expect("create admin");
+        fs::write(
+            dir.path().join("api/users/admin/folder.yml"),
+            "{{{{not valid yaml: [[[",
+        )
+        .expect("write");
+
+        let err = repo
+            .get_folder_chain_settings("api", "users/admin/list.yml")
+            .expect_err("corrupt folder.yml");
+        assert!(err.to_string().contains("'users/admin'"), "{err}");
+
+        // The variables chain stays lenient and skips the broken file, as before.
+        assert!(repo
+            .get_folder_chain_variables("api", "users/admin/list.yml")
+            .is_ok());
+    }
+
+    #[test]
+    fn chain_rejects_parent_dir_components() {
+        let (_dir, repo) = setup();
+        let err = repo
+            .get_folder_chain_settings("api", "users/../../evil/list.yml")
+            .expect_err("traversal");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
     }
 }

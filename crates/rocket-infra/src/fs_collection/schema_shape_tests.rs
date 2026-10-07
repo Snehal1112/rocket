@@ -10,7 +10,8 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use rocket_collection::settings::SandboxMode;
 use rocket_collection::{
-    CollectionItem, CollectionRepository, CollectionSettings, CollectionVariable, Request,
+    CollectionItem, CollectionRepository, CollectionSettings, CollectionVariable, FolderSettings,
+    Request,
 };
 use rocket_shared::oauth2::{
     OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE, OAuth2ResourceOwner, OAuth2Settings,
@@ -318,8 +319,17 @@ fn check_request_defaults(v: &mut Violations, at: &str, req: &Value) {
     for h in seq(req.get("headers")) {
         v.keys("HttpRequestHeader", at, h, HEADER);
     }
+    for m in seq(req.get("metadata")) {
+        v.keys("GrpcMetadata", at, m, GRPC_METADATA);
+    }
     for var in seq(req.get("variables")) {
         v.keys("Variable", at, var, VARIABLE);
+    }
+    for s in seq(req.get("scripts")) {
+        v.keys("Script", at, s, SCRIPT);
+    }
+    if let Some(settings) = req.get("settings") {
+        v.keys("RequestSettings", at, settings, HTTP_SETTINGS);
     }
     if let Some(auth) = req.get("auth") {
         check_auth(v, at, auth);
@@ -855,8 +865,14 @@ fn checker_flags_known_bad_shapes() {
         "implicit secret",
         &parse("type: oauth2\nflow: implicit\ncredentials:\n  clientId: a\n  clientSecret: ''\n"),
     );
-    // Legacy folder: `name` and `type` (2). Plus none auth, legacy pkce and implicit secret (1 each).
-    assert_eq!(v.0.len(), 5, "{:#?}", v.0);
+    check_folder(
+        &mut v,
+        "folder script extra key",
+        &parse("info:\n  name: f\n  type: folder\nrequest:\n  scripts:\n  - type: tests\n    code: x\n    enabled: true\n"),
+    );
+    // Legacy folder: `name` and `type` (2). Plus none auth, legacy pkce, implicit secret
+    // and the folder script's `enabled` (1 each).
+    assert_eq!(v.0.len(), 6, "{:#?}", v.0);
 }
 
 #[test]
@@ -991,4 +1007,57 @@ fn saved_grpc_request_only_uses_schema_keys_besides_deferred() {
     let mut v = Violations::default();
     check_grpc_request(&mut v, &rel, &read_yaml(&dir.path().join("api").join(&rel)));
     assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
+}
+
+#[test]
+fn fully_populated_folder_yml_only_uses_schema_keys() {
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    repo.create_folder("api", "users").expect("create folder");
+    let folder_yml = dir.path().join("api/users/folder.yml");
+    // Sections a Bruno user may have written, which a save must keep valid.
+    fs::write(
+        &folder_yml,
+        "info:\n  name: users\n  type: folder\nrequest:\n  metadata:\n  - name: x-trace\n    value: '1'\n  settings:\n    timeout: 5000\n  scripts:\n  - type: hooks\n    code: onStart()\n",
+    )
+    .expect("write fixture");
+
+    for (auth_name, auth) in sample_auths() {
+        repo.save_folder_settings(
+            "api",
+            "users",
+            &FolderSettings {
+                headers: vec![
+                    Header::new("X-Tenant", "acme"),
+                    Header::disabled("X-Debug", "1"),
+                ],
+                auth: Some(auth),
+                variables: vec![CollectionVariable {
+                    key: "fv".into(),
+                    value: "x".into(),
+                    initial_value: "x".into(),
+                    enabled: false,
+                    secret: false,
+                }],
+                pre_request_script: Some("console.log('pre');".into()),
+                post_response_script: Some("console.log('post');".into()),
+                tests_script: Some("test('ok', () => {});".into()),
+                docs: Some("# Users".into()),
+            },
+        )
+        .expect("save folder settings");
+
+        let doc = read_yaml(&folder_yml);
+        let mut v = Violations::default();
+        check_folder(&mut v, &format!("users/folder.yml [{auth_name}]"), &doc);
+        assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
+        assert!(doc["request"]["headers"].is_sequence(), "{doc:?}");
+        assert!(doc["request"]["variables"].is_sequence(), "{doc:?}");
+        assert_eq!(
+            doc["request"]["scripts"].as_sequence().map(Vec::len),
+            Some(4),
+            "{doc:?}"
+        );
+        assert_eq!(doc["docs"].as_str(), Some("# Users"), "{doc:?}");
+    }
 }

@@ -312,6 +312,14 @@ impl CollectionRepository for FsCollectionRepo {
         folder_settings::save_folder_settings(self, collection, folder_path, settings)
     }
 
+    fn get_folder_chain_settings(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<FolderSettings>> {
+        folder_settings::get_folder_chain_settings(self, collection, request_path)
+    }
+
     fn get_request_variables(
         &self,
         collection: &str,
