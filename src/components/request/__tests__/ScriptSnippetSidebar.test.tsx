@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { PRE_REQUEST_SNIPPETS } from '@/components/editor/rok-types';
 import { ScriptSnippetSidebar } from '../ScriptSnippetSidebar';
 
 describe('ScriptSnippetSidebar', () => {
@@ -34,5 +35,12 @@ describe('ScriptSnippetSidebar', () => {
 
     fireEvent.keyDown(splitter, { key: 'Home' });
     expect(splitter.getAttribute('aria-valuenow')).toBe('160');
+  });
+
+  it('inserts rok.getFolderVar from the pre-request snippet list', () => {
+    const onInsert = vi.fn();
+    render(<ScriptSnippetSidebar onInsert={onInsert} snippets={PRE_REQUEST_SNIPPETS} />);
+    fireEvent.click(screen.getByText('rok.getFolderVar("key")'));
+    expect(onInsert).toHaveBeenCalledWith('rok.getFolderVar("key")');
   });
 });
