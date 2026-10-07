@@ -1,6 +1,7 @@
 pub mod collection;
 pub mod contract;
 pub mod folder;
+pub mod folder_settings;
 pub mod graphql_request;
 pub mod grpc_request;
 pub mod repository;
@@ -16,6 +17,7 @@ pub(crate) mod uid;
 // Re-export key types at crate root for convenience
 pub use collection::Collection;
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
+pub use folder_settings::{FolderSettings, ScriptFlow, ScriptPhase};
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{
     GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript,

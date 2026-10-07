@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use rocket_shared::types::{Auth, Header};
 use serde::{Deserialize, Serialize};
 
+use crate::folder_settings::ScriptFlow;
+
 /// A collection-scoped variable (like Postman/Bruno collection variables).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +60,11 @@ pub struct CollectionSettings {
     /// Persisted at `extensions.rocketapi.scripts.additionalContextRoots`.
     #[serde(default)]
     pub script_context_roots: Vec<String>,
+
+    /// Script run order for this collection. Absent means sandwich.
+    /// Persisted at `extensions.bruno.scripts.flow` (Plan 03).
+    #[serde(default)]
+    pub script_flow: ScriptFlow,
 }
 
 /// Merge a folder ancestor chain into a single deduplicated, sorted variable set.
@@ -172,5 +179,27 @@ mod tests {
         );
         let round: CollectionSettings = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(round.sandbox_mode, SandboxMode::Developer);
+    }
+
+    #[test]
+    fn script_flow_defaults_to_sandwich_when_absent_from_json() {
+        let json = r#"{"headers":[],"variables":[]}"#;
+        let settings: CollectionSettings = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(settings.script_flow, ScriptFlow::Sandwich);
+    }
+
+    #[test]
+    fn script_flow_sequential_roundtrips_as_camel_case() {
+        let settings = CollectionSettings {
+            script_flow: ScriptFlow::Sequential,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialize");
+        assert!(
+            json.contains(r#""scriptFlow":"sequential""#),
+            "expected camelCase scriptFlow field, got {json}"
+        );
+        let round: CollectionSettings = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round.script_flow, ScriptFlow::Sequential);
     }
 }

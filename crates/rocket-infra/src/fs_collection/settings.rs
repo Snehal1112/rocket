@@ -1,7 +1,7 @@
 use std::fs;
 
 use rocket_collection::settings::SandboxMode;
-use rocket_collection::{Collection, CollectionSettings, CollectionVariable};
+use rocket_collection::{Collection, CollectionSettings, CollectionVariable, ScriptFlow};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -155,6 +155,8 @@ pub(super) fn get_settings(
                 .collect(),
             sandbox_mode,
             script_context_roots,
+            // Plan 03 reads this from `extensions.bruno.scripts.flow`.
+            script_flow: ScriptFlow::default(),
         })
     } else {
         Ok(CollectionSettings {
