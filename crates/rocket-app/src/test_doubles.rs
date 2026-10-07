@@ -35,22 +35,33 @@ use zeroize::Zeroizing;
 pub struct InMemoryCollectionRepo {
     collection: Collection,
     folder_chain: Vec<FolderSettings>,
+    root: Option<std::path::PathBuf>,
+    folder_chain_reads: AtomicUsize,
 }
 
 impl InMemoryCollectionRepo {
     pub fn new(collection: Collection) -> Arc<Self> {
-        Self::with_folder_chain(collection, Vec::new())
+        Self::with_folder_chain(collection, Vec::new(), None)
     }
 
-    /// Like `new`, and every request path gets `folder_chain` as its folder chain.
+    /// Every request sits below `folder_chain`, outermost folder first. `root`
+    /// is the collection directory scripts may `require()` from.
     pub fn with_folder_chain(
         collection: Collection,
         folder_chain: Vec<FolderSettings>,
+        root: Option<std::path::PathBuf>,
     ) -> Arc<Self> {
         Arc::new(Self {
             collection,
             folder_chain,
+            root,
+            folder_chain_reads: AtomicUsize::new(0),
         })
+    }
+
+    /// How many times `get_folder_chain_settings` was called.
+    pub fn folder_chain_reads(&self) -> usize {
+        self.folder_chain_reads.load(Ordering::SeqCst)
     }
 }
 
@@ -114,7 +125,13 @@ impl CollectionRepository for InMemoryCollectionRepo {
     ) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
     }
+    fn collection_root_path(&self, _: &str) -> DomainResult<std::path::PathBuf> {
+        self.root
+            .clone()
+            .ok_or_else(|| DomainError::Internal("collection root path is not available".into()))
+    }
     fn get_folder_chain_settings(&self, _: &str, _: &str) -> DomainResult<Vec<FolderSettings>> {
+        self.folder_chain_reads.fetch_add(1, Ordering::SeqCst);
         Ok(self.folder_chain.clone())
     }
     fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
@@ -199,6 +216,9 @@ impl CollectionRepository for SharedCollectionRepo {
         b: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
         self.0.get_folder_chain_variables(a, b)
+    }
+    fn collection_root_path(&self, n: &str) -> DomainResult<std::path::PathBuf> {
+        self.0.collection_root_path(n)
     }
     fn get_folder_chain_settings(&self, a: &str, b: &str) -> DomainResult<Vec<FolderSettings>> {
         self.0.get_folder_chain_settings(a, b)

@@ -328,6 +328,7 @@ pub(crate) mod test_support {
         ExecuteRequestInput {
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
+            skip_folder_scripts: false,
             method: HttpMethod::Post,
             url: url.to_string(),
             headers: vec![],

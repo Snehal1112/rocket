@@ -1688,7 +1688,7 @@ mod tests {
             }),
             ..rocket_collection::FolderSettings::default()
         };
-        let repo = InMemoryCollectionRepo::with_folder_chain(collection, vec![folder]);
+        let repo = InMemoryCollectionRepo::with_folder_chain(collection, vec![folder], None);
         let executor = RecordingExecutor::new();
         let engine = ProgrammableEngine::new();
         let exec = RequestExecutionService::new(

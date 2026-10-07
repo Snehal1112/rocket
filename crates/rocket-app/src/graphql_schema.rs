@@ -269,6 +269,7 @@ pub fn introspection_input(base: &ExecuteRequestInput) -> ExecuteRequestInput {
     input.pre_request_script = None;
     input.post_response_script = None;
     input.tests_script = None;
+    input.skip_folder_scripts = true;
     input.assertions = Vec::new();
     input.actions = Vec::new();
     input.tags = Vec::new();
@@ -431,6 +432,10 @@ mod tests {
         assert!(out.pre_request_script.is_none());
         assert!(out.post_response_script.is_none());
         assert!(out.tests_script.is_none());
+        assert!(
+            out.skip_folder_scripts,
+            "introspection runs no folder scripts"
+        );
         assert!(out.assertions.is_empty());
         assert!(out.actions.is_empty());
         assert!(out.tags.is_empty());

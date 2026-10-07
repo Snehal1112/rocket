@@ -6,7 +6,7 @@ use rocket_audit::{
 };
 use rocket_collection::{
     inherited_headers, resolve_folder_auth, settings::SandboxMode as CollectionSandboxMode,
-    CollectionRepository, CollectionSettings, FolderSettings,
+    CollectionRepository, CollectionSettings, FolderSettings, ScriptFlow,
 };
 use rocket_environment::{
     resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory,
@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 pub mod websocket_resolution;
 pub(crate) mod script_chain;
+use self::script_chain::{folder_labels, ChainedScript, PhaseScripts};
 
 /// Request path prefix of an inline Flow request. It names no file, so it has no folder chain.
 pub(crate) const FLOW_INLINE_PATH_PREFIX: &str = "__flow_inline__/";
@@ -99,6 +100,10 @@ pub struct ExecuteRequestInput {
     /// They resolve like runtime variables. Empty for every other caller.
     #[serde(default)]
     pub flow_vars: std::collections::HashMap<String, String>,
+    /// When true, no folder scripts run for this send. GraphQL introspection
+    /// sets it, because it runs none of the request's own scripts either.
+    #[serde(default)]
+    pub skip_folder_scripts: bool,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -249,6 +254,9 @@ pub(crate) struct PhaseState {
     pub sandbox_mode: SandboxMode,
     /// Local-file `require()` scope, resolved once in `begin_phases`.
     pub file_scope: Option<ScriptFileScope>,
+    /// Scripts of every phase in run order: the folder chain and the request's
+    /// own script, built once in `begin_phases`.
+    pub scripts: PhaseScripts,
 }
 
 impl PhaseState {
@@ -1112,9 +1120,11 @@ impl RequestExecutionService {
         }
     }
 
+    /// Runs one chained script. A failure is published as `ScriptError` and
+    /// returned in `error`. Both name the folder when the script came from one.
     async fn run_script_phase(
         &self,
-        _code: &str,
+        script: &ChainedScript,
         ctx: ScriptContext,
         request_name: &str,
         phase: &str,
@@ -1125,19 +1135,21 @@ impl RequestExecutionService {
             None => return ScriptResult::default(),
         };
         match engine.execute(ctx).await {
-            Ok(result) => {
-                if let Some(ref err) = result.error {
+            Ok(mut result) => {
+                if let Some(err) = result.error.take() {
+                    let message = script.attribute(phase, &err);
                     self.events.publish(DomainEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: phase.to_string(),
-                        message: err.clone(),
+                        message: message.clone(),
                     });
+                    result.error = Some(message);
                 }
                 all_console.extend(result.console_entries.clone());
                 result
             }
             Err(e) => {
-                let message = e.to_string();
+                let message = script.attribute(phase, &e.to_string());
                 self.events.publish(DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
@@ -1396,7 +1408,13 @@ impl RequestExecutionService {
         input: &ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> DomainResult<PhaseState> {
-        let http_request = self.resolve_request(input, external_secrets)?;
+        // One chain read per execution, shared by the request defaults and the
+        // script phases. A folder.yml that cannot be read fails the send here,
+        // with an error that names the folder.
+        let folder_chain =
+            self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())?;
+        let http_request =
+            self.resolve_request_with_chain(input, external_secrets, &folder_chain)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -1427,7 +1445,7 @@ impl RequestExecutionService {
         // variables. A script that sets the same key later still wins.
         var_ctx.runtime.extend(input.flow_vars.clone());
 
-        let (sandbox_mode, file_scope) = match input.collection.as_deref() {
+        let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {
             Some(col) => {
                 let settings = self.collection_repo.get_settings(col).unwrap_or_default();
                 let mode = match settings.sandbox_mode {
@@ -1447,10 +1465,28 @@ impl RequestExecutionService {
                             .map(std::path::PathBuf::from)
                             .collect(),
                     });
-                (mode, scope)
+                (mode, scope, settings.script_flow)
             }
-            None => (SandboxMode::Safe, None),
+            None => (SandboxMode::Safe, None, ScriptFlow::default()),
         };
+
+        let script_folders: &[FolderSettings] = if input.skip_folder_scripts {
+            &[]
+        } else {
+            &folder_chain
+        };
+        let labels = folder_labels(
+            input.request_path.as_deref().unwrap_or_default(),
+            script_folders.len(),
+        );
+        let scripts = PhaseScripts::assemble(
+            script_folders,
+            &labels,
+            script_flow,
+            input.pre_request_script.as_deref(),
+            input.post_response_script.as_deref(),
+            input.tests_script.as_deref(),
+        );
 
         Ok(PhaseState {
             http_request,
@@ -1463,6 +1499,7 @@ impl RequestExecutionService {
             vault_forms: crate::redaction::secret_forms(external_secrets.values()),
             sandbox_mode,
             file_scope,
+            scripts,
         })
     }
 
@@ -1481,133 +1518,147 @@ impl RequestExecutionService {
         let request_name = input.request_name.clone().unwrap_or_default();
         let env_name = input.environment_name.clone();
 
-        if let Some(code) = &input.pre_request_script {
-            if !code.trim().is_empty() {
-                let ctx = ScriptContext::before_request(
-                    code.clone(),
-                    state.var_ctx.clone(),
-                    state.http_request.clone(),
-                    env_name.clone(),
-                    request_name.clone(),
-                    input.tags.clone(),
-                    input.path_params.clone(),
+        // The folder chain and the request's own script, in `chain_scripts`
+        // order. Each script is its own engine run, and sees the request and
+        // the variables the scripts before it left behind.
+        let scripts = state.scripts.pre_request.clone();
+        for script in &scripts {
+            let ctx = ScriptContext::before_request(
+                script.code.clone(),
+                state.var_ctx.clone(),
+                state.http_request.clone(),
+                env_name.clone(),
+                request_name.clone(),
+                input.tags.clone(),
+                input.path_params.clone(),
+            )
+            .with_execution_mode(mode)
+            .with_sandbox_mode(state.sandbox_mode)
+            .with_file_scope(state.file_scope.clone());
+            let had_error = state.script_error.is_some();
+            let result = self
+                .run_script_phase(
+                    script,
+                    ctx,
+                    &request_name,
+                    "before-request",
+                    &mut state.console,
                 )
-                .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode)
-                .with_file_scope(state.file_scope.clone());
-                let result = self
-                    .run_script_phase(
-                        code,
-                        ctx,
-                        &request_name,
-                        "before-request",
-                        &mut state.console,
-                    )
-                    .await;
+                .await;
 
-                // Apply request mutations.
-                if let Some(ref mutations) = result.request_mutations {
-                    if let Some(ref url) = mutations.url {
-                        let original_url = state.http_request.url.clone();
-                        // Deliberate: an early return here also discards any
-                        // next_request/runtime_vars this same script set below.
-                        // A script whose req.setUrl() just tripped the SSRF
-                        // guard does not get to steer the run via
-                        // setNextRequest() or leave variables behind either.
-                        self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
-                        state.http_request.url = url.clone();
-                    }
-                    if let Some(ref method_str) = mutations.method {
-                        if let Ok(m) = method_str.parse() {
-                            state.http_request.method = m;
-                        } else {
-                            tracing::warn!(
-                                method = %method_str,
-                                "req.setMethod() called with an unrecognized HTTP method, ignored"
-                            );
-                            state.script_error.get_or_insert_with(|| format!(
-                                "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
-                            ));
-                        }
-                    }
-                    // Apply header mutations in the order the script issued them —
-                    // e.g. deleteHeader() then setHeader() on the same name must
-                    // result in the header being present, not dropped.
-                    for mutation in &mutations.headers {
-                        match mutation {
-                            rocket_scripting::HeaderMutation::Set { name, value } => {
-                                if let Some(h) = state
-                                    .http_request
-                                    .headers
-                                    .iter_mut()
-                                    .find(|h| h.key.eq_ignore_ascii_case(name))
-                                {
-                                    h.value = value.clone();
-                                } else {
-                                    state.http_request.headers.push(Header::new(name, value));
-                                }
-                            }
-                            rocket_scripting::HeaderMutation::Delete { name } => {
-                                state
-                                    .http_request
-                                    .headers
-                                    .retain(|h| !h.key.eq_ignore_ascii_case(name));
-                            }
-                        }
-                    }
-                    if let Some(ms) = mutations.timeout_ms {
-                        state.http_request.options.timeout_ms = ms;
-                    }
-                    if let Some(ref body_val) = mutations.body {
-                        // A JS object/array is unambiguously meant as JSON. A string
-                        // may be non-JSON text (XML, plain text, etc) — respect an
-                        // explicit Content-Type header the script already set instead
-                        // of forcing JSON, which would mislabel the body on the wire.
-                        let mode = if body_val.is_object() || body_val.is_array() {
-                            rocket_shared::types::BodyMode::Json
-                        } else {
-                            body_mode_from_content_type(&state.http_request.headers)
-                        };
-                        let content = body_val
-                            .as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| body_val.to_string());
-                        state.http_request.body = Some(rocket_shared::types::Body {
-                            mode,
-                            content: Some(content),
-                            form_data: None,
-                            file_path: None,
+            // Apply request mutations.
+            if let Some(ref mutations) = result.request_mutations {
+                if let Some(ref url) = mutations.url {
+                    let original_url = state.http_request.url.clone();
+                    // Deliberate: an early return here also discards any
+                    // next_request/runtime_vars this same script set below.
+                    // A script whose req.setUrl() just tripped the SSRF
+                    // guard does not get to steer the run via
+                    // setNextRequest() or leave variables behind either.
+                    self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
+                    state.http_request.url = url.clone();
+                }
+                if let Some(ref method_str) = mutations.method {
+                    if let Ok(m) = method_str.parse() {
+                        state.http_request.method = m;
+                    } else {
+                        tracing::warn!(
+                            method = %method_str,
+                            "req.setMethod() called with an unrecognized HTTP method, ignored"
+                        );
+                        state.script_error.get_or_insert_with(|| {
+                            format!(
+                            "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
+                        )
                         });
                     }
-                    if let Some(n) = mutations.max_redirects {
-                        state.http_request.options.max_redirects = Some(n);
+                }
+                // Apply header mutations in the order the script issued them —
+                // e.g. deleteHeader() then setHeader() on the same name must
+                // result in the header being present, not dropped.
+                for mutation in &mutations.headers {
+                    match mutation {
+                        rocket_scripting::HeaderMutation::Set { name, value } => {
+                            if let Some(h) = state
+                                .http_request
+                                .headers
+                                .iter_mut()
+                                .find(|h| h.key.eq_ignore_ascii_case(name))
+                            {
+                                h.value = value.clone();
+                            } else {
+                                state.http_request.headers.push(Header::new(name, value));
+                            }
+                        }
+                        rocket_scripting::HeaderMutation::Delete { name } => {
+                            state
+                                .http_request
+                                .headers
+                                .retain(|h| !h.key.eq_ignore_ascii_case(name));
+                        }
                     }
                 }
-
-                self.apply_script_side_effects(
-                    &result,
-                    input.environment_name.as_deref(),
-                    input.global_env_name.as_deref(),
-                    input.collection.as_deref(),
-                    &mut state.var_ctx,
-                    VaultGuard {
-                        forms: &state.vault_forms,
-                        console: &mut state.console,
-                    },
-                );
-
-                if result.error.is_some() {
-                    state.script_error = result.error;
+                if let Some(ms) = mutations.timeout_ms {
+                    state.http_request.options.timeout_ms = ms;
                 }
+                if let Some(ref body_val) = mutations.body {
+                    // A JS object/array is unambiguously meant as JSON. A string
+                    // may be non-JSON text (XML, plain text, etc) — respect an
+                    // explicit Content-Type header the script already set instead
+                    // of forcing JSON, which would mislabel the body on the wire.
+                    let mode = if body_val.is_object() || body_val.is_array() {
+                        rocket_shared::types::BodyMode::Json
+                    } else {
+                        body_mode_from_content_type(&state.http_request.headers)
+                    };
+                    let content = body_val
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| body_val.to_string());
+                    state.http_request.body = Some(rocket_shared::types::Body {
+                        mode,
+                        content: Some(content),
+                        form_data: None,
+                        file_path: None,
+                    });
+                }
+                if let Some(n) = mutations.max_redirects {
+                    state.http_request.options.max_redirects = Some(n);
+                }
+            }
 
-                // Runner controls. `execute()` never reads these; the runner
-                // checks them after every phase that ran (spec §4).
-                if result.skip_request {
-                    state.skip_request = true;
-                }
-                if result.next_request.is_some() {
-                    state.next_request = result.next_request.clone();
-                }
+            self.apply_script_side_effects(
+                &result,
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                input.collection.as_deref(),
+                &mut state.var_ctx,
+                VaultGuard {
+                    forms: &state.vault_forms,
+                    console: &mut state.console,
+                },
+            );
+
+            // The first error in phase order is kept. Within one script, a
+            // thrown error still replaces its own setMethod warning.
+            let failed = result.error.is_some();
+            if failed && !had_error {
+                state.script_error = result.error;
+            }
+
+            // Runner controls. `execute()` never reads these; the runner
+            // checks them after every phase that ran (spec §4).
+            if result.skip_request {
+                state.skip_request = true;
+            }
+            if result.next_request.is_some() {
+                state.next_request = result.next_request.clone();
+            }
+
+            // A failed script ends its phase. In a run, skipRequest() ends it
+            // too, because the request will not be sent.
+            if failed || (result.skip_request && mode == ExecutionMode::Runner) {
+                break;
             }
         }
 
@@ -1688,47 +1739,51 @@ impl RequestExecutionService {
         let request_name = input.request_name.clone().unwrap_or_default();
         let env_name = input.environment_name.clone();
 
-        if let Some(code) = &input.post_response_script {
-            if !code.trim().is_empty() {
-                let ctx = ScriptContext::after_response(
-                    code.clone(),
-                    state.var_ctx.clone(),
-                    state.http_request.clone(),
-                    response.clone(),
-                    env_name.clone(),
-                    request_name.clone(),
-                    input.tags.clone(),
-                    input.path_params.clone(),
+        let scripts = state.scripts.post_response.clone();
+        for script in &scripts {
+            let ctx = ScriptContext::after_response(
+                script.code.clone(),
+                state.var_ctx.clone(),
+                state.http_request.clone(),
+                response.clone(),
+                env_name.clone(),
+                request_name.clone(),
+                input.tags.clone(),
+                input.path_params.clone(),
+            )
+            .with_execution_mode(mode)
+            .with_sandbox_mode(state.sandbox_mode)
+            .with_file_scope(state.file_scope.clone());
+            let result = self
+                .run_script_phase(
+                    script,
+                    ctx,
+                    &request_name,
+                    "after-response",
+                    &mut state.console,
                 )
-                .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode)
-                .with_file_scope(state.file_scope.clone());
-                let result = self
-                    .run_script_phase(
-                        code,
-                        ctx,
-                        &request_name,
-                        "after-response",
-                        &mut state.console,
-                    )
-                    .await;
-                self.apply_script_side_effects(
-                    &result,
-                    input.environment_name.as_deref(),
-                    input.global_env_name.as_deref(),
-                    input.collection.as_deref(),
-                    &mut state.var_ctx,
-                    VaultGuard {
-                        forms: &state.vault_forms,
-                        console: &mut state.console,
-                    },
-                );
-                if result.error.is_some() && state.script_error.is_none() {
-                    state.script_error = result.error;
-                }
-                if result.next_request.is_some() {
-                    state.next_request = result.next_request.clone();
-                }
+                .await;
+            self.apply_script_side_effects(
+                &result,
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                input.collection.as_deref(),
+                &mut state.var_ctx,
+                VaultGuard {
+                    forms: &state.vault_forms,
+                    console: &mut state.console,
+                },
+            );
+            let failed = result.error.is_some();
+            if failed && state.script_error.is_none() {
+                state.script_error = result.error;
+            }
+            if result.next_request.is_some() {
+                state.next_request = result.next_request.clone();
+            }
+            // A failed script ends its phase.
+            if failed {
+                break;
             }
         }
     }
@@ -1744,42 +1799,46 @@ impl RequestExecutionService {
         let request_name = input.request_name.clone().unwrap_or_default();
         let env_name = input.environment_name.clone();
 
-        if let Some(code) = &input.tests_script {
-            if !code.trim().is_empty() {
-                let ctx = ScriptContext::tests(
-                    code.clone(),
-                    state.var_ctx.clone(),
-                    state.http_request.clone(),
-                    response.clone(),
-                    env_name.clone(),
-                    request_name.clone(),
-                    input.tags.clone(),
-                    input.path_params.clone(),
-                )
-                .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode)
-                .with_file_scope(state.file_scope.clone());
-                let result = self
-                    .run_script_phase(code, ctx, &request_name, "tests", &mut state.console)
-                    .await;
-                self.apply_script_side_effects(
-                    &result,
-                    input.environment_name.as_deref(),
-                    input.global_env_name.as_deref(),
-                    input.collection.as_deref(),
-                    &mut state.var_ctx,
-                    VaultGuard {
-                        forms: &state.vault_forms,
-                        console: &mut state.console,
-                    },
-                );
-                state.test_results.extend(result.test_results.clone());
-                if result.error.is_some() && state.script_error.is_none() {
-                    state.script_error = result.error;
-                }
-                if result.next_request.is_some() {
-                    state.next_request = result.next_request.clone();
-                }
+        let scripts = state.scripts.tests.clone();
+        for script in &scripts {
+            let ctx = ScriptContext::tests(
+                script.code.clone(),
+                state.var_ctx.clone(),
+                state.http_request.clone(),
+                response.clone(),
+                env_name.clone(),
+                request_name.clone(),
+                input.tags.clone(),
+                input.path_params.clone(),
+            )
+            .with_execution_mode(mode)
+            .with_sandbox_mode(state.sandbox_mode)
+            .with_file_scope(state.file_scope.clone());
+            let result = self
+                .run_script_phase(script, ctx, &request_name, "tests", &mut state.console)
+                .await;
+            self.apply_script_side_effects(
+                &result,
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                input.collection.as_deref(),
+                &mut state.var_ctx,
+                VaultGuard {
+                    forms: &state.vault_forms,
+                    console: &mut state.console,
+                },
+            );
+            state.test_results.extend(result.test_results.clone());
+            let failed = result.error.is_some();
+            if failed && state.script_error.is_none() {
+                state.script_error = result.error;
+            }
+            if result.next_request.is_some() {
+                state.next_request = result.next_request.clone();
+            }
+            // A failed script ends its phase.
+            if failed {
+                break;
             }
         }
     }
@@ -2663,6 +2722,7 @@ mod tests {
         ExecuteRequestInput {
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
+            skip_folder_scripts: false,
             method: HttpMethod::Get,
             url: url.to_string(),
             headers: vec![],

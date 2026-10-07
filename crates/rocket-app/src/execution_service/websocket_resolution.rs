@@ -267,7 +267,7 @@ mod tests {
             RecordingExecutor::new(),
             Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
             Box::new(SharedCollectionRepo(InMemoryCollectionRepo::with_folder_chain(
-                collection, folders,
+                collection, folders, None,
             ))),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),

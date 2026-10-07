@@ -370,3 +370,477 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+    use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+    use crate::test_doubles::{
+        EmptySecretManagerRepo, FakeSecretStore, FakeVaultSecretFetcher, InMemoryCollectionRepo,
+        InMemoryHistoryRepo, NullCookieRepo, NullEnvRepo, RecordingExecutor, RecordingPublisher,
+        SharedCollectionRepo, SharedExecutor, SharedHistoryRepo, SharedPublisher,
+    };
+    use async_trait::async_trait;
+    use rocket_collection::settings::SandboxMode as CollectionSandboxMode;
+    use rocket_collection::{Collection, CollectionSettings};
+    use rocket_http::RequestOptions;
+    use rocket_scripting::{
+        ExecutionMode, HeaderMutation, RequestMutations, SandboxMode, ScriptContext, ScriptEngine,
+        ScriptFileScope, ScriptResult,
+    };
+    use rocket_shared::error::DomainResult;
+    use rocket_shared::events::DomainEvent;
+    use rocket_shared::types::{Auth, HttpMethod};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    /// What one engine call saw.
+    #[derive(Debug, Clone)]
+    struct Seen {
+        /// `"<phase>:<code>"`.
+        call: String,
+        headers: Vec<(String, String)>,
+        runtime: HashMap<String, String>,
+        sandbox: SandboxMode,
+        file_scope: Option<ScriptFileScope>,
+    }
+
+    /// Engine that answers a canned result per script text and records every call.
+    struct CodeEngine {
+        results: Mutex<HashMap<String, ScriptResult>>,
+        seen: Mutex<Vec<Seen>>,
+    }
+
+    impl CodeEngine {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                results: Mutex::new(HashMap::new()),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+        fn on(&self, code: &str, result: ScriptResult) {
+            self.results
+                .lock()
+                .expect("lock")
+                .insert(code.to_string(), result);
+        }
+        fn seen(&self) -> Vec<Seen> {
+            self.seen.lock().expect("lock").clone()
+        }
+        fn calls(&self) -> Vec<String> {
+            self.seen().into_iter().map(|seen| seen.call).collect()
+        }
+    }
+
+    #[async_trait]
+    impl ScriptEngine for CodeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.seen.lock().expect("lock").push(Seen {
+                call: format!("{}:{}", ctx.phase.as_str(), ctx.code),
+                headers: ctx
+                    .request
+                    .headers
+                    .iter()
+                    .map(|h| (h.key.clone(), h.value.clone()))
+                    .collect(),
+                runtime: ctx.variables.runtime.clone(),
+                sandbox: ctx.sandbox_mode,
+                file_scope: ctx.file_scope.clone(),
+            });
+            Ok(self
+                .results
+                .lock()
+                .expect("lock")
+                .get(&ctx.code)
+                .cloned()
+                .unwrap_or_default())
+        }
+    }
+
+    struct SharedCodeEngine(Arc<CodeEngine>);
+
+    #[async_trait]
+    impl ScriptEngine for SharedCodeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.0.execute(ctx).await
+        }
+    }
+
+    struct Harness {
+        svc: RequestExecutionService,
+        repo: Arc<InMemoryCollectionRepo>,
+        engine: Arc<CodeEngine>,
+        executor: Arc<RecordingExecutor>,
+        publisher: Arc<RecordingPublisher>,
+    }
+
+    fn harness(
+        settings: CollectionSettings,
+        chain: Vec<FolderSettings>,
+        root: Option<PathBuf>,
+    ) -> Harness {
+        let mut collection = Collection::new("col");
+        collection.settings = settings;
+        let repo = InMemoryCollectionRepo::with_folder_chain(collection, chain, root);
+        let shared_repo = Arc::clone(&repo);
+        let engine = CodeEngine::new();
+        let executor = RecordingExecutor::new();
+        let publisher = RecordingPublisher::new();
+        let svc = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(shared_repo)),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(FakeSecretStore("client-secret".into())),
+            FakeVaultSecretFetcher::new(HashMap::new()),
+        )
+        .with_script_engine(Box::new(SharedCodeEngine(Arc::clone(&engine))));
+        Harness {
+            svc,
+            repo,
+            engine,
+            executor,
+            publisher,
+        }
+    }
+
+    fn settings(flow: ScriptFlow) -> CollectionSettings {
+        CollectionSettings {
+            script_flow: flow,
+            ..CollectionSettings::default()
+        }
+    }
+
+    /// Outer folder `api`, inner folder `api/users`, each with all three scripts.
+    fn chain() -> Vec<FolderSettings> {
+        vec![
+            FolderSettings {
+                pre_request_script: Some("o-pre".into()),
+                post_response_script: Some("o-post".into()),
+                tests_script: Some("o-test".into()),
+                ..FolderSettings::default()
+            },
+            FolderSettings {
+                pre_request_script: Some("i-pre".into()),
+                post_response_script: Some("i-post".into()),
+                tests_script: Some("i-test".into()),
+                ..FolderSettings::default()
+            },
+        ]
+    }
+
+    /// A request at `api/users/get.yml` in collection `col`.
+    pub(super) fn input(
+        pre: Option<&str>,
+        post: Option<&str>,
+        tests: Option<&str>,
+    ) -> ExecuteRequestInput {
+        ExecuteRequestInput {
+            method: HttpMethod::Get,
+            url: "https://api.example.com/users/1".into(),
+            headers: vec![],
+            query_params: vec![],
+            body: None,
+            auth: Auth::None,
+            options: RequestOptions::default(),
+            environment_name: None,
+            collection: Some("col".into()),
+            request_name: Some("Get user".into()),
+            request_path: Some("api/users/get.yml".into()),
+            tags: vec![],
+            path_params: vec![],
+            pre_request_script: pre.map(str::to_string),
+            post_response_script: post.map(str::to_string),
+            tests_script: tests.map(str::to_string),
+            global_env_name: None,
+            assertions: vec![],
+            actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+            skip_history: false,
+            flow_vars: HashMap::new(),
+            skip_folder_scripts: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn sandwich_flow_runs_folder_and_request_scripts_in_spec_order() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), Some("r-test")))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.engine.calls(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "before-request:r-pre",
+                "after-response:r-post",
+                "after-response:i-post",
+                "after-response:o-post",
+                "tests:r-test",
+                "tests:i-test",
+                "tests:o-test",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn sequential_flow_runs_folders_first_in_every_phase() {
+        let h = harness(settings(ScriptFlow::Sequential), chain(), None);
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), Some("r-test")))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.engine.calls(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "before-request:r-pre",
+                "after-response:o-post",
+                "after-response:i-post",
+                "after-response:r-post",
+                "tests:o-test",
+                "tests:i-test",
+                "tests:r-test",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_later_script_sees_the_request_and_variables_an_earlier_one_left() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "o-pre",
+            ScriptResult {
+                request_mutations: Some(RequestMutations {
+                    headers: vec![HeaderMutation::Set {
+                        name: "X-Folder".into(),
+                        value: "outer".into(),
+                    }],
+                    ..Default::default()
+                }),
+                runtime_vars: HashMap::from([("token".to_string(), serde_json::json!("abc"))]),
+                ..Default::default()
+            },
+        );
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), None))
+            .await
+            .expect("execute");
+
+        let seen = h.engine.seen();
+        let request_pre = seen
+            .iter()
+            .find(|s| s.call == "before-request:r-pre")
+            .expect("request script ran");
+        assert!(request_pre
+            .headers
+            .contains(&("X-Folder".to_string(), "outer".to_string())));
+        assert_eq!(
+            request_pre.runtime.get("token").map(String::as_str),
+            Some("abc")
+        );
+        let outer_post = seen
+            .iter()
+            .find(|s| s.call == "after-response:o-post")
+            .expect("folder post-response script ran");
+        assert_eq!(
+            outer_post.runtime.get("token").map(String::as_str),
+            Some("abc")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_folder_script_error_names_the_folder_and_ends_its_phase() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "i-pre",
+            ScriptResult {
+                error: Some("boom".into()),
+                ..Default::default()
+            },
+        );
+        h.engine.on(
+            "o-post",
+            ScriptResult {
+                error: Some("later".into()),
+                ..Default::default()
+            },
+        );
+        let out = h
+            .svc
+            .execute(input(Some("r-pre"), Some("r-post"), None))
+            .await
+            .expect("execute");
+
+        let expected = "Folder \"api/users\" before-request script: boom";
+        assert_eq!(out.script_error.as_deref(), Some(expected));
+        assert_eq!(
+            h.engine.calls(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "after-response:r-post",
+                "after-response:i-post",
+                "after-response:o-post",
+                "tests:i-test",
+                "tests:o-test",
+            ],
+            "the request's pre-request script is skipped, later phases still run"
+        );
+        assert_eq!(
+            h.executor.sent_urls().len(),
+            1,
+            "a script error does not stop the send"
+        );
+        let events = h.publisher.events();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::ScriptError { phase, message, .. }
+                if phase == "before-request" && message == expected
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::ScriptError { message, .. }
+                if message == "Folder \"api\" after-response script: later"
+        )));
+    }
+
+    #[tokio::test]
+    async fn skip_request_from_a_folder_script_ends_the_chain_in_a_run() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "o-pre",
+            ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
+        );
+        let inp = input(Some("r-pre"), None, None);
+        let mut state = h
+            .svc
+            .begin_phases(&inp, &HashMap::new())
+            .expect("begin phases");
+        h.svc
+            .run_before_request_phase(&inp, ExecutionMode::Runner, &mut state)
+            .await
+            .expect("before-request phase");
+        assert!(state.skip_request);
+        assert_eq!(h.engine.calls(), vec!["before-request:o-pre"]);
+    }
+
+    #[tokio::test]
+    async fn skip_request_from_a_folder_script_is_ignored_by_a_single_send() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "o-pre",
+            ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
+        );
+        h.svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.engine.calls()[..3].to_vec(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "before-request:r-pre",
+            ]
+        );
+        assert_eq!(h.executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_folder_without_scripts_changes_nothing() {
+        let h = harness(
+            settings(ScriptFlow::Sandwich),
+            vec![FolderSettings::default()],
+            None,
+        );
+        let out = h
+            .svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+        assert_eq!(h.engine.calls(), vec!["before-request:r-pre"]);
+        assert!(out.script_error.is_none());
+
+        let h = harness(
+            settings(ScriptFlow::Sandwich),
+            vec![FolderSettings::default()],
+            None,
+        );
+        h.svc
+            .execute(input(None, None, None))
+            .await
+            .expect("execute");
+        assert!(h.engine.calls().is_empty());
+        assert_eq!(h.executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn folder_scripts_run_with_the_request_scripts_sandbox_and_file_scope() {
+        let mut developer = settings(ScriptFlow::Sandwich);
+        developer.sandbox_mode = CollectionSandboxMode::Developer;
+        let root = PathBuf::from("/tmp/rocket-folder-chain-test");
+        let h = harness(developer, chain(), Some(root.clone()));
+        h.svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+
+        let expected_scope = Some(ScriptFileScope {
+            collection_root: root,
+            additional_roots: vec![],
+        });
+        let seen = h.engine.seen();
+        assert_eq!(
+            seen.len(),
+            7,
+            "three pre-request, two post-response, two tests"
+        );
+        for call in &seen {
+            assert_eq!(call.sandbox, SandboxMode::Developer, "{}", call.call);
+            assert_eq!(call.file_scope, expected_scope, "{}", call.call);
+        }
+    }
+
+    #[tokio::test]
+    async fn inline_flow_requests_and_introspection_run_no_folder_scripts() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        let mut inline = input(Some("r-pre"), None, None);
+        inline.request_path = Some("__flow_inline__/node-1".into());
+        h.svc.execute(inline).await.expect("execute");
+        assert_eq!(h.engine.calls(), vec!["before-request:r-pre"]);
+
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        let mut introspection = input(Some("r-pre"), None, None);
+        introspection.skip_folder_scripts = true;
+        h.svc.execute(introspection).await.expect("execute");
+        assert_eq!(h.engine.calls(), vec!["before-request:r-pre"]);
+    }
+
+    #[tokio::test]
+    async fn the_folder_chain_is_read_once_per_execution() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), Some("r-test")))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.repo.folder_chain_reads(),
+            1,
+            "headers, auth and scripts share one chain read"
+        );
+    }
+}
