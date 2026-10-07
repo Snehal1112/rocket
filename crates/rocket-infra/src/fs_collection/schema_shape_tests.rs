@@ -1061,3 +1061,60 @@ fn fully_populated_folder_yml_only_uses_schema_keys() {
         assert_eq!(doc["docs"].as_str(), Some("# Users"), "{doc:?}");
     }
 }
+
+#[test]
+fn script_flow_is_written_only_under_bruno_extensions() {
+    use rocket_collection::ScriptFlow;
+
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    let path = dir.path().join("api/opencollection.yml");
+    let mut settings = CollectionSettings {
+        headers: vec![Header::new("X-Tenant", "acme")],
+        sandbox_mode: SandboxMode::Developer,
+        script_context_roots: vec!["../shared".into()],
+        script_flow: ScriptFlow::Sequential,
+        ..Default::default()
+    };
+    repo.save_settings("api", &settings)
+        .expect("save sequential");
+
+    let doc = read_yaml(&path);
+    let mut v = Violations::default();
+    check_collection_root(&mut v, "opencollection.yml", &doc);
+    assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
+
+    // The flow lives only under Bruno's namespace, and Rocket adds nothing else there.
+    let bruno = doc
+        .get("extensions")
+        .and_then(|e| e.get("bruno"))
+        .expect("extensions.bruno written for sequential");
+    let expected: Value =
+        serde_yaml::from_str("scripts:\n  flow: sequential\n").expect("parse expected yaml");
+    assert_eq!(bruno, &expected);
+    let root = doc.as_mapping().expect("root mapping");
+    for key in ["flow", "scriptFlow", "script_flow", "bruno"] {
+        assert!(
+            !root.contains_key(Value::String(key.into())),
+            "`{key}` must not be a root key"
+        );
+    }
+    let request = doc.get("request").expect("request defaults written for headers");
+    assert!(request.get("scripts").is_none(), "flow is not a RequestDefaults key");
+    assert!(
+        doc.get("extensions")
+            .and_then(|e| e.get("rocketapi"))
+            .and_then(|r| r.get("sandboxMode"))
+            .is_some(),
+        "rocketapi extensions are still written"
+    );
+
+    // Back to the default: the Bruno namespace disappears again.
+    settings.script_flow = ScriptFlow::Sandwich;
+    repo.save_settings("api", &settings).expect("save sandwich");
+    let doc = read_yaml(&path);
+    assert!(
+        doc.get("extensions").and_then(|e| e.get("bruno")).is_none(),
+        "no bruno key for sandwich"
+    );
+}
