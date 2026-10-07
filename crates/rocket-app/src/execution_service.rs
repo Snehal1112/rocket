@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod websocket_resolution;
+pub(crate) mod script_chain;
 
 /// Request path prefix of an inline Flow request. It names no file, so it has no folder chain.
 pub(crate) const FLOW_INLINE_PATH_PREFIX: &str = "__flow_inline__/";
