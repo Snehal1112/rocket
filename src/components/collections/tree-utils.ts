@@ -1,6 +1,6 @@
 import { isPathWithin } from '@/lib/pane-utils';
 import type { PaneNode, Tab } from '@/types/pane-types';
-import { isScriptTab } from '@/types/pane-types';
+import { isFolderTab, isScriptTab } from '@/types/pane-types';
 
 // Returns true if any active tab in the pane tree matches the given tabId.
 export function isActiveRequest(node: PaneNode, tabId: string): boolean {
@@ -33,6 +33,15 @@ export function findAffectedTabs(root: PaneNode, target: DeleteTarget): Affected
       return;
     }
     for (const tab of node.tabs) {
+      // Folder tabs have no source. They match by collection and folder path.
+      if (isFolderTab(tab)) {
+        if (tab.collectionName !== target.collection) continue;
+        const folderMatches =
+          target.type === 'collection' ||
+          (target.type === 'folder' && isPathWithin(tab.folderPath, target.path ?? ''));
+        if (folderMatches) found.push({ tab, groupId: node.groupId });
+        continue;
+      }
       if (!tab.source || tab.source.collection !== target.collection) continue;
       const path = tab.source.path;
       const matches =

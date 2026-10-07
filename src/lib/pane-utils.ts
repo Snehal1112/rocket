@@ -9,6 +9,7 @@ import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import { createDefaultWebSocketDraft } from '@/lib/websocket-messages';
 import type {
   BodyState,
+  FolderTab,
   GrpcState,
   LeafNode,
   PaneNode,
@@ -17,7 +18,7 @@ import type {
   SplitNode,
   Tab,
 } from '@/types/pane-types';
-import { isScriptTab } from '@/types/pane-types';
+import { isFolderTab, isScriptTab } from '@/types/pane-types';
 
 // Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
 export function mapApiRequestToState(req: ApiRequest, fromCollection = false): RequestState {
@@ -272,6 +273,46 @@ export function findScriptTab(
   return (
     findScriptTab(node.children[0], collection, path) ??
     findScriptTab(node.children[1], collection, path)
+  );
+}
+
+// Collects every open folder tab of a collection whose folder is `folderPath` or below it.
+export function findFolderTabsWithin(
+  node: PaneNode,
+  collection: string,
+  folderPath: string,
+): FolderTab[] {
+  if (node.type !== 'leaf') {
+    return [
+      ...findFolderTabsWithin(node.children[0], collection, folderPath),
+      ...findFolderTabsWithin(node.children[1], collection, folderPath),
+    ];
+  }
+  return node.tabs.filter(
+    (tab): tab is FolderTab =>
+      isFolderTab(tab) &&
+      tab.collectionName === collection &&
+      isPathWithin(tab.folderPath, folderPath),
+  );
+}
+
+// Finds the open folder tab for a collection and folder path, if any.
+export function findFolderTab(
+  node: PaneNode,
+  collection: string,
+  folderPath: string,
+): { leaf: LeafNode; tab: FolderTab } | null {
+  if (node.type === 'leaf') {
+    for (const tab of node.tabs) {
+      if (isFolderTab(tab) && tab.collectionName === collection && tab.folderPath === folderPath) {
+        return { leaf: node, tab };
+      }
+    }
+    return null;
+  }
+  return (
+    findFolderTab(node.children[0], collection, folderPath) ??
+    findFolderTab(node.children[1], collection, folderPath)
   );
 }
 

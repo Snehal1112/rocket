@@ -5,6 +5,8 @@ import {
   createDefaultLeaf,
   createDefaultRequestFor,
   findActiveLeaf,
+  findFolderTab,
+  findFolderTabsWithin,
   findScriptTab,
   findScriptTabsWithin,
   findTabInTree,
@@ -35,6 +37,8 @@ import type {
   ContractTab,
   FlowNodeDetail,
   FlowTab,
+  FolderSection,
+  FolderTab,
   LeafNode,
   PaneNode,
   RequestState,
@@ -48,7 +52,7 @@ import type {
   WorkspaceTab,
   WorkspaceTabSection,
 } from '@/types/pane-types';
-import { isFlowTab, isRequestTab, isRunnerTab, isScriptTab } from '@/types/pane-types';
+import { isFlowTab, isFolderTab, isRequestTab, isRunnerTab, isScriptTab } from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
@@ -243,6 +247,11 @@ export interface PaneState {
   updateScriptContent: (tabId: string, content: string) => void;
   markScriptSaved: (tabId: string, content: string) => void;
   renameScriptTabs: (collection: string, oldPath: string, newPath: string) => void;
+  /** Opens or focuses the settings tab of a folder. Returns true when an open tab was reused. */
+  openFolderTab: (collection: string, folderPath: string, section?: FolderSection) => boolean;
+  updateFolderSection: (tabId: string, section: FolderSection) => void;
+  /** Retargets open folder tabs when a folder is renamed, matching whole path segments. */
+  renameFolderTabs: (collection: string, oldPath: string, newPath: string) => void;
 
   // Focus tracking.
   setActiveGroup: (groupId: string) => void;
@@ -303,7 +312,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         ? (tab as CollectionTab).collectionName
         : tab.tabType === 'contract'
           ? (tab as ContractTab).collectionName
-          : (tab.source?.collection ?? null);
+          : tab.tabType === 'folder'
+            ? tab.collectionName
+            : (tab.source?.collection ?? null);
     if (collectionName && collectionName !== get().activeCollection) {
       get().switchCollection(collectionName);
     }
@@ -1237,5 +1248,57 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         return { ...tab, activeSection: section };
       }),
     });
+  },
+
+  openFolderTab(collection, folderPath, section) {
+    // Switch first, so a tab parked in another collection's snapshot is found and not duplicated.
+    if (!get().isWorkspaceMode() && get().activeCollection !== collection) {
+      get().switchCollection(collection);
+    }
+    const existing = findFolderTab(get().root, collection, folderPath);
+    if (existing) {
+      if (section) get().updateFolderSection(existing.tab.id, section);
+      // The id is all openTab reads for an open tab, so it only activates it.
+      get().openTab(existing.tab);
+      return true;
+    }
+    const tab: FolderTab = {
+      id: `folder:${crypto.randomUUID()}`,
+      title: folderPath.split('/').pop() ?? folderPath,
+      tabType: 'folder',
+      collectionName: collection,
+      folderPath,
+      activeSection: section ?? 'headers',
+      isDirty: false,
+    };
+    get().openTab(tab);
+    return false;
+  },
+
+  updateFolderSection(tabId, section) {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) =>
+        isFolderTab(tab) ? { ...tab, activeSection: section } : tab,
+      ),
+    );
+  },
+
+  renameFolderTabs(collection, oldPath, newPath) {
+    // Matches the folder itself or any folder below it, by whole segments.
+    // Matching by tab id keeps the id stable, so panes keep their active tab.
+    const tabs = findFolderTabsWithin(get().root, collection, oldPath);
+    if (tabs.length === 0) return;
+    let next = get();
+    for (const found of tabs) {
+      const target = `${newPath}${found.folderPath.slice(oldPath.length)}`;
+      next = {
+        ...next,
+        ...updateTabEverywhere(next, found.id, (tab) => {
+          if (!isFolderTab(tab)) return tab;
+          return { ...tab, folderPath: target, title: target.split('/').pop() ?? target };
+        }),
+      };
+    }
+    set({ root: next.root, collectionTabState: next.collectionTabState });
   },
 }));

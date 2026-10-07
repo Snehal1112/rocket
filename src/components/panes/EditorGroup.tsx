@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
+import { FolderSettingsTab } from '@/components/collections/FolderSettingsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { WebSocketPanel } from '@/components/request/websocket/WebSocketPanel';
 
@@ -68,6 +69,7 @@ import {
   isContractTab,
   isDiffTab,
   isFlowTab,
+  isFolderTab,
   isGitTab,
   isRequestTab,
   isRunnerTab,
@@ -307,6 +309,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             <Suspense fallback={<EditorSkeleton />}>
               <FlowPane tab={activeTab} groupId={node.groupId} />
             </Suspense>
+          ) : isFolderTab(activeTab) ? (
+            <FolderSettingsTab key={activeTab.id} tab={activeTab} />
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )
