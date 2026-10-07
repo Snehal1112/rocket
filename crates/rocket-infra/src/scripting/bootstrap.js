@@ -36,6 +36,7 @@
     getSecretVar:      (key)        => __ops.op_rok_get_secret_var(key),
     getCollectionVar:  (key)        => __ops.op_rok_get_collection_var(key),
     setCollectionVar:  (key, value) => __ops.op_rok_set_collection_var(key, JSON.stringify(value)),
+    getFolderVar:      (key)        => __ops.op_rok_get_folder_var(key),
     getGlobalEnvVar:   (key)        => __ops.op_rok_get_global_env_var(key),
     setGlobalEnvVar:   (key, value) => __ops.op_rok_set_global_env_var(key, JSON.stringify(value)),
     interpolate:       (template)   => __ops.op_rok_interpolate(template),

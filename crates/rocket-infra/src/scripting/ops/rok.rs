@@ -77,6 +77,20 @@ pub fn op_rok_get_collection_var(state: &OpState, #[string] key: String) -> Stri
         .unwrap_or_default()
 }
 
+/// rok.getFolderVar(key) — reads the request's merged folder-chain scope.
+/// The innermost folder wins and disabled entries are already left out.
+#[op2]
+#[string]
+pub fn op_rok_get_folder_var(state: &OpState, #[string] key: String) -> String {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .folder
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// rok.getGlobalEnvVar(key) — reads from the global environment scope.
 #[op2]
 #[string]

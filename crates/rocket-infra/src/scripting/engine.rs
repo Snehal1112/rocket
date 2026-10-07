@@ -165,6 +165,7 @@ extension!(
         rok::op_rok_get_env_name,
         rok::op_rok_get_collection_var,
         rok::op_rok_set_collection_var,
+        rok::op_rok_get_folder_var,
         rok::op_rok_get_global_env_var,
         rok::op_rok_set_global_env_var,
         rok::op_rok_interpolate,
@@ -417,6 +418,59 @@ mod tests {
         let result = engine.execute(ctx).await.expect("execute");
         let val = result.runtime_vars.get("key").expect("key present");
         assert_eq!(val, "sk-live-abcdef123");
+    }
+
+    #[tokio::test]
+    async fn rok_get_folder_var_reads_folder_scope() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.folder.insert("tenant".into(), "acme".into());
+        let mut ctx = minimal_ctx("rok.setVar('t', rok.getFolderVar('tenant'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
+        assert_eq!(result.runtime_vars.get("t").expect("t present"), "acme");
+    }
+
+    #[tokio::test]
+    async fn rok_get_folder_var_ignores_other_scopes() {
+        // The key exists everywhere except the folder scope, so the getter must return "".
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.collection.insert("k".into(), "from-collection".into());
+        vars.env.insert("k".into(), "from-env".into());
+        vars.request.insert("k".into(), "from-request".into());
+        vars.runtime.insert("k".into(), "from-runtime".into());
+        let mut ctx = minimal_ctx("rok.setVar('k', rok.getFolderVar('k'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
+        assert_eq!(result.runtime_vars.get("k").expect("k present"), "");
+    }
+
+    #[tokio::test]
+    async fn rok_has_no_folder_var_setter() {
+        // Folder variables are read-only from scripts. This guards against an accidental setter.
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('s', typeof rok.setFolderVar)");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(
+            result.error.is_none(),
+            "unexpected error: {:?}",
+            result.error
+        );
+        assert_eq!(
+            result.runtime_vars.get("s").expect("s present"),
+            "undefined"
+        );
     }
 
     #[tokio::test]

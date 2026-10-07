@@ -28,6 +28,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod websocket_resolution;
+
+#[cfg(test)]
+mod folder_var_script_tests;
 pub(crate) mod script_chain;
 use self::script_chain::{
     folder_labels, folder_mentions, script_mentions, ChainedScript, PhaseScripts,
