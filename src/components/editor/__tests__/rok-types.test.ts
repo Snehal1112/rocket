@@ -156,7 +156,8 @@ describe('rok typings stay in sync with the runtime', () => {
       .map((m) => m[1])
       .filter((n) => n !== 'runner');
     const defs = ROK_TYPE_DEFS_FOR_PHASE('tests');
-    const missing = names.filter((n) => !defs.includes(`${n}(`));
+    // Only 2-space indented lines are top-level members, so runner.* cannot satisfy this.
+    const missing = names.filter((n) => !new RegExp(`^ {2}${n}\\(`, 'm').test(defs));
     expect(missing).toEqual([]);
   });
 });
