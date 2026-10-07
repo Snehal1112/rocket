@@ -469,6 +469,24 @@ declare const rok: {
   setGlobalEnvVar(key: string, value: unknown): void;
   /** Resolve {{var}} tokens using the current variable context. */
   interpolate(template: string): string;
+  /** Every variable of the active environment. */
+  getAllEnvVars(): Record<string, string>;
+  /** Every runtime variable. */
+  getAllVars(): Record<string, string>;
+  /** Every global environment variable. */
+  getAllGlobalEnvVars(): Record<string, string>;
+  /** Returns true if the runtime variable exists. */
+  hasVar(key: string): boolean;
+  /** Returns true if the global environment variable exists. */
+  hasGlobalEnvVar(key: string): boolean;
+  /** Returns true if the collection variable exists. */
+  hasCollectionVar(key: string): boolean;
+  /** Read a request variable. */
+  getRequestVar(key: string): string;
+  /** Read a host environment variable, or undefined when it is not set. */
+  getProcessEnv(key: string): string | undefined;
+  /** Same as rok.runner.setNextRequest. Pass null to stop the run. */
+  setNextRequest(name: string | null): void;
   /**
    * Controls the Collection Runner's sequencing (see
    * docs/superpowers/specs/2026-09-16-collection-runner-design.md). Only

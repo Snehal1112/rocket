@@ -171,6 +171,15 @@ extension!(
         rok::op_rok_interpolate,
         rok::op_rok_set_next_request,
         rok::op_rok_skip_request,
+        rok::op_rok_get_all_env_vars,
+        rok::op_rok_get_all_vars,
+        rok::op_rok_get_all_global_env_vars,
+        rok::op_rok_has_var,
+        rok::op_rok_has_global_env_var,
+        rok::op_rok_has_collection_var,
+        rok::op_rok_get_request_var,
+        rok::op_rok_has_process_env,
+        rok::op_rok_get_process_env,
         // req read ops
         req::op_req_get_url,
         req::op_req_get_host,
@@ -405,6 +414,102 @@ mod tests {
         let result = engine.execute(ctx).await.expect("execute");
         let val = result.runtime_vars.get("url").expect("url present");
         assert_eq!(val, "https://api.example.com");
+    }
+
+    #[tokio::test]
+    async fn rok_get_all_env_vars_returns_the_env_scope() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("A".into(), "1".into());
+        vars.env.insert("B".into(), "2".into());
+        let mut ctx = minimal_ctx(
+            "rok.setVar('keys', Object.keys(rok.getAllEnvVars()).sort().join(','))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("keys").expect("keys present"), "A,B");
+    }
+
+    #[tokio::test]
+    async fn rok_get_all_vars_and_global_vars_read_their_scopes() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("r".into(), "runtime".into());
+        vars.global_env.insert("g".into(), "global".into());
+        let mut ctx = minimal_ctx(
+            "rok.setVar('out', rok.getAllVars().r + '|' + rok.getAllGlobalEnvVars().g)",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "runtime|global"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_has_checks_report_presence_per_scope() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("r".into(), "1".into());
+        vars.global_env.insert("g".into(), "1".into());
+        vars.collection.insert("c".into(), "1".into());
+        let mut ctx = minimal_ctx(
+            "rok.setVar('out', [rok.hasVar('r'), rok.hasVar('x'), rok.hasGlobalEnvVar('g'), \
+             rok.hasGlobalEnvVar('x'), rok.hasCollectionVar('c'), rok.hasCollectionVar('x')].join(','))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "true,false,true,false,true,false"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_get_request_var_reads_the_request_scope() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.request.insert("source".into(), "warehouse-a".into());
+        let mut ctx = minimal_ctx("rok.setVar('v', rok.getRequestVar('source'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("v").expect("v present"), "warehouse-a");
+    }
+
+    #[tokio::test]
+    async fn rok_get_process_env_returns_value_or_undefined() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.process_env.insert("HOME_DIR".into(), "/home/me".into());
+        let mut ctx = minimal_ctx(
+            "rok.setVar('out', rok.getProcessEnv('HOME_DIR') + '|' + String(rok.getProcessEnv('NOPE')))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "/home/me|undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_set_next_request_alias_matches_runner_form() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setNextRequest('Poll Status')");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(matches!(
+            result.next_request,
+            Some(rocket_scripting::NextRequest::Name(ref n)) if n == "Poll Status"
+        ));
+
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setNextRequest(null)");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(matches!(
+            result.next_request,
+            Some(rocket_scripting::NextRequest::Stop)
+        ));
     }
 
     #[tokio::test]

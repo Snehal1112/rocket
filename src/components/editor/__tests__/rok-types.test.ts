@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ScriptSnippetGroup } from '../rok-types';
 import {
@@ -137,5 +139,24 @@ describe('rok.getFolderVar coverage', () => {
     const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
     expect(defs).toContain('getFolderVar(key: string): unknown;');
     expect(defs).not.toContain('setFolderVar');
+  });
+});
+
+describe('rok typings stay in sync with the runtime', () => {
+  it('declares every top-level rok method defined in bootstrap.js', () => {
+    const bootstrap = readFileSync(
+      join(process.cwd(), 'crates/rocket-infra/src/scripting/bootstrap.js'),
+      'utf8',
+    );
+    const start = bootstrap.indexOf('globalThis.rok = {');
+    expect(start).toBeGreaterThan(-1);
+    const end = bootstrap.indexOf('\n  };', start);
+    const block = bootstrap.slice(start, end);
+    const names = [...block.matchAll(/^ {4}(\w+):/gm)]
+      .map((m) => m[1])
+      .filter((n) => n !== 'runner');
+    const defs = ROK_TYPE_DEFS_FOR_PHASE('tests');
+    const missing = names.filter((n) => !defs.includes(`${n}(`));
+    expect(missing).toEqual([]);
   });
 });

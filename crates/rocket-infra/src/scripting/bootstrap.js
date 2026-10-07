@@ -40,8 +40,17 @@
     getGlobalEnvVar:   (key)        => __ops.op_rok_get_global_env_var(key),
     setGlobalEnvVar:   (key, value) => __ops.op_rok_set_global_env_var(key, JSON.stringify(value)),
     interpolate:       (template)   => __ops.op_rok_interpolate(template),
+    getAllEnvVars:       ()    => JSON.parse(__ops.op_rok_get_all_env_vars()),
+    getAllVars:          ()    => JSON.parse(__ops.op_rok_get_all_vars()),
+    getAllGlobalEnvVars: ()    => JSON.parse(__ops.op_rok_get_all_global_env_vars()),
+    hasVar:              (key) => __ops.op_rok_has_var(key),
+    hasGlobalEnvVar:     (key) => __ops.op_rok_has_global_env_var(key),
+    hasCollectionVar:    (key) => __ops.op_rok_has_collection_var(key),
+    getRequestVar:       (key) => __ops.op_rok_get_request_var(key),
+    getProcessEnv:       (key) => (__ops.op_rok_has_process_env(key) ? __ops.op_rok_get_process_env(key) : undefined),
+    setNextRequest:      (name) => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
     runner: {
-      setNextRequest: (name)  => __ops.op_rok_set_next_request(name),
+      setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),
     },
   };

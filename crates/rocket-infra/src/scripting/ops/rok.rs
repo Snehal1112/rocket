@@ -1,6 +1,7 @@
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use deno_core::{op2, OpState};
 use rocket_scripting::{CollectionVarWrite, EnvVarWrite, NextRequest};
+use std::collections::HashMap;
 
 // ── Variable reads ────────────────────────────────────────────────────────────
 
@@ -99,6 +100,97 @@ pub fn op_rok_get_global_env_var(state: &OpState, #[string] key: String) -> Stri
         .borrow::<ScriptInputState>()
         .variables
         .global_env
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn scope_json(map: &HashMap<String, String>) -> String {
+    serde_json::to_string(map).unwrap_or_else(|_| "{}".into())
+}
+
+/// rok.getAllEnvVars() — every variable of the active environment as a JSON object.
+#[op2]
+#[string]
+pub fn op_rok_get_all_env_vars(state: &OpState) -> String {
+    scope_json(&state.borrow::<ScriptInputState>().variables.env)
+}
+
+/// rok.getAllVars() — every runtime variable as a JSON object.
+#[op2]
+#[string]
+pub fn op_rok_get_all_vars(state: &OpState) -> String {
+    scope_json(&state.borrow::<ScriptInputState>().variables.runtime)
+}
+
+/// rok.getAllGlobalEnvVars() — every global environment variable as a JSON object.
+#[op2]
+#[string]
+pub fn op_rok_get_all_global_env_vars(state: &OpState) -> String {
+    scope_json(&state.borrow::<ScriptInputState>().variables.global_env)
+}
+
+/// rok.hasVar(key) — true if the runtime scope holds key.
+#[op2(fast)]
+pub fn op_rok_has_var(state: &OpState, #[string] key: String) -> bool {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .runtime
+        .contains_key(&key)
+}
+
+/// rok.hasGlobalEnvVar(key) — true if the global environment holds key.
+#[op2(fast)]
+pub fn op_rok_has_global_env_var(state: &OpState, #[string] key: String) -> bool {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .global_env
+        .contains_key(&key)
+}
+
+/// rok.hasCollectionVar(key) — true if the collection scope holds key.
+#[op2(fast)]
+pub fn op_rok_has_collection_var(state: &OpState, #[string] key: String) -> bool {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .collection
+        .contains_key(&key)
+}
+
+/// rok.getRequestVar(key) — reads from the request variable scope.
+#[op2]
+#[string]
+pub fn op_rok_get_request_var(state: &OpState, #[string] key: String) -> String {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .request
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// True if the host environment snapshot holds key.
+#[op2(fast)]
+pub fn op_rok_has_process_env(state: &OpState, #[string] key: String) -> bool {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .process_env
+        .contains_key(&key)
+}
+
+/// rok.getProcessEnv(key) — reads the host environment snapshot.
+#[op2]
+#[string]
+pub fn op_rok_get_process_env(state: &OpState, #[string] key: String) -> String {
+    state
+        .borrow::<ScriptInputState>()
+        .variables
+        .process_env
         .get(&key)
         .cloned()
         .unwrap_or_default()
