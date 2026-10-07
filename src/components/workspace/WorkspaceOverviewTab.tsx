@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { collectionKeys, useCollections } from '@/lib/queries/collection-queries';
 import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
@@ -151,7 +152,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
               </p>
               {isCreating ? (
                 <div className='flex gap-2'>
-                  <input
+                  <Input
                     autoFocus
                     placeholder='Collection name'
                     value={newName}
@@ -163,7 +164,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                         setNewName('');
                       }
                     }}
-                    className='flex-1 rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                    className='flex-1 h-auto bg-transparent py-1.5 text-sm'
                   />
                   <Button
                     size='sm'

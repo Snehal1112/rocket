@@ -70,7 +70,7 @@ export function AgentChatPanel({
   };
 
   const handleSend = async () => {
-    if (!agentSession || agentSession.status !== 'active') return;
+    if (agentSession?.status !== 'active') return;
     const text = promptText.trim();
     if (!text) return;
     if (agentSession.messages.some((m) => m.streaming)) return;
@@ -181,6 +181,7 @@ export function AgentChatPanel({
           value={promptText}
           onChange={(e) => setPromptText(e.target.value)}
           placeholder='Ask the agent…'
+          autoCorrect='on'
           className='min-h-8 flex-1 resize-none text-sm'
           disabled={isStreaming}
         />
