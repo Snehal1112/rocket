@@ -1,17 +1,11 @@
 import { CollectionVariablesEditor } from '@/components/collections/CollectionVariablesEditor';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { CollectionVariable, FolderSettings } from '@/lib/tauri-api';
-
-interface VarsSectionProps {
-  collectionName: string;
-  folderPath: string;
-  settings: FolderSettings;
-  onChange: (patch: Partial<FolderSettings>) => void;
-}
+import type { CollectionVariable } from '@/lib/tauri-api';
+import type { FolderSectionProps } from './sections';
 
 /** Pre-request variables for every request in this folder and its sub-folders. */
-export function VarsSection({ settings, onChange }: VarsSectionProps) {
+export function VarsSection({ settings, onChange }: FolderSectionProps) {
   const handleChange = (variables: CollectionVariable[]) => onChange({ variables });
 
   return (

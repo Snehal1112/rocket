@@ -24,7 +24,8 @@ export interface FolderSectionProps {
   collectionName: string;
   /** Folder path relative to the collection root. */
   folderPath: string;
-  /** Supplied by the tab once plan 09 adds the settings hook. Placeholders ignore it. */
-  settings?: FolderSettings;
-  onChange?: (patch: Partial<FolderSettings>) => void;
+  /** The folder settings loaded by the tab. */
+  settings: FolderSettings;
+  /** Merges a partial change into the settings draft. */
+  onChange: (patch: Partial<FolderSettings>) => void;
 }
