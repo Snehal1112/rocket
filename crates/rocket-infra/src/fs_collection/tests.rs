@@ -2770,3 +2770,101 @@ fn script_rename_returns_a_normalised_path() {
         "lib/b.js"
     );
 }
+
+fn bruno_flow(yaml: &str) -> Option<String> {
+    let doc: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse opencollection.yml");
+    doc.get("extensions")
+        .and_then(|v| v.get("bruno"))
+        .and_then(|v| v.get("scripts"))
+        .and_then(|v| v.get("flow"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+#[test]
+fn settings_default_save_writes_no_bruno_extension() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let settings = repo.get_settings("col").expect("get");
+    assert_eq!(settings.script_flow, rocket_collection::ScriptFlow::Sandwich);
+    repo.save_settings("col", &settings).expect("save");
+    let yaml = fs::read_to_string(repo.settings_path("col")).expect("read");
+    assert!(!yaml.contains("bruno"), "no bruno key for sandwich: {yaml}");
+    assert!(!yaml.contains("flow"), "no flow key for sandwich: {yaml}");
+}
+
+#[test]
+fn settings_script_flow_reads_a_bruno_authored_file() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let path = repo.settings_path("col");
+    let existing = fs::read_to_string(&path).expect("read");
+    fs::write(
+        &path,
+        format!("{existing}extensions:\n  bruno:\n    scripts:\n      flow: sequential\n"),
+    )
+    .expect("write fixture");
+    let loaded = repo.get_settings("col").expect("get");
+    assert_eq!(loaded.script_flow, rocket_collection::ScriptFlow::Sequential);
+}
+
+#[test]
+fn settings_script_flow_sequential_roundtrips_and_keeps_other_extensions() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let path = repo.settings_path("col");
+    let existing = fs::read_to_string(&path).expect("read");
+    fs::write(
+        &path,
+        format!(
+            "{existing}extensions:\n  rocketapi:\n    sandboxMode: developer\n    keep: me\n    scripts:\n      additionalContextRoots:\n        - ../shared\n  bruno:\n    other: 1\n  other:\n    x: 1\n"
+        ),
+    )
+    .expect("write fixture");
+
+    let mut settings = repo.get_settings("col").expect("get");
+    assert_eq!(settings.sandbox_mode, SandboxMode::Developer);
+    assert_eq!(settings.script_context_roots, vec!["../shared"]);
+    settings.script_flow = rocket_collection::ScriptFlow::Sequential;
+    repo.save_settings("col", &settings).expect("save");
+
+    let loaded = repo.get_settings("col").expect("reload");
+    assert_eq!(loaded.script_flow, rocket_collection::ScriptFlow::Sequential);
+    assert_eq!(loaded.sandbox_mode, SandboxMode::Developer);
+    assert_eq!(loaded.script_context_roots, vec!["../shared"]);
+    let yaml = fs::read_to_string(&path).expect("read back");
+    assert_eq!(bruno_flow(&yaml).as_deref(), Some("sequential"), "{yaml}");
+    assert!(yaml.contains("keep: me"), "rocketapi keys kept: {yaml}");
+    assert!(yaml.contains("other: 1"), "bruno siblings kept: {yaml}");
+    assert!(yaml.contains("x: 1"), "foreign namespaces kept: {yaml}");
+
+    // A read-modify-write that only edits variables (the script-side
+    // `rok.setCollectionVar` path) keeps the flow.
+    let mut again = repo.get_settings("col").expect("get again");
+    again.variables.push(CollectionVariable {
+        key: "k".into(),
+        value: "v".into(),
+        initial_value: String::new(),
+        enabled: true,
+        secret: false,
+    });
+    repo.save_settings("col", &again).expect("save variables");
+    assert_eq!(
+        repo.get_settings("col").expect("reload").script_flow,
+        rocket_collection::ScriptFlow::Sequential
+    );
+}
+
+#[test]
+fn settings_script_flow_back_to_sandwich_removes_the_bruno_stub() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let mut settings = repo.get_settings("col").expect("get");
+    settings.script_flow = rocket_collection::ScriptFlow::Sequential;
+    repo.save_settings("col", &settings).expect("save sequential");
+    settings.script_flow = rocket_collection::ScriptFlow::Sandwich;
+    repo.save_settings("col", &settings).expect("save sandwich");
+    let yaml = fs::read_to_string(repo.settings_path("col")).expect("read");
+    assert!(!yaml.contains("bruno"), "bruno stub removed: {yaml}");
+    assert!(yaml.contains("sandboxMode: safe"), "rocketapi kept: {yaml}");
+}

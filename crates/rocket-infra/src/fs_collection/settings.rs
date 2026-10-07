@@ -121,6 +121,72 @@ fn set_script_roots_in_extensions(
     Some(serde_yaml::Value::Mapping(root))
 }
 
+/// Reads Bruno's script order from `extensions.bruno.scripts.flow`. A missing key, an
+/// unknown string or a value of the wrong type all mean `Sandwich`, Bruno's default.
+fn script_flow_from_extensions(extensions: &Option<serde_yaml::Value>) -> ScriptFlow {
+    match extensions
+        .as_ref()
+        .and_then(|v| v.get("bruno"))
+        .and_then(|v| v.get("scripts"))
+        .and_then(|v| v.get("flow"))
+        .and_then(|v| v.as_str())
+    {
+        Some("sequential") => ScriptFlow::Sequential,
+        _ => ScriptFlow::Sandwich,
+    }
+}
+
+/// Writes the script order to `extensions.bruno.scripts.flow`, keeping every other key.
+/// A value that already reads as `flow` is left as it is, so a save never rewrites it.
+/// `Sequential` writes `flow: sequential`. `Sandwich` is the default, so it removes the
+/// key and prunes the `scripts` and `bruno` mappings that this leaves empty.
+fn set_script_flow_in_extensions(
+    extensions: Option<serde_yaml::Value>,
+    flow: &ScriptFlow,
+) -> Option<serde_yaml::Value> {
+    if script_flow_from_extensions(&extensions) == *flow {
+        return extensions;
+    }
+    let mut root = match extensions {
+        Some(serde_yaml::Value::Mapping(map)) => map,
+        _ => serde_yaml::Mapping::new(),
+    };
+    let bruno_key = serde_yaml::Value::String("bruno".into());
+    let scripts_key = serde_yaml::Value::String("scripts".into());
+    let flow_key = serde_yaml::Value::String("flow".into());
+    let mut bruno = match root.get(&bruno_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    let mut scripts = match bruno.get(&scripts_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    match flow {
+        ScriptFlow::Sequential => {
+            scripts.insert(flow_key, serde_yaml::Value::String("sequential".into()));
+        }
+        ScriptFlow::Sandwich => {
+            scripts.remove(&flow_key);
+        }
+    }
+    if scripts.is_empty() {
+        bruno.remove(&scripts_key);
+    } else {
+        bruno.insert(scripts_key, serde_yaml::Value::Mapping(scripts));
+    }
+    if bruno.is_empty() {
+        root.remove(&bruno_key);
+    } else {
+        root.insert(bruno_key, serde_yaml::Value::Mapping(bruno));
+    }
+    if root.is_empty() {
+        None
+    } else {
+        Some(serde_yaml::Value::Mapping(root))
+    }
+}
+
 pub(super) fn get_settings(
     repo: &FsCollectionRepo,
     name: &str,
@@ -136,6 +202,7 @@ pub(super) fn get_settings(
 
     let sandbox_mode = sandbox_mode_from_extensions(&oc.extensions);
     let script_context_roots = script_roots_from_extensions(&oc.extensions);
+    let script_flow = script_flow_from_extensions(&oc.extensions);
 
     if let Some(defaults) = oc.request {
         Ok(CollectionSettings {
@@ -155,14 +222,14 @@ pub(super) fn get_settings(
                 .collect(),
             sandbox_mode,
             script_context_roots,
-            // Plan 03 reads this from `extensions.bruno.scripts.flow`.
-            script_flow: ScriptFlow::default(),
+            script_flow,
         })
     } else {
         Ok(CollectionSettings {
             docs: oc.docs,
             sandbox_mode,
             script_context_roots,
+            script_flow,
             ..CollectionSettings::default()
         })
     }
@@ -241,6 +308,7 @@ pub(super) fn save_settings(
     oc.extensions = set_sandbox_mode_in_extensions(oc.extensions.take(), settings.sandbox_mode);
     oc.extensions =
         set_script_roots_in_extensions(oc.extensions.take(), &settings.script_context_roots);
+    oc.extensions = set_script_flow_in_extensions(oc.extensions.take(), &settings.script_flow);
 
     let yaml = serde_yaml::to_string(&oc).map_err(|e| {
         DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}"))
@@ -311,5 +379,122 @@ mod tests {
             vec!["../shared".to_string(), "./more".to_string()]
         );
         assert!(script_roots_from_extensions(&None).is_empty());
+    }
+
+    fn ext(yaml: &str) -> Option<serde_yaml::Value> {
+        Some(serde_yaml::from_str(yaml).expect("parse fixture yaml"))
+    }
+
+    #[test]
+    fn script_flow_from_extensions_defaults_to_sandwich_for_absent_unknown_or_wrong_type() {
+        assert_eq!(script_flow_from_extensions(&None), ScriptFlow::Sandwich);
+        for yaml in [
+            "rocketapi:\n  sandboxMode: safe\n",
+            "bruno:\n  scripts:\n    flow: yolo\n",
+            "bruno:\n  scripts:\n    flow: 1\n",
+            "bruno:\n  scripts:\n    - flow\n",
+            "bruno: 7\n",
+            "- bruno\n",
+        ] {
+            assert_eq!(
+                script_flow_from_extensions(&ext(yaml)),
+                ScriptFlow::Sandwich,
+                "{yaml}"
+            );
+        }
+        assert_eq!(
+            script_flow_from_extensions(&ext("bruno:\n  scripts:\n    flow: sequential\n")),
+            ScriptFlow::Sequential
+        );
+        assert_eq!(
+            script_flow_from_extensions(&ext("bruno:\n  scripts:\n    flow: sandwich\n")),
+            ScriptFlow::Sandwich
+        );
+    }
+
+    #[test]
+    fn set_script_flow_sequential_keeps_sibling_keys() {
+        let input = ext(
+            "rocketapi:\n  sandboxMode: developer\n  keep: me\n  scripts:\n    additionalContextRoots:\n      - ../shared\nbruno:\n  other: 1\n  scripts:\n    keep: true\nsomeOtherTool:\n  foo: bar\n",
+        );
+        let out = set_script_flow_in_extensions(input, &ScriptFlow::Sequential)
+            .expect("extensions value");
+        let expected: serde_yaml::Value = serde_yaml::from_str(
+            "rocketapi:\n  sandboxMode: developer\n  keep: me\n  scripts:\n    additionalContextRoots:\n      - ../shared\nbruno:\n  other: 1\n  scripts:\n    keep: true\n    flow: sequential\nsomeOtherTool:\n  foo: bar\n",
+        )
+        .expect("parse expected yaml");
+        assert_eq!(out, expected);
+        assert_eq!(
+            script_flow_from_extensions(&Some(out)),
+            ScriptFlow::Sequential
+        );
+    }
+
+    #[test]
+    fn set_script_flow_sequential_on_empty_extensions_creates_only_the_flow_key() {
+        let out =
+            set_script_flow_in_extensions(None, &ScriptFlow::Sequential).expect("extensions value");
+        let expected: serde_yaml::Value =
+            serde_yaml::from_str("bruno:\n  scripts:\n    flow: sequential\n")
+                .expect("parse expected yaml");
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn set_script_flow_sandwich_removes_only_the_flow_key() {
+        let out = set_script_flow_in_extensions(
+            ext("bruno:\n  other: 1\n  scripts:\n    flow: sequential\n    keep: true\n"),
+            &ScriptFlow::Sandwich,
+        )
+        .expect("extensions value");
+        let expected: serde_yaml::Value =
+            serde_yaml::from_str("bruno:\n  other: 1\n  scripts:\n    keep: true\n")
+                .expect("parse expected yaml");
+        assert_eq!(out, expected);
+
+        // Emptied `scripts` and `bruno` stubs are pruned, siblings stay.
+        let out = set_script_flow_in_extensions(
+            ext("rocketapi:\n  sandboxMode: safe\nbruno:\n  scripts:\n    flow: sequential\n"),
+            &ScriptFlow::Sandwich,
+        )
+        .expect("extensions value");
+        let expected: serde_yaml::Value =
+            serde_yaml::from_str("rocketapi:\n  sandboxMode: safe\n").expect("parse expected yaml");
+        assert_eq!(out, expected);
+
+        // Nothing left at all gives no `extensions` key.
+        assert_eq!(
+            set_script_flow_in_extensions(
+                ext("bruno:\n  scripts:\n    flow: sequential\n"),
+                &ScriptFlow::Sandwich
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn set_script_flow_sandwich_leaves_matching_values_untouched() {
+        assert_eq!(
+            set_script_flow_in_extensions(None, &ScriptFlow::Sandwich),
+            None
+        );
+        for yaml in [
+            "rocketapi:\n  sandboxMode: safe\n",
+            "bruno:\n  scripts:\n    flow: sandwich\n",
+            "bruno:\n  scripts:\n    flow: yolo\n",
+            "bruno:\n  scripts:\n    flow: 1\n",
+        ] {
+            let input = ext(yaml);
+            assert_eq!(
+                set_script_flow_in_extensions(input.clone(), &ScriptFlow::Sandwich),
+                input,
+                "{yaml}"
+            );
+        }
+        let sequential = ext("bruno:\n  scripts:\n    flow: sequential\n  other: 1\n");
+        assert_eq!(
+            set_script_flow_in_extensions(sequential.clone(), &ScriptFlow::Sequential),
+            sequential
+        );
     }
 }
