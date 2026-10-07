@@ -29,7 +29,9 @@ use std::sync::Arc;
 
 pub mod websocket_resolution;
 pub(crate) mod script_chain;
-use self::script_chain::{folder_labels, ChainedScript, PhaseScripts};
+use self::script_chain::{
+    folder_labels, folder_mentions, script_mentions, ChainedScript, PhaseScripts,
+};
 
 /// Request path prefix of an inline Flow request. It names no file, so it has no folder chain.
 pub(crate) const FLOW_INLINE_PATH_PREFIX: &str = "__flow_inline__/";
@@ -521,13 +523,23 @@ impl RequestExecutionService {
         if scripts
             .iter()
             .filter_map(|script| script.as_deref())
-            .any(|script| {
-                script
-                    .lines()
-                    .any(|line| !line.trim_start().starts_with("//") && line.contains(&needle))
-            })
+            .any(|script| script_mentions(script, &needle))
         {
             return true;
+        }
+        // Folder scripts run, and folder headers and auth are sent, with this
+        // request too. A chain that cannot be read is not checked here, because
+        // `begin_phases` then fails the send with an error naming the folder.
+        if let Ok(chain) =
+            self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())
+        {
+            let with_scripts = !input.skip_folder_scripts;
+            if chain
+                .iter()
+                .any(|folder| folder_mentions(folder, &needle, with_scripts))
+            {
+                return true;
+            }
         }
         let mut rest = input.clone();
         rest.pre_request_script = None;

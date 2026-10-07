@@ -153,6 +153,35 @@ pub(crate) fn folder_labels(request_path: &str, count: usize) -> Vec<String> {
     }
 }
 
+/// Whether a script uses `needle` on a line that is not a full-line `//` comment.
+pub(crate) fn script_mentions(script: &str, needle: &str) -> bool {
+    script
+        .lines()
+        .any(|line| !line.trim_start().starts_with("//") && line.contains(needle))
+}
+
+/// Whether a folder sends or reads `needle`: in its scripts (when `with_scripts`
+/// is set), its headers or its auth. Folder variables are checked with the
+/// other variable scopes. Like the request check, this may over-match, never
+/// under-match.
+pub(crate) fn folder_mentions(folder: &FolderSettings, needle: &str, with_scripts: bool) -> bool {
+    let scripts = [
+        &folder.pre_request_script,
+        &folder.post_response_script,
+        &folder.tests_script,
+    ];
+    if with_scripts
+        && scripts
+            .iter()
+            .filter_map(|script| script.as_deref())
+            .any(|script| script_mentions(script, needle))
+    {
+        return true;
+    }
+    serde_json::to_string(&folder.headers).map_or(true, |text| text.contains(needle))
+        || serde_json::to_string(&folder.auth).map_or(true, |text| text.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,5 +871,181 @@ mod service_tests {
             1,
             "headers, auth and scripts share one chain read"
         );
+    }
+}
+
+#[cfg(test)]
+mod secret_scan_tests {
+    use super::service_tests::input;
+    use super::*;
+    use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+    use crate::test_doubles::{
+        FakeSecretManagerRepo, FakeSecretStore, InMemoryCollectionRepo, InMemoryHistoryRepo,
+        NullCookieRepo, RecordingExecutor, SharedCollectionRepo, SharedExecutor, SharedHistoryRepo,
+        StaticEnvRepo,
+    };
+    use async_trait::async_trait;
+    use rocket_collection::Collection;
+    use rocket_environment::{
+        Environment, ExternalSecretBinding, ExternalSecretRef, SecretManagerConnection,
+        VaultSecretFetcher,
+    };
+    use rocket_shared::error::{DomainError, DomainResult};
+    use rocket_shared::events::NullEventPublisher;
+    use rocket_shared::types::{Auth, Header};
+    use std::sync::Arc;
+
+    /// Every secret fetch fails, as when the vault rejects the credentials.
+    struct FailingFetcher;
+
+    #[async_trait]
+    impl VaultSecretFetcher for FailingFetcher {
+        async fn list_secrets(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<Vec<ExternalSecretRef>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_secret_value(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+            _secret_id: &str,
+        ) -> DomainResult<Option<String>> {
+            Err(DomainError::Internal(
+                "vault rejected the credentials".into(),
+            ))
+        }
+
+        async fn test_connection(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    fn connection() -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: "conn-1".to_string(),
+            label: "Test".to_string(),
+            base_url: "https://vault.internal:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
+        }
+    }
+
+    /// Environment `prod` with one binding, `payments.apiKey`.
+    fn environment() -> Environment {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(ExternalSecretBinding {
+            alias: "payments".to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "prod-vault".to_string(),
+            secret_names: vec![ExternalSecretRef {
+                name: "apiKey".to_string(),
+                secret_id: "sec-1".to_string(),
+            }],
+        });
+        env
+    }
+
+    fn service(folder: FolderSettings) -> (RequestExecutionService, Arc<RecordingExecutor>) {
+        let repo =
+            InMemoryCollectionRepo::with_folder_chain(Collection::new("col"), vec![folder], None);
+        let executor = RecordingExecutor::new();
+        let svc = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(environment())),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(repo)),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(connection())),
+            Arc::new(FakeSecretStore("client-secret".into())),
+            Arc::new(FailingFetcher),
+        );
+        (svc, executor)
+    }
+
+    /// The request itself never mentions `payments`.
+    fn prod_input() -> ExecuteRequestInput {
+        let mut inp = input(None, None, None);
+        inp.environment_name = Some("prod".into());
+        inp
+    }
+
+    #[tokio::test]
+    async fn a_folder_script_reading_a_failing_secret_blocks_the_send() {
+        let (svc, executor) = service(FolderSettings {
+            pre_request_script: Some("rok.getSecretVar(\"payments.apiKey\")".into()),
+            ..FolderSettings::default()
+        });
+        assert!(svc.execute(prod_input()).await.is_err());
+        assert!(executor.sent_urls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_commented_out_folder_secret_read_does_not_block_the_send() {
+        let (svc, executor) = service(FolderSettings {
+            tests_script: Some("  // rok.getSecretVar(\"payments.apiKey\")\nconsole.log(1)".into()),
+            ..FolderSettings::default()
+        });
+        assert!(svc.execute(prod_input()).await.is_ok());
+        assert_eq!(executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_folder_header_naming_a_failing_secret_blocks_the_send() {
+        let (svc, executor) = service(FolderSettings {
+            headers: vec![Header::new("X-Api-Key", "{{payments.apiKey}}")],
+            ..FolderSettings::default()
+        });
+        assert!(svc.execute(prod_input()).await.is_err());
+        assert!(executor.sent_urls().is_empty());
+    }
+
+    #[test]
+    fn folder_mentions_skips_scripts_only_when_asked() {
+        let scripted = FolderSettings {
+            post_response_script: Some("rok.getSecretVar('payments.apiKey')".into()),
+            ..FolderSettings::default()
+        };
+        assert!(folder_mentions(&scripted, "payments.", true));
+        assert!(!folder_mentions(&scripted, "payments.", false));
+
+        let with_auth = FolderSettings {
+            auth: Some(Auth::Bearer {
+                token: "{{payments.token}}".into(),
+            }),
+            ..FolderSettings::default()
+        };
+        assert!(folder_mentions(&with_auth, "payments.", false));
+        assert!(!folder_mentions(
+            &FolderSettings::default(),
+            "payments.",
+            true
+        ));
+    }
+
+    #[test]
+    fn script_mentions_ignores_full_line_comments() {
+        assert!(script_mentions(
+            "const k = rok.getSecretVar('payments.apiKey');",
+            "payments."
+        ));
+        assert!(!script_mentions(
+            "   // rok.getSecretVar('payments.apiKey')",
+            "payments."
+        ));
     }
 }
