@@ -192,7 +192,7 @@ function deriveSegments(
               else break;
             }
             const req = items.find((it) => it.type === 'request' && it.uid === item.id);
-            if (!req || req.type !== 'request') return;
+            if (req?.type !== 'request') return;
             nav.openTab({
               id: req.uid,
               title: req.name,
@@ -255,7 +255,7 @@ function deriveSegments(
             else break;
           }
           const req = items.find((it) => it.type === 'request' && it.uid === item.id);
-          if (!req || req.type !== 'request') return;
+          if (req?.type !== 'request') return;
           nav.openTab({
             id: req.uid,
             title: req.name,

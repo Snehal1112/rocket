@@ -195,7 +195,7 @@ export function CollectionsSidebar() {
       };
 
       const source = findRequest(items, path.split('/').pop() ?? path);
-      if (!source || source.type !== 'request') return;
+      if (source?.type !== 'request') return;
 
       // Collect existing names at the top level to find a unique copy name.
       const existing = new Set(

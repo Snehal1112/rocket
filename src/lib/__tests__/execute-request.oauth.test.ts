@@ -108,7 +108,7 @@ function storedAuth(): AuthState {
   const { root } = usePaneStore.getState();
   if (root.type !== 'leaf') throw new Error('expected a single leaf');
   const tab = root.tabs.find((t) => t.id === TAB_ID);
-  if (!tab || tab.tabType !== 'request') throw new Error('request tab missing');
+  if (tab?.tabType !== 'request') throw new Error('request tab missing');
   return tab.request.auth;
 }
 
@@ -185,56 +185,56 @@ describe('sendRequest OAuth2 auto-refresh / auto-fetch', () => {
     expect(sentAuth()).toMatchObject({ authType: 'bearer', token: 'new-access' });
   });
 
-  it.each([
-    'client_credentials',
-    'resource_owner_password_credentials',
-  ])('(b) auto-fetches a missing token for %s with a resolved request', async (flow) => {
-    vi.mocked(oauth2GetToken).mockResolvedValue({
-      access_token: 'fetched',
-      token_type: 'Bearer',
-      expires_in: 300,
-    });
-    const req = openTab(
-      requestWith(oauthAuth(flow, { autoFetchToken: true, autoRefreshToken: false })),
-    );
+  it.each(['client_credentials', 'resource_owner_password_credentials'])(
+    '(b) auto-fetches a missing token for %s with a resolved request',
+    async (flow) => {
+      vi.mocked(oauth2GetToken).mockResolvedValue({
+        access_token: 'fetched',
+        token_type: 'Bearer',
+        expires_in: 300,
+      });
+      const req = openTab(
+        requestWith(oauthAuth(flow, { autoFetchToken: true, autoRefreshToken: false })),
+      );
 
-    await sendRequest(TAB_ID, req);
+      await sendRequest(TAB_ID, req);
 
-    expect(oauth2GetToken).toHaveBeenCalledTimes(1);
-    expect(oauth2GetToken).toHaveBeenCalledWith(
-      expect.objectContaining({
-        grantType: flow === 'client_credentials' ? flow : 'password',
-        tokenUrl: 'https://idp.test/token',
-        clientId: 'client-123',
-        clientSecret: 's3cret',
-        collection: 'api',
-        environmentName: 'dev',
-        requestPath: 'ping.yml',
-      }),
-    );
-    expect(oauth2RefreshToken).not.toHaveBeenCalled();
-    expect(storedAuth().oauth2).toMatchObject({
-      accessToken: 'fetched',
-      expiresIn: 300,
-      tokenAcquiredAt: NOW_S,
-    });
-    expect(sentAuth()).toMatchObject({ authType: 'bearer', token: 'fetched' });
-  });
+      expect(oauth2GetToken).toHaveBeenCalledTimes(1);
+      expect(oauth2GetToken).toHaveBeenCalledWith(
+        expect.objectContaining({
+          grantType: flow === 'client_credentials' ? flow : 'password',
+          tokenUrl: 'https://idp.test/token',
+          clientId: 'client-123',
+          clientSecret: 's3cret',
+          collection: 'api',
+          environmentName: 'dev',
+          requestPath: 'ping.yml',
+        }),
+      );
+      expect(oauth2RefreshToken).not.toHaveBeenCalled();
+      expect(storedAuth().oauth2).toMatchObject({
+        accessToken: 'fetched',
+        expiresIn: 300,
+        tokenAcquiredAt: NOW_S,
+      });
+      expect(sentAuth()).toMatchObject({ authType: 'bearer', token: 'fetched' });
+    },
+  );
 
-  it.each([
-    'authorization_code',
-    'implicit',
-  ])('(c) never auto-fetches the interactive %s grant on send', async (flow) => {
-    const req = openTab(
-      requestWith(oauthAuth(flow, { autoFetchToken: true, autoRefreshToken: true })),
-    );
+  it.each(['authorization_code', 'implicit'])(
+    '(c) never auto-fetches the interactive %s grant on send',
+    async (flow) => {
+      const req = openTab(
+        requestWith(oauthAuth(flow, { autoFetchToken: true, autoRefreshToken: true })),
+      );
 
-    await sendRequest(TAB_ID, req);
+      await sendRequest(TAB_ID, req);
 
-    expect(oauth2GetToken).not.toHaveBeenCalled();
-    expect(oauth2RefreshToken).not.toHaveBeenCalled();
-    expect(executeRequest).toHaveBeenCalledTimes(1);
-  });
+      expect(oauth2GetToken).not.toHaveBeenCalled();
+      expect(oauth2RefreshToken).not.toHaveBeenCalled();
+      expect(executeRequest).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('(d) a failed refresh is non-fatal: warns and sends with the original auth', async () => {
     vi.mocked(oauth2RefreshToken).mockRejectedValue(new Error('idp down'));
