@@ -321,6 +321,10 @@ impl ImportService {
                 if p.file_name().is_some_and(|n| n == "environments") {
                     continue;
                 }
+                // Never import dependency trees.
+                if p.file_name().is_some_and(|n| n == "node_modules") {
+                    continue;
+                }
                 // Create subfolder metadata and recurse.
                 let folder_rel = p.strip_prefix(root).unwrap_or(&p);
                 let folder_path = folder_rel.to_string_lossy().to_string();
@@ -331,15 +335,17 @@ impl ImportService {
 
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
             // A gRPC request points at a `.proto` file by path, so the proto files
-            // travel with the requests. They are not requests and are not counted.
-            if ext == "proto" {
+            // travel with the requests. Shared `.js` script files are loaded by scripts
+            // with `require()`, so they travel too. Neither is a request or counted.
+            if ext == "proto" || ext == "js" {
+                let label = if ext == "js" { ".js" } else { ".proto" };
                 let rel = p.strip_prefix(root).unwrap_or(&p);
                 let dest = self
                     .workspace_path
                     .join("collections")
                     .join(collection_name)
                     .join(rel);
-                copy_proto_file(&p, &dest, rel, report);
+                copy_support_file(&p, &dest, rel, label, report);
                 continue;
             }
             if !matches!(ext, "bru" | "yml" | "yaml") {
@@ -812,16 +818,21 @@ impl ImportService {
             let dest_path = dest_root.join(rel);
 
             if src_path.is_dir() {
+                // Never import dependency trees.
+                if src_path.file_name().is_some_and(|n| n == "node_modules") {
+                    continue;
+                }
                 std::fs::create_dir_all(&dest_path)?;
                 self.copy_collection_files(src_root, &src_path, dest_root, report)?;
                 continue;
             }
 
             let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            // gRPC requests refer to `.proto` files by path, so copy them as well.
-            // They are not requests and are not counted.
-            if ext == "proto" {
-                copy_proto_file(&src_path, &dest_path, rel, report);
+            // gRPC requests refer to `.proto` files by path, and scripts `require()` shared
+            // `.js` files, so copy both as well. They are not requests and are not counted.
+            if ext == "proto" || ext == "js" {
+                let label = if ext == "js" { ".js" } else { ".proto" };
+                copy_support_file(&src_path, &dest_path, rel, label, report);
                 continue;
             }
             if !matches!(ext, "yml" | "yaml") {
@@ -904,10 +915,10 @@ fn merge_root_defaults(src: &Path, dest: &Path, report: &mut ImportReport) {
     }
 }
 
-/// Copies a `.proto` file next to the requests. A symlink is never followed, because a
-/// cloned collection could point one at a private file, and a copy that fails is reported
-/// instead of aborting the whole import.
-fn copy_proto_file(src: &Path, dest: &Path, rel: &Path, report: &mut ImportReport) {
+/// Copies a support file (`.proto` or `.js`, named by `label`) next to the requests. A
+/// symlink is never followed, because a cloned collection could point one at a private
+/// file, and a copy that fails is reported instead of aborting the whole import.
+fn copy_support_file(src: &Path, dest: &Path, rel: &Path, label: &str, report: &mut ImportReport) {
     let mut skip = |why: String| {
         report.skipped.push(SkippedItem {
             path: rel.to_string_lossy().to_string(),
@@ -916,21 +927,21 @@ fn copy_proto_file(src: &Path, dest: &Path, rel: &Path, report: &mut ImportRepor
     };
     match std::fs::symlink_metadata(src) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            skip("a symlinked .proto file is not copied".into());
+            skip(format!("a symlinked {label} file is not copied"));
         }
         Ok(meta) if meta.is_file() => {
             if let Some(parent) = dest.parent() {
                 if let Err(e) = std::fs::create_dir_all(parent) {
-                    skip(format!("could not copy the .proto file: {e}"));
+                    skip(format!("could not copy the {label} file: {e}"));
                     return;
                 }
             }
             if let Err(e) = std::fs::copy(src, dest) {
-                skip(format!("could not copy the .proto file: {e}"));
+                skip(format!("could not copy the {label} file: {e}"));
             }
         }
         Ok(_) => {}
-        Err(e) => skip(format!("could not read the .proto file: {e}")),
+        Err(e) => skip(format!("could not read the {label} file: {e}")),
     }
 }
 

@@ -798,3 +798,113 @@ fn opencollection_import_keeps_collection_level_defaults_and_docs() {
     assert_eq!(settings.docs.as_deref(), Some("Collection notes"));
 }
 
+
+// ──────────────────────────────────────────────────────────
+// Shared `.js` script files travel with the collection
+// ──────────────────────────────────────────────────────────
+
+const UTIL_JS: &[u8] = b"module.exports = { id: (x) => x };\r\n// unicode: \xc3\xa9\n";
+
+fn legacy_js_collection(root: &Path) {
+    std::fs::create_dir_all(root.join("shared-scripts")).unwrap();
+    std::fs::create_dir_all(root.join("folder")).unwrap();
+    std::fs::write(
+        root.join("bruno.json"),
+        r#"{ "name": "js-api", "version": "1", "type": "collection" }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("shared-scripts/util.js"), UTIL_JS).unwrap();
+    std::fs::write(
+        root.join("folder/req.bru"),
+        "meta {\n  name: Req\n  type: http\n  seq: 1\n}\n\nget {\n  url: https://example.com\n  body: none\n  auth: none\n}\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn legacy_bruno_import_copies_js_files_verbatim_and_does_not_count_them() {
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("js-api");
+    legacy_js_collection(&root);
+
+    let ws = TempDir::new().unwrap();
+    let report = make_service(ws.path())
+        .import_collection(&root, "default")
+        .unwrap();
+
+    assert_eq!(report.imported, 1, "skipped: {:?}", report.skipped);
+    assert_eq!(report.total_files, 1);
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+    let name = &report.created_collections[0];
+    let copied = std::fs::read(
+        ws.path()
+            .join("collections")
+            .join(name)
+            .join("shared-scripts/util.js"),
+    )
+    .expect("util.js is copied");
+    assert_eq!(copied, UTIL_JS);
+}
+
+#[test]
+fn legacy_bruno_import_does_not_copy_node_modules() {
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("js-api");
+    legacy_js_collection(&root);
+    std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+    std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports = 1;").unwrap();
+
+    let ws = TempDir::new().unwrap();
+    let report = make_service(ws.path())
+        .import_collection(&root, "default")
+        .unwrap();
+
+    let col = ws.path().join("collections").join(&report.created_collections[0]);
+    assert!(col.join("shared-scripts/util.js").exists());
+    assert!(!col.join("node_modules").exists(), "node_modules is never imported");
+}
+
+#[test]
+fn opencollection_import_copies_js_files_and_skips_node_modules() {
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("oc-js");
+    make_modern_collection_dir(&root, "oc-js", 2);
+    std::fs::create_dir_all(root.join("shared-scripts")).unwrap();
+    std::fs::write(root.join("shared-scripts/util.js"), UTIL_JS).unwrap();
+    std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+    std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports = 1;").unwrap();
+
+    let ws = TempDir::new().unwrap();
+    let report = make_service(ws.path())
+        .import_collection(&root, "default")
+        .unwrap();
+
+    assert_eq!(report.imported, 2, "js files are not requests");
+    let col = ws.path().join("collections").join(&report.created_collections[0]);
+    assert_eq!(std::fs::read(col.join("shared-scripts/util.js")).unwrap(), UTIL_JS);
+    assert!(!col.join("node_modules").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_js_file_is_skipped_and_reported() {
+    let src = TempDir::new().unwrap();
+    let root = src.path().join("js-api");
+    legacy_js_collection(&root);
+    let secret = src.path().join("secret.txt");
+    std::fs::write(&secret, "private").unwrap();
+    std::os::unix::fs::symlink(&secret, root.join("shared-scripts/link.js")).unwrap();
+
+    let ws = TempDir::new().unwrap();
+    let report = make_service(ws.path())
+        .import_collection(&root, "default")
+        .unwrap();
+
+    let col = ws.path().join("collections").join(&report.created_collections[0]);
+    assert!(!col.join("shared-scripts/link.js").exists());
+    assert!(
+        report.skipped.iter().any(|s| s.path.ends_with("link.js")),
+        "{:?}",
+        report.skipped
+    );
+}
