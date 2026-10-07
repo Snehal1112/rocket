@@ -5,11 +5,12 @@ use dashmap::DashMap;
 
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
+    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
 pub(crate) mod folder_file;
+mod folder_settings;
 mod folders;
 mod paths;
 mod requests;
@@ -292,6 +293,23 @@ impl CollectionRepository for FsCollectionRepo {
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
         variables::save_folder_variables(self, collection, folder_path, vars)
+    }
+
+    fn get_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<FolderSettings> {
+        folder_settings::get_folder_settings(self, collection, folder_path)
+    }
+
+    fn save_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        settings: &FolderSettings,
+    ) -> DomainResult<()> {
+        folder_settings::save_folder_settings(self, collection, folder_path, settings)
     }
 
     fn get_request_variables(

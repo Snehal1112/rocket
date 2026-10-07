@@ -5,11 +5,12 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::oc::{
-    OcFolder, OcFolderInfo, OcGraphQLRequest, OcGraphQLRequestRuntime, OcHttpRequest,
-    OcGrpcRequest, OcHttpRequestRuntime, OcRequestDefaults, OcVariable, OcWebSocketRequest,
+    OcGraphQLRequest, OcGraphQLRequestRuntime, OcHttpRequest, OcGrpcRequest,
+    OcHttpRequestRuntime, OcRequestDefaults, OcVariable, OcWebSocketRequest,
 };
 
-use super::folder_file::{parse_folder_yml, read_folder_yml, write_folder_yml};
+use super::folder_file::parse_folder_yml;
+use super::folder_settings::{edit_folder_yml, get_folder_settings};
 use super::paths::resolve_request_path;
 use super::FsCollectionRepo;
 
@@ -74,46 +75,20 @@ pub(super) fn save_folder_variables(
     folder_path: &str,
     vars: Vec<CollectionVariable>,
 ) -> DomainResult<()> {
-    Collection::validate_name(collection)?;
-    let mutex = repo.collection_mutex(collection);
-    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
-    let collection_dir = repo.collection_path(collection);
-    let folder_dir = if folder_path.is_empty() {
-        collection_dir.clone()
-    } else {
-        repo.validate_path(&collection_dir, std::path::Path::new(folder_path))?
-    };
-    let folder_yml_path = folder_dir.join("folder.yml");
-    let mut oc_folder = if folder_yml_path.exists() {
-        read_folder_yml(&folder_yml_path)?
-    } else {
-        let name = folder_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_string();
-        OcFolder {
-            info: OcFolderInfo {
-                name,
-                ..OcFolderInfo::default()
-            },
-            items: None,
-            request: None,
-            docs: None,
-        }
-    };
     let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
-    let req_defaults = oc_folder.request.take().unwrap_or_default();
-    oc_folder.request = Some(OcRequestDefaults {
-        variables: if oc_vars.is_empty() {
-            None
-        } else {
-            Some(oc_vars)
-        },
-        ..req_defaults
-    });
-    write_folder_yml(&folder_yml_path, &oc_folder)?;
-    Ok(())
+    // Only `request.variables` changes. Docs, scripts and auth stay exactly as they
+    // are on disk, and a folder directory that does not exist is still created.
+    edit_folder_yml(repo, collection, folder_path, false, move |oc_folder| {
+        let req_defaults = oc_folder.request.take().unwrap_or_default();
+        oc_folder.request = Some(OcRequestDefaults {
+            variables: if oc_vars.is_empty() {
+                None
+            } else {
+                Some(oc_vars)
+            },
+            ..req_defaults
+        });
+    })
 }
 
 pub(super) fn get_folder_variables(
@@ -121,26 +96,7 @@ pub(super) fn get_folder_variables(
     collection: &str,
     folder_path: &str,
 ) -> DomainResult<Vec<CollectionVariable>> {
-    Collection::validate_name(collection)?;
-    let collection_dir = repo.collection_path(collection);
-    let folder_dir = if folder_path.is_empty() {
-        collection_dir.clone()
-    } else {
-        repo.validate_path(&collection_dir, std::path::Path::new(folder_path))?
-    };
-    let folder_yml = folder_dir.join("folder.yml");
-    if !folder_yml.exists() {
-        return Ok(vec![]);
-    }
-    let oc_folder = read_folder_yml(&folder_yml)?;
-    let vars = oc_folder
-        .request
-        .and_then(|r| r.variables)
-        .unwrap_or_default()
-        .into_iter()
-        .map(CollectionVariable::from)
-        .collect();
-    Ok(vars)
+    Ok(get_folder_settings(repo, collection, folder_path)?.variables)
 }
 
 pub(super) fn get_request_variables(
