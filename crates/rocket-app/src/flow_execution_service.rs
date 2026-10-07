@@ -74,6 +74,33 @@ fn captured_output_response_json(output: &CapturedOutput) -> DomainResult<String
         .map_err(|e| DomainError::Internal(format!("failed to serialize captured output: {e}")))
 }
 
+/// The `value_type` of a Transform result that is not a string. Its text is
+/// compact JSON, and scripts read it parsed.
+const JSON_VALUE_TYPE: &str = "json";
+
+/// How a Flow script reads `response.body`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScriptBody {
+    /// JSON text is parsed. Used for responses and non-string Transform results.
+    Parsed,
+    /// The text stays a string, so `2.10` or `null` reach the script unchanged.
+    /// Only text that looks like a JSON object or array is parsed, so its
+    /// fields can still be read.
+    Text,
+}
+
+/// Picks how the scripts that read `output` see its body. Input, Auth and
+/// Output values and string Transform results are text.
+fn body_mode(output: &CapturedOutput) -> ScriptBody {
+    match output {
+        CapturedOutput::Request(_) => ScriptBody::Parsed,
+        CapturedOutput::Value(value) if value.value_type() == Some(JSON_VALUE_TYPE) => {
+            ScriptBody::Parsed
+        }
+        CapturedOutput::Value(_) => ScriptBody::Text,
+    }
+}
+
 /// How a Flow script's result is turned into the value the caller needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowCoercion {
@@ -94,8 +121,13 @@ pub enum FlowCoercion {
 /// without running the code: one expression first, then the same without a
 /// trailing `;`, then a script that sends its value with `return`. The chosen
 /// form then runs exactly once. Only the Flow entry points use this. The Vars
-/// tab keeps `res.body` syntax.
-fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
+/// tab keeps `res.body` syntax. `body_mode` decides whether `response.body`
+/// is parsed JSON or the raw text.
+fn flow_script(
+    source: &str,
+    coercion: FlowCoercion,
+    body_mode: ScriptBody,
+) -> DomainResult<String> {
     let literal = serde_json::to_string(source)
         .map_err(|e| DomainError::Internal(format!("failed to encode flow script: {e}")))?;
     // The coercion text keeps the `!!(` and `String(` markers the scripted
@@ -105,6 +137,13 @@ fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
         FlowCoercion::Bool => ("!!(", ")"),
         FlowCoercion::Str => ("String(", ")"),
         FlowCoercion::Required => ("__requireValue(", ")"),
+    };
+    // Text mode reads the raw body. Only object or array text is parsed.
+    let body = match body_mode {
+        ScriptBody::Parsed => "res.getBody()",
+        ScriptBody::Text => {
+            "((raw) => {\n    const t = raw.trim();\n    if (t.startsWith('{') || t.startsWith('[')) {\n      try { return JSON.parse(raw); } catch (e) { return raw; }\n    }\n    return raw;\n  })(res.getBody({ raw: true }))"
+        }
     };
     Ok(format!(
         r#"(() => {{
@@ -130,7 +169,7 @@ fn flow_script(source: &str, coercion: FlowCoercion) -> DomainResult<String> {
     status: res.getStatus(),
     statusText: res.getStatusText(),
     headers: res.getHeaders(),
-    body: res.getBody(),
+    body: {body},
     duration_ms: res.getResponseTime(),
   }};
   return {open}fn(response){close};
@@ -193,7 +232,8 @@ impl RequestExecutionService {
     /// script-engine mechanism `evaluate_var_expression` uses for the Vars
     /// tab's preview — not a second sandbox invocation path. The expression
     /// sees a `response` object with `status`, `statusText`, `headers`,
-    /// `body` (parsed JSON, else text) and `duration_ms`.
+    /// `body` and `duration_ms`. A response body is parsed JSON, else text
+    /// (see `ScriptBody` for Input and Transform values).
     ///
     /// A string result is returned as-is and other JSON values are
     /// stringified. A `null` or `undefined` result is an `InvalidInput`
@@ -205,20 +245,13 @@ impl RequestExecutionService {
         expression: &str,
         secret_values: &HashSet<String>,
     ) -> FlowScriptOutcome {
-        let script = match flow_script(expression, FlowCoercion::Raw) {
-            Ok(script) => script,
-            Err(e) => return FlowScriptOutcome::failed(e),
-        };
-        let response_json = match captured_output_response_json(output) {
-            Ok(json) => json,
-            Err(e) => return FlowScriptOutcome::failed(e),
-        };
-        let (result, entries) = self
-            .evaluate_expression_with_logs(
+        let (result, logs) = self
+            .run_flow_script(
                 collection,
-                &script,
-                &response_json,
-                secret_values.clone(),
+                output,
+                expression,
+                FlowCoercion::Raw,
+                secret_values,
             )
             .await;
         let result = result.and_then(|value| match value {
@@ -230,10 +263,42 @@ impl RequestExecutionService {
             serde_json::Value::String(s) => Ok(s),
             other => Ok(other.to_string()),
         });
-        FlowScriptOutcome {
-            result,
-            logs: to_flow_logs(entries),
-        }
+        FlowScriptOutcome { result, logs }
+    }
+
+    /// Runs one Flow script against `output` and returns its raw JSON result
+    /// and console logs. `response.body` follows `body_mode(output)` for wires
+    /// and Transforms. If and Switch conditions always read parsed values.
+    async fn run_flow_script(
+        &self,
+        collection: &str,
+        output: &CapturedOutput,
+        source: &str,
+        coercion: FlowCoercion,
+        secret_values: &HashSet<String>,
+    ) -> (DomainResult<serde_json::Value>, Vec<FlowLogEntry>) {
+        // If and Switch conditions keep reading parsed values, as they always did.
+        let body = match coercion {
+            FlowCoercion::Bool | FlowCoercion::Str => ScriptBody::Parsed,
+            FlowCoercion::Raw | FlowCoercion::Required => body_mode(output),
+        };
+        let script = match flow_script(source, coercion, body) {
+            Ok(script) => script,
+            Err(e) => return (Err(e), Vec::new()),
+        };
+        let response_json = match captured_output_response_json(output) {
+            Ok(json) => json,
+            Err(e) => return (Err(e), Vec::new()),
+        };
+        let (result, entries) = self
+            .evaluate_expression_with_logs(
+                collection,
+                &script,
+                &response_json,
+                secret_values.clone(),
+            )
+            .await;
+        (result, to_flow_logs(entries))
     }
 
     /// Evaluates an If/Switch routing script, or a Transform script, against
@@ -249,21 +314,8 @@ impl RequestExecutionService {
         coercion: FlowCoercion,
         secret_values: &HashSet<String>,
     ) -> FlowScriptOutcome {
-        let script = match flow_script(source, coercion) {
-            Ok(script) => script,
-            Err(e) => return FlowScriptOutcome::failed(e),
-        };
-        let response_json = match captured_output_response_json(output) {
-            Ok(json) => json,
-            Err(e) => return FlowScriptOutcome::failed(e),
-        };
-        let (result, entries) = self
-            .evaluate_expression_with_logs(
-                collection,
-                &script,
-                &response_json,
-                secret_values.clone(),
-            )
+        let (result, logs) = self
+            .run_flow_script(collection, output, source, coercion, secret_values)
             .await;
         FlowScriptOutcome {
             result: result.map(|value| match value {
@@ -271,7 +323,7 @@ impl RequestExecutionService {
                 serde_json::Value::String(s) => s,
                 other => other.to_string(),
             }),
-            logs: to_flow_logs(entries),
+            logs,
         }
     }
 
@@ -286,14 +338,42 @@ impl RequestExecutionService {
         source: &str,
         secret_values: &HashSet<String>,
     ) -> FlowScriptOutcome {
-        self.evaluate_flow_route_expression(
-            collection,
-            output,
-            source,
-            FlowCoercion::Required,
-            secret_values,
-        )
-        .await
+        let outcome = self
+            .evaluate_flow_transform_value(collection, output, source, secret_values)
+            .await;
+        FlowScriptOutcome {
+            result: outcome.result.map(|value| value.data().to_string()),
+            logs: outcome.logs,
+        }
+    }
+
+    /// Like `evaluate_flow_transform_script`, but keeps the result's kind. A
+    /// string comes back as a simple value, so later scripts read it as text.
+    /// Any other result is compact JSON typed `json`, so later scripts read it
+    /// parsed, as before.
+    pub async fn evaluate_flow_transform_value(
+        &self,
+        collection: &str,
+        output: &CapturedOutput,
+        source: &str,
+        secret_values: &HashSet<String>,
+    ) -> FlowScriptOutcome<VariableValue> {
+        let (result, logs) = self
+            .run_flow_script(
+                collection,
+                output,
+                source,
+                FlowCoercion::Required,
+                secret_values,
+            )
+            .await;
+        FlowScriptOutcome {
+            result: result.map(|value| match value {
+                serde_json::Value::String(s) => VariableValue::simple(s),
+                other => VariableValue::typed(other.to_string(), JSON_VALUE_TYPE),
+            }),
+            logs,
+        }
     }
 
     /// Evaluates a Wait for callback node's `accept_when` against one
@@ -349,12 +429,12 @@ impl RequestExecutionService {
 
 /// The value and console output of one Flow script.
 #[derive(Debug)]
-pub struct FlowScriptOutcome {
-    pub result: DomainResult<String>,
+pub struct FlowScriptOutcome<T = String> {
+    pub result: DomainResult<T>,
     pub logs: Vec<FlowLogEntry>,
 }
 
-impl FlowScriptOutcome {
+impl<T> FlowScriptOutcome<T> {
     /// An outcome for a script that could not be run, so it has no output.
     fn failed(error: DomainError) -> Self {
         Self {
@@ -1377,7 +1457,7 @@ impl FlowExecutionService {
             FlowNodeKind::Transform { script, .. } => {
                 let source = single_input(node, data_edges, captured)?;
                 let outcome = exec
-                    .evaluate_flow_transform_script(
+                    .evaluate_flow_transform_value(
                         &input.collection,
                         source,
                         script,
@@ -1385,12 +1465,13 @@ impl FlowExecutionService {
                     )
                     .await;
                 logs.extend(outcome.logs);
-                let text = outcome.result?;
+                // A string result stays text for wires. Other results stay JSON.
+                let value = outcome.result?;
                 // Wires get the raw text. The step shows it with secrets masked.
-                let reported = crate::redaction::redact_secrets(&text, &secret_values);
+                let reported = crate::redaction::redact_secrets(value.data(), &secret_values);
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
-                    ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(text)))
+                    ..ExecutedNode::plain(CapturedOutput::Value(value))
                 })
             }
             FlowNodeKind::Auth { label, .. } => {
@@ -5734,6 +5815,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn real_engine_wire_keeps_input_text_byte_for_byte() {
+        let svc = real_engine_service();
+        for text in [
+            "2.10",
+            "12345678901234567890",
+            "1e3",
+            "null",
+            "true",
+            r#""abc""#,
+            " 7 ",
+        ] {
+            let output = CapturedOutput::Value(VariableValue::simple(text));
+            let value = svc
+                .resolve_flow_wire_expression("my-api", &output, "response.body", &HashSet::new())
+                .await
+                .result
+                .unwrap_or_else(|e| panic!("input {text:?} must resolve: {e}"));
+            assert_eq!(value, text, "input {text:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_sees_input_text_as_a_string() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple("2.10"));
+        let value = svc
+            .resolve_flow_wire_expression(
+                "my-api",
+                &output,
+                "typeof response.body",
+                &HashSet::new(),
+            )
+            .await
+            .result
+            .expect("resolve");
+        assert_eq!(value, "string");
+    }
+
+    #[tokio::test]
+    async fn real_engine_wire_still_reads_fields_of_json_object_input() {
+        let svc = real_engine_service();
+        let output = CapturedOutput::Value(VariableValue::simple(r#"{"id": "12", "n": 2.10}"#));
+        let value = svc
+            .resolve_flow_wire_expression("my-api", &output, "response.body.id", &HashSet::new())
+            .await
+            .result
+            .expect("an object text keeps its fields readable");
+        assert_eq!(value, "12");
+    }
+
+    /// Runs `script` as a Transform on the Input text "in", then a wire with
+    /// `expression` against the Transform result.
+    async fn real_engine_transform_then_wire(script: &str, expression: &str) -> String {
+        let svc = real_engine_service();
+        let input = CapturedOutput::Value(VariableValue::simple("in"));
+        let value = svc
+            .evaluate_flow_transform_value("my-api", &input, script, &HashSet::new())
+            .await
+            .result
+            .expect("the transform must evaluate");
+        svc.resolve_flow_wire_expression(
+            "my-api",
+            &CapturedOutput::Value(value),
+            expression,
+            &HashSet::new(),
+        )
+        .await
+        .result
+        .expect("the wire must resolve")
+    }
+
+    #[tokio::test]
+    async fn real_engine_transform_string_reaches_a_wire_unchanged() {
+        for (script, want) in [
+            ("return '10.50';", "10.50"),
+            ("return '1234567890123456789';", "1234567890123456789"),
+            ("return 'null';", "null"),
+        ] {
+            let value = real_engine_transform_then_wire(script, "response.body").await;
+            assert_eq!(value, want, "script: {script}");
+        }
+        let kind = real_engine_transform_then_wire("return '10.5';", "typeof response.body").await;
+        assert_eq!(kind, "string");
+    }
+
+    #[tokio::test]
+    async fn real_engine_transform_number_still_reaches_a_wire_as_a_number() {
+        let value = real_engine_transform_then_wire("return 10.5;", "response.body").await;
+        assert_eq!(value, "10.5");
+        let kind = real_engine_transform_then_wire("return 10.5;", "typeof response.body").await;
+        assert_eq!(kind, "number");
+        let sum = real_engine_transform_then_wire("return 10.5;", "response.body + 1").await;
+        assert_eq!(sum, "11.5");
+    }
+
+    #[tokio::test]
+    async fn real_engine_transform_reads_input_text_unchanged() {
+        let svc = real_engine_service();
+        let input = CapturedOutput::Value(VariableValue::simple("2.10"));
+        let value = svc
+            .evaluate_flow_transform_value(
+                "my-api",
+                &input,
+                "return response.body;",
+                &HashSet::new(),
+            )
+            .await
+            .result
+            .expect("the transform must evaluate");
+        assert_eq!(value, VariableValue::simple("2.10"));
+    }
+
+    #[tokio::test]
     async fn real_engine_switch_style_string_of_body_field() {
         let mut out = sample_response_output();
         out.response.body = r#"{"plan":"pro"}"#.into();
@@ -7434,7 +7628,12 @@ mod tests {
 
     #[test]
     fn required_coercion_guards_against_undefined() {
-        let script = flow_script("return response.body;", FlowCoercion::Required).expect("wrapper");
+        let script = flow_script(
+            "return response.body;",
+            FlowCoercion::Required,
+            ScriptBody::Parsed,
+        )
+        .expect("wrapper");
         assert!(
             script.contains("return __requireValue(fn(response));"),
             "got: {script}"
@@ -7445,7 +7644,7 @@ mod tests {
     #[test]
     fn other_coercions_do_not_call_the_guard() {
         for coercion in [FlowCoercion::Raw, FlowCoercion::Bool, FlowCoercion::Str] {
-            let script = flow_script("1", coercion).expect("wrapper");
+            let script = flow_script("1", coercion, ScriptBody::Parsed).expect("wrapper");
             assert!(!script.contains("__requireValue(fn"), "got: {script}");
         }
     }
