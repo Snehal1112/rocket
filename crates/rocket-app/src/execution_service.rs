@@ -2252,15 +2252,15 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
 /// specific level replaces a header with the same key, and a disabled header never shadows.
 /// Auth: a request auth of `none` or `inherit` takes the nearest folder auth, then the
 /// collection auth.
-/// With no folder chain the collection headers merge as they always did, so duplicate and
-/// disabled collection headers are kept.
+/// When no folder in the chain sets headers, the collection headers merge as they always did,
+/// so duplicate and disabled collection headers are kept.
 fn apply_inherited_defaults(
     request_auth: Auth,
     request_headers: &[Header],
     settings: CollectionSettings,
     folders: &[FolderSettings],
 ) -> (Auth, Vec<Header>) {
-    let headers = if folders.is_empty() {
+    let headers = if folders.iter().all(|f| f.headers.is_empty()) {
         merge_headers(&settings.headers, request_headers)
     } else {
         merge_headers(
@@ -4662,6 +4662,55 @@ mod tests {
                 resolved.headers,
                 merge_headers(&settings.headers, &input.headers)
             );
+        }
+
+        #[tokio::test]
+        async fn nested_folders_without_headers_keep_collection_headers_exactly_as_before() {
+            let settings = CollectionSettings {
+                headers: vec![
+                    Header::new("Accept", "application/json"),
+                    Header::new("Accept", "text/plain"),
+                    Header::disabled("X-Off", "collection-off"),
+                ],
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings.clone(),
+                chain(vec![FolderSettings::default(), FolderSettings::default()]),
+            );
+            let mut input = input();
+            input.headers = vec![
+                Header::new("X-Trace", "request"),
+                Header::disabled("Accept", "request-off"),
+            ];
+
+            let resolved = resolve(&svc, &input);
+
+            assert_eq!(
+                resolved.headers,
+                merge_headers(&settings.headers, &input.headers)
+            );
+        }
+
+        #[tokio::test]
+        async fn nested_folders_without_auth_resolve_auth_exactly_as_before() {
+            let settings = CollectionSettings {
+                auth: Some(bearer("from-collection")),
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings.clone(),
+                chain(vec![FolderSettings::default(), FolderSettings::default()]),
+            );
+            for request_auth in [Auth::Inherit, Auth::None, bearer("from-request")] {
+                let mut input = input();
+                input.auth = request_auth.clone();
+
+                assert_eq!(
+                    resolve(&svc, &input).auth,
+                    merge_auth(request_auth, settings.auth.clone())
+                );
+            }
         }
     }
 
