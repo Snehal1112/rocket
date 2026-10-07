@@ -27,6 +27,7 @@ function applyEdits(
   const before = baseline as unknown as Record<string, unknown>;
   const after = edited as unknown as Record<string, unknown>;
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    // The comparison assumes stable key order in the serialised values.
     if (JSON.stringify(before[key]) === JSON.stringify(after[key])) continue;
     if (after[key] === undefined) delete result[key];
     else result[key] = after[key];

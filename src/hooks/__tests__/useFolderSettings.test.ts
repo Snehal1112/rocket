@@ -200,4 +200,69 @@ describe('useFolderSettings', () => {
       docs: 'mine',
     });
   });
+  describe('applyEdits through save', () => {
+    const header = { key: 'X', value: '1', enabled: true };
+
+    async function loadWith(initial: FolderSettings) {
+      mockGet.mockResolvedValue(initial);
+      const hook = load();
+      await waitFor(() => expect(hook.result.current.isLoaded).toBe(true));
+      return hook;
+    }
+
+    it('does not write an array edited and reverted to an equal new reference', async () => {
+      const { result } = await loadWith({ ...base, headers: [header] });
+      act(() => result.current.setSettings((prev) => ({ ...prev, headers: [] })));
+      act(() => result.current.setSettings((prev) => ({ ...prev, headers: [{ ...header }] })));
+      const onDisk = { key: 'Y', value: '2', enabled: true };
+      mockGet.mockResolvedValue({ ...base, headers: [onDisk], docs: 'disk docs' });
+      await act(async () => {
+        await result.current.save();
+      });
+      expect(mockSave).toHaveBeenCalledWith('col', 'a/b', {
+        ...base,
+        headers: [onDisk],
+        docs: 'disk docs',
+      });
+    });
+
+    it('writes a field cleared to an empty array or string', async () => {
+      const { result } = await loadWith({ ...base, headers: [header], docs: 'text' });
+      act(() => result.current.setSettings((prev) => ({ ...prev, headers: [], docs: '' })));
+      mockGet.mockResolvedValue({ ...base, headers: [header], docs: 'text' });
+      await act(async () => {
+        await result.current.save();
+      });
+      expect(mockSave).toHaveBeenCalledWith('col', 'a/b', { ...base, headers: [], docs: '' });
+    });
+
+    it('deletes the key when a field is set to undefined', async () => {
+      const { result } = await loadWith({ ...base, testsScript: 'old' });
+      act(() => result.current.setSettings((prev) => ({ ...prev, testsScript: undefined })));
+      mockGet.mockResolvedValue({ ...base, testsScript: 'old' });
+      await act(async () => {
+        await result.current.save();
+      });
+      const written = mockSave.mock.calls[0][2] as Record<string, unknown>;
+      expect('testsScript' in written).toBe(false);
+    });
+
+    it('keeps external changes to unedited fields and lets an edited field win', async () => {
+      const { result } = await loadWith(base);
+      act(() => result.current.setSettings((prev) => ({ ...prev, docs: 'mine' })));
+      mockGet.mockResolvedValue({
+        ...base,
+        docs: 'disk docs',
+        preRequestScript: 'disk script',
+      });
+      await act(async () => {
+        await result.current.save();
+      });
+      expect(mockSave).toHaveBeenCalledWith('col', 'a/b', {
+        ...base,
+        docs: 'mine',
+        preRequestScript: 'disk script',
+      });
+    });
+  });
 });
