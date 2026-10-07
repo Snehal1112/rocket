@@ -165,3 +165,17 @@ describe('folder Script and Test sections', () => {
     expect(second.dataset.local).toBe('initial');
   });
 });
+
+describe('folder sections show the order hint', () => {
+  it('ScriptSection renders the hint', async () => {
+    render(<ScriptSection {...sectionProps()} />);
+    await screen.findByTestId('scripts-tab');
+    expect(screen.getByTestId('folder-script-hint')).toBeInTheDocument();
+  });
+
+  it('TestSection renders the hint', async () => {
+    render(<TestSection {...sectionProps()} />);
+    await screen.findByTestId('scripts-tab');
+    expect(screen.getByTestId('folder-script-hint')).toBeInTheDocument();
+  });
+});

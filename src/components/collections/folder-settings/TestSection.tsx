@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
+import { FolderScriptHint } from './FolderScriptHint';
 import type { FolderSectionProps } from './sections';
 
 // Lazy so the Monaco and rok type chain loads only when a Test section opens.
@@ -37,6 +38,7 @@ export function TestSection({
           />
         </Suspense>
       </div>
+      <FolderScriptHint kind='test' collectionName={collectionName} />
     </div>
   );
 }
