@@ -45,6 +45,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useExecuteRequest } from '@/hooks/useExecuteRequest';
+import { useInheritedAuthSource } from '@/hooks/useInheritedAuthSource';
 import { useSelectedOperationKind } from '@/hooks/useSelectedOperationKind';
 import { authStateForType } from '@/lib/auth-type-defaults';
 import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
@@ -56,6 +57,7 @@ import {
   startSubscription,
   stopSubscription,
 } from '@/lib/graphql-subscription-session';
+import { describeInheritedAuthSource } from '@/lib/inherited-auth';
 import { findTabInTree } from '@/lib/pane-utils';
 import {
   useEnvironments,
@@ -568,6 +570,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         currentAuthType,
       ),
     [tab.source, currentAuthType],
+  );
+  const inheritedAuthSource = useInheritedAuthSource(
+    tab.source?.collection,
+    tab.source?.path,
+    activeSection === 'auth' && currentAuthType === 'inherit',
   );
 
   const handleAuthTypeChange = useCallback(
@@ -1260,6 +1267,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             collection={tab.source?.collection}
             environmentName={activeEnvIdForScope ?? undefined}
             requestPath={tab.source?.path}
+            inheritMessage={
+              inheritedAuthSource ? describeInheritedAuthSource(inheritedAuthSource) : undefined
+            }
           />
         )}
         {activeSection === 'variables' &&

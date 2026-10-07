@@ -1,9 +1,9 @@
 import { dispatchSend, type ResolvedGraphQl } from '@/lib/dispatch-send';
-import { inheritedHeaders, loadFolderChain, resolveFolderAuth } from '@/lib/folder-inheritance';
+import { inheritedHeaders, loadFolderChain } from '@/lib/folder-inheritance';
 import { parseGraphQlResponse } from '@/lib/graphql-response';
+import { resolveInheritedFolderAuth } from '@/lib/inherited-auth';
 import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
-import { fromPersistedAuth } from '@/lib/persisted-auth';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
 import type { Environment, RequestOptions } from '@/lib/tauri-api';
@@ -320,12 +320,16 @@ export async function resolveRequestFieldsForPath(
 
   let authToResolve: AuthState = request.auth;
   if (request.auth.authType === 'inherit' && collection) {
-    const folderAuth = resolveFolderAuth(folderChain);
+    // The nearest folder with auth wins over the collection. A folder OAuth2 token only
+    // exists in the frontend store, so the folder is resolved here, with its cached token.
+    const folderAuth = requestPath
+      ? await resolveInheritedFolderAuth(collection, requestPath)
+      : undefined;
     if (folderAuth) {
-      // An OAuth2 folder auth stays `inherit`. The backend resolves it, and fetches a
-      // client-credentials token at send time, exactly as on every other send path.
-      const folderState = fromPersistedAuth(folderAuth);
-      if (folderState.authType !== 'oauth2') authToResolve = folderState;
+      // An OAuth2 folder auth without a usable token stays `inherit`. The backend then
+      // resolves the same folder from folder.yml, and fetches a client-credentials token.
+      const { auth } = folderAuth;
+      if (auth.authType !== 'oauth2' || auth.oauth2?.accessToken) authToResolve = auth;
     } else {
       const storedAuth = useCollectionAuthStore.getState().getCollectionAuth(collection);
       if (storedAuth && storedAuth.authType !== 'none' && storedAuth.authType !== 'inherit') {
