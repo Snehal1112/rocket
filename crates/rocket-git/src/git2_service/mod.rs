@@ -3455,4 +3455,55 @@ mod tests {
             result
         );
     }
+
+    fn unborn_repo_with_staged_file() -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        Repository::init(&path).unwrap();
+        fs::write(dir.path().join("a.txt"), "hello").unwrap();
+        Git2Service::new().stage(&path, &["a.txt"]).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn push_on_unborn_branch_returns_nothing_to_push() {
+        let remote_dir = TempDir::new().unwrap();
+        Repository::init_bare(remote_dir.path()).unwrap();
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        Repository::init(&path).unwrap();
+        let svc = Git2Service::new();
+        svc.add_remote(&path, "origin", &remote_dir.path().to_string_lossy())
+            .unwrap();
+        let creds = GitCredentials::UserPass {
+            username: String::new(),
+            password: String::new(),
+        };
+        let err = svc.push(&path, "origin", &creds, false).unwrap_err();
+        assert!(
+            matches!(&err, DomainError::InvalidInput(m) if m.contains("no commits")),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unstage_on_unborn_repo_removes_path_from_index() {
+        let (_dir, path) = unborn_repo_with_staged_file();
+        let svc = Git2Service::new();
+        svc.unstage(&path, &["a.txt"]).unwrap();
+        let status = svc.status(&path).unwrap();
+        let f = status.files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert!(!f.staged, "file must no longer be staged");
+        assert_eq!(f.status, GitStatus::Untracked);
+    }
+
+    #[test]
+    fn unstage_on_unborn_repo_with_unstaged_path_is_ok() {
+        let (dir, path) = unborn_repo_with_staged_file();
+        fs::write(dir.path().join("b.txt"), "never staged").unwrap();
+        let svc = Git2Service::new();
+        svc.unstage(&path, &["b.txt"]).unwrap();
+        let status = svc.status(&path).unwrap();
+        assert!(status.files.iter().any(|f| f.path == "a.txt" && f.staged));
+    }
 }

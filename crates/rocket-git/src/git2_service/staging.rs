@@ -8,8 +8,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::commit::CommitInfo;
 
 use super::helpers::{
-    count_commit_files, inspect_worktree_path, open_repo, validate_batch_paths, GitRelativePath,
-    InspectedWorktreePath, WorktreeLeafKind,
+    count_commit_files, inspect_worktree_path, is_unborn, open_repo, validate_batch_paths,
+    GitRelativePath, InspectedWorktreePath, WorktreeLeafKind,
 };
 
 #[tracing::instrument(name = "git_stage", skip(files), fields(repo_path = %path, count = files.len()))]
@@ -54,10 +54,25 @@ pub(super) fn stage(path: &str, files: &[&str]) -> DomainResult<()> {
 pub(super) fn unstage(path: &str, files: &[&str]) -> DomainResult<()> {
     let paths = parse_batch(files)?;
     let repo = open_repo(path)?;
-    let head = repo
-        .head()
-        .and_then(|reference| reference.peel_to_commit())
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let head = match repo.head().and_then(|reference| reference.peel_to_commit()) {
+        Ok(commit) => commit,
+        Err(e) if is_unborn(&e) => {
+            // No commits yet: unstaging is `git rm --cached`.
+            let mut index = repo
+                .index()
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            for path in &paths {
+                index
+                    .remove_path(path.as_path())
+                    .map_err(|e| DomainError::Internal(e.to_string()))?;
+            }
+            index
+                .write()
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            return Ok(());
+        }
+        Err(e) => return Err(DomainError::Internal(e.to_string())),
+    };
     let tree = head
         .tree()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
