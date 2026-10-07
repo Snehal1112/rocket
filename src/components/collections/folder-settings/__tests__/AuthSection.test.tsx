@@ -23,7 +23,7 @@ vi.mock('@/components/request/oauth2/OAuth2AuthEditor', () => ({
     patchOAuth2,
   }: {
     oauth2: { accessToken: string };
-    patchOAuth2: (patch: { accessToken?: string; clientId?: string }) => void;
+    patchOAuth2: (patch: Record<string, string>) => void;
   }) => (
     <div>
       <div data-testid='oauth2-token'>{oauth2.accessToken}</div>
@@ -32,6 +32,15 @@ vi.mock('@/components/request/oauth2/OAuth2AuthEditor', () => ({
       </button>
       <button type='button' onClick={() => patchOAuth2({ clientId: 'edited' })}>
         Edit client id
+      </button>
+      <button type='button' onClick={() => patchOAuth2({ tokenUrl: 'https://b.example/token' })}>
+        Edit token url
+      </button>
+      <button type='button' onClick={() => patchOAuth2({ grantType: 'password' })}>
+        Edit grant type
+      </button>
+      <button type='button' onClick={() => patchOAuth2({ scope: 'read' })}>
+        Edit scope
       </button>
     </div>
   ),
@@ -172,6 +181,32 @@ describe('AuthSection', () => {
     renderSection(stateToFolderAuth(state), onChange);
     fireEvent.click(screen.getByRole('button', { name: 'Edit client id' }));
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'Edit client id',
+    'Edit token url',
+    'Edit grant type',
+  ])('drops a fetched token after "%s"', (button) => {
+    const state = authStateForType('oauth2', { authType: 'none' });
+    renderSection(stateToFolderAuth(state));
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch token' }));
+    fireEvent.click(screen.getByRole('button', { name: button }));
+    expect(useFolderAuthStore.getState().getFolderAuth('demo', 'api')?.oauth2?.accessToken).toBe(
+      '',
+    );
+    expect(screen.getByTestId('oauth2-token')).toHaveTextContent('');
+    expect(screen.getByTestId('oauth2-token')).not.toHaveTextContent('fetched');
+  });
+
+  it('keeps a fetched token after an edit outside the token config', () => {
+    const state = authStateForType('oauth2', { authType: 'none' });
+    renderSection(stateToFolderAuth(state));
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch token' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit scope' }));
+    expect(useFolderAuthStore.getState().getFolderAuth('demo', 'api')?.oauth2?.accessToken).toBe(
+      'fetched',
+    );
   });
 
   it('does not restore a cached token fetched for another OAuth2 config', () => {

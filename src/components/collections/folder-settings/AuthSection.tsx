@@ -18,6 +18,7 @@ import {
   restoreOAuth2Tokens,
   stateToFolderAuth,
 } from '@/lib/folder-settings-convert';
+import { sameOAuth2TokenConfig, withoutOAuth2Tokens } from '@/lib/oauth2-token-config';
 import type { FolderSettings } from '@/lib/tauri-api';
 import { useFolderAuthStore } from '@/stores/folder-auth-store';
 import type { AuthState } from '@/types/pane-types';
@@ -38,6 +39,17 @@ function loadAuthState(
     folderAuthToState(persisted),
     useFolderAuthStore.getState().getFolderAuth(collectionName, folderPath),
   );
+}
+
+/**
+ * Clears the OAuth2 token when an edit changes the config it was fetched with. The editor
+ * merges edits into the old state, so without this an old token would look like it belongs
+ * to the new config.
+ */
+function dropTokenOnConfigChange(previous: AuthState, next: AuthState): AuthState {
+  if (!next.oauth2) return next;
+  if (previous.oauth2 && sameOAuth2TokenConfig(previous.oauth2, next.oauth2)) return next;
+  return { ...next, oauth2: withoutOAuth2Tokens(next.oauth2) };
 }
 
 /** Serialised persisted auth, with no folder auth as `null`, for change detection. */
@@ -78,7 +90,8 @@ export function AuthSection({
     }
   }, [settings.auth, collectionName, folderPath]);
 
-  const commit = useCallback((next: AuthState) => {
+  const commit = useCallback((edited: AuthState) => {
+    const next = dropTokenOnConfigChange(authRef.current, edited);
     const previous = stateToFolderAuth(authRef.current);
     authRef.current = next;
     setAuth(next);

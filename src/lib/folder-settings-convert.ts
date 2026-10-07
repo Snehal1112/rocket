@@ -1,6 +1,7 @@
 // Conversions between the Folder Settings payload and the editor state types.
 // Auth conversion reuses persisted-auth.ts, header conversion reuses persisted-headers.ts.
 import { type AuthTypeOption, NTLM_OPTION, OAUTH1_OPTION } from '@/lib/auth-type-options';
+import { sameOAuth2TokenConfig } from '@/lib/oauth2-token-config';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import type { Auth, Header } from '@/lib/tauri-api';
@@ -72,12 +73,7 @@ export function stateToFolderAuth(state: AuthState): Auth | undefined {
  */
 export function sameOAuth2Config(a: AuthState, b: AuthState): boolean {
   if (a.authType !== 'oauth2' || b.authType !== 'oauth2' || !a.oauth2 || !b.oauth2) return false;
-  const x = a.oauth2;
-  const y = b.oauth2;
-  if (x.grantType !== y.grantType || x.tokenUrl !== y.tokenUrl || x.clientId !== y.clientId) {
-    return false;
-  }
-  return x.grantType !== 'implicit' || x.authorizationUrl === y.authorizationUrl;
+  return sameOAuth2TokenConfig(a.oauth2, b.oauth2);
 }
 
 /**
