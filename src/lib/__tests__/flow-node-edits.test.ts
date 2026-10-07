@@ -20,6 +20,76 @@ const saved: Request = {
   auth: { authType: 'inherit' },
 };
 
+describe('savedToInline params and settings', () => {
+  const base: Request = { ...saved, headers: [], url: 'https://h.test/search' };
+
+  it('folds enabled query params into the url', () => {
+    const { inline, dropped } = savedToInline({
+      ...base,
+      queryParams: [
+        { key: 'q', value: 'a b', enabled: true },
+        { key: 'page', value: '2', enabled: true },
+      ],
+    });
+    expect(inline.url).toBe('https://h.test/search?q=a%20b&page=2');
+    expect(dropped).toEqual([]);
+  });
+
+  it('counts disabled query params as dropped', () => {
+    const { inline, dropped } = savedToInline({
+      ...base,
+      queryParams: [
+        { key: 'q', value: '1', enabled: true },
+        { key: 'x', value: '1', enabled: false },
+        { key: 'y', value: '1', enabled: false },
+      ],
+    });
+    expect(inline.url).toBe('https://h.test/search?q=1');
+    expect(dropped).toEqual(['2 disabled query params']);
+  });
+
+  it('appends to an existing query and keeps the fragment last', () => {
+    const { inline } = savedToInline({
+      ...base,
+      url: 'https://h.test/search?a=1#top',
+      queryParams: [{ key: 'b', value: '2', enabled: true }],
+    });
+    expect(inline.url).toBe('https://h.test/search?a=1&b=2#top');
+  });
+
+  it('keeps {{variables}} readable', () => {
+    const { inline } = savedToInline({
+      ...base,
+      queryParams: [{ key: 'token', value: '{{apiKey}}&x', enabled: true }],
+    });
+    expect(inline.url).toBe('https://h.test/search?token={{apiKey}}%26x');
+  });
+
+  it('reports path params with values as dropped', () => {
+    const { dropped } = savedToInline({
+      ...base,
+      url: 'https://h.test/u/:id',
+      pathParams: [{ name: 'id', value: '7' }],
+    });
+    expect(dropped).toEqual(['path params']);
+  });
+
+  it('reports non-default settings and ignores defaults', () => {
+    expect(savedToInline({ ...base, settings: { timeout: 5000 } }).dropped).toEqual([
+      'request settings',
+    ]);
+    expect(savedToInline({ ...base, settings: { verifySsl: false } }).dropped).toEqual([
+      'request settings',
+    ]);
+    expect(
+      savedToInline({
+        ...base,
+        settings: { timeout: 0, followRedirects: true, verifySsl: true, maxRedirects: 5 },
+      }).dropped,
+    ).toEqual([]);
+  });
+});
+
 describe('savedToInline', () => {
   it('copies method, url, enabled headers and a raw body', () => {
     const { inline, dropped } = savedToInline(saved);

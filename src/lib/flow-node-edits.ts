@@ -1,4 +1,11 @@
-import type { Auth, FlowEdge, Folder, InlineRequestData, Request } from '@/lib/tauri-api';
+import type {
+  Auth,
+  FlowEdge,
+  Folder,
+  InlineRequestData,
+  QueryParam,
+  Request,
+} from '@/lib/tauri-api';
 
 // Body modes whose content is plain text, so an inline request can carry it.
 const RAW_BODY_MODES = new Set(['json', 'xml', 'text']);
@@ -10,6 +17,39 @@ export interface InlineConversion {
 }
 
 const authCarriesNothing = (auth: Auth) => auth.authType === 'none' || auth.authType === 'inherit';
+
+// Backend defaults for the settings an inline request cannot carry.
+const DEFAULT_MAX_REDIRECTS = new Set([5, 10]);
+
+const encodePart = (text: string) =>
+  text
+    .split(/(\{\{[^{}]*\}\})/)
+    .map((piece) =>
+      piece.startsWith('{{') && piece.endsWith('}}') ? piece : encodeURIComponent(piece),
+    )
+    .join('');
+
+/** Appends enabled query params to the URL, keeping {{variables}} readable. */
+function foldQueryParams(url: string, params: QueryParam[], encode: boolean): string {
+  if (params.length === 0) return url;
+  const hashAt = url.indexOf('#');
+  const head = hashAt === -1 ? url : url.slice(0, hashAt);
+  const fragment = hashAt === -1 ? '' : url.slice(hashAt);
+  const pairs = params.map((p) =>
+    encode ? `${encodePart(p.key)}=${encodePart(p.value)}` : `${p.key}=${p.value}`,
+  );
+  const hasQuery = head.includes('?');
+  const separator = !hasQuery ? '?' : /[?&]$/.test(head) ? '' : '&';
+  return `${head}${separator}${pairs.join('&')}${fragment}`;
+}
+
+const settingsAreCustom = (settings: Request['settings']) =>
+  settings !== undefined &&
+  ((settings.timeout ?? 0) > 0 ||
+    settings.followRedirects === false ||
+    settings.verifySsl === false ||
+    settings.encodeUrl === false ||
+    (settings.maxRedirects !== undefined && !DEFAULT_MAX_REDIRECTS.has(settings.maxRedirects)));
 
 const hasText = (value: string | null | undefined) => (value ?? '').trim() !== '';
 
@@ -26,6 +66,20 @@ export function savedToInline(request: Request): InlineConversion {
     .map((h) => ({ name: h.key, value: h.value }));
   const disabled = request.headers.length - headers.length;
   if (disabled > 0) dropped.push(`${disabled} disabled header${disabled === 1 ? '' : 's'}`);
+
+  const queryParams = request.queryParams ?? [];
+  const enabledQuery = queryParams.filter((p) => p.enabled && p.key !== '');
+  const disabledQuery = queryParams.filter((p) => !p.enabled).length;
+  if (disabledQuery > 0) {
+    dropped.push(`${disabledQuery} disabled query param${disabledQuery === 1 ? '' : 's'}`);
+  }
+  const url = foldQueryParams(request.url, enabledQuery, request.settings?.encodeUrl !== false);
+
+  // Path values cannot be substituted exactly here, so they are reported instead.
+  if ((request.pathParams ?? []).some((p) => p.name !== '' && p.value !== '')) {
+    dropped.push('path params');
+  }
+  if (settingsAreCustom(request.settings)) dropped.push('request settings');
 
   let body: string | null = null;
   const source = request.body;
@@ -45,7 +99,7 @@ export function savedToInline(request: Request): InlineConversion {
   if (request.actions?.some((a) => !a.disabled)) dropped.push('actions');
 
   return {
-    inline: { method: request.method.toUpperCase(), url: request.url, headers, body },
+    inline: { method: request.method.toUpperCase(), url, headers, body },
     dropped,
   };
 }

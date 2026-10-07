@@ -144,6 +144,7 @@ export interface Request {
   method: HttpMethod;
   url: string;
   headers: Header[];
+  queryParams?: QueryParam[];
   pathParams?: PathParam[];
   body?: Body;
   auth: Auth;
