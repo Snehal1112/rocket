@@ -64,11 +64,11 @@ describe('FolderSettingsTab', () => {
     expect(screen.getByRole('tab', { name: 'Headers' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('shows the placeholder of the active section', async () => {
+  it('shows the body of the active section', async () => {
     usePaneStore.getState().openFolderTab('my-col', 'auth/oauth', 'docs');
     await renderStoredTab();
     expect(screen.getByRole('tab', { name: 'Docs' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('Docs for this folder will be editable here.')).toBeInTheDocument();
+    expect(screen.getByText('No documentation yet')).toBeInTheDocument();
   });
 
   it('switching a section updates the tab in the store', async () => {
