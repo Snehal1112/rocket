@@ -9,7 +9,7 @@ use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 use rocket_shared::VariableValue;
 
 use crate::execution_service::{
-    ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
+    ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService, FLOW_INLINE_PATH_PREFIX,
 };
 use crate::flow_auth::{
     resolve_flow_credentials, FetchContext, FlowAuthTokens, FlowCredentials, FlowTokenFetcher,
@@ -486,7 +486,7 @@ pub fn build_execute_request_input(
         }
         RequestSource::Inline { request: inline } => (
             build_inline_request(label, inline)?,
-            format!("__flow_inline__/{}", node.id),
+            format!("{FLOW_INLINE_PATH_PREFIX}{}", node.id),
         ),
     };
 

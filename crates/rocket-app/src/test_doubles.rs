@@ -12,7 +12,7 @@ use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall}
 use async_trait::async_trait;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    Request as CollectionRequest,
+    FolderSettings, Request as CollectionRequest,
 };
 use rocket_environment::{
     Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
@@ -34,11 +34,23 @@ use zeroize::Zeroizing;
 /// Collection repo backed by one in-memory `Collection`.
 pub struct InMemoryCollectionRepo {
     collection: Collection,
+    folder_chain: Vec<FolderSettings>,
 }
 
 impl InMemoryCollectionRepo {
     pub fn new(collection: Collection) -> Arc<Self> {
-        Arc::new(Self { collection })
+        Self::with_folder_chain(collection, Vec::new())
+    }
+
+    /// Like `new`, and every request path gets `folder_chain` as its folder chain.
+    pub fn with_folder_chain(
+        collection: Collection,
+        folder_chain: Vec<FolderSettings>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            collection,
+            folder_chain,
+        })
     }
 }
 
@@ -101,6 +113,9 @@ impl CollectionRepository for InMemoryCollectionRepo {
         _: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
+    }
+    fn get_folder_chain_settings(&self, _: &str, _: &str) -> DomainResult<Vec<FolderSettings>> {
+        Ok(self.folder_chain.clone())
     }
     fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
@@ -184,6 +199,9 @@ impl CollectionRepository for SharedCollectionRepo {
         b: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
         self.0.get_folder_chain_variables(a, b)
+    }
+    fn get_folder_chain_settings(&self, a: &str, b: &str) -> DomainResult<Vec<FolderSettings>> {
+        self.0.get_folder_chain_settings(a, b)
     }
     fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
         self.0.get_folder_variables(a, b)

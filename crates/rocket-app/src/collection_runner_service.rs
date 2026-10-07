@@ -1668,4 +1668,54 @@ mod tests {
         assert_eq!(summary.steps[0].status, RunStepStatus::Error);
         assert!(executor.sent_urls().is_empty());
     }
+
+    #[tokio::test]
+    async fn a_runner_step_inherits_folder_auth() {
+        use rocket_shared::types::Auth;
+        let mut list = Request::new("List", HttpMethod::Get, "https://api.test/users");
+        list.file_name = Some("list.yml".to_string());
+        list.auth = Auth::Inherit;
+        let mut users = rocket_collection::Folder::new("users");
+        users.add_request(list);
+        let mut collection = Collection::new("my-api");
+        collection.settings.auth = Some(Auth::Bearer {
+            token: "from-collection".into(),
+        });
+        collection.root.add_subfolder(users);
+        let folder = rocket_collection::FolderSettings {
+            auth: Some(Auth::Bearer {
+                token: "from-folder".into(),
+            }),
+            ..rocket_collection::FolderSettings::default()
+        };
+        let repo = InMemoryCollectionRepo::with_folder_chain(collection, vec![folder]);
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        );
+
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 1);
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "from-folder".into()
+            }]
+        );
+    }
 }

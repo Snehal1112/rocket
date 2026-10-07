@@ -15,7 +15,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Header};
 use serde::Deserialize;
 
-use super::{merge_auth, merge_headers, resolve_auth, RequestExecutionService};
+use super::{resolve_auth, RequestExecutionService};
 
 /// Where `{{variables}}` come from. Mirrors the scope fields of `ExecuteRequestInput`.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -151,16 +151,14 @@ impl RequestExecutionService {
         );
 
         let request_auth = input.auth.clone().unwrap_or(Auth::None);
-        let (auth, headers) = match scope.collection.as_deref() {
-            Some(collection) => {
-                let settings = self.collection_repo.get_settings(collection).unwrap_or_default();
-                (
-                    merge_auth(request_auth, settings.auth),
-                    merge_headers(&settings.headers, &input.headers),
-                )
-            }
-            None => (request_auth, input.headers.clone()),
-        };
+        let folders =
+            self.folder_chain(scope.collection.as_deref(), scope.request_path.as_deref())?;
+        let (auth, headers) = self.inherited_auth_and_headers(
+            scope.collection.as_deref(),
+            &folders,
+            request_auth,
+            &input.headers,
+        );
         let auth = resolve_auth(auth, &vars);
 
         let mut url = resolve(&input.url, &vars).output;
@@ -236,7 +234,7 @@ mod tests {
         EmptySecretManagerRepo, InMemoryCollectionRepo, InMemoryHistoryRepo, NullCookieRepo,
         RecordingExecutor, SharedCollectionRepo, SharedHistoryRepo, StaticEnvRepo,
     };
-    use rocket_collection::{Collection, CollectionSettings};
+    use rocket_collection::{Collection, CollectionSettings, FolderSettings};
     use rocket_environment::{Environment, Variable};
     use rocket_shared::events::NullEventPublisher;
     use std::sync::Arc;
@@ -249,6 +247,28 @@ mod tests {
             RecordingExecutor::new(),
             Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
             Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(collection))),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+    }
+
+    fn service_with_folders(
+        env: Environment,
+        settings: CollectionSettings,
+        folders: Vec<FolderSettings>,
+    ) -> RequestExecutionService {
+        let mut collection = Collection::new("api");
+        collection.settings = settings;
+        RequestExecutionService::new(
+            Box::new(StaticEnvRepo(env)),
+            RecordingExecutor::new(),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::with_folder_chain(
+                collection, folders,
+            ))),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -310,6 +330,30 @@ mod tests {
         assert_eq!(header(&resolved, "X-Team"), Some("core"));
         assert_eq!(header(&resolved, "X-Token"), Some("request"));
         assert_eq!(header(&resolved, "Authorization"), Some("Bearer from-collection"));
+    }
+
+    #[tokio::test]
+    async fn folder_headers_and_auth_apply_between_collection_and_request() {
+        let settings = CollectionSettings {
+            headers: vec![Header::new("X-Team", "core"), Header::new("X-Env", "collection")],
+            auth: Some(Auth::Bearer { token: "from-collection".into() }),
+            ..CollectionSettings::default()
+        };
+        let folder = FolderSettings {
+            headers: vec![Header::new("X-Env", "{{host}}")],
+            auth: Some(Auth::Bearer { token: "{{token}}".into() }),
+            ..FolderSettings::default()
+        };
+        let svc = service_with_folders(dev_env(), settings, vec![folder]);
+        let mut i = input("wss://h/ws");
+        i.scope.request_path = Some("chat/live.yml".into());
+        i.auth = Some(Auth::Inherit);
+
+        let resolved = svc.resolve_websocket(&i).await.expect("resolve");
+
+        assert_eq!(header(&resolved, "X-Team"), Some("core"));
+        assert_eq!(header(&resolved, "X-Env"), Some("chat.example.com"));
+        assert_eq!(header(&resolved, "Authorization"), Some("Bearer abc123"));
     }
 
     #[tokio::test]

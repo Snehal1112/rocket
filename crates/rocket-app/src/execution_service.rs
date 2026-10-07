@@ -29,6 +29,9 @@ use std::sync::Arc;
 
 pub mod websocket_resolution;
 
+/// Request path prefix of an inline Flow request. It names no file, so it has no folder chain.
+pub(crate) const FLOW_INLINE_PATH_PREFIX: &str = "__flow_inline__/";
+
 /// An external secret binding whose values could not be fetched.
 struct UnresolvedBinding {
     alias: String,
@@ -696,6 +699,7 @@ impl RequestExecutionService {
         request_path: Option<&str>,
     ) -> DomainResult<Vec<FolderSettings>> {
         match (collection, request_path) {
+            (Some(_), Some(path)) if path.starts_with(FLOW_INLINE_PATH_PREFIX) => Ok(Vec::new()),
             (Some(col), Some(path)) => self.collection_repo.get_folder_chain_settings(col, path),
             _ => Ok(Vec::new()),
         }
@@ -4690,6 +4694,26 @@ mod tests {
                 resolved.headers,
                 merge_headers(&settings.headers, &input.headers)
             );
+        }
+
+        #[tokio::test]
+        async fn an_inline_flow_request_inherits_no_folder_settings() {
+            let svc = folder_service(
+                CollectionSettings::default(),
+                chain(vec![folder(
+                    vec![Header::new("X-Env", "folder")],
+                    Some(bearer("from-folder")),
+                )]),
+            );
+            let mut input = input();
+            input.request_path = Some(format!("{FLOW_INLINE_PATH_PREFIX}node-1"));
+            input.auth = Auth::Inherit;
+
+            let resolved = resolve(&svc, &input);
+
+            assert!(enabled_values(&resolved, "X-Env").is_empty());
+            // `merge_auth` turns `inherit` with no collection auth into `none`.
+            assert_eq!(resolved.auth, Auth::None);
         }
 
         #[tokio::test]
