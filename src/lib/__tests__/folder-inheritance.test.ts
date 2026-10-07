@@ -10,12 +10,7 @@ vi.mock('@/lib/tauri-api', () => ({
   }),
 }));
 
-import {
-  ancestorFolderPaths,
-  inheritedHeaders,
-  loadFolderChain,
-  resolveFolderAuth,
-} from '@/lib/folder-inheritance';
+import { ancestorFolderPaths, inheritedHeaders, loadFolderChain } from '@/lib/folder-inheritance';
 import { getFolderSettings } from '@/lib/tauri-api';
 
 function folder(partial: Partial<FolderSettings>): FolderSettings {
@@ -64,24 +59,6 @@ describe('inheritedHeaders', () => {
       [folder({ headers: [h('X-Env', 'folder-off', false)] })],
     );
     expect(merged).toEqual([h('X-Env', 'collection')]);
-  });
-});
-
-describe('resolveFolderAuth', () => {
-  it('returns the innermost folder auth that is not none or inherit', () => {
-    const auth = resolveFolderAuth([
-      folder({ auth: { authType: 'bearer', token: 'outer' } }),
-      folder({ auth: { authType: 'bearer', token: 'inner' } }),
-      folder({ auth: { authType: 'inherit' } }),
-      folder({ auth: { authType: 'none' } }),
-    ]);
-    expect(auth).toEqual({ authType: 'bearer', token: 'inner' });
-  });
-
-  it('returns undefined when no folder sets auth', () => {
-    expect(resolveFolderAuth([folder({}), folder({ auth: { authType: 'inherit' } })])).toBe(
-      undefined,
-    );
   });
 });
 

@@ -1,4 +1,4 @@
-import { type Auth, type FolderSettings, getFolderSettings, type Header } from '@/lib/tauri-api';
+import { type FolderSettings, getFolderSettings, type Header } from '@/lib/tauri-api';
 
 // Folder paths above a request, outermost first. `users/admin/get.yml` gives
 // `['users', 'users/admin']`. A request at the collection root has none.
@@ -42,14 +42,4 @@ export function inheritedHeaders(collection: Header[], folders: FolderSettings[]
     merged = [...merged.filter((h) => !keys.has(h.key.toLowerCase())), ...own];
   }
   return merged;
-}
-
-// Mirrors rocket_collection::resolve_folder_auth: the innermost folder auth
-// that is not `none` or `inherit`.
-export function resolveFolderAuth(folders: FolderSettings[]): Auth | undefined {
-  for (const folder of [...folders].reverse()) {
-    const auth = folder.auth;
-    if (auth && auth.authType !== 'none' && auth.authType !== 'inherit') return auth;
-  }
-  return undefined;
 }

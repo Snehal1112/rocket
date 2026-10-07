@@ -24,10 +24,9 @@ const hasAuth = (auth: AuthState) => auth.authType !== 'none' && auth.authType !
 
 /**
  * The innermost ancestor folder whose auth is neither None nor Inherit, matching the backend
- * `resolve_folder_auth` (Plan 05's `resolveFolderAuth` does the same on a loaded chain). The
- * folder.yml decides whether a folder has auth. `folder-auth-store` only supplies a cached
- * OAuth2 token, and only one fetched for the same OAuth2 config. An `inherit` entry in the
- * store therefore never counts as folder auth. A folder that cannot be read is skipped: the
+ * `resolve_folder_auth`. The folder.yml decides whether a folder has auth. `folder-auth-store`
+ * only supplies a cached OAuth2 token, and only one fetched for the same OAuth2 config. An
+ * `inherit` entry in the store therefore never counts as folder auth. A folder that cannot be read is skipped: the
  * backend reports a broken folder.yml when the request runs, and a hint must not fail on it.
  */
 export async function resolveInheritedFolderAuth(

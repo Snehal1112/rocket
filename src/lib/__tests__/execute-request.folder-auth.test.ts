@@ -153,7 +153,9 @@ describe('resolveRequestFieldsForPath inherited folder auth', () => {
     expect(out.auth).toEqual({ authType: 'bearer', token: 'collection-token' });
   });
 
-  it('keeps a request own auth over a folder auth', async () => {
+  // A frontend `none` is sent as is. The backend `merge_auth` treats `none` like `inherit`,
+  // so the folder auth is applied there, not here.
+  it('sends a request none unchanged and leaves folder auth to the backend', async () => {
     api.getFolderSettings.mockImplementation(async (_c: string, path: string) => ({
       auth: path === 'api' ? { authType: 'basic', username: 'u', password: 'p' } : null,
     }));
