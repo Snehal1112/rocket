@@ -58,6 +58,7 @@ impl EventPublisher for TauriEventBus {
             | DomainEvent::ItemsReordered { .. }
             | DomainEvent::CollectionSettingsSaved { .. }
             | DomainEvent::FolderVariablesSaved { .. }
+            | DomainEvent::FolderSettingsSaved { .. }
             | DomainEvent::RequestVariablesSaved { .. } => "collection-changed",
             DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {

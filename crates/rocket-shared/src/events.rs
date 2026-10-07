@@ -170,6 +170,11 @@ pub enum DomainEvent {
         collection: String,
         request_path: String,
     },
+    /// A folder's settings (folder.yml) were saved from the Folder Settings tab.
+    FolderSettingsSaved {
+        collection: String,
+        folder_path: String,
+    },
 
     // Environment events
     EnvironmentSaved {
@@ -818,6 +823,19 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"requestVariablesSaved","collection":"my-api","request_path":"users.yml"}"#
+        );
+    }
+
+    #[test]
+    fn folder_settings_saved_wire_shape() {
+        let event = DomainEvent::FolderSettingsSaved {
+            collection: "my-api".into(),
+            folder_path: "auth/login".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"folderSettingsSaved","collection":"my-api","folder_path":"auth/login"}"#
         );
     }
 
