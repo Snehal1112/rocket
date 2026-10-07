@@ -1074,3 +1074,13 @@ Suggested subject: `feat(scripting): add rok response and runner extras`.
 ## Manual check (real app, after both plans)
 
 Run `yarn tauri dev` and in a request's post-response script try: `rok.setVar('n', 0); console.log(rok.getVar('n'), rok.hasVar('n'))`, then `rok.deleteVar('n')`, `res.getSize()`, `res.setBody({ a: 2 })` followed by a tests script reading `res.body.a`. In a collection with Developer mode, check `rok.cwd()` and `__dirname`.
+
+---
+
+## Next plan to execute
+
+This is the last plan of sub-project A. When Task 3 is complete, its checks pass, the manual check above is done or handed to the user, and the ledger shows "Task 3: complete", the executing Claude must:
+
+1. Run a final whole-branch review of plans 01 and 02 together (see `.claude/rules/harness.md`).
+2. Update `.claude/rok-api-parity-notes.md` so part A reads "done" and note the follow-ups: `getOauth2CredentialVar` and `resetOauth2Credential`, per-folder `__dirname`, a collection read-all op for the overlay, and a Developer-mode gate for `getProcessEnv` if the user asks.
+3. Move on to **sub-project B** without asking. Its spec is committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`. There is no plan for it yet, so invoke the `superpowers:writing-plans` skill and write plan files (at most 3 tasks each, plus an index) under `docs/superpowers/plans/rok-parity-b/`. Sub-project C (`2026-10-07-rok-js-api-parity-c-cookies-design.md`) follows B and depends on B's `ScriptHost`.

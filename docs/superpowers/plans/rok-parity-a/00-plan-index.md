@@ -4,7 +4,7 @@
 **Series notes:** `.claude/rok-api-parity-notes.md`
 **Ledger:** `.superpowers/sdd/rok-parity-a/progress.md` (create on first task; log `Ruling:` lines there)
 
-Run the plans in order. Each plan has at most 3 tasks and produces working, tested software on its own.
+Run the plans in order. Each plan has at most 3 tasks and produces working, tested software on its own. Each plan file ends with a "Next plan to execute" section: the executing Claude moves on to the next plan on its own when the current one is complete (no consent needed between plans). After plan 02 the next work is sub-project B, which still needs a plan written from its committed spec.
 
 | Plan | File | Tasks |
 |---|---|---|

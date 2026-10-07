@@ -1047,3 +1047,11 @@ Expected: PASS.
 
 Skill `dev-workflow-skills:1-git-commit`, pathspec commit of `crates/rocket-infra/src/scripting/bootstrap.js` and `crates/rocket-infra/src/scripting/engine.rs`.
 Suggested subject: `feat(scripting): make rok reads see earlier writes`.
+
+---
+
+## Next plan to execute
+
+When Task 3 is complete, its checks pass and the ledger (`.superpowers/sdd/rok-parity-a/progress.md`) shows "Task 3: complete", **the executing Claude must go straight on to plan 02**: `docs/superpowers/plans/rok-parity-a/02-context-and-response.md`. No consent is needed between plans (see the memory note "No consent needed between plans"). Run one plan at a time, and swap the visible task list to plan 02's tasks when it starts.
+
+Plan 02 depends on this plan: it extends the `rok` block layout, `ScriptOutputState` and the `ScriptResult` literal that Tasks 1 and 2 changed. Do not start it on a tree where this plan's checks fail.
