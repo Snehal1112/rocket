@@ -28,7 +28,8 @@ A script written from Bruno's JavaScript API Reference runs in Rocket with `bru`
 
 - `rok.getAllEnvVars`, `getAllVars`, `getAllGlobalEnvVars`
 - `rok.hasVar`, `hasGlobalEnvVar`, `hasCollectionVar`
-- `rok.getFolderVar`, `getRequestVar`, `getProcessEnv`
+- `rok.getRequestVar`, `getProcessEnv`
+- `rok.getFolderVar` is owned by the folder-settings plan 07 (same `variables.folder` read). Do not add it here. If that plan has not landed when this one is implemented, add it then and drop it from plan 07.
 
 ### 2. Writes and deletes
 
