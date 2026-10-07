@@ -1,11 +1,11 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V14). Rules run in table order and the first violation found
+//! §7 (rules V1-V15). Rules run in table order and the first violation found
 //! is returned, so the same file always yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
-use crate::graph::{topological_sort, FlowGraphError};
+use crate::graph::{reachable_from, topological_sort, FlowGraphError};
 use crate::handle;
-use crate::node::{FlowNodeKind, CALLBACK_MAX_TIMEOUT_MS, CALLBACK_MIN_TIMEOUT_MS};
+use crate::node::{FlowNodeKind, RequestSource, CALLBACK_MAX_TIMEOUT_MS, CALLBACK_MIN_TIMEOUT_MS};
 use std::collections::{HashMap, HashSet};
 
 /// Validates `flow` and returns its node ids in topological order.
@@ -84,6 +84,7 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     check_expressions(flow)?;
     check_repeat_until(flow)?;
     check_wait_nodes(flow)?;
+    check_callback_order(flow)?;
     check_auth_nodes(flow)?;
 
     Ok(order)
@@ -382,6 +383,60 @@ fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
         }
     }
     Ok(())
+}
+
+/// V15: every inline Request that sends `{{callback.<name>}}` must run before
+/// the Wait for callback node of that name, so it is an ancestor of the Wait
+/// node in the wire graph. Only inline url, headers and body are inspected.
+/// Saved requests cannot be read in this pure crate, so they are skipped, and
+/// so are values fed in through wired fields.
+fn check_callback_order(flow: &Flow) -> Result<(), FlowGraphError> {
+    for wait in &flow.nodes {
+        let FlowNodeKind::WaitForCallback { name, .. } = &wait.kind else {
+            continue;
+        };
+        for node in &flow.nodes {
+            let FlowNodeKind::Request {
+                source: RequestSource::Inline { request },
+                ..
+            } = &node.kind
+            else {
+                continue;
+            };
+            let texts = std::iter::once(request.url.as_str())
+                .chain(
+                    request
+                        .headers
+                        .iter()
+                        .flat_map(|h| [h.name.as_str(), h.value.as_str()]),
+                )
+                .chain(request.body.as_deref());
+            if !texts.into_iter().any(|t| mentions_callback(t, name)) {
+                continue;
+            }
+            if !reachable_from(flow, &node.id).contains(&wait.id) {
+                return Err(invalid_node(
+                    wait,
+                    format!(
+                        "Request '{}' sends {{{{callback.{name}}}}} but is not wired before this Wait for callback node; wire its '{}' exit into this node's '{}' input",
+                        node.id,
+                        handle::RESULT,
+                        handle::TRIGGER
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// True when `text` holds the variable `{{callback.<name>}}`, spaces allowed.
+fn mentions_callback(text: &str, name: &str) -> bool {
+    let wanted = format!("callback.{name}");
+    text.split("{{").skip(1).any(|rest| {
+        rest.split_once("}}")
+            .is_some_and(|(inner, _)| inner.trim() == wanted)
+    })
 }
 
 #[cfg(test)]
@@ -1305,5 +1360,113 @@ mod tests {
             let f = flow(vec![auth_node("a", auth, false)], vec![]);
             assert_eq!(invalid_node_id(validate(&f)), "a");
         }
+    }
+
+    fn inline_request(id: &str, url: &str) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Request {
+                debug: false,
+                repeat_until: None,
+                label: id.to_string(),
+                source: RequestSource::Inline {
+                    request: crate::node::InlineRequestData {
+                        method: "POST".to_string(),
+                        url: url.to_string(),
+                        headers: Vec::new(),
+                        body: None,
+                    },
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn v15_request_wired_to_the_wait_trigger_is_valid() {
+        let f = flow(
+            vec![
+                inline_request("r", "https://x.test?cb={{callback.pay}}"),
+                wait_node("w", "pay", 60_000),
+            ],
+            vec![edge("e1", "r", handle::RESULT, "w", handle::TRIGGER)],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn v15_unwired_wait_after_a_callback_request_is_rejected() {
+        let f = flow(
+            vec![
+                input("i"),
+                wait_node("w", "pay", 60_000),
+                inline_request("r", "https://x.test?cb={{callback.pay}}"),
+            ],
+            vec![edge("e1", "i", handle::RESULT, "r", "url")],
+        );
+        let reason = invalid_node_reason(validate(&f));
+        assert_eq!(
+            invalid_node_id(validate(&f)),
+            "w",
+            "the Wait node is reported"
+        );
+        assert!(reason.contains("Request 'r'"), "{reason}");
+        assert!(reason.contains("{{callback.pay}}"), "{reason}");
+        assert!(reason.contains("'result' exit"), "{reason}");
+        assert!(reason.contains("'trigger' input"), "{reason}");
+    }
+
+    #[test]
+    fn v15_accidental_declaration_order_is_not_enough() {
+        let f = flow(
+            vec![
+                inline_request("r", "{{ callback.pay }}"),
+                wait_node("w", "pay", 60_000),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(invalid_node_id(validate(&f)), "w");
+    }
+
+    #[test]
+    fn v15_header_and_body_references_count() {
+        let mut r = inline_request("r", "https://x.test");
+        if let FlowNodeKind::Request {
+            source: RequestSource::Inline { request },
+            ..
+        } = &mut r.kind
+        {
+            request.body = Some("{\"url\":\"{{callback.pay}}\"}".to_string());
+        }
+        let f = flow(vec![wait_node("w", "pay", 60_000), r], Vec::new());
+        assert_eq!(invalid_node_id(validate(&f)), "w");
+    }
+
+    #[test]
+    fn v15_unreferenced_callback_needs_no_wiring() {
+        let f = flow(
+            vec![
+                inline_request("r", "https://x.test?cb={{callback.other}}"),
+                wait_node("w", "pay", 60_000),
+                request("saved"),
+            ],
+            Vec::new(),
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn v15_request_reaching_the_wait_through_another_node_is_valid() {
+        let f = flow(
+            vec![
+                inline_request("r", "{{callback.pay}}"),
+                transform("t", "return 1;"),
+                wait_node("w", "pay", 60_000),
+            ],
+            vec![
+                edge("e1", "r", handle::RESULT, "t", handle::INPUT),
+                edge("e2", "t", handle::RESULT, "w", handle::TRIGGER),
+            ],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
     }
 }

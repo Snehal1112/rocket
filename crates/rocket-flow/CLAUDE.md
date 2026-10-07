@@ -31,7 +31,7 @@ cargo test -p rocket-flow -j4
 | `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch/WaitForCallback/Transform/Auth), `SwitchCase`, `RepeatUntil`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
-| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V14 (spec §7, listed in the file header) |
+| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V15 (spec §7, listed in the file header) |
 
 ### Key Design Points
 

@@ -7232,7 +7232,11 @@ mod tests {
                     "https://api.example.com/r?a={{callback.first}}&b={{callback.second}}",
                 ),
             ],
-            edges: Vec::new(),
+            // The request must run before both waits, so it triggers them.
+            edges: vec![
+                trigger_edge("e1", "reg", handle::RESULT, "w1"),
+                trigger_edge("e2", "reg", handle::RESULT, "w2"),
+            ],
             callback_host: None,
         };
         let fake = crate::test_doubles::FakeCallbackListener::new();
