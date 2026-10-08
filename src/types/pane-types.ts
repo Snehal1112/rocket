@@ -212,6 +212,8 @@ export interface FlowTab extends BaseTab {
   nodeDetail?: Record<string, FlowNodeDetail>;
   runState: 'idle' | 'running' | 'done';
   runId?: string;
+  /** Undo and redo steps for the graph. In memory only, never saved. */
+  history?: import('@/lib/flow-history').FlowHistory;
   /** Result of the last finished run. Cleared when the next run starts. */
   lastRun?: FlowLastRun;
 }

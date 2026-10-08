@@ -1,5 +1,14 @@
 import { create } from 'zustand';
 import { scheduleAutoSave } from '@/lib/auto-save';
+import {
+  emptyHistory,
+  type FlowWriteOptions,
+  isAtSaved,
+  recordEdit,
+  redoStep,
+  snapOf,
+  undoStep,
+} from '@/lib/flow-history';
 import { mergeRunResult } from '@/lib/flow-run-result';
 import {
   collectAllTabs,
@@ -174,6 +183,42 @@ function clearFlowAuthForDroppedTabs(dropped: Tab[], remaining: Tab[] = []): voi
   }
 }
 
+// Applies a graph edit to a flow tab and records the undo step. A write that
+// changes nothing keeps the old behaviour of marking the tab dirty, but adds no step.
+function applyFlowEdit(
+  tab: FlowTab,
+  patch: Partial<Pick<FlowTab, 'nodes' | 'edges' | 'callbackHost'>>,
+  options?: FlowWriteOptions,
+): FlowTab {
+  const changed = (Object.keys(patch) as Array<keyof typeof patch>).some(
+    (key) => patch[key] !== tab[key],
+  );
+  if (!changed) return { ...tab, isDirty: true };
+  const before = snapOf(tab);
+  const recorded = recordEdit(tab.history, before, options, Date.now());
+  // A clean tab matches the file, so its state before this edit is the saved state.
+  const history = tab.isDirty ? recorded : { ...recorded, saved: before };
+  return { ...tab, ...patch, isDirty: true, history };
+}
+
+// Moves a flow tab one step through its history.
+function stepFlowHistory(tab: FlowTab, direction: 'undo' | 'redo'): FlowTab {
+  if (!tab.history) return tab;
+  const current = snapOf(tab);
+  const result =
+    direction === 'undo' ? undoStep(tab.history, current) : redoStep(tab.history, current);
+  if (!result) return tab;
+  const { snap, history } = result;
+  return {
+    ...tab,
+    nodes: snap.nodes,
+    edges: snap.edges,
+    callbackHost: snap.callbackHost,
+    history,
+    isDirty: !isAtSaved(snap, history.saved),
+  };
+}
+
 // Recursively finds a split node by id and updates its sizes.
 function updateSplitSizes(node: PaneNode, splitId: string, sizes: [number, number]): PaneNode {
   if (node.type === 'leaf') return node;
@@ -278,11 +323,22 @@ export interface PaneState {
 
   // Flow tab.
   openFlowTab: (collectionName: string | null, flowName?: string) => Promise<void>;
-  updateFlowNodes: (tabId: string, nodes: FlowNode[]) => void;
-  updateFlowEdges: (tabId: string, edges: FlowEdge[]) => void;
-  /** Replaces nodes and edges together, so dependent edits land in one update. */
-  updateFlowGraph: (tabId: string, nodes: FlowNode[], edges: FlowEdge[]) => void;
-  setFlowCallbackHost: (tabId: string, host: string | null) => void;
+  updateFlowNodes: (tabId: string, nodes: FlowNode[], options?: FlowWriteOptions) => void;
+  updateFlowEdges: (tabId: string, edges: FlowEdge[], options?: FlowWriteOptions) => void;
+  /** Replaces nodes and edges together, so dependent edits land in one update and one undo step. */
+  updateFlowGraph: (
+    tabId: string,
+    nodes: FlowNode[],
+    edges: FlowEdge[],
+    options?: FlowWriteOptions,
+  ) => void;
+  setFlowCallbackHost: (tabId: string, host: string | null, options?: FlowWriteOptions) => void;
+  /** Steps the graph back or forward. No-ops without history. */
+  undoFlow: (tabId: string) => void;
+  redoFlow: (tabId: string) => void;
+  /** Brackets a drag: all `{ gesture: true }` writes in between make one undo step. */
+  beginFlowGesture: (tabId: string) => void;
+  endFlowGesture: (tabId: string) => void;
   patchFlowNodeStatus: (
     tabId: string,
     nodeId: string,
@@ -530,7 +586,18 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   markClean(tabId) {
     const { root } = get();
-    set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: false })) });
+    set({
+      root: updateTabInTree(root, tabId, (tab) =>
+        // A flow remembers what it saved, so undo back to that state clears the dirty dot.
+        isFlowTab(tab)
+          ? {
+              ...tab,
+              isDirty: false,
+              history: { ...(tab.history ?? emptyHistory()), saved: snapOf(tab) },
+            }
+          : { ...tab, isDirty: false },
+      ),
+    });
   },
 
   beginAgentSession(tabId, agentConfigId) {
@@ -908,34 +975,78 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     get().openTab(tab);
   },
 
-  updateFlowNodes(tabId, nodes) {
+  updateFlowNodes(tabId, nodes, options) {
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
-        isFlowTab(tab) ? { ...tab, nodes, isDirty: true } : tab,
+        isFlowTab(tab) ? applyFlowEdit(tab, { nodes }, options) : tab,
       ),
     });
   },
 
-  updateFlowEdges(tabId, edges) {
+  updateFlowEdges(tabId, edges, options) {
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
-        isFlowTab(tab) ? { ...tab, edges, isDirty: true } : tab,
+        isFlowTab(tab) ? applyFlowEdit(tab, { edges }, options) : tab,
       ),
     });
   },
 
-  updateFlowGraph(tabId, nodes, edges) {
+  updateFlowGraph(tabId, nodes, edges, options) {
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
-        isFlowTab(tab) ? { ...tab, nodes, edges, isDirty: true } : tab,
+        isFlowTab(tab) ? applyFlowEdit(tab, { nodes, edges }, options) : tab,
       ),
     });
   },
 
-  setFlowCallbackHost(tabId, host) {
+  setFlowCallbackHost(tabId, host, options) {
     set({
       root: updateTabInTree(get().root, tabId, (tab) =>
-        isFlowTab(tab) ? { ...tab, callbackHost: host, isDirty: true } : tab,
+        isFlowTab(tab) ? applyFlowEdit(tab, { callbackHost: host }, options) : tab,
+      ),
+    });
+  },
+
+  undoFlow(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? stepFlowHistory(tab, 'undo') : tab,
+      ),
+    });
+  },
+
+  redoFlow(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? stepFlowHistory(tab, 'redo') : tab,
+      ),
+    });
+  },
+
+  beginFlowGesture(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab)
+          ? {
+              ...tab,
+              history: {
+                ...(tab.history ?? emptyHistory()),
+                gesture: 'armed',
+                lastKey: undefined,
+                lastAt: undefined,
+              },
+            }
+          : tab,
+      ),
+    });
+  },
+
+  endFlowGesture(tabId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) && tab.history?.gesture
+          ? { ...tab, history: { ...tab.history, gesture: undefined } }
+          : tab,
       ),
     });
   },
