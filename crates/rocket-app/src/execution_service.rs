@@ -30,6 +30,9 @@ use std::sync::Arc;
 pub mod websocket_resolution;
 
 #[cfg(test)]
+mod folder_chain_e2e_tests;
+
+#[cfg(test)]
 mod folder_var_script_tests;
 pub(crate) mod script_chain;
 use self::script_chain::{
