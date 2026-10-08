@@ -75,6 +75,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **`auth: Option<Auth>`** — default auth applied to all requests in the collection.
 - **`headers: Vec<Header>`** — default headers prepended to every request.
 - **`docs: Option<String>`** — optional markdown documentation for the collection (maps to `docs:` in opencollection.yml).
+- **`script_flow: ScriptFlow`** — `Sandwich` (default) or `Sequential`, serde lowercase. Stored at `extensions.bruno.scripts.flow` in opencollection.yml, not in a Rocket-only field.
 
 ## FolderSettings
 

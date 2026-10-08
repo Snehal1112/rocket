@@ -210,6 +210,18 @@ request:                # RequestDefaults — inherited by children
 docs: string | { content, type } | null
 ```
 
+**What Rocket edits in `folder.yml`** (the Folder Settings tab; design in `docs/superpowers/specs/2026-10-07-folder-settings-design.md`):
+
+| Section | Shape | Notes |
+|---|---|---|
+| `request.headers` | `[ { name, value, description, disabled } ]` | Disabled entries never shadow an outer header. |
+| `request.auth` | `Auth` or `"inherit"` | Every auth type is allowed on a folder. Absent and `inherit` both mean "no folder auth". |
+| `request.variables` | `[ Variable ]` | Pre-request only. There is no post-response variable slot in `RequestDefaults`. |
+| `request.scripts` | `[ { type, code } ]` | Types `before-request`, `after-response`, `tests`. A `hooks` entry is kept untouched. |
+| `docs` | string or `{ content, type }` | Rocket reads both. It writes a plain string. |
+
+Rocket leaves `request.metadata`, `request.settings`, `info.seq` and any `hooks` script exactly as it found them on every save. An empty section is omitted, never written as an empty list. Folder `request.variables` never carry `initial`, and each keeps the description of the existing entry with the same name. `info.uid` is the existing `FolderInfo.uid` deviation and is never added to a file that lacks it. Rocket has no `folder.bru` importer: a Bruno folder imported from `.bru` files loses its folder-level settings (a tracked follow-up).
+
 ### 2.8 ScriptFile
 
 ```yaml
@@ -588,7 +600,8 @@ Each item in `items[]` maps to a separate `.yml` file on disk.
 
 **Key layout rules:**
 - `opencollection.yml` at collection root — contains `info`, `config`, `request` (defaults), `docs`. The `items[]` array is NOT written here; items live as individual files.
-- `folder.yml` at each folder root — contains `info`, `request` (defaults), `docs`. No `items[]` array.
+- `extensions.bruno.scripts.flow` in `opencollection.yml` is `sequential`, or absent for the default `sandwich`. It is the script order for the whole collection, and it is the only place the order is stored (there is no per-folder flow). Rocket reads it, honors it and keeps it, with every other key under `extensions`, on every settings save. `extensions` is the schema's free-form object, so this is not a deviation.
+- `folder.yml` at each folder root — contains `info`, `request` (defaults), `docs`. No `items[]` array. Rocket writes `request.headers`, `request.auth`, `request.variables`, `request.scripts` and `docs` here (see section 2.7), and keeps `request.metadata` and `request.settings` as found. No Rocket-only fields.
 - Each request is its own `.yml` file named after the request (slugified).
 - All file names and directory names are slugified (lowercase, hyphens).
 - **All files are `.yml`, never `.json`.**
@@ -615,6 +628,26 @@ Priority order (highest → lowest):
 - For `Variable.value`, resolution uses `value ?? initialValue` — the `initialValue` field is the Git-committed shared value; `value` is the local override. (This is a RocketAPI convention layered on top of the spec's `VariableValue` type.)
 - Global environments are **regular `Environment` yml files** stored at the workspace level — they are NOT a special type.
 - Runtime variables exist in memory only — never serialised to disk.
+
+### 6.1 Headers, auth and scripts follow the same chain
+
+Variables are not the only thing a folder contributes. The chain is always collection, then folders from the outermost to the innermost, then the request.
+
+**Headers.** Lowest to highest: collection `request.headers`, each folder's `request.headers`, the request's own headers. A more specific level replaces an enabled header of the same name from a less specific level. The match is on the exact header name, the same as today's collection-versus-request merge, so `x-id` and `X-Id` are two headers. A disabled header never replaces another one.
+
+**Auth.** A request whose auth is `inherit` (or `none`, which Rocket treats the same, see section 3.1) takes the auth of the nearest folder whose auth is set and is not `inherit`, then the collection's auth, then none. A folder whose auth is absent or `inherit` passes the lookup to its parent. An explicit request auth always wins.
+
+**Scripts.** Each phase gets the request's script plus every folder's script of that phase, in an order set by `extensions.bruno.scripts.flow`:
+
+| Phase | `sandwich` (default) | `sequential` |
+|---|---|---|
+| before-request | outer folder, inner folder, request | outer folder, inner folder, request |
+| after-response | request, inner folder, outer folder | outer folder, inner folder, request |
+| tests | request, inner folder, outer folder | outer folder, inner folder, request |
+
+A blank script is skipped. Folder scripts use the same sandbox mode, `require()` rules and secret-use scan as request scripts, and an error in one surfaces as `script_error` in phase order. Scripts stored in `opencollection.yml` `request.scripts` are preserved on save but are not run: `CollectionSettings` has no script field.
+
+A `folder.yml` that fails to parse during a send is an error that names the folder. It is never silently dropped.
 
 ---
 
@@ -663,7 +696,7 @@ Priority order (highest → lowest):
 - Always use `"inherit"` (string literal) when an auth or setting falls back to the parent — never `null`, never omit the field ambiguously.
 - Always emit a domain event from the Rust backend for state-changing operations.
 - Always route disk I/O through `FsCollectionRepo` / `FsEnvironmentRepo`.
-- Always walk the full ancestor folder chain when resolving folder variables.
+- Always walk the full ancestor folder chain when resolving folder variables, headers, auth and scripts.
 - Always keep IPC DTOs (camelCase serde) separate from persistence structs (snake_case / spec-case).
 - Always check the variable resolution order in section 6 before implementing any variable lookup.
 
