@@ -112,6 +112,28 @@ describe('flow tab history', () => {
     expect(current().isDirty).toBe(true);
   });
 
+  it('captures the saved state on the first real edit after a no-op write', () => {
+    const tab = openFlow();
+    store().updateFlowNodes(TAB_ID, tab.nodes);
+    store().updateFlowNodes(TAB_ID, [node('a'), node('b', 100), node('c')]);
+    store().undoFlow(TAB_ID);
+    expect(current().nodes).toBe(tab.nodes);
+    expect(current().isDirty).toBe(false);
+  });
+
+  it('marks saved with the written snapshot, not the live one', () => {
+    const tab = openFlow();
+    store().updateFlowNodes(TAB_ID, [node('a')]);
+    const written = { nodes: current().nodes, edges: current().edges };
+    store().updateFlowNodes(TAB_ID, [node('a'), node('z')]);
+    store().markClean(TAB_ID, written);
+    expect(current().isDirty).toBe(true);
+    store().undoFlow(TAB_ID);
+    expect(current().nodes).toBe(written.nodes);
+    expect(current().isDirty).toBe(false);
+    expect(tab.nodes).not.toBe(written.nodes);
+  });
+
   it('keeps at most 100 steps', () => {
     openFlow();
     for (let i = 0; i < 105; i += 1) store().updateFlowNodes(TAB_ID, [node(`n${i}`)]);

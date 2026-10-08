@@ -15,7 +15,7 @@ import {
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
-import { pruneSelection } from '@/lib/flow-history';
+import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
 import type { FlowRunResult } from '@/lib/flow-run-result';
 import { flowPayloadFromTab } from '@/lib/flow-save';
 import {
@@ -48,6 +48,12 @@ import { NodePropertiesPanel, type PanelTab } from './properties/NodePropertiesP
 import { RunResultStrip } from './RunResultStrip';
 import { useClearRemovedAuthTokens } from './useClearRemovedAuthTokens';
 import { WireScriptDialog } from './WireScriptDialog';
+
+// A new wire and the dialog that finishes it are one undo step, however long the dialog stays open.
+const WIRE_STEP = (edgeId: string): FlowWriteOptions => ({
+  coalesceKey: `wire:${edgeId}`,
+  coalesceMs: Number.POSITIVE_INFINITY,
+});
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const openFlowTab = usePaneStore((s) => s.openFlowTab);
@@ -364,11 +370,13 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     try {
       const payload = flowPayloadFromTab(tab);
       if (!payload) return false;
+      // The graph being written, so an edit made during the save stays unsaved.
+      const written = snapOf(tab);
       await saveFlow(payload.collection, payload.flow);
       setCycleNodeIds([]);
       setCycleEdgeIds([]);
       setSaveErrorMessage(null);
-      markClean(tab.id);
+      markClean(tab.id, written);
       if (!quiet) toast.success('Flow saved.');
       return true;
     } catch (err) {
@@ -415,7 +423,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       pendingEdge && isUncommittedHeadersEdge(pendingEdge)
         ? tab.edges.filter((e) => e.id !== pendingEdge.id)
         : tab.edges;
-    updateFlowEdges(tab.id, [...base, edge]);
+    // The connect and the dialog's commit or dismissal share one undo step.
+    updateFlowEdges(tab.id, [...base, edge], WIRE_STEP(edge.id));
     // Input and trigger wires carry no value, so there is nothing to edit.
     // Clearing the pending edge also closes a preempted popover.
     setPendingEdge(shouldPromptForExpression(edge) ? edge : null);
@@ -566,6 +575,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                   updateFlowEdges(
                     tab.id,
                     tab.edges.filter((e) => e.id !== pendingEdge.id),
+                    WIRE_STEP(pendingEdge.id),
                   );
                 }
                 setPendingEdge(null);
@@ -575,6 +585,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                 updateFlowEdges(
                   tab.id,
                   tab.edges.map((e) => (e.id === updated.id ? updated : e)),
+                  WIRE_STEP(updated.id),
                 );
               }}
             />

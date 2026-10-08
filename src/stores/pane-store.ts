@@ -3,6 +3,7 @@ import { scheduleAutoSave } from '@/lib/auto-save';
 import {
   emptyHistory,
   type FlowWriteOptions,
+  type GraphSnap,
   isAtSaved,
   recordEdit,
   redoStep,
@@ -193,7 +194,15 @@ function applyFlowEdit(
   const changed = (Object.keys(patch) as Array<keyof typeof patch>).some(
     (key) => patch[key] !== tab[key],
   );
-  if (!changed) return { ...tab, isDirty: true };
+  if (!changed) {
+    // A clean tab still matches the file, so remember it before it turns dirty.
+    if (tab.isDirty || tab.history?.saved) return { ...tab, isDirty: true };
+    return {
+      ...tab,
+      isDirty: true,
+      history: { ...(tab.history ?? emptyHistory()), saved: snapOf(tab) },
+    };
+  }
   const before = snapOf(tab);
   const recorded = recordEdit(tab.history, before, options, Date.now());
   // A clean tab matches the file, so its state before this edit is the saved state.
@@ -264,7 +273,8 @@ export interface PaneState {
   updateRequest: (tabId: string, patch: Partial<RequestState>) => void;
   setResponse: (tabId: string, response: ResponseState) => void;
   markDirty: (tabId: string) => void;
-  markClean: (tabId: string) => void;
+  // For a flow, `saved` is the graph that was written, which may be older than the live one.
+  markClean: (tabId: string, saved?: GraphSnap) => void;
 
   // Agent chat session actions.
   beginAgentSession: (tabId: string, agentConfigId: string) => void;
@@ -584,7 +594,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: true })) });
   },
 
-  markClean(tabId) {
+  markClean(tabId, saved) {
     const { root } = get();
     set({
       root: updateTabInTree(root, tabId, (tab) =>
@@ -592,8 +602,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         isFlowTab(tab)
           ? {
               ...tab,
-              isDirty: false,
-              history: { ...(tab.history ?? emptyHistory()), saved: snapOf(tab) },
+              isDirty: saved ? !isAtSaved(snapOf(tab), saved) : false,
+              history: { ...(tab.history ?? emptyHistory()), saved: saved ?? snapOf(tab) },
             }
           : { ...tab, isDirty: false },
       ),
