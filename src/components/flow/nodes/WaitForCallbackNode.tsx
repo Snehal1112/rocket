@@ -24,6 +24,8 @@ export interface WaitForCallbackNodeData {
   durationMs?: number;
   /** Live text while waiting, such as "waiting… 42s left". */
   progress?: string;
+  /** True while a partial run is in progress and this result is from the earlier run. */
+  cached?: boolean;
   /** This run's callback URL. Set only while the run is active. */
   callbackUrl?: string;
   /** Problems found in this node, drawn as a ring and a badge. */
@@ -88,6 +90,7 @@ export function WaitForCallbackNode({
         skipReason={data.skipReason}
         error={data.error}
         progress={data.progress}
+        cached={data.cached}
       />
       {data.callbackUrl && (
         <div className='px-2 pt-1'>

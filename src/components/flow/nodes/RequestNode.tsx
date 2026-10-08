@@ -21,6 +21,8 @@ export interface RequestNodeData {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
+  /** True while a partial run is in progress and this result is from the earlier run. */
+  cached?: boolean;
   /** Attempts a repeat-until run made. Set after a run. */
   attempts?: number;
   headerCount?: number;
@@ -102,7 +104,12 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
       )}
       {/* The line above already shows a failure, so the caption covers skips only. */}
       {status !== 'failed' && (
-        <NodeStatusCaption status={status} skipReason={data.skipReason} progress={data.progress} />
+        <NodeStatusCaption
+          status={status}
+          skipReason={data.skipReason}
+          progress={data.progress}
+          cached={data.cached}
+        />
       )}
 
       {/* Every field row, including the data-less "Run when" trigger row, is

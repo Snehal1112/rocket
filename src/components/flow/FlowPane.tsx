@@ -70,6 +70,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
   const patchFlowNodeProgress = usePaneStore((s) => s.patchFlowNodeProgress);
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
+  const startPartialFlowRun = usePaneStore((s) => s.startPartialFlowRun);
   const setFlowPendingRun = usePaneStore((s) => s.setFlowPendingRun);
   const setFlowCallbackUrls = usePaneStore((s) => s.setFlowCallbackUrls);
   const setFlowRunResult = usePaneStore((s) => s.setFlowRunResult);
@@ -489,7 +490,27 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                 patchFlowNodeProgress(tab.id, nodeId, message, live)
               }
               onCallbackUrls={(urls) => setFlowCallbackUrls(tab.id, urls)}
-              onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
+              onRunStateChange={(state, runId, partial) => {
+                if (state === 'running') {
+                  // A new run replaces the highlight of an earlier refusal.
+                  setCycleNodeIds([]);
+                  setCycleEdgeIds([]);
+                  setSaveErrorMessage(null);
+                }
+                if (state === 'running' && partial && runId) {
+                  startPartialFlowRun(tab.id, runId, partial.nodeIds);
+                } else {
+                  setFlowRunState(tab.id, state, runId);
+                }
+              }}
+              onRunError={(message) => {
+                // A refused partial run names nodes the same way a save error does.
+                const parsed = parseGraphErrorMessage(message);
+                if (!parsed) return;
+                setCycleNodeIds(parsed.nodeIds);
+                setCycleEdgeIds(parsed.edgeIds);
+                setSaveErrorMessage(message);
+              }}
               onRunRequested={(runId) => setFlowPendingRun(tab.id, runId)}
               tabRunState={tab.runState}
               tabRunId={tab.runId}

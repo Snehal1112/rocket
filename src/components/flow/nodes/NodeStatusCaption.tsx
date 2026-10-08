@@ -9,11 +9,13 @@ export function NodeStatusCaption({
   skipReason,
   error,
   progress,
+  cached,
 }: {
   status: FlowNodeStatus;
   skipReason?: FlowSkipReason;
   error?: string;
   progress?: string;
+  cached?: boolean;
 }) {
   if (status === 'failed') {
     const message = error ?? 'Error';
@@ -35,6 +37,14 @@ export function NodeStatusCaption({
     );
   }
   const caption = nodeStatusCaption(status, { skipReason });
+  // During a partial run, results the run does not redo are from the earlier run.
+  if (cached) {
+    return (
+      <div data-testid='node-cached-caption' className='px-2 pt-1 italic text-muted-foreground'>
+        {caption ? `${caption} · from an earlier run` : 'Result from an earlier run'}
+      </div>
+    );
+  }
   if (!caption) return null;
   return (
     <div data-testid='node-status-caption' className='px-2 pt-1 italic text-muted-foreground'>

@@ -18,6 +18,8 @@ export type TransformNodeData = {
   error?: string;
   /** Progress text while running. */
   progress?: string;
+  /** True while a partial run is in progress and this result is from the earlier run. */
+  cached?: boolean;
   /** How long the last run of this node took. */
   durationMs?: number;
   skipReason?: FlowSkipReason;
@@ -70,6 +72,7 @@ export function TransformNode({
         skipReason={data.skipReason}
         error={data.error}
         progress={data.progress}
+        cached={data.cached}
       />
       <DurationChip durationMs={data.durationMs} />
 

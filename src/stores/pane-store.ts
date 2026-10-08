@@ -392,6 +392,8 @@ export interface PaneState {
     live?: FlowLiveProgress,
   ) => void;
   setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
+  /** Starts a partial run: keeps results outside nodeIds, marked as from an earlier run. */
+  startPartialFlowRun: (tabId: string, runId: string, nodeIds: string[]) => void;
   /** Remembers the id of a run the tab sent, until its run state changes. */
   setFlowPendingRun: (tabId: string, runId: string | undefined) => void;
   /** Stores the running flow's callback URLs. Ignored when no run is active. */
@@ -409,6 +411,19 @@ export interface PaneState {
 // different tabs, get distinct ids, so a stale loop can never coincide with
 // a fresh one by chance.
 let runIdCounter = 0;
+
+// Drops the earlier-run marks once a partial run is over.
+function clearCachedMarks(
+  detail: Record<string, FlowNodeDetail> | undefined,
+): Record<string, FlowNodeDetail> | undefined {
+  if (!detail || !Object.values(detail).some((d) => d.cached)) return detail;
+  const next: Record<string, FlowNodeDetail> = {};
+  for (const [id, d] of Object.entries(detail)) {
+    const { cached: _cached, ...rest } = d;
+    next[id] = rest;
+  }
+  return next;
+}
 
 export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
@@ -1213,11 +1228,42 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           };
         }
         // A change without a run id, such as a refused start, keeps the last run.
+        // The earlier-run marks last only while a partial run is in progress.
         return {
           ...tab,
+          nodeDetail: clearCachedMarks(tab.nodeDetail),
           runState,
           runId: runId ?? tab.runId,
           pendingRunId: undefined,
+          callbackUrls: undefined,
+        };
+      }),
+    );
+  },
+
+  // A partial run keeps every result it does not re-run, marked as from the
+  // earlier run, and clears the nodes it executes. Parked tabs get it too.
+  startPartialFlowRun(tabId, runId, nodeIds) {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
+        if (!isFlowTab(tab)) return tab;
+        const rerun = new Set(nodeIds);
+        const nodeStatus: FlowTab['nodeStatus'] = {};
+        const nodeDetail: Record<string, FlowNodeDetail> = {};
+        for (const [id, status] of Object.entries(tab.nodeStatus)) {
+          if (rerun.has(id)) continue;
+          nodeStatus[id] = status;
+          nodeDetail[id] = { ...tab.nodeDetail?.[id], cached: true };
+        }
+        return {
+          ...tab,
+          runState: 'running',
+          runId,
+          pendingRunId: undefined,
+          nodeStatus,
+          nodeDetail,
+          lastRun: undefined,
+          viewedRunId: null,
           callbackUrls: undefined,
         };
       }),

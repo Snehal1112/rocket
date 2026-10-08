@@ -17,4 +17,21 @@ describe('NodeStatusCaption', () => {
     render(<NodeStatusCaption status='success' progress='attempt 3/30' />);
     expect(screen.queryByTestId('node-progress')).toBeNull();
   });
+
+  it('says a success is from an earlier run while a partial run is in progress', () => {
+    render(<NodeStatusCaption status='success' cached />);
+    expect(screen.getByTestId('node-cached-caption')).toHaveTextContent(
+      'Result from an earlier run',
+    );
+  });
+
+  it('adds the earlier-run note to a skip caption', () => {
+    render(<NodeStatusCaption status='skipped' skipReason='branch_not_taken' cached />);
+    expect(screen.getByTestId('node-cached-caption')).toHaveTextContent(/from an earlier run/);
+  });
+
+  it('keeps showing the error of a failed node', () => {
+    render(<NodeStatusCaption status='failed' error='boom' cached />);
+    expect(screen.getByTestId('node-error')).toHaveTextContent('boom');
+  });
 });
