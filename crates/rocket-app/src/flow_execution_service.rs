@@ -825,6 +825,10 @@ impl<'a> RunRegistration<'a> {
         if kept || !in_flight.insert(run_id.to_string()) {
             return Err(in_use());
         }
+        // A Stop that raced the end of an earlier run with this id may have
+        // left a mark. `cancel` never holds `cancelled` together with another
+        // lock, so taking it under `in_flight` cannot deadlock.
+        service.clear_cancellation(run_id);
         let (handle, signal) = cancel_pair();
         // Still under the `in_flight` lock, so a Stop for this id always finds
         // its handle. `cancel` never holds two of these locks at once.
@@ -4625,6 +4629,29 @@ mod tests {
         service.cancel("r1");
 
         assert!(signal.is_cancelled());
+    }
+
+    #[test]
+    fn a_stale_cancel_does_not_stop_a_later_run_with_the_same_id() {
+        let service = service_with_flow(Flow {
+            name: "x".to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            callback_host: None,
+        });
+        // A Stop that raced the end of an earlier run left its id behind.
+        service
+            .cancelled
+            .lock()
+            .expect("lock cancelled")
+            .insert("r1".to_string());
+
+        let (registration, signal) =
+            RunRegistration::reserve(&service, "r1").expect("reserve the reused id");
+
+        assert!(!service.is_cancelled("r1"));
+        assert!(!signal.is_cancelled());
+        drop(registration);
     }
 
     #[tokio::test]
