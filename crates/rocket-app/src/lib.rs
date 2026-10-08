@@ -21,6 +21,7 @@ pub mod flow_execution_service;
 pub(crate) mod flow_poll;
 pub(crate) mod flow_routing;
 pub mod flow_service;
+pub(crate) mod flow_trace;
 pub(crate) mod flow_wait;
 pub mod git_service;
 pub mod grpc_service;

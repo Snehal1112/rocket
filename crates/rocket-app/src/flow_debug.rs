@@ -133,14 +133,20 @@ pub(crate) fn cap_exchange(mut record: FlowDebugRequest) -> FlowDebugRequest {
 /// Cuts `body` to `EXCHANGE_BODY_LIMIT` bytes at a UTF-8 boundary. Returns
 /// true when it cut anything.
 fn cap_body(body: &mut String) -> bool {
-    if body.len() <= EXCHANGE_BODY_LIMIT {
+    cap_text(body, EXCHANGE_BODY_LIMIT)
+}
+
+/// Cuts `text` to at most `limit` bytes at a UTF-8 boundary. Returns true
+/// when it cut anything.
+pub(crate) fn cap_text(text: &mut String, limit: usize) -> bool {
+    if text.len() <= limit {
         return false;
     }
-    let mut cut = EXCHANGE_BODY_LIMIT;
-    while !body.is_char_boundary(cut) {
+    let mut cut = limit;
+    while !text.is_char_boundary(cut) {
         cut -= 1;
     }
-    body.truncate(cut);
+    text.truncate(cut);
     true
 }
 

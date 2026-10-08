@@ -77,6 +77,58 @@ pub struct FlowDebugRequest {
     pub error: Option<String>,
 }
 
+/// What one Flow step saw and decided. Every field is optional on the wire,
+/// so a payload from before this field existed still parses.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowStepTrace {
+    /// One entry per data wire into the step, in the order they were read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wires: Vec<FlowWireValue>,
+    /// How an If or Switch node decided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<FlowRouteEval>,
+    /// The wire whose failure failed the step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_edge_id: Option<String>,
+    /// True when the step's `value` was cut to the step value limit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub value_truncated: bool,
+}
+
+/// The value one wire delivered to a step, already masked and size-capped.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowWireValue {
+    pub edge_id: String,
+    pub source_node_id: String,
+    pub target_field: String,
+    /// `None` for a credential wire and for a wire that failed before it had a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// True when `value` was cut.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// True for an `auth` wire. Its credential is never recorded.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub credential: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// How a routing node decided, already masked and size-capped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowRouteEval {
+    /// `"if"` or `"switch"`.
+    pub kind: String,
+    /// The coerced condition (`"true"` or `"false"`) or the Switch value.
+    pub value: String,
+    /// The Switch case id that matched. `None` for If and for the default exit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_case: Option<String>,
+}
+
 /// Direction of a WebSocket frame from the client's point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -299,8 +351,8 @@ pub enum DomainEvent {
         /// `None` for a node with no HTTP response (Input/Output nodes, or
         /// a Skipped/Failed Request node that never got a response).
         status_code: Option<u16>,
-        /// `None` for a node that never executed (Skipped) or has no
-        /// meaningful duration (Input/Output nodes).
+        /// How long the node ran. A Request reports its response time and a
+        /// repeat-until poll its total. `None` only for a node that never ran.
         duration_ms: Option<u64>,
         error: Option<String>,
         /// The node's captured output value for Output and Input nodes, or the
@@ -329,6 +381,10 @@ pub enum DomainEvent {
         /// accepted Wait for callback, whatever the Debug mode.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exchange: Option<Box<FlowDebugRequest>>,
+        /// What the step saw on its wires and how it routed, masked and capped.
+        /// The nested fields are camelCase inside this snake_case event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace: Option<Box<FlowStepTrace>>,
     },
     /// Emitted once when a Flow run ends, for any reason.
     FlowRunFinished {
@@ -925,6 +981,7 @@ mod tests {
                 message: "hi".into(),
             }],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&with_logs).expect("serialize");
         assert!(
@@ -946,6 +1003,7 @@ mod tests {
             attempts: None,
             logs: vec![],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&without).expect("serialize");
         assert!(!json.contains("logs"), "got {json}");
@@ -988,6 +1046,7 @@ mod tests {
             attempts: None,
             logs: vec![],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&event(Some(Box::new(debug)))).expect("serialize");
         assert!(
@@ -1016,6 +1075,7 @@ mod tests {
             attempts: None,
             logs: vec![],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -1040,6 +1100,7 @@ mod tests {
             attempts: None,
             logs: vec![],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(json.contains(r#""status":"skipped""#));
@@ -1072,6 +1133,7 @@ mod tests {
                 debug_request,
                 attempts,
                 exchange,
+                trace,
             } => {
                 assert_eq!(run_id, "01J");
                 assert_eq!(node_id, "node-3");
@@ -1086,6 +1148,7 @@ mod tests {
                 assert_eq!(debug_request, None);
                 assert_eq!(attempts, None);
                 assert_eq!(exchange, None);
+                assert_eq!(trace, None);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1158,6 +1221,7 @@ mod tests {
             attempts: None,
             logs: vec![],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -1182,6 +1246,7 @@ mod tests {
             attempts: None,
             logs: vec![],
             exchange: None,
+            trace: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -1386,6 +1451,7 @@ mod tests {
             logs: Vec::new(),
             debug_request: None,
             attempts: None,
+            trace: None,
             exchange: Some(Box::new(FlowDebugRequest {
                 method: "GET".into(),
                 url: "https://x.test".into(),
@@ -1420,5 +1486,90 @@ mod tests {
         assert!(!old.body_truncated);
         let json = serde_json::to_string(&old).expect("serialize");
         assert!(!json.contains("bodyTruncated"), "{json}");
+    }
+
+    #[test]
+    fn an_empty_flow_step_trace_serializes_to_an_empty_object() {
+        let json = serde_json::to_string(&FlowStepTrace::default()).expect("serialize");
+        assert_eq!(json, "{}");
+        let back: FlowStepTrace = serde_json::from_str("{}").expect("deserialize");
+        assert_eq!(back, FlowStepTrace::default());
+    }
+
+    #[test]
+    fn a_flow_wire_value_is_camel_case_and_omits_false_flags() {
+        let wire = FlowWireValue {
+            edge_id: "e1".into(),
+            source_node_id: "in".into(),
+            target_field: "headers[X-Id].value".into(),
+            value: Some("42".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&wire).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"edgeId":"e1","sourceNodeId":"in","targetField":"headers[X-Id].value","value":"42"}"#
+        );
+        let credential = FlowWireValue {
+            credential: true,
+            ..wire.clone()
+        };
+        let json = serde_json::to_string(&FlowWireValue {
+            value: None,
+            ..credential
+        })
+        .expect("serialize");
+        assert!(json.contains(r#""credential":true"#), "{json}");
+        // The target field itself ends in ".value", so match the key.
+        assert!(!json.contains(r#""value":"#), "{json}");
+        assert!(!json.contains("truncated"), "{json}");
+    }
+
+    #[test]
+    fn flow_step_completed_carries_a_trace_and_omits_it_when_absent() {
+        let trace = FlowStepTrace {
+            route: Some(FlowRouteEval {
+                kind: "switch".into(),
+                value: "admin".into(),
+                matched_case: Some("c1".into()),
+            }),
+            failed_edge_id: Some("e2".into()),
+            ..Default::default()
+        };
+        let event = |trace| DomainEvent::FlowStepCompleted {
+            run_id: "r".into(),
+            node_id: "n".into(),
+            status: FlowNodeStatus::Success,
+            status_code: None,
+            duration_ms: Some(3),
+            error: None,
+            value: None,
+            skip_reason: None,
+            branch: None,
+            logs: Vec::new(),
+            debug_request: None,
+            attempts: None,
+            exchange: None,
+            trace,
+        };
+        let json = serde_json::to_string(&event(Some(Box::new(trace)))).expect("serialize");
+        assert!(
+            json.contains(
+                r#""trace":{"route":{"kind":"switch","value":"admin","matchedCase":"c1"},"failedEdgeId":"e2"}"#
+            ),
+            "{json}"
+        );
+        let json = serde_json::to_string(&event(None)).expect("serialize");
+        assert!(!json.contains("trace"), "{json}");
+    }
+
+    #[test]
+    fn flow_step_completed_without_trace_still_deserializes() {
+        let json = r#"{"type":"flowStepCompleted","run_id":"r","node_id":"n","status":"success","status_code":200,"duration_ms":5,"error":null,"value":null}"#;
+        let event: DomainEvent = serde_json::from_str(json).expect("old payload");
+        match event {
+            DomainEvent::FlowStepCompleted { trace, .. } => assert!(trace.is_none()),
+            other => panic!("unexpected event {other:?}"),
+        }
     }
 }

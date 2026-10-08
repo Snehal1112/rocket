@@ -668,8 +668,11 @@ use std::sync::{Arc, Mutex};
 use rocket_scripting::{ConsoleEntry, ConsoleLevel};
 use rocket_shared::events::{
     DomainEvent, FlowDebugRequest, FlowLogEntry, FlowLogLevel, FlowNodeStatus, FlowSkipReason,
+    FlowStepTrace,
 };
 use ulid::Ulid;
+
+use crate::flow_trace::{mask_then_cap, NodeTrace, STEP_VALUE_LIMIT};
 
 /// Input DTO for `FlowExecutionService::run`.
 #[derive(Debug, Clone)]
@@ -688,6 +691,9 @@ pub struct FlowStepResult {
     pub node_id: String,
     pub status: FlowNodeStatus,
     pub status_code: Option<u16>,
+    /// How long the node ran. A Request reports its response time, a
+    /// repeat-until poll its total and a callback wait its wait. `None` only
+    /// for a node that never ran.
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
     /// The node's captured output value for Output and Input nodes, or the
@@ -715,6 +721,9 @@ pub struct FlowStepResult {
     /// callback, whatever the Debug mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exchange: Option<FlowDebugRequest>,
+    /// What the step saw on its wires and how it routed, masked and capped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<FlowStepTrace>,
 }
 
 /// Builds the `FlowStepCompleted` event for one recorded step, so the live
@@ -734,6 +743,7 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         debug_request: step.debug_request.clone().map(Box::new),
         exchange: step.exchange.clone().map(Box::new),
         attempts: step.attempts,
+        trace: step.trace.clone().map(Box::new),
     }
 }
 
@@ -1024,11 +1034,13 @@ impl FlowExecutionService {
                     let mut node_debug = None;
                     let mut node_exchange = None;
                     let mut node_poll_stats = None;
+                    let mut node_trace = NodeTrace::default();
                     let mut ctx = NodeRunContext {
                         run_id: run_id.clone(),
                         node_id: node_id.clone(),
                         cancel: cancel_signal.clone(),
                     };
+                    let started_at = std::time::Instant::now();
                     let result = match node_opt {
                         Some(node) => {
                             self.execute_node(
@@ -1043,6 +1055,7 @@ impl FlowExecutionService {
                                 &mut node_debug,
                                 &mut node_exchange,
                                 &mut node_poll_stats,
+                                &mut node_trace,
                                 &mut ctx,
                                 &mut callbacks,
                             )
@@ -1052,6 +1065,8 @@ impl FlowExecutionService {
                             "node '{node_id}' is missing from the flow"
                         ))),
                     };
+                    let elapsed_ms =
+                        u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
                     // A cancel that landed while this node ran turns an error
                     // into "cancelled". A finished node keeps its real result.
                     let cancelled_now = ctx.cancel.is_cancelled();
@@ -1064,6 +1079,7 @@ impl FlowExecutionService {
                         logs: node_logs,
                         debug_request: node_debug,
                         exchange: node_exchange,
+                        trace: node_trace.into_trace(),
                         ..step
                     };
                     // A failed poll still shows its last response (§6.3).
@@ -1075,6 +1091,12 @@ impl FlowExecutionService {
                             ..step
                         },
                         _ => step,
+                    };
+                    // Every node that ran has a duration. A Request keeps its
+                    // response time and a poll or a wait keeps its own total.
+                    let step = FlowStepResult {
+                        duration_ms: step.duration_ms.or(Some(elapsed_ms)),
+                        ..step
                     };
                     let outcome = match &result {
                         Ok(executed) if step.status == FlowNodeStatus::Success => {
@@ -1171,8 +1193,8 @@ impl FlowExecutionService {
     /// output and chosen exit, or an error if the node itself failed.
     // The node needs the run's inputs, captured outputs and secrets, and
     // `logs` collects the console output, `debug` the debug record,
-    // `exchange` the capped exchange record and `poll_stats` how a failed
-    // poll went.
+    // `exchange` the capped exchange record, `poll_stats` how a failed
+    // poll went, and `trace` what the step saw on its wires.
     #[allow(clippy::too_many_arguments)]
     async fn execute_node(
         &self,
@@ -1187,6 +1209,7 @@ impl FlowExecutionService {
         debug: &mut Option<FlowDebugRequest>,
         exchange: &mut Option<FlowDebugRequest>,
         poll_stats: &mut Option<crate::flow_poll::FailedPollStats>,
+        trace: &mut NodeTrace,
         ctx: &mut NodeRunContext,
         callbacks: &mut crate::flow_callbacks::RunCallbacks,
     ) -> DomainResult<ExecutedNode> {
@@ -1210,8 +1233,9 @@ impl FlowExecutionService {
                     external_secrets,
                 );
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
-                // Wires get the raw value. The step shows it with secrets masked.
-                let reported = crate::redaction::redact_secrets(&resolved, &secret_values);
+                // Wires get the raw value. The step shows it masked, then capped.
+                let (reported, cut) = mask_then_cap(&resolved, &secret_values, STEP_VALUE_LIMIT);
+                trace.step.value_truncated = cut;
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
                     ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(resolved)))
@@ -1242,10 +1266,11 @@ impl FlowExecutionService {
                     .await;
                 logs.extend(outcome.logs);
                 let value = outcome.result?;
-                // Wires get the raw value. The step shows every secret masked.
+                // Wires get the raw value. The step shows every secret masked, then capped.
                 let mut masked = secret_values.clone();
                 masked.extend(credentials.secret_forms());
-                let reported = crate::redaction::redact_secrets(&value, &masked);
+                let (reported, cut) = mask_then_cap(&value, &masked, STEP_VALUE_LIMIT);
+                trace.step.value_truncated = cut;
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
                     ..ExecutedNode::plain(CapturedOutput::Value(VariableValue::simple(value)))
@@ -1467,8 +1492,9 @@ impl FlowExecutionService {
                 logs.extend(outcome.logs);
                 // A string result stays text for wires. Other results stay JSON.
                 let value = outcome.result?;
-                // Wires get the raw text. The step shows it with secrets masked.
-                let reported = crate::redaction::redact_secrets(value.data(), &secret_values);
+                // Wires get the raw text. The step shows it masked, then capped.
+                let (reported, cut) = mask_then_cap(value.data(), &secret_values, STEP_VALUE_LIMIT);
+                trace.step.value_truncated = cut;
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
                     ..ExecutedNode::plain(CapturedOutput::Value(value))
@@ -1584,6 +1610,7 @@ fn result_to_step(
         debug_request: None,
         attempts: None,
         exchange: None,
+        trace: None,
     };
     match result {
         Ok(executed) if is_routing => FlowStepResult {
@@ -1657,6 +1684,7 @@ fn skipped_step(node_id: &str, reason: FlowSkipReason) -> FlowStepResult {
         debug_request: None,
         attempts: None,
         exchange: None,
+        trace: None,
     }
 }
 
@@ -1674,6 +1702,7 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
         debug_request: None,
         attempts: None,
         exchange: None,
+        trace: None,
     }
 }
 
@@ -4493,6 +4522,7 @@ mod tests {
             debug_request: None,
             attempts: None,
             exchange: None,
+            trace: None,
             logs: Vec::new(),
         };
         let json = serde_json::to_value(&step).expect("serialize");
@@ -4520,6 +4550,10 @@ mod tests {
         .expect("deserialize pre-Phase-2 summary step");
         assert_eq!(back.skip_reason, None);
         assert_eq!(back.branch, None);
+        assert_eq!(
+            back.trace, None,
+            "a summary step from before the trace still parses"
+        );
     }
 
     #[tokio::test]
@@ -7845,6 +7879,92 @@ mod tests {
             Some(crate::redaction::REDACTED),
             "the output step masks the secret"
         );
+    }
+
+    #[tokio::test]
+    async fn every_node_that_ran_reports_a_duration() {
+        let summary = run_transform("tf-duration", Scripted::Value(serde_json::json!("PRO"))).await;
+
+        for id in ["in", "t", "out"] {
+            assert!(
+                step_of(&summary, id).duration_ms.is_some(),
+                "node {id} ran, so it has a duration"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_routing_node_has_a_duration_and_a_skipped_node_has_none() {
+        let service = service_with_flow(if_flow("if-duration"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service
+            .run(&exec, run_input("if-duration"))
+            .await
+            .expect("run");
+
+        assert!(step_of(&summary, "check").duration_ms.is_some());
+        assert_eq!(step_of(&summary, "no").status, FlowNodeStatus::Skipped);
+        assert_eq!(step_of(&summary, "no").duration_ms, None);
+    }
+
+    #[tokio::test]
+    async fn a_request_keeps_its_response_time_as_its_duration() {
+        let service = service_with_flow(if_flow("if-response-time"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service
+            .run(&exec, run_input("if-response-time"))
+            .await
+            .expect("run");
+
+        // The run loop only fills a duration a node did not report itself.
+        let login = step_of(&summary, "login");
+        let exchange_ms = login
+            .exchange
+            .as_ref()
+            .and_then(|e| e.response.as_ref())
+            .map(|r| r.duration_ms);
+        assert_eq!(login.duration_ms, exchange_ms);
+    }
+
+    #[tokio::test]
+    async fn a_large_input_value_is_masked_before_it_is_capped() {
+        let limit = crate::flow_trace::STEP_VALUE_LIMIT;
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        let exec = scoped_exec(env, Vec::new());
+        // The secret straddles the cap. Cutting first would leave "sk-l".
+        let text = format!("{}{{{{apiKey}}}}", "a".repeat(limit - 4));
+        let flow = Flow {
+            name: "big-input".to_string(),
+            nodes: vec![input_node_with("in", &text)],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let mut input = run_input("big-input");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "in");
+        let value = step.value.as_deref().expect("value");
+        assert!(value.len() <= limit);
+        assert!(!value.contains("sk-"), "half a secret leaked");
+        assert!(step.trace.as_ref().is_some_and(|t| t.value_truncated));
     }
 
     /// in -> check(if) -> true: t -> out.
