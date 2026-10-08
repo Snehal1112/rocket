@@ -52,6 +52,7 @@ import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
 import { FlowHistoryButtons } from './FlowHistoryButtons';
+import { FlowIssuesButton } from './FlowIssuesButton';
 import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
@@ -315,6 +316,16 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     [latestFlowTab, recordFlowRun, setFlowRunResult, tabId],
   );
 
+  // Selects the node an issue names and opens its Settings tab.
+  const handleSelectIssueNode = useCallback(
+    (nodeId: string) => {
+      setPanelTab('settings');
+      handleSelectedNodeIdsChange(new Set([nodeId]));
+      handleOpenProperties(nodeId);
+    },
+    [handleOpenProperties, handleSelectedNodeIdsChange],
+  );
+
   // Selects the node and opens its panel on the Last run tab.
   const handleOpenNodeOnLastRun = useCallback(
     (nodeId: string) => {
@@ -543,7 +554,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             onSave={() => handleSave()}
             isDirty={() => latestFlowTab()?.isDirty ?? false}
           />
-          <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
+          <div className='absolute top-2 right-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center justify-end gap-2'>
             {tab.nodes.some((n) => n.kind.kind === 'WaitForCallback') && (
               <CallbackHostSetting
                 value={tab.callbackHost}
@@ -569,6 +580,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               viewedRunId={viewedRecord ? viewedRecord.runId : null}
               disabled={tab.runState === 'running'}
               onChange={(runId) => setViewedFlowRun(tab.id, runId)}
+            />
+            <FlowIssuesButton
+              issues={issues}
+              nodes={tab.nodes}
+              onSelectNode={handleSelectIssueNode}
             />
             <FlowToolbar
               collection={collectionName}
