@@ -51,6 +51,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
+import { FlowExportMenu } from './FlowExportMenu';
 import { FlowHistoryButtons } from './FlowHistoryButtons';
 import { FlowIssuesButton } from './FlowIssuesButton';
 import { FlowSaveShortcut } from './FlowSaveShortcut';
@@ -646,6 +647,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             <Button size='sm' variant='outline' onClick={() => void handleSave()}>
               Save
             </Button>
+            <FlowExportMenu tab={tab} />
           </div>
           {shownRun && (
             <div className='absolute top-12 right-2 z-10 max-w-[60%]'>
