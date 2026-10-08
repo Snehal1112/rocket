@@ -1,8 +1,9 @@
+use super::folder_settings_dto::FolderSettingsDto;
 use rocket_app::{CollectionService, ContractService, WorkspaceService};
 use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::{
-    Collection, CollectionSummary, CollectionVariable, GraphQlRequest, GrpcRequest, Request,
-    WebSocketRequest,
+    Collection, CollectionSummary, CollectionVariable, FolderSettings, GraphQlRequest, GrpcRequest,
+    Request, WebSocketRequest,
 };
 use rocket_shared::error::DomainError;
 use rocket_workspace::RepositoryId;
@@ -531,6 +532,46 @@ pub fn save_folder_variables(
     svc.save_folder_variables(&collection, &folder_path, vars)
 }
 
+/// Refuses folder paths that are absolute or climb out of the collection.
+/// The repository checks again, this keeps a bad path from reaching it.
+fn validate_folder_path(folder_path: &str) -> Result<(), DomainError> {
+    use std::path::Component;
+    let escapes = Path::new(folder_path).components().any(|c| {
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    });
+    if escapes {
+        return Err(DomainError::InvalidInput(format!(
+            "folder path must stay inside the collection: {folder_path}"
+        )));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_folder_settings(
+    collection: String,
+    folder_path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<FolderSettingsDto, DomainError> {
+    validate_folder_path(&folder_path)?;
+    svc.get_folder_settings(&collection, &folder_path)
+        .map(FolderSettingsDto::from)
+}
+
+#[tauri::command]
+pub fn save_folder_settings(
+    collection: String,
+    folder_path: String,
+    settings: FolderSettingsDto,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    validate_folder_path(&folder_path)?;
+    svc.save_folder_settings(&collection, &folder_path, &FolderSettings::from(settings))
+}
+
 #[tauri::command]
 pub fn get_request_variables(
     collection: String,
@@ -575,5 +616,30 @@ mod tests {
         assert_eq!(dto.repository_id, "collection:workspace-1:collection-1");
         let json = serde_json::to_value(dto).expect("serialize collection summary DTO");
         assert_eq!(json["repositoryId"], "collection:workspace-1:collection-1");
+    }
+
+    #[test]
+    fn folder_settings_path_accepts_root_and_nested_folders() {
+        assert!(validate_folder_path("").is_ok());
+        assert!(validate_folder_path("auth").is_ok());
+        assert!(validate_folder_path("auth/login").is_ok());
+    }
+
+    #[test]
+    fn folder_settings_path_rejects_escaping_paths() {
+        for bad in ["../outside", "auth/../../x", "/etc"] {
+            let err = validate_folder_path(bad).expect_err(bad);
+            assert!(
+                matches!(err, DomainError::InvalidInput(_)),
+                "{bad}: {err:?}"
+            );
+            let wire = serde_json::to_value(&err).expect("serialize error");
+            assert_eq!(
+                wire,
+                serde_json::json!(format!(
+                    "Invalid input: folder path must stay inside the collection: {bad}"
+                ))
+            );
+        }
     }
 }

@@ -421,7 +421,10 @@ pub fn run() {
                 )),
                 Arc::clone(&executor),
                 Box::new(FsHistoryRepo::new(history_dir)),
-                Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
+                // Sends read the folder chain, so the repo must follow workspace switches.
+                Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(FsCookieRepo::new(cookies_dir)),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
@@ -647,6 +650,8 @@ pub fn run() {
             commands::collections::get_folder_chain_variables,
             commands::collections::get_folder_variables,
             commands::collections::save_folder_variables,
+            commands::collections::get_folder_settings,
+            commands::collections::save_folder_settings,
             commands::collections::get_request_variables,
             commands::collections::save_request_variables,
             commands::collections::update_request_docs,

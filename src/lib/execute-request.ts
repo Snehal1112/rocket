@@ -1,5 +1,7 @@
 import { dispatchSend, type ResolvedGraphQl } from '@/lib/dispatch-send';
+import { inheritedHeaders, loadFolderChain } from '@/lib/folder-inheritance';
 import { parseGraphQlResponse } from '@/lib/graphql-response';
+import { resolveInheritedFolderAuth } from '@/lib/inherited-auth';
 import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
 import { environmentKeys } from '@/lib/queries/environment-queries';
@@ -242,16 +244,20 @@ export async function resolveRequestFieldsForPath(
   const processEnvVars = getProcessEnvVars();
 
   let collectionVars: CollectionVariable[] = [];
-  let collectionHeaders: { key: string; value: string; enabled: boolean }[] = [];
+  let collectionHeaders: Header[] = [];
   if (collection) {
     try {
       const settings = await getCollectionSettings(collection);
       collectionVars = settings.variables;
-      collectionHeaders = settings.headers.filter((h) => h.enabled);
+      collectionHeaders = settings.headers;
     } catch {
       // Collection settings unavailable — proceed without collection vars/headers.
     }
   }
+
+  // Folder headers and auth sit between the collection and the request.
+  const folderChain =
+    collection && requestPath ? await loadFolderChain(collection, requestPath) : [];
 
   let folderVars: CollectionVariable[] = [];
   if (collection && requestPath) {
@@ -314,16 +320,28 @@ export async function resolveRequestFieldsForPath(
 
   let authToResolve: AuthState = request.auth;
   if (request.auth.authType === 'inherit' && collection) {
-    const storedAuth = useCollectionAuthStore.getState().getCollectionAuth(collection);
-    if (storedAuth && storedAuth.authType !== 'none' && storedAuth.authType !== 'inherit') {
-      authToResolve = storedAuth;
+    // The nearest folder with auth wins over the collection. A folder OAuth2 token only
+    // exists in the frontend store, so the folder is resolved here, with its cached token.
+    const folderAuth = requestPath
+      ? await resolveInheritedFolderAuth(collection, requestPath)
+      : undefined;
+    if (folderAuth) {
+      // An OAuth2 folder auth without a usable token stays `inherit`. The backend then
+      // resolves the same folder from folder.yml, and fetches a client-credentials token.
+      const { auth } = folderAuth;
+      if (auth.authType !== 'oauth2' || auth.oauth2?.accessToken) authToResolve = auth;
+    } else {
+      const storedAuth = useCollectionAuthStore.getState().getCollectionAuth(collection);
+      if (storedAuth && storedAuth.authType !== 'none' && storedAuth.authType !== 'inherit') {
+        authToResolve = storedAuth;
+      }
     }
   }
   const resolvedAuth = toApiAuth(authToResolve, resolve);
 
   const requestHeaderKeys = new Set(resolvedHeaders.map((h) => h.key.toLowerCase()));
   const effectiveHeaders: Header[] = [
-    ...collectionHeaders
+    ...inheritedHeaders(collectionHeaders, folderChain)
       .filter((h) => !requestHeaderKeys.has(h.key.toLowerCase()))
       .map((h) => ({ key: resolve(h.key), value: resolve(h.value), enabled: true })),
     ...resolvedHeaders,

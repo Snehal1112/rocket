@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { sameOAuth2TokenConfig } from '@/lib/oauth2-token-config';
 import { oauth2DecodeJwt, oauth2GetToken, oauth2RefreshToken } from '@/lib/tauri-api';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import { resolveWithContext } from '@/lib/variable-context';
@@ -31,6 +32,9 @@ import { OAuth2TokenSection } from './OAuth2TokenSection';
 
 type OAuth2State = NonNullable<AuthState['oauth2']>;
 type OAuth2GrantType = OAuth2State['grantType'];
+
+const CONFIG_CHANGED_ERROR =
+  'The OAuth2 settings changed while the token was being fetched, so it was not used. Get a new token.';
 
 interface OAuth2AuthEditorProps {
   oauth2: OAuth2State;
@@ -62,6 +66,9 @@ export function OAuth2AuthEditor({
   // Always holds the latest patchOAuth2 so async handlers never use a stale closure.
   const patchOAuth2Ref = useRef(patchOAuth2);
   patchOAuth2Ref.current = patchOAuth2;
+  // The latest config, so a token that arrives after the config changed can be dropped.
+  const latestRef = useRef(o);
+  latestRef.current = o;
 
   // Build a flat key→value map from variableContext so we can resolve {{vars}}
   // on the frontend before sending to Tauri. The backend env_repo only covers
@@ -123,6 +130,10 @@ export function OAuth2AuthEditor({
         requestPath,
         forceReauth: isForceReauth || undefined,
       });
+      if (!sameOAuth2TokenConfig(o, latestRef.current)) {
+        setTokenError(CONFIG_CHANGED_ERROR);
+        return;
+      }
       patchOAuth2Ref.current({
         accessToken: result.access_token,
         refreshToken: result.refresh_token || '',
@@ -184,6 +195,10 @@ export function OAuth2AuthEditor({
         environmentName,
         requestPath,
       });
+      if (!sameOAuth2TokenConfig(o, latestRef.current)) {
+        setTokenError(CONFIG_CHANGED_ERROR);
+        return;
+      }
       patchOAuth2Ref.current({
         accessToken: result.access_token,
         refreshToken: result.refresh_token || o.refreshToken,

@@ -121,3 +121,21 @@ describe('header list and res property typings', () => {
     }
   });
 });
+
+describe('rok.getFolderVar coverage', () => {
+  it('appears in the tests-phase (default), pre-request and post-response snippet lists', () => {
+    for (const groups of [ROK_SNIPPETS, PRE_REQUEST_SNIPPETS, POST_RESPONSE_SNIPPETS]) {
+      expect(rokItemLabels(groups)).toContain('rok.getFolderVar("key")');
+    }
+  });
+
+  it.each([
+    'pre-request',
+    'post-response',
+    'tests',
+  ] as const)('%s typings declare getFolderVar and no setter', (phase) => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
+    expect(defs).toContain('getFolderVar(key: string): unknown;');
+    expect(defs).not.toContain('setFolderVar');
+  });
+});

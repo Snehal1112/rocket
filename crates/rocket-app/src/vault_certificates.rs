@@ -709,6 +709,7 @@ mod wiring_tests {
         ExecuteRequestInput {
             skip_history: false,
             flow_vars: HashMap::new(),
+            skip_folder_scripts: false,
             method: HttpMethod::Get,
             url: url.into(),
             headers: vec![],

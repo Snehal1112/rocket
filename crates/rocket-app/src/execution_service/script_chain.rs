@@ -1,0 +1,1051 @@
+//! The folder script chain of one request.
+//!
+//! The order rule lives in `rocket_collection::chain_scripts` only. This module
+//! pairs each script with the folder it came from, so an error can name it.
+
+use rocket_collection::{chain_scripts, FolderSettings, ScriptFlow, ScriptPhase as ChainPhase};
+
+/// Where a chained script came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ScriptSource {
+    /// A folder's `folder.yml`, named by its path relative to the collection root.
+    Folder(String),
+    /// The request's own script.
+    Request,
+}
+
+/// One script of a phase, in run order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChainedScript {
+    pub source: ScriptSource,
+    pub code: String,
+}
+
+impl ChainedScript {
+    /// The error text for this script. A request script keeps the raw message,
+    /// so the error text users see today does not change.
+    pub(crate) fn attribute(&self, phase: &str, message: &str) -> String {
+        match &self.source {
+            ScriptSource::Request => message.to_string(),
+            ScriptSource::Folder(label) => {
+                format!("Folder \"{label}\" {phase} script: {message}")
+            }
+        }
+    }
+}
+
+/// The scripts of every phase of one request, in run order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PhaseScripts {
+    pub pre_request: Vec<ChainedScript>,
+    pub post_response: Vec<ChainedScript>,
+    pub tests: Vec<ChainedScript>,
+}
+
+impl PhaseScripts {
+    /// Builds every phase from the folder chain (outermost first) and the
+    /// request's own scripts. `labels[i]` names `folders[i]`.
+    pub(crate) fn assemble(
+        folders: &[FolderSettings],
+        labels: &[String],
+        flow: ScriptFlow,
+        pre_request: Option<&str>,
+        post_response: Option<&str>,
+        tests: Option<&str>,
+    ) -> Self {
+        Self {
+            pre_request: phase_scripts(ChainPhase::PreRequest, flow, folders, labels, pre_request),
+            post_response: phase_scripts(
+                ChainPhase::PostResponse,
+                flow,
+                folders,
+                labels,
+                post_response,
+            ),
+            tests: phase_scripts(ChainPhase::Tests, flow, folders, labels, tests),
+        }
+    }
+}
+
+/// Stands in for the request's script when `chain_scripts` orders the markers.
+const REQUEST_MARKER: &str = "request";
+
+/// One phase in `chain_scripts` order.
+///
+/// `chain_scripts` returns script text only, and two folders may hold the same
+/// text. So each folder's script is replaced by its index before ordering, and
+/// each returned index is mapped back to its script and folder name.
+fn phase_scripts(
+    phase: ChainPhase,
+    flow: ScriptFlow,
+    folders: &[FolderSettings],
+    labels: &[String],
+    request_script: Option<&str>,
+) -> Vec<ChainedScript> {
+    let codes: Vec<Option<&str>> = folders
+        .iter()
+        .map(|folder| folder_script(folder, phase))
+        .collect();
+    let markers: Vec<FolderSettings> = codes
+        .iter()
+        .enumerate()
+        .map(|(index, code)| marker_folder(phase, code.map(|_| index.to_string())))
+        .collect();
+    let request_code = request_script.filter(|code| !code.trim().is_empty());
+
+    chain_scripts(phase, flow, &markers, request_code.map(|_| REQUEST_MARKER))
+        .into_iter()
+        .filter_map(|marker| {
+            if marker == REQUEST_MARKER {
+                return request_code.map(|code| ChainedScript {
+                    source: ScriptSource::Request,
+                    code: code.to_string(),
+                });
+            }
+            let index: usize = marker.parse().ok()?;
+            let code = codes.get(index).copied().flatten()?;
+            let label = labels
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| format!("folder level {}", index + 1));
+            Some(ChainedScript {
+                source: ScriptSource::Folder(label),
+                code: code.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The folder's script for one phase, or `None` when it is missing or blank.
+fn folder_script(folder: &FolderSettings, phase: ChainPhase) -> Option<&str> {
+    let code = match phase {
+        ChainPhase::PreRequest => folder.pre_request_script.as_deref(),
+        ChainPhase::PostResponse => folder.post_response_script.as_deref(),
+        ChainPhase::Tests => folder.tests_script.as_deref(),
+    };
+    code.filter(|code| !code.trim().is_empty())
+}
+
+/// A folder whose only content is `marker` as its script for `phase`.
+fn marker_folder(phase: ChainPhase, marker: Option<String>) -> FolderSettings {
+    let mut folder = FolderSettings::default();
+    match phase {
+        ChainPhase::PreRequest => folder.pre_request_script = marker,
+        ChainPhase::PostResponse => folder.post_response_script = marker,
+        ChainPhase::Tests => folder.tests_script = marker,
+    }
+    folder
+}
+
+/// Names for the `count` folders above `request_path`, outermost first, such as
+/// `api` and `api/users` for `api/users/get.yml`. When the chain length does not
+/// match the path, the folders are named by level instead.
+pub(crate) fn folder_labels(request_path: &str, count: usize) -> Vec<String> {
+    let segments: Vec<&str> = request_path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    let dirs = &segments[..segments.len().saturating_sub(1)];
+    if dirs.len() == count {
+        (1..=count).map(|n| dirs[..n].join("/")).collect()
+    } else {
+        (1..=count).map(|n| format!("folder level {n}")).collect()
+    }
+}
+
+/// Whether a script uses `needle` on a line that is not a full-line `//` comment.
+pub(crate) fn script_mentions(script: &str, needle: &str) -> bool {
+    script
+        .lines()
+        .any(|line| !line.trim_start().starts_with("//") && line.contains(needle))
+}
+
+/// Whether a folder sends or reads `needle`: in its scripts (when `with_scripts`
+/// is set), its headers or its auth. Folder variables are checked with the
+/// other variable scopes. Like the request check, this may over-match, never
+/// under-match.
+pub(crate) fn folder_mentions(folder: &FolderSettings, needle: &str, with_scripts: bool) -> bool {
+    let scripts = [
+        &folder.pre_request_script,
+        &folder.post_response_script,
+        &folder.tests_script,
+    ];
+    if with_scripts
+        && scripts
+            .iter()
+            .filter_map(|script| script.as_deref())
+            .any(|script| script_mentions(script, needle))
+    {
+        return true;
+    }
+    serde_json::to_string(&folder.headers).map_or(true, |text| text.contains(needle))
+        || serde_json::to_string(&folder.auth).map_or(true, |text| text.contains(needle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folder(pre: &str, post: &str, tests: &str) -> FolderSettings {
+        FolderSettings {
+            pre_request_script: Some(pre.to_string()),
+            post_response_script: Some(post.to_string()),
+            tests_script: Some(tests.to_string()),
+            ..FolderSettings::default()
+        }
+    }
+
+    fn from_folder(label: &str, code: &str) -> ChainedScript {
+        ChainedScript {
+            source: ScriptSource::Folder(label.to_string()),
+            code: code.to_string(),
+        }
+    }
+
+    fn from_request(code: &str) -> ChainedScript {
+        ChainedScript {
+            source: ScriptSource::Request,
+            code: code.to_string(),
+        }
+    }
+
+    fn labels() -> Vec<String> {
+        vec!["api".to_string(), "api/users".to_string()]
+    }
+
+    fn two_folders() -> Vec<FolderSettings> {
+        vec![
+            folder("o-pre", "o-post", "o-test"),
+            folder("i-pre", "i-post", "i-test"),
+        ]
+    }
+
+    #[test]
+    fn sandwich_wraps_the_request_in_its_folders() {
+        let scripts = PhaseScripts::assemble(
+            &two_folders(),
+            &labels(),
+            ScriptFlow::Sandwich,
+            Some("r-pre"),
+            Some("r-post"),
+            Some("r-test"),
+        );
+        assert_eq!(
+            scripts.pre_request,
+            vec![
+                from_folder("api", "o-pre"),
+                from_folder("api/users", "i-pre"),
+                from_request("r-pre"),
+            ]
+        );
+        assert_eq!(
+            scripts.post_response,
+            vec![
+                from_request("r-post"),
+                from_folder("api/users", "i-post"),
+                from_folder("api", "o-post"),
+            ]
+        );
+        assert_eq!(
+            scripts.tests,
+            vec![
+                from_request("r-test"),
+                from_folder("api/users", "i-test"),
+                from_folder("api", "o-test"),
+            ]
+        );
+    }
+
+    #[test]
+    fn sequential_runs_folders_first_in_every_phase() {
+        let scripts = PhaseScripts::assemble(
+            &two_folders(),
+            &labels(),
+            ScriptFlow::Sequential,
+            Some("r-pre"),
+            Some("r-post"),
+            Some("r-test"),
+        );
+        assert_eq!(
+            scripts.pre_request,
+            vec![
+                from_folder("api", "o-pre"),
+                from_folder("api/users", "i-pre"),
+                from_request("r-pre"),
+            ]
+        );
+        assert_eq!(
+            scripts.post_response,
+            vec![
+                from_folder("api", "o-post"),
+                from_folder("api/users", "i-post"),
+                from_request("r-post"),
+            ]
+        );
+        assert_eq!(
+            scripts.tests,
+            vec![
+                from_folder("api", "o-test"),
+                from_folder("api/users", "i-test"),
+                from_request("r-test"),
+            ]
+        );
+    }
+
+    #[test]
+    fn blank_and_missing_scripts_are_skipped() {
+        let folders = vec![
+            FolderSettings::default(),
+            FolderSettings {
+                pre_request_script: Some("  \n".to_string()),
+                tests_script: Some("i-test".to_string()),
+                ..FolderSettings::default()
+            },
+        ];
+        let scripts = PhaseScripts::assemble(
+            &folders,
+            &labels(),
+            ScriptFlow::Sandwich,
+            Some(" "),
+            None,
+            Some("r-test"),
+        );
+        assert!(scripts.pre_request.is_empty());
+        assert!(scripts.post_response.is_empty());
+        assert_eq!(
+            scripts.tests,
+            vec![from_request("r-test"), from_folder("api/users", "i-test")]
+        );
+    }
+
+    #[test]
+    fn no_folders_gives_only_the_request_scripts() {
+        let scripts =
+            PhaseScripts::assemble(&[], &[], ScriptFlow::Sandwich, Some("r-pre"), None, None);
+        assert_eq!(scripts.pre_request, vec![from_request("r-pre")]);
+        assert!(scripts.post_response.is_empty());
+        assert!(scripts.tests.is_empty());
+        assert_eq!(
+            PhaseScripts::assemble(&[], &[], ScriptFlow::Sequential, None, None, None),
+            PhaseScripts::default()
+        );
+    }
+
+    #[test]
+    fn identical_scripts_in_two_folders_keep_their_own_labels() {
+        let folders = vec![folder("same", "", ""), folder("same", "", "")];
+        let scripts =
+            PhaseScripts::assemble(&folders, &labels(), ScriptFlow::Sandwich, None, None, None);
+        assert_eq!(
+            scripts.pre_request,
+            vec![from_folder("api", "same"), from_folder("api/users", "same")]
+        );
+    }
+
+    #[test]
+    fn script_text_is_kept_as_written() {
+        let folders = vec![folder("  rok.setVar('a', 1);\n", "", "")];
+        let scripts = PhaseScripts::assemble(
+            &folders,
+            &["api".to_string()],
+            ScriptFlow::Sandwich,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(scripts.pre_request[0].code, "  rok.setVar('a', 1);\n");
+    }
+
+    #[test]
+    fn folder_labels_name_each_ancestor_folder() {
+        assert_eq!(
+            folder_labels("api/users/get.yml", 2),
+            vec!["api".to_string(), "api/users".to_string()]
+        );
+        assert!(folder_labels("get.yml", 0).is_empty());
+        assert!(folder_labels("", 0).is_empty());
+    }
+
+    #[test]
+    fn folder_labels_fall_back_when_the_chain_does_not_match_the_path() {
+        assert_eq!(
+            folder_labels("api/get.yml", 2),
+            vec!["folder level 1".to_string(), "folder level 2".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_missing_label_falls_back_to_the_folder_level() {
+        let scripts =
+            PhaseScripts::assemble(&two_folders(), &[], ScriptFlow::Sandwich, None, None, None);
+        assert_eq!(
+            scripts.pre_request,
+            vec![
+                from_folder("folder level 1", "o-pre"),
+                from_folder("folder level 2", "i-pre"),
+            ]
+        );
+    }
+
+    #[test]
+    fn errors_name_the_folder_and_leave_request_errors_as_they_were() {
+        assert_eq!(
+            from_request("x").attribute("before-request", "boom"),
+            "boom"
+        );
+        assert_eq!(
+            from_folder("api/users", "x").attribute("tests", "boom"),
+            "Folder \"api/users\" tests script: boom"
+        );
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+    use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+    use crate::test_doubles::{
+        EmptySecretManagerRepo, FakeSecretStore, FakeVaultSecretFetcher, InMemoryCollectionRepo,
+        InMemoryHistoryRepo, NullCookieRepo, NullEnvRepo, RecordingExecutor, RecordingPublisher,
+        SharedCollectionRepo, SharedExecutor, SharedHistoryRepo, SharedPublisher,
+    };
+    use async_trait::async_trait;
+    use rocket_collection::settings::SandboxMode as CollectionSandboxMode;
+    use rocket_collection::{Collection, CollectionSettings};
+    use rocket_http::RequestOptions;
+    use rocket_scripting::{
+        ExecutionMode, HeaderMutation, RequestMutations, SandboxMode, ScriptContext, ScriptEngine,
+        ScriptFileScope, ScriptResult,
+    };
+    use rocket_shared::error::DomainResult;
+    use rocket_shared::events::DomainEvent;
+    use rocket_shared::types::{Auth, HttpMethod};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    /// What one engine call saw.
+    #[derive(Debug, Clone)]
+    struct Seen {
+        /// `"<phase>:<code>"`.
+        call: String,
+        headers: Vec<(String, String)>,
+        runtime: HashMap<String, String>,
+        sandbox: SandboxMode,
+        file_scope: Option<ScriptFileScope>,
+    }
+
+    /// Engine that answers a canned result per script text and records every call.
+    struct CodeEngine {
+        results: Mutex<HashMap<String, ScriptResult>>,
+        seen: Mutex<Vec<Seen>>,
+    }
+
+    impl CodeEngine {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                results: Mutex::new(HashMap::new()),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+        fn on(&self, code: &str, result: ScriptResult) {
+            self.results
+                .lock()
+                .expect("lock")
+                .insert(code.to_string(), result);
+        }
+        fn seen(&self) -> Vec<Seen> {
+            self.seen.lock().expect("lock").clone()
+        }
+        fn calls(&self) -> Vec<String> {
+            self.seen().into_iter().map(|seen| seen.call).collect()
+        }
+    }
+
+    #[async_trait]
+    impl ScriptEngine for CodeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.seen.lock().expect("lock").push(Seen {
+                call: format!("{}:{}", ctx.phase.as_str(), ctx.code),
+                headers: ctx
+                    .request
+                    .headers
+                    .iter()
+                    .map(|h| (h.key.clone(), h.value.clone()))
+                    .collect(),
+                runtime: ctx.variables.runtime.clone(),
+                sandbox: ctx.sandbox_mode,
+                file_scope: ctx.file_scope.clone(),
+            });
+            Ok(self
+                .results
+                .lock()
+                .expect("lock")
+                .get(&ctx.code)
+                .cloned()
+                .unwrap_or_default())
+        }
+    }
+
+    struct SharedCodeEngine(Arc<CodeEngine>);
+
+    #[async_trait]
+    impl ScriptEngine for SharedCodeEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.0.execute(ctx).await
+        }
+    }
+
+    struct Harness {
+        svc: RequestExecutionService,
+        repo: Arc<InMemoryCollectionRepo>,
+        engine: Arc<CodeEngine>,
+        executor: Arc<RecordingExecutor>,
+        publisher: Arc<RecordingPublisher>,
+    }
+
+    fn harness(
+        settings: CollectionSettings,
+        chain: Vec<FolderSettings>,
+        root: Option<PathBuf>,
+    ) -> Harness {
+        let mut collection = Collection::new("col");
+        collection.settings = settings;
+        let repo = InMemoryCollectionRepo::with_folder_chain(collection, chain, root);
+        let shared_repo = Arc::clone(&repo);
+        let engine = CodeEngine::new();
+        let executor = RecordingExecutor::new();
+        let publisher = RecordingPublisher::new();
+        let svc = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(shared_repo)),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(FakeSecretStore("client-secret".into())),
+            FakeVaultSecretFetcher::new(HashMap::new()),
+        )
+        .with_script_engine(Box::new(SharedCodeEngine(Arc::clone(&engine))));
+        Harness {
+            svc,
+            repo,
+            engine,
+            executor,
+            publisher,
+        }
+    }
+
+    fn settings(flow: ScriptFlow) -> CollectionSettings {
+        CollectionSettings {
+            script_flow: flow,
+            ..CollectionSettings::default()
+        }
+    }
+
+    /// Outer folder `api`, inner folder `api/users`, each with all three scripts.
+    fn chain() -> Vec<FolderSettings> {
+        vec![
+            FolderSettings {
+                pre_request_script: Some("o-pre".into()),
+                post_response_script: Some("o-post".into()),
+                tests_script: Some("o-test".into()),
+                ..FolderSettings::default()
+            },
+            FolderSettings {
+                pre_request_script: Some("i-pre".into()),
+                post_response_script: Some("i-post".into()),
+                tests_script: Some("i-test".into()),
+                ..FolderSettings::default()
+            },
+        ]
+    }
+
+    /// A request at `api/users/get.yml` in collection `col`.
+    pub(super) fn input(
+        pre: Option<&str>,
+        post: Option<&str>,
+        tests: Option<&str>,
+    ) -> ExecuteRequestInput {
+        ExecuteRequestInput {
+            method: HttpMethod::Get,
+            url: "https://api.example.com/users/1".into(),
+            headers: vec![],
+            query_params: vec![],
+            body: None,
+            auth: Auth::None,
+            options: RequestOptions::default(),
+            environment_name: None,
+            collection: Some("col".into()),
+            request_name: Some("Get user".into()),
+            request_path: Some("api/users/get.yml".into()),
+            tags: vec![],
+            path_params: vec![],
+            pre_request_script: pre.map(str::to_string),
+            post_response_script: post.map(str::to_string),
+            tests_script: tests.map(str::to_string),
+            global_env_name: None,
+            assertions: vec![],
+            actions: vec![],
+            request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+            skip_history: false,
+            flow_vars: HashMap::new(),
+            skip_folder_scripts: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn sandwich_flow_runs_folder_and_request_scripts_in_spec_order() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), Some("r-test")))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.engine.calls(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "before-request:r-pre",
+                "after-response:r-post",
+                "after-response:i-post",
+                "after-response:o-post",
+                "tests:r-test",
+                "tests:i-test",
+                "tests:o-test",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn sequential_flow_runs_folders_first_in_every_phase() {
+        let h = harness(settings(ScriptFlow::Sequential), chain(), None);
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), Some("r-test")))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.engine.calls(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "before-request:r-pre",
+                "after-response:o-post",
+                "after-response:i-post",
+                "after-response:r-post",
+                "tests:o-test",
+                "tests:i-test",
+                "tests:r-test",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_later_script_sees_the_request_and_variables_an_earlier_one_left() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "o-pre",
+            ScriptResult {
+                request_mutations: Some(RequestMutations {
+                    headers: vec![HeaderMutation::Set {
+                        name: "X-Folder".into(),
+                        value: "outer".into(),
+                    }],
+                    ..Default::default()
+                }),
+                runtime_vars: HashMap::from([("token".to_string(), serde_json::json!("abc"))]),
+                ..Default::default()
+            },
+        );
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), None))
+            .await
+            .expect("execute");
+
+        let seen = h.engine.seen();
+        let request_pre = seen
+            .iter()
+            .find(|s| s.call == "before-request:r-pre")
+            .expect("request script ran");
+        assert!(request_pre
+            .headers
+            .contains(&("X-Folder".to_string(), "outer".to_string())));
+        assert_eq!(
+            request_pre.runtime.get("token").map(String::as_str),
+            Some("abc")
+        );
+        let outer_post = seen
+            .iter()
+            .find(|s| s.call == "after-response:o-post")
+            .expect("folder post-response script ran");
+        assert_eq!(
+            outer_post.runtime.get("token").map(String::as_str),
+            Some("abc")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_folder_script_error_names_the_folder_and_ends_its_phase() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "i-pre",
+            ScriptResult {
+                error: Some("boom".into()),
+                ..Default::default()
+            },
+        );
+        h.engine.on(
+            "o-post",
+            ScriptResult {
+                error: Some("later".into()),
+                ..Default::default()
+            },
+        );
+        let out = h
+            .svc
+            .execute(input(Some("r-pre"), Some("r-post"), None))
+            .await
+            .expect("execute");
+
+        let expected = "Folder \"api/users\" before-request script: boom";
+        assert_eq!(out.script_error.as_deref(), Some(expected));
+        assert_eq!(
+            h.engine.calls(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "after-response:r-post",
+                "after-response:i-post",
+                "after-response:o-post",
+                "tests:i-test",
+                "tests:o-test",
+            ],
+            "the request's pre-request script is skipped, later phases still run"
+        );
+        assert_eq!(
+            h.executor.sent_urls().len(),
+            1,
+            "a script error does not stop the send"
+        );
+        let events = h.publisher.events();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::ScriptError { phase, message, .. }
+                if phase == "before-request" && message == expected
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::ScriptError { message, .. }
+                if message == "Folder \"api\" after-response script: later"
+        )));
+    }
+
+    #[tokio::test]
+    async fn skip_request_from_a_folder_script_ends_the_chain_in_a_run() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "o-pre",
+            ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
+        );
+        let inp = input(Some("r-pre"), None, None);
+        let mut state = h
+            .svc
+            .begin_phases(&inp, &HashMap::new())
+            .expect("begin phases");
+        h.svc
+            .run_before_request_phase(&inp, ExecutionMode::Runner, &mut state)
+            .await
+            .expect("before-request phase");
+        assert!(state.skip_request);
+        assert_eq!(h.engine.calls(), vec!["before-request:o-pre"]);
+    }
+
+    #[tokio::test]
+    async fn skip_request_from_a_folder_script_is_ignored_by_a_single_send() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.engine.on(
+            "o-pre",
+            ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
+        );
+        h.svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.engine.calls()[..3].to_vec(),
+            vec![
+                "before-request:o-pre",
+                "before-request:i-pre",
+                "before-request:r-pre",
+            ]
+        );
+        assert_eq!(h.executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_folder_without_scripts_changes_nothing() {
+        let h = harness(
+            settings(ScriptFlow::Sandwich),
+            vec![FolderSettings::default()],
+            None,
+        );
+        let out = h
+            .svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+        assert_eq!(h.engine.calls(), vec!["before-request:r-pre"]);
+        assert!(out.script_error.is_none());
+
+        let h = harness(
+            settings(ScriptFlow::Sandwich),
+            vec![FolderSettings::default()],
+            None,
+        );
+        h.svc
+            .execute(input(None, None, None))
+            .await
+            .expect("execute");
+        assert!(h.engine.calls().is_empty());
+        assert_eq!(h.executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn folder_scripts_run_with_the_request_scripts_sandbox_and_file_scope() {
+        let mut developer = settings(ScriptFlow::Sandwich);
+        developer.sandbox_mode = CollectionSandboxMode::Developer;
+        let root = PathBuf::from("/tmp/rocket-folder-chain-test");
+        let h = harness(developer, chain(), Some(root.clone()));
+        h.svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+
+        let expected_scope = Some(ScriptFileScope {
+            collection_root: root,
+            additional_roots: vec![],
+        });
+        let seen = h.engine.seen();
+        assert_eq!(
+            seen.len(),
+            7,
+            "three pre-request, two post-response, two tests"
+        );
+        for call in &seen {
+            assert_eq!(call.sandbox, SandboxMode::Developer, "{}", call.call);
+            assert_eq!(call.file_scope, expected_scope, "{}", call.call);
+        }
+    }
+
+    #[tokio::test]
+    async fn inline_flow_requests_and_introspection_run_no_folder_scripts() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        let mut inline = input(Some("r-pre"), None, None);
+        inline.request_path = Some("__flow_inline__/node-1".into());
+        h.svc.execute(inline).await.expect("execute");
+        assert_eq!(h.engine.calls(), vec!["before-request:r-pre"]);
+
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        let mut introspection = input(Some("r-pre"), None, None);
+        introspection.skip_folder_scripts = true;
+        h.svc.execute(introspection).await.expect("execute");
+        assert_eq!(h.engine.calls(), vec!["before-request:r-pre"]);
+    }
+
+    #[tokio::test]
+    async fn the_folder_chain_is_read_once_per_execution() {
+        let h = harness(settings(ScriptFlow::Sandwich), chain(), None);
+        h.svc
+            .execute(input(Some("r-pre"), Some("r-post"), Some("r-test")))
+            .await
+            .expect("execute");
+        assert_eq!(
+            h.repo.folder_chain_reads(),
+            1,
+            "headers, auth and scripts share one chain read"
+        );
+    }
+}
+
+#[cfg(test)]
+mod secret_scan_tests {
+    use super::service_tests::input;
+    use super::*;
+    use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+    use crate::test_doubles::{
+        FakeSecretManagerRepo, FakeSecretStore, InMemoryCollectionRepo, InMemoryHistoryRepo,
+        NullCookieRepo, RecordingExecutor, SharedCollectionRepo, SharedExecutor, SharedHistoryRepo,
+        StaticEnvRepo,
+    };
+    use async_trait::async_trait;
+    use rocket_collection::Collection;
+    use rocket_environment::{
+        Environment, ExternalSecretBinding, ExternalSecretRef, SecretManagerConnection,
+        VaultSecretFetcher,
+    };
+    use rocket_shared::error::{DomainError, DomainResult};
+    use rocket_shared::events::NullEventPublisher;
+    use rocket_shared::types::{Auth, Header};
+    use std::sync::Arc;
+
+    /// Every secret fetch fails, as when the vault rejects the credentials.
+    struct FailingFetcher;
+
+    #[async_trait]
+    impl VaultSecretFetcher for FailingFetcher {
+        async fn list_secrets(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<Vec<ExternalSecretRef>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_secret_value(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+            _secret_id: &str,
+        ) -> DomainResult<Option<String>> {
+            Err(DomainError::Internal(
+                "vault rejected the credentials".into(),
+            ))
+        }
+
+        async fn test_connection(
+            &self,
+            _connection: &SecretManagerConnection,
+            _client_secret: &str,
+            _vault_name: &str,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    fn connection() -> SecretManagerConnection {
+        SecretManagerConnection {
+            id: "conn-1".to_string(),
+            label: "Test".to_string(),
+            base_url: "https://vault.internal:8774".to_string(),
+            client_id: "rocketapi".to_string(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
+        }
+    }
+
+    /// Environment `prod` with one binding, `payments.apiKey`.
+    fn environment() -> Environment {
+        let mut env = Environment::new("prod");
+        env.external_secrets.push(ExternalSecretBinding {
+            alias: "payments".to_string(),
+            connection_id: "conn-1".to_string(),
+            vault_name: "prod-vault".to_string(),
+            secret_names: vec![ExternalSecretRef {
+                name: "apiKey".to_string(),
+                secret_id: "sec-1".to_string(),
+            }],
+        });
+        env
+    }
+
+    fn service(folder: FolderSettings) -> (RequestExecutionService, Arc<RecordingExecutor>) {
+        let repo =
+            InMemoryCollectionRepo::with_folder_chain(Collection::new("col"), vec![folder], None);
+        let executor = RecordingExecutor::new();
+        let svc = RequestExecutionService::new(
+            Box::new(StaticEnvRepo(environment())),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(repo)),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo(connection())),
+            Arc::new(FakeSecretStore("client-secret".into())),
+            Arc::new(FailingFetcher),
+        );
+        (svc, executor)
+    }
+
+    /// The request itself never mentions `payments`.
+    fn prod_input() -> ExecuteRequestInput {
+        let mut inp = input(None, None, None);
+        inp.environment_name = Some("prod".into());
+        inp
+    }
+
+    #[tokio::test]
+    async fn a_folder_script_reading_a_failing_secret_blocks_the_send() {
+        let (svc, executor) = service(FolderSettings {
+            pre_request_script: Some("rok.getSecretVar(\"payments.apiKey\")".into()),
+            ..FolderSettings::default()
+        });
+        assert!(svc.execute(prod_input()).await.is_err());
+        assert!(executor.sent_urls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_commented_out_folder_secret_read_does_not_block_the_send() {
+        let (svc, executor) = service(FolderSettings {
+            tests_script: Some("  // rok.getSecretVar(\"payments.apiKey\")\nconsole.log(1)".into()),
+            ..FolderSettings::default()
+        });
+        assert!(svc.execute(prod_input()).await.is_ok());
+        assert_eq!(executor.sent_urls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_folder_header_naming_a_failing_secret_blocks_the_send() {
+        let (svc, executor) = service(FolderSettings {
+            headers: vec![Header::new("X-Api-Key", "{{payments.apiKey}}")],
+            ..FolderSettings::default()
+        });
+        assert!(svc.execute(prod_input()).await.is_err());
+        assert!(executor.sent_urls().is_empty());
+    }
+
+    #[test]
+    fn folder_mentions_skips_scripts_only_when_asked() {
+        let scripted = FolderSettings {
+            post_response_script: Some("rok.getSecretVar('payments.apiKey')".into()),
+            ..FolderSettings::default()
+        };
+        assert!(folder_mentions(&scripted, "payments.", true));
+        assert!(!folder_mentions(&scripted, "payments.", false));
+
+        let with_auth = FolderSettings {
+            auth: Some(Auth::Bearer {
+                token: "{{payments.token}}".into(),
+            }),
+            ..FolderSettings::default()
+        };
+        assert!(folder_mentions(&with_auth, "payments.", false));
+        assert!(!folder_mentions(
+            &FolderSettings::default(),
+            "payments.",
+            true
+        ));
+    }
+
+    #[test]
+    fn script_mentions_ignores_full_line_comments() {
+        assert!(script_mentions(
+            "const k = rok.getSecretVar('payments.apiKey');",
+            "payments."
+        ));
+        assert!(!script_mentions(
+            "   // rok.getSecretVar('payments.apiKey')",
+            "payments."
+        ));
+    }
+}

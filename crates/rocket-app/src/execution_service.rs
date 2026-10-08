@@ -4,7 +4,10 @@ use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
-use rocket_collection::{settings::SandboxMode as CollectionSandboxMode, CollectionRepository};
+use rocket_collection::{
+    inherited_headers, resolve_folder_auth, settings::SandboxMode as CollectionSandboxMode,
+    CollectionRepository, CollectionSettings, FolderSettings, ScriptFlow,
+};
 use rocket_environment::{
     resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory,
     SecretManagerRepository, SecretStore, VariableContext, VaultSecretFetcher,
@@ -25,6 +28,19 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub mod websocket_resolution;
+
+#[cfg(test)]
+mod folder_chain_e2e_tests;
+
+#[cfg(test)]
+mod folder_var_script_tests;
+pub(crate) mod script_chain;
+use self::script_chain::{
+    folder_labels, folder_mentions, script_mentions, ChainedScript, PhaseScripts,
+};
+
+/// Request path prefix of an inline Flow request. It names no file, so it has no folder chain.
+pub(crate) const FLOW_INLINE_PATH_PREFIX: &str = "__flow_inline__/";
 
 /// An external secret binding whose values could not be fetched.
 struct UnresolvedBinding {
@@ -92,6 +108,10 @@ pub struct ExecuteRequestInput {
     /// They resolve like runtime variables. Empty for every other caller.
     #[serde(default)]
     pub flow_vars: std::collections::HashMap<String, String>,
+    /// When true, no folder scripts run for this send. GraphQL introspection
+    /// sets it, because it runs none of the request's own scripts either.
+    #[serde(default)]
+    pub skip_folder_scripts: bool,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -242,6 +262,9 @@ pub(crate) struct PhaseState {
     pub sandbox_mode: SandboxMode,
     /// Local-file `require()` scope, resolved once in `begin_phases`.
     pub file_scope: Option<ScriptFileScope>,
+    /// Scripts of every phase in run order: the folder chain and the request's
+    /// own script, built once in `begin_phases`.
+    pub scripts: PhaseScripts,
 }
 
 impl PhaseState {
@@ -506,13 +529,23 @@ impl RequestExecutionService {
         if scripts
             .iter()
             .filter_map(|script| script.as_deref())
-            .any(|script| {
-                script
-                    .lines()
-                    .any(|line| !line.trim_start().starts_with("//") && line.contains(&needle))
-            })
+            .any(|script| script_mentions(script, &needle))
         {
             return true;
+        }
+        // Folder scripts run, and folder headers and auth are sent, with this
+        // request too. A chain that cannot be read is not checked here, because
+        // `begin_phases` then fails the send with an error naming the folder.
+        if let Ok(chain) =
+            self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())
+        {
+            let with_scripts = !input.skip_folder_scripts;
+            if chain
+                .iter()
+                .any(|folder| folder_mentions(folder, &needle, with_scripts))
+            {
+                return true;
+            }
         }
         let mut rest = input.clone();
         rest.pre_request_script = None;
@@ -684,6 +717,39 @@ impl RequestExecutionService {
         scopes.flatten_with_process_env()
     }
 
+    /// Loads the folder chain above a request, outermost folder first.
+    /// A request outside a collection has no chain. A `folder.yml` that cannot be read fails
+    /// the send, so its settings are never dropped silently.
+    pub(crate) fn folder_chain(
+        &self,
+        collection: Option<&str>,
+        request_path: Option<&str>,
+    ) -> DomainResult<Vec<FolderSettings>> {
+        match (collection, request_path) {
+            (Some(_), Some(path)) if path.starts_with(FLOW_INLINE_PATH_PREFIX) => Ok(Vec::new()),
+            (Some(col), Some(path)) => self.collection_repo.get_folder_chain_settings(col, path),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// The auth and headers a request sends once collection and folder defaults apply.
+    /// Every send path calls this, so a folder setting cannot apply on one path only.
+    pub(crate) fn inherited_auth_and_headers(
+        &self,
+        collection: Option<&str>,
+        folders: &[FolderSettings],
+        request_auth: Auth,
+        request_headers: &[Header],
+    ) -> (Auth, Vec<Header>) {
+        match collection {
+            Some(col) => {
+                let settings = self.collection_repo.get_settings(col).unwrap_or_default();
+                apply_inherited_defaults(request_auth, request_headers, settings, folders)
+            }
+            None => (request_auth, request_headers.to_vec()),
+        }
+    }
+
     /// Resolves all {{placeholders}} in `input` using the full variable precedence
     /// chain and returns a ready-to-send `HttpRequest`. Called by both `execute` and
     /// `run_load_test` so resolution logic is never duplicated.
@@ -691,6 +757,19 @@ impl RequestExecutionService {
         &self,
         input: &ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
+    ) -> DomainResult<HttpRequest> {
+        let folders =
+            self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())?;
+        self.resolve_request_with_chain(input, external_secrets, &folders)
+    }
+
+    /// `resolve_request` with the folder chain already loaded. A caller that also needs the
+    /// chain, such as the script phases, reads it once and passes it here.
+    pub(crate) fn resolve_request_with_chain(
+        &self,
+        input: &ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+        folders: &[FolderSettings],
     ) -> DomainResult<HttpRequest> {
         // Build variable map: global_env < collection < env < folder < request.
         let mut vars = self.build_variable_context(
@@ -702,15 +781,13 @@ impl RequestExecutionService {
         );
         vars.extend(input.flow_vars.clone());
 
-        // Merge collection auth and headers with request-level values.
-        let (effective_auth, effective_headers) = if let Some(col) = &input.collection {
-            let settings = self.collection_repo.get_settings(col).unwrap_or_default();
-            let auth = merge_auth(input.auth.clone(), settings.auth);
-            let headers = merge_headers(&settings.headers, &input.headers);
-            (auth, headers)
-        } else {
-            (input.auth.clone(), input.headers.clone())
-        };
+        // Merge collection and folder-chain auth and headers with request-level values.
+        let (effective_auth, effective_headers) = self.inherited_auth_and_headers(
+            input.collection.as_deref(),
+            folders,
+            input.auth.clone(),
+            &input.headers,
+        );
 
         // Resolve {{placeholders}} in auth, URL and headers.
         let effective_auth = resolve_auth(effective_auth, &vars);
@@ -1061,9 +1138,11 @@ impl RequestExecutionService {
         }
     }
 
+    /// Runs one chained script. A failure is published as `ScriptError` and
+    /// returned in `error`. Both name the folder when the script came from one.
     async fn run_script_phase(
         &self,
-        _code: &str,
+        script: &ChainedScript,
         ctx: ScriptContext,
         request_name: &str,
         phase: &str,
@@ -1074,19 +1153,21 @@ impl RequestExecutionService {
             None => return ScriptResult::default(),
         };
         match engine.execute(ctx).await {
-            Ok(result) => {
-                if let Some(ref err) = result.error {
+            Ok(mut result) => {
+                if let Some(err) = result.error.take() {
+                    let message = script.attribute(phase, &err);
                     self.events.publish(DomainEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: phase.to_string(),
-                        message: err.clone(),
+                        message: message.clone(),
                     });
+                    result.error = Some(message);
                 }
                 all_console.extend(result.console_entries.clone());
                 result
             }
             Err(e) => {
-                let message = e.to_string();
+                let message = script.attribute(phase, &e.to_string());
                 self.events.publish(DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
@@ -1345,7 +1426,13 @@ impl RequestExecutionService {
         input: &ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> DomainResult<PhaseState> {
-        let http_request = self.resolve_request(input, external_secrets)?;
+        // One chain read per execution, shared by the request defaults and the
+        // script phases. A folder.yml that cannot be read fails the send here,
+        // with an error that names the folder.
+        let folder_chain =
+            self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())?;
+        let http_request =
+            self.resolve_request_with_chain(input, external_secrets, &folder_chain)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -1376,7 +1463,7 @@ impl RequestExecutionService {
         // variables. A script that sets the same key later still wins.
         var_ctx.runtime.extend(input.flow_vars.clone());
 
-        let (sandbox_mode, file_scope) = match input.collection.as_deref() {
+        let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {
             Some(col) => {
                 let settings = self.collection_repo.get_settings(col).unwrap_or_default();
                 let mode = match settings.sandbox_mode {
@@ -1396,10 +1483,28 @@ impl RequestExecutionService {
                             .map(std::path::PathBuf::from)
                             .collect(),
                     });
-                (mode, scope)
+                (mode, scope, settings.script_flow)
             }
-            None => (SandboxMode::Safe, None),
+            None => (SandboxMode::Safe, None, ScriptFlow::default()),
         };
+
+        let script_folders: &[FolderSettings] = if input.skip_folder_scripts {
+            &[]
+        } else {
+            &folder_chain
+        };
+        let labels = folder_labels(
+            input.request_path.as_deref().unwrap_or_default(),
+            script_folders.len(),
+        );
+        let scripts = PhaseScripts::assemble(
+            script_folders,
+            &labels,
+            script_flow,
+            input.pre_request_script.as_deref(),
+            input.post_response_script.as_deref(),
+            input.tests_script.as_deref(),
+        );
 
         Ok(PhaseState {
             http_request,
@@ -1412,6 +1517,7 @@ impl RequestExecutionService {
             vault_forms: crate::redaction::secret_forms(external_secrets.values()),
             sandbox_mode,
             file_scope,
+            scripts,
         })
     }
 
@@ -1430,133 +1536,147 @@ impl RequestExecutionService {
         let request_name = input.request_name.clone().unwrap_or_default();
         let env_name = input.environment_name.clone();
 
-        if let Some(code) = &input.pre_request_script {
-            if !code.trim().is_empty() {
-                let ctx = ScriptContext::before_request(
-                    code.clone(),
-                    state.var_ctx.clone(),
-                    state.http_request.clone(),
-                    env_name.clone(),
-                    request_name.clone(),
-                    input.tags.clone(),
-                    input.path_params.clone(),
+        // The folder chain and the request's own script, in `chain_scripts`
+        // order. Each script is its own engine run, and sees the request and
+        // the variables the scripts before it left behind.
+        let scripts = state.scripts.pre_request.clone();
+        for script in &scripts {
+            let ctx = ScriptContext::before_request(
+                script.code.clone(),
+                state.var_ctx.clone(),
+                state.http_request.clone(),
+                env_name.clone(),
+                request_name.clone(),
+                input.tags.clone(),
+                input.path_params.clone(),
+            )
+            .with_execution_mode(mode)
+            .with_sandbox_mode(state.sandbox_mode)
+            .with_file_scope(state.file_scope.clone());
+            let had_error = state.script_error.is_some();
+            let result = self
+                .run_script_phase(
+                    script,
+                    ctx,
+                    &request_name,
+                    "before-request",
+                    &mut state.console,
                 )
-                .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode)
-                .with_file_scope(state.file_scope.clone());
-                let result = self
-                    .run_script_phase(
-                        code,
-                        ctx,
-                        &request_name,
-                        "before-request",
-                        &mut state.console,
-                    )
-                    .await;
+                .await;
 
-                // Apply request mutations.
-                if let Some(ref mutations) = result.request_mutations {
-                    if let Some(ref url) = mutations.url {
-                        let original_url = state.http_request.url.clone();
-                        // Deliberate: an early return here also discards any
-                        // next_request/runtime_vars this same script set below.
-                        // A script whose req.setUrl() just tripped the SSRF
-                        // guard does not get to steer the run via
-                        // setNextRequest() or leave variables behind either.
-                        self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
-                        state.http_request.url = url.clone();
-                    }
-                    if let Some(ref method_str) = mutations.method {
-                        if let Ok(m) = method_str.parse() {
-                            state.http_request.method = m;
-                        } else {
-                            tracing::warn!(
-                                method = %method_str,
-                                "req.setMethod() called with an unrecognized HTTP method, ignored"
-                            );
-                            state.script_error.get_or_insert_with(|| format!(
-                                "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
-                            ));
-                        }
-                    }
-                    // Apply header mutations in the order the script issued them —
-                    // e.g. deleteHeader() then setHeader() on the same name must
-                    // result in the header being present, not dropped.
-                    for mutation in &mutations.headers {
-                        match mutation {
-                            rocket_scripting::HeaderMutation::Set { name, value } => {
-                                if let Some(h) = state
-                                    .http_request
-                                    .headers
-                                    .iter_mut()
-                                    .find(|h| h.key.eq_ignore_ascii_case(name))
-                                {
-                                    h.value = value.clone();
-                                } else {
-                                    state.http_request.headers.push(Header::new(name, value));
-                                }
-                            }
-                            rocket_scripting::HeaderMutation::Delete { name } => {
-                                state
-                                    .http_request
-                                    .headers
-                                    .retain(|h| !h.key.eq_ignore_ascii_case(name));
-                            }
-                        }
-                    }
-                    if let Some(ms) = mutations.timeout_ms {
-                        state.http_request.options.timeout_ms = ms;
-                    }
-                    if let Some(ref body_val) = mutations.body {
-                        // A JS object/array is unambiguously meant as JSON. A string
-                        // may be non-JSON text (XML, plain text, etc) — respect an
-                        // explicit Content-Type header the script already set instead
-                        // of forcing JSON, which would mislabel the body on the wire.
-                        let mode = if body_val.is_object() || body_val.is_array() {
-                            rocket_shared::types::BodyMode::Json
-                        } else {
-                            body_mode_from_content_type(&state.http_request.headers)
-                        };
-                        let content = body_val
-                            .as_str()
-                            .map(str::to_owned)
-                            .unwrap_or_else(|| body_val.to_string());
-                        state.http_request.body = Some(rocket_shared::types::Body {
-                            mode,
-                            content: Some(content),
-                            form_data: None,
-                            file_path: None,
+            // Apply request mutations.
+            if let Some(ref mutations) = result.request_mutations {
+                if let Some(ref url) = mutations.url {
+                    let original_url = state.http_request.url.clone();
+                    // Deliberate: an early return here also discards any
+                    // next_request/runtime_vars this same script set below.
+                    // A script whose req.setUrl() just tripped the SSRF
+                    // guard does not get to steer the run via
+                    // setNextRequest() or leave variables behind either.
+                    self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
+                    state.http_request.url = url.clone();
+                }
+                if let Some(ref method_str) = mutations.method {
+                    if let Ok(m) = method_str.parse() {
+                        state.http_request.method = m;
+                    } else {
+                        tracing::warn!(
+                            method = %method_str,
+                            "req.setMethod() called with an unrecognized HTTP method, ignored"
+                        );
+                        state.script_error.get_or_insert_with(|| {
+                            format!(
+                            "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
+                        )
                         });
                     }
-                    if let Some(n) = mutations.max_redirects {
-                        state.http_request.options.max_redirects = Some(n);
+                }
+                // Apply header mutations in the order the script issued them —
+                // e.g. deleteHeader() then setHeader() on the same name must
+                // result in the header being present, not dropped.
+                for mutation in &mutations.headers {
+                    match mutation {
+                        rocket_scripting::HeaderMutation::Set { name, value } => {
+                            if let Some(h) = state
+                                .http_request
+                                .headers
+                                .iter_mut()
+                                .find(|h| h.key.eq_ignore_ascii_case(name))
+                            {
+                                h.value = value.clone();
+                            } else {
+                                state.http_request.headers.push(Header::new(name, value));
+                            }
+                        }
+                        rocket_scripting::HeaderMutation::Delete { name } => {
+                            state
+                                .http_request
+                                .headers
+                                .retain(|h| !h.key.eq_ignore_ascii_case(name));
+                        }
                     }
                 }
-
-                self.apply_script_side_effects(
-                    &result,
-                    input.environment_name.as_deref(),
-                    input.global_env_name.as_deref(),
-                    input.collection.as_deref(),
-                    &mut state.var_ctx,
-                    VaultGuard {
-                        forms: &state.vault_forms,
-                        console: &mut state.console,
-                    },
-                );
-
-                if result.error.is_some() {
-                    state.script_error = result.error;
+                if let Some(ms) = mutations.timeout_ms {
+                    state.http_request.options.timeout_ms = ms;
                 }
+                if let Some(ref body_val) = mutations.body {
+                    // A JS object/array is unambiguously meant as JSON. A string
+                    // may be non-JSON text (XML, plain text, etc) — respect an
+                    // explicit Content-Type header the script already set instead
+                    // of forcing JSON, which would mislabel the body on the wire.
+                    let mode = if body_val.is_object() || body_val.is_array() {
+                        rocket_shared::types::BodyMode::Json
+                    } else {
+                        body_mode_from_content_type(&state.http_request.headers)
+                    };
+                    let content = body_val
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| body_val.to_string());
+                    state.http_request.body = Some(rocket_shared::types::Body {
+                        mode,
+                        content: Some(content),
+                        form_data: None,
+                        file_path: None,
+                    });
+                }
+                if let Some(n) = mutations.max_redirects {
+                    state.http_request.options.max_redirects = Some(n);
+                }
+            }
 
-                // Runner controls. `execute()` never reads these; the runner
-                // checks them after every phase that ran (spec §4).
-                if result.skip_request {
-                    state.skip_request = true;
-                }
-                if result.next_request.is_some() {
-                    state.next_request = result.next_request.clone();
-                }
+            self.apply_script_side_effects(
+                &result,
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                input.collection.as_deref(),
+                &mut state.var_ctx,
+                VaultGuard {
+                    forms: &state.vault_forms,
+                    console: &mut state.console,
+                },
+            );
+
+            // The first error in phase order is kept. Within one script, a
+            // thrown error still replaces its own setMethod warning.
+            let failed = result.error.is_some();
+            if failed && !had_error {
+                state.script_error = result.error;
+            }
+
+            // Runner controls. `execute()` never reads these; the runner
+            // checks them after every phase that ran (spec §4).
+            if result.skip_request {
+                state.skip_request = true;
+            }
+            if result.next_request.is_some() {
+                state.next_request = result.next_request.clone();
+            }
+
+            // A failed script ends its phase. In a run, skipRequest() ends it
+            // too, because the request will not be sent.
+            if failed || (result.skip_request && mode == ExecutionMode::Runner) {
+                break;
             }
         }
 
@@ -1637,47 +1757,51 @@ impl RequestExecutionService {
         let request_name = input.request_name.clone().unwrap_or_default();
         let env_name = input.environment_name.clone();
 
-        if let Some(code) = &input.post_response_script {
-            if !code.trim().is_empty() {
-                let ctx = ScriptContext::after_response(
-                    code.clone(),
-                    state.var_ctx.clone(),
-                    state.http_request.clone(),
-                    response.clone(),
-                    env_name.clone(),
-                    request_name.clone(),
-                    input.tags.clone(),
-                    input.path_params.clone(),
+        let scripts = state.scripts.post_response.clone();
+        for script in &scripts {
+            let ctx = ScriptContext::after_response(
+                script.code.clone(),
+                state.var_ctx.clone(),
+                state.http_request.clone(),
+                response.clone(),
+                env_name.clone(),
+                request_name.clone(),
+                input.tags.clone(),
+                input.path_params.clone(),
+            )
+            .with_execution_mode(mode)
+            .with_sandbox_mode(state.sandbox_mode)
+            .with_file_scope(state.file_scope.clone());
+            let result = self
+                .run_script_phase(
+                    script,
+                    ctx,
+                    &request_name,
+                    "after-response",
+                    &mut state.console,
                 )
-                .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode)
-                .with_file_scope(state.file_scope.clone());
-                let result = self
-                    .run_script_phase(
-                        code,
-                        ctx,
-                        &request_name,
-                        "after-response",
-                        &mut state.console,
-                    )
-                    .await;
-                self.apply_script_side_effects(
-                    &result,
-                    input.environment_name.as_deref(),
-                    input.global_env_name.as_deref(),
-                    input.collection.as_deref(),
-                    &mut state.var_ctx,
-                    VaultGuard {
-                        forms: &state.vault_forms,
-                        console: &mut state.console,
-                    },
-                );
-                if result.error.is_some() && state.script_error.is_none() {
-                    state.script_error = result.error;
-                }
-                if result.next_request.is_some() {
-                    state.next_request = result.next_request.clone();
-                }
+                .await;
+            self.apply_script_side_effects(
+                &result,
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                input.collection.as_deref(),
+                &mut state.var_ctx,
+                VaultGuard {
+                    forms: &state.vault_forms,
+                    console: &mut state.console,
+                },
+            );
+            let failed = result.error.is_some();
+            if failed && state.script_error.is_none() {
+                state.script_error = result.error;
+            }
+            if result.next_request.is_some() {
+                state.next_request = result.next_request.clone();
+            }
+            // A failed script ends its phase.
+            if failed {
+                break;
             }
         }
     }
@@ -1693,42 +1817,46 @@ impl RequestExecutionService {
         let request_name = input.request_name.clone().unwrap_or_default();
         let env_name = input.environment_name.clone();
 
-        if let Some(code) = &input.tests_script {
-            if !code.trim().is_empty() {
-                let ctx = ScriptContext::tests(
-                    code.clone(),
-                    state.var_ctx.clone(),
-                    state.http_request.clone(),
-                    response.clone(),
-                    env_name.clone(),
-                    request_name.clone(),
-                    input.tags.clone(),
-                    input.path_params.clone(),
-                )
-                .with_execution_mode(mode)
-                .with_sandbox_mode(state.sandbox_mode)
-                .with_file_scope(state.file_scope.clone());
-                let result = self
-                    .run_script_phase(code, ctx, &request_name, "tests", &mut state.console)
-                    .await;
-                self.apply_script_side_effects(
-                    &result,
-                    input.environment_name.as_deref(),
-                    input.global_env_name.as_deref(),
-                    input.collection.as_deref(),
-                    &mut state.var_ctx,
-                    VaultGuard {
-                        forms: &state.vault_forms,
-                        console: &mut state.console,
-                    },
-                );
-                state.test_results.extend(result.test_results.clone());
-                if result.error.is_some() && state.script_error.is_none() {
-                    state.script_error = result.error;
-                }
-                if result.next_request.is_some() {
-                    state.next_request = result.next_request.clone();
-                }
+        let scripts = state.scripts.tests.clone();
+        for script in &scripts {
+            let ctx = ScriptContext::tests(
+                script.code.clone(),
+                state.var_ctx.clone(),
+                state.http_request.clone(),
+                response.clone(),
+                env_name.clone(),
+                request_name.clone(),
+                input.tags.clone(),
+                input.path_params.clone(),
+            )
+            .with_execution_mode(mode)
+            .with_sandbox_mode(state.sandbox_mode)
+            .with_file_scope(state.file_scope.clone());
+            let result = self
+                .run_script_phase(script, ctx, &request_name, "tests", &mut state.console)
+                .await;
+            self.apply_script_side_effects(
+                &result,
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                input.collection.as_deref(),
+                &mut state.var_ctx,
+                VaultGuard {
+                    forms: &state.vault_forms,
+                    console: &mut state.console,
+                },
+            );
+            state.test_results.extend(result.test_results.clone());
+            let failed = result.error.is_some();
+            if failed && state.script_error.is_none() {
+                state.script_error = result.error;
+            }
+            if result.next_request.is_some() {
+                state.next_request = result.next_request.clone();
+            }
+            // A failed script ends its phase.
+            if failed {
+                break;
             }
         }
     }
@@ -2201,6 +2329,31 @@ fn merge_headers(collection_headers: &[Header], request_headers: &[Header]) -> V
     merged
 }
 
+/// Applies the collection and folder-chain defaults to a request's own auth and headers.
+/// Headers: collection, then folders from outermost to innermost, then the request. A more
+/// specific level replaces a header with the same key, and a disabled header never shadows.
+/// Auth: a request auth of `none` or `inherit` takes the nearest folder auth, then the
+/// collection auth.
+/// When no folder in the chain sets an enabled header, the collection headers merge as they
+/// always did, so duplicate and disabled collection headers are kept.
+fn apply_inherited_defaults(
+    request_auth: Auth,
+    request_headers: &[Header],
+    settings: CollectionSettings,
+    folders: &[FolderSettings],
+) -> (Auth, Vec<Header>) {
+    let headers = if folders.iter().all(|f| f.headers.iter().all(|h| !h.enabled)) {
+        merge_headers(&settings.headers, request_headers)
+    } else {
+        merge_headers(
+            &inherited_headers(&settings.headers, folders),
+            request_headers,
+        )
+    };
+    let auth = merge_auth(request_auth, resolve_folder_auth(folders).or(settings.auth));
+    (auth, headers)
+}
+
 /// Joins the relative file paths of a multipart or binary body onto the collection folder.
 ///
 /// Absolute paths and paths with a `..` stay as written. The executor rejects a path that is
@@ -2230,7 +2383,7 @@ mod tests {
     use async_trait::async_trait;
     use rocket_collection::{
         Collection, CollectionRepository, CollectionSettings, CollectionSummary,
-        CollectionVariable, Request as CollectionRequest,
+        CollectionVariable, FolderSettings, Request as CollectionRequest,
     };
     use rocket_environment::{Environment, Variable};
     use rocket_http::{CertificateMaterial, CertificateSource};
@@ -2437,6 +2590,8 @@ mod tests {
         folder_vars: Vec<CollectionVariable>,
         request_vars: Vec<CollectionVariable>,
         root: Option<std::path::PathBuf>,
+        folder_chain: Vec<FolderSettings>,
+        folder_chain_error: Option<String>,
     }
 
     impl StubCollectionRepo {
@@ -2446,6 +2601,8 @@ mod tests {
                 folder_vars: vec![],
                 request_vars: vec![],
                 root: None,
+                folder_chain: vec![],
+                folder_chain_error: None,
             }
         }
 
@@ -2455,6 +2612,8 @@ mod tests {
                 folder_vars: vec![],
                 request_vars: vec![],
                 root: None,
+                folder_chain: vec![],
+                folder_chain_error: None,
             }
         }
 
@@ -2470,6 +2629,18 @@ mod tests {
 
         fn with_request_vars(mut self, vars: Vec<CollectionVariable>) -> Self {
             self.request_vars = vars;
+            self
+        }
+
+        /// Every request path gets `chain` as its folder chain, outermost first.
+        fn with_folder_chain(mut self, chain: Vec<FolderSettings>) -> Self {
+            self.folder_chain = chain;
+            self
+        }
+
+        /// Loading the folder chain fails with `message`, like a broken folder.yml.
+        fn with_folder_chain_error(mut self, message: &str) -> Self {
+            self.folder_chain_error = Some(message.into());
             self
         }
     }
@@ -2535,6 +2706,12 @@ mod tests {
         ) -> DomainResult<Vec<CollectionVariable>> {
             Ok(self.folder_vars.clone())
         }
+        fn get_folder_chain_settings(&self, _: &str, _: &str) -> DomainResult<Vec<FolderSettings>> {
+            match &self.folder_chain_error {
+                Some(message) => Err(DomainError::InvalidInput(message.clone())),
+                None => Ok(self.folder_chain.clone()),
+            }
+        }
         fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
             Ok(vec![])
         }
@@ -2563,6 +2740,7 @@ mod tests {
         ExecuteRequestInput {
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
+            skip_folder_scripts: false,
             method: HttpMethod::Get,
             url: url.to_string(),
             headers: vec![],
@@ -4295,6 +4473,376 @@ mod tests {
             .expect("resolve_request");
 
         assert_eq!(resolved.url, "https://api.example.com/sk-live-key");
+    }
+
+    /// Folder header and auth inheritance (folder settings plan 05).
+    mod folder_inheritance {
+        use super::*;
+
+        fn folder_service(
+            settings: CollectionSettings,
+            repo: StubCollectionRepo,
+        ) -> RequestExecutionService {
+            let mut env = Environment::new("local");
+            env.set_variable(Variable::new("token", "jwt-from-env"));
+            let repo = StubCollectionRepo { settings, ..repo };
+            RequestExecutionService::new(
+                Box::new(MockEnvRepo::with_env(env)),
+                Arc::new(MockExecutor::new(200)),
+                Box::new(MockHistoryRepo::new()),
+                Box::new(repo),
+                Box::new(NullCookieRepo),
+                Box::new(NullEventPublisher),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+        }
+
+        fn chain(folders: Vec<FolderSettings>) -> StubCollectionRepo {
+            StubCollectionRepo::empty().with_folder_chain(folders)
+        }
+
+        fn folder(headers: Vec<Header>, auth: Option<Auth>) -> FolderSettings {
+            FolderSettings {
+                headers,
+                auth,
+                ..FolderSettings::default()
+            }
+        }
+
+        fn input() -> ExecuteRequestInput {
+            let mut input = sample_input("https://api.example.com/users", Some("local"));
+            input.collection = Some("my-api".into());
+            input.request_path = Some("users/admin/get.yml".into());
+            input
+        }
+
+        fn resolve(svc: &RequestExecutionService, input: &ExecuteRequestInput) -> HttpRequest {
+            svc.resolve_request(input, &std::collections::HashMap::new())
+                .expect("resolve_request")
+        }
+
+        /// Values of the enabled headers named `key`, in send order.
+        fn enabled_values(request: &HttpRequest, key: &str) -> Vec<String> {
+            request
+                .headers
+                .iter()
+                .filter(|h| h.enabled && h.key == key)
+                .map(|h| h.value.clone())
+                .collect()
+        }
+
+        fn bearer(token: &str) -> Auth {
+            Auth::Bearer {
+                token: token.into(),
+            }
+        }
+
+        #[tokio::test]
+        async fn folder_header_beats_collection_header_and_request_header_beats_folder() {
+            let settings = CollectionSettings {
+                headers: vec![
+                    Header::new("X-Team", "core"),
+                    Header::new("X-Env", "collection"),
+                    Header::new("X-Trace", "collection"),
+                ],
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings,
+                chain(vec![folder(
+                    vec![
+                        Header::new("X-Env", "folder"),
+                        Header::new("X-Trace", "folder"),
+                    ],
+                    None,
+                )]),
+            );
+            let mut input = input();
+            input.headers = vec![Header::new("X-Trace", "request")];
+
+            let resolved = resolve(&svc, &input);
+
+            assert_eq!(enabled_values(&resolved, "X-Team"), vec!["core"]);
+            assert_eq!(enabled_values(&resolved, "X-Env"), vec!["folder"]);
+            assert_eq!(enabled_values(&resolved, "X-Trace"), vec!["request"]);
+        }
+
+        #[tokio::test]
+        async fn disabled_headers_never_shadow_an_inherited_header() {
+            let settings = CollectionSettings {
+                headers: vec![Header::new("X-Env", "collection")],
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings,
+                chain(vec![folder(
+                    vec![
+                        Header::disabled("X-Env", "folder-off"),
+                        Header::new("X-Folder", "folder"),
+                    ],
+                    None,
+                )]),
+            );
+            let mut input = input();
+            input.headers = vec![Header::disabled("X-Folder", "request-off")];
+
+            let resolved = resolve(&svc, &input);
+
+            assert_eq!(enabled_values(&resolved, "X-Env"), vec!["collection"]);
+            assert_eq!(enabled_values(&resolved, "X-Folder"), vec!["folder"]);
+        }
+
+        #[tokio::test]
+        async fn inner_folder_header_beats_outer_folder_header() {
+            let svc = folder_service(
+                CollectionSettings::default(),
+                chain(vec![
+                    folder(
+                        vec![
+                            Header::new("X-Env", "outer"),
+                            Header::new("X-Outer", "only"),
+                        ],
+                        None,
+                    ),
+                    folder(vec![Header::new("X-Env", "inner")], None),
+                ]),
+            );
+
+            let resolved = resolve(&svc, &input());
+
+            assert_eq!(enabled_values(&resolved, "X-Env"), vec!["inner"]);
+            assert_eq!(enabled_values(&resolved, "X-Outer"), vec!["only"]);
+        }
+
+        #[tokio::test]
+        async fn inherit_takes_the_nearest_folder_auth() {
+            let settings = CollectionSettings {
+                auth: Some(bearer("from-collection")),
+                ..Default::default()
+            };
+            let outer = Auth::Basic {
+                username: "outer".into(),
+                password: "secret".into(),
+            };
+            let svc = folder_service(
+                settings,
+                chain(vec![
+                    folder(vec![], Some(outer)),
+                    folder(vec![], Some(bearer("from-inner"))),
+                ]),
+            );
+            let mut input = input();
+            input.auth = Auth::Inherit;
+
+            assert_eq!(resolve(&svc, &input).auth, bearer("from-inner"));
+        }
+
+        #[tokio::test]
+        async fn inherit_skips_folders_without_auth_and_falls_back_to_the_collection() {
+            let settings = CollectionSettings {
+                auth: Some(bearer("from-collection")),
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings,
+                chain(vec![
+                    folder(vec![], None),
+                    folder(vec![], Some(Auth::Inherit)),
+                    folder(vec![], Some(Auth::None)),
+                ]),
+            );
+            let mut input = input();
+            input.auth = Auth::Inherit;
+
+            assert_eq!(resolve(&svc, &input).auth, bearer("from-collection"));
+        }
+
+        #[tokio::test]
+        async fn an_explicit_request_auth_beats_folder_auth() {
+            let svc = folder_service(
+                CollectionSettings::default(),
+                chain(vec![folder(vec![], Some(bearer("from-folder")))]),
+            );
+            let mut input = input();
+            input.auth = bearer("from-request");
+
+            assert_eq!(resolve(&svc, &input).auth, bearer("from-request"));
+        }
+
+        #[tokio::test]
+        async fn folder_auth_placeholders_resolve_through_resolve_auth() {
+            let svc = folder_service(
+                CollectionSettings::default(),
+                chain(vec![folder(vec![], Some(bearer("{{token}}")))]),
+            );
+            let mut input = input();
+            input.auth = Auth::Inherit;
+
+            assert_eq!(resolve(&svc, &input).auth, bearer("jwt-from-env"));
+        }
+
+        #[tokio::test]
+        async fn oauth2_folder_auth_reaches_the_executor_unchanged() {
+            use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
+            let oauth = Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
+                access_token_url: "https://auth.example.com/token".into(),
+                refresh_token_url: None,
+                credentials: OAuth2ClientCredentials {
+                    client_id: "folder-client".into(),
+                    client_secret: "folder-secret".into(),
+                    placement: None,
+                },
+                scope: Some("read".into()),
+                additional_parameters: None,
+                token_config: None,
+                settings: None,
+            }));
+            let settings = CollectionSettings {
+                auth: Some(bearer("from-collection")),
+                ..Default::default()
+            };
+            let svc = folder_service(settings, chain(vec![folder(vec![], Some(oauth.clone()))]));
+            let mut input = input();
+            input.auth = Auth::Inherit;
+
+            assert_eq!(resolve(&svc, &input).auth, oauth);
+        }
+
+        #[tokio::test]
+        async fn a_failing_folder_chain_fails_the_request() {
+            let svc = folder_service(
+                CollectionSettings::default(),
+                StubCollectionRepo::empty()
+                    .with_folder_chain_error("folder.yml in 'users' is not valid YAML"),
+            );
+
+            let err = svc
+                .resolve_request(&input(), &std::collections::HashMap::new())
+                .expect_err("a broken folder.yml must fail the send");
+
+            assert!(err.to_string().contains("users"), "{err}");
+        }
+
+        #[tokio::test]
+        async fn without_folders_collection_headers_merge_exactly_as_before() {
+            let settings = CollectionSettings {
+                headers: vec![
+                    Header::new("Accept", "application/json"),
+                    Header::new("Accept", "text/plain"),
+                    Header::disabled("X-Off", "collection-off"),
+                ],
+                ..Default::default()
+            };
+            let svc = folder_service(settings.clone(), StubCollectionRepo::empty());
+            let mut input = input();
+            input.headers = vec![Header::new("X-Trace", "request")];
+
+            let resolved = resolve(&svc, &input);
+
+            assert_eq!(
+                resolved.headers,
+                merge_headers(&settings.headers, &input.headers)
+            );
+        }
+
+        #[tokio::test]
+        async fn nested_folders_without_headers_keep_collection_headers_exactly_as_before() {
+            let settings = CollectionSettings {
+                headers: vec![
+                    Header::new("Accept", "application/json"),
+                    Header::new("Accept", "text/plain"),
+                    Header::disabled("X-Off", "collection-off"),
+                ],
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings.clone(),
+                chain(vec![FolderSettings::default(), FolderSettings::default()]),
+            );
+            let mut input = input();
+            input.headers = vec![
+                Header::new("X-Trace", "request"),
+                Header::disabled("Accept", "request-off"),
+            ];
+
+            let resolved = resolve(&svc, &input);
+
+            assert_eq!(
+                resolved.headers,
+                merge_headers(&settings.headers, &input.headers)
+            );
+        }
+
+        #[tokio::test]
+        async fn an_inline_flow_request_inherits_no_folder_settings() {
+            let svc = folder_service(
+                CollectionSettings::default(),
+                chain(vec![folder(
+                    vec![Header::new("X-Env", "folder")],
+                    Some(bearer("from-folder")),
+                )]),
+            );
+            let mut input = input();
+            input.request_path = Some(format!("{FLOW_INLINE_PATH_PREFIX}node-1"));
+            input.auth = Auth::Inherit;
+
+            let resolved = resolve(&svc, &input);
+
+            assert!(enabled_values(&resolved, "X-Env").is_empty());
+            // `merge_auth` turns `inherit` with no collection auth into `none`.
+            assert_eq!(resolved.auth, Auth::None);
+        }
+
+        #[tokio::test]
+        async fn folders_with_only_disabled_headers_keep_collection_headers_exactly_as_before() {
+            let settings = CollectionSettings {
+                headers: vec![
+                    Header::new("Accept", "application/json"),
+                    Header::new("Accept", "text/plain"),
+                    Header::disabled("X-Off", "collection-off"),
+                ],
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings.clone(),
+                chain(vec![folder(
+                    vec![Header::disabled("X-Folder", "folder-off")],
+                    None,
+                )]),
+            );
+            let mut input = input();
+            input.headers = vec![Header::new("X-Trace", "request")];
+
+            let resolved = resolve(&svc, &input);
+
+            assert_eq!(
+                resolved.headers,
+                merge_headers(&settings.headers, &input.headers)
+            );
+        }
+
+        #[tokio::test]
+        async fn nested_folders_without_auth_resolve_auth_exactly_as_before() {
+            let settings = CollectionSettings {
+                auth: Some(bearer("from-collection")),
+                ..Default::default()
+            };
+            let svc = folder_service(
+                settings.clone(),
+                chain(vec![FolderSettings::default(), FolderSettings::default()]),
+            );
+            for request_auth in [Auth::Inherit, Auth::None, bearer("from-request")] {
+                let mut input = input();
+                input.auth = request_auth.clone();
+
+                assert_eq!(
+                    resolve(&svc, &input).auth,
+                    merge_auth(request_auth, settings.auth.clone())
+                );
+            }
+        }
     }
 
     #[tokio::test]

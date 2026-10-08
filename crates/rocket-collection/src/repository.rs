@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection::Collection;
+use crate::folder_settings::FolderSettings;
 use crate::graphql_request::GraphQlRequest;
 use crate::grpc_request::GrpcRequest;
 use crate::request::Request;
@@ -229,6 +230,43 @@ pub trait CollectionRepository: Send + Sync {
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()>;
 
+    /// Read one folder's own settings from its folder.yml (no chain walk).
+    /// `folder_path` is relative to the collection root, `""` for the root.
+    /// The default body keeps test doubles compiling; real repositories override it.
+    fn get_folder_settings(
+        &self,
+        _collection: &str,
+        _folder_path: &str,
+    ) -> DomainResult<FolderSettings> {
+        Err(DomainError::Internal(
+            "folder settings not supported".into(),
+        ))
+    }
+
+    /// Persist one folder's settings to its folder.yml.
+    /// Keys the domain does not model (for example `request.metadata`) are kept by the implementation.
+    fn save_folder_settings(
+        &self,
+        _collection: &str,
+        _folder_path: &str,
+        _settings: &FolderSettings,
+    ) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "folder settings not supported".into(),
+        ))
+    }
+
+    /// Settings of every folder above a request, outermost folder first.
+    /// The default returns no folders, so repositories without folder.yml
+    /// support run requests with collection settings only.
+    fn get_folder_chain_settings(
+        &self,
+        _collection: &str,
+        _request_path: &str,
+    ) -> DomainResult<Vec<FolderSettings>> {
+        Ok(vec![])
+    }
+
     /// Read request-level variables from a request .yml file's runtime.variables[].
     fn get_request_variables(
         &self,
@@ -249,9 +287,153 @@ pub trait CollectionRepository: Send + Sync {
 mod tests {
     use super::*;
 
+    /// Implements only the required methods, like the older test doubles in
+    /// other crates. If a new method had no default, this would not compile.
+    struct MinimalRepo;
+
+    fn unused<T>() -> DomainResult<T> {
+        Err(DomainError::Internal("unused in this test".into()))
+    }
+
+    impl CollectionRepository for MinimalRepo {
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            unused()
+        }
+        fn get(&self, _name: &str) -> DomainResult<Collection> {
+            unused()
+        }
+        fn get_summaries(&self, _name: &str) -> DomainResult<Collection> {
+            unused()
+        }
+        fn create(&self, _name: &str) -> DomainResult<Collection> {
+            unused()
+        }
+        fn delete(&self, _name: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn rename(&self, _old_name: &str, _new_name: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn get_request(&self, _collection: &str, _path: &str) -> DomainResult<Request> {
+            unused()
+        }
+        fn save_request(
+            &self,
+            _collection: &str,
+            _path: &str,
+            _request: &Request,
+        ) -> DomainResult<String> {
+            unused()
+        }
+        fn rename_request(
+            &self,
+            _collection: &str,
+            _old_path: &str,
+            _new_path: &str,
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn delete_request(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn create_folder(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn delete_folder(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn move_item(
+            &self,
+            _src_collection: &str,
+            _src_path: &str,
+            _dst_collection: &str,
+            _dst_path: &str,
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn reorder_items(
+            &self,
+            _collection: &str,
+            _folder_path: &str,
+            _ordered_names: &[String],
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn get_settings(&self, _name: &str) -> DomainResult<CollectionSettings> {
+            unused()
+        }
+        fn save_settings(&self, _name: &str, _settings: &CollectionSettings) -> DomainResult<()> {
+            unused()
+        }
+        fn get_folder_chain_variables(
+            &self,
+            _collection: &str,
+            _request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            unused()
+        }
+        fn get_folder_variables(
+            &self,
+            _collection: &str,
+            _folder_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            unused()
+        }
+        fn save_folder_variables(
+            &self,
+            _collection: &str,
+            _folder_path: &str,
+            _vars: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn get_request_variables(
+            &self,
+            _collection: &str,
+            _request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            unused()
+        }
+        fn save_request_variables(
+            &self,
+            _collection: &str,
+            _request_path: &str,
+            _vars: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            unused()
+        }
+    }
+
     #[test]
     fn trait_is_object_safe() {
         // Compile-time check.
         fn _assert_object_safe(_: Box<dyn CollectionRepository>) {}
+        let _boxed: Box<dyn CollectionRepository> = Box::new(MinimalRepo);
+    }
+
+    #[test]
+    fn minimal_impl_gets_folder_settings_defaults() {
+        let repo: Box<dyn CollectionRepository> = Box::new(MinimalRepo);
+
+        let read = repo.get_folder_settings("c", "a/b");
+        assert!(
+            matches!(&read, Err(DomainError::Internal(msg)) if msg == "folder settings not supported"),
+            "unexpected get_folder_settings default: {read:?}"
+        );
+
+        let saved = repo.save_folder_settings("c", "", &FolderSettings::default());
+        assert!(
+            matches!(&saved, Err(DomainError::Internal(msg)) if msg == "folder settings not supported"),
+            "unexpected save_folder_settings default: {saved:?}"
+        );
+    }
+
+    #[test]
+    fn default_get_folder_chain_settings_is_empty() {
+        let repo = MinimalRepo;
+        let chain = repo
+            .get_folder_chain_settings("c", "a/b/request.yml")
+            .expect("default chain is Ok");
+        assert_eq!(chain, Vec::<FolderSettings>::new());
     }
 }

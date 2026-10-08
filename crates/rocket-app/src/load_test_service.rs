@@ -343,6 +343,7 @@ mod tests {
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
+            skip_folder_scripts: false,
         };
 
         // One short Hold phase to keep the test fast.
@@ -441,6 +442,7 @@ mod tests {
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             skip_history: false,
             flow_vars: std::collections::HashMap::new(),
+            skip_folder_scripts: false,
         };
         let config = LoadTestConfigV2 {
             phases: vec![LoadTestPhase {

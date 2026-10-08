@@ -55,6 +55,16 @@ export interface CollectionTab extends BaseTab {
   activeSection?: CollectionSection;
 }
 
+export type FolderSection = 'headers' | 'script' | 'test' | 'vars' | 'auth' | 'docs';
+
+export interface FolderTab extends BaseTab {
+  tabType: 'folder';
+  collectionName: string;
+  /** Folder path relative to the collection root, for example `auth/oauth`. */
+  folderPath: string;
+  activeSection: FolderSection;
+}
+
 export type WorkspaceTabSection = 'overview' | 'environments' | 'git' | 'audit';
 
 export interface WorkspaceTab extends BaseTab {
@@ -205,6 +215,10 @@ export function isScriptTab(tab: Tab): tab is ScriptTab {
   return tab.tabType === 'script';
 }
 
+export function isFolderTab(tab: Tab): tab is FolderTab {
+  return tab.tabType === 'folder';
+}
+
 export function isCollectionTab(tab: Tab): tab is CollectionTab {
   return tab.tabType === 'collection';
 }
@@ -220,7 +234,8 @@ export type Tab =
   | ContractDiffTab
   | RunnerTab
   | FlowTab
-  | ScriptTab;
+  | ScriptTab
+  | FolderTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';

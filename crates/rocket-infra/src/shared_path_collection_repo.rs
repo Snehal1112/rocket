@@ -5,7 +5,7 @@ use dashmap::DashMap;
 
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
+    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
 };
 use rocket_shared::error::DomainResult;
 
@@ -230,6 +230,33 @@ impl CollectionRepository for SharedPathCollectionRepo {
             .save_folder_variables(collection, folder_path, vars)
     }
 
+    fn get_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<FolderSettings> {
+        self.repo().get_folder_settings(collection, folder_path)
+    }
+
+    fn save_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        settings: &FolderSettings,
+    ) -> DomainResult<()> {
+        self.repo()
+            .save_folder_settings(collection, folder_path, settings)
+    }
+
+    fn get_folder_chain_settings(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<FolderSettings>> {
+        self.repo()
+            .get_folder_chain_settings(collection, request_path)
+    }
+
     fn get_request_variables(
         &self,
         collection: &str,
@@ -392,5 +419,26 @@ mod tests {
         let loaded_b = repo.get_request("shared-col", "req-b.yml").unwrap();
         assert_eq!(loaded_a.name, "Req A");
         assert_eq!(loaded_b.name, "Req B");
+    }
+
+    #[test]
+    fn folder_settings_calls_reach_the_active_workspace() {
+        let (_dir, repo) = setup();
+        repo.create("api").unwrap();
+        repo.create_folder("api", "users").unwrap();
+        let settings = rocket_collection::FolderSettings {
+            headers: vec![rocket_shared::types::Header::new("X-Tenant", "acme")],
+            ..Default::default()
+        };
+
+        repo.save_folder_settings("api", "users", &settings)
+            .unwrap();
+
+        assert_eq!(repo.get_folder_settings("api", "users").unwrap(), settings);
+        assert_eq!(
+            repo.get_folder_chain_settings("api", "users/list.yml")
+                .unwrap(),
+            vec![settings]
+        );
     }
 }

@@ -9,6 +9,7 @@ pub mod cookies;
 pub mod environments;
 pub mod execution;
 pub mod flow;
+pub mod folder_settings_dto;
 pub mod git;
 pub mod grpc;
 pub mod graphql_subscription;

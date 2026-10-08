@@ -256,10 +256,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   }, [auth, collectionName, setCollectionAuth, isLoaded]);
 
   // Persist all settings to disk (no auto-save). saveCollectionSettings is a full
-  // replace on the backend, so sandboxMode and scriptContextRoots are read fresh here immediately before
-  // saving rather than from `collection` (loaded once on mount) — otherwise a mode
-  // change made via the toolbar's SandboxPopover in the meantime would be silently
-  // wiped by this save.
+  // replace on the backend, so sandboxMode, scriptContextRoots and scriptFlow are read
+  // fresh here immediately before saving rather than from `collection` (loaded once on
+  // mount). Otherwise a change made elsewhere in the meantime, such as a mode change
+  // via the toolbar's SandboxPopover, would be silently wiped by this save.
   const saveSettings = useCallback(async () => {
     const current = await getCollectionSettings(collectionName);
     await saveCollectionSettings(

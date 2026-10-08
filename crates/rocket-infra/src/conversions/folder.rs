@@ -2,6 +2,7 @@ use crate::oc::*;
 use rocket_collection::collection::Collection;
 use rocket_collection::folder::{CollectionItem, Folder};
 use rocket_collection::settings::{CollectionSettings, CollectionVariable, SandboxMode};
+use rocket_collection::ScriptFlow;
 use rocket_shared::types::{Auth, Header};
 
 use super::auth::persisted_oc_auth;
@@ -153,6 +154,7 @@ pub fn oc_collection_to_collection(oc: OcCollection) -> Collection {
                 .collect(),
             sandbox_mode: SandboxMode::Safe,
             script_context_roots: vec![],
+            script_flow: ScriptFlow::default(),
         }
     } else {
         CollectionSettings {

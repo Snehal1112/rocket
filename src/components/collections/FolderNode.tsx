@@ -1,4 +1,5 @@
 import {
+  ChevronRight,
   FileCode,
   Folder,
   FolderOpen,
@@ -6,6 +7,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Settings,
   Trash2,
   Variable,
 } from 'lucide-react';
@@ -33,9 +35,10 @@ import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { moveItem, saveRequest } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
-import { FolderVariablesPopover } from './FolderVariablesPopover';
+import type { FolderSection } from '@/types/pane-types';
 import { RequestNode } from './RequestNode';
 import type { DeleteTarget } from './tree-utils';
 
@@ -83,7 +86,6 @@ export function FolderNode({
   const [renameValue, setRenameValue] = useState(name);
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [newRequestName, setNewRequestName] = useState('');
-  const [varsOpen, setVarsOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
   const renameInFlight = useRef(false);
   // Set to true on Escape or after a successful rename to block the
@@ -94,6 +96,11 @@ export function FolderNode({
   useEffect(() => {
     if (filter) setOpen(true);
   }, [filter]);
+
+  // Opens or focuses this folder's settings tab. A given section switches the tab to it.
+  const openSettings = (section?: FolderSection) => {
+    usePaneStore.getState().openFolderTab(collectionName, basePath, section);
+  };
 
   const handleRename = async () => {
     if (renameInFlight.current) return;
@@ -114,6 +121,7 @@ export function FolderNode({
     try {
       await moveItem(collectionName, basePath, collectionName, newPath);
       usePaneStore.getState().renameScriptTabs(collectionName, basePath, newPath);
+      usePaneStore.getState().renameFolderTabs(collectionName, basePath, newPath);
       // Prevent the blur (fired when Input unmounts) from triggering a second rename.
       renameCancelled.current = true;
     } catch (err) {
@@ -191,8 +199,36 @@ export function FolderNode({
             <TreeItem value={basePath} open={open} onOpenChange={setOpen} className='flex-1'>
               <TreeItemContent
                 className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
-                onClick={() => setOpen((prev) => !prev)}
+                onClick={() => {
+                  // A row click opens the settings and expands. Only the chevron collapses.
+                  openSettings();
+                  setOpen(true);
+                }}
               >
+                {/* biome-ignore lint/a11y/useSemanticElements: nested inside TreeItem's <button> row, HTML forbids button-in-button */}
+                <span
+                  role='button'
+                  tabIndex={0}
+                  aria-label={`${open ? 'Collapse' : 'Expand'} ${name}`}
+                  aria-expanded={open}
+                  className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm hover:bg-accent'
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpen((prev) => !prev);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setOpen((prev) => !prev);
+                    }
+                  }}
+                >
+                  <ChevronRight
+                    aria-hidden='true'
+                    className={cn('h-3 w-3 transition-transform', open && 'rotate-90')}
+                  />
+                </span>
                 {open ? (
                   <FolderOpen aria-hidden='true' strokeWidth={10} className='h-5 w-5 shrink-0' />
                 ) : (
@@ -253,7 +289,10 @@ export function FolderNode({
                   <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setVarsOpen(true)}>
+                <DropdownMenuItem onClick={() => openSettings()}>
+                  <Settings aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openSettings('vars')}>
                   <Variable className='h-3.5 w-3.5 mr-2' /> Variables
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -301,7 +340,10 @@ export function FolderNode({
             <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => setVarsOpen(true)}>
+          <ContextMenuItem onClick={() => openSettings()}>
+            <Settings aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Settings
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => openSettings('vars')}>
             <Variable className='h-3.5 w-3.5 mr-2' /> Variables
           </ContextMenuItem>
           <ContextMenuSeparator />
@@ -330,15 +372,6 @@ export function FolderNode({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-
-      {/* Variables dialog for this folder. */}
-      <FolderVariablesPopover
-        open={varsOpen}
-        onClose={() => setVarsOpen(false)}
-        collection={collectionName}
-        folderPath={basePath}
-        folderName={name}
-      />
 
       {open && (
         // Indentation guide line.

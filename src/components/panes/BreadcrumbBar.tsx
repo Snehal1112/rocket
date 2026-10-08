@@ -14,6 +14,10 @@ import {
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FOLDER_SECTIONS,
+  folderSectionLabel,
+} from '@/components/collections/folder-settings/sections';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
@@ -22,7 +26,12 @@ import { useSwitchWorkspace, useWorkspaces } from '@/lib/queries/workspace-queri
 import { getCollection, listCollections } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import type { CollectionSection, Tab, WorkspaceTabSection } from '@/types/pane-types';
+import type {
+  CollectionSection,
+  FolderSection,
+  Tab,
+  WorkspaceTabSection,
+} from '@/types/pane-types';
 import {
   isCollectionTab,
   isConflictTab,
@@ -30,6 +39,7 @@ import {
   isContractTab,
   isDiffTab,
   isFlowTab,
+  isFolderTab,
   isGitTab,
   isRequestTab,
   isRunnerTab,
@@ -122,6 +132,7 @@ interface NavActions {
   switchCollection: (name: string) => void;
   openTab: (tab: Tab) => void;
   updateCollectionSection: (tabId: string, section: CollectionSection) => void;
+  updateFolderSection: (tabId: string, section: FolderSection) => void;
 }
 
 function deriveSegments(
@@ -460,6 +471,38 @@ function deriveSegments(
     ];
   }
 
+  if (isFolderTab(tab)) {
+    return [
+      {
+        label: tab.collectionName,
+        picker: {
+          loadItems: async () => {
+            const summaries = await listCollections();
+            return summaries.map((s) => ({
+              id: s.name,
+              label: s.name,
+              isActive: s.name === tab.collectionName,
+            }));
+          },
+          onSelect: (item) => nav.switchCollection(item.id),
+        },
+      },
+      { label: tab.folderPath, icon: <FolderOpen className='h-3 w-3' /> },
+      {
+        label: folderSectionLabel(tab.activeSection),
+        picker: {
+          loadItems: () =>
+            FOLDER_SECTIONS.map((s) => ({
+              id: s.id,
+              label: s.label,
+              isActive: s.id === tab.activeSection,
+            })),
+          onSelect: (item) => nav.updateFolderSection(tab.id, item.id as FolderSection),
+        },
+      },
+    ];
+  }
+
   const _exhaustive: never = tab;
   throw new Error(`Unhandled tab type: ${(_exhaustive as { tabType: string }).tabType}`);
 }
@@ -613,6 +656,7 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
   const switchCollection = usePaneStore((s) => s.switchCollection);
   const openTab = usePaneStore((s) => s.openTab);
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
+  const updateFolderSection = usePaneStore((s) => s.updateFolderSection);
 
   const switchWorkspace = useCallback(
     (id: string) => switchWorkspaceMutation.mutate(id),
@@ -627,6 +671,7 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
       switchCollection,
       openTab,
       updateCollectionSection,
+      updateFolderSection,
     }),
     [
       openCollectionTab,
@@ -635,6 +680,7 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
       switchCollection,
       openTab,
       updateCollectionSection,
+      updateFolderSection,
     ],
   );
 

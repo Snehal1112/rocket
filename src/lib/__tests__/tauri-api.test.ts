@@ -1,6 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { isGitSshTrustFailure, parseGitNetworkError } from '../tauri-api';
+import {
+  FOLDER_SETTINGS_SAVED_EVENT,
+  type FolderSettings,
+  getFolderSettings,
+  isGitSshTrustFailure,
+  parseGitNetworkError,
+  saveFolderSettings,
+} from '../tauri-api';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -99,5 +106,48 @@ describe('listContracts in-flight dedup', () => {
 
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(result).toEqual([{ id: 'c1' }]);
+  });
+});
+
+describe('folder settings bindings', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it('getFolderSettings calls get_folder_settings with collection and folderPath', async () => {
+    const settings: FolderSettings = { headers: [], variables: [], docs: '# Auth' };
+    vi.mocked(invoke).mockResolvedValueOnce(settings);
+
+    await expect(getFolderSettings('my-api', 'auth/login')).resolves.toEqual(settings);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('get_folder_settings', {
+      collection: 'my-api',
+      folderPath: 'auth/login',
+    });
+  });
+
+  it('saveFolderSettings sends the settings under the settings key', async () => {
+    const settings: FolderSettings = {
+      headers: [{ key: 'X-Team', value: 'core', enabled: true }],
+      auth: { authType: 'bearer', token: '{{token}}' },
+      variables: [],
+      preRequestScript: "console.log('pre');",
+      testsScript: "test('ok', () => {});",
+    };
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
+    await saveFolderSettings('my-api', 'auth', settings);
+
+    expect(invoke).toHaveBeenCalledWith('save_folder_settings', {
+      collection: 'my-api',
+      folderPath: 'auth',
+      settings,
+    });
+  });
+
+  it('FOLDER_SETTINGS_SAVED_EVENT matches the Rust event tag', () => {
+    // Must equal the tag asserted in folder_settings_saved_wire_shape (rocket-shared).
+    expect(FOLDER_SETTINGS_SAVED_EVENT).toBe('folderSettingsSaved');
   });
 });

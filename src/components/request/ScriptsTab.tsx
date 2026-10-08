@@ -9,6 +9,7 @@ import {
 } from '@/components/editor/rok-types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 import type { AgentChatSession } from '@/types/pane-types';
 import { AgentChatPanel } from './AgentChatPanel';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
@@ -19,11 +20,16 @@ const MonacoWrapper = lazy(() =>
 
 const MIN_SIDEBAR_WIDTH = 160;
 const MIN_EDITOR_WIDTH = 320;
+const ALL_PHASES: ScriptPhase[] = ['pre-request', 'post-response', 'tests'];
 
 interface ScriptsTabProps {
   tabId: string;
   collectionName?: string;
   agentSession?: AgentChatSession;
+  /** Phase tabs to show. Defaults to all three. */
+  phases?: ScriptPhase[];
+  /** Shows the AI Assist button and panel. Defaults to true. */
+  agentAssist?: boolean;
   preRequestScript: string;
   postResponseScript: string;
   testsScript: string;
@@ -65,6 +71,8 @@ export function ScriptsTab({
   tabId,
   collectionName,
   agentSession,
+  phases = ALL_PHASES,
+  agentAssist = true,
   preRequestScript,
   postResponseScript,
   testsScript,
@@ -79,7 +87,11 @@ export function ScriptsTab({
     {},
   );
 
-  const [activeTab, setActiveTab] = useState<ScriptPhase>('pre-request');
+  const [selectedTab, setActiveTab] = useState<ScriptPhase>(phases[0] ?? 'pre-request');
+  // Falls back to the first allowed phase if the selection is not in `phases`.
+  const activeTab: ScriptPhase = phases.includes(selectedTab)
+    ? selectedTab
+    : (phases[0] ?? 'pre-request');
   const [snippetSidebars, setSnippetSidebars] = useState<Record<ScriptPhase, boolean>>({
     'pre-request': false,
     'post-response': false,
@@ -135,31 +147,39 @@ export function ScriptsTab({
         className='flex h-full min-h-0 min-w-0 flex-1 flex-col'
       >
         <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
-          <TabsTrigger value='pre-request' className='text-xs'>
-            Pre Request
-          </TabsTrigger>
-          <TabsTrigger value='post-response' className='text-xs'>
-            Post Response
-          </TabsTrigger>
-          <TabsTrigger value='tests' className='text-xs'>
-            Tests
-          </TabsTrigger>
+          {phases.includes('pre-request') && (
+            <TabsTrigger value='pre-request' className='text-xs'>
+              Pre Request
+            </TabsTrigger>
+          )}
+          {phases.includes('post-response') && (
+            <TabsTrigger value='post-response' className='text-xs'>
+              Post Response
+            </TabsTrigger>
+          )}
+          {phases.includes('tests') && (
+            <TabsTrigger value='tests' className='text-xs'>
+              Tests
+            </TabsTrigger>
+          )}
+          {agentAssist && (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='ml-auto h-7 gap-1 text-xs'
+              onClick={() => setShowAgentChat((v) => !v)}
+              aria-pressed={showAgentChat}
+              aria-controls='agent-chat-panel'
+              title={showAgentChat ? 'Hide AI assist' : 'Show AI assist'}
+            >
+              <MessageSquare className='h-3.5 w-3.5' />
+              AI Assist
+            </Button>
+          )}
           <Button
             variant='ghost'
             size='sm'
-            className='ml-auto h-7 gap-1 text-xs'
-            onClick={() => setShowAgentChat((v) => !v)}
-            aria-pressed={showAgentChat}
-            aria-controls='agent-chat-panel'
-            title={showAgentChat ? 'Hide AI assist' : 'Show AI assist'}
-          >
-            <MessageSquare className='h-3.5 w-3.5' />
-            AI Assist
-          </Button>
-          <Button
-            variant='ghost'
-            size='sm'
-            className='h-7 gap-1 text-xs'
+            className={cn('h-7 gap-1 text-xs', !agentAssist && 'ml-auto')}
             onClick={toggleSidebar}
             disabled={!canShowSidebar}
             aria-pressed={showSidebar}
@@ -248,7 +268,7 @@ export function ScriptsTab({
           )}
         </TabsContent>
       </Tabs>
-      {showAgentChat && (
+      {agentAssist && showAgentChat && (
         <AgentChatPanel
           tabId={tabId}
           collectionName={collectionName}

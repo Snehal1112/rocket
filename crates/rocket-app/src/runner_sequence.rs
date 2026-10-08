@@ -206,6 +206,7 @@ pub fn build_step_input(
         request_guard_policy,
         skip_history: false,
         flow_vars: std::collections::HashMap::new(),
+        skip_folder_scripts: false,
     }
 }
 

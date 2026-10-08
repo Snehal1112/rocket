@@ -135,6 +135,11 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.getCollectionVar("key")',
           },
+          {
+            label: 'rok.getFolderVar("key")',
+            kind: 'expression',
+            code: 'rok.getFolderVar("key")',
+          },
           { label: 'rok.getEnvName()', kind: 'expression', code: 'rok.getEnvName()' },
           {
             label: 'rok.interpolate("{{template}}")',
@@ -301,6 +306,11 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.getCollectionVar("key")',
           },
+          {
+            label: 'rok.getFolderVar("key")',
+            kind: 'expression',
+            code: 'rok.getFolderVar("key")',
+          },
           { label: 'rok.getEnvName()', kind: 'expression', code: 'rok.getEnvName()' },
           {
             label: 'rok.interpolate("{{template}}")',
@@ -404,6 +414,11 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'rok.getCollectionVar("key")',
           },
           {
+            label: 'rok.getFolderVar("key")',
+            kind: 'expression',
+            code: 'rok.getFolderVar("key")',
+          },
+          {
             label: 'rok.interpolate("{{template}}")',
             kind: 'expression',
             code: 'rok.interpolate("{{template}}")',
@@ -446,6 +461,8 @@ declare const rok: {
   getCollectionVar(key: string): unknown;
   /** Write a collection variable (persisted to opencollection.yml). */
   setCollectionVar(key: string, value: unknown): void;
+  /** Read a folder variable. The innermost folder wins and disabled entries are skipped. Returns "" when unknown. Read-only. */
+  getFolderVar(key: string): unknown;
   /** Read a global environment variable. */
   getGlobalEnvVar(key: string): unknown;
   /** Write a global environment variable. */

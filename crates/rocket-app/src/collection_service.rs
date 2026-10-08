@@ -3,8 +3,8 @@ use rocket_audit::{
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_collection::{
-    Collection, CollectionRepository, CollectionSummary, CollectionVariable, GraphQlRequest,
-    GrpcRequest, Request, RequestKind, WebSocketRequest,
+    Collection, CollectionRepository, CollectionSummary, CollectionVariable, FolderSettings,
+    GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
@@ -416,6 +416,31 @@ impl CollectionService {
         self.repo
             .save_folder_variables(collection, folder_path, vars)?;
         self.events.publish(DomainEvent::FolderVariablesSaved {
+            collection: collection.to_string(),
+            folder_path: folder_path.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Reads one folder's own settings from its folder.yml. No chain walk.
+    pub fn get_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<FolderSettings> {
+        self.repo.get_folder_settings(collection, folder_path)
+    }
+
+    /// Writes one folder's settings, then tells listeners the folder changed.
+    pub fn save_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        settings: &FolderSettings,
+    ) -> DomainResult<()> {
+        self.repo
+            .save_folder_settings(collection, folder_path, settings)?;
+        self.events.publish(DomainEvent::FolderSettingsSaved {
             collection: collection.to_string(),
             folder_path: folder_path.to_string(),
         });
@@ -1274,6 +1299,95 @@ mod websocket_tests {
         assert_eq!(
             svc.get_request("api", "get.yml").expect("reload").name,
             "Fetch"
+        );
+    }
+}
+
+#[cfg(test)]
+mod folder_settings_tests {
+    use super::*;
+    use rocket_shared::types::Header;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<DomainEvent>>);
+
+    struct SharedRecorder(Arc<Recorder>);
+
+    impl EventPublisher for SharedRecorder {
+        fn publish(&self, event: DomainEvent) {
+            self.0 .0.lock().expect("lock").push(event);
+        }
+    }
+
+    /// A service over a temp collection "api" with one folder "auth".
+    fn service(dir: &std::path::Path) -> (CollectionService, Arc<Recorder>) {
+        let repo = rocket_infra::FsCollectionRepo::new_standalone(dir.to_path_buf());
+        repo.create("api").expect("create collection");
+        repo.create_folder("api", "auth").expect("create folder");
+        let recorder = Arc::new(Recorder::default());
+        let svc = CollectionService::new(
+            Box::new(repo),
+            Box::new(SharedRecorder(Arc::clone(&recorder))),
+        );
+        (svc, recorder)
+    }
+
+    fn sample() -> FolderSettings {
+        FolderSettings {
+            headers: vec![Header::new("X-Team", "core")],
+            pre_request_script: Some("console.log('auth pre');".into()),
+            docs: Some("# Auth folder".into()),
+            ..FolderSettings::default()
+        }
+    }
+
+    #[test]
+    fn save_folder_settings_persists_and_emits_folder_settings_saved() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (svc, recorder) = service(dir.path());
+
+        svc.save_folder_settings("api", "auth", &sample())
+            .expect("save_folder_settings");
+
+        assert_eq!(
+            svc.get_folder_settings("api", "auth").expect("get_folder_settings"),
+            sample()
+        );
+        let events = recorder.0.lock().expect("lock");
+        assert!(
+            matches!(
+                events.as_slice(),
+                [DomainEvent::FolderSettingsSaved { collection, folder_path }]
+                    if collection == "api" && folder_path == "auth"
+            ),
+            "expected one FolderSettingsSaved, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn get_folder_settings_publishes_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (svc, recorder) = service(dir.path());
+
+        let settings = svc.get_folder_settings("api", "auth").expect("get");
+
+        assert_eq!(settings, FolderSettings::default());
+        assert!(recorder.0.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn failed_folder_settings_save_publishes_no_event() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (svc, recorder) = service(dir.path());
+
+        // The spec makes a save to a missing folder an InvalidInput error (Plan 02).
+        let result = svc.save_folder_settings("api", "ghost", &sample());
+
+        assert!(result.is_err(), "a save to a missing folder must fail");
+        assert!(
+            recorder.0.lock().expect("lock").is_empty(),
+            "a failed save must not publish an event"
         );
     }
 }
