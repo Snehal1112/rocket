@@ -19,15 +19,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { DEFAULT_AUTH_NODE_AUTH } from '@/lib/flow-auth';
 import { DEFAULT_CALLBACK_TIMEOUT_MS, nextCallbackName } from '@/lib/flow-callback';
+import { newNodeId } from '@/lib/flow-ids';
 import { DEFAULT_REPEAT_UNTIL } from '@/lib/flow-repeat';
 import { DEFAULT_TRANSFORM_SCRIPT } from '@/lib/flow-transform';
 import type { FlowNode } from '@/lib/tauri-api';
-
-let nextId = 0;
-function newNodeId(prefix: string) {
-  nextId += 1;
-  return `${prefix}-${Date.now()}-${nextId}`;
-}
 
 export function NodePalette({
   onAddNode,
