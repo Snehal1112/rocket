@@ -347,6 +347,77 @@ describe('FlowToolbar', () => {
     );
   });
 
+  it('stores the trace from the step event and the summary', async () => {
+    const trace: tauriApi.FlowStepTrace = {
+      wires: [{ edgeId: 'e1', sourceNodeId: 'in', targetField: 'value', value: '••••••' }],
+      route: { kind: 'if', value: 'true' },
+      failedEdgeId: 'e1',
+    };
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    started('run-123');
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-123',
+      node_id: 'n',
+      status: 'success',
+      status_code: null,
+      duration_ms: 4,
+      error: null,
+      value: null,
+      trace,
+    });
+    expect(onPatchStatus).toHaveBeenCalledWith(
+      'n',
+      'success',
+      expect.objectContaining({ trace, durationMs: 4 }),
+    );
+
+    resolveRun({
+      runId: 'run-123',
+      stoppedReason: 'completed',
+      steps: [
+        {
+          nodeId: 'n',
+          status: 'success',
+          statusCode: null,
+          durationMs: 4,
+          error: null,
+          value: null,
+          trace,
+        },
+      ],
+    });
+    await waitFor(() =>
+      expect(onPatchStatus).toHaveBeenLastCalledWith(
+        'n',
+        'success',
+        expect.objectContaining({ trace }),
+      ),
+    );
+  });
+
+  it('leaves the trace unset for a step without one', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(stepHandler).toBeDefined());
+    started('run-123');
+    stepHandler?.({
+      type: 'flowStepCompleted',
+      run_id: 'run-123',
+      node_id: 'n',
+      status: 'success',
+      status_code: 200,
+      duration_ms: 5,
+      error: null,
+      value: null,
+    });
+    const detail = onPatchStatus.mock.calls[onPatchStatus.mock.calls.length - 1]?.[2];
+    expect(detail).toBeDefined();
+    expect(detail?.trace).toBeUndefined();
+  });
+
   it('forwards skip_reason and branch from flow-step-completed', async () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));

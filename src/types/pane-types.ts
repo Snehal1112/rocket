@@ -182,6 +182,8 @@ export interface FlowNodeDetail {
   exchange?: import('@/lib/tauri-api').FlowDebugRequest;
   /** Script console output of the last run. */
   logs?: import('@/lib/tauri-api').FlowLogEntry[];
+  /** Wire values and routing decision of the last run, masked by the backend. */
+  trace?: import('@/lib/tauri-api').FlowStepTrace;
 }
 
 /** Outcome of the last finished run, shown in the run-result strip. */

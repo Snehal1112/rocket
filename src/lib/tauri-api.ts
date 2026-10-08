@@ -2209,6 +2209,8 @@ export interface FlowStepResult {
   exchange?: FlowDebugRequest;
   /** How many times a repeat-until Request node sent its request. */
   attempts?: number;
+  /** Wire values and routing decision of the step, masked and capped. */
+  trace?: FlowStepTrace;
 }
 
 /** One header line in a debug record, already masked by the backend. */
@@ -2239,6 +2241,39 @@ export interface FlowDebugRequest {
   bodyTruncated?: boolean;
   response?: FlowDebugResponse;
   error?: string;
+}
+
+/** The value one wire delivered to a step. Masked and size-capped by the backend. */
+export interface FlowWireValue {
+  edgeId: string;
+  sourceNodeId: string;
+  targetField: string;
+  /** Absent for a credential wire and for a wire that failed before it had a value. */
+  value?: string;
+  /** True when `value` was cut at 16 KB or by the 64 KB per-step budget. */
+  truncated?: boolean;
+  /** True for an `auth` wire. Its credential is never sent to the UI. */
+  credential?: boolean;
+  error?: string;
+}
+
+/** How an If or Switch node decided. `value` is masked and cut at 1 KB. */
+export interface FlowRouteEval {
+  kind: 'if' | 'switch';
+  /** `true` or `false` for an If, the evaluated value for a Switch. */
+  value: string;
+  /** The Switch case id that matched. Absent for If and for the default exit. */
+  matchedCase?: string;
+}
+
+/** What one step saw and decided. Every key is optional. */
+export interface FlowStepTrace {
+  wires?: FlowWireValue[];
+  route?: FlowRouteEval;
+  /** The wire whose failure failed the step. */
+  failedEdgeId?: string;
+  /** True when the step's `value` was cut at 256 KB. */
+  valueTruncated?: boolean;
 }
 
 export interface FlowRunSummary {
@@ -2323,6 +2358,8 @@ export interface FlowStepCompletedEvent {
   exchange?: FlowDebugRequest;
   /** How many times a repeat-until Request node sent its request. */
   attempts?: number;
+  /** Wire values and routing decision of the step. Its keys are camelCase. */
+  trace?: FlowStepTrace;
 }
 
 export const onFlowStepCompleted = (

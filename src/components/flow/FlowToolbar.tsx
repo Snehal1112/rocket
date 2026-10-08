@@ -63,6 +63,7 @@ function detailFromEvent(event: FlowStepCompletedEvent): FlowNodeDetail {
     attempts: event.attempts ?? undefined,
     exchange: event.exchange ?? undefined,
     logs: event.logs?.length ? event.logs : undefined,
+    trace: event.trace ?? undefined,
   };
 }
 
@@ -78,6 +79,7 @@ function detailFromStep(step: FlowStepResult): FlowNodeDetail {
     attempts: step.attempts ?? undefined,
     exchange: step.exchange ?? undefined,
     logs: step.logs?.length ? step.logs : undefined,
+    trace: step.trace ?? undefined,
   };
 }
 
