@@ -1,3 +1,4 @@
+import { type FlowIssue, worstSeverity } from '@/lib/flow-issues';
 import type { FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 
 const statusStyles: Record<FlowNodeStatus, string> = {
@@ -22,4 +23,12 @@ export function nodeStatusCaption(
 ): string | null {
   if (status !== 'skipped') return null;
   return detail?.skipReason === 'branch_not_taken' ? 'Not taken' : 'Skipped — upstream failed';
+}
+
+// Ring around a node card for the worst problem it has. Plain colours only.
+export function issueRingClassName(issues?: FlowIssue[]): string | undefined {
+  const worst = worstSeverity(issues ?? []);
+  if (worst === 'error') return 'ring-2 ring-red-500';
+  if (worst === 'warning') return 'ring-1 ring-amber-500';
+  return undefined;
 }

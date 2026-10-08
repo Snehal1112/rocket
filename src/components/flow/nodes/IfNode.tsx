@@ -3,14 +3,16 @@ import { GitBranch } from 'lucide-react';
 import { SingleLineEditor } from '@/components/editor';
 import { Badge } from '@/components/ui/badge';
 import { FALSE_HANDLE, INPUT_HANDLE, TRUE_HANDLE } from '@/lib/flow-handles';
+import type { FlowIssue } from '@/lib/flow-issues';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { exitLabel } from '../flowExits';
 import { DurationChip } from './DurationChip';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
+import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
-import { nodeStatusClassName } from './nodeStatus';
+import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export type IfNodeData = {
   kind: Extract<FlowNodeKind, { kind: 'If' }>;
@@ -23,8 +25,8 @@ export type IfNodeData = {
   skipReason?: FlowSkipReason;
   /** Exit chosen by the last run: "true" or "false". */
   branch?: string;
-  /** Set when a save was rejected because of this node. */
-  hasCycleError?: boolean;
+  /** Problems found in this node, drawn as a ring and a badge. */
+  issues?: FlowIssue[];
 };
 
 export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeData }) {
@@ -38,7 +40,7 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
       className={cn(
         'w-64 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         nodeStatusClassName(status, data.skipReason),
-        data.hasCycleError && 'ring-2 ring-red-500',
+        issueRingClassName(data.issues),
       )}
     >
       <Handle
@@ -52,6 +54,7 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
         <GitBranch className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
         <span className='font-mono text-[10px] text-muted-foreground'>If</span>
         <span className='truncate font-medium'>{kind.label}</span>
+        <NodeIssueBadge issues={data.issues} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 

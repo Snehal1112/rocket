@@ -1,6 +1,6 @@
 import type { Connection } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +25,7 @@ import {
 } from '@/lib/flow-clipboard';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
+import { computeFlowIssues } from '@/lib/flow-issues';
 import { buildRunRecord } from '@/lib/flow-run-history';
 import type { FlowRunResult } from '@/lib/flow-run-result';
 import { flowPayloadFromTab } from '@/lib/flow-save';
@@ -136,6 +137,19 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   }, []);
   // A removed Auth node's in-memory token goes with it.
   useClearRemovedAuthTokens(tab.collectionName, tab.flowName, tab.nodes);
+
+  // Client-side checks plus whatever the last rejected save named. The popover
+  // count and the node badges read this one list.
+  const issues = useMemo(
+    () =>
+      computeFlowIssues(tab.nodes, tab.edges, {
+        save:
+          cycleNodeIds.length > 0 || cycleEdgeIds.length > 0
+            ? { nodeIds: cycleNodeIds, edgeIds: cycleEdgeIds, message: saveErrorMessage }
+            : undefined,
+      }),
+    [tab.nodes, tab.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage],
+  );
   // A deleted node closes its panel.
   useEffect(() => {
     setPanelNodeId((current) =>
@@ -640,7 +654,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             edges={tab.edges}
             nodeStatus={shownStatus}
             nodeDetail={shownDetail}
-            cycleNodeIds={cycleNodeIds}
+            issues={issues}
             cycleEdgeIds={cycleEdgeIds}
             onNodesChange={(nodes, options) => updateFlowNodes(tab.id, nodes, options)}
             onEdgesChange={(edges, options) => updateFlowEdges(tab.id, edges, options)}

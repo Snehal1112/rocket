@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { type FlowWriteOptions, pruneSelection } from '@/lib/flow-history';
+import { type FlowIssue, groupIssuesByNode } from '@/lib/flow-issues';
 import { layoutFlow } from '@/lib/flow-layout';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { SavedRequestPreview } from '@/lib/saved-request-preview';
@@ -71,8 +72,8 @@ export interface FlowCanvasProps {
   flowCollectionName?: string | null;
   // Per-node status-code/timing/error, keyed by node id. Populated by a run.
   nodeDetail?: Record<string, FlowNodeDetail>;
-  // Node ids named in a save validation error, such as a cycle.
-  cycleNodeIds?: string[];
+  // Problems to show on nodes. Computed by the owner so the same list feeds the issue count.
+  issues?: FlowIssue[];
   // Edge ids named in a save validation error, such as a cycle.
   cycleEdgeIds?: string[];
   // Inline edits from routing nodes (If condition, Switch value and cases).
@@ -111,6 +112,8 @@ type Measured = { width: number; height: number };
 // fresh node. Passing back the last measured size keeps the node visible
 // and its handle positions intact instead of re-measuring from scratch.
 // Selection lives in canvas-local state, because it is not persisted.
+const NO_ISSUES: ReadonlyMap<string, FlowIssue[]> = new Map();
+
 function toRfNodes(
   nodes: FlowNode[],
   edges: FlowEdge[],
@@ -118,7 +121,7 @@ function toRfNodes(
   selectedIds: ReadonlySet<string>,
   measured: ReadonlyMap<string, Measured>,
   nodeDetail?: Record<string, FlowNodeDetail>,
-  cycleNodeIds?: string[],
+  issuesByNode: ReadonlyMap<string, FlowIssue[]> = NO_ISSUES,
   savedPreviews: Record<string, SavedRequestPreview> = {},
   callbackUrls?: Record<string, string>,
 ): Node[] {
@@ -135,7 +138,7 @@ function toRfNodes(
         kind: n.kind,
         status: nodeStatus[n.id] ?? 'idle',
         ...nodeDetail?.[n.id],
-        hasCycleError: cycleNodeIds?.includes(n.id) ?? false,
+        issues: issuesByNode.get(n.id),
         ...(n.kind.kind === 'Output' && {
           hasValueWire: edges.some((e) => e.targetNodeId === n.id && e.targetField === 'value'),
         }),
@@ -285,7 +288,7 @@ function FlowCanvasInner({
   onAddNode,
   flowCollectionName,
   nodeDetail,
-  cycleNodeIds,
+  issues,
   cycleEdgeIds,
   onNodeKindChange,
   onRemoveSwitchCase,
@@ -412,6 +415,7 @@ function FlowCanvasInner({
     [nodes],
   );
   const savedPreviews = useSavedRequestPreviews(flowCollectionName ?? null, savedPaths);
+  const issuesByNode = useMemo(() => groupIssuesByNode(issues ?? []), [issues]);
   const rfNodes = useMemo(
     () =>
       toRfNodes(
@@ -421,7 +425,7 @@ function FlowCanvasInner({
         selectedNodeIds,
         measuredRef.current,
         nodeDetail,
-        cycleNodeIds,
+        issuesByNode,
         savedPreviews,
         callbackUrls,
       ),
@@ -431,7 +435,7 @@ function FlowCanvasInner({
       nodeStatus,
       selectedNodeIds,
       nodeDetail,
-      cycleNodeIds,
+      issuesByNode,
       savedPreviews,
       callbackUrls,
     ],

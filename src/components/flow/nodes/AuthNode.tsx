@@ -2,12 +2,14 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { KeyRound } from 'lucide-react';
 import { describeAuth } from '@/lib/flow-auth';
 import { RESULT_HANDLE } from '@/lib/flow-handles';
+import type { FlowIssue } from '@/lib/flow-issues';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { DurationChip } from './DurationChip';
+import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
-import { nodeStatusClassName } from './nodeStatus';
+import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export type AuthNodeData = {
   kind: Extract<FlowNodeKind, { kind: 'Auth' }>;
@@ -17,8 +19,8 @@ export type AuthNodeData = {
   /** How long the last run of this node took. */
   durationMs?: number;
   skipReason?: FlowSkipReason;
-  /** Set when a save was rejected because of this node. */
-  hasCycleError?: boolean;
+  /** Problems found in this node, drawn as a ring and a badge. */
+  issues?: FlowIssue[];
 };
 
 // An Auth node has no inputs. It shows only what kind of auth it holds, never
@@ -32,13 +34,14 @@ export function AuthNode({ id, data, isConnectable }: NodeProps & { data: AuthNo
       className={cn(
         'w-56 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         nodeStatusClassName(status, data.skipReason),
-        data.hasCycleError && 'ring-2 ring-red-500',
+        issueRingClassName(data.issues),
       )}
     >
       <div className='flex items-center gap-1.5 border-b px-2 py-1.5'>
         <KeyRound className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
         <span className='font-mono text-[10px] text-muted-foreground'>Auth</span>
         <span className='truncate font-medium'>{kind.label}</span>
+        <NodeIssueBadge issues={data.issues} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 

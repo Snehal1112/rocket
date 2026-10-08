@@ -3,13 +3,15 @@ import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { TRIGGER_HANDLE } from '@/lib/flow-handles';
+import type { FlowIssue } from '@/lib/flow-issues';
 import { formatOutputValue } from '@/lib/flow-output';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { DurationChip } from './DurationChip';
+import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
-import { nodeStatusClassName } from './nodeStatus';
+import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export interface OutputNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Output' }>;
@@ -20,8 +22,8 @@ export interface OutputNodeData {
   progress?: string;
   /** How long the last run of this node took. */
   durationMs?: number;
-  /** Set when this node is named in a save validation error, such as a cycle. */
-  hasCycleError?: boolean;
+  /** Problems found in this node, drawn as a ring and a badge. */
+  issues?: FlowIssue[];
   value?: string;
   /** False when no wire feeds `value`, so an empty value is not the wire's result. */
   hasValueWire?: boolean;
@@ -57,11 +59,12 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
       className={cn(
         'w-max min-w-48 max-w-[28rem] rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         nodeStatusClassName(data.status, data.skipReason),
-        data.hasCycleError && 'ring-2 ring-red-500',
+        issueRingClassName(data.issues),
       )}
     >
       <div className='flex items-center gap-1.5 border-b px-2 py-1.5 font-medium'>
         <span className='truncate'>{data.kind.label}</span>
+        <NodeIssueBadge issues={data.issues} />
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
       <NodeStatusCaption

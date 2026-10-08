@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nodeStatusCaption, nodeStatusClassName } from '../nodeStatus';
+import { issueRingClassName, nodeStatusCaption, nodeStatusClassName } from '../nodeStatus';
 
 describe('nodeStatusClassName', () => {
   it('keeps the existing per-status styles', () => {
@@ -38,5 +38,26 @@ describe('nodeStatusCaption', () => {
     );
     expect(nodeStatusCaption('skipped', { skipReason: 'branch_not_taken' })).toBe('Not taken');
     expect(nodeStatusCaption('skipped')).toBe('Skipped — upstream failed');
+  });
+});
+
+describe('issueRingClassName', () => {
+  const error = { code: 'a', severity: 'error' as const, nodeId: 'n', message: 'm' };
+  const warning = { code: 'b', severity: 'warning' as const, nodeId: 'n', message: 'm' };
+
+  it('draws a red ring for an error, even next to a warning', () => {
+    expect(issueRingClassName([error])).toContain('ring-red-500');
+    expect(issueRingClassName([warning, error])).toContain('ring-red-500');
+  });
+
+  it('draws an amber ring, and no red, for a warning', () => {
+    const cls = issueRingClassName([warning]);
+    expect(cls).toContain('ring-amber-500');
+    expect(cls).not.toContain('ring-red-500');
+  });
+
+  it('draws no ring without issues', () => {
+    expect(issueRingClassName(undefined)).toBeUndefined();
+    expect(issueRingClassName([])).toBeUndefined();
   });
 });

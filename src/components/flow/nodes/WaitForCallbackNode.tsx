@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { callbackVariable } from '@/lib/flow-callback';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
+import type { FlowIssue } from '@/lib/flow-issues';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { CallbackUrlField } from '../CallbackUrlField';
+import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
-import { nodeStatusClassName } from './nodeStatus';
+import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export interface WaitForCallbackNodeData {
   kind: Extract<FlowNodeKind, { kind: 'WaitForCallback' }>;
@@ -23,8 +25,8 @@ export interface WaitForCallbackNodeData {
   progress?: string;
   /** This run's callback URL. Set only while the run is active. */
   callbackUrl?: string;
-  /** Set when this node is named in a save validation error, such as a cycle. */
-  hasCycleError?: boolean;
+  /** Problems found in this node, drawn as a ring and a badge. */
+  issues?: FlowIssue[];
 }
 
 const COPIED_MS = 1500;
@@ -63,12 +65,13 @@ export function WaitForCallbackNode({
       className={cn(
         'w-64 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         nodeStatusClassName(status, data.skipReason),
-        data.hasCycleError && 'ring-2 ring-red-500',
+        issueRingClassName(data.issues),
       )}
     >
       <div className='flex items-center gap-1.5 border-b px-2 py-1.5'>
         <Hourglass className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
         <span className='truncate font-medium'>{kind.label}</span>
+        <NodeIssueBadge issues={data.issues} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 

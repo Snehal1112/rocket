@@ -151,9 +151,24 @@ describe('RequestNode', () => {
     expect(screen.getByText(/boom/)).toBeInTheDocument();
   });
 
-  it('outlines the card when it is part of a rejected cycle', () => {
-    renderNode({ kind: baseKind, status: 'idle', hasCycleError: true });
+  it('outlines the card in red when the node has an error', () => {
+    renderNode({
+      kind: baseKind,
+      status: 'idle',
+      issues: [{ code: 'save', severity: 'error', nodeId: 'n1', message: 'Rejected.' }],
+    });
     expect(screen.getByTestId('request-node-card').className).toContain('ring-red-500');
+  });
+
+  it('outlines the card in amber, not red, when the node only has a warning', () => {
+    renderNode({
+      kind: baseKind,
+      status: 'idle',
+      issues: [{ code: 'exit-unwired', severity: 'warning', nodeId: 'n1', message: 'Careful.' }],
+    });
+    const cls = screen.getByTestId('request-node-card').className;
+    expect(cls).toContain('ring-amber-500');
+    expect(cls).not.toContain('ring-red-500');
   });
 
   it('shows a debug badge only while debug mode is on', () => {

@@ -1,13 +1,15 @@
 import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { Bug, Repeat } from 'lucide-react';
 import { AUTH_HANDLE, RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
+import type { FlowIssue } from '@/lib/flow-issues';
 import { msToSecondsLabel } from '@/lib/flow-repeat';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
+import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
-import { nodeStatusClassName } from './nodeStatus';
+import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export interface RequestNodeData {
   kind: Extract<FlowNodeKind, { kind: 'Request' }>;
@@ -24,8 +26,8 @@ export interface RequestNodeData {
   bodyPreview?: string;
   /** Method of a Saved request, when the caller has looked it up. */
   method?: string;
-  /** Set when this node is named in a save validation error, such as a cycle. */
-  hasCycleError?: boolean;
+  /** Problems found in this node, drawn as a ring and a badge. */
+  issues?: FlowIssue[];
 }
 
 // A Saved source stores only its request path, not its method. The method
@@ -54,7 +56,7 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
       className={cn(
         'w-64 rounded-md border bg-card text-card-foreground text-xs shadow-sm',
         nodeStatusClassName(status, data.skipReason),
-        data.hasCycleError && 'ring-2 ring-red-500',
+        issueRingClassName(data.issues),
       )}
     >
       <div className='flex items-center justify-between gap-2 border-b px-2 py-1.5'>
@@ -70,6 +72,7 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
             className='h-3.5 w-3.5 shrink-0 text-amber-500'
           />
         )}
+        <NodeIssueBadge issues={data.issues} />
         <NodeMenuButton
           nodeId={id}
           label={kind.label}
