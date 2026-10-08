@@ -14,9 +14,11 @@ import {
   SelectionMode,
   useReactFlow,
 } from '@xyflow/react';
+import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
+import { Button } from '@/components/ui/button';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { type FlowWriteOptions, pruneSelection } from '@/lib/flow-history';
@@ -24,6 +26,7 @@ import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { FlowSearchBar } from './FlowSearchBar';
 import { edgeRunState, exitLabel } from './flowExits';
 import { minimapNodeColor } from './minimap';
 import { AuthNode } from './nodes/AuthNode';
@@ -218,6 +221,7 @@ const CANVAS_HINTS = [
   'Ctrl+Z undo',
   'Ctrl+C/V copy and paste',
   'Ctrl+D duplicate',
+  'Ctrl+F search',
 ];
 
 // A Delete press makes a node write and an edge write in the same tick, so a 50 ms window folds them into one step.
@@ -290,7 +294,7 @@ function FlowCanvasInner({
   onDuplicate,
   onDuplicateNode,
 }: FlowCanvasProps) {
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const [localSelection, setLocalSelection] = useState<ReadonlySet<string>>(() => new Set());
   const selectedNodeIds = selectedNodeIdsProp ?? localSelection;
   // Reports a new selection to the owner, or keeps it locally when uncontrolled.
@@ -327,6 +331,22 @@ function FlowCanvasInner({
   // text field was last active and silently breaking Backspace/Delete.
   const paneRef = useRef<HTMLDivElement>(null);
   const focusPane = () => paneRef.current?.focus();
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Bumped by Ctrl+F so an open search bar takes focus again.
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const openSearch = () => {
+    setSearchOpen(true);
+    setSearchFocusToken((t) => t + 1);
+  };
+  const closeSearch = () => {
+    setSearchOpen(false);
+    focusPane();
+  };
+  // Selects the match and brings it into view. The properties panel stays as it is.
+  const showSearchMatch = (nodeId: string) => {
+    selectNodes(new Set([nodeId]));
+    void fitView({ nodes: [{ id: nodeId }], duration: 300, maxZoom: 1.2 });
+  };
   // React Flow reports every click inside a node, including clicks on its
   // inline fields and buttons. Moving focus there would pull it out of the
   // field, so editable targets keep their focus. The selector matches the
@@ -490,6 +510,12 @@ function FlowCanvasInner({
       onRedo();
       return;
     }
+    if (key === 'f') {
+      // Replaces the webview's own find, which cannot see the canvas.
+      e.preventDefault();
+      openSearch();
+      return;
+    }
     // Plain Ctrl+C, V and D only. Shift variants belong to the browser.
     if (e.shiftKey) return;
     if (key === 'c' && onCopy && selectedNodeIds.size > 0) {
@@ -581,6 +607,27 @@ function FlowCanvasInner({
             // Lifts the minimap clear of the React Flow attribution link.
             style={{ marginBottom: 28 }}
           />
+          <Panel position='top-center' className='nokey flex items-center gap-2'>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              className='h-8 gap-1.5'
+              aria-label='Search nodes'
+              title='Search nodes (Ctrl+F)'
+              onClick={openSearch}
+            >
+              <Search className='h-3.5 w-3.5' aria-hidden='true' />
+            </Button>
+            {searchOpen && (
+              <FlowSearchBar
+                nodes={nodes}
+                focusToken={searchFocusToken}
+                onShowMatch={showSearchMatch}
+                onClose={closeSearch}
+              />
+            )}
+          </Panel>
           <Panel position='bottom-left' className='pointer-events-none ml-14 mb-3 max-w-[50%]'>
             <span className='text-[11px] text-muted-foreground/70'>{CANVAS_HINTS.join(' · ')}</span>
           </Panel>
