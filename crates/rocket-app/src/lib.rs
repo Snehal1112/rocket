@@ -18,6 +18,9 @@ pub(crate) mod flow_callbacks;
 pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;
+// Used only by tests until Task 3 of plan P19 wires it into the engine.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod flow_partial;
 pub(crate) mod flow_poll;
 pub(crate) mod flow_routing;
 pub mod flow_service;
@@ -69,6 +72,7 @@ pub use flow_auth::{
 pub use flow_execution_service::{
     CapturedOutput, FlowExecutionService, FlowRunSummary, FlowStepResult, RunFlowInput,
 };
+pub use flow_partial::PartialRun;
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;
 pub use graphql_request::ExecuteGraphQlInput;

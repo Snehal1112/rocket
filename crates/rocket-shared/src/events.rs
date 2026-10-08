@@ -35,6 +35,29 @@ pub struct FlowLogEntry {
     pub message: String,
 }
 
+/// Which nodes a partial Flow run executes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlowPartialMode {
+    /// "Run this node": the start node and the Input and Auth nodes it reads.
+    Node,
+    /// "Run from here": the start node and every node downstream of it.
+    FromHere,
+}
+
+/// Describes a partial run on `FlowRunStarted` and on the run summary.
+/// Nested keys are camelCase, like `FlowDebugRequest`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowPartialRunInfo {
+    /// The run whose cached results feed this one.
+    pub base_run_id: String,
+    pub start_node_id: String,
+    pub mode: FlowPartialMode,
+    /// Every node this run executes, in execution order.
+    pub node_ids: Vec<String>,
+}
+
 /// One header line in a Flow debug record, already masked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1051,6 +1074,27 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"Login Flow","collection":"acme","total_nodes":3}"#
+        );
+    }
+
+    #[test]
+    fn flow_partial_run_info_wire_shape() {
+        let info = FlowPartialRunInfo {
+            base_run_id: "01A".into(),
+            start_node_id: "n2".into(),
+            mode: FlowPartialMode::FromHere,
+            node_ids: vec!["n2".into(), "n3".into()],
+        };
+        let json = serde_json::to_string(&info).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"baseRunId":"01A","startNodeId":"n2","mode":"fromHere","nodeIds":["n2","n3"]}"#
+        );
+        let back: FlowPartialRunInfo = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, info);
+        assert_eq!(
+            serde_json::to_string(&FlowPartialMode::Node).expect("serialize"),
+            r#""node""#
         );
     }
 

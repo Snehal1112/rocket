@@ -431,7 +431,8 @@ fn check_callback_order(flow: &Flow) -> Result<(), FlowGraphError> {
 }
 
 /// True when `text` holds the variable `{{callback.<name>}}`, spaces allowed.
-fn mentions_callback(text: &str, name: &str) -> bool {
+/// The engine reuses it to find the requests that send a Wait's callback URL.
+pub fn mentions_callback(text: &str, name: &str) -> bool {
     let wanted = format!("callback.{name}");
     text.split("{{").skip(1).any(|rest| {
         rest.split_once("}}")
