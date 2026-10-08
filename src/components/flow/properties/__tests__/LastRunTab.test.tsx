@@ -1,11 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   FlowDebugRequest,
   FlowDebugResponse,
   FlowNode,
   FlowNodeKind,
+  FlowRejectedCall,
   FlowStepTrace,
 } from '@/lib/tauri-api';
 import { LastRunTab } from '../LastRunTab';
@@ -524,5 +525,151 @@ describe('LastRunTab trace', () => {
     const out = node({ kind: 'Output', label: 'Token' });
     render(<LastRunTab node={out} status='success' detail={{ value: 'abc', durationMs: 3 }} />);
     expect(screen.getByTestId('last-run-status')).toHaveTextContent('3ms');
+  });
+});
+
+describe('LastRunTab live progress', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const poller = node({
+    kind: 'Request',
+    label: 'Job',
+    source: { type: 'Saved', requestPath: 'jobs/status.yml' },
+  });
+  const wait = node({ kind: 'WaitForCallback', label: 'Hook', name: 'hook', timeoutMs: 60000 });
+  const rejected: FlowRejectedCall = {
+    method: 'POST',
+    url: '/cb/…?event=pending',
+    headers: [{ key: 'Authorization', value: '••••••' }],
+    body: '{"event":"pending"}',
+    bodyTruncated: true,
+    reason: 'Accept when returned false.',
+  };
+
+  it('shows live poll progress with a countdown', () => {
+    vi.useFakeTimers();
+    render(
+      <LastRunTab
+        node={poller}
+        status='running'
+        detail={{
+          progress: 'attempt 2/5 · condition false',
+          live: { lastStatusCode: 202, conditionMet: false, remainingMs: 12000 },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-poll-live')).toHaveTextContent(
+      'Last status 202 · condition false · 12s left',
+    );
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.getByTestId('last-run-poll-live')).toHaveTextContent('9s left');
+  });
+
+  it('hides the live line once the node finished and stops its timer', () => {
+    vi.useFakeTimers();
+    const live = { lastStatusCode: 202, conditionMet: false, remainingMs: 12000 };
+    const { rerender } = render(<LastRunTab node={poller} status='running' detail={{ live }} />);
+    expect(vi.getTimerCount()).toBe(1);
+    rerender(<LastRunTab node={poller} status='success' detail={{ statusCode: 200 }} />);
+    expect(screen.queryByTestId('last-run-poll-live')).not.toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('shows the poll result after the run', () => {
+    render(
+      <LastRunTab
+        node={poller}
+        status='failed'
+        detail={{
+          error: 'condition not met after 30 attempts (60.0s)',
+          trace: {
+            poll: {
+              attempts: 30,
+              maxAttempts: 30,
+              lastStatusCode: 202,
+              conditionMet: false,
+              elapsedMs: 60000,
+              timeoutMs: 60000,
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-poll')).toHaveTextContent(
+      'Last status 202 · condition false · 30 of 30 attempts',
+    );
+  });
+
+  it('says when a poll reached no verdict', () => {
+    render(
+      <LastRunTab
+        node={poller}
+        status='failed'
+        detail={{
+          trace: {
+            poll: {
+              attempts: 1,
+              maxAttempts: 5,
+              lastStatusCode: 200,
+              elapsedMs: 10,
+              timeoutMs: 60000,
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-poll')).toHaveTextContent('no verdict');
+  });
+
+  it('shows ignored calls and a countdown while waiting', () => {
+    vi.useFakeTimers();
+    render(
+      <LastRunTab
+        node={wait}
+        status='running'
+        detail={{ live: { ignored: 2, remainingMs: 42000, lastRejected: rejected } }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-wait-live')).toHaveTextContent('2 ignored · 42s left');
+    expect(screen.getByTestId('last-run-rejected')).toBeInTheDocument();
+  });
+
+  it('keeps the last rejected call collapsed until asked', async () => {
+    render(
+      <LastRunTab
+        node={wait}
+        status='running'
+        detail={{ live: { ignored: 1, remainingMs: 42000, lastRejected: rejected } }}
+      />,
+    );
+    expect(screen.queryByLabelText('Body viewer')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Last rejected call/ }));
+    const section = screen.getByTestId('last-run-rejected');
+    expect(section).toHaveTextContent('POST /cb/…?event=pending');
+    expect(section).toHaveTextContent('Accept when returned false.');
+    expect(section).toHaveTextContent('Authorization');
+    expect(section).toHaveTextContent('••••••');
+    expect(section).toHaveTextContent('Body truncated.');
+    expect(await screen.findByLabelText('Body viewer')).toBeInTheDocument();
+  });
+
+  it('shows the wait result after a timeout', () => {
+    render(
+      <LastRunTab
+        node={wait}
+        status='failed'
+        detail={{
+          error: 'no matching callback within 60s (3 ignored)',
+          trace: { wait: { ignored: 3, timeoutMs: 60000, lastRejected: rejected } },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-wait')).toHaveTextContent('3 ignored');
+    expect(screen.getByTestId('last-run-rejected')).toBeInTheDocument();
+    expect(screen.queryByTestId('last-run-wait-live')).not.toBeInTheDocument();
   });
 });

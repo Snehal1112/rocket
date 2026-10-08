@@ -9,9 +9,11 @@ import { msToSecondsLabel } from '@/lib/flow-repeat';
 import type {
   FlowDebugHeader,
   FlowDebugRequest,
+  FlowLiveProgress,
   FlowLogEntry,
   FlowNode,
   FlowNodeStatus,
+  FlowRejectedCall,
   FlowRouteEval,
   FlowWireValue,
 } from '@/lib/tauri-api';
@@ -377,6 +379,95 @@ function LogsSection({ logs }: { logs: FlowLogEntry[] }) {
   );
 }
 
+// Whole seconds left before a running node gives up. Each live event restarts
+// the count from the backend's `remainingMs`, and the hook ticks once a second.
+function useSecondsLeft(live?: FlowLiveProgress): number | undefined {
+  const [deadline, setDeadline] = useState<number | undefined>(undefined);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const remaining = live?.remainingMs;
+    if (remaining === undefined) {
+      setDeadline(undefined);
+      return;
+    }
+    const start = Date.now();
+    setNow(start);
+    setDeadline(start + remaining);
+  }, [live]);
+  useEffect(() => {
+    if (deadline === undefined) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [deadline]);
+  return deadline === undefined ? undefined : Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+function verdictText(conditionMet?: boolean): string {
+  if (conditionMet === undefined) return 'no verdict';
+  return conditionMet ? 'condition true' : 'condition false';
+}
+
+// While a poll runs: its last status, verdict and time left.
+function PollLiveLine({ live }: { live: FlowLiveProgress }) {
+  const seconds = useSecondsLeft(live);
+  const parts: string[] = [];
+  if (live.lastStatusCode !== undefined) parts.push(`Last status ${live.lastStatusCode}`);
+  if (live.conditionMet !== undefined) parts.push(verdictText(live.conditionMet));
+  if (seconds !== undefined) parts.push(`${seconds}s left`);
+  if (parts.length === 0) return null;
+  return (
+    <p data-testid='last-run-poll-live' className='text-muted-foreground'>
+      {parts.join(' · ')}
+    </p>
+  );
+}
+
+// While a callback wait runs: ignored calls and time left.
+function WaitLiveLine({ live }: { live: FlowLiveProgress }) {
+  const seconds = useSecondsLeft(live);
+  const parts: string[] = [];
+  if (live.ignored !== undefined) parts.push(`${live.ignored} ignored`);
+  if (seconds !== undefined) parts.push(`${seconds}s left`);
+  if (parts.length === 0) return null;
+  return (
+    <p data-testid='last-run-wait-live' className='text-muted-foreground'>
+      {parts.join(' · ')}
+    </p>
+  );
+}
+
+// A call the wait turned down, collapsed because its body can be large.
+function RejectedCallSection({ call }: { call: FlowRejectedCall }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section data-testid='last-run-rejected'>
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <Button type='button' variant='ghost' size='sm' className='h-6 px-1 text-xs'>
+            <ChevronRight
+              className={
+                open ? 'h-3 w-3 rotate-90 transition-transform' : 'h-3 w-3 transition-transform'
+              }
+            />
+            Last rejected call
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className='mt-1.5 space-y-1.5'>
+            <p className='select-text font-mono text-[11px] [overflow-wrap:anywhere]'>
+              {call.method} {call.url}
+            </p>
+            <p className='text-muted-foreground'>{call.reason}</p>
+            <HeadersTable headers={call.headers} />
+            <BodyViewer body={call.body} />
+            {call.bodyTruncated && <p className='text-muted-foreground'>Body truncated.</p>}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </section>
+  );
+}
+
 export function LastRunTab({ node, status, detail, nodes }: LastRunTabProps) {
   if (status === 'idle') {
     return (
@@ -406,6 +497,38 @@ export function LastRunTab({ node, status, detail, nodes }: LastRunTabProps) {
         >
           {detail.error}
         </div>
+      )}
+      {node.kind.kind === 'Request' && status === 'running' && detail?.live && (
+        <PollLiveLine live={detail.live} />
+      )}
+      {node.kind.kind === 'Request' && status !== 'running' && detail?.trace?.poll && (
+        <p data-testid='last-run-poll' className='text-muted-foreground'>
+          {[
+            detail.trace.poll.lastStatusCode !== undefined
+              ? `Last status ${detail.trace.poll.lastStatusCode}`
+              : null,
+            verdictText(detail.trace.poll.conditionMet),
+            `${detail.trace.poll.attempts} of ${detail.trace.poll.maxAttempts} attempts`,
+          ]
+            .filter((part) => part !== null)
+            .join(' · ')}
+        </p>
+      )}
+      {node.kind.kind === 'WaitForCallback' && status === 'running' && detail?.live && (
+        <>
+          <WaitLiveLine live={detail.live} />
+          {detail.live.lastRejected && <RejectedCallSection call={detail.live.lastRejected} />}
+        </>
+      )}
+      {node.kind.kind === 'WaitForCallback' && status !== 'running' && detail?.trace?.wait && (
+        <>
+          <p data-testid='last-run-wait' className='text-muted-foreground'>
+            {detail.trace.wait.ignored} ignored
+          </p>
+          {detail.trace.wait.lastRejected && (
+            <RejectedCallSection call={detail.trace.wait.lastRejected} />
+          )}
+        </>
       )}
       {status === 'skipped' && <p className='text-muted-foreground'>{skipText(detail)}</p>}
       {detail?.trace?.wires && detail.trace.wires.length > 0 && (
