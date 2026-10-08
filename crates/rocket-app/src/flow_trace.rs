@@ -5,6 +5,7 @@
 use std::collections::HashSet;
 
 use rocket_flow::FlowEdge;
+use rocket_shared::error::DomainError;
 use rocket_shared::events::{FlowRouteEval, FlowStepTrace, FlowWireValue};
 
 use crate::flow_debug::cap_text;
@@ -82,6 +83,25 @@ impl NodeTrace {
             matched_case,
         });
     }
+
+    /// Marks `edge` as the wire that failed the step. The message is masked
+    /// and capped. A wire recorded earlier keeps its value.
+    pub(crate) fn record_failure(
+        &mut self,
+        edge: &FlowEdge,
+        message: &str,
+        masks: &HashSet<String>,
+    ) {
+        let (error, _) = mask_then_cap(message, masks, WIRE_VALUE_LIMIT);
+        match self.step.wires.iter_mut().find(|w| w.edge_id == edge.id) {
+            Some(wire) => wire.error = Some(error),
+            None => self.step.wires.push(FlowWireValue {
+                error: Some(error),
+                ..blank_wire(edge)
+            }),
+        }
+        self.step.failed_edge_id = Some(edge.id.clone());
+    }
 }
 
 /// A wire record that names `edge` and holds nothing else yet.
@@ -91,6 +111,21 @@ fn blank_wire(edge: &FlowEdge) -> FlowWireValue {
         source_node_id: edge.source_node_id.clone(),
         target_field: edge.target_field.clone(),
         ..Default::default()
+    }
+}
+
+/// Names the wire in an error, as
+/// `wire '<id>' (<source>.<exit> -> <target>.<field>): <cause>`. It never
+/// adds a value. `InvalidInput` and `Internal` keep their variant.
+pub(crate) fn wire_err(edge: &FlowEdge, e: DomainError) -> DomainError {
+    let context = format!(
+        "wire '{}' ({}.{} -> {}.{})",
+        edge.id, edge.source_node_id, edge.source_handle, edge.target_node_id, edge.target_field
+    );
+    match e {
+        DomainError::Internal(m) => DomainError::Internal(format!("{context}: {m}")),
+        DomainError::InvalidInput(m) => DomainError::InvalidInput(format!("{context}: {m}")),
+        other => DomainError::InvalidInput(format!("{context}: {other}")),
     }
 }
 
@@ -220,5 +255,51 @@ mod tests {
         assert!(route.value.starts_with(REDACTED));
         assert!(route.value.len() <= ROUTE_VALUE_LIMIT);
         assert_eq!(route.matched_case.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn wire_err_names_the_wire_and_keeps_the_variant() {
+        use rocket_shared::error::DomainError;
+
+        let e = edge("e7", "headers[X-Id].value");
+        let named = wire_err(&e, DomainError::InvalidInput("boom".into()));
+        assert_eq!(
+            named,
+            DomainError::InvalidInput(
+                "wire 'e7' (src.result -> dst.headers[X-Id].value): boom".into()
+            )
+        );
+        assert!(matches!(
+            wire_err(&e, DomainError::Internal("x".into())),
+            DomainError::Internal(_)
+        ));
+    }
+
+    #[test]
+    fn record_failure_marks_the_wire_and_the_step() {
+        let mut trace = NodeTrace::default();
+        trace.record_failure(
+            &edge("e1", "url"),
+            "token sk-live-123456 failed",
+            &masks(&["sk-live-123456"]),
+        );
+        assert_eq!(trace.step.failed_edge_id.as_deref(), Some("e1"));
+        let wire = &trace.step.wires[0];
+        assert_eq!(wire.value, None);
+        assert_eq!(
+            wire.error.as_deref(),
+            Some(format!("token {REDACTED} failed").as_str())
+        );
+    }
+
+    #[test]
+    fn record_failure_on_a_recorded_wire_keeps_its_value() {
+        let mut trace = NodeTrace::default();
+        let e = edge("e1", "headers[3].value");
+        trace.record_wire(&e, "abcdef-value", &masks(&[]));
+        trace.record_failure(&e, "header index 3 out of range", &masks(&[]));
+        assert_eq!(trace.step.wires.len(), 1, "one row per wire");
+        assert_eq!(trace.step.wires[0].value.as_deref(), Some("abcdef-value"));
+        assert!(trace.step.wires[0].error.is_some());
     }
 }

@@ -114,3 +114,15 @@ variable); `{{$dynamic}}` placeholders in a static token are generated
 separately for the mask and the send, so they are not masked; a partly
 resolved template (`{{token}}-{{unset}}`) is not masked by the Auth node; and
 `flow-auth-sent.<id>` widens the script-write hold-back for that request.
+
+## Flow step trace (`flow_trace.rs`)
+
+`execute_node` fills a `NodeTrace` out-param; the run loop moves it into
+`FlowStepResult.trace` and the `FlowStepCompleted` event. It records each data
+wire's value (`record_wire`), an `auth` wire as `credential: true` with no
+value, an If/Switch decision (`record_route`) and the failing wire
+(`record_failure`, `failed_edge_id`). Values are masked with `secret_values`
+plus `credentials.secret_forms()` first and capped second (16 KB per wire,
+64 KB per step, 1 KB per route value, 256 KB per step value). Wire errors are
+named by `wire_err` and never quote a resolved value. The run loop fills
+`duration_ms` for every node that ran and did not set its own.

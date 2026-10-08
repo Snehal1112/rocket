@@ -552,6 +552,7 @@ fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult
 /// path is a `DomainError` — never a silent no-op, since a wire the user drew
 /// that quietly does nothing would be far more confusing than a run that
 /// fails with a clear reason.
+/// Every error names its wire (see `flow_trace::wire_err`) and never the value.
 pub fn apply_wired_overrides(
     input: &mut ExecuteRequestInput,
     resolved: &HashMap<String, String>,
@@ -561,32 +562,29 @@ pub fn apply_wired_overrides(
         let Some(value) = resolved.get(&e.id) else {
             continue;
         };
-        match e.target_field.as_str() {
-            "url" => input.url = value.clone(),
-            "body" => apply_body_override(input, e, value)?,
-            field => {
-                let Some(selector) = field
-                    .strip_prefix("headers[")
-                    .and_then(|rest| rest.strip_suffix("].value"))
-                else {
-                    return Err(DomainError::InvalidInput(format!(
-                        "edge '{}': unrecognized target_field '{}'",
-                        e.id, e.target_field
-                    )));
-                };
-                apply_header_override(input, e, selector, value)?;
+        let applied = match e.target_field.as_str() {
+            "url" => {
+                input.url = value.clone();
+                Ok(())
             }
-        }
+            "body" => apply_body_override(input, value),
+            field => match field
+                .strip_prefix("headers[")
+                .and_then(|rest| rest.strip_suffix("].value"))
+            {
+                Some(selector) => apply_header_override(input, field, selector, value),
+                None => Err(DomainError::InvalidInput(format!(
+                    "unrecognized target_field '{field}'"
+                ))),
+            },
+        };
+        applied.map_err(|err| crate::flow_trace::wire_err(e, err))?;
     }
     Ok(())
 }
 
 /// Writes `value` into the request body for a `"body"` wire.
-fn apply_body_override(
-    input: &mut ExecuteRequestInput,
-    e: &FlowEdge,
-    value: &str,
-) -> DomainResult<()> {
+fn apply_body_override(input: &mut ExecuteRequestInput, value: &str) -> DomainResult<()> {
     let body = input.body.get_or_insert(Body {
         mode: BodyMode::Json,
         content: None,
@@ -600,8 +598,8 @@ fn apply_body_override(
         // These modes never read `content`, so writing it would do nothing.
         BodyMode::FormUrlEncoded | BodyMode::FormData | BodyMode::Binary => {
             return Err(DomainError::InvalidInput(format!(
-                "edge '{}': cannot wire a value into a {:?} body",
-                e.id, body.mode
+                "cannot wire a value into a {:?} body",
+                body.mode
             )));
         }
     }
@@ -613,29 +611,24 @@ fn apply_body_override(
 /// `"headers[<selector>].value"` wire.
 fn apply_header_override(
     input: &mut ExecuteRequestInput,
-    e: &FlowEdge,
+    field: &str,
     selector: &str,
     value: &str,
 ) -> DomainResult<()> {
     if selector.trim().is_empty() {
         return Err(DomainError::InvalidInput(format!(
-            "edge '{}': malformed target_field '{}'",
-            e.id, e.target_field
+            "malformed target_field '{field}'"
         )));
     }
 
     if selector.bytes().all(|b| b.is_ascii_digit()) {
-        let index: usize = selector.parse().map_err(|_| {
-            DomainError::InvalidInput(format!(
-                "edge '{}': malformed target_field '{}'",
-                e.id, e.target_field
-            ))
-        })?;
+        let index: usize = selector
+            .parse()
+            .map_err(|_| DomainError::InvalidInput(format!("malformed target_field '{field}'")))?;
         let headers_len = input.headers.len();
         let header = input.headers.get_mut(index).ok_or_else(|| {
             DomainError::InvalidInput(format!(
-                "edge '{}': header index {} out of range (request has {} headers)",
-                e.id, index, headers_len
+                "header index {index} out of range (request has {headers_len} headers)"
             ))
         })?;
         header.value = value.to_string();
@@ -1255,12 +1248,17 @@ impl FlowExecutionService {
                 // An Output node shows one value. Picking one of several wires
                 // would silently drop the others, so this is an error.
                 if data_edges.len() > 1 {
+                    let ids: Vec<&str> = data_edges.iter().map(|e| e.id.as_str()).collect();
                     return Err(DomainError::InvalidInput(format!(
-                        "output node '{}' has more than one incoming wire",
-                        node.id
+                        "output node '{}' has more than one incoming wire (edges {})",
+                        node.id,
+                        ids.join(", ")
                     )));
                 }
-                let source_output = captured_source(node, edge, captured)?;
+                let source_output = match captured_source(node, edge, captured) {
+                    Ok(output) => output,
+                    Err(e) => return Err(fail_wire(trace, edge, e, &trace_masks)),
+                };
                 let outcome = exec
                     .resolve_flow_wire_expression(
                         &input.collection,
@@ -1270,7 +1268,10 @@ impl FlowExecutionService {
                     )
                     .await;
                 logs.extend(outcome.logs);
-                let value = outcome.result?;
+                let value = match outcome.result {
+                    Ok(value) => value,
+                    Err(e) => return Err(fail_wire(trace, edge, e, &trace_masks)),
+                };
                 trace.record_wire(edge, &value, &trace_masks);
                 // Wires get the raw value. The step shows every secret masked, then capped.
                 let (reported, cut) = mask_then_cap(&value, &trace_masks, STEP_VALUE_LIMIT);
@@ -1321,7 +1322,10 @@ impl FlowExecutionService {
                         auth_from = Some(edge.source_node_id.clone());
                         continue;
                     }
-                    let source_output = captured_source(node, edge, captured)?;
+                    let source_output = match captured_source(node, edge, captured) {
+                        Ok(output) => output,
+                        Err(e) => return Err(fail_wire(trace, edge, e, &trace_masks)),
+                    };
                     let outcome = exec
                         .resolve_flow_wire_expression(
                             &input.collection,
@@ -1331,12 +1335,24 @@ impl FlowExecutionService {
                         )
                         .await;
                     logs.extend(outcome.logs);
-                    let value = outcome.result?;
+                    let value = match outcome.result {
+                        Ok(value) => value,
+                        Err(e) => return Err(fail_wire(trace, edge, e, &trace_masks)),
+                    };
                     trace.record_wire(edge, &value, &trace_masks);
                     resolved.insert(edge.id.clone(), value);
                 }
-                let edges_owned: Vec<FlowEdge> = data_edges.iter().map(|e| (*e).clone()).collect();
-                apply_wired_overrides(&mut request_input, &resolved, &edges_owned)?;
+                // One wire at a time, so a failure marks the wire it came from.
+                for edge in data_edges {
+                    if let Err(err) = apply_wired_overrides(
+                        &mut request_input,
+                        &resolved,
+                        std::slice::from_ref(*edge),
+                    ) {
+                        trace.record_failure(edge, &err.to_string(), &trace_masks);
+                        return Err(err);
+                    }
+                }
 
                 // An Auth-node credential with a `{{template}}` is resolved by
                 // the request at send time, so the value sent can differ from
@@ -1619,6 +1635,18 @@ fn record_input_wire(
     if let [edge] = data_edges {
         trace.record_wire(edge, captured_text(source), masks);
     }
+}
+
+/// Marks `edge` as failed in the trace and returns its error, named after
+/// the wire.
+fn fail_wire(
+    trace: &mut NodeTrace,
+    edge: &FlowEdge,
+    e: DomainError,
+    masks: &HashSet<String>,
+) -> DomainError {
+    trace.record_failure(edge, &e.to_string(), masks);
+    crate::flow_trace::wire_err(edge, e)
 }
 
 /// Turns one node's `execute_node` outcome into its `FlowStepResult`. A node
@@ -2672,7 +2700,11 @@ mod tests {
 
         let err = apply_wired_overrides(&mut input, &resolved, &edges)
             .expect_err("a form body ignores content, so a wire into it must error");
-        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(
+            matches!(&err, DomainError::InvalidInput(m)
+                if m.starts_with("wire 'e1' (src.result -> n2.body): ")),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -4643,6 +4675,18 @@ mod tests {
             "a node whose wire failed must not be sent"
         );
         assert_eq!(finished_counts(&publisher), (4, 1, 1));
+        let error = b.error.as_deref().unwrap_or_default();
+        assert!(
+            error.contains("wire 'e1' (a.result -> b.url)"),
+            "got {error}"
+        );
+        let trace = b.trace.clone().expect("a trace");
+        assert_eq!(trace.failed_edge_id.as_deref(), Some("e1"));
+        assert_eq!(trace.wires[0].value, None);
+        assert!(trace.wires[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("ReferenceError")));
     }
 
     #[tokio::test]
@@ -4690,6 +4734,13 @@ mod tests {
             .expect("run");
 
         assert_eq!(status_of(&summary, "out"), FlowNodeStatus::Failed);
+        assert!(
+            step_of(&summary, "out")
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("(edges e1, e2)")),
+            "the error lists both wires"
+        );
     }
 
     #[tokio::test]
@@ -5027,7 +5078,10 @@ mod tests {
 
         let c = step_of(&summary, "c");
         assert_eq!(c.status, FlowNodeStatus::Failed);
-        assert_eq!(c.error.as_deref(), Some("field 'url' has 2 live inputs"));
+        assert_eq!(
+            c.error.as_deref(),
+            Some("field 'url' has 2 live inputs (edges e1, e2)")
+        );
         assert_eq!(executor.sent_urls().len(), 2, "c must never be sent");
     }
 
@@ -9246,5 +9300,104 @@ mod tests {
             .expect("a route");
         assert_eq!(route.value, "pro");
         assert_eq!(route.matched_case, None);
+    }
+
+    #[tokio::test]
+    async fn an_earlier_wire_keeps_its_value_when_a_later_wire_fails() {
+        let flow = Flow {
+            name: "two-wires".to_string(),
+            nodes: vec![
+                input_node_with("in", "hello"),
+                request_flow_node("r", "https://api.example.com/r"),
+            ],
+            edges: vec![
+                edge_from("e1", "in", handle::RESULT, "r", "body", "response.body"),
+                edge_from(
+                    "e2",
+                    "in",
+                    handle::RESULT,
+                    "r",
+                    "headers[X-Id].value",
+                    "boom()",
+                ),
+            ],
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![
+                (
+                    "boom()",
+                    Scripted::Throw("ReferenceError: boom is not defined"),
+                ),
+                ("response.body", Scripted::Value(serde_json::json!("hello"))),
+            ]),
+        );
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("two-wires"))
+            .await
+            .expect("run");
+
+        let r = step_of(&summary, "r");
+        assert_eq!(r.status, FlowNodeStatus::Failed);
+        let trace = r.trace.clone().expect("a trace");
+        assert_eq!(trace.failed_edge_id.as_deref(), Some("e2"));
+        assert_eq!(trace.wires.len(), 2);
+        assert_eq!(trace.wires[0].edge_id, "e1");
+        assert_eq!(trace.wires[0].value.as_deref(), Some("hello"));
+        assert_eq!(trace.wires[1].edge_id, "e2");
+        assert!(trace.wires[1].error.is_some());
+        assert!(executor.sent_urls().is_empty(), "r must not be sent");
+    }
+
+    #[tokio::test]
+    async fn a_wire_error_never_quotes_the_resolved_value() {
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        let exec = scoped_exec(env, Vec::new());
+        // The request has no headers, so index 3 is out of range.
+        let flow = Flow {
+            name: "bad-header".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{apiKey}}"),
+                request_flow_node("r", "https://api.example.com/r"),
+            ],
+            edges: vec![edge_from(
+                "e1",
+                "in",
+                handle::RESULT,
+                "r",
+                "headers[3].value",
+                "response.body",
+            )],
+            callback_host: None,
+        };
+        let mut input = run_input("bad-header");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        let r = step_of(&summary, "r");
+        let error = r.error.as_deref().expect("an error");
+        assert!(
+            error.contains("wire 'e1' (in.result -> r.headers[3].value)"),
+            "got {error}"
+        );
+        assert!(!error.contains("sk-live-123456"), "got {error}");
+        let trace = r.trace.clone().expect("a trace");
+        assert_eq!(trace.failed_edge_id.as_deref(), Some("e1"));
+        assert_eq!(
+            trace.wires[0].value.as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("sk-live-123456"), "{json}");
     }
 }

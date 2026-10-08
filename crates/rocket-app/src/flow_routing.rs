@@ -95,7 +95,7 @@ pub(crate) fn decide_fate<'a>(
     }
 
     let mut data_edges = Vec::new();
-    let mut ambiguous: Option<(&str, usize)> = None;
+    let mut ambiguous: Option<(&str, Vec<&'a str>)> = None;
     for (field, edges) in &groups {
         let live: Vec<&'a FlowEdge> = edges
             .iter()
@@ -110,13 +110,17 @@ pub(crate) fn decide_fate<'a>(
             continue;
         }
         if live.len() > 1 && ambiguous.is_none() {
-            ambiguous = Some((*field, live.len()));
+            ambiguous = Some((*field, live.iter().map(|e| e.id.as_str()).collect()));
         }
         data_edges.extend(live);
     }
 
-    if let Some((field, count)) = ambiguous {
-        return NodeFate::Fail(format!("field '{field}' has {count} live inputs"));
+    if let Some((field, ids)) = ambiguous {
+        return NodeFate::Fail(format!(
+            "field '{field}' has {} live inputs (edges {})",
+            ids.len(),
+            ids.join(", ")
+        ));
     }
     NodeFate::Run { data_edges }
 }
@@ -347,7 +351,7 @@ mod tests {
         let o = outcomes(&[("a", ok(handle::RESULT)), ("b", ok(handle::RESULT))]);
         assert_eq!(
             decide_fate(&[&a, &b], &o, false),
-            NodeFate::Fail("field 'body' has 2 live inputs".to_string())
+            NodeFate::Fail("field 'body' has 2 live inputs (edges e1, e2)".to_string())
         );
     }
 
