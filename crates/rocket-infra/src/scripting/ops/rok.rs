@@ -1,7 +1,7 @@
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use deno_core::{op2, OpState};
 use rocket_scripting::{CollectionVarWrite, EnvVarWrite, NextRequest};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 // ── Variable reads ────────────────────────────────────────────────────────────
 
@@ -214,10 +214,9 @@ pub fn op_rok_interpolate(state: &OpState, #[string] template: String) -> String
 #[op2(fast)]
 pub fn op_rok_set_var(state: &mut OpState, #[string] key: String, #[string] json_value: String) {
     let value = serde_json::from_str(&json_value).unwrap_or(serde_json::Value::Null);
-    state
-        .borrow_mut::<ScriptOutputState>()
-        .runtime_vars
-        .insert(key, value);
+    let out = state.borrow_mut::<ScriptOutputState>();
+    out.runtime_var_deletes.retain(|k| k != &key);
+    out.runtime_vars.insert(key, value);
 }
 
 /// rok.setEnvVar(key, jsonValue, persist) — writes to active environment.
@@ -282,6 +281,108 @@ pub fn op_rok_set_global_env_var(
             value,
             persist: false,
         });
+}
+
+/// Keys of a snapshot scope plus keys a script already wrote, in stable order.
+fn scope_keys<'a>(
+    snapshot: &HashMap<String, String>,
+    written: impl Iterator<Item = &'a String>,
+) -> BTreeSet<String> {
+    snapshot.keys().cloned().chain(written.cloned()).collect()
+}
+
+/// rok.deleteVar(key) — removes a runtime variable.
+#[op2(fast)]
+pub fn op_rok_delete_var(state: &mut OpState, #[string] key: String) {
+    let out = state.borrow_mut::<ScriptOutputState>();
+    out.runtime_vars.remove(&key);
+    out.runtime_var_deletes.push(key);
+}
+
+/// rok.deleteAllVars() — removes every runtime variable.
+#[op2(fast)]
+pub fn op_rok_delete_all_vars(state: &mut OpState) {
+    let snapshot: Vec<String> = state
+        .borrow::<ScriptInputState>()
+        .variables
+        .runtime
+        .keys()
+        .cloned()
+        .collect();
+    let out = state.borrow_mut::<ScriptOutputState>();
+    let written: Vec<String> = out.runtime_vars.keys().cloned().collect();
+    out.runtime_vars.clear();
+    out.runtime_var_deletes.extend(snapshot);
+    out.runtime_var_deletes.extend(written);
+}
+
+/// rok.deleteAllEnvVars() — null-writes every key of the active environment.
+#[op2(fast)]
+pub fn op_rok_delete_all_env_vars(state: &mut OpState) {
+    let snapshot = state.borrow::<ScriptInputState>().variables.env.clone();
+    let out = state.borrow_mut::<ScriptOutputState>();
+    let keys = scope_keys(&snapshot, out.env_var_writes.iter().map(|w| &w.key));
+    for key in keys {
+        out.env_var_writes.push(EnvVarWrite {
+            key,
+            value: serde_json::Value::Null,
+            persist: true,
+        });
+    }
+}
+
+/// rok.deleteCollectionVar(key) — null-writes one collection variable.
+#[op2(fast)]
+pub fn op_rok_delete_collection_var(state: &mut OpState, #[string] key: String) {
+    state
+        .borrow_mut::<ScriptOutputState>()
+        .collection_var_writes
+        .push(CollectionVarWrite {
+            key,
+            value: serde_json::Value::Null,
+        });
+}
+
+/// rok.deleteAllCollectionVars() — null-writes every collection variable.
+#[op2(fast)]
+pub fn op_rok_delete_all_collection_vars(state: &mut OpState) {
+    let snapshot = state.borrow::<ScriptInputState>().variables.collection.clone();
+    let out = state.borrow_mut::<ScriptOutputState>();
+    let keys = scope_keys(&snapshot, out.collection_var_writes.iter().map(|w| &w.key));
+    for key in keys {
+        out.collection_var_writes.push(CollectionVarWrite {
+            key,
+            value: serde_json::Value::Null,
+        });
+    }
+}
+
+/// rok.deleteGlobalEnvVar(key) — null-writes one global environment variable.
+#[op2(fast)]
+pub fn op_rok_delete_global_env_var(state: &mut OpState, #[string] key: String) {
+    state
+        .borrow_mut::<ScriptOutputState>()
+        .global_env_var_writes
+        .push(EnvVarWrite {
+            key,
+            value: serde_json::Value::Null,
+            persist: true,
+        });
+}
+
+/// rok.deleteAllGlobalEnvVars() — null-writes every global environment variable.
+#[op2(fast)]
+pub fn op_rok_delete_all_global_env_vars(state: &mut OpState) {
+    let snapshot = state.borrow::<ScriptInputState>().variables.global_env.clone();
+    let out = state.borrow_mut::<ScriptOutputState>();
+    let keys = scope_keys(&snapshot, out.global_env_var_writes.iter().map(|w| &w.key));
+    for key in keys {
+        out.global_env_var_writes.push(EnvVarWrite {
+            key,
+            value: serde_json::Value::Null,
+            persist: true,
+        });
+    }
 }
 
 // ── Runner ops ────────────────────────────────────────────────────────────────

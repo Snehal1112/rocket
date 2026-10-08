@@ -17,6 +17,11 @@ pub struct ScriptResult {
     #[serde(default)]
     pub runtime_vars: HashMap<String, serde_json::Value>,
 
+    /// Runtime variable keys removed via `rok.deleteVar` or `rok.deleteAllVars`.
+    /// Applied after `runtime_vars` is merged.
+    #[serde(default)]
+    pub runtime_var_deletes: Vec<String>,
+
     /// Environment variable writes via `rok.setEnvVar(key, value, opts?)`.
     #[serde(default)]
     pub env_var_writes: Vec<EnvVarWrite>,

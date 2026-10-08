@@ -39,6 +39,7 @@ pub struct ScriptOutputState {
     pub request_mutations: RequestMutations,
     pub any_request_mutation: bool,
     pub runtime_vars: HashMap<String, serde_json::Value>,
+    pub runtime_var_deletes: Vec<String>,
     pub env_var_writes: Vec<EnvVarWrite>,
     pub collection_var_writes: Vec<CollectionVarWrite>,
     pub global_env_var_writes: Vec<EnvVarWrite>,

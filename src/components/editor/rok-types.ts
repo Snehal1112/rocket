@@ -467,6 +467,20 @@ declare const rok: {
   getGlobalEnvVar(key: string): unknown;
   /** Write a global environment variable. */
   setGlobalEnvVar(key: string, value: unknown): void;
+  /** Delete a runtime variable. */
+  deleteVar(key: string): void;
+  /** Delete every runtime variable. */
+  deleteAllVars(): void;
+  /** Delete every variable of the active environment (persisted). */
+  deleteAllEnvVars(): void;
+  /** Delete a collection variable (persisted to opencollection.yml). */
+  deleteCollectionVar(key: string): void;
+  /** Delete every collection variable (persisted). */
+  deleteAllCollectionVars(): void;
+  /** Delete a global environment variable (persisted). */
+  deleteGlobalEnvVar(key: string): void;
+  /** Delete every global environment variable (persisted). */
+  deleteAllGlobalEnvVars(): void;
   /** Resolve {{var}} tokens using the current variable context. */
   interpolate(template: string): string;
   /** Every variable of the active environment. */

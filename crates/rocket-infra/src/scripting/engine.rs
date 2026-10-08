@@ -168,6 +168,13 @@ extension!(
         rok::op_rok_get_folder_var,
         rok::op_rok_get_global_env_var,
         rok::op_rok_set_global_env_var,
+        rok::op_rok_delete_var,
+        rok::op_rok_delete_all_vars,
+        rok::op_rok_delete_all_env_vars,
+        rok::op_rok_delete_collection_var,
+        rok::op_rok_delete_all_collection_vars,
+        rok::op_rok_delete_global_env_var,
+        rok::op_rok_delete_all_global_env_vars,
         rok::op_rok_interpolate,
         rok::op_rok_set_next_request,
         rok::op_rok_skip_request,
@@ -336,6 +343,7 @@ fn run_script(
     Ok(ScriptResult {
         request_mutations,
         runtime_vars: out.runtime_vars,
+        runtime_var_deletes: out.runtime_var_deletes,
         env_var_writes: out.env_var_writes,
         collection_var_writes: out.collection_var_writes,
         global_env_var_writes: out.global_env_var_writes,
@@ -371,6 +379,100 @@ mod tests {
             sandbox_mode: SandboxMode::Safe,
             file_scope: None,
         }
+    }
+
+    #[tokio::test]
+    async fn rok_delete_var_records_a_runtime_delete() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("gone".into(), "1".into());
+        let mut ctx = minimal_ctx("rok.deleteVar('gone')");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_var_deletes, vec!["gone".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn rok_set_after_delete_keeps_the_key_set() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("k".into(), "old".into());
+        let mut ctx = minimal_ctx("rok.deleteVar('k'); rok.setVar('k', 'new')");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("k").expect("k present"), "new");
+        assert!(!result.runtime_var_deletes.contains(&"k".to_string()));
+    }
+
+    #[tokio::test]
+    async fn rok_delete_all_vars_deletes_every_snapshot_key() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("a".into(), "1".into());
+        vars.runtime.insert("b".into(), "2".into());
+        let mut ctx = minimal_ctx("rok.deleteAllVars()");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let mut deleted = result.runtime_var_deletes.clone();
+        deleted.sort();
+        assert_eq!(deleted, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn rok_delete_all_env_vars_writes_null_for_every_key() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("A".into(), "1".into());
+        vars.env.insert("B".into(), "2".into());
+        let mut ctx = minimal_ctx("rok.deleteAllEnvVars()");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let mut keys: Vec<_> = result
+            .env_var_writes
+            .iter()
+            .filter(|w| w.value.is_null())
+            .map(|w| w.key.clone())
+            .collect();
+        keys.sort();
+        assert_eq!(keys, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn rok_delete_all_env_vars_on_empty_env_writes_nothing() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.deleteAllEnvVars()");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.env_var_writes.is_empty());
+        assert!(result.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn rok_delete_all_env_vars_also_removes_keys_the_script_created() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setEnvVar('only_in_script', 'x'); rok.deleteAllEnvVars()");
+        let result = engine.execute(ctx).await.expect("execute");
+        let last = result.env_var_writes.last().expect("a write");
+        assert_eq!(last.key, "only_in_script");
+        assert!(last.value.is_null());
+    }
+
+    #[tokio::test]
+    async fn rok_collection_and_global_deletes_write_null() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.collection.insert("c1".into(), "1".into());
+        vars.collection.insert("c2".into(), "2".into());
+        vars.global_env.insert("g1".into(), "1".into());
+        let mut ctx = minimal_ctx(
+            "rok.deleteCollectionVar('c1'); rok.deleteAllCollectionVars(); \
+             rok.deleteGlobalEnvVar('g1'); rok.deleteAllGlobalEnvVars()",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.collection_var_writes.iter().all(|w| w.value.is_null()));
+        assert!(result.collection_var_writes.iter().any(|w| w.key == "c2"));
+        assert!(result.global_env_var_writes.iter().all(|w| w.value.is_null()));
+        assert!(result.global_env_var_writes.iter().any(|w| w.key == "g1"));
     }
 
     #[tokio::test]

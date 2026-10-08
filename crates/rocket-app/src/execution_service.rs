@@ -972,6 +972,12 @@ impl RequestExecutionService {
         if !result.collection_var_writes.is_empty() {
             if let Some(col) = collection {
                 for write in &result.collection_var_writes {
+                    if write.value.is_null() {
+                        if let Err(e) = self.apply_collection_var_delete(col, &write.key) {
+                            tracing::warn!(error = %e, key = %write.key, "failed to persist collection var delete");
+                        }
+                        continue;
+                    }
                     let str_val = write
                         .value
                         .as_str()
@@ -995,11 +1001,7 @@ impl RequestExecutionService {
         }
 
         // Merge runtime vars into context for subsequent phases.
-        for (k, v) in &result.runtime_vars {
-            if let Some(s) = v.as_str() {
-                var_ctx.runtime.insert(k.clone(), s.to_owned());
-            }
-        }
+        merge_runtime_vars(var_ctx, result);
     }
 
     /// Read-modify-write helper for a single collection variable.
@@ -1014,6 +1016,26 @@ impl RequestExecutionService {
     ) -> DomainResult<()> {
         let mut settings = self.collection_repo.get_settings(collection)?;
         upsert_variable(&mut settings.variables, key, value);
+        self.collection_repo.save_settings(collection, &settings)?;
+        self.events.publish(DomainEvent::CollectionVariableWritten {
+            collection: collection.to_string(),
+            key: key.to_string(),
+        });
+        self.events.publish(DomainEvent::ScriptVariableWritten {
+            scope: "collection".to_string(),
+            environment: None,
+            collection: Some(collection.to_string()),
+            key: key.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Removes a collection variable and publishes the same events as a write.
+    fn apply_collection_var_delete(&self, collection: &str, key: &str) -> DomainResult<()> {
+        let mut settings = self.collection_repo.get_settings(collection)?;
+        if !remove_variable(&mut settings.variables, key) {
+            return Ok(());
+        }
         self.collection_repo.save_settings(collection, &settings)?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
@@ -2210,6 +2232,31 @@ fn upsert_variable(vars: &mut Vec<rocket_collection::CollectionVariable>, key: &
             enabled: true,
             secret: false,
         });
+    }
+}
+
+/// Removes a collection variable by key. Returns true when one was removed.
+fn remove_variable(vars: &mut Vec<rocket_collection::CollectionVariable>, key: &str) -> bool {
+    let before = vars.len();
+    vars.retain(|v| v.key != key);
+    vars.len() != before
+}
+
+/// Merges a script's runtime writes and deletes into the variable context.
+///
+/// Non-string values are kept as JSON text so a number or object set with
+/// `rok.setVar` survives into the next script phase. A null value is skipped.
+fn merge_runtime_vars(var_ctx: &mut rocket_environment::VariableContext, result: &ScriptResult) {
+    for (key, value) in &result.runtime_vars {
+        let text = match value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Null => continue,
+            other => other.to_string(),
+        };
+        var_ctx.runtime.insert(key.clone(), text);
+    }
+    for key in &result.runtime_var_deletes {
+        var_ctx.runtime.remove(key);
     }
 }
 
@@ -8899,5 +8946,89 @@ mod tests {
             out,
             Auth::AwsSigV4 { profile_name: Some(ref n), .. } if n == "prod"
         ));
+    }
+
+    #[test]
+    fn merge_runtime_vars_keeps_non_string_values_as_json_text() {
+        let mut ctx = rocket_environment::VariableContext::default();
+        let mut result = ScriptResult::default();
+        result.runtime_vars.insert("n".into(), serde_json::json!(0));
+        result.runtime_vars.insert("s".into(), serde_json::json!("text"));
+        result
+            .runtime_vars
+            .insert("o".into(), serde_json::json!({ "a": 1 }));
+        result.runtime_vars.insert("nil".into(), serde_json::Value::Null);
+        merge_runtime_vars(&mut ctx, &result);
+        assert_eq!(ctx.runtime.get("n").map(String::as_str), Some("0"));
+        assert_eq!(ctx.runtime.get("s").map(String::as_str), Some("text"));
+        assert_eq!(ctx.runtime.get("o").map(String::as_str), Some("{\"a\":1}"));
+        assert!(!ctx.runtime.contains_key("nil"));
+    }
+
+    #[test]
+    fn merge_runtime_vars_applies_deletes_after_sets() {
+        let mut ctx = rocket_environment::VariableContext::default();
+        ctx.runtime.insert("old".into(), "1".into());
+        let result = ScriptResult {
+            runtime_var_deletes: vec!["old".into()],
+            ..Default::default()
+        };
+        merge_runtime_vars(&mut ctx, &result);
+        assert!(!ctx.runtime.contains_key("old"));
+    }
+
+    #[test]
+    fn remove_variable_drops_the_named_variable_only() {
+        let mut vars = vec![
+            rocket_collection::CollectionVariable {
+                key: "keep".into(),
+                value: "1".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            },
+            rocket_collection::CollectionVariable {
+                key: "drop".into(),
+                value: "2".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            },
+        ];
+        assert!(remove_variable(&mut vars, "drop"));
+        assert!(!remove_variable(&mut vars, "drop"));
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].key, "keep");
+    }
+
+    #[tokio::test]
+    async fn post_response_script_env_var_null_write_removes_the_variable() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("TOKEN", "old"));
+        env.set_variable(Variable::new("KEEP", "1"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "TOKEN".into(),
+                value: serde_json::Value::Null,
+                persist: true,
+            }],
+            ..Default::default()
+        };
+
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let saved = env_repo.last_saved().expect("env_repo.save() was called");
+        assert_eq!(saved.get_value("TOKEN"), None);
+        assert_eq!(saved.get_value("KEEP"), Some("1"));
     }
 }
