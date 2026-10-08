@@ -660,8 +660,8 @@ use std::sync::{Arc, Mutex};
 
 use rocket_scripting::{ConsoleEntry, ConsoleLevel};
 use rocket_shared::events::{
-    DomainEvent, FlowDebugRequest, FlowLogEntry, FlowLogLevel, FlowNodeStatus, FlowSkipReason,
-    FlowStepTrace,
+    DomainEvent, FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowLogLevel, FlowNodeStatus,
+    FlowSkipReason, FlowStepTrace,
 };
 use ulid::Ulid;
 
@@ -1173,12 +1173,37 @@ impl FlowExecutionService {
         max_attempts: Option<u32>,
         message: String,
     ) {
+        self.publish_progress_event(ctx, attempt, max_attempts, message, None);
+    }
+
+    /// Reports progress with structured detail for the Last run tab. Every
+    /// value in `live` must already be masked.
+    pub(crate) fn publish_live_progress(
+        &self,
+        ctx: &NodeRunContext,
+        attempt: Option<u32>,
+        max_attempts: Option<u32>,
+        message: String,
+        live: FlowLiveProgress,
+    ) {
+        self.publish_progress_event(ctx, attempt, max_attempts, message, Some(Box::new(live)));
+    }
+
+    fn publish_progress_event(
+        &self,
+        ctx: &NodeRunContext,
+        attempt: Option<u32>,
+        max_attempts: Option<u32>,
+        message: String,
+        live: Option<Box<FlowLiveProgress>>,
+    ) {
         self.events.publish(DomainEvent::FlowStepProgress {
             run_id: ctx.run_id.clone(),
             node_id: ctx.node_id.clone(),
             attempt,
             max_attempts,
             message,
+            live,
         });
     }
 
@@ -1401,6 +1426,7 @@ impl FlowExecutionService {
                             debug,
                             exchange,
                             poll_stats,
+                            trace,
                             ctx,
                         )
                         .await;
@@ -4062,7 +4088,9 @@ mod tests {
                 attempt,
                 max_attempts,
                 message,
+                live,
             } => {
+                assert!(live.is_none(), "plain progress has no live detail");
                 assert_eq!(run_id, "run-1");
                 assert_eq!(node_id, "poll");
                 assert_eq!(*attempt, Some(3));
@@ -7079,6 +7107,7 @@ mod tests {
                     node_id,
                     attempt,
                     message,
+                    live: None,
                     ..
                 } if node_id == "job" => Some((attempt, message)),
                 _ => None,
@@ -7108,10 +7137,173 @@ mod tests {
                 _ => None,
             })
             .collect();
+        // Each unmet condition adds a live event before the pause.
         assert_eq!(
             order,
-            vec!["started", "progress", "progress", "progress", "completed"]
+            vec![
+                "started",
+                "progress",
+                "progress",
+                "progress",
+                "progress",
+                "progress",
+                "completed"
+            ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_poll_reports_live_progress_after_each_unmet_condition() {
+        use rocket_shared::events::FlowLiveProgress;
+
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            poll_flow(repeat("response.status === 200", 100, 5, 10_000), false),
+            &publisher,
+        );
+
+        service.run(&exec, run_input("poll")).await.expect("run");
+
+        let events = publisher.events();
+        let live: Vec<FlowLiveProgress> = events
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepProgress {
+                    node_id,
+                    live: Some(live),
+                    ..
+                } if node_id == "job" => Some((**live).clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            live.len(),
+            2,
+            "one per unmet condition, none after the met one"
+        );
+        for l in &live {
+            assert_eq!(l.last_status_code, Some(404));
+            assert_eq!(l.condition_met, Some(false));
+            assert!(l.elapsed_ms.is_some());
+            assert!(
+                l.remaining_ms.is_some_and(|ms| ms > 0 && ms <= 10_000),
+                "{l:?}"
+            );
+        }
+        let completed_at = events
+            .iter()
+            .position(
+                |e| matches!(e, DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "job"),
+            )
+            .expect("completed");
+        let last_progress = events
+            .iter()
+            .rposition(
+                |e| matches!(e, DomainEvent::FlowStepProgress { node_id, .. } if node_id == "job"),
+            )
+            .expect("progress");
+        assert!(
+            last_progress < completed_at,
+            "no progress for a node arrives after its step completed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_met_poll_keeps_its_poll_detail_in_the_trace() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let poll = step_of(&summary, "job")
+            .trace
+            .clone()
+            .and_then(|t| t.poll)
+            .expect("poll detail");
+        assert_eq!(poll.attempts, 3);
+        assert_eq!(poll.max_attempts, 5);
+        assert_eq!(poll.last_status_code, Some(200));
+        assert_eq!(poll.condition_met, Some(true));
+        assert_eq!(poll.timeout_ms, 10_000);
+    }
+
+    #[tokio::test]
+    async fn a_given_up_poll_keeps_condition_false_in_the_trace() {
+        let executor = SequenceExecutor::new(vec![(404, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 3, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        let poll = step
+            .trace
+            .clone()
+            .and_then(|t| t.poll)
+            .expect("poll detail");
+        assert_eq!(poll.attempts, 3);
+        assert_eq!(poll.last_status_code, Some(404));
+        assert_eq!(poll.condition_met, Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_poll_condition_error_keeps_no_verdict() {
+        let executor = SequenceExecutor::new(vec![(200, "{}")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Throw("ReferenceError: nope"))]),
+            &history,
+        );
+        let flow = poll_flow(repeat("nope.ok", 100, 3, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let poll = step_of(&summary, "job")
+            .trace
+            .clone()
+            .and_then(|t| t.poll)
+            .expect("poll detail");
+        assert_eq!(poll.attempts, 1);
+        assert_eq!(poll.last_status_code, Some(200));
+        assert_eq!(poll.condition_met, None);
+    }
+
+    #[tokio::test]
+    async fn a_poll_without_a_response_keeps_its_attempts() {
+        let executor = SequenceExecutor::new(vec![(0, "")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 3, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let poll = step_of(&summary, "job")
+            .trace
+            .clone()
+            .and_then(|t| t.poll)
+            .expect("poll detail");
+        assert_eq!(poll.attempts, 1);
+        assert_eq!(poll.last_status_code, None);
     }
 
     #[tokio::test]

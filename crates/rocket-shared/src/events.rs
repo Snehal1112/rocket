@@ -88,6 +88,9 @@ pub struct FlowStepTrace {
     /// How an If or Switch node decided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<FlowRouteEval>,
+    /// How a repeat-until poll went.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<FlowPollDetail>,
     /// The wire whose failure failed the step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed_edge_id: Option<String>,
@@ -127,6 +130,43 @@ pub struct FlowRouteEval {
     /// The Switch case id that matched. `None` for If and for the default exit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matched_case: Option<String>,
+}
+
+/// Structured progress of a node that is still running. Every field is
+/// optional, so each node kind sends only what applies to it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowLiveProgress {
+    /// Status code of the last poll response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_status_code: Option<u16>,
+    /// Verdict of the last poll condition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition_met: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
+    /// Time left before the node gives up. The UI counts down from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_ms: Option<u64>,
+    /// Calls a Wait for callback node turned down so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored: Option<u32>,
+}
+
+/// How a repeat-until poll went. Kept in the step trace, also on failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowPollDetail {
+    pub attempts: u32,
+    pub max_attempts: u32,
+    /// `None` until an attempt got a response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_status_code: Option<u16>,
+    /// `None` when no verdict was reached, as after a condition script error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition_met: Option<bool>,
+    pub elapsed_ms: u64,
+    pub timeout_ms: u64,
 }
 
 /// Direction of a WebSocket frame from the client's point of view.
@@ -342,6 +382,10 @@ pub enum DomainEvent {
         max_attempts: Option<u32>,
         /// Short text shown on the node, such as "attempt 3/30".
         message: String,
+        /// Structured progress for the Last run tab. The nested fields are
+        /// camelCase inside this snake_case event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        live: Option<Box<FlowLiveProgress>>,
     },
     /// Emitted after every node of a run, in topological execution order.
     FlowStepCompleted {
@@ -931,6 +975,59 @@ mod tests {
     }
 
     #[test]
+    fn flow_step_progress_carries_live_detail_in_camel_case() {
+        let event = DomainEvent::FlowStepProgress {
+            run_id: "01J".into(),
+            node_id: "n".into(),
+            attempt: Some(2),
+            max_attempts: Some(5),
+            message: "attempt 2/5 · condition false".into(),
+            live: Some(Box::new(FlowLiveProgress {
+                last_status_code: Some(202),
+                condition_met: Some(false),
+                remaining_ms: Some(12_000),
+                ..Default::default()
+            })),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains(
+                r#""live":{"lastStatusCode":202,"conditionMet":false,"remainingMs":12000}"#
+            ),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn flow_step_progress_without_live_still_deserializes() {
+        let json = r#"{"type":"flowStepProgress","run_id":"01J","node_id":"n","attempt":3,"max_attempts":30,"message":"attempt 3/30"}"#;
+        match serde_json::from_str::<DomainEvent>(json).expect("old payload") {
+            DomainEvent::FlowStepProgress { live, .. } => assert!(live.is_none()),
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_flow_poll_detail_rides_in_the_step_trace() {
+        let trace = FlowStepTrace {
+            poll: Some(FlowPollDetail {
+                attempts: 3,
+                max_attempts: 30,
+                last_status_code: Some(200),
+                condition_met: Some(true),
+                elapsed_ms: 2_500,
+                timeout_ms: 60_000,
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&trace).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"poll":{"attempts":3,"maxAttempts":30,"lastStatusCode":200,"conditionMet":true,"elapsedMs":2500,"timeoutMs":60000}}"#
+        );
+    }
+
+    #[test]
     fn flow_step_progress_wire_shape() {
         let event = DomainEvent::FlowStepProgress {
             run_id: "01J".into(),
@@ -938,6 +1035,7 @@ mod tests {
             attempt: Some(3),
             max_attempts: Some(30),
             message: "attempt 3/30".into(),
+            live: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
@@ -954,6 +1052,7 @@ mod tests {
             attempt: None,
             max_attempts: None,
             message: "waiting… 42s left".into(),
+            live: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(
