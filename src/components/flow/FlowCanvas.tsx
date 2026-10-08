@@ -85,6 +85,8 @@ export interface FlowCanvasProps {
   onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
   // Called when a node's menu button or a double-click opens its properties.
   onOpenProperties?: (nodeId: string) => void;
+  // The running flow's callback URL per Wait node id. Absent when no run is active.
+  callbackUrls?: Record<string, string>;
   // A node or selection drag starts or ends. The owner brackets the drag's writes into one undo step.
   onGestureStart?: () => void;
   onGestureEnd?: () => void;
@@ -118,6 +120,7 @@ function toRfNodes(
   nodeDetail?: Record<string, FlowNodeDetail>,
   cycleNodeIds?: string[],
   savedPreviews: Record<string, SavedRequestPreview> = {},
+  callbackUrls?: Record<string, string>,
 ): Node[] {
   return nodes.map((n) => {
     const preview =
@@ -142,6 +145,9 @@ function toRfNodes(
           headerCount: preview.headers.filter((h) => h.enabled).length,
           bodyPreview: preview.bodyPreview ?? undefined,
         }),
+        // A running flow's callback URL, for its Wait node.
+        ...(n.kind.kind === 'WaitForCallback' &&
+          callbackUrls?.[n.id] !== undefined && { callbackUrl: callbackUrls[n.id] }),
       },
       selected: selectedIds.has(n.id),
       measured: measured.get(n.id),
@@ -286,6 +292,7 @@ function FlowCanvasInner({
   selectedNodeIds: selectedNodeIdsProp,
   onSelectedNodeIdsChange,
   onOpenProperties,
+  callbackUrls,
   onGestureStart,
   onGestureEnd,
   onUndo,
@@ -416,8 +423,18 @@ function FlowCanvasInner({
         nodeDetail,
         cycleNodeIds,
         savedPreviews,
+        callbackUrls,
       ),
-    [nodes, edges, nodeStatus, selectedNodeIds, nodeDetail, cycleNodeIds, savedPreviews],
+    [
+      nodes,
+      edges,
+      nodeStatus,
+      selectedNodeIds,
+      nodeDetail,
+      cycleNodeIds,
+      savedPreviews,
+      callbackUrls,
+    ],
   );
   const rfEdges = useMemo(
     () => toRfEdges(edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds),

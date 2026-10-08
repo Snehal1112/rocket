@@ -425,6 +425,27 @@ describe('FlowPane run logs', () => {
     );
   });
 
+  it('shows the running flow callback URL on its Wait node', () => {
+    const running: FlowTab = {
+      ...logTab,
+      id: 'flow-wait-live',
+      runState: 'running',
+      runId: 'r1',
+      callbackUrls: { w: 'http://10.0.0.5:4000/cb/tok' },
+      nodes: [
+        ...logTab.nodes,
+        {
+          id: 'w',
+          kind: { kind: 'WaitForCallback', label: 'Hook', name: 'payment', timeoutMs: 60000 },
+          position: { x: 0, y: 0 },
+        },
+      ],
+    };
+    usePaneStore.getState().openTab(running);
+    render(<FlowPane tab={running} groupId={usePaneStore.getState().activeGroupId} />);
+    expect(screen.getByTestId('callback-url')).toHaveTextContent('http://10.0.0.5:4000/cb/tok');
+  });
+
   it('passes the active global environment to the Auth pre-run step', async () => {
     vi.mocked(getActiveGlobalEnvName).mockReturnValue('g1');
     vi.mocked(runFlow).mockResolvedValue({ runId: 'r1', stoppedReason: 'completed', steps: [] });

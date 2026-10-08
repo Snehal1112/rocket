@@ -9,6 +9,7 @@ import type {
   FlowRejectedCall,
   FlowStepTrace,
 } from '@/lib/tauri-api';
+import { copyTextAsync } from '@/lib/clipboard';
 import { LastRunTab } from '../LastRunTab';
 
 // Monaco cannot run in jsdom. A read-only textarea stands in for it.
@@ -23,6 +24,8 @@ vi.mock('@/components/editor/MonacoWrapper', () => ({
     />
   ),
 }));
+
+vi.mock('@/lib/clipboard', () => ({ copyTextAsync: vi.fn(async () => undefined) }));
 
 const node = (kind: FlowNodeKind): FlowNode => ({ id: 'n1', kind, position: { x: 0, y: 0 } });
 const request = node({
@@ -235,11 +238,10 @@ describe('LastRunTab exchange', () => {
   });
 
   it('copies the raw response body', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     render(<LastRunTab node={request} status='success' detail={{ exchange }} />);
     await userEvent.click(screen.getByRole('button', { name: 'Copy response body' }));
-    expect(writeText).toHaveBeenCalledWith('{"token":"abc"}');
+    expect(copyTextAsync).toHaveBeenCalledTimes(1);
+    await expect(vi.mocked(copyTextAsync).mock.calls[0][0]).resolves.toBe('{"token":"abc"}');
   });
 });
 
@@ -539,6 +541,23 @@ describe('LastRunTab live progress', () => {
     source: { type: 'Saved', requestPath: 'jobs/status.yml' },
   });
   const wait = node({ kind: 'WaitForCallback', label: 'Hook', name: 'hook', timeoutMs: 60000 });
+  it('shows the callback URL of a waiting node', () => {
+    render(
+      <LastRunTab
+        node={wait}
+        status='running'
+        callbackUrl='http://10.0.0.5:4000/cb/tok'
+        detail={{ live: { ignored: 0, remainingMs: 1000 } }}
+      />,
+    );
+    expect(screen.getByTestId('callback-url')).toHaveTextContent('http://10.0.0.5:4000/cb/tok');
+  });
+
+  it('shows no callback URL for a finished wait without one', () => {
+    render(<LastRunTab node={wait} status='success' />);
+    expect(screen.queryByTestId('callback-url')).not.toBeInTheDocument();
+  });
+
   const rejected: FlowRejectedCall = {
     method: 'POST',
     url: '/cb/…?event=pending',

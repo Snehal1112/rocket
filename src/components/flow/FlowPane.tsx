@@ -629,6 +629,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             onSelectedNodeIdsChange={handleSelectedNodeIdsChange}
             onOpenProperties={handleOpenProperties}
             onEdgeEdit={openWireEditor}
+            callbackUrls={tab.callbackUrls}
           />
           {pendingEdge && pendingTargetNode && (
             <WireScriptDialog
@@ -702,6 +703,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               onDelete={() => handleDeleteNode(panelNode.id)}
               focusRequest={panelFocusRequest}
               autoFocusLabel={panelNode.id === labelFocusNodeId}
+              callbackUrl={tab.callbackUrls?.[panelNode.id]}
             />
           </ResizablePanel>
         </>

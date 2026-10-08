@@ -89,6 +89,16 @@ describe('WaitForCallbackNode', () => {
     expect(screen.getByTestId('node-progress')).toHaveTextContent('waiting… 42s left');
   });
 
+  it('shows the live callback URL while the run holds one', () => {
+    renderNode({ status: 'running', callbackUrl: 'http://10.0.0.5:4000/cb/tok' });
+    expect(screen.getByTestId('callback-url')).toHaveTextContent('http://10.0.0.5:4000/cb/tok');
+  });
+
+  it('shows no callback URL when the tab holds none', () => {
+    renderNode({ status: 'success' });
+    expect(screen.queryByTestId('callback-url')).not.toBeInTheDocument();
+  });
+
   it('shows the error of a failed wait', () => {
     renderNode({
       status: 'failed',

@@ -27,6 +27,7 @@ function editorFor(
   collection: string,
   flowName: string,
   onChange: (kind: FlowNodeKind) => void,
+  callbackUrl?: string,
 ) {
   const kind = node.kind;
   switch (kind.kind) {
@@ -66,7 +67,7 @@ function editorFor(
         </div>
       );
     case 'WaitForCallback':
-      return <WaitForCallbackEditor kind={kind} onChange={onChange} />;
+      return <WaitForCallbackEditor kind={kind} onChange={onChange} callbackUrl={callbackUrl} />;
     case 'Transform':
       return <TransformNodeEditor kind={kind} onChange={onChange} />;
     case 'Auth':
@@ -107,6 +108,7 @@ export function NodePropertiesPanel({
   onDelete,
   autoFocusLabel = false,
   focusRequest = null,
+  callbackUrl,
 }: {
   node: FlowNode;
   edges: FlowEdge[];
@@ -133,6 +135,8 @@ export function NodePropertiesPanel({
   autoFocusLabel?: boolean;
   // A new object asks the panel to take focus, as when a node's menu button opens it.
   focusRequest?: { nodeId: string } | null;
+  // This run's callback URL for a Wait node. Absent when no run is active.
+  callbackUrl?: string;
 }) {
   const asideRef = useRef<HTMLElement>(null);
   const refocusPanel = useCallback(() => asideRef.current?.focus(), []);
@@ -229,11 +233,17 @@ export function NodePropertiesPanel({
                   {saveError}
                 </p>
               )}
-              {editorFor(node, edges, nodes, collection, flowName, onChange)}
+              {editorFor(node, edges, nodes, collection, flowName, onChange, callbackUrl)}
             </div>
           </TabsContent>
           <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
-            <LastRunTab node={node} status={status} detail={detail} nodes={nodes} />
+            <LastRunTab
+              node={node}
+              status={status}
+              detail={detail}
+              nodes={nodes}
+              callbackUrl={callbackUrl}
+            />
           </TabsContent>
           <TabsContent value='wires' className='min-h-0 flex-1 overflow-y-auto p-3'>
             <WiresTab

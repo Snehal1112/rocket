@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { NumberInput } from '@/components/ui/number-input';
 import { callbackVariable, isValidCallbackName } from '@/lib/flow-callback';
 import type { FlowNodeKind } from '@/lib/tauri-api';
+import { CallbackUrlField } from '../CallbackUrlField';
 import { LabelField } from './LabelField';
 
 type WaitKind = Extract<FlowNodeKind, { kind: 'WaitForCallback' }>;
@@ -62,9 +63,12 @@ function TimeoutField({
 export function WaitForCallbackEditor({
   kind,
   onChange,
+  callbackUrl,
 }: {
   kind: WaitKind;
   onChange: (kind: FlowNodeKind) => void;
+  // This run's URL for the node. Absent when no run is active.
+  callbackUrl?: string;
 }) {
   return (
     <div className='space-y-3'>
@@ -89,6 +93,7 @@ export function WaitForCallbackEditor({
           Send this URL in an earlier request as{' '}
           <code className='font-mono'>{callbackVariable(kind.name)}</code>
         </p>
+        {callbackUrl && <CallbackUrlField url={callbackUrl} />}
       </div>
 
       <TimeoutField

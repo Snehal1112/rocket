@@ -258,6 +258,27 @@ describe('Wait for callback editor', () => {
     expect(screen.getByText('{{callback.payment}}')).toBeInTheDocument();
     expect(screen.getByText(/reachable from your local network/)).toBeInTheDocument();
   });
+
+  it('shows the live callback URL in Settings', () => {
+    const url = 'http://10.0.0.5:4000/cb/tok';
+    renderPanel(node('w', waitKind), { callbackUrl: url });
+    expect(screen.getByTestId('callback-url')).toHaveTextContent(url);
+  });
+
+  it('shows the live callback URL on the Last run tab of a running wait', () => {
+    const url = 'http://10.0.0.5:4000/cb/tok';
+    renderPanel(node('w', waitKind), {
+      callbackUrl: url,
+      activeTab: 'last-run',
+      status: 'running',
+    });
+    expect(screen.getByTestId('callback-url')).toHaveTextContent(url);
+  });
+
+  it('shows no callback URL when none is passed', () => {
+    renderPanel(node('w', waitKind));
+    expect(screen.queryByTestId('callback-url')).not.toBeInTheDocument();
+  });
 });
 
 describe('Wires tab in the panel', () => {

@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { copyTextAsync } from '@/lib/clipboard';
 import { formatOutputValue } from '@/lib/flow-output';
 import { msToSecondsLabel } from '@/lib/flow-repeat';
 import type {
@@ -19,6 +20,7 @@ import type {
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import type { FlowNodeDetail } from '@/types/pane-types';
+import { CallbackUrlField } from '../CallbackUrlField';
 import { exitDisplayLabel, fieldLabel } from './wireRows';
 
 interface LastRunTabProps {
@@ -27,6 +29,8 @@ interface LastRunTabProps {
   detail?: FlowNodeDetail;
   /** The flow's nodes, to name the source of each input. */
   nodes?: FlowNode[];
+  /** This run's callback URL, for a Wait node. Absent when no run is active. */
+  callbackUrl?: string;
 }
 
 // The badge text for a status. A branch that was not taken is a skip too,
@@ -91,7 +95,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = () => {
-    navigator.clipboard?.writeText(text).then(
+    // Started in the click handler, so WebKit keeps the user activation.
+    copyTextAsync(Promise.resolve(text)).then(
       () => {
         setCopied(true);
         clearTimeout(timer.current);
@@ -468,7 +473,7 @@ function RejectedCallSection({ call }: { call: FlowRejectedCall }) {
   );
 }
 
-export function LastRunTab({ node, status, detail, nodes }: LastRunTabProps) {
+export function LastRunTab({ node, status, detail, nodes, callbackUrl }: LastRunTabProps) {
   if (status === 'idle') {
     return (
       <p className='text-xs text-muted-foreground'>
@@ -519,6 +524,12 @@ export function LastRunTab({ node, status, detail, nodes }: LastRunTabProps) {
           <WaitLiveLine live={detail.live} />
           {detail.live.lastRejected && <RejectedCallSection call={detail.live.lastRejected} />}
         </>
+      )}
+      {node.kind.kind === 'WaitForCallback' && callbackUrl && (
+        <section className='space-y-1'>
+          <h4 className='font-medium'>Callback URL</h4>
+          <CallbackUrlField url={callbackUrl} />
+        </section>
       )}
       {node.kind.kind === 'WaitForCallback' && status !== 'running' && detail?.trace?.wait && (
         <>

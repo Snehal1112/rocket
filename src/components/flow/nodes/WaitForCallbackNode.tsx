@@ -6,6 +6,7 @@ import { callbackVariable } from '@/lib/flow-callback';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { CallbackUrlField } from '../CallbackUrlField';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -20,6 +21,8 @@ export interface WaitForCallbackNodeData {
   durationMs?: number;
   /** Live text while waiting, such as "waiting… 42s left". */
   progress?: string;
+  /** This run's callback URL. Set only while the run is active. */
+  callbackUrl?: string;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
 }
@@ -81,6 +84,11 @@ export function WaitForCallbackNode({
         error={data.error}
         progress={data.progress}
       />
+      {data.callbackUrl && (
+        <div className='px-2 pt-1'>
+          <CallbackUrlField url={data.callbackUrl} />
+        </div>
+      )}
 
       <div className='relative space-y-1 px-2 py-1.5'>
         <div className='relative flex items-center gap-1.5 pl-2'>
