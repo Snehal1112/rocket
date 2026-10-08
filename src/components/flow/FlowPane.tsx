@@ -15,6 +15,7 @@ import {
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
+import { flowPayloadFromTab } from '@/lib/flow-save';
 import {
   buildEdgeFromConnection,
   parseGraphErrorMessage,
@@ -37,6 +38,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
+import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
 import { NodePropertiesPanel, type PanelTab } from './properties/NodePropertiesPanel';
@@ -302,12 +304,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // Returns whether the save succeeded, so Run can stop on a failed save.
   const handleSave = async (quiet = false): Promise<boolean> => {
     try {
-      await saveFlow(collectionName, {
-        name: flowName,
-        nodes: tab.nodes,
-        edges: tab.edges,
-        ...(tab.callbackHost ? { callbackHost: tab.callbackHost } : {}),
-      });
+      const payload = flowPayloadFromTab(tab);
+      if (!payload) return false;
+      await saveFlow(payload.collection, payload.flow);
       setCycleNodeIds([]);
       setCycleEdgeIds([]);
       setSaveErrorMessage(null);
@@ -331,7 +330,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
 
   // `run_flow` runs the saved file, not the canvas. Save unsaved edits
   // first, so Run executes what the user sees.
-  const handleBeforeRun = () => (tab.isDirty ? handleSave(true) : Promise.resolve(true));
+  const handleBeforeRun = async () => {
+    if (!tab.isDirty) return true;
+    const saved = await handleSave(true);
+    if (saved) toast.info('Flow saved before run.');
+    return saved;
+  };
 
   // A bare `headers` target is not a valid target_field (the backend
   // rejects it). If a headers-target edge's popover is dismissed — or
@@ -369,6 +373,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     <ResizablePanelGroup className='h-full'>
       <ResizablePanel id='flow-canvas-panel' minSize='40%'>
         <div ref={canvasAreaRef} className='relative h-full'>
+          <FlowSaveShortcut
+            tabId={tab.id}
+            onSave={() => handleSave()}
+            isDirty={() => latestFlowTab()?.isDirty ?? false}
+          />
           <div className='absolute top-2 right-2 z-10 flex items-center gap-2'>
             {tab.nodes.some((n) => n.kind.kind === 'WaitForCallback') && (
               <CallbackHostSetting
