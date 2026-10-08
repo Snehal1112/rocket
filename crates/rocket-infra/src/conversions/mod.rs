@@ -33,7 +33,9 @@ pub use folder::{
     oc_folder_to_folder, oc_item_to_collection_item,
 };
 #[allow(unused_imports)]
-pub use folder_settings::{apply_folder_settings, oc_folder_to_folder_settings};
+pub use folder_settings::{
+    apply_folder_settings, folder_oc_variables, oc_folder_to_folder_settings,
+};
 #[allow(unused_imports)]
 pub use graphql::{graphql_to_oc, oc_graphql_to_domain};
 #[allow(unused_imports)]

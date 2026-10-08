@@ -57,14 +57,7 @@ pub fn apply_folder_settings(folder: &mut OcFolder, settings: &FolderSettings) {
             .collect(),
     );
     defaults.auth = settings.auth.clone().and_then(persisted_oc_auth);
-    defaults.variables = non_empty(
-        settings
-            .variables
-            .iter()
-            .cloned()
-            .map(OcVariable::from)
-            .collect(),
-    );
+    defaults.variables = folder_oc_variables(&settings.variables, defaults.variables.as_deref());
     let mut scripts = scripts_to_oc(
         &non_blank(&settings.pre_request_script),
         &non_blank(&settings.post_response_script),
@@ -85,6 +78,35 @@ pub fn apply_folder_settings(folder: &mut OcFolder, settings: &FolderSettings) {
         Some(defaults)
     };
     folder.docs = docs_to_oc(folder.docs.take(), settings.docs.as_deref());
+}
+
+/// Builds `request.variables` for a `folder.yml` from the in-memory variables.
+///
+/// `CollectionVariable` cannot carry a description, so each entry keeps the description of the
+/// existing entry with the same name. Loading fills `initial_value` from `value`, so an equal
+/// pair means "no initial value" and `initial` is left out. That keeps the file free of a key
+/// the OpenCollection schema rejects.
+pub fn folder_oc_variables(
+    vars: &[CollectionVariable],
+    existing: Option<&[OcVariable]>,
+) -> Option<Vec<OcVariable>> {
+    if vars.is_empty() {
+        return None;
+    }
+    Some(
+        vars.iter()
+            .map(|cv| {
+                let mut oc = OcVariable::from(cv.clone());
+                if cv.initial_value == cv.value {
+                    oc.initial = None;
+                }
+                oc.description = existing
+                    .and_then(|list| list.iter().find(|e| e.name == cv.key))
+                    .and_then(|e| e.description.clone());
+                oc
+            })
+            .collect(),
+    )
 }
 
 fn non_empty<T>(items: Vec<T>) -> Option<Vec<T>> {

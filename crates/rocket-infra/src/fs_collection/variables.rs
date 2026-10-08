@@ -4,6 +4,7 @@ use rocket_collection::{Collection, CollectionVariable};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
+use crate::conversions::folder_oc_variables;
 use crate::oc::{
     OcGraphQLRequest, OcGraphQLRequestRuntime, OcHttpRequest, OcGrpcRequest,
     OcHttpRequestRuntime, OcRequestDefaults, OcVariable, OcWebSocketRequest,
@@ -75,17 +76,13 @@ pub(super) fn save_folder_variables(
     folder_path: &str,
     vars: Vec<CollectionVariable>,
 ) -> DomainResult<()> {
-    let oc_vars: Vec<OcVariable> = vars.into_iter().map(OcVariable::from).collect();
     // Only `request.variables` changes. Docs, scripts and auth stay exactly as they
     // are on disk, and a folder directory that does not exist is still created.
     edit_folder_yml(repo, collection, folder_path, false, move |oc_folder| {
         let req_defaults = oc_folder.request.take().unwrap_or_default();
+        let oc_vars = folder_oc_variables(&vars, req_defaults.variables.as_deref());
         oc_folder.request = Some(OcRequestDefaults {
-            variables: if oc_vars.is_empty() {
-                None
-            } else {
-                Some(oc_vars)
-            },
+            variables: oc_vars,
             ..req_defaults
         });
     })
