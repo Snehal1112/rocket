@@ -17,6 +17,7 @@ vi.mock('@/lib/tauri-api', async () => {
     onFlowStepStarted: vi.fn(),
     onFlowStepCompleted: vi.fn(),
     onFlowStepProgress: vi.fn(),
+    onFlowRunFinished: vi.fn(),
   };
 });
 
@@ -38,6 +39,7 @@ let startedHandler: StartedHandler | undefined;
 let stepHandler: StepHandler | undefined;
 let progressHandler: Parameters<typeof tauriApi.onFlowStepProgress>[0] | undefined;
 let startedStepHandler: Parameters<typeof tauriApi.onFlowStepStarted>[0] | undefined;
+let finishedHandler: Parameters<typeof tauriApi.onFlowRunFinished>[0] | undefined;
 let resolveRun: (summary: tauriApi.FlowRunSummary) => void = () => {
   // Reassigned by beforeEach's mock implementation before use.
 };
@@ -69,6 +71,7 @@ describe('FlowToolbar', () => {
     stepHandler = undefined;
     startedStepHandler = undefined;
     progressHandler = undefined;
+    finishedHandler = undefined;
     vi.mocked(tauriApi.onFlowStepProgress).mockImplementation(async (h) => {
       progressHandler = h;
       return () => {
@@ -93,6 +96,13 @@ describe('FlowToolbar', () => {
         // Fake unlisten — no real Tauri listener to tear down in tests.
       };
     });
+    vi.mocked(tauriApi.onFlowRunFinished).mockImplementation(async (h) => {
+      finishedHandler = h;
+      return () => {
+        // Fake unlisten — no real Tauri listener to tear down in tests.
+      };
+    });
+    vi.mocked(tauriApi.onFlowRunFinished).mockClear();
     // run_flow stays pending until the test resolves it, like the real backend.
     vi.mocked(tauriApi.runFlow).mockImplementation(
       () =>
@@ -869,6 +879,115 @@ describe('FlowToolbar', () => {
       fire('tab-1');
       await act(async () => {});
       expect(tauriApi.runFlow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('run result', () => {
+    const base = { statusCode: null, durationMs: null, error: null, value: null };
+
+    const finishedEvent = (
+      over: Partial<tauriApi.FlowRunFinishedEvent> = {},
+    ): tauriApi.FlowRunFinishedEvent => ({
+      type: 'flowRunFinished',
+      run_id: 'run-9',
+      stopped_reason: 'completed',
+      node_count: 3,
+      failed_count: 1,
+      skipped_count: 2,
+      not_taken_count: 1,
+      ...over,
+    });
+
+    it('reports the result after the final summary and before the run is marked done', async () => {
+      const onRunResult = vi.fn();
+      renderToolbar({ onRunResult });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-1');
+      resolveRun({
+        runId: 'run-1',
+        stoppedReason: 'completed',
+        steps: [
+          { ...base, nodeId: 'a', status: 'success' },
+          { ...base, nodeId: 'b', status: 'failed', error: 'boom' },
+          { ...base, nodeId: 'c', status: 'skipped', skipReason: 'upstream_failed' },
+          { ...base, nodeId: 'd', status: 'skipped', skipReason: 'branch_not_taken' },
+        ],
+      });
+      await waitFor(() => expect(onRunResult).toHaveBeenCalledTimes(1));
+      expect(onRunResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: 'run-1',
+          stoppedReason: 'completed',
+          failedNodeId: 'b',
+          failedCount: 1,
+          skippedCount: 1,
+          totalMs: expect.any(Number),
+        }),
+      );
+      expect(onRunResult.mock.calls[0][0].totalMs).toBeGreaterThanOrEqual(0);
+      const doneIndex = onRunStateChange.mock.calls.findIndex((c) => c[0] === 'done');
+      expect(onRunResult.mock.invocationCallOrder[0]).toBeLessThan(
+        onRunStateChange.mock.invocationCallOrder[doneIndex],
+      );
+    });
+
+    it('names no failed node for a cancelled run', async () => {
+      const onRunResult = vi.fn();
+      renderToolbar({ onRunResult });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-1');
+      resolveRun({
+        runId: 'run-1',
+        stoppedReason: 'cancelled',
+        steps: [{ ...base, nodeId: 'b', status: 'failed', error: 'cancelled' }],
+      });
+      await waitFor(() => expect(onRunResult).toHaveBeenCalledTimes(1));
+      const result = onRunResult.mock.calls[0][0];
+      expect(result.stoppedReason).toBe('cancelled');
+      expect(result.failedCount).toBe(0);
+      expect(result).not.toHaveProperty('failedNodeId');
+    });
+
+    it('reports nothing when the run is rejected before it starts', async () => {
+      const onRunResult = vi.fn();
+      vi.mocked(tauriApi.runFlow).mockRejectedValue('Invalid input: bad graph');
+      renderToolbar({ onRunResult });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(onRunResult).not.toHaveBeenCalled();
+    });
+
+    it('a remounted toolbar reports the result from the finished event of its run', async () => {
+      const onRunResult = vi.fn();
+      renderToolbar({ onRunResult, tabRunState: 'running', tabRunId: 'run-9' });
+      await waitFor(() => expect(finishedHandler).toBeDefined());
+      finishedHandler?.(finishedEvent());
+      expect(onRunResult).toHaveBeenCalledWith({
+        runId: 'run-9',
+        stoppedReason: 'completed',
+        totalMs: null,
+        failedCount: 1,
+        skippedCount: 1,
+      });
+      expect(onRunStateChange).toHaveBeenCalledWith('done', 'run-9');
+    });
+
+    it('a remounted toolbar ignores the finished event of another run', async () => {
+      const onRunResult = vi.fn();
+      renderToolbar({ onRunResult, tabRunState: 'running', tabRunId: 'run-9' });
+      await waitFor(() => expect(finishedHandler).toBeDefined());
+      finishedHandler?.(finishedEvent({ run_id: 'run-other' }));
+      expect(onRunResult).not.toHaveBeenCalled();
+      expect(onRunStateChange).not.toHaveBeenCalled();
+    });
+
+    it('does not subscribe to the finished event when no run is being resumed', async () => {
+      renderToolbar({ onRunResult: vi.fn() });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+      expect(tauriApi.onFlowRunFinished).not.toHaveBeenCalled();
     });
   });
 });

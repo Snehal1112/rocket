@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
+import { type FlowRunResult, resultFromFinishedEvent, summarizeRun } from '@/lib/flow-run-result';
 import {
   cancelFlowRun,
   type FlowAuthToken,
@@ -10,6 +11,7 @@ import {
   type FlowLogEntry,
   type FlowStepCompletedEvent,
   type FlowStepResult,
+  onFlowRunFinished,
   onFlowRunStarted,
   onFlowStepCompleted,
   onFlowStepProgress,
@@ -43,6 +45,10 @@ interface FlowToolbarProps {
   onStepLogs?: (nodeId: string, logs: FlowLogEntry[]) => void;
   // Receives each debug node's sent request once the run ends.
   onStepDebug?: (nodeId: string, debug: FlowDebugRequest) => void;
+  // Receives the outcome of a finished run: after the final summary is
+  // applied, or, for a run this mount only resumed, when its finished event
+  // arrives. Not called for a run that is rejected before it starts.
+  onRunResult?: (result: FlowRunResult) => void;
 }
 
 // Maps a streamed step event (snake_case) to the per-node detail the tab stores.
@@ -89,6 +95,7 @@ export function FlowToolbar({
   onPrepareAuth,
   onStepLogs,
   onStepDebug,
+  onRunResult,
 }: FlowToolbarProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   // A run started by an earlier mount of this toolbar, still in progress.
@@ -101,6 +108,10 @@ export function FlowToolbar({
   onPatchStatusRef.current = onPatchStatus;
   const onPatchProgressRef = useRef(onPatchProgress);
   onPatchProgressRef.current = onPatchProgress;
+  const onRunResultRef = useRef(onRunResult);
+  onRunResultRef.current = onRunResult;
+  const onRunStateChangeRef = useRef(onRunStateChange);
+  onRunStateChangeRef.current = onRunStateChange;
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   // A ref, not state: `activeRunId` is only set once the `flow-run-started`
   // event round-trips through the backend, so between a click and that
@@ -142,6 +153,7 @@ export function FlowToolbar({
     let unlistenStep: UnlistenFn | undefined;
     let unlistenStarted: UnlistenFn | undefined;
     let unlistenProgress: UnlistenFn | undefined;
+    let unlistenFinished: UnlistenFn | undefined;
     let disposed = false;
     void onFlowStepStarted((event) => {
       if (event.run_id !== resumedRunId) return;
@@ -164,11 +176,22 @@ export function FlowToolbar({
       if (disposed) fn();
       else unlistenProgress = fn;
     });
+    void onFlowRunFinished((event) => {
+      if (event.run_id !== resumedRunId) return;
+      // The mount that started the run applies the timed summary later, which
+      // replaces this counts-only result.
+      onRunResultRef.current?.(resultFromFinishedEvent(event));
+      onRunStateChangeRef.current('done', event.run_id);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlistenFinished = fn;
+    });
     return () => {
       disposed = true;
       unlistenStarted?.();
       unlistenStep?.();
       unlistenProgress?.();
+      unlistenFinished?.();
     };
   }, [resumedRunId]);
 
@@ -235,6 +258,8 @@ export function FlowToolbar({
     cleanupListeners();
     // Held in a local, not state, so the event handlers see it at once.
     let runId: string | null = null;
+    // Wall-clock start. The run-started event moves it to the real start.
+    let startedAt = performance.now();
 
     // Subscribe first. run_flow only resolves when the run ends, so every
     // event is emitted while its promise is still pending.
@@ -242,6 +267,7 @@ export function FlowToolbar({
       if (runId !== null) return;
       if (event.collection !== collection || event.flow_name !== flowName) return;
       runId = event.run_id;
+      startedAt = performance.now();
       setActiveRunId(event.run_id);
       onRunStateChange('running', event.run_id);
     });
@@ -280,6 +306,7 @@ export function FlowToolbar({
         if (step.logs?.length) onStepLogs?.(step.nodeId, step.logs);
         if (step.debugRequest) onStepDebug?.(step.nodeId, step.debugRequest);
       }
+      onRunResult?.(summarizeRun(summary, Math.round(performance.now() - startedAt)));
       onRunStateChange('done', summary.runId);
     } catch (err) {
       // A run that cannot start rejects before any event is emitted.
