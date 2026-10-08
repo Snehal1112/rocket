@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildOAuth2VarContext } from '@/lib/execute-request';
 import { flowAuthKey, oauth2Fingerprint } from '@/lib/flow-auth';
-import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
+import {
+  type AuthNode,
+  authenticateAuthNode,
+  collectFlowAuthTokens,
+} from '@/lib/flow-auth-preflight';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import type { Auth, FlowNode } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
@@ -362,5 +366,171 @@ describe('collectFlowAuthTokens', () => {
     await expect(collectFlowAuthTokens(input([node]))).rejects.toThrow(
       'Sign-in for Auth node "Corporate SSO" failed: window closed',
     );
+  });
+});
+
+describe('authenticateAuthNode', () => {
+  const scope = { collection: 'api', flowName: 'login' };
+  const asAuthNode = (n: FlowNode) => n as AuthNode;
+
+  beforeEach(() => {
+    useFlowAuthStore.setState({ auths: {} });
+    vi.mocked(tauriApi.oauth2GetToken).mockReset();
+    vi.mocked(tauriApi.oauth2RefreshToken).mockReset();
+    vi.mocked(buildOAuth2VarContext).mockReset();
+    vi.mocked(buildOAuth2VarContext).mockResolvedValue(DEFAULT_VARS);
+  });
+
+  it('signs in an interactive grant and keeps the token in memory', async () => {
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    const out = await authenticateAuthNode(scope, node);
+
+    expect(out).toEqual({ accessToken: 'new-access-123456', source: 'signed-in' });
+    expect(useFlowAuthStore.getState().getAuth(key('a'))?.oauth2?.accessToken).toBe(
+      'new-access-123456',
+    );
+  });
+
+  it('keys the stored token by the scope environment and global environment', async () => {
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    await authenticateAuthNode({ ...scope, environmentName: 'dev', globalEnvName: 'g1' }, node);
+
+    expect(useFlowAuthStore.getState().getAuth(key('a', 'dev', 'g1'))).toBeDefined();
+    expect(useFlowAuthStore.getState().getAuth(key('a'))).toBeUndefined();
+  });
+
+  it('reuses a valid stored token without prompting', async () => {
+    const auth = oauthAuth('authorization_code');
+    seed('a', auth, {
+      accessToken: 'stored-123456',
+      expiresIn: 3600,
+      tokenAcquiredAt: Math.floor(Date.now() / 1000),
+    });
+
+    const out = await authenticateAuthNode(scope, asAuthNode(authNode('a', auth)));
+
+    expect(out).toEqual({ accessToken: 'stored-123456', source: 'stored' });
+    expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
+  });
+
+  it('signs in again when forced, even with a valid token and a refresh token', async () => {
+    const auth = oauthAuth('authorization_code');
+    seed('a', auth, {
+      accessToken: 'stored-123456',
+      refreshToken: 'ref-123456',
+      expiresIn: 3600,
+      tokenAcquiredAt: Math.floor(Date.now() / 1000),
+    });
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(
+      result({ access_token: 'forced-123456' }),
+    );
+
+    const out = await authenticateAuthNode(scope, asAuthNode(authNode('a', auth)), {
+      force: true,
+    });
+
+    expect(out).toEqual({ accessToken: 'forced-123456', source: 'signed-in' });
+    expect(tauriApi.oauth2RefreshToken).not.toHaveBeenCalled();
+    expect(useFlowAuthStore.getState().getAuth(key('a'))?.oauth2?.accessToken).toBe(
+      'forced-123456',
+    );
+  });
+
+  it('refreshes an expired token before prompting', async () => {
+    const auth = oauthAuth('authorization_code');
+    seed('a', auth, {
+      accessToken: 'old-123456',
+      refreshToken: 'ref-123456',
+      expiresIn: 60,
+      tokenAcquiredAt: 1,
+    });
+    vi.mocked(tauriApi.oauth2RefreshToken).mockResolvedValue(result());
+
+    const out = await authenticateAuthNode(scope, asAuthNode(authNode('a', auth)));
+
+    expect(out).toEqual({ accessToken: 'new-access-123456', source: 'refreshed' });
+    expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
+  });
+
+  it('leaves a non-interactive grant without a token to the backend', async () => {
+    const out = await authenticateAuthNode(
+      scope,
+      asAuthNode(authNode('a', oauthAuth('client_credentials'))),
+    );
+    expect(out).toEqual({ source: 'backend' });
+    expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for an auth that is not OAuth 2.0', async () => {
+    const out = await authenticateAuthNode(
+      scope,
+      asAuthNode(authNode('a', { authType: 'bearer', token: 't' })),
+    );
+    expect(out).toEqual({ source: 'backend' });
+    expect(buildOAuth2VarContext).not.toHaveBeenCalled();
+  });
+
+  it('does not write the token when shouldWrite says the node changed, after a sign-in', async () => {
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    const out = await authenticateAuthNode(scope, node, { shouldWrite: () => false });
+
+    expect(out).toEqual({ source: 'discarded' });
+    expect(tauriApi.oauth2GetToken).toHaveBeenCalledTimes(1);
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+
+  it('does not write, and does not then prompt, when shouldWrite rejects a refresh', async () => {
+    const auth = oauthAuth('authorization_code');
+    seed('a', auth, {
+      accessToken: 'old-123456',
+      refreshToken: 'ref-123456',
+      expiresIn: 60,
+      tokenAcquiredAt: 1,
+    });
+    vi.mocked(tauriApi.oauth2RefreshToken).mockResolvedValue(result());
+
+    const out = await authenticateAuthNode(scope, asAuthNode(authNode('a', auth)), {
+      shouldWrite: () => false,
+    });
+
+    expect(out).toEqual({ source: 'discarded' });
+    expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
+    expect(useFlowAuthStore.getState().getAuth(key('a'))?.oauth2?.accessToken).toBe('old-123456');
+  });
+
+  it('rejects with the node label when the sign-in fails, and stores nothing', async () => {
+    vi.mocked(tauriApi.oauth2GetToken).mockRejectedValue(new Error('window closed'));
+    const node = asAuthNode(authNode('a', oauthAuth('implicit'), 'Corporate SSO'));
+
+    await expect(authenticateAuthNode(scope, node)).rejects.toThrow(
+      'Sign-in for Auth node "Corporate SSO" failed: window closed',
+    );
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+});
+
+describe('collectFlowAuthTokens variable context', () => {
+  it('builds the variable context once for several nodes', async () => {
+    useFlowAuthStore.setState({ auths: {} });
+    vi.mocked(buildOAuth2VarContext).mockReset();
+    vi.mocked(buildOAuth2VarContext).mockResolvedValue(DEFAULT_VARS);
+    vi.mocked(tauriApi.oauth2GetToken).mockReset();
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
+
+    await collectFlowAuthTokens(
+      input([
+        authNode('a', oauthAuth('authorization_code')),
+        authNode('b', oauthAuth('implicit')),
+      ]),
+    );
+
+    expect(buildOAuth2VarContext).toHaveBeenCalledTimes(1);
+    expect(tauriApi.oauth2GetToken).toHaveBeenCalledTimes(2);
   });
 });
