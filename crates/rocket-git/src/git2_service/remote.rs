@@ -6,7 +6,9 @@ use rocket_shared::error::{DomainError, DomainResult};
 use crate::credentials::GitCredentials;
 use crate::remote::{FetchResult, RemoteInfo};
 
-use super::helpers::{branch_name, build_callbacks, clear_matching_untracked_paths, open_repo};
+use super::helpers::{
+    branch_name, build_callbacks, clear_matching_untracked_paths, is_unborn, open_repo,
+};
 
 #[tracing::instrument(name = "git_list_remotes", fields(repo_path = %path))]
 pub(super) fn list_remotes(path: &str) -> DomainResult<Vec<RemoteInfo>> {
@@ -167,9 +169,16 @@ pub(super) fn push(
         .find_remote(remote)
         .map_err(|e| DomainError::Internal(e.to_string()))?;
 
-    let head = repo
-        .head()
-        .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let head = repo.head().map_err(|e| {
+        if is_unborn(&e) {
+            DomainError::InvalidInput(
+                "Nothing to push yet: this branch has no commits. Commit your changes first."
+                    .into(),
+            )
+        } else {
+            DomainError::Internal(e.to_string())
+        }
+    })?;
     let branch_name_str = head.shorthand().unwrap_or("main");
 
     // Prefer the configured upstream's remote branch name as the push target.

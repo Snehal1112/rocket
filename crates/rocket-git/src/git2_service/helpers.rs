@@ -197,6 +197,12 @@ fn certificate_failure_policy() -> git2::CertificateCheckStatus {
     git2::CertificateCheckStatus::CertificatePassthrough
 }
 
+/// True when `e` is libgit2's "HEAD points at a branch with no commits yet"
+/// error (e.g. right after cloning an empty remote).
+pub(super) fn is_unborn(e: &git2::Error) -> bool {
+    e.code() == git2::ErrorCode::UnbornBranch
+}
+
 /// Open a git repository at the given path.
 pub(super) fn open_repo(path: &str) -> DomainResult<Repository> {
     Repository::open(path).map_err(|e| DomainError::Internal(e.to_string()))

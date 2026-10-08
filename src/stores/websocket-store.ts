@@ -167,7 +167,7 @@ export const useWebSocketStore = create<WebSocketStoreState>((set, get) => ({
     const { byTab, tabBySession } = get();
     const session = byTab[tabId];
     // A late rejection from an older connect must not fail the tab's newer session.
-    if (!session || session.status !== 'connecting' || session.sessionId !== sessionId) return;
+    if (session?.status !== 'connecting' || session.sessionId !== sessionId) return;
     set({
       byTab: {
         ...byTab,

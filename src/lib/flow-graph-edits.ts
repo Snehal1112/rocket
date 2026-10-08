@@ -14,7 +14,7 @@ export function removeSwitchCase(
   caseId: string,
 ): { nodes: FlowNode[]; edges: FlowEdge[] } | null {
   const node = nodes.find((n) => n.id === nodeId);
-  if (!node || node.kind.kind !== 'Switch') return null;
+  if (node?.kind.kind !== 'Switch') return null;
   const kind: FlowNodeKind = {
     ...node.kind,
     cases: node.kind.cases.filter((c) => c.id !== caseId),

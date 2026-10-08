@@ -2,6 +2,7 @@ import { Check, FileText, PenLine } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Card } from '../ui/card';
 
 interface RequestDocsPanelProps {
@@ -48,8 +49,8 @@ export function RequestDocsPanel({
         <div className='relative flex-1 overflow-hidden'>
           {/* Subtle left accent stripe. */}
           <div className='absolute left-0 top-0 bottom-0 w-[3px]' />
-          <textarea
-            className='h-full w-full bg-transparent border-none resize-none pl-4 pr-3 py-3 text-xs font-mono text-foreground/80 placeholder:text-muted-foreground/30 focus-visible:outline-none leading-[1.7]'
+          <Textarea
+            className='h-full min-h-0 w-full bg-transparent border-none rounded-none shadow-none resize-none pl-4 pr-3 py-3 text-xs font-mono text-foreground/80 placeholder:text-muted-foreground/30 focus-visible:ring-0 leading-[1.7]'
             placeholder={
               '# Request Documentation\n\nDescribe what this endpoint does...\n\nSupports **Markdown** syntax.'
             }

@@ -94,6 +94,7 @@ export function GitCommitForm() {
           className='text-sm min-h-[60px] resize-none'
           disabled={committing}
           aria-label='Commit message'
+          autoCorrect='on'
         />
         {stagedCount === 0 && message.trim().length > 0 && (
           <p className='text-xs text-muted-foreground/70'>No files staged</p>

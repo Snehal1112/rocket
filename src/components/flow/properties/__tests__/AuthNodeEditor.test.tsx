@@ -315,7 +315,8 @@ describe('AuthNodeEditor', () => {
     );
     await userEvent.click(screen.getByRole('combobox', { name: 'Auth type' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Basic' }));
-    expect((onChange.mock.lastCall?.[0] as AuthKind).auth.authType).toBe('basic');
+    const lastKind = onChange.mock.lastCall?.[0] as AuthKind | undefined;
+    expect(lastKind?.auth.authType).toBe('basic');
   });
 
   describe('OAuth2 tokens', () => {
