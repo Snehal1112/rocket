@@ -164,6 +164,8 @@ extension!(
         rok::op_rok_delete_env_var,
         rok::op_rok_get_env_name,
         rok::op_rok_get_collection_name,
+        rok::op_rok_get_test_results,
+        rok::op_rok_get_assertion_results,
         rok::op_rok_is_safe_mode,
         rok::op_rok_cwd,
         rok::op_rok_get_collection_var,
@@ -320,6 +322,7 @@ fn run_script(
             sandbox_mode,
             collection_name: ctx.collection_name.unwrap_or_default(),
             collection_root,
+            assertion_results: ctx.assertion_results,
         });
         state.put(ScriptOutputState::default());
     }
@@ -367,7 +370,7 @@ mod tests {
     use super::*;
     use rocket_environment::VariableContext;
     use rocket_http::HttpRequest;
-    use rocket_scripting::{ScriptContext, ScriptPhase};
+    use rocket_scripting::{AssertionOutcome, ScriptContext, ScriptPhase, TestStatus};
     use rocket_shared::types::HttpMethod;
 
     fn minimal_ctx(code: &str) -> ScriptContext {
@@ -386,6 +389,7 @@ mod tests {
             sandbox_mode: SandboxMode::Safe,
             file_scope: None,
             collection_name: None,
+            assertion_results: vec![],
         }
     }
 
@@ -2324,6 +2328,7 @@ mod tests {
             sandbox_mode: SandboxMode::Developer,
             file_scope: None,
             collection_name: None,
+            assertion_results: vec![],
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
@@ -2350,6 +2355,7 @@ mod tests {
             sandbox_mode: SandboxMode::Developer,
             file_scope: None,
             collection_name: None,
+            assertion_results: vec![],
             ..minimal_ctx(
                 "const result = process.exec('echo', ['hello-from-script']); \
                  rok.setVar('stdout', result.stdout); \
@@ -2389,6 +2395,7 @@ mod tests {
             sandbox_mode: SandboxMode::Developer,
             file_scope: None,
             collection_name: None,
+            assertion_results: vec![],
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
@@ -2735,6 +2742,44 @@ mod tests {
                 "missing null write for {key}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn rok_get_test_results_returns_tests_recorded_so_far() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx(
+            "test('first', () => { expect(1).to.equal(1); }); \
+             test('second', () => { expect(1).to.equal(2); }); \
+             rok.setVar('out', JSON.stringify(rok.getTestResults().map(r => r.name + ':' + r.status)))",
+        );
+        ctx.phase = ScriptPhase::Tests;
+        ctx.response = Some(rocket_http::HttpResponse::default());
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "[\"first:pass\",\"second:fail\"]"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_get_assertion_results_returns_the_precomputed_outcomes() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx(
+            "rok.setVar('out', rok.getAssertionResults().map(a => a.lhs + ' ' + a.operator + ' ' + a.rhs + ' ' + a.status).join('|'))",
+        );
+        ctx.phase = ScriptPhase::Tests;
+        ctx.response = Some(rocket_http::HttpResponse::default());
+        ctx.assertion_results = vec![AssertionOutcome {
+            lhs: "res.status".into(),
+            operator: "eq".into(),
+            rhs: "200".into(),
+            status: TestStatus::Passed,
+        }];
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "res.status eq 200 pass"
+        );
     }
 
     #[tokio::test]

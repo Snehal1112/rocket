@@ -2,7 +2,7 @@ use crate::scripting::local_modules::LocalRoots;
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
-    CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest, RequestMutations,
+    AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest, RequestMutations,
     SandboxMode, ScriptPhase, TestResult, TestStatus,
 };
 use rocket_shared::types::PathParam;
@@ -37,6 +37,8 @@ pub struct ScriptInputState {
     pub collection_name: String,
     /// Absolute collection directory, for `rok.cwd()` and `__dirname`.
     pub collection_root: Option<PathBuf>,
+    /// Declarative assertion outcomes, for `rok.getAssertionResults()`.
+    pub assertion_results: Vec<AssertionOutcome>,
 }
 
 /// Accumulates all side-effects produced by ops during execution.

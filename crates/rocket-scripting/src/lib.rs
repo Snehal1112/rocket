@@ -7,6 +7,6 @@ pub use context::{ExecutionMode, SandboxMode, ScriptContext, ScriptFileScope};
 pub use engine::ScriptEngine;
 pub use phase::ScriptPhase;
 pub use result::{
-    CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, HeaderMutation, NextRequest,
+    AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, HeaderMutation, NextRequest,
     RequestMutations, ScriptResult, TestResult, TestStatus,
 };

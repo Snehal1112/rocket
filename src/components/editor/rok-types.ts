@@ -457,6 +457,10 @@ declare const rok: {
   getEnvName(): string | undefined;
   /** Display name of the collection this request belongs to. */
   getCollectionName(): string;
+  /** Tests recorded so far by this script. Tests phase only. */
+  getTestResults(): { name: string; status: 'pass' | 'fail'; error?: string }[];
+  /** Declarative assertion outcomes for this request. Tests phase only. */
+  getAssertionResults(): { lhs: string; operator: string; rhs: string; status: 'pass' | 'fail' }[];
   /** True in Safe mode, false in Developer mode. */
   isSafeMode(): boolean;
   /** Absolute path of the collection directory. Developer mode only, throws in Safe mode. */

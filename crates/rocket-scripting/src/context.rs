@@ -1,4 +1,4 @@
-use crate::ScriptPhase;
+use crate::{AssertionOutcome, ScriptPhase};
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
@@ -103,6 +103,8 @@ pub struct ScriptContext {
     pub file_scope: Option<ScriptFileScope>,
     /// Display name of the collection the request belongs to, for `rok.getCollectionName()`.
     pub collection_name: Option<String>,
+    /// Declarative assertion outcomes for `rok.getAssertionResults()`. Filled for the tests phase only.
+    pub assertion_results: Vec<AssertionOutcome>,
 }
 
 impl ScriptContext {
@@ -132,6 +134,7 @@ impl ScriptContext {
             path_params,
             file_scope: None,
             collection_name: None,
+            assertion_results: Vec::new(),
         }
     }
 
@@ -162,6 +165,7 @@ impl ScriptContext {
             path_params,
             file_scope: None,
             collection_name: None,
+            assertion_results: Vec::new(),
         }
     }
 
@@ -192,6 +196,7 @@ impl ScriptContext {
             path_params,
             file_scope: None,
             collection_name: None,
+            assertion_results: Vec::new(),
         }
     }
 
@@ -213,6 +218,12 @@ impl ScriptContext {
     /// Sets the collection name returned by `rok.getCollectionName()`.
     pub fn with_collection_name(mut self, name: Option<String>) -> Self {
         self.collection_name = name;
+        self
+    }
+
+    /// Sets the outcomes returned by `rok.getAssertionResults()`.
+    pub fn with_assertion_results(mut self, results: Vec<AssertionOutcome>) -> Self {
+        self.assertion_results = results;
         self
     }
 

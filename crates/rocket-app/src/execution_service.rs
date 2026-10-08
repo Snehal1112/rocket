@@ -1856,7 +1856,11 @@ impl RequestExecutionService {
             .with_execution_mode(mode)
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
-            .with_collection_name(input.collection.clone());
+            .with_collection_name(input.collection.clone())
+            .with_assertion_results(crate::assertion_evaluator::assertion_outcomes(
+                &input.assertions,
+                response,
+            ));
             let result = self
                 .run_script_phase(script, ctx, &request_name, "tests", &mut state.console)
                 .await;
@@ -5855,6 +5859,33 @@ mod tests {
         assert!(contexts
             .iter()
             .all(|c| c.collection_name.as_deref() == Some("Payments")));
+    }
+
+    #[tokio::test]
+    async fn tests_script_receives_precomputed_assertion_outcomes() {
+        let capture = CapturingScriptEngine::new();
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.tests_script = Some("// tests".into());
+        input.assertions = vec![rocket_shared::Assertion::new(
+            "res.status",
+            "eq",
+            Some("200".into()),
+        )];
+        svc.execute(input).await.expect("execute failed");
+
+        let contexts = capture.contexts();
+        let tests_ctx = contexts
+            .iter()
+            .find(|c| c.phase == rocket_scripting::ScriptPhase::Tests)
+            .expect("tests phase ran");
+        assert_eq!(tests_ctx.assertion_results.len(), 1);
+        assert_eq!(tests_ctx.assertion_results[0].lhs, "res.status");
     }
 
     #[tokio::test]

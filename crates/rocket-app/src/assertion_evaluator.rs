@@ -1,6 +1,6 @@
 use regex::Regex;
 use rocket_http::HttpResponse;
-use rocket_scripting::{TestResult, TestStatus};
+use rocket_scripting::{AssertionOutcome, TestResult, TestStatus};
 use rocket_shared::assertion::Assertion;
 use serde_json::Value;
 
@@ -11,6 +11,26 @@ pub fn evaluate_assertions(assertions: &[Assertion], response: &HttpResponse) ->
         .iter()
         .filter(|a| a.disabled != Some(true))
         .map(|a| evaluate_one(a, response))
+        .collect()
+}
+
+/// Evaluates the enabled assertions and returns them in the shape scripts read.
+///
+/// Pure, so it can run before the tests script and again afterwards without
+/// changing the outcome.
+pub fn assertion_outcomes(
+    assertions: &[Assertion],
+    response: &HttpResponse,
+) -> Vec<AssertionOutcome> {
+    assertions
+        .iter()
+        .filter(|a| a.disabled != Some(true))
+        .map(|a| AssertionOutcome {
+            lhs: a.expression.clone(),
+            operator: a.operator.clone(),
+            rhs: a.value.clone().unwrap_or_default(),
+            status: evaluate_one(a, response).status,
+        })
         .collect()
 }
 
@@ -306,6 +326,24 @@ fn is_truthy(value: &Value) -> bool {
 mod tests {
     use super::*;
     use rocket_shared::types::Header;
+
+    #[test]
+    fn assertion_outcomes_skip_disabled_and_keep_order() {
+        let first = Assertion::new("res.status", "eq", Some("200".into()));
+        let mut disabled = Assertion::new("res.status", "eq", Some("500".into()));
+        disabled.disabled = Some(true);
+        let last = Assertion::new("res.body", "isJson", None);
+
+        let outcomes = assertion_outcomes(&[first, disabled, last], &resp(200, "{}"));
+
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].lhs, "res.status");
+        assert_eq!(outcomes[0].operator, "eq");
+        assert_eq!(outcomes[0].rhs, "200");
+        assert_eq!(outcomes[0].status, TestStatus::Passed);
+        assert_eq!(outcomes[1].lhs, "res.body");
+        assert_eq!(outcomes[1].rhs, "");
+    }
 
     fn resp(status: u16, body: &str) -> HttpResponse {
         HttpResponse {

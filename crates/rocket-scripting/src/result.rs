@@ -144,6 +144,17 @@ pub enum TestStatus {
     Failed,
 }
 
+/// One declarative assertion as seen by `rok.getAssertionResults()`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssertionOutcome {
+    /// The expression, for example `res.status`.
+    pub lhs: String,
+    pub operator: String,
+    /// The expected value, empty for unary operators.
+    pub rhs: String,
+    pub status: TestStatus,
+}
+
 /// A single `console.log`, `console.warn`, or `console.error` entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsoleEntry {

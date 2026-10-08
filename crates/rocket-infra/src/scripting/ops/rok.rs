@@ -405,7 +405,53 @@ pub fn op_rok_skip_request(state: &mut OpState) {
     state.borrow_mut::<ScriptOutputState>().skip_request = true;
 }
 
-/// rok.getCollectionName() — display name of the collection, or empty string.
+fn status_word(status: &rocket_scripting::TestStatus) -> &'static str {
+    match status {
+        rocket_scripting::TestStatus::Passed => "pass",
+        rocket_scripting::TestStatus::Failed => "fail",
+    }
+}
+
+/// rok.getTestResults() - tests recorded so far by this script, as JSON.
+#[op2]
+#[string]
+pub fn op_rok_get_test_results(state: &OpState) -> String {
+    let items: Vec<serde_json::Value> = state
+        .borrow::<ScriptOutputState>()
+        .test_results
+        .iter()
+        .map(|t| {
+            let mut item = serde_json::json!({ "name": t.name, "status": status_word(&t.status) });
+            if let Some(error) = &t.error {
+                item["error"] = serde_json::Value::String(error.clone());
+            }
+            item
+        })
+        .collect();
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+}
+
+/// rok.getAssertionResults() - declarative assertion outcomes, as JSON.
+#[op2]
+#[string]
+pub fn op_rok_get_assertion_results(state: &OpState) -> String {
+    let items: Vec<serde_json::Value> = state
+        .borrow::<ScriptInputState>()
+        .assertion_results
+        .iter()
+        .map(|a| {
+            serde_json::json!({
+                "lhs": a.lhs,
+                "operator": a.operator,
+                "rhs": a.rhs,
+                "status": status_word(&a.status),
+            })
+        })
+        .collect();
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+}
+
+/// rok.getCollectionName()— display name of the collection, or empty string.
 #[op2]
 #[string]
 pub fn op_rok_get_collection_name(state: &OpState) -> String {

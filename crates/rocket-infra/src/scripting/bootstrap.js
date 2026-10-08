@@ -106,6 +106,8 @@
     },
     getEnvName:        ()           => __ops.op_rok_get_env_name(),
     getCollectionName: ()           => __ops.op_rok_get_collection_name(),
+    getTestResults:      () => JSON.parse(__ops.op_rok_get_test_results()),
+    getAssertionResults: () => JSON.parse(__ops.op_rok_get_assertion_results()),
     isSafeMode:        ()           => __ops.op_rok_is_safe_mode(),
     cwd:               ()           => __ops.op_rok_cwd(),
     getSecretVar:      (key)        => __ops.op_rok_get_secret_var(key),
