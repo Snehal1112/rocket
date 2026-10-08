@@ -109,20 +109,28 @@ pub fn rename_workspace(
 pub fn close_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
+    flow_exec: State<'_, FlowExecutionService>,
 ) -> Result<(), DomainError> {
     svc.lock()
         .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
-        .close(&id)
+        .close(&id)?;
+    // The active workspace may have changed, and cached runs belong to one workspace.
+    flow_exec.clear_run_cache();
+    Ok(())
 }
 
 #[tauri::command]
 pub fn delete_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
+    flow_exec: State<'_, FlowExecutionService>,
 ) -> Result<(), DomainError> {
     svc.lock()
         .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
-        .delete(&id)
+        .delete(&id)?;
+    // The active workspace may have changed, and cached runs belong to one workspace.
+    flow_exec.clear_run_cache();
+    Ok(())
 }
 
 #[tauri::command]

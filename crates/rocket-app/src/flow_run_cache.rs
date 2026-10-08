@@ -1,8 +1,8 @@
 //! In-memory results of recent Flow runs, so a partial run can reuse them
 //! (`flow_partial`). Outputs are raw and unmasked: nothing here is
 //! persisted, sent over IPC or printed. `CachedRun`'s `Debug` shows counts.
-//! `switch_workspace` calls `FlowExecutionService::clear_run_cache`, so runs
-//! never outlive their workspace.
+//! `switch_workspace`, `close_workspace` and `delete_workspace` call
+//! `FlowExecutionService::clear_run_cache`, so runs never outlive their workspace.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};
