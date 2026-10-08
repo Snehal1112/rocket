@@ -1220,6 +1220,11 @@ impl FlowExecutionService {
             input.environment_name.as_deref(),
             external_secrets,
         );
+        // Trace values are masked like an Output value: every secret variable
+        // and every form of every Auth-node credential. The Request arm
+        // rebinds `secret_values` later, so this set is built first.
+        let mut trace_masks = secret_values.clone();
+        trace_masks.extend(credentials.secret_forms());
         match &node.kind {
             FlowNodeKind::Input { value, .. } => {
                 // Resolve with the scope a request uses (global < collection <
@@ -1266,10 +1271,9 @@ impl FlowExecutionService {
                     .await;
                 logs.extend(outcome.logs);
                 let value = outcome.result?;
+                trace.record_wire(edge, &value, &trace_masks);
                 // Wires get the raw value. The step shows every secret masked, then capped.
-                let mut masked = secret_values.clone();
-                masked.extend(credentials.secret_forms());
-                let (reported, cut) = mask_then_cap(&value, &masked, STEP_VALUE_LIMIT);
+                let (reported, cut) = mask_then_cap(&value, &trace_masks, STEP_VALUE_LIMIT);
                 trace.step.value_truncated = cut;
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
@@ -1303,6 +1307,8 @@ impl FlowExecutionService {
                     // no expression to evaluate. It wins over inherit and over
                     // the request's own auth.
                     if edge.target_field == handle::AUTH {
+                        // Only the fact that a credential arrived is recorded.
+                        trace.record_credential_wire(edge);
                         request_input.auth = credentials
                             .auth_for_node(&edge.source_node_id)
                             .cloned()
@@ -1326,6 +1332,7 @@ impl FlowExecutionService {
                         .await;
                     logs.extend(outcome.logs);
                     let value = outcome.result?;
+                    trace.record_wire(edge, &value, &trace_masks);
                     resolved.insert(edge.id.clone(), value);
                 }
                 let edges_owned: Vec<FlowEdge> = data_edges.iter().map(|e| (*e).clone()).collect();
@@ -1407,6 +1414,7 @@ impl FlowExecutionService {
             }
             FlowNodeKind::If { condition, .. } => {
                 let source = single_input(node, data_edges, captured)?;
+                record_input_wire(trace, data_edges, source, &trace_masks);
                 let outcome = exec
                     .evaluate_flow_route_expression(
                         &input.collection,
@@ -1418,6 +1426,8 @@ impl FlowExecutionService {
                     .await;
                 logs.extend(outcome.logs);
                 let raw = outcome.result?;
+                // Recorded before the check, so a non-boolean result shows too.
+                trace.record_route("if", &raw, None, &trace_masks);
                 let chosen_exit = match raw.as_str() {
                     "true" => handle::TRUE,
                     "false" => handle::FALSE,
@@ -1437,6 +1447,7 @@ impl FlowExecutionService {
             }
             FlowNodeKind::Switch { value, cases, .. } => {
                 let source = single_input(node, data_edges, captured)?;
+                record_input_wire(trace, data_edges, source, &trace_masks);
                 let outcome = exec
                     .evaluate_flow_route_expression(
                         &input.collection,
@@ -1448,9 +1459,14 @@ impl FlowExecutionService {
                     .await;
                 logs.extend(outcome.logs);
                 let raw = outcome.result?;
-                let chosen_exit = cases
-                    .iter()
-                    .find(|case| case.matches == raw)
+                let matched = cases.iter().find(|case| case.matches == raw);
+                trace.record_route(
+                    "switch",
+                    &raw,
+                    matched.map(|case| case.id.clone()),
+                    &trace_masks,
+                );
+                let chosen_exit = matched
                     .map(|case| handle::case_handle(&case.id))
                     .unwrap_or_else(|| handle::DEFAULT.to_string());
                 Ok(ExecutedNode {
@@ -1481,6 +1497,7 @@ impl FlowExecutionService {
             }
             FlowNodeKind::Transform { script, .. } => {
                 let source = single_input(node, data_edges, captured)?;
+                record_input_wire(trace, data_edges, source, &trace_masks);
                 let outcome = exec
                     .evaluate_flow_transform_value(
                         &input.collection,
@@ -1579,6 +1596,28 @@ fn single_input<'c>(
             handle::INPUT,
             data_edges.len()
         ))),
+    }
+}
+
+/// The text a node captured, as a single-input node received it: a
+/// response body or a value.
+fn captured_text(output: &CapturedOutput) -> &str {
+    match output {
+        CapturedOutput::Request(out) => &out.response.body,
+        CapturedOutput::Value(value) => value.data(),
+    }
+}
+
+/// Records the one `input` wire of an If, Switch or Transform node with what
+/// its source captured. Nothing is evaluated again.
+fn record_input_wire(
+    trace: &mut NodeTrace,
+    data_edges: &[&FlowEdge],
+    source: &CapturedOutput,
+    masks: &HashSet<String>,
+) {
+    if let [edge] = data_edges {
+        trace.record_wire(edge, captured_text(source), masks);
     }
 }
 
@@ -8947,5 +8986,265 @@ mod tests {
                 token: "supplied-token-123456".to_string()
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn an_input_wired_into_an_output_records_the_wire_masked() {
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        let exec = scoped_exec(env, Vec::new());
+        let flow = Flow {
+            name: "scope".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{apiKey}}"),
+                output_node_named("out"),
+            ],
+            edges: vec![FlowEdge {
+                target_field: "value".to_string(),
+                ..wire("e1", "in", "out")
+            }],
+            callback_host: None,
+        };
+        let publisher = RecordingPublisher::new();
+        let mut input = run_input("scope");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_publisher(flow, &publisher)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        let trace = step_of(&summary, "out").trace.clone().expect("a trace");
+        assert_eq!(trace.wires.len(), 1);
+        let recorded = &trace.wires[0];
+        assert_eq!(recorded.edge_id, "e1");
+        assert_eq!(recorded.source_node_id, "in");
+        assert_eq!(recorded.target_field, "value");
+        assert_eq!(recorded.value.as_deref(), Some(crate::redaction::REDACTED));
+        let event_trace = publisher.events().iter().find_map(|e| match e {
+            DomainEvent::FlowStepCompleted { node_id, trace, .. } if node_id == "out" => {
+                trace.clone()
+            }
+            _ => None,
+        });
+        assert_eq!(event_trace.map(|t| *t), Some(trace));
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("sk-live-123456"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn an_auth_token_wired_into_a_header_is_recorded_masked() {
+        use rocket_shared::types::Auth;
+
+        let flow = Flow {
+            name: "auth-header".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Sign in".to_string(),
+                        auth: Auth::Bearer {
+                            token: "static-token-123456".to_string(),
+                        },
+                        apply_to_inherit: false,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                request_flow_node("r", "https://api.example.com/me"),
+            ],
+            // X-Token is not a sensitive header, so only secret masking hides it.
+            edges: vec![edge_from(
+                "e1",
+                "a",
+                handle::RESULT,
+                "r",
+                "headers[X-Token].value",
+                "response.body",
+            )],
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("static-token-123456"));
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("auth-header"))
+            .await
+            .expect("run");
+
+        let trace = step_of(&summary, "r").trace.clone().expect("a trace");
+        assert_eq!(
+            trace.wires[0].value.as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("static-token-123456"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn an_auth_wire_is_recorded_as_a_credential_without_a_value() {
+        use rocket_shared::events::FlowWireValue;
+        use rocket_shared::types::Auth;
+
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = recording_http_exec(&executor);
+        let service = service_with_saved_request(
+            auth_and_request_flow(false, vec![auth_wire()]),
+            Auth::Inherit,
+        );
+
+        let summary = service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run must succeed");
+
+        let trace = step_of(&summary, "r").trace.clone().expect("a trace");
+        assert_eq!(
+            trace.wires,
+            vec![FlowWireValue {
+                edge_id: "e1".to_string(),
+                source_node_id: "a".to_string(),
+                target_field: handle::AUTH.to_string(),
+                credential: true,
+                ..Default::default()
+            }]
+        );
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("flow-token-123456"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_wire_value_is_cut_and_flagged() {
+        let limit = crate::flow_trace::WIRE_VALUE_LIMIT;
+        let big = "x".repeat(limit + 100);
+        let flow = Flow {
+            name: "big-wire".to_string(),
+            nodes: vec![input_node_with("in", &big), output_node_named("out")],
+            edges: vec![FlowEdge {
+                target_field: "value".to_string(),
+                ..wire("e1", "in", "out")
+            }],
+            callback_host: None,
+        };
+        let exec = scoped_exec(env_with(&[]), Vec::new());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("big-wire"))
+            .await
+            .expect("run");
+
+        let out = step_of(&summary, "out");
+        let recorded = &out.trace.as_ref().expect("a trace").wires[0];
+        assert!(recorded.truncated);
+        assert_eq!(recorded.value.as_ref().map(String::len), Some(limit));
+        // The step value has its own, larger limit.
+        assert_eq!(out.value.as_ref().map(String::len), Some(big.len()));
+    }
+
+    #[tokio::test]
+    async fn an_if_records_its_condition_result_and_its_input_wire() {
+        use rocket_shared::events::FlowRouteEval;
+
+        let service = service_with_flow(if_flow("if-route"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![("!!(", Scripted::Value(serde_json::json!(true)))]),
+        );
+
+        let summary = service
+            .run(&exec, run_input("if-route"))
+            .await
+            .expect("run");
+
+        let trace = step_of(&summary, "check").trace.clone().expect("a trace");
+        assert_eq!(
+            trace.route,
+            Some(FlowRouteEval {
+                kind: "if".to_string(),
+                value: "true".to_string(),
+                matched_case: None,
+            })
+        );
+        assert_eq!(trace.wires.len(), 1, "the input wire is recorded once");
+        assert_eq!(trace.wires[0].edge_id, "e1");
+        assert!(trace.wires[0].value.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_switch_records_its_value_masked_and_the_matched_case() {
+        use rocket_shared::events::FlowRouteEval;
+
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        let exec = scoped_exec(env, Vec::new());
+        let flow = Flow {
+            name: "sw-secret".to_string(),
+            nodes: vec![
+                input_node_with("in", "{{apiKey}}"),
+                switch_node(
+                    "route",
+                    "response.body",
+                    &[("c1", "sk-live-123456"), ("c2", "other")],
+                ),
+            ],
+            edges: vec![input_edge("e1", "in", "route")],
+            callback_host: None,
+        };
+        let mut input = run_input("sw-secret");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, input)
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "route");
+        assert_eq!(step.branch.as_deref(), Some("case:c1"));
+        let trace = step.trace.clone().expect("a trace");
+        assert_eq!(
+            trace.route,
+            Some(FlowRouteEval {
+                kind: "switch".to_string(),
+                value: crate::redaction::REDACTED.to_string(),
+                matched_case: Some("c1".to_string()),
+            })
+        );
+        assert_eq!(
+            trace.wires[0].value.as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("sk-live-123456"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn a_switch_that_takes_the_default_exit_has_no_matched_case() {
+        let flow = Flow {
+            name: "sw-default".to_string(),
+            nodes: vec![
+                input_node_with("in", "pro"),
+                switch_node("route", "response.body", &[("c1", "free")]),
+            ],
+            edges: vec![input_edge("e1", "in", "route")],
+            callback_host: None,
+        };
+        let exec = scoped_exec(env_with(&[]), Vec::new());
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("sw-default"))
+            .await
+            .expect("run");
+
+        let route = step_of(&summary, "route")
+            .trace
+            .clone()
+            .and_then(|t| t.route)
+            .expect("a route");
+        assert_eq!(route.value, "pro");
+        assert_eq!(route.matched_case, None);
     }
 }
