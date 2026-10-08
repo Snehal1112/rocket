@@ -115,6 +115,21 @@ separately for the mask and the send, so they are not masked; a partly
 resolved template (`{{token}}-{{unset}}`) is not masked by the Auth node; and
 `flow-auth-sent.<id>` widens the script-write hold-back for that request.
 
+## Flow partial runs (`flow_partial.rs`, `flow_run_cache.rs`)
+
+`FlowExecutionService::run_partial` re-runs one node (`FlowPartialMode::Node`)
+or a node and its descendants (`FromHere`) on top of a cached earlier run.
+`flow_run_cache` keeps the last 8 runs in memory (64 MiB of outputs, 16 MiB
+per output, never persisted, never sent over IPC, cleared on workspace
+switch). Input and Auth nodes always run again; their outputs are never
+cached. A run is refused before any event when the base run is gone, used
+other environments, a node upstream changed (Merkle fingerprints, saved
+request text without `uid`), a needed input was skipped, failed or not kept,
+a seed is stale after an earlier partial run, or a Wait's callback sender is
+outside the run. Variable value changes are not detected (decision D5).
+Values the base run masked are masked again under `}}prev-run.<n>`
+external-secret keys, which no `{{template}}` can reference.
+
 ## Flow step trace (`flow_trace.rs`)
 
 `execute_node` fills a `NodeTrace` out-param; the run loop moves it into

@@ -192,6 +192,7 @@ impl FlowExecutionService {
                             elapsed_ms: millis(elapsed),
                         }),
                         reported_value: None,
+                        sent_secret: None,
                     })
                 }
                 Ok(false) if gives_up => {

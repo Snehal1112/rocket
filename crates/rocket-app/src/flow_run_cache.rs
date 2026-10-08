@@ -440,6 +440,8 @@ impl FlowRunCache {
         self.runs.clear();
     }
 
+    /// Whether a run is kept, without touching its place in the order.
+    #[cfg(test)]
     pub(crate) fn contains(&self, run_id: &str) -> bool {
         self.runs.iter().any(|(id, _)| id == run_id)
     }

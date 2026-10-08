@@ -435,6 +435,9 @@ pub enum DomainEvent {
         /// The nested fields are camelCase inside this snake_case event.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         callbacks: Vec<FlowCallbackInfo>,
+        /// Set for a partial run. `total_nodes` then counts only its nodes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        partial: Option<FlowPartialRunInfo>,
     },
     /// Emitted immediately before a node is dispatched — once per node that
     /// is actually attempted, never for a node marked `Skipped` (those never
@@ -1042,6 +1045,7 @@ mod tests {
                 name: "payment".into(),
                 url: "http://10.0.0.5:4000/cb/tok".into(),
             }],
+            partial: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(
@@ -1069,12 +1073,38 @@ mod tests {
             collection: "acme".into(),
             total_nodes: 3,
             callbacks: Vec::new(),
+            partial: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
             json,
             r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"Login Flow","collection":"acme","total_nodes":3}"#
         );
+    }
+
+    #[test]
+    fn flow_run_started_carries_partial_run_info() {
+        let event = DomainEvent::FlowRunStarted {
+            run_id: "01J".into(),
+            flow_name: "f".into(),
+            collection: "c".into(),
+            total_nodes: 1,
+            callbacks: Vec::new(),
+            partial: Some(FlowPartialRunInfo {
+                base_run_id: "01A".into(),
+                start_node_id: "n2".into(),
+                mode: FlowPartialMode::Node,
+                node_ids: vec!["n2".into()],
+            }),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"f","collection":"c","total_nodes":1,"partial":{"baseRunId":"01A","startNodeId":"n2","mode":"node","nodeIds":["n2"]}}"#
+        );
+        let old = r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"f","collection":"c","total_nodes":1}"#;
+        let back: DomainEvent = serde_json::from_str(old).expect("old JSON still reads");
+        assert!(matches!(back, DomainEvent::FlowRunStarted { partial: None, .. }));
     }
 
     #[test]

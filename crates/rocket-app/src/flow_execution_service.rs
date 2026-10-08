@@ -17,6 +17,8 @@ use crate::flow_auth::{
 };
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange};
+use crate::flow_partial::{PartialPlan, PartialRun};
+use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults, MAX_CACHED_RUNS};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::runner_sequence::{build_step_input, RunItem};
 
@@ -39,6 +41,9 @@ pub(crate) struct ExecutedNode {
     /// The value the step reports, masked, when it differs from the raw
     /// captured value. Set by an Input node.
     pub(crate) reported_value: Option<String>,
+    /// The credential value a Request sent for its Auth node, when it was
+    /// resolved at send time. A later partial run masks it too.
+    pub(crate) sent_secret: Option<String>,
 }
 
 impl ExecutedNode {
@@ -48,7 +53,13 @@ impl ExecutedNode {
             chosen_exit: handle::RESULT.to_string(),
             poll: None,
             reported_value: None,
+            sent_secret: None,
         }
+    }
+
+    pub(crate) fn with_sent_secret(mut self, sent_secret: Option<String>) -> Self {
+        self.sent_secret = sent_secret;
+        self
     }
 }
 
@@ -661,7 +672,7 @@ use std::sync::{Arc, Mutex};
 use rocket_scripting::{ConsoleEntry, ConsoleLevel};
 use rocket_shared::events::{
     DomainEvent, FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowLogLevel, FlowNodeStatus,
-    FlowSkipReason, FlowStepTrace,
+    FlowPartialRunInfo, FlowSkipReason, FlowStepTrace,
 };
 use ulid::Ulid;
 
@@ -748,6 +759,9 @@ pub struct FlowRunSummary {
     pub run_id: String,
     pub steps: Vec<FlowStepResult>,
     pub stopped_reason: String,
+    /// Set for a partial run ("Run this node", "Run from here").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial: Option<FlowPartialRunInfo>,
 }
 
 /// What a node needs to know about the run it belongs to.
@@ -794,6 +808,13 @@ impl Drop for RunRegistration<'_> {
     }
 }
 
+/// A partial run that passed every check, ready to execute.
+struct PreparedPartial {
+    partial: PartialRun,
+    base: Arc<CachedRun>,
+    plan: PartialPlan,
+}
+
 /// Orchestrates one Flow run: loads the graph, walks it in dependency order,
 /// and dispatches each node using the building blocks in this same module
 /// (`build_execute_request_input`, `apply_wired_overrides`,
@@ -815,6 +836,8 @@ pub struct FlowExecutionService {
     token_fetcher: Box<dyn FlowTokenFetcher>,
     /// Upper bound on each run-start token fetch (`TOKEN_FETCH_TIMEOUT`).
     token_fetch_timeout: std::time::Duration,
+    /// Results of recent runs, for partial runs. In memory only.
+    run_cache: Arc<Mutex<FlowRunCache>>,
 }
 
 impl FlowExecutionService {
@@ -833,6 +856,7 @@ impl FlowExecutionService {
             callback_listener: Box::new(crate::callback_listener::NoCallbackListener),
             token_fetcher: Box::new(NoTokenFetcher),
             token_fetch_timeout: crate::flow_auth::TOKEN_FETCH_TIMEOUT,
+            run_cache: Arc::new(Mutex::new(FlowRunCache::new())),
         }
     }
 
@@ -897,6 +921,14 @@ impl FlowExecutionService {
         }
     }
 
+    /// Forgets every cached run. Called when the workspace changes, because a
+    /// collection and flow of the same name in another workspace are different.
+    pub fn clear_run_cache(&self) {
+        if let Ok(mut cache) = self.run_cache.lock() {
+            cache.clear();
+        }
+    }
+
     fn is_cancelled(&self, run_id: &str) -> bool {
         self.cancelled
             .lock()
@@ -931,7 +963,45 @@ impl FlowExecutionService {
         input: RunFlowInput,
         auth_tokens: FlowAuthTokens,
     ) -> DomainResult<FlowRunSummary> {
+        self.run_inner(exec, input, auth_tokens, None).await
+    }
+
+    /// Runs part of a flow ("Run this node" or "Run from here") on top of the
+    /// cached results of `partial.base_run_id`. Refused with no events when
+    /// that run is gone, used other environments, anything upstream changed
+    /// since, or a needed input has no cached value (decisions D1 and D5).
+    /// Otherwise an ordinary run: a new run id, the same events for the nodes
+    /// it runs, the same Stop.
+    pub async fn run_partial(
+        &self,
+        exec: &RequestExecutionService,
+        input: RunFlowInput,
+        auth_tokens: FlowAuthTokens,
+        partial: PartialRun,
+    ) -> DomainResult<FlowRunSummary> {
+        self.run_inner(exec, input, auth_tokens, Some(partial)).await
+    }
+
+    /// The run loop shared by full and partial runs.
+    async fn run_inner(
+        &self,
+        exec: &RequestExecutionService,
+        input: RunFlowInput,
+        auth_tokens: FlowAuthTokens,
+        partial: Option<PartialRun>,
+    ) -> DomainResult<FlowRunSummary> {
         let (flow, order) = self.load_ordered_nodes(&input.collection, &input.flow_name)?;
+        // Saved requests are read once, for fingerprints and the callback check.
+        let saved = self.saved_requests(&input.collection, &flow);
+        let fingerprints = crate::flow_run_cache::fingerprints(&flow, &order, &|path| {
+            saved.get(path).map(crate::flow_run_cache::saved_request_text)
+        });
+        // A partial run is checked before any secret is fetched or event sent,
+        // so a refusal costs nothing and leaves no trace.
+        let prepared = match &partial {
+            Some(p) => Some(self.prepare_partial(&input, &flow, &order, &saved, &fingerprints, p)?),
+            None => None,
+        };
 
         // Fetch every External Secret value once for the whole run. Each
         // Request node reuses this map, so a run of N requests makes one
@@ -966,6 +1036,16 @@ impl FlowExecutionService {
         for (node_id, secret) in credentials.secrets() {
             external_secrets.insert(format!("flow-auth.{node_id}"), secret.to_string());
         }
+        // Cached outputs may hold secrets of the earlier run, such as a token
+        // rotated since. Mask them too, under keys no template can reference.
+        if let Some(prep) = &prepared {
+            for (i, value) in prep.base.masking_secrets.iter().enumerate() {
+                external_secrets.insert(
+                    crate::flow_run_cache::previous_run_secret_key(i),
+                    value.clone(),
+                );
+            }
+        }
         let nodes_by_id: HashMap<&str, &FlowNode> =
             flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
@@ -984,20 +1064,49 @@ impl FlowExecutionService {
 
         let run_id = Ulid::new().to_string();
         let (registration, cancel_signal) = RunRegistration::new(self, &run_id);
+        let partial_info = prepared.as_ref().map(|p| FlowPartialRunInfo {
+            base_run_id: p.partial.base_run_id.clone(),
+            start_node_id: p.partial.start_node_id.clone(),
+            mode: p.partial.mode,
+            node_ids: p.plan.run_order.clone(),
+        });
+        let run_order: &[String] = prepared
+            .as_ref()
+            .map_or(order.as_slice(), |p| p.plan.run_order.as_slice());
         self.events.publish(DomainEvent::FlowRunStarted {
             run_id: run_id.clone(),
             flow_name: input.flow_name.clone(),
             collection: input.collection.clone(),
-            total_nodes: flow.nodes.len(),
+            total_nodes: run_order.len(),
             callbacks: callbacks.infos().to_vec(),
+            partial: partial_info.clone(),
         });
 
         let mut captured: HashMap<String, CapturedOutput> = HashMap::new();
         let mut outcomes: HashMap<String, NodeOutcome> = HashMap::new();
+        // Seeds come from the earlier run. They get no events and are left
+        // out of this run's cache entry.
+        let mut seeded: HashSet<String> = HashSet::new();
+        let mut sent_secrets: HashSet<String> = HashSet::new();
+        if let Some(prep) = &prepared {
+            for seed in &prep.plan.seeds {
+                if let Some(node) = prep.base.nodes.get(seed) {
+                    outcomes.insert(seed.clone(), node.outcome.clone());
+                    if let Some(output) = &node.output {
+                        captured.insert(seed.clone(), output.as_ref().clone());
+                    }
+                    seeded.insert(seed.clone());
+                }
+            }
+        }
+        let dropped_edges: HashSet<String> = prepared
+            .as_ref()
+            .map(|p| p.plan.dropped_edges.clone())
+            .unwrap_or_default();
         let mut steps: Vec<FlowStepResult> = Vec::new();
         let mut stopped_reason = "completed".to_string();
 
-        for node_id in &order {
+        for node_id in run_order {
             if self.is_cancelled(&run_id) {
                 stopped_reason = "cancelled".to_string();
                 break;
@@ -1006,7 +1115,7 @@ impl FlowExecutionService {
             let incoming: Vec<&FlowEdge> = flow
                 .edges
                 .iter()
-                .filter(|e| e.target_node_id == *node_id)
+                .filter(|e| e.target_node_id == *node_id && !dropped_edges.contains(&e.id))
                 .collect();
             // Routing nodes may observe a failed Request's response (§6.3.1).
             let target_is_routing = matches!(
@@ -1115,6 +1224,9 @@ impl FlowExecutionService {
                     // non-2xx Request is captured too — that is what a routing
                     // node observes. An `Err` captures nothing.
                     if let Ok(executed) = result {
+                        if let Some(value) = &executed.sent_secret {
+                            sent_secrets.extend(crate::redaction::redaction_forms(value));
+                        }
                         captured.insert(node_id.clone(), executed.output);
                     }
                     if cancelled_now {
@@ -1156,11 +1268,123 @@ impl FlowExecutionService {
             not_taken_count,
         });
 
+        // Every value this run masked, so a partial run built on it masks
+        // them too, even after a token rotates.
+        let mut masking_secrets = exec.secret_values(
+            input.global_env_name.as_deref(),
+            Some(&input.collection),
+            input.environment_name.as_deref(),
+            &external_secrets,
+        );
+        masking_secrets.extend(credentials.secret_forms());
+        masking_secrets.extend(sent_secrets);
+        outcomes.retain(|id, _| !seeded.contains(id));
+        captured.retain(|id, _| !seeded.contains(id));
+        self.remember_run(
+            &run_id,
+            &input,
+            &flow,
+            prepared.as_ref(),
+            RunResults {
+                outcomes,
+                captured,
+                masking_secrets,
+            },
+            &fingerprints,
+        );
+
         Ok(FlowRunSummary {
             run_id,
             steps,
             stopped_reason,
+            partial: partial_info,
         })
+    }
+
+    /// Every saved request the flow's Request nodes read, by request path.
+    /// A request that cannot be read is left out; the run reports that
+    /// failure at its node.
+    fn saved_requests(
+        &self,
+        collection: &str,
+        flow: &rocket_flow::Flow,
+    ) -> HashMap<String, Request> {
+        flow.nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                FlowNodeKind::Request {
+                    source: RequestSource::Saved { request_path },
+                    ..
+                } => Some(request_path.clone()),
+                _ => None,
+            })
+            .filter_map(|path| {
+                self.collection_repo
+                    .get_request(collection, &path)
+                    .ok()
+                    .map(|request| (path, request))
+            })
+            .collect()
+    }
+
+    /// Checks a partial run against its base run and the current flow.
+    fn prepare_partial(
+        &self,
+        input: &RunFlowInput,
+        flow: &rocket_flow::Flow,
+        order: &[String],
+        saved: &HashMap<String, Request>,
+        fingerprints: &HashMap<String, u64>,
+        partial: &PartialRun,
+    ) -> DomainResult<PreparedPartial> {
+        let base = self
+            .run_cache
+            .lock()
+            .ok()
+            .and_then(|mut cache| cache.get(&partial.base_run_id))
+            .ok_or_else(|| crate::flow_partial::PartialRefusal {
+                message: format!(
+                    "the earlier run this builds on is no longer kept (the last {MAX_CACHED_RUNS} runs stay in memory until Rocket restarts or the workspace changes). Run the full flow first"
+                ),
+                node_ids: vec![partial.start_node_id.clone()],
+                edge_ids: Vec::new(),
+            })?;
+        base.check_scope(input, &partial.start_node_id)?;
+        let senders = crate::flow_partial::callback_senders(flow, saved);
+        let plan = crate::flow_partial::select_nodes(flow, order, partial, &senders)?;
+        base.check_unchanged(flow, &plan.seeds, fingerprints)?;
+        crate::flow_partial::check_seeds(flow, &plan, &partial.start_node_id, &base.seed_views())?;
+        Ok(PreparedPartial {
+            partial: partial.clone(),
+            base,
+            plan,
+        })
+    }
+
+    /// Keeps this run's results for later partial runs. A partial run adds a
+    /// new entry built on its base, so the base itself never changes.
+    fn remember_run(
+        &self,
+        run_id: &str,
+        input: &RunFlowInput,
+        flow: &rocket_flow::Flow,
+        prepared: Option<&PreparedPartial>,
+        results: RunResults,
+        fingerprints: &HashMap<String, u64>,
+    ) {
+        let entry = match prepared {
+            Some(p) => p.base.merge_partial(
+                input,
+                flow,
+                &p.partial.start_node_id,
+                results,
+                fingerprints,
+            ),
+            None => CachedRun::from_full_run(input, flow, results, fingerprints),
+        };
+        if let Ok(mut cache) = self.run_cache.lock() {
+            cache.insert(run_id.to_string(), entry);
+        }
     }
 
     fn publish_started(&self, run_id: &str, node_id: &str) {
@@ -1395,6 +1619,8 @@ impl FlowExecutionService {
                     send_time_credential_value(exec, &request_input, external_secrets)
                         .map(|value| (format!("flow-auth-sent.{node_id}"), value))
                 });
+                // Kept on the result, so a partial run built on this run masks it.
+                let sent_value = sent_secret.as_ref().map(|(_, value)| value.clone());
                 let request_secrets: std::borrow::Cow<'_, HashMap<String, String>>;
                 let request_secret_values: std::borrow::Cow<'_, HashSet<String>>;
                 match sent_secret {
@@ -1435,7 +1661,8 @@ impl FlowExecutionService {
                             trace,
                             ctx,
                         )
-                        .await;
+                        .await
+                        .map(|node| node.with_sent_secret(sent_value));
                 }
 
                 let mut sent = None;
@@ -1457,9 +1684,8 @@ impl FlowExecutionService {
                 }
                 let output = result?;
                 logs.extend(to_flow_logs(output.console_entries.clone()));
-                Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(
-                    output,
-                ))))
+                Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(output)))
+                    .with_sent_secret(sent_value))
             }
             FlowNodeKind::If { condition, .. } => {
                 let source = single_input(node, data_edges, captured, trace, &trace_masks)?;
@@ -1492,6 +1718,7 @@ impl FlowExecutionService {
                     chosen_exit: chosen_exit.to_string(),
                     poll: None,
                     reported_value: None,
+                    sent_secret: None,
                 })
             }
             FlowNodeKind::Switch { value, cases, .. } => {
@@ -1523,6 +1750,7 @@ impl FlowExecutionService {
                     chosen_exit,
                     poll: None,
                     reported_value: None,
+                    sent_secret: None,
                 })
             }
             FlowNodeKind::WaitForCallback {
@@ -4584,6 +4812,7 @@ mod tests {
                 elapsed_ms: 14_200,
             }),
             reported_value: None,
+            sent_secret: None,
         };
 
         let step = result_to_step("job", Some(&node), &Ok(executed));
@@ -10033,3 +10262,7 @@ mod tests {
         assert!(!json.contains("second-line-token-222"), "{json}");
     }
 }
+
+#[cfg(test)]
+#[path = "flow_partial_run_tests.rs"]
+mod partial_run_tests;
