@@ -1030,6 +1030,83 @@ describe('Flow tab actions', () => {
     expect(findFirstFlowTab()?.nodeDetail).toEqual(before?.nodeDetail);
   });
 
+  it('patchFlowNodeProgress stores live detail next to the text', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');
+    usePaneStore.getState().patchFlowNodeProgress(tabId, 'n1', 'attempt 2/5 · condition false', {
+      lastStatusCode: 202,
+      conditionMet: false,
+      remainingMs: 12000,
+    });
+    expect(findFirstFlowTab()?.nodeDetail?.n1).toEqual({
+      progress: 'attempt 2/5 · condition false',
+      live: { lastStatusCode: 202, conditionMet: false, remainingMs: 12000 },
+    });
+  });
+
+  it('patchFlowNodeProgress keeps the last rejected call across ticks', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');
+    const lastRejected = {
+      method: 'POST',
+      url: '/cb/…',
+      headers: [],
+      body: '{}',
+      reason: 'Accept when returned false.',
+    };
+    usePaneStore
+      .getState()
+      .patchFlowNodeProgress(tabId, 'n1', 'waiting… 9s left · 1 ignored call(s)', {
+        ignored: 1,
+        remainingMs: 9000,
+        lastRejected,
+      });
+    usePaneStore
+      .getState()
+      .patchFlowNodeProgress(tabId, 'n1', 'waiting… 8s left · 1 ignored call(s)', {
+        ignored: 1,
+        remainingMs: 8000,
+      });
+    expect(findFirstFlowTab()?.nodeDetail?.n1?.live).toEqual({
+      ignored: 1,
+      remainingMs: 8000,
+      lastRejected,
+    });
+  });
+
+  it('patchFlowNodeProgress ignores progress after the run finished', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');
+    usePaneStore.getState().patchFlowNodeStatus(tabId, 'n1', 'success', { durationMs: 5 });
+    usePaneStore.getState().setFlowRunState(tabId, 'done', 'r1');
+    usePaneStore
+      .getState()
+      .patchFlowNodeProgress(tabId, 'n1', 'waiting… 3s left', { remainingMs: 3000 });
+    expect(findFirstFlowTab()?.nodeDetail?.n1).toEqual({ durationMs: 5 });
+  });
+
+  it('callback URLs are kept only while a run is active', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().setFlowCallbackUrls(tabId, { w: 'http://h:1/cb/t' });
+    expect(findFirstFlowTab()?.callbackUrls).toBeUndefined();
+
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');
+    usePaneStore.getState().setFlowCallbackUrls(tabId, { w: 'http://h:1/cb/t' });
+    expect(findFirstFlowTab()?.callbackUrls).toEqual({ w: 'http://h:1/cb/t' });
+    expect(findFirstFlowTab()?.nodeDetail).toEqual({});
+
+    usePaneStore.getState().setFlowRunState(tabId, 'done', 'r1');
+    expect(findFirstFlowTab()?.callbackUrls).toBeUndefined();
+  });
+
+  it('a new run drops the previous run callback URLs', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');
+    usePaneStore.getState().setFlowCallbackUrls(tabId, { w: 'http://h:1/cb/old' });
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r2');
+    expect(findFirstFlowTab()?.callbackUrls).toBeUndefined();
+  });
+
   it('setFlowRunState clears the last run results when a new run starts', async () => {
     await usePaneStore.getState().openFlowTab('my-collection');
     const tabId = findFirstFlowTab()?.id;

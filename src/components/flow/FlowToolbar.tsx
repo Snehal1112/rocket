@@ -8,8 +8,11 @@ import {
   cancelFlowRun,
   type FlowAuthToken,
   type FlowDebugRequest,
+  type FlowLiveProgress,
   type FlowLogEntry,
+  type FlowRunStartedEvent,
   type FlowStepCompletedEvent,
+  type FlowStepProgressEvent,
   type FlowStepResult,
   onFlowRunFinished,
   onFlowRunStarted,
@@ -28,7 +31,9 @@ interface FlowToolbarProps {
   environmentName: string | null;
   onPatchStatus: (nodeId: string, status: string, detail?: FlowNodeDetail) => void;
   // Receives progress text for a running node, such as "attempt 3/30".
-  onPatchProgress?: (nodeId: string, message: string) => void;
+  onPatchProgress?: (nodeId: string, message: string, live?: FlowLiveProgress) => void;
+  // Receives the callback URL of each Wait node when this toolbar's run starts.
+  onCallbackUrls?: (urls: Record<string, string>) => void;
   onRunStateChange: (state: 'running' | 'done', runId?: string) => void;
   // The tab's stored run state. The toolbar unmounts when its tab is hidden,
   // so a remounted toolbar reads an in-progress run from here.
@@ -83,6 +88,22 @@ function detailFromStep(step: FlowStepResult): FlowNodeDetail {
   };
 }
 
+// Forwards one progress event. The structured part is passed only when the
+// backend sent it, so older payloads call the handler as before.
+function forwardProgress(
+  handler: FlowToolbarProps['onPatchProgress'],
+  event: FlowStepProgressEvent,
+) {
+  if (!handler) return;
+  if (event.live) handler(event.node_id, event.message, event.live);
+  else handler(event.node_id, event.message);
+}
+
+// Maps the run-started callbacks to node id and URL.
+function callbackUrlsFrom(event: FlowRunStartedEvent): Record<string, string> {
+  return Object.fromEntries((event.callbacks ?? []).map((c) => [c.nodeId, c.url]));
+}
+
 export function FlowToolbar({
   collection,
   flowName,
@@ -90,6 +111,7 @@ export function FlowToolbar({
   environmentName,
   onPatchStatus,
   onPatchProgress,
+  onCallbackUrls,
   onRunStateChange,
   tabRunState,
   tabRunId,
@@ -176,7 +198,7 @@ export function FlowToolbar({
     void onFlowStepProgress((event) => {
       if (disposed) return;
       if (event.run_id !== resumedRunId) return;
-      onPatchProgressRef.current?.(event.node_id, event.message);
+      forwardProgress(onPatchProgressRef.current, event);
     }).then((fn) => {
       if (disposed) fn();
       else unlistenProgress = fn;
@@ -276,6 +298,9 @@ export function FlowToolbar({
       startedAt = performance.now();
       setActiveRunId(event.run_id);
       onRunStateChange('running', event.run_id);
+      // After the run state, because a new run drops older URLs.
+      const urls = callbackUrlsFrom(event);
+      if (Object.keys(urls).length > 0) onCallbackUrls?.(urls);
     });
     const unlistenStepStarted = await onFlowStepStarted((event) => {
       if (runId === null || event.run_id !== runId) return;
@@ -287,7 +312,7 @@ export function FlowToolbar({
     });
     const unlistenProgress = await onFlowStepProgress((event) => {
       if (runId === null || event.run_id !== runId) return;
-      onPatchProgressRef.current?.(event.node_id, event.message);
+      forwardProgress(onPatchProgressRef.current, event);
     });
     unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
 

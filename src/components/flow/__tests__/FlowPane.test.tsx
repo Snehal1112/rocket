@@ -351,6 +351,49 @@ describe('FlowPane run logs', () => {
     );
   });
 
+  it('stores live progress and the callback URLs on the tab', async () => {
+    let startedHandler: Parameters<typeof onFlowRunStarted>[0] | undefined;
+    let progress: Parameters<typeof onFlowStepProgress>[0] | undefined;
+    vi.mocked(onFlowRunStarted).mockImplementation(async (h) => {
+      startedHandler = h;
+      return () => undefined;
+    });
+    vi.mocked(onFlowStepProgress).mockImplementation(async (h) => {
+      progress = h;
+      return () => undefined;
+    });
+    vi.mocked(runFlow).mockImplementation(() => new Promise(() => undefined));
+    render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(progress).toBeDefined());
+    startedHandler?.({
+      type: 'flowRunStarted',
+      run_id: 'r1',
+      flow_name: 'login-flow',
+      collection: 'demo',
+      total_nodes: 1,
+      callbacks: [{ nodeId: 'n1', name: 'hook', url: 'http://h:1/cb/tok' }],
+    });
+    progress?.({
+      type: 'flowStepProgress',
+      run_id: 'r1',
+      node_id: 'n1',
+      attempt: null,
+      max_attempts: null,
+      message: 'waiting… 9s left · 0 ignored call(s)',
+      live: { ignored: 0, remainingMs: 9000 },
+    });
+    const { root } = usePaneStore.getState();
+    const stored = root.type === 'leaf' ? root.tabs.find((t) => t.id === logTab.id) : undefined;
+    expect(stored && 'callbackUrls' in stored ? stored.callbackUrls : undefined).toEqual({
+      n1: 'http://h:1/cb/tok',
+    });
+    expect(stored && 'nodeDetail' in stored ? stored.nodeDetail?.n1?.live : undefined).toEqual({
+      ignored: 0,
+      remainingMs: 9000,
+    });
+  });
+
   it('pushes step logs from the run summary to the Console', async () => {
     vi.mocked(runFlow).mockResolvedValue({
       runId: 'r1',

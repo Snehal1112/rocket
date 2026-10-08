@@ -750,6 +750,85 @@ describe('FlowToolbar', () => {
     expect(onPatchProgress).toHaveBeenCalledWith('node-a', 'attempt 1/5');
   });
 
+  it('passes live progress as a third argument only when present', async () => {
+    const onPatchProgress = vi.fn();
+    renderToolbar({ onPatchProgress });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(progressHandler).toBeDefined());
+    started('run-123');
+    const live = { lastStatusCode: 202, conditionMet: false, remainingMs: 12000 };
+    progressHandler?.({
+      type: 'flowStepProgress',
+      run_id: 'run-123',
+      node_id: 'node-a',
+      attempt: 2,
+      max_attempts: 5,
+      message: 'attempt 2/5 · condition false',
+      live,
+    });
+    expect(onPatchProgress).toHaveBeenLastCalledWith(
+      'node-a',
+      'attempt 2/5 · condition false',
+      live,
+    );
+    progressHandler?.({
+      type: 'flowStepProgress',
+      run_id: 'run-123',
+      node_id: 'node-a',
+      attempt: 3,
+      max_attempts: 5,
+      message: 'attempt 3/5',
+    });
+    expect(onPatchProgress.mock.calls[onPatchProgress.mock.calls.length - 1]).toEqual(['node-a', 'attempt 3/5']);
+  });
+
+  it('a remounted toolbar forwards live progress for the resumed run', async () => {
+    const onPatchProgress = vi.fn();
+    renderToolbar({ onPatchProgress, tabRunState: 'running', tabRunId: 'run-9' });
+    await waitFor(() => expect(progressHandler).toBeDefined());
+    const live = { ignored: 2, remainingMs: 5000 };
+    progressHandler?.({
+      type: 'flowStepProgress',
+      run_id: 'run-9',
+      node_id: 'w',
+      attempt: null,
+      max_attempts: null,
+      message: 'waiting… 5s left · 2 ignored call(s)',
+      live,
+    });
+    expect(onPatchProgress).toHaveBeenCalledWith('w', 'waiting… 5s left · 2 ignored call(s)', live);
+  });
+
+  it('hands the callback URLs from flow-run-started to onCallbackUrls', async () => {
+    const onCallbackUrls = vi.fn();
+    renderToolbar({ onCallbackUrls });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    startedHandler?.({
+      type: 'flowRunStarted',
+      run_id: 'run-1',
+      flow_name: 'my-flow',
+      collection: 'my-collection',
+      total_nodes: 2,
+      callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://10.0.0.5:4000/cb/tok' }],
+    });
+    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-1');
+    expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://10.0.0.5:4000/cb/tok' });
+    // The run state is set first, because a new run drops older URLs.
+    expect(onRunStateChange.mock.invocationCallOrder[0]).toBeLessThan(
+      onCallbackUrls.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not call onCallbackUrls for a run without callbacks', async () => {
+    const onCallbackUrls = vi.fn();
+    renderToolbar({ onCallbackUrls });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-1');
+    expect(onCallbackUrls).not.toHaveBeenCalled();
+  });
+
   describe('pending sign-in', () => {
     type Tokens = Record<string, tauriApi.FlowAuthToken> | null;
     const pendingAuth = () => {

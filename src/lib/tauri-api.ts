@@ -2270,10 +2270,60 @@ export interface FlowRouteEval {
 export interface FlowStepTrace {
   wires?: FlowWireValue[];
   route?: FlowRouteEval;
+  poll?: FlowPollDetail;
+  wait?: FlowWaitDetail;
   /** The wire whose failure failed the step. */
   failedEdgeId?: string;
   /** True when the step's `value` was cut at 256 KB. */
   valueTruncated?: boolean;
+}
+
+/** A call a Wait for callback node turned down. Masked by the backend. */
+export interface FlowRejectedCall {
+  method: string;
+  /** Path and query. The token path is shown as `/cb/…`. */
+  url: string;
+  headers: FlowDebugHeader[];
+  body: string;
+  /** True when the body was cut: at 2 KB in a live event, at 256 KB in the trace. */
+  bodyTruncated?: boolean;
+  reason: string;
+}
+
+/** How a repeat-until poll went. */
+export interface FlowPollDetail {
+  attempts: number;
+  maxAttempts: number;
+  lastStatusCode?: number;
+  /** Absent when no verdict was reached, as after a condition script error. */
+  conditionMet?: boolean;
+  elapsedMs: number;
+  timeoutMs: number;
+}
+
+/** How a callback wait went. */
+export interface FlowWaitDetail {
+  ignored: number;
+  timeoutMs: number;
+  lastRejected?: FlowRejectedCall;
+}
+
+/** Structured progress of a node that is still running. Every key is optional. */
+export interface FlowLiveProgress {
+  lastStatusCode?: number;
+  conditionMet?: boolean;
+  elapsedMs?: number;
+  /** Time left before the node gives up. The UI counts down from it. */
+  remainingMs?: number;
+  ignored?: number;
+  lastRejected?: FlowRejectedCall;
+}
+
+/** The callback URL of one Wait for callback node. Valid only while its run is active. */
+export interface FlowCallbackInfo {
+  nodeId: string;
+  name: string;
+  url: string;
 }
 
 export interface FlowRunSummary {
@@ -2321,6 +2371,8 @@ export interface FlowRunStartedEvent {
   flow_name: string;
   collection: string;
   total_nodes: number;
+  /** Every Wait for callback node's URL. Omitted when the flow has none. Keys are camelCase. */
+  callbacks?: FlowCallbackInfo[];
 }
 
 export const onFlowRunStarted = (
@@ -2376,6 +2428,8 @@ export interface FlowStepProgressEvent {
   max_attempts: number | null;
   /** Short text shown on the node, such as "attempt 3/30". */
   message: string;
+  /** Structured progress. Omitted by older backends. Keys are camelCase. */
+  live?: FlowLiveProgress;
 }
 
 export const onFlowStepProgress = (

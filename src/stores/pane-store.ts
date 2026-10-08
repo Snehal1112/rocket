@@ -32,6 +32,7 @@ import {
   endAgentSession,
   type Flow,
   type FlowEdge,
+  type FlowLiveProgress,
   type FlowNode,
   type FlowNodeStatus,
   getCollection,
@@ -355,8 +356,15 @@ export interface PaneState {
     status: FlowNodeStatus,
     detail?: FlowNodeDetail,
   ) => void;
-  patchFlowNodeProgress: (tabId: string, nodeId: string, message: string) => void;
+  patchFlowNodeProgress: (
+    tabId: string,
+    nodeId: string,
+    message: string,
+    live?: FlowLiveProgress,
+  ) => void;
   setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
+  /** Stores the running flow's callback URLs. Ignored when no run is active. */
+  setFlowCallbackUrls: (tabId: string, urls: Record<string, string> | undefined) => void;
   /** Stores the finished run's result. Pass undefined to clear it. */
   setFlowRunResult: (tabId: string, lastRun: FlowLastRun | undefined) => void;
 }
@@ -1077,15 +1085,24 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   // Merges progress into the node's detail and leaves its status alone. The
   // next status patch with a detail replaces the detail, which clears it.
-  patchFlowNodeProgress(tabId, nodeId, message) {
+  // A finished run ignores late progress.
+  patchFlowNodeProgress(tabId, nodeId, message, live) {
     set({
       root: updateTabInTree(get().root, tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
+        if (tab.runState === 'done') return tab;
         if (!tab.nodes.some((n) => n.id === nodeId)) return tab;
         const previous = tab.nodeDetail?.[nodeId];
+        // A ticker event has no call, so the last turned-down call stays shown.
+        const kept = previous?.live?.lastRejected;
+        const nextLive =
+          live && !live.lastRejected && kept ? { ...live, lastRejected: kept } : live;
         return {
           ...tab,
-          nodeDetail: { ...tab.nodeDetail, [nodeId]: { ...previous, progress: message } },
+          nodeDetail: {
+            ...tab.nodeDetail,
+            [nodeId]: { ...previous, progress: message, ...(nextLive ? { live: nextLive } : {}) },
+          },
         };
       }),
     });
@@ -1096,12 +1113,29 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       root: updateTabInTree(get().root, tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         // A new run starts from a clean canvas. Otherwise the last run's
-        // results stay on nodes this run skips or never reaches.
+        // results stay on nodes this run skips or never reaches. Callback URLs
+        // work only while their run is active, so every change drops them.
         if (runState === 'running') {
-          return { ...tab, runState, runId, nodeStatus: {}, nodeDetail: {}, lastRun: undefined };
+          return {
+            ...tab,
+            runState,
+            runId,
+            nodeStatus: {},
+            nodeDetail: {},
+            lastRun: undefined,
+            callbackUrls: undefined,
+          };
         }
-        return { ...tab, runState, runId };
+        return { ...tab, runState, runId, callbackUrls: undefined };
       }),
+    });
+  },
+
+  setFlowCallbackUrls(tabId, urls) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) && tab.runState === 'running' ? { ...tab, callbackUrls: urls } : tab,
+      ),
     });
   },
 

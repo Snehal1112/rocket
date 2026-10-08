@@ -176,6 +176,8 @@ export interface FlowNodeDetail {
   branch?: string;
   /** Progress text of a running node, such as "attempt 3/30". */
   progress?: string;
+  /** Structured progress of a running node, such as a poll verdict or a countdown. */
+  live?: import('@/lib/tauri-api').FlowLiveProgress;
   /** Attempts a repeat-until Request node made. */
   attempts?: number;
   /** Masked request and response of the last run, for Request and Wait nodes. */
@@ -214,6 +216,11 @@ export interface FlowTab extends BaseTab {
   nodeDetail?: Record<string, FlowNodeDetail>;
   runState: 'idle' | 'running' | 'done';
   runId?: string;
+  /**
+   * Callback URL per Wait for callback node id, set from `flow-run-started`.
+   * Each URL holds a token, so it is kept only while the run is active.
+   */
+  callbackUrls?: Record<string, string>;
   /** Undo and redo steps for the graph. In memory only, never saved. */
   history?: import('@/lib/flow-history').FlowHistory;
   /** Result of the last finished run. Cleared when the next run starts. */
