@@ -654,3 +654,57 @@ describe('AuthNodeEditor', () => {
     });
   });
 });
+
+describe('AuthNodeEditor plaintext credential warning', () => {
+  const SECRET = 'hunter2-literal-value';
+  const renderKind = (auth: Auth) =>
+    render(
+      <AuthNodeEditor
+        kind={{ ...kind, auth }}
+        onChange={vi.fn()}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+
+  beforeEach(() => {
+    useFlowAuthStore.setState({ auths: {} });
+    useEnvStore.setState({ activeEnvId: null, activeCollection: null });
+  });
+
+  it('warns about a literal password and names the field, never the value', () => {
+    renderKind({ authType: 'basic', username: 'u', password: SECRET });
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent(
+      'This credential is saved as plain text in the flow file. Use a {{variable}} or a RocketVault reference instead.',
+    );
+    expect(note).toHaveTextContent('Password');
+    expect(document.body.innerHTML).not.toContain(SECRET);
+  });
+
+  it('lists every literal field of an OAuth 2.0 auth', () => {
+    renderKind({
+      authType: 'o-auth2',
+      flow: 'resource_owner_password_credentials',
+      accessTokenUrl: '{{tokenUrl}}',
+      credentials: { clientId: '{{clientId}}', clientSecret: SECRET },
+      resourceOwner: { username: 'u', password: 'also-literal' },
+    } as unknown as Auth);
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent('Client secret');
+    expect(note).toHaveTextContent('Resource owner password');
+    expect(document.body.innerHTML).not.toContain(SECRET);
+    expect(document.body.innerHTML).not.toContain('also-literal');
+  });
+
+  it('does not warn when the credential is a variable reference', () => {
+    renderKind({ authType: 'basic', username: 'u', password: '{{password}}' });
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
+  it('does not warn for an empty credential', () => {
+    renderKind({ authType: 'bearer', token: '' });
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { Label } from '@/components/ui/label';
 import {
@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { useCollectionVariableContext } from '@/hooks/useCollectionVariableContext';
 import { AUTH_NODE_TYPE_OPTIONS, authStateForType } from '@/lib/auth-type-defaults';
 import { withCurrentAuthType } from '@/lib/auth-type-options';
 import {
@@ -17,31 +18,14 @@ import {
   flowAuthResolver,
   flowAuthState,
 } from '@/lib/flow-auth';
+import { plaintextSecretFields } from '@/lib/flow-secrets';
 import { toPersistedAuth } from '@/lib/persisted-auth';
-import {
-  useEnvironments,
-  useGlobalEnvironment,
-  useGlobalEnvironmentName,
-  useProcessEnvVars,
-} from '@/lib/queries/environment-queries';
-import {
-  type CollectionVariable,
-  type Environment,
-  type FlowNodeKind,
-  getCollectionSettings,
-} from '@/lib/tauri-api';
-import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
-import { useEnvStore } from '@/stores/env-store';
+import type { FlowNodeKind } from '@/lib/tauri-api';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
 import { LabelField } from './LabelField';
 
 type AuthKind = Extract<FlowNodeKind, { kind: 'Auth' }>;
-
-// Stable defaults while a query has no data, so the variable context (and the
-// token check that depends on it) is not rebuilt on every render.
-const NO_ENVIRONMENTS: Environment[] = [];
-const NO_PROCESS_ENV: Record<string, string> = {};
 
 export function AuthNodeEditor({
   kind,
@@ -59,71 +43,25 @@ export function AuthNodeEditor({
   /** Another Auth node in the flow already applies to inherited auth. */
   otherNodeApplies?: boolean;
 }) {
-  const activeEnvId = useEnvStore((s) => s.activeEnvId);
-  // The same query-cache entry getActiveGlobalEnvName() reads for the pre-run
-  // step, so the editor and the preflight build the same key.
-  const { data: globalEnvName = null } = useGlobalEnvironmentName();
+  // The flow's own collection, which the pre-run step also uses
+  // (buildOAuth2VarContext), so both resolve the same environment. The hook is
+  // also the single source of the editor's highlighting and OAuth2 resolution.
+  const {
+    variableContext,
+    envVars,
+    globalVars,
+    collectionVars,
+    processEnvVars,
+    activeEnvId,
+    globalEnvName,
+  } = useCollectionVariableContext(collection);
   const applyBlocked = otherNodeApplies && !kind.applyToInherit;
   const key = flowAuthKey(collection, flowName, nodeId, activeEnvId, globalEnvName);
   const stored = useFlowAuthStore((s) => s.auths[key]);
   const setAuth = useFlowAuthStore((s) => s.setAuth);
   const environmentName = activeEnvId ?? undefined;
-  // The flow's own collection, which the pre-run step also uses
-  // (buildOAuth2VarContext), so both resolve the same environment.
-  const { data: environments = NO_ENVIRONMENTS } = useEnvironments(collection);
-  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = NO_PROCESS_ENV } = useProcessEnvVars();
-  const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getCollectionSettings(collection)
-      .then((s) => {
-        if (!cancelled) setCollectionVars(s.variables);
-      })
-      .catch(() => {
-        if (!cancelled) setCollectionVars([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [collection]);
-
-  // The active environment's and the global environment's enabled variables.
-  const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
-  const envVars = useMemo(() => {
-    const vars: Record<string, string> = {};
-    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) vars[v.key] = v.value;
-    return vars;
-  }, [activeEnv]);
-  const globalVars = useMemo<Record<string, string>>(
-    () =>
-      globalEnv
-        ? Object.fromEntries(
-            globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
-          )
-        : {},
-    [globalEnv],
-  );
-
-  // The same scoped context the collection Authorization tab builds. The OAuth2
-  // editor resolves {{vars}} from it before "Get New Access Token", because the
-  // backend does not read collection-scoped environments. It also drives
-  // highlighting and autocomplete.
-  const variableContext = useMemo(
-    () =>
-      buildScopedContext({
-        envVars,
-        envSecretKeys: secretKeysOf(activeEnv?.variables),
-        envLabel: activeEnvId ?? undefined,
-        externalSecrets: activeEnv?.externalSecrets,
-        globalVars,
-        globalSecretKeys: secretKeysOf(globalEnv?.variables),
-        processEnvVars,
-        collectionVars,
-      }),
-    [activeEnvId, activeEnv, envVars, globalEnv, globalVars, processEnvVars, collectionVars],
-  );
+  // Literal credentials in the persisted auth, by label. Never the values.
+  const plaintextFields = plaintextSecretFields(kind.auth);
 
   // Resolves {{vars}} for the token fingerprint exactly as the pre-run step
   // does, so a token stored by either one is recognised by the other.
@@ -203,6 +141,13 @@ export function AuthNodeEditor({
           </SelectContent>
         </Select>
       </div>
+
+      {plaintextFields.length > 0 && (
+        <p role='note' className='text-xs text-amber-600 dark:text-amber-500'>
+          This credential is saved as plain text in the flow file. Use a {'{{variable}}'} or a
+          RocketVault reference instead. Plain text: {plaintextFields.join(', ')}.
+        </p>
+      )}
 
       <AuthEditor
         auth={state}
