@@ -25,6 +25,7 @@ import {
 } from '@/lib/flow-clipboard';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
+import { buildRunRecord } from '@/lib/flow-run-history';
 import type { FlowRunResult } from '@/lib/flow-run-result';
 import { flowPayloadFromTab } from '@/lib/flow-save';
 import {
@@ -76,6 +77,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
   const setFlowCallbackUrls = usePaneStore((s) => s.setFlowCallbackUrls);
   const setFlowRunResult = usePaneStore((s) => s.setFlowRunResult);
+  const recordFlowRun = usePaneStore((s) => s.recordFlowRun);
   const markClean = usePaneStore((s) => s.markClean);
   const undoFlow = usePaneStore((s) => s.undoFlow);
   const redoFlow = usePaneStore((s) => s.redoFlow);
@@ -280,7 +282,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   }, [tab.nodes]);
 
   // Adds the failed node's label while the node still exists, so the strip
-  // keeps naming it after a rename or delete.
+  // keeps naming it after a rename or delete. Then snapshots the run for the
+  // history selector.
   const handleRunResult = useCallback(
     (result: FlowRunResult) => {
       const failed = result.failedNodeId
@@ -288,8 +291,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         : undefined;
       const failedLabel = failed ? failed.kind.label || failed.id : undefined;
       setFlowRunResult(tabId, { ...result, ...(failedLabel ? { failedLabel } : {}) });
+      // The store has just applied the result, so the tab now holds this run's maps.
+      const record = buildRunRecord(latestFlowTab(), result.runId, Date.now());
+      if (record) recordFlowRun(tabId, record);
     },
-    [latestFlowTab, setFlowRunResult, tabId],
+    [latestFlowTab, recordFlowRun, setFlowRunResult, tabId],
   );
 
   // Selects the node and opens its panel on the Last run tab.

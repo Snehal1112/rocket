@@ -1048,6 +1048,57 @@ describe('FlowToolbar', () => {
       ...over,
     });
 
+    it('reports the environment the run was started with, even if it changes mid-run', async () => {
+      const onRunResult = vi.fn();
+      const element = (environmentName: string | null) => (
+        <FlowToolbar
+          collection='my-collection'
+          flowName='my-flow'
+          environmentName={environmentName}
+          onPatchStatus={onPatchStatus}
+          onRunStateChange={onRunStateChange}
+          onRunResult={onRunResult}
+        />
+      );
+      const view = render(element('staging'));
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-1');
+      view.rerender(element('prod'));
+      resolveRun({ runId: 'run-1', stoppedReason: 'completed', steps: [] });
+      await waitFor(() => expect(onRunResult).toHaveBeenCalledTimes(1));
+      expect(onRunResult).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: 'run-1', environmentName: 'staging' }),
+      );
+    });
+
+    it('reports an error result when a run that had started is rejected', async () => {
+      const onRunResult = vi.fn();
+      let rejectRun: (reason: unknown) => void = () => undefined;
+      vi.mocked(tauriApi.runFlow).mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectRun = reject;
+          }),
+      );
+      renderToolbar({ onRunResult });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-1');
+      rejectRun('socket closed');
+      await waitFor(() => expect(onRunResult).toHaveBeenCalledTimes(1));
+      expect(onRunResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runId: 'run-1',
+          stoppedReason: 'error',
+          failedCount: 0,
+          skippedCount: 0,
+          totalMs: expect.any(Number),
+        }),
+      );
+      expect(toast.error).toHaveBeenCalled();
+    });
+
     it('reports the result after the final summary and before the run is marked done', async () => {
       const onRunResult = vi.fn();
       renderToolbar({ onRunResult });

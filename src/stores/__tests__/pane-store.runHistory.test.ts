@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_RUN_HISTORY } from '@/lib/flow-run-history';
+import { buildRunRecord, MAX_RUN_HISTORY } from '@/lib/flow-run-history';
 import { findTabInTree } from '@/lib/pane-utils';
 import { type FlowRunRecord, type FlowTab, isFlowTab } from '@/types/pane-types';
 import { usePaneStore } from '../pane-store';
@@ -125,5 +125,34 @@ describe('pane-store flow run history', () => {
     usePaneStore.getState().recordFlowRun(tabId, record('r1'));
     usePaneStore.getState().setViewedFlowRun(tabId, 'r1');
     expect(stored().isDirty).toBe(false);
+  });
+
+  it('records and views a run on a tab parked by a collection switch', () => {
+    usePaneStore.setState({ activeCollection: 'demo' });
+    usePaneStore.getState().switchCollection('other');
+    usePaneStore.getState().recordFlowRun(tabId, record('r1'));
+    usePaneStore.getState().setViewedFlowRun(tabId, 'r1');
+    usePaneStore.getState().switchCollection('demo');
+    expect(stored().runHistory?.map((r) => r.runId)).toEqual(['r1']);
+    expect(stored().viewedRunId).toBe('r1');
+  });
+
+  it('keeps the callback URLs of a run out of its history record', () => {
+    const api = usePaneStore.getState();
+    api.setFlowRunState(tabId, 'running', 'run-1');
+    api.setFlowCallbackUrls(tabId, { w: 'http://h/cb/SECRET' });
+    api.setFlowRunResult(tabId, {
+      runId: 'run-1',
+      stoppedReason: 'completed',
+      totalMs: 5,
+      failedCount: 0,
+      skippedCount: 0,
+    });
+    expect(JSON.stringify(stored().callbackUrls)).toContain('SECRET');
+    const built = buildRunRecord(stored(), 'run-1', 1);
+    if (!built) throw new Error('Expected a record');
+    usePaneStore.getState().recordFlowRun(tabId, built);
+    expect(stored().runHistory).toHaveLength(1);
+    expect(JSON.stringify(stored().runHistory)).not.toContain('SECRET');
   });
 });

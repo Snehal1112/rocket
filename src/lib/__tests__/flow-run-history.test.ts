@@ -99,6 +99,13 @@ describe('buildRunRecord', () => {
     expect(buildRunRecord(tab({ lastRun: result({ runId: 'run-0' }) }), 'run-1', 1)).toBeNull();
   });
 
+  it('never copies the callback URLs, which carry a bearer token', () => {
+    const t = tab({ callbackUrls: { w: 'http://h/cb/SECRET' } });
+    const built = buildRunRecord(t, 'run-1', 1);
+    expect(built).not.toBeNull();
+    expect(JSON.stringify(built)).not.toContain('SECRET');
+  });
+
   it('still records when the tab never learned the run id', () => {
     expect(buildRunRecord(tab({ runId: undefined }), 'run-1', 1)?.runId).toBe('run-1');
   });

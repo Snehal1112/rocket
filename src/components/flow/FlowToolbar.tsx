@@ -226,6 +226,8 @@ export function FlowToolbar({
   const handleRun = async () => {
     if (isStartingRef.current || liveRunId !== null) return;
     isStartingRef.current = true;
+    // The environment can change while the run is going, so keep the one it started with.
+    const runEnvironment = environmentName;
     if (onBeforeRun) {
       let ready = false;
       try {
@@ -288,6 +290,9 @@ export function FlowToolbar({
     let runId: string | null = null;
     // Wall-clock start. The run-started event moves it to the real start.
     let startedAt = performance.now();
+    // A function, because TypeScript narrows `runId` to null in the catch block
+    // below, while the event handlers assign it later.
+    const currentRunId = (): string | null => runId;
 
     // Subscribe first. run_flow only resolves when the run ends, so every
     // event is emitted while its promise is still pending.
@@ -337,11 +342,26 @@ export function FlowToolbar({
         if (step.logs?.length) onStepLogs?.(step.nodeId, step.logs);
         if (step.debugRequest) onStepDebug?.(step.nodeId, step.debugRequest);
       }
-      onRunResult?.(summarizeRun(summary, Math.round(performance.now() - startedAt)));
+      onRunResult?.({
+        ...summarizeRun(summary, Math.round(performance.now() - startedAt)),
+        environmentName: runEnvironment,
+      });
       onRunStateChange('done', summary.runId);
     } catch (err) {
       // A run that cannot start rejects before any event is emitted.
       toast.error(`Could not run flow: ${String(err)}`);
+      // A run that had started leaves a result, so its partial results stay viewable.
+      const startedRunId = currentRunId();
+      if (startedRunId !== null) {
+        onRunResult?.({
+          runId: startedRunId,
+          stoppedReason: 'error',
+          totalMs: Math.round(performance.now() - startedAt),
+          failedCount: 0,
+          skippedCount: 0,
+          environmentName: runEnvironment,
+        });
+      }
       onRunStateChange('done');
     } finally {
       setActiveRunId(null);

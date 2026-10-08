@@ -1162,16 +1162,16 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   recordFlowRun(tabId, record) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) =>
+    set(
+      updateTabEverywhere(get(), tabId, (tab) =>
         isFlowTab(tab) ? { ...tab, runHistory: appendRunRecord(tab.runHistory, record) } : tab,
       ),
-    });
+    );
   },
 
   setViewedFlowRun(tabId, runId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         if (runId === null) return { ...tab, viewedRunId: null };
         // The live results are being written during a run, so the view stays live.
@@ -1179,7 +1179,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         if (!tab.runHistory?.some((r) => r.runId === runId)) return tab;
         return { ...tab, viewedRunId: runId };
       }),
-    });
+    );
   },
 
   setActiveCollection(name) {
