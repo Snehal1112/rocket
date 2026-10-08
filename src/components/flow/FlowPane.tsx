@@ -1,17 +1,8 @@
 import type { Connection } from '@xyflow/react';
-import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import {
@@ -36,13 +27,10 @@ import {
 } from '@/lib/flow-wiring';
 import { findTabInTree } from '@/lib/pane-utils';
 import {
-  type CollectionSummary,
   type FlowEdge,
   type FlowNode,
   type FlowNodeKind,
   type FlowNodeStatus,
-  listCollections,
-  listFlows,
   saveFlow,
 } from '@/lib/tauri-api';
 import { useConsoleStore } from '@/stores/console-store';
@@ -54,6 +42,7 @@ import { FlowCanvas } from './FlowCanvas';
 import { FlowExportMenu } from './FlowExportMenu';
 import { FlowHistoryButtons } from './FlowHistoryButtons';
 import { FlowIssuesButton } from './FlowIssuesButton';
+import { FlowPicker } from './FlowPicker';
 import { FlowRunAnnouncer } from './FlowRunAnnouncer';
 import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
@@ -72,8 +61,6 @@ const WIRE_STEP = (edgeId: string): FlowWriteOptions => ({
 });
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
-  const openFlowTab = usePaneStore((s) => s.openFlowTab);
-  const closeTab = usePaneStore((s) => s.closeTab);
   const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
   const updateFlowGraph = usePaneStore((s) => s.updateFlowGraph);
   const setFlowCallbackHost = usePaneStore((s) => s.setFlowCallbackHost);
@@ -94,13 +81,6 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // name is env-store's `activeEnvId` (it holds the name; see
   // src/lib/execute-request.ts, which passes it as environmentName).
   const activeEnvironmentName = useEnvStore((s) => s.activeEnvId);
-  const [collections, setCollections] = useState<CollectionSummary[]>([]);
-  // Start from the tab's own collection, so a tab opened for a collection
-  // (or one that fell back after a failed load) keeps that choice.
-  const [selectedCollection, setSelectedCollection] = useState(tab.collectionName ?? '');
-  const [flowNames, setFlowNames] = useState<string[]>([]);
-  const [newFlowName, setNewFlowName] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
   const [pendingEdge, setPendingEdge] = useState<FlowEdge | null>(null);
   const [cycleNodeIds, setCycleNodeIds] = useState<string[]>([]);
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
@@ -338,107 +318,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     [handleOpenProperties, handleSelectedNodeIdsChange],
   );
 
-  useEffect(() => {
-    if (tab.flowName === null) {
-      void listCollections()
-        .then(setCollections)
-        .catch((err) => console.error('[FlowPane] failed to list collections', err));
-    }
-  }, [tab.flowName]);
-
-  useEffect(() => {
-    if (!selectedCollection) {
-      setFlowNames([]);
-      return;
-    }
-    // Ignore a stale response when the user switches collections quickly.
-    let cancelled = false;
-    setFlowNames([]);
-    void listFlows(selectedCollection)
-      .then((names) => {
-        if (!cancelled) setFlowNames(names);
-      })
-      .catch((err) => console.error('[FlowPane] failed to list flows', err));
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCollection]);
-
-  const openFlow = (name: string) => {
-    closeTab(tab.id, groupId);
-    void openFlowTab(selectedCollection, name);
-  };
-
-  // Saves an empty flow first, so the new tab loads it like any existing one.
-  const handleCreate = async () => {
-    const name = newFlowName.trim();
-    if (!selectedCollection || !name) return;
-    if (flowNames.includes(name)) {
-      openFlow(name);
-      return;
-    }
-    setIsCreating(true);
-    try {
-      await saveFlow(selectedCollection, { name, nodes: [], edges: [] });
-      openFlow(name);
-    } catch (err) {
-      toast.error(`Could not create flow: ${String(err)}`);
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
   if (tab.flowName === null) {
-    return (
-      <div className='flex flex-col items-center justify-center h-full gap-3 p-6'>
-        <p className='text-sm text-muted-foreground'>Choose a collection and a flow</p>
-        <Select value={selectedCollection} onValueChange={setSelectedCollection}>
-          <SelectTrigger className='w-64' aria-label='Collection'>
-            <SelectValue placeholder='Select collection' />
-          </SelectTrigger>
-          <SelectContent>
-            {collections.map((c) => (
-              <SelectItem key={c.name} value={c.name}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select disabled={!selectedCollection || flowNames.length === 0} onValueChange={openFlow}>
-          <SelectTrigger className='w-64' aria-label='Flow'>
-            <SelectValue placeholder={flowNames.length === 0 ? 'No flows yet' : 'Select flow'} />
-          </SelectTrigger>
-          <SelectContent>
-            {flowNames.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className='flex w-64 items-center gap-2'>
-          <Input
-            aria-label='New flow name'
-            placeholder='New flow name'
-            value={newFlowName}
-            disabled={!selectedCollection || isCreating}
-            onChange={(e) => setNewFlowName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleCreate();
-            }}
-          />
-          <Button
-            size='sm'
-            variant='outline'
-            aria-label='Create flow'
-            disabled={!selectedCollection || !newFlowName.trim() || isCreating}
-            onClick={() => void handleCreate()}
-          >
-            <Plus className='h-3.5 w-3.5' />
-          </Button>
-        </div>
-      </div>
-    );
+    return <FlowPicker tab={tab} groupId={groupId} />;
   }
 
   // tab.flowName is narrowed non-null by the picker-state return above.

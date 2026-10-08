@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
@@ -69,7 +70,13 @@ function storedTab(id: string): FlowTab | undefined {
 
 function openAndRender(tab: FlowTab) {
   usePaneStore.getState().openTab(tab);
-  return render(<FlowPane tab={tab} groupId={usePaneStore.getState().activeGroupId} />);
+  // The picker tab reads its flow list through TanStack Query.
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <FlowPane tab={tab} groupId={usePaneStore.getState().activeGroupId} />
+    </QueryClientProvider>,
+  );
 }
 
 describe('FlowPane save shortcut', () => {

@@ -1,8 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
+import { flowKeys } from '@/lib/queries/flow-queries';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import {
   getFlow,
@@ -73,6 +75,17 @@ function pickerTab(collectionName: string | null): FlowTab {
   };
 }
 
+// The picker reads its flow list through TanStack Query, so it needs a provider.
+function renderPicker() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <FlowPane tab={pickerTab('demo')} groupId='g1' />
+    </QueryClientProvider>,
+  );
+  return { client, ...view };
+}
+
 describe('FlowPane picker', () => {
   beforeEach(() => {
     usePaneStore.getState().reset();
@@ -82,7 +95,7 @@ describe('FlowPane picker', () => {
   });
 
   it('lists flows for the tab collection without a manual pick', async () => {
-    render(<FlowPane tab={pickerTab('demo')} groupId='g1' />);
+    renderPicker();
     await waitFor(() => expect(listFlows).toHaveBeenCalledWith('demo'));
   });
 
@@ -92,7 +105,7 @@ describe('FlowPane picker', () => {
     const closeTab = vi.fn();
     usePaneStore.setState({ openFlowTab, closeTab });
 
-    render(<FlowPane tab={pickerTab('demo')} groupId='g1' />);
+    renderPicker();
     await userEvent.type(screen.getByLabelText('New flow name'), 'Login flow');
     await userEvent.click(screen.getByRole('button', { name: 'Create flow' }));
 
@@ -106,12 +119,50 @@ describe('FlowPane picker', () => {
     const openFlowTab = vi.fn().mockResolvedValue(undefined);
     usePaneStore.setState({ openFlowTab });
 
-    render(<FlowPane tab={pickerTab('demo')} groupId='g1' />);
-    await userEvent.type(screen.getByLabelText('New flow name'), '!!!');
+    renderPicker();
+    await userEvent.type(screen.getByLabelText('New flow name'), 'Broken flow');
     await userEvent.click(screen.getByRole('button', { name: 'Create flow' }));
 
     await waitFor(() => expect(saveFlow).toHaveBeenCalled());
     expect(openFlowTab).not.toHaveBeenCalled();
+  });
+
+  it('shows a flow that appears after the flow list is invalidated', async () => {
+    vi.mocked(listFlows).mockResolvedValueOnce([]).mockResolvedValue(['Alpha']);
+    const { client } = renderPicker();
+    expect(await screen.findByText('No flows yet')).toBeInTheDocument();
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: flowKeys.collection('demo') });
+    });
+
+    expect(await screen.findByText('Select flow')).toBeInTheDocument();
+  });
+
+  it('invalidates the flow list after creating a flow', async () => {
+    vi.mocked(saveFlow).mockResolvedValue(undefined);
+    usePaneStore.setState({
+      openFlowTab: vi.fn().mockResolvedValue(undefined),
+      closeTab: vi.fn(),
+    });
+    const { client } = renderPicker();
+    const spy = vi.spyOn(client, 'invalidateQueries');
+
+    await userEvent.type(screen.getByLabelText('New flow name'), 'Login flow');
+    await userEvent.click(screen.getByRole('button', { name: 'Create flow' }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: flowKeys.collection('demo') }),
+    );
+  });
+
+  it('rejects a name containing "::" without calling the backend', async () => {
+    renderPicker();
+    await userEvent.type(screen.getByLabelText('New flow name'), 'a::b');
+    await userEvent.click(screen.getByRole('button', { name: 'Create flow' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("cannot contain '::'");
+    expect(saveFlow).not.toHaveBeenCalled();
   });
 });
 
