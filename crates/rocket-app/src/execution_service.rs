@@ -1483,6 +1483,8 @@ impl RequestExecutionService {
             input.request_path.as_deref(),
             external_secrets,
         );
+        // Scripts read the host environment through rok.getProcessEnv.
+        var_ctx.process_env = std::env::vars().collect();
         // Flow run variables (e.g. `callback.<name>`) behave like runtime
         // variables. A script that sets the same key later still wins.
         var_ctx.runtime.extend(input.flow_vars.clone());
@@ -2256,10 +2258,6 @@ fn remove_variable(vars: &mut Vec<rocket_collection::CollectionVariable>, key: &
     vars.len() != before
 }
 
-/// Merges a script's runtime writes and deletes into the variable context.
-///
-/// Non-string values are kept as JSON text so a number or object set with
-/// `rok.setVar` survives into the next script phase. A null value is skipped.
 /// Returns a copy of `response` whose text body is replaced, for later script phases.
 fn with_body_override(response: &HttpResponse, body: Option<&str>) -> HttpResponse {
     let mut patched = response.clone();
@@ -2272,6 +2270,10 @@ fn with_body_override(response: &HttpResponse, body: Option<&str>) -> HttpRespon
     patched
 }
 
+/// Merges a script's runtime writes and deletes into the variable context.
+///
+/// Non-string values are kept as JSON text so a number or object set with
+/// `rok.setVar` survives into the next script phase. A null value is skipped.
 fn merge_runtime_vars(var_ctx: &mut rocket_environment::VariableContext, result: &ScriptResult) {
     for (key, value) in &result.runtime_vars {
         let text = match value {
@@ -5876,6 +5878,29 @@ mod tests {
         assert!(contexts
             .iter()
             .all(|c| c.collection_name.as_deref() == Some("Payments")));
+    }
+
+    #[tokio::test]
+    async fn user_scripts_receive_the_host_process_env() {
+        let capture = CapturingScriptEngine::new();
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        // PATH exists in every test environment, so no env mutation is needed.
+        let expected = std::env::var("PATH").expect("PATH should be set");
+        let contexts = capture.contexts();
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(
+            contexts[0].variables.process_env.get("PATH"),
+            Some(&expected)
+        );
     }
 
     #[test]
