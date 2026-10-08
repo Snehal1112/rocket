@@ -684,7 +684,6 @@ use rocket_shared::events::{
     DomainEvent, FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowLogLevel, FlowNodeStatus,
     FlowPartialRunInfo, FlowSkipReason, FlowStepTrace,
 };
-use ulid::Ulid;
 
 use crate::flow_trace::{mask_then_cap, NodeTrace, STEP_VALUE_LIMIT};
 
@@ -695,6 +694,17 @@ pub struct RunFlowInput {
     pub flow_name: String,
     pub environment_name: Option<String>,
     pub global_env_name: Option<String>,
+}
+
+/// How to run a flow, beyond what to run. Not an IPC DTO.
+#[derive(Debug, Clone, Default)]
+pub struct FlowRunOptions {
+    /// The run id the client chose, so it can match every event to the tab
+    /// that asked. `None` makes the service generate a ULID. A malformed id,
+    /// or one a running or kept run uses, is refused before anything runs.
+    pub run_id: Option<String>,
+    /// Set for "Run this node" or "Run from here".
+    pub partial: Option<PartialRun>,
 }
 
 /// One node's outcome within a run, as reported in `FlowRunSummary::steps`
@@ -790,19 +800,43 @@ struct RunRegistration<'a> {
 }
 
 impl<'a> RunRegistration<'a> {
-    fn new(service: &'a FlowExecutionService, run_id: &str) -> (Self, CancelSignal) {
+    /// Registers `run_id` as in flight. Refuses an id that a running run or a
+    /// kept run already uses, so two runs never share events, Stop or a run
+    /// cache entry.
+    fn reserve(
+        service: &'a FlowExecutionService,
+        run_id: &str,
+    ) -> DomainResult<(Self, CancelSignal)> {
+        let in_use = || {
+            DomainError::AlreadyExists(format!(
+                "flow run id '{run_id}' is already used by a running or recent run"
+            ))
+        };
+        let mut in_flight = service.in_flight.lock().map_err(|_| {
+            DomainError::Internal("the flow run registry is unavailable".to_string())
+        })?;
+        // A finished run is cached before it leaves `in_flight`. The cache is
+        // checked under the `in_flight` lock, so a used id never passes both
+        // checks. Nothing locks `in_flight` while it holds the cache lock.
+        let kept = service
+            .run_cache
+            .lock()
+            .is_ok_and(|cache| cache.contains(run_id));
+        if kept || !in_flight.insert(run_id.to_string()) {
+            return Err(in_use());
+        }
         let (handle, signal) = cancel_pair();
+        // Still under the `in_flight` lock, so a Stop for this id always finds
+        // its handle. `cancel` never holds two of these locks at once.
         if let Ok(mut handles) = service.cancel_handles.lock() {
             handles.insert(run_id.to_string(), handle);
         }
-        if let Ok(mut set) = service.in_flight.lock() {
-            set.insert(run_id.to_string());
-        }
+        drop(in_flight);
         let registration = Self {
             service,
             run_id: run_id.to_string(),
         };
-        (registration, signal)
+        Ok((registration, signal))
     }
 }
 
@@ -973,7 +1007,8 @@ impl FlowExecutionService {
         input: RunFlowInput,
         auth_tokens: FlowAuthTokens,
     ) -> DomainResult<FlowRunSummary> {
-        self.run_inner(exec, input, auth_tokens, None).await
+        self.run_with_options(exec, input, auth_tokens, FlowRunOptions::default())
+            .await
     }
 
     /// Runs part of a flow ("Run this node" or "Run from here") on top of the
@@ -989,17 +1024,29 @@ impl FlowExecutionService {
         auth_tokens: FlowAuthTokens,
         partial: PartialRun,
     ) -> DomainResult<FlowRunSummary> {
-        self.run_inner(exec, input, auth_tokens, Some(partial)).await
+        let options = FlowRunOptions {
+            run_id: None,
+            partial: Some(partial),
+        };
+        self.run_with_options(exec, input, auth_tokens, options).await
     }
 
-    /// The run loop shared by full and partial runs.
-    async fn run_inner(
+    /// The run loop shared by full and partial runs. The run id from
+    /// `options` (or a generated one) names the run in every event, in
+    /// `cancel`, in the run cache and in the summary.
+    pub async fn run_with_options(
         &self,
         exec: &RequestExecutionService,
         input: RunFlowInput,
         auth_tokens: FlowAuthTokens,
-        partial: Option<PartialRun>,
+        options: FlowRunOptions,
     ) -> DomainResult<FlowRunSummary> {
+        let FlowRunOptions { run_id, partial } = options;
+        let run_id = crate::flow_run_id::choose_run_id(run_id)?;
+        // Reserved before anything else, so a duplicate id is refused at once,
+        // and a Stop sent while secrets and tokens are fetched is kept and
+        // stops the run before its first node.
+        let (registration, cancel_signal) = RunRegistration::reserve(self, &run_id)?;
         let (flow, order) = self.load_ordered_nodes(&input.collection, &input.flow_name)?;
         // Saved requests are read once, for fingerprints and the callback check.
         let saved = self.saved_requests(&input.collection, &flow);
@@ -1059,10 +1106,10 @@ impl FlowExecutionService {
         let nodes_by_id: HashMap<&str, &FlowNode> =
             flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
-        // Open every callback endpoint before the run is registered or
-        // announced. A failure here ends the call with no events and nothing
-        // left in `in_flight`. `callbacks` lives until `run` returns, so
-        // every endpoint closes on every exit path.
+        // Open every callback endpoint before the run is announced. A failure
+        // here ends the call with no events, and the registration guard
+        // leaves nothing in `in_flight`. `callbacks` lives until `run`
+        // returns, so every endpoint closes on every exit path.
         let mut callbacks =
             crate::flow_callbacks::RunCallbacks::open_all(self.callback_listener.as_ref(), &flow)
                 .await?;
@@ -1079,8 +1126,6 @@ impl FlowExecutionService {
             &external_secrets,
         );
 
-        let run_id = Ulid::new().to_string();
-        let (registration, cancel_signal) = RunRegistration::new(self, &run_id);
         let partial_info = prepared.as_ref().map(|p| FlowPartialRunInfo {
             base_run_id: p.partial.base_run_id.clone(),
             start_node_id: p.partial.start_node_id.clone(),
@@ -1261,9 +1306,6 @@ impl FlowExecutionService {
             steps.push(step);
         }
 
-        // Deregister before `FlowRunFinished`, as before this guard existed.
-        drop(registration);
-
         // Every value this run masked, so a partial run built on it masks
         // them too, even after a token rotates. The start-of-run set covers a
         // secret a script rotated during the run.
@@ -1292,6 +1334,9 @@ impl FlowExecutionService {
             },
             &fingerprints,
         );
+        // Deregister after the run is cached and before `FlowRunFinished`. A
+        // kept run is never out of both places, so its id cannot be reused.
+        drop(registration);
 
         let failed_count = steps
             .iter()

@@ -1,4 +1,5 @@
-//! End-to-end tests for partial runs ("Run this node", "Run from here").
+//! End-to-end tests for partial runs ("Run this node", "Run from here") and
+//! for client-chosen run ids.
 
 use super::*;
 
@@ -637,4 +638,170 @@ async fn an_unknown_base_another_environment_and_a_cleared_cache_are_refused() {
         .await
         .expect_err("cache cleared");
     assert!(cleared.to_string().contains("no longer kept"), "{cleared}");
+}
+
+// ---- Client-chosen run ids (roadmap F-03) ----
+
+fn with_id(id: &str) -> FlowRunOptions {
+    FlowRunOptions {
+        run_id: Some(id.to_string()),
+        partial: None,
+    }
+}
+
+/// The run id of every Flow event, in order.
+fn flow_event_run_ids(events: &RecordingPublisher) -> Vec<String> {
+    events
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            DomainEvent::FlowRunStarted { run_id, .. }
+            | DomainEvent::FlowStepStarted { run_id, .. }
+            | DomainEvent::FlowStepProgress { run_id, .. }
+            | DomainEvent::FlowStepCompleted { run_id, .. }
+            | DomainEvent::FlowRunFinished { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn client_run_id_names_the_run_in_every_event_and_the_summary() {
+    let h = harness(login_then_b());
+    h.http.set_body("/login", "https://api.example.com/profile");
+    let id = "0b7e2c1a-5d1f-4a7e-9c3b-2f6d8e9a1b2c";
+
+    let summary = h
+        .service
+        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id(id))
+        .await
+        .expect("run");
+
+    assert_eq!(summary.run_id, id);
+    let ids = flow_event_run_ids(&h.events);
+    assert!(ids.len() >= 4, "started, two steps and finished: {ids:?}");
+    assert!(ids.iter().all(|e| e == id), "{ids:?}");
+}
+
+#[tokio::test]
+async fn client_run_id_absent_falls_back_to_a_generated_ulid() {
+    let h = harness(login_then_b());
+
+    let summary = h
+        .service
+        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), FlowRunOptions::default())
+        .await
+        .expect("run");
+
+    assert!(
+        ulid::Ulid::from_string(&summary.run_id).is_ok(),
+        "got {}",
+        summary.run_id
+    );
+}
+
+#[tokio::test]
+async fn client_run_id_that_is_malformed_is_refused_before_any_event() {
+    let h = harness(login_then_b());
+    let long = "x".repeat(65);
+
+    for bad in ["", "has space", "line\nbreak", "../etc", long.as_str()] {
+        let err = h
+            .service
+            .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id(bad))
+            .await
+            .expect_err("a malformed id must be refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{bad:?}: {err:?}");
+    }
+
+    assert!(h.events.events().is_empty(), "a refused id sends no event");
+    assert!(h.http.sent_urls().is_empty(), "a refused id sends no request");
+    assert!(h.service.in_flight.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn client_run_id_of_a_run_in_flight_is_refused_and_free_after_it_ends() {
+    let h = harness(login_then_b());
+    let held = RunRegistration::reserve(&h.service, "live-1").expect("reserve");
+
+    let err = h
+        .service
+        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id("live-1"))
+        .await
+        .expect_err("an id in flight must be refused");
+
+    assert!(matches!(err, DomainError::AlreadyExists(_)), "{err:?}");
+    assert!(h.events.events().is_empty(), "a refused id sends no event");
+    assert!(
+        h.service.in_flight.lock().expect("lock").contains("live-1"),
+        "a refused duplicate must not unregister the run that owns the id"
+    );
+
+    drop(held);
+    let summary = h
+        .service
+        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id("live-1"))
+        .await
+        .expect("the id is free once its run ended without being kept");
+    assert_eq!(summary.run_id, "live-1");
+}
+
+#[tokio::test]
+async fn client_run_id_of_a_kept_run_is_refused_and_the_kept_run_is_untouched() {
+    let h = harness(login_then_b());
+    h.http.set_body("/login", "https://api.example.com/profile");
+    h.service
+        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id("kept-1"))
+        .await
+        .expect("first run");
+    let events_before = h.events.events().len();
+    let ids_before = flow_event_run_ids(&h.events).len();
+
+    let err = h
+        .service
+        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id("kept-1"))
+        .await
+        .expect_err("the id of a kept run must be refused");
+    assert!(matches!(err, DomainError::AlreadyExists(_)), "{err:?}");
+    assert_eq!(h.events.events().len(), events_before, "no event for a refused id");
+
+    // The kept run still feeds a partial run, which takes its own client id.
+    let summary = h
+        .service
+        .run_with_options(
+            &h.exec,
+            input(),
+            FlowAuthTokens::new(),
+            FlowRunOptions {
+                run_id: Some("partial-1".to_string()),
+                partial: Some(partial("kept-1", "b", FlowPartialMode::Node)),
+            },
+        )
+        .await
+        .expect("partial run on the kept run");
+    assert_eq!(summary.run_id, "partial-1");
+    assert_eq!(
+        summary.partial.expect("partial info").base_run_id,
+        "kept-1"
+    );
+    let partial_ids: Vec<String> = flow_event_run_ids(&h.events)
+        .into_iter()
+        .skip(ids_before)
+        .collect();
+    assert!(!partial_ids.is_empty());
+    assert!(partial_ids.iter().all(|e| e == "partial-1"), "{partial_ids:?}");
+}
+
+#[tokio::test]
+async fn client_run_id_stop_cancels_only_that_run() {
+    let h = harness(login_then_b());
+    let (_a, signal_a) = RunRegistration::reserve(&h.service, "run-a").expect("reserve a");
+    let (_b, signal_b) = RunRegistration::reserve(&h.service, "run-b").expect("reserve b");
+
+    h.service.cancel("run-b");
+
+    assert!(signal_b.is_cancelled());
+    assert!(!signal_a.is_cancelled());
+    assert!(h.service.is_cancelled("run-b"));
+    assert!(!h.service.is_cancelled("run-a"));
 }

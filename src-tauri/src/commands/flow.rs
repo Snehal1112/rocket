@@ -1,5 +1,6 @@
 use rocket_app::{
-    FlowExecutionService, FlowRunSummary, FlowService, RequestExecutionService, RunFlowInput,
+    FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowService, RequestExecutionService,
+    RunFlowInput,
 };
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
@@ -481,8 +482,20 @@ pub struct RunFlowInputDto {
     /// Tokens the UI obtained for Auth nodes, keyed by node id. Never serialized.
     #[serde(default, skip_serializing)]
     pub auth_tokens: std::collections::HashMap<String, FlowAuthTokenDto>,
+    /// The run id the frontend chose. Absent means the backend picks one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 impl RunFlowInputDto {
+    /// Takes what the run needs besides the input and the tokens. Call it
+    /// before `into_parts`.
+    pub fn take_options(&mut self) -> FlowRunOptions {
+        FlowRunOptions {
+            run_id: self.run_id.take(),
+            partial: None,
+        }
+    }
+
     /// Splits the DTO into the run input and the tokens, so the tokens cannot
     /// be dropped by accident.
     pub fn into_parts(self) -> (RunFlowInput, rocket_app::FlowAuthTokens) {
@@ -508,25 +521,28 @@ impl RunFlowInputDto {
     }
 }
 
-/// Runs a Flow to completion. Streams `flow-run-started`,
-/// `flow-step-completed`, and `flow-run-finished` events while it runs
-/// (`FlowExecutionService::run` publishes these through the injected
-/// `TauriEventBus` as it goes) and returns the same data as one summary when
-/// the run ends — mirroring `run_collection` in `runner.rs` exactly. The
-/// frontend reads `run_id` off the `flow-run-started` event payload, not off
-/// this command's return value, so Stop is available before the run finishes.
+/// Runs a Flow to completion. Streams `flow-run-started`, `flow-step-*` and
+/// `flow-run-finished` events while it runs and returns the same data as one
+/// summary when the run ends, mirroring `run_collection` in `runner.rs`. The
+/// frontend chooses the run id (`runId`) and matches every event by it, so
+/// Stop works before the run finishes and two tabs of one flow never share a
+/// run. Without `runId` the backend picks one.
 #[tauri::command]
 pub async fn run_flow(
-    input: RunFlowInputDto,
+    mut input: RunFlowInputDto,
     flow_exec: State<'_, FlowExecutionService>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<FlowRunSummary, DomainError> {
+    let options = input.take_options();
     let (run_input, tokens) = input.into_parts();
-    flow_exec.run_with_auth(&exec, run_input, tokens).await
+    flow_exec
+        .run_with_options(&exec, run_input, tokens, options)
+        .await
 }
 
-/// Asks an in-progress Flow run to stop. An unknown or already-finished run
-/// id is a no-op, matching `stop_collection_run`'s existing behavior.
+/// Asks an in-progress Flow run to stop. `run_id` is the id the frontend
+/// sent with `run_flow`. An unknown or already-finished run id is a no-op,
+/// matching `stop_collection_run`'s existing behavior.
 #[tauri::command]
 pub fn cancel_flow_run(
     run_id: String,
@@ -568,6 +584,32 @@ mod tests {
         let dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
         let (_input, tokens) = dto.into_parts();
         assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn run_flow_input_carries_the_client_run_id_into_the_options() {
+        let json = r#"{
+            "collection": "c", "flowName": "f", "environmentName": null, "globalEnvName": null,
+            "runId": "0b7e2c1a-5d1f-4a7e-9c3b-2f6d8e9a1b2c"
+        }"#;
+        let mut dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+
+        let options = dto.take_options();
+
+        assert_eq!(
+            options.run_id.as_deref(),
+            Some("0b7e2c1a-5d1f-4a7e-9c3b-2f6d8e9a1b2c")
+        );
+        assert!(options.partial.is_none());
+        assert!(dto.run_id.is_none(), "the id is taken, not copied");
+    }
+
+    #[test]
+    fn run_flow_input_without_run_id_lets_the_backend_choose() {
+        let json =
+            r#"{"collection":"c","flowName":"f","environmentName":null,"globalEnvName":null}"#;
+        let mut dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+        assert!(dto.take_options().run_id.is_none());
     }
 
     #[test]
