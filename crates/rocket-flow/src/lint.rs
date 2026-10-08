@@ -326,14 +326,50 @@ pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
     }
 }
 
-/// Makes a `validate` reason read as a sentence: a capital first letter and
-/// an end mark.
+/// Handle names that `validate` may quote in a reason. They are fixed words.
+const FIXED_QUOTES: [&str; 4] = [handle::INPUT, handle::TRIGGER, handle::AUTH, handle::RESULT];
+
+/// The reason as a sentence that never holds user-typed text. `validate`
+/// builds a few reasons from a match value, an id, a name or a handle, and
+/// those get fixed text. A reason with any other quoted text is replaced
+/// by a generic sentence, so a secret typed into a field is never echoed.
 fn sentence(reason: &str) -> String {
-    let mut chars = reason.trim().chars();
-    let Some(first) = chars.next() else {
-        return "The flow has a structural problem.".to_string();
+    let reason = reason.trim();
+    let fixed = if reason.starts_with("more than one case matches") {
+        Some("Two cases of this Switch have the same match value.")
+    } else if reason.starts_with("more than one case has id") {
+        Some("Two cases of this Switch have the same id.")
+    } else if reason.starts_with("the source node has no exit named") {
+        Some("The wire leaves an exit that the source node does not have.")
+    } else if reason.starts_with("the Wait for callback name") {
+        Some("The Wait for callback name must use only letters, digits and _.")
+    } else if reason.starts_with("more than one Wait for callback node is named") {
+        Some("More than one Wait for callback node has the same name.")
+    } else if reason.contains("node's wire must target") {
+        Some("The wire must target the 'input' handle of this node.")
+    } else if reason.contains("{{") {
+        Some("A Request uses a callback value but is not wired before this Wait for callback node.")
+    } else {
+        None
     };
-    let mut out: String = first.to_uppercase().chain(chars).collect();
+    if let Some(text) = fixed {
+        return text.to_string();
+    }
+    // Quoted spans are the odd parts when the text is split on quotes.
+    let only_fixed_quotes = reason
+        .split('\'')
+        .skip(1)
+        .step_by(2)
+        .all(|span| FIXED_QUOTES.contains(&span));
+    let balanced = reason.matches('\'').count().is_multiple_of(2);
+    if reason.is_empty() || !only_fixed_quotes || !balanced {
+        return "The flow has a structural problem.".to_string();
+    }
+    let mut chars = reason.chars();
+    let mut out: String = match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => return "The flow has a structural problem.".to_string(),
+    };
     if !out.ends_with(&['.', '!', '?'][..]) {
         out.push('.');
     }
@@ -896,5 +932,132 @@ mod tests {
         let f = flow(vec![output("a"), output("a")], vec![]);
         let lints = graph_lints(&f);
         assert_eq!(keys(&lints), vec![(Some("a"), None, INVALID_GRAPH)]);
+    }
+
+    const CANARY: &str = "sk-live-canary-9f3a";
+
+    fn assert_no_canary(lints: &[FlowLint]) {
+        for l in lints {
+            let all = format!(
+                "{:?} {:?} {} {:?}",
+                l.node_id, l.edge_id, l.message, l.hint
+            );
+            assert!(!all.contains(CANARY), "leaked in: {all}");
+        }
+    }
+
+    #[test]
+    fn a_duplicate_switch_match_value_is_never_echoed() {
+        let sw = switch_node("sw", "Route", &[("A", CANARY), ("B", CANARY)]);
+        let f = flow(
+            vec![input("in1"), sw, output("out")],
+            vec![
+                edge("e1", "in1", handle::RESULT, "sw", handle::INPUT),
+                edge("e2", "sw", handle::DEFAULT, "out", "value"),
+            ],
+        );
+        let graph = graph_lints(&f);
+        assert_eq!(keys(&graph), vec![(Some("sw"), None, INVALID_GRAPH)]);
+        assert_no_canary(&graph);
+        assert_eq!(
+            graph[0].message,
+            "'Route': Two cases of this Switch have the same match value."
+        );
+        assert_no_canary(&lint(&f));
+    }
+
+    #[test]
+    fn a_bad_callback_name_is_never_echoed() {
+        let wait = |id: &str, name: &str| {
+            node(
+                id,
+                FlowNodeKind::WaitForCallback {
+                    label: id.to_string(),
+                    name: name.to_string(),
+                    timeout_ms: 60_000,
+                    accept_when: None,
+                },
+            )
+        };
+        let bad = flow(vec![wait("w1", CANARY)], vec![]);
+        let graph = graph_lints(&bad);
+        assert!(!graph.is_empty());
+        assert_no_canary(&graph);
+        assert_no_canary(&lint(&bad));
+        let same = flow(vec![wait("w1", "pay"), wait("w2", "pay")], vec![]);
+        let lints = graph_lints(&same);
+        assert!(lints[0].message.contains("same name"), "{}", lints[0].message);
+        let odd = flow(
+            vec![input("in1"), wait("w1", "pay")],
+            vec![edge("e1", "in1", handle::RESULT, "w1", CANARY)],
+        );
+        assert_no_canary(&graph_lints(&odd));
+    }
+
+    #[test]
+    fn a_bad_wire_target_or_exit_name_is_never_echoed() {
+        let f = flow(
+            vec![input("in1"), if_node("if1", "Check"), output("out")],
+            vec![edge("e1", "in1", handle::RESULT, "if1", CANARY)],
+        );
+        assert_no_canary(&graph_lints(&f));
+        let g = flow(
+            vec![input("in1"), output("out")],
+            vec![edge("e1", "in1", CANARY, "out", "value")],
+        );
+        assert_no_canary(&graph_lints(&g));
+    }
+
+    #[test]
+    fn a_huge_ring_reports_its_cycle_in_linear_time() {
+        const N: usize = 20_000;
+        let nodes: Vec<FlowNode> = (0..N).map(|i| output(&format!("n{i}"))).collect();
+        let edges: Vec<FlowEdge> = (0..N)
+            .map(|i| {
+                edge(
+                    &format!("e{i}"),
+                    &format!("n{i}"),
+                    handle::RESULT,
+                    &format!("n{}", (i + 1) % N),
+                    "value",
+                )
+            })
+            .collect();
+        let f = flow(nodes, edges);
+        let started = std::time::Instant::now();
+        let error = validate(&f).expect_err("a ring is a cycle");
+        let lints = graph_error_lints(&f, &error);
+        let elapsed = started.elapsed();
+        assert_eq!(lints.len(), 2 * N);
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_node_that_feeds_an_output_only_through_a_cycle_is_handled() {
+        let f = flow(
+            vec![input("in1"), output("a"), output("b")],
+            vec![
+                edge("e1", "in1", handle::RESULT, "a", "value"),
+                edge("e2", "a", handle::RESULT, "b", "value"),
+                edge("e3", "b", handle::RESULT, "a", "value"),
+            ],
+        );
+        assert!(lint(&f).is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_id_output_does_not_panic_or_double_lint() {
+        let f = flow(
+            vec![input("in1"), output("out"), output("out"), input("lonely")],
+            vec![edge("e1", "in1", handle::RESULT, "out", "value")],
+        );
+        assert_eq!(keys(&lint(&f)), vec![(Some("lonely"), None, NO_PATH_TO_OUTPUT)]);
+        assert_eq!(
+            keys(&graph_lints(&f)),
+            vec![(Some("out"), None, INVALID_GRAPH)]
+        );
     }
 }
