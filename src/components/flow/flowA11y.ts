@@ -22,10 +22,24 @@ export function flowNodeName(kind: FlowNodeKind): string {
   return kind.label.trim() || KIND_NAMES[kind.kind];
 }
 
-// First line of an error, cut so that one failure cannot flood a reader.
+// First non-empty line of an error, cut so that one failure cannot flood a reader.
+// The cut counts code points, so it never splits a surrogate pair.
 export function shortError(error: string): string {
-  const first = (error.split('\n')[0] ?? '').trim();
-  return first.length > MAX_ERROR_CHARS ? `${first.slice(0, MAX_ERROR_CHARS - 1)}…` : first;
+  const first =
+    error
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line !== '') ?? '';
+  const chars = Array.from(first);
+  return chars.length > MAX_ERROR_CHARS
+    ? `${chars.slice(0, MAX_ERROR_CHARS - 1).join('')}…`
+    : first;
+}
+
+// The ": text" suffix for a failed node, or nothing when the error has no text.
+export function errorSuffix(error: string | undefined): string {
+  const text = error ? shortError(error) : '';
+  return text ? `: ${text}` : '';
 }
 
 // Label, kind and status only. Progress text, values and exchanges change too
@@ -36,7 +50,7 @@ export function flowNodeAriaLabel(
   detail?: FlowNodeDetail,
 ): string {
   const base = `${flowNodeName(kind)}, ${KIND_NAMES[kind.kind]} node, ${nodeStatusLabel(status, detail)}`;
-  return status === 'failed' && detail?.error ? `${base}: ${shortError(detail.error)}` : base;
+  return status === 'failed' ? `${base}${errorSuffix(detail?.error)}` : base;
 }
 
 const targetFieldLabel = (field: string) => (field === 'trigger' ? 'run when' : field);

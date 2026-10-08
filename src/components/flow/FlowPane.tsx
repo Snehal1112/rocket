@@ -668,6 +668,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             </div>
           )}
           <FlowRunAnnouncer
+            key={tab.id}
             nodes={tab.nodes}
             nodeStatus={tab.nodeStatus}
             nodeDetail={tab.nodeDetail}

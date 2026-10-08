@@ -37,9 +37,27 @@ describe('shortError', () => {
   it('leaves a short error alone', () => {
     expect(shortError('boom')).toBe('boom');
   });
+
+  it('uses the first non-empty line', () => {
+    expect(shortError('\n\n  boom\nmore')).toBe('boom');
+    expect(shortError('\n  \n')).toBe('');
+  });
+
+  it('does not split a surrogate pair at the cut', () => {
+    const cut = shortError(`${'x'.repeat(78)}😀😀tail`);
+    expect(Array.from(cut)).toHaveLength(80);
+    expect(cut).toBe(`${'x'.repeat(78)}😀…`);
+  });
 });
 
 describe('flowNodeAriaLabel', () => {
+  it('skips the colon when the error has no text', () => {
+    expect(flowNodeAriaLabel(request, 'failed', { error: '\n' })).toBe('Fetch, request node, failed');
+    expect(flowNodeAriaLabel(request, 'failed', { error: '\nboom' })).toBe(
+      'Fetch, request node, failed: boom',
+    );
+  });
+
   it('names label, kind and status', () => {
     expect(flowNodeAriaLabel(request, 'idle')).toBe('Fetch, request node, not run');
     expect(flowNodeAriaLabel(request, 'success')).toBe('Fetch, request node, succeeded');

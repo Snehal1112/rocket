@@ -132,4 +132,25 @@ describe('FlowPane run announcer', () => {
     expect(polite()).toBeEmptyDOMElement();
     expect(alert()).toBeEmptyDOMElement();
   });
+
+  it('does not announce the other tab\'s run when switching flow tabs', () => {
+    const tabB: FlowTab = {
+      ...baseTab,
+      id: 'flow-announce-2',
+      flowName: 'other',
+      nodes: [
+        { id: 'a', position: { x: 0, y: 0 }, kind: { kind: 'Output', label: 'A' } },
+        { id: 'b', position: { x: 0, y: 0 }, kind: { kind: 'Output', label: 'B' } },
+      ],
+      runState: 'done',
+      runId: 'run-9',
+      nodeStatus: { a: 'failed', b: 'success' },
+      nodeDetail: { a: { error: 'bad' } },
+    };
+    const group = usePaneStore.getState().activeGroupId;
+    const { rerender } = render(<FlowPane tab={baseTab} groupId={group} />);
+    rerender(<FlowPane tab={tabB} groupId={group} />);
+    expect(polite()).toBeEmptyDOMElement();
+    expect(alert()).toBeEmptyDOMElement();
+  });
 });

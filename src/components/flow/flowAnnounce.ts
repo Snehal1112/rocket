@@ -1,6 +1,6 @@
 import type { FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
-import { flowNodeName, shortError } from './flowA11y';
+import { errorSuffix, flowNodeName } from './flowA11y';
 import { nodeStatusLabel } from './nodes/nodeStatus';
 
 export type AnnounceRunState = 'idle' | 'running' | 'done';
@@ -51,7 +51,7 @@ export function diffAnnouncements(
     const name = flowNodeName(node.kind);
     const detail = nodeDetail?.[id];
     if (status === 'failed') {
-      failures.push(`${name} failed${detail?.error ? `: ${shortError(detail.error)}` : ''}.`);
+      failures.push(`${name} failed${errorSuffix(detail?.error)}.`);
     } else {
       results.push(`${name} ${nodeStatusLabel(status, detail)}.`);
     }
