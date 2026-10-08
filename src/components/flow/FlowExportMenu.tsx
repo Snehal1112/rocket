@@ -1,8 +1,10 @@
 import { Copy, Download } from 'lucide-react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -22,6 +24,8 @@ const FILTERS: Record<'json' | 'md', FileFilter[]> = {
 // masked in every output, and the exporter never reads the in-memory auth store.
 export function FlowExportMenu({ tab }: { tab: FlowTab }) {
   const reportReady = tab.runState === 'done' && tab.nodeDetail !== undefined;
+  // Off until the person asks. Kept while the tab is open, never stored.
+  const [includeBodies, setIncludeBodies] = useState(false);
 
   const copyFlow = () => {
     const flow = exportableFlow(tab);
@@ -40,7 +44,7 @@ export function FlowExportMenu({ tab }: { tab: FlowTab }) {
   };
 
   const exportReport = async (format: 'json' | 'md') => {
-    const report = buildRunReport(tab, { includeBodies: false });
+    const report = buildRunReport(tab, { includeBodies });
     const text = format === 'json' ? report.json : report.markdown;
     try {
       const saved = await saveTextFile(
@@ -74,6 +78,15 @@ export function FlowExportMenu({ tab }: { tab: FlowTab }) {
         <DropdownMenuItem disabled={!reportReady} onSelect={() => void exportReport('md')}>
           Export run report (Markdown)
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem
+          checked={includeBodies}
+          onCheckedChange={setIncludeBodies}
+          // Keep the menu open so the person can pick a report next.
+          onSelect={(e) => e.preventDefault()}
+        >
+          Include bodies in run report
+        </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

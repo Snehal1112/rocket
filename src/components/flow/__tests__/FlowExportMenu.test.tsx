@@ -168,4 +168,19 @@ describe('FlowExportMenu', () => {
     expect(toast.error).toHaveBeenCalledWith('Could not save the report: Error: disk full');
     expect(toast.success).not.toHaveBeenCalled();
   });
+
+  it('has an unchecked bodies option, and checking it keeps the menu open', async () => {
+    render(<FlowExportMenu tab={tab()} />);
+    await openMenu();
+    const option = await screen.findByRole('menuitemcheckbox', {
+      name: 'Include bodies in run report',
+    });
+    expect(option).toHaveAttribute('aria-checked', 'false');
+    await userEvent.click(option);
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Include bodies in run report' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('menuitem', { name: 'Copy flow JSON' })).toBeInTheDocument();
+  });
 });
