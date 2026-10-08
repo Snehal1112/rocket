@@ -63,8 +63,18 @@ describe('FlowCanvas search', () => {
     expect(searchBox()).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Close search' }));
     expect(searchBox()).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Search nodes' }));
+    await user.click(screen.getByRole('button', { name: 'Open node search' }));
     expect(searchBox()).toHaveFocus();
+  });
+
+  it('does not open on Ctrl+Shift+F', () => {
+    render(<Harness onSelect={vi.fn()} />);
+    fireEvent.keyDown(screen.getByTestId('flow-canvas'), {
+      key: 'F',
+      ctrlKey: true,
+      shiftKey: true,
+    });
+    expect(searchBox()).toBeNull();
   });
 
   it('selects the match and zooms to it, then cycles with Enter', async () => {

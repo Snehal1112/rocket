@@ -153,4 +153,21 @@ describe('layoutFlow', () => {
     expect(y('o1')).toBeLessThan(y('o2'));
     expect(y('o2')).toBeLessThan(y('o3'));
   });
+
+  it('keeps the true exit of an If above the false exit', () => {
+    const cond: FlowNode = {
+      id: 'if',
+      kind: { kind: 'If', label: 'Check', condition: 'x' },
+      position: { x: 0, y: 0 },
+    };
+    const nodes = [cond, out('t'), out('f')];
+    // The false wire is listed first on purpose.
+    const edges = [
+      wire('e2', 'if', 'f', { sourceHandle: 'false' }),
+      wire('e1', 'if', 't', { sourceHandle: 'true' }),
+    ];
+    const laid = layoutFlow(nodes, edges, noSizes);
+    const y = (id: string) => laid.find((n) => n.id === id)?.position.y ?? Number.NaN;
+    expect(y('t')).toBeLessThan(y('f'));
+  });
 });

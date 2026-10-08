@@ -351,6 +351,7 @@ function FlowCanvasInner({
       const next = layoutFlow(nodes, edges, measuredRef.current, only);
       if (next === nodes) {
         toast.info('The layout is already tidy.');
+        focusPane();
         return;
       }
       onNodesChange(next);
@@ -365,6 +366,8 @@ function FlowCanvasInner({
     } catch (err) {
       toast.error(`Could not tidy the layout: ${String(err)}`);
     }
+    // The toolbar is a key-free zone, so hand the focus back to the canvas.
+    focusPane();
   };
 
   // Selects the match and brings it into view. The properties panel stays as it is.
@@ -535,14 +538,14 @@ function FlowCanvasInner({
       onRedo();
       return;
     }
+    // Plain Ctrl+C, V, D and F only. Shift variants belong to the browser.
+    if (e.shiftKey) return;
     if (key === 'f') {
       // Replaces the webview's own find, which cannot see the canvas.
       e.preventDefault();
       openSearch();
       return;
     }
-    // Plain Ctrl+C, V and D only. Shift variants belong to the browser.
-    if (e.shiftKey) return;
     if (key === 'c' && onCopy && selectedNodeIds.size > 0) {
       e.preventDefault();
       onCopy();
@@ -651,7 +654,7 @@ function FlowCanvasInner({
               size='sm'
               variant='outline'
               className='h-8 gap-1.5'
-              aria-label='Search nodes'
+              aria-label='Open node search'
               title='Search nodes (Ctrl+F)'
               onClick={openSearch}
             >

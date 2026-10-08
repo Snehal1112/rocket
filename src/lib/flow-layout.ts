@@ -16,6 +16,7 @@ export const NODE_SEP = 40;
 // Position of a wire's exit on its source: a Switch case index, true before false, else 0.
 // Dagre stacks siblings in reverse insertion order, so the wires are inserted
 // from the last exit to the first to show the exits in the order the node does.
+// This ordering was observed on @dagrejs/dagre 3.1.1.
 function exitIndex(edge: FlowEdge, source: FlowNode | undefined): number {
   const handle = edge.sourceHandle;
   if (!handle || !source) return 0;

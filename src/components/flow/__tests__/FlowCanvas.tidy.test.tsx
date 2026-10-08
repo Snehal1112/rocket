@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +34,7 @@ function renderCanvas(
   edges: FlowEdge[],
   selected: string[] = [],
   onNodesChange = vi.fn(),
+  onUndo?: () => void,
 ) {
   render(
     <FlowCanvas
@@ -45,6 +46,8 @@ function renderCanvas(
       onConnect={vi.fn()}
       selectedNodeIds={new Set(selected)}
       onSelectedNodeIdsChange={vi.fn()}
+      onUndo={onUndo}
+      onRedo={onUndo ? vi.fn() : undefined}
     />,
   );
   return onNodesChange;
@@ -105,6 +108,24 @@ describe('FlowCanvas tidy', () => {
     await user.click(tidyButton());
     const [next] = onNodes.mock.calls[0];
     expect(next[1].position.x).toBeGreaterThan(next[0].position.x);
+  });
+
+  it('hands the focus back so Ctrl+Z works right after Tidy', async () => {
+    const user = userEvent.setup();
+    const onUndo = vi.fn();
+    renderCanvas([out('a'), out('b')], [edge('e1', 'a', 'b')], [], vi.fn(), onUndo);
+    await user.click(tidyButton());
+    fireEvent.keyDown(document.activeElement as Element, { key: 'z', ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the focus back when the graph is already tidy', async () => {
+    const user = userEvent.setup();
+    const onUndo = vi.fn();
+    renderCanvas([out('a', 0, 0), out('b', 340, 0)], [edge('e1', 'a', 'b')], [], vi.fn(), onUndo);
+    await user.click(tidyButton());
+    fireEvent.keyDown(document.activeElement as Element, { key: 'z', ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
   it('is disabled for an empty flow', () => {
