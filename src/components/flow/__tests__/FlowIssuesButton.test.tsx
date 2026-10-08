@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { FlowIssue } from '@/lib/flow-issues';
@@ -49,6 +49,21 @@ describe('FlowIssuesButton', () => {
     await userEvent.click(within(list).getAllByRole('button')[0]);
     expect(onSelectNode).toHaveBeenCalledWith('n1');
     expect(screen.queryByRole('list', { name: 'Flow issues' })).not.toBeInTheDocument();
+  });
+
+  it('selects the node only after the list closed, and leaves focus off the trigger', async () => {
+    const trigger = () => screen.getByRole('button', { name: '2 errors, 1 warning' });
+    let listOpenAtSelect: boolean | null = null;
+    const onSelectNode = vi.fn(() => {
+      listOpenAtSelect = screen.queryByRole('list', { name: 'Flow issues' }) !== null;
+    });
+    render(<FlowIssuesButton issues={issues} nodes={nodes} onSelectNode={onSelectNode} />);
+    await userEvent.click(trigger());
+    const list = await screen.findByRole('list', { name: 'Flow issues' });
+    await userEvent.click(within(list).getAllByRole('button')[0]);
+    await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('n1'));
+    expect(listOpenAtSelect).toBe(false);
+    expect(document.activeElement).not.toBe(trigger());
   });
 
   it('does not make an issue without a node clickable', async () => {

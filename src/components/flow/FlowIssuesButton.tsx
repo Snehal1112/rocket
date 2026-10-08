@@ -1,5 +1,5 @@
 import { CircleAlert, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { type FlowIssue, issueCountLabel, worstSeverity } from '@/lib/flow-issues';
@@ -29,6 +29,7 @@ function SeverityIcon({ severity }: { severity: FlowIssue['severity'] }) {
 // names a node selects it and opens its panel.
 export function FlowIssuesButton({ issues, nodes, onSelectNode }: FlowIssuesButtonProps) {
   const [open, setOpen] = useState(false);
+  const chosenNodeId = useRef<string | null>(null);
   if (issues.length === 0) return null;
   const worst = worstSeverity(issues) ?? 'warning';
   const nodeLabel = (nodeId: string) => {
@@ -49,11 +50,23 @@ export function FlowIssuesButton({ issues, nodes, onSelectNode }: FlowIssuesButt
           <span>{issues.length}</span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align='end' className='nokey w-80 p-1'>
+      <PopoverContent
+        align='end'
+        className='nokey w-80 p-1'
+        onCloseAutoFocus={(event) => {
+          // Radix returns focus to the trigger after this. Select the node only
+          // now, so the panel's focus request runs last and the trigger cannot steal it.
+          const nodeId = chosenNodeId.current;
+          if (nodeId === null) return;
+          chosenNodeId.current = null;
+          event.preventDefault();
+          onSelectNode(nodeId);
+        }}
+      >
         <ul aria-label='Flow issues' className='max-h-80 overflow-y-auto'>
-          {issues.map((issue) => {
+          {issues.map((issue, index) => {
             const nodeId = issue.nodeId;
-            const key = `${issue.code}:${nodeId ?? issue.edgeId ?? ''}:${issue.message}`;
+            const key = `${issue.code}:${nodeId ?? issue.edgeId ?? ''}:${issue.message}:${index}`;
             return (
               <li key={key}>
                 {nodeId ? (
@@ -63,7 +76,7 @@ export function FlowIssuesButton({ issues, nodes, onSelectNode }: FlowIssuesButt
                     size='sm'
                     className='h-auto w-full items-start justify-start gap-2 whitespace-normal px-2 py-1.5 text-left text-xs'
                     onClick={() => {
-                      onSelectNode(nodeId);
+                      chosenNodeId.current = nodeId;
                       setOpen(false);
                     }}
                   >
