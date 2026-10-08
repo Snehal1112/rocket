@@ -126,3 +126,6 @@ plus `credentials.secret_forms()` first and capped second (16 KB per wire,
 64 KB per step, 1 KB per route value, 256 KB per step value). Wire errors are
 named by `wire_err` and never quote a resolved value. The run loop fills
 `duration_ms` for every node that ran and did not set its own.
+Wires are recorded with the credential captured at run start, so a credential
+that changes at send time is not in the trace mask (same caveat as the
+send-time note above).

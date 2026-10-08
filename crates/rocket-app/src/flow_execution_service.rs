@@ -684,9 +684,10 @@ pub struct FlowStepResult {
     pub node_id: String,
     pub status: FlowNodeStatus,
     pub status_code: Option<u16>,
-    /// How long the node ran. A Request reports its response time, a
-    /// repeat-until poll its total and a callback wait its wait. `None` only
-    /// for a node that never ran.
+    /// How long the node ran. A Request that got a response reports its
+    /// response time; other steps report the elapsed time of the node run. A
+    /// repeat-until poll reports its total and a callback wait its wait.
+    /// `None` only for a node that never ran.
     pub duration_ms: Option<u64>,
     pub error: Option<String>,
     /// The node's captured output value for Output and Input nodes, or the
@@ -1232,7 +1233,7 @@ impl FlowExecutionService {
                 );
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
                 // Wires get the raw value. The step shows it masked, then capped.
-                let (reported, cut) = mask_then_cap(&resolved, &secret_values, STEP_VALUE_LIMIT);
+                let (reported, cut) = mask_then_cap(&resolved, &trace_masks, STEP_VALUE_LIMIT);
                 trace.step.value_truncated = cut;
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
@@ -1310,15 +1311,15 @@ impl FlowExecutionService {
                     if edge.target_field == handle::AUTH {
                         // Only the fact that a credential arrived is recorded.
                         trace.record_credential_wire(edge);
-                        request_input.auth = credentials
-                            .auth_for_node(&edge.source_node_id)
-                            .cloned()
-                            .ok_or_else(|| {
-                                DomainError::Internal(format!(
-                                    "edge '{}': node '{}' has no credential",
-                                    edge.id, edge.source_node_id
-                                ))
-                            })?;
+                        let Some(credential) = credentials.auth_for_node(&edge.source_node_id)
+                        else {
+                            let e = DomainError::Internal(format!(
+                                "node '{}' has no credential",
+                                edge.source_node_id
+                            ));
+                            return Err(fail_wire(trace, edge, e, &trace_masks));
+                        };
+                        request_input.auth = credential.clone();
                         auth_from = Some(edge.source_node_id.clone());
                         continue;
                     }
@@ -1429,7 +1430,7 @@ impl FlowExecutionService {
                 ))))
             }
             FlowNodeKind::If { condition, .. } => {
-                let source = single_input(node, data_edges, captured)?;
+                let source = single_input(node, data_edges, captured, trace, &trace_masks)?;
                 record_input_wire(trace, data_edges, source, &trace_masks);
                 let outcome = exec
                     .evaluate_flow_route_expression(
@@ -1462,7 +1463,7 @@ impl FlowExecutionService {
                 })
             }
             FlowNodeKind::Switch { value, cases, .. } => {
-                let source = single_input(node, data_edges, captured)?;
+                let source = single_input(node, data_edges, captured, trace, &trace_masks)?;
                 record_input_wire(trace, data_edges, source, &trace_masks);
                 let outcome = exec
                     .evaluate_flow_route_expression(
@@ -1512,7 +1513,7 @@ impl FlowExecutionService {
                 .await
             }
             FlowNodeKind::Transform { script, .. } => {
-                let source = single_input(node, data_edges, captured)?;
+                let source = single_input(node, data_edges, captured, trace, &trace_masks)?;
                 record_input_wire(trace, data_edges, source, &trace_masks);
                 let outcome = exec
                     .evaluate_flow_transform_value(
@@ -1526,7 +1527,7 @@ impl FlowExecutionService {
                 // A string result stays text for wires. Other results stay JSON.
                 let value = outcome.result?;
                 // Wires get the raw text. The step shows it masked, then capped.
-                let (reported, cut) = mask_then_cap(value.data(), &secret_values, STEP_VALUE_LIMIT);
+                let (reported, cut) = mask_then_cap(value.data(), &trace_masks, STEP_VALUE_LIMIT);
                 trace.step.value_truncated = cut;
                 Ok(ExecutedNode {
                     reported_value: Some(reported),
@@ -1603,9 +1604,13 @@ fn single_input<'c>(
     node: &FlowNode,
     data_edges: &[&FlowEdge],
     captured: &'c HashMap<String, CapturedOutput>,
+    trace: &mut NodeTrace,
+    masks: &HashSet<String>,
 ) -> DomainResult<&'c CapturedOutput> {
     match data_edges {
-        [edge] if edge.target_field == handle::INPUT => captured_source(node, edge, captured),
+        [edge] if edge.target_field == handle::INPUT => {
+            captured_source(node, edge, captured).map_err(|e| fail_wire(trace, edge, e, masks))
+        }
         _ => Err(DomainError::Internal(format!(
             "node '{}' needs exactly one live '{}' input, found {}",
             node.id,
@@ -9399,5 +9404,159 @@ mod tests {
         );
         let json = serde_json::to_string(&summary).expect("serialize");
         assert!(!json.contains("sk-live-123456"), "{json}");
+    }
+
+    /// Runs `execute_node` once for `node` with nothing captured yet, and
+    /// returns its result with the trace it filled.
+    async fn execute_one_node(
+        flow: Flow,
+        node_id: &str,
+        edge_ids: &[&str],
+    ) -> (DomainResult<ExecutedNode>, NodeTrace) {
+        let node = flow
+            .nodes
+            .iter()
+            .find(|n| n.id == node_id)
+            .expect("node")
+            .clone();
+        let edges: Vec<FlowEdge> = flow
+            .edges
+            .iter()
+            .filter(|e| edge_ids.contains(&e.id.as_str()))
+            .cloned()
+            .collect();
+        let data_edges: Vec<&FlowEdge> = edges.iter().collect();
+        let name = flow.name.clone();
+        let service = service_with_flow(flow.clone());
+        let mut callbacks = crate::flow_callbacks::RunCallbacks::open_all(
+            service.callback_listener.as_ref(),
+            &flow,
+        )
+        .await
+        .expect("callbacks");
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+        let (_handle, cancel) = cancel_pair();
+        let mut ctx = NodeRunContext {
+            run_id: "run-1".to_string(),
+            node_id: node_id.to_string(),
+            cancel,
+        };
+        let mut trace = NodeTrace::default();
+        let result = service
+            .execute_node(
+                &exec,
+                &run_input(&name),
+                &node,
+                &data_edges,
+                &HashMap::new(),
+                &HashMap::new(),
+                &FlowCredentials::default(),
+                &mut Vec::new(),
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut trace,
+                &mut ctx,
+                &mut callbacks,
+            )
+            .await;
+        (result, trace)
+    }
+
+    #[tokio::test]
+    async fn an_auth_wire_without_a_credential_names_the_wire() {
+        use rocket_shared::types::Auth;
+
+        let flow = Flow {
+            name: "no-cred".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Sign in".to_string(),
+                        auth: Auth::Bearer {
+                            token: "static-token-123456".to_string(),
+                        },
+                        apply_to_inherit: false,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                request_flow_node("r", "https://api.example.com/r"),
+            ],
+            edges: vec![auth_wire()],
+            callback_host: None,
+        };
+
+        let (result, trace) = execute_one_node(flow, "r", &["e1"]).await;
+
+        let err = result.expect_err("no credential");
+        assert!(
+            matches!(&err, DomainError::Internal(m)
+                if m.starts_with("wire 'e1' (a.result -> r.auth): ")
+                    && m.contains("node 'a' has no credential")),
+            "got {err}"
+        );
+        assert_eq!(trace.step.failed_edge_id.as_deref(), Some("e1"));
+    }
+
+    #[tokio::test]
+    async fn a_missing_single_input_source_names_the_wire() {
+        let flow = if_flow("if-missing");
+
+        let (result, trace) = execute_one_node(flow, "check", &["e1"]).await;
+
+        let err = result.expect_err("source has not executed");
+        assert!(
+            err.to_string()
+                .contains("wire 'e1' (login.result -> check.input)"),
+            "got {err}"
+        );
+        assert_eq!(trace.step.failed_edge_id.as_deref(), Some("e1"));
+    }
+
+    #[tokio::test]
+    async fn an_auth_token_wired_into_a_transform_is_masked_in_the_step_value() {
+        use rocket_shared::types::Auth;
+
+        let flow = Flow {
+            name: "auth-transform".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "a".to_string(),
+                    kind: FlowNodeKind::Auth {
+                        label: "Sign in".to_string(),
+                        auth: Auth::Bearer {
+                            token: "first-line-token-111\nsecond-line-token-222".to_string(),
+                        },
+                        apply_to_inherit: false,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+                transform_node("t", "return response.body;"),
+            ],
+            edges: vec![edge_from("e1", "a", handle::RESULT, "t", handle::INPUT, "")],
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "__requireValue(",
+                Scripted::Value(serde_json::json!("second-line-token-222")),
+            )]),
+        );
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("auth-transform"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            step_of(&summary, "t").value.as_deref(),
+            Some(crate::redaction::REDACTED)
+        );
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("second-line-token-222"), "{json}");
     }
 }
