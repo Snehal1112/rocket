@@ -267,3 +267,93 @@ async fn sequential_flow_runs_every_phase_outer_to_inner() {
         vec!["outer-tests", "inner-tests", "req-tests"]
     );
 }
+
+/// Writes collection `name` under `<workspace>/collections` with folder `outer`, whose
+/// `folder.yml` sets `X-Env` to `env`, and returns the saved path of `outer/ping.yml`.
+fn seed_workspace(workspace: &std::path::Path, name: &str, env: &str, url: &str) -> String {
+    let repo = FsCollectionRepo::new_standalone(workspace.join("collections"));
+    repo.create(name).expect("create collection");
+    repo.create_folder(name, "outer").expect("create outer");
+    repo.save_folder_settings(
+        name,
+        "outer",
+        &FolderSettings {
+            headers: vec![Header::new("X-Env", env)],
+            ..Default::default()
+        },
+    )
+    .expect("save outer settings");
+    repo.save_request(
+        name,
+        "outer/ping.yml",
+        &Request::new("Ping", HttpMethod::Get, url),
+    )
+    .expect("save request")
+}
+
+/// Builds the input for a send of `collection`'s `outer/ping.yml`.
+fn ping_input(url: &str, collection: &str, rel: &str) -> super::ExecuteRequestInput {
+    let mut req = input(url);
+    req.method = HttpMethod::Get;
+    req.collection = Some(collection.into());
+    req.request_path = Some(rel.into());
+    req.request_name = Some("Ping".into());
+    req
+}
+
+#[tokio::test]
+async fn nested_send_follows_a_workspace_switch() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/ping"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let url = format!("{}/ping", server.uri());
+
+    // Workspace A and B both hold `api`, and only B holds `beta`.
+    let ws_a = TempDir::new().expect("tempdir");
+    let ws_b = TempDir::new().expect("tempdir");
+    let rel = seed_workspace(ws_a.path(), "api", "a", &url);
+    seed_workspace(ws_b.path(), "api", "b", &url);
+    let beta_rel = seed_workspace(ws_b.path(), "beta", "beta-b", &url);
+
+    let active = Arc::new(Mutex::new(ws_a.path().to_path_buf()));
+    let svc = RequestExecutionService::new(
+        Box::new(NullEnvRepo),
+        Arc::new(ReqwestExecutor::new()),
+        Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+        Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(
+            &active,
+        ))),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(EmptySecretManagerRepo),
+        Arc::new(rocket_environment::NullSecretStore),
+        Arc::new(rocket_environment::NullVaultSecretFetcher),
+    );
+
+    svc.execute(ping_input(&url, "api", &rel))
+        .await
+        .expect("send in workspace A");
+
+    // The switch only changes the shared path, the service is not rebuilt.
+    *active.lock().expect("lock") = ws_b.path().to_path_buf();
+    svc.execute(ping_input(&url, "api", &rel))
+        .await
+        .expect("send of the same-named collection in workspace B");
+    svc.execute(ping_input(&url, "beta", &beta_rel))
+        .await
+        .expect("send of a collection that only workspace B has");
+
+    let seen = server
+        .received_requests()
+        .await
+        .expect("request recording is on");
+    let envs: Vec<Option<&str>> = seen.iter().map(|r| header(r, "X-Env")).collect();
+    assert_eq!(
+        envs,
+        vec![Some("a"), Some("b"), Some("beta-b")],
+        "each send takes folder headers from the active workspace"
+    );
+}
