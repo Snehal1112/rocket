@@ -10,6 +10,7 @@ import {
   snapOf,
   undoStep,
 } from '@/lib/flow-history';
+import { appendRunRecord } from '@/lib/flow-run-history';
 import { mergeRunResult } from '@/lib/flow-run-result';
 import {
   collectAllTabs,
@@ -49,6 +50,7 @@ import type {
   ContractTab,
   FlowLastRun,
   FlowNodeDetail,
+  FlowRunRecord,
   FlowTab,
   FolderSection,
   FolderTab,
@@ -367,6 +369,10 @@ export interface PaneState {
   setFlowCallbackUrls: (tabId: string, urls: Record<string, string> | undefined) => void;
   /** Stores the finished run's result. Pass undefined to clear it. */
   setFlowRunResult: (tabId: string, lastRun: FlowLastRun | undefined) => void;
+  /** Adds a finished run to the tab's history (newest first, capped). */
+  recordFlowRun: (tabId: string, record: FlowRunRecord) => void;
+  /** Shows a recorded run's results. Null returns to the live results. */
+  setViewedFlowRun: (tabId: string, runId: string | null) => void;
 }
 
 // Monotonic source for RunnerTab.runId. Module-level (not per-tab) is
@@ -1124,6 +1130,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
             nodeStatus: {},
             nodeDetail: {},
             lastRun: undefined,
+            viewedRunId: null,
             callbackUrls: undefined,
           };
         }
@@ -1150,6 +1157,27 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           return tab;
         }
         return { ...tab, lastRun: mergeRunResult(tab.lastRun, lastRun) };
+      }),
+    });
+  },
+
+  recordFlowRun(tabId, record) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, runHistory: appendRunRecord(tab.runHistory, record) } : tab,
+      ),
+    });
+  },
+
+  setViewedFlowRun(tabId, runId) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isFlowTab(tab)) return tab;
+        if (runId === null) return { ...tab, viewedRunId: null };
+        // The live results are being written during a run, so the view stays live.
+        if (tab.runState === 'running') return tab;
+        if (!tab.runHistory?.some((r) => r.runId === runId)) return tab;
+        return { ...tab, viewedRunId: runId };
       }),
     });
   },

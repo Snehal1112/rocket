@@ -202,6 +202,20 @@ export interface FlowLastRun {
   failedCount: number;
   /** Nodes skipped because an upstream node failed. Not-taken branches are excluded. */
   skippedCount: number;
+  /** Environment the run used. Absent when the client could not tell. */
+  environmentName?: string | null;
+}
+
+/** One finished run kept in memory so its results can be viewed again. */
+export interface FlowRunRecord {
+  runId: string;
+  /** Epoch ms when this client recorded the finish. */
+  finishedAt: number;
+  environmentName: string | null;
+  result: FlowLastRun;
+  /** Frozen copy of the tab's node results at the end of the run. */
+  nodeStatus: Record<string, import('@/lib/tauri-api').FlowNodeStatus>;
+  nodeDetail: Record<string, FlowNodeDetail>;
 }
 
 export interface FlowTab extends BaseTab {
@@ -225,6 +239,10 @@ export interface FlowTab extends BaseTab {
   history?: import('@/lib/flow-history').FlowHistory;
   /** Result of the last finished run. Cleared when the next run starts. */
   lastRun?: FlowLastRun;
+  /** The last few finished runs, newest first. In memory only, never saved. */
+  runHistory?: FlowRunRecord[];
+  /** The past run whose results are shown. Null or absent means the live results. */
+  viewedRunId?: string | null;
 }
 
 export function isFlowTab(tab: Tab): tab is FlowTab {
