@@ -15,6 +15,7 @@ import {
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
+import type { FlowRunResult } from '@/lib/flow-run-result';
 import { flowPayloadFromTab } from '@/lib/flow-save';
 import {
   buildEdgeFromConnection,
@@ -42,6 +43,7 @@ import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
 import { NodePropertiesPanel, type PanelTab } from './properties/NodePropertiesPanel';
+import { RunResultStrip } from './RunResultStrip';
 import { useClearRemovedAuthTokens } from './useClearRemovedAuthTokens';
 import { WireScriptDialog } from './WireScriptDialog';
 
@@ -55,6 +57,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
   const patchFlowNodeProgress = usePaneStore((s) => s.patchFlowNodeProgress);
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
+  const setFlowRunResult = usePaneStore((s) => s.setFlowRunResult);
   const markClean = usePaneStore((s) => s.markClean);
   // There is no `activeEnvironmentName` anywhere. The active environment's
   // name is env-store's `activeEnvId` (it holds the name; see
@@ -170,6 +173,29 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       focusCanvas();
     },
     [focusCanvas, latestFlowTab, tabId, updateFlowGraph],
+  );
+
+  // Adds the failed node's label while the node still exists, so the strip
+  // keeps naming it after a rename or delete.
+  const handleRunResult = useCallback(
+    (result: FlowRunResult) => {
+      const failed = result.failedNodeId
+        ? latestFlowTab()?.nodes.find((n) => n.id === result.failedNodeId)
+        : undefined;
+      const failedLabel = failed ? failed.kind.label || failed.id : undefined;
+      setFlowRunResult(tabId, { ...result, ...(failedLabel ? { failedLabel } : {}) });
+    },
+    [latestFlowTab, setFlowRunResult, tabId],
+  );
+
+  // Selects the node and opens its panel on the Last run tab.
+  const handleOpenNodeOnLastRun = useCallback(
+    (nodeId: string) => {
+      setPanelTab('last-run');
+      handleSelectedNodeIdsChange(new Set([nodeId]));
+      handleOpenProperties(nodeId);
+    },
+    [handleOpenProperties, handleSelectedNodeIdsChange],
   );
 
   useEffect(() => {
@@ -419,6 +445,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                   })),
                 );
               }}
+              onRunResult={handleRunResult}
               onStepDebug={(nodeId, debug) => {
                 const node = latestFlowTab()?.nodes.find((n) => n.id === nodeId);
                 const label = node?.kind.label || nodeId;
@@ -442,6 +469,15 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               Save
             </Button>
           </div>
+          {tab.lastRun && (
+            <div className='absolute top-12 right-2 z-10 max-w-[60%]'>
+              <RunResultStrip
+                result={tab.lastRun}
+                canSelectFailed={tab.nodes.some((n) => n.id === tab.lastRun?.failedNodeId)}
+                onSelectFailed={handleOpenNodeOnLastRun}
+              />
+            </div>
+          )}
           <NodePalette onAddNode={handleAddNode} nodes={tab.nodes} />
           <FlowCanvas
             nodes={tab.nodes}
