@@ -257,17 +257,24 @@ describe('two tabs running the same flow', () => {
     await waitFor(() => expect(runFlow).toHaveBeenCalledTimes(1));
     const id = sentRunId(0);
     view.unmount();
-    expect(startedBus.size()).toBe(0);
+    // The run keeps its own listener, so it learns it started while hidden.
+    expect(startedBus.size()).toBe(1);
     expect(stored('flow-a').pendingRunId).toBe(id);
 
     render(<Pane id='flow-a' />);
-    await waitFor(() => expect(startedBus.size()).toBe(1));
+    // The remounted toolbar follows the run through that listener, not a second one.
+    await act(async () => {});
+    expect(startedBus.size()).toBe(1);
     expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
     startedBus.emit(startedEvent(id));
     expect(stored('flow-a').runState).toBe('running');
     expect(stored('flow-a').runId).toBe(id);
     await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(cancelFlowRun).toHaveBeenCalledWith(id);
+    await act(async () => {
+      resolvers.get(id)?.(summary(id, 'success'));
+    });
+    await waitFor(() => expect(startedBus.size()).toBe(0));
   });
 
   it('runs started with Ctrl+Enter get their own ids too', async () => {

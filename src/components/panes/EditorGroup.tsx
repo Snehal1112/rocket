@@ -328,7 +328,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             </Suspense>
           ) : isFlowTab(activeTab) ? (
             <Suspense fallback={<EditorSkeleton />}>
-              <FlowPane tab={activeTab} groupId={node.groupId} />
+              <FlowPane key={activeTab.id} tab={activeTab} groupId={node.groupId} />
             </Suspense>
           ) : isFolderTab(activeTab) ? (
             <FolderSettingsTab key={activeTab.id} tab={activeTab} />

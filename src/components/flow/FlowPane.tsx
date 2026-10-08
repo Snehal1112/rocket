@@ -471,6 +471,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               onSelectNode={handleSelectIssueNode}
             />
             <FlowToolbar
+              key={tab.id}
               collection={collectionName}
               flowName={flowName}
               tabId={tab.id}

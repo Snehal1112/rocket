@@ -110,6 +110,9 @@ function callbackUrlsFrom(event: FlowRunStartedEvent): Record<string, string> {
   return Object.fromEntries((event.callbacks ?? []).map((c) => [c.nodeId, c.url]));
 }
 
+// Ids of runs whose own handleRun still listens, even after its toolbar unmounted.
+const ownedRunIds = new Set<string>();
+
 export function FlowToolbar({
   collection,
   flowName,
@@ -180,15 +183,14 @@ export function FlowToolbar({
     unlistenRefs.current = [];
   }, []);
 
-  // Unsubscribe when the tab closes mid-run.
-  useEffect(() => cleanupListeners, [cleanupListeners]);
-
   // Keep streaming step results for a run this mount did not start. The
   // mount that started it still applies the final summary when it ends. A
   // run found by its pending id is marked running when it announces itself.
   useEffect(() => {
     // The mount that is starting a run follows it itself.
     if (!resumedRunId || isStartingRef.current) return;
+    // A start that outlived its toolbar still follows its run itself.
+    if (ownedRunIds.has(resumedRunId)) return;
     let unlistenRun: UnlistenFn | undefined;
     let unlistenStep: UnlistenFn | undefined;
     let unlistenStarted: UnlistenFn | undefined;
@@ -326,6 +328,9 @@ export function FlowToolbar({
     // catch block below, while the event handler sets it later.
     const hasStarted = (): boolean => started;
     const isOurs = (eventRunId: string) => !ended && eventRunId === runId;
+    // The listeners below outlive an unmounted toolbar, because their writes
+    // go to the tab by id. A toolbar mounted later must not follow this run too.
+    ownedRunIds.add(runId);
 
     // Subscribe first. run_flow only resolves when the run ends, so every
     // event is emitted while its promise is still pending.
@@ -350,13 +355,9 @@ export function FlowToolbar({
       if (!isOurs(event.run_id)) return;
       forwardProgress(onPatchProgressRef.current, event);
     });
-    const subscribed = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
-    if (mountedRef.current) {
-      unlistenRefs.current = subscribed;
-    } else {
-      // The unmount cleanup already ran, so nothing else would free these.
-      for (const unlisten of subscribed) unlisten();
-    }
+    // Kept even after an unmount and freed when run_flow settles, so a run
+    // whose toolbar was hidden still learns that it started.
+    unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
     // Known before the request goes out, so Stop works and a remounted
     // toolbar can follow the run before flow-run-started arrives.
     setActiveRunId(runId);
@@ -411,6 +412,7 @@ export function FlowToolbar({
       }
       onRunStateChange('done');
     } finally {
+      ownedRunIds.delete(runId);
       setActiveRunId(null);
       cleanupListeners();
       isStartingRef.current = false;

@@ -1305,7 +1305,7 @@ describe('FlowToolbar', () => {
       expect(vi.mocked(tauriApi.runFlow).mock.calls[1][5]).toEqual({ runId: 'run-b' });
     });
 
-    it('frees listeners that finish subscribing after the toolbar unmounted', async () => {
+    it('frees listeners that finish subscribing after the toolbar unmounted, once the run ends', async () => {
       const unlisten = vi.fn();
       let release: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => {
@@ -1323,7 +1323,54 @@ describe('FlowToolbar', () => {
       await waitFor(() => expect(tauriApi.onFlowRunStarted).toHaveBeenCalled());
       view.unmount();
       release();
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+      expect(unlisten).not.toHaveBeenCalled();
+      resolveRun({ runId: 'run-123', steps: [], stoppedReason: 'completed' });
       await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(4));
+    });
+
+    it('a run still learns it started after its toolbar unmounted, without double handling', async () => {
+      const unlisten = vi.fn();
+      // Like Tauri, every started event reaches every subscriber.
+      const subscribers: Array<NonNullable<typeof startedHandler>> = [];
+      const emit = (event: Parameters<NonNullable<typeof startedHandler>>[0]) => {
+        for (const h of subscribers) h(event);
+      };
+      vi.mocked(tauriApi.onFlowRunStarted).mockImplementation(async (h) => {
+        subscribers.push(h);
+        return unlisten;
+      });
+      const onCallbackUrls = vi.fn();
+      const view = renderToolbar({ onCallbackUrls });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+      view.unmount();
+      // The run is announced while no toolbar is mounted.
+      emit({
+        type: 'flowRunStarted',
+        run_id: 'run-123',
+        flow_name: 'my-flow',
+        collection: 'my-collection',
+        total_nodes: 1,
+        callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' }],
+      });
+      expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
+      expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://h:1/cb/tok' });
+      // A toolbar mounted later follows the run without handling the event twice.
+      onRunStateChange.mockClear();
+      renderToolbar({ tabRunState: 'running', tabRunId: 'run-123', onCallbackUrls });
+      await act(async () => {});
+      emit({
+        type: 'flowRunStarted',
+        run_id: 'run-123',
+        flow_name: 'my-flow',
+        collection: 'my-collection',
+        total_nodes: 1,
+      });
+      expect(onRunStateChange).toHaveBeenCalledTimes(0);
+      resolveRun({ runId: 'run-123', steps: [], stoppedReason: 'completed' });
+      await waitFor(() => expect(onRunStateChange).toHaveBeenCalledWith('done', 'run-123'));
+      await waitFor(() => expect(unlisten).toHaveBeenCalled());
     });
 
     it('a remounted toolbar follows a run that has not announced itself yet', async () => {
