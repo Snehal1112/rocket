@@ -633,7 +633,7 @@ Priority order (highest → lowest):
 
 Variables are not the only thing a folder contributes. The chain is always collection, then folders from the outermost to the innermost, then the request.
 
-**Headers.** Lowest to highest: collection `request.headers`, each folder's `request.headers`, the request's own headers. A more specific level replaces an enabled header of the same name from a less specific level. The match is on the exact header name, the same as today's collection-versus-request merge, so `x-id` and `X-Id` are two headers. A disabled header never replaces another one.
+**Headers.** Lowest to highest: collection `request.headers`, each folder's `request.headers`, the request's own headers. A more specific level replaces an enabled header of the same name from a less specific level. On the backend the match is on the exact header name, the same as today's collection-versus-request merge, so `x-id` and `X-Id` are two headers. The frontend send path matches names without case. A disabled header never replaces another one.
 
 **Auth.** A request whose auth is `inherit` (or `none`, which Rocket treats the same, see section 3.1) takes the auth of the nearest folder whose auth is set and is not `inherit`, then the collection's auth, then none. A folder whose auth is absent or `inherit` passes the lookup to its parent. An explicit request auth always wins.
 

@@ -22,7 +22,7 @@ Design: `docs/superpowers/specs/2026-10-07-folder-settings-design.md`. Plans and
 - `CollectionVariable` has no description field. Folder saves keep each variable's existing description by name (`folder_oc_variables` in `conversions/folder_settings.rs`). Loading fills `initial_value` from `value`, so an equal pair means no initial value and `initial` is not written.
 - `docs` is read as a string or `{ content, type }` and written as a plain string.
 - Absent auth and `inherit` both mean no folder auth. The folder Auth UI saves Inherit as an absent key. A request set to `none` also inherits (existing known difference, spec reference section 3.1).
-- Header names match exactly (no case folding), like the collection-versus-request merge. A disabled header never shadows another.
+- On the backend, header names match exactly (no case folding), like the collection-versus-request merge. The frontend send path (`src/lib/folder-inheritance.ts`) matches names without case. A disabled header never shadows another.
 - Script flow is per collection, at `extensions.bruno.scripts.flow`. There is no per-folder flow and no UI for it. `save_settings` must keep every other key under `extensions`.
 - Collection-level scripts in `opencollection.yml` are preserved but not run. Only folder and request scripts are chained.
 - Folder variables are pre-request only. A script can still set variables after a response.
@@ -37,11 +37,13 @@ These were found in review and left on purpose. Check them before building on th
 Scope not covered:
 - gRPC requests do not inherit folder settings. `grpc_service.rs` does not read the folder chain.
 - Collection-level scripts do not exist as a feature. They are preserved in `opencollection.yml`, never run.
+- Importers do not read or write the script flow (`extensions.bruno.scripts.flow`). A Bruno collection imported through `rocket-import` ends with the default sandwich flow. Hand edits to `opencollection.yml` are kept by Rocket saves.
 - There is no `folder.bru` importer. A Bruno `.bru` collection loses folder-level settings on import.
 - Folder OAuth2 on Flow and the collection runner has no interactive token step. A non-client-credentials grant (auth code, password, implicit) with no cached token sends no Authorization header, silently. Folder OAuth2 goes out as a plain bearer and ignores `addTokenTo` and `headerPrefix`.
 
 Header and auth behavior:
 - `inherited_headers` collapses same-name duplicates inside one level when a folder sets enabled headers. The legacy `merge_headers` keeps them (for example two `Set-Cookie`). With no enabled folder headers the legacy merge is used.
+- Header-name matching is case-sensitive on the backend and case-insensitive on the frontend send path (existing rules, kept as is).
 - The backend treats a request's `none` auth like `inherit`, so a frontend `none` request gets folder auth.
 
 Folder OAuth2 token cache (frontend `folder-auth-store`):
