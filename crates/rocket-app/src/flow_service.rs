@@ -22,6 +22,23 @@ impl FlowService {
         self.flow_repo.delete(collection, name)
     }
 
+    /// Renames a flow. The new name is trimmed. A blank or unchanged name is
+    /// rejected here, so the repository only sees real renames.
+    pub fn rename(&self, collection: &str, old_name: &str, new_name: &str) -> DomainResult<()> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "Flow name must not be empty".to_string(),
+            ));
+        }
+        if new_name == old_name {
+            return Err(DomainError::InvalidInput(
+                "The new flow name is the same as the current one".to_string(),
+            ));
+        }
+        self.flow_repo.rename(collection, old_name, new_name)
+    }
+
     pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()> {
         validate(&flow).map_err(|e| DomainError::InvalidInput(graph_error_message(e)))?;
         self.flow_repo.save(collection, &flow)
@@ -331,5 +348,74 @@ mod tests {
             message.ends_with("node(s): ; edge(s): e9"),
             "got: {message}"
         );
+    }
+
+    fn named_flow(name: &str) -> Flow {
+        Flow {
+            name: name.to_string(),
+            ..sample_flow()
+        }
+    }
+
+    #[test]
+    fn rename_moves_the_flow_and_trims_the_new_name() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::seeded("demo", sample_flow())));
+        svc.rename("demo", "Login Then Fetch", "  Sign In  ")
+            .expect("rename");
+        assert_eq!(svc.list("demo").expect("list"), vec!["Sign In".to_string()]);
+        assert_eq!(svc.get("demo", "Sign In").expect("get").name, "Sign In");
+    }
+
+    #[test]
+    fn rename_rejects_a_blank_name_without_touching_the_repo() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::seeded("demo", sample_flow())));
+        let err = svc
+            .rename("demo", "Login Then Fetch", "   ")
+            .expect_err("blank name");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::InvalidInput(_)
+        ));
+        assert!(svc.get("demo", "Login Then Fetch").is_ok());
+    }
+
+    #[test]
+    fn rename_rejects_an_unchanged_name_even_with_surrounding_spaces() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::seeded("demo", sample_flow())));
+        let err = svc
+            .rename("demo", "Login Then Fetch", " Login Then Fetch ")
+            .expect_err("unchanged name");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::InvalidInput(_)
+        ));
+        assert!(svc.get("demo", "Login Then Fetch").is_ok());
+    }
+
+    #[test]
+    fn rename_onto_an_existing_flow_is_a_conflict_and_keeps_both() {
+        let repo = FakeFlowRepo::seeded("demo", sample_flow());
+        repo.save("demo", &named_flow("Other")).expect("seed other");
+        let svc = FlowService::new(Box::new(repo));
+        let err = svc
+            .rename("demo", "Login Then Fetch", "Other")
+            .expect_err("target exists");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::Conflict(_)
+        ));
+        assert_eq!(svc.list("demo").expect("list").len(), 2);
+    }
+
+    #[test]
+    fn rename_of_a_missing_flow_is_not_found() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::new()));
+        let err = svc
+            .rename("demo", "missing", "Anything")
+            .expect_err("missing flow");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::NotFound(_)
+        ));
     }
 }

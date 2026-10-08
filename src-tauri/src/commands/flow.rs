@@ -441,6 +441,16 @@ pub fn delete_flow(
 }
 
 #[tauri::command]
+pub fn rename_flow(
+    collection: String,
+    old_name: String,
+    new_name: String,
+    svc: State<'_, FlowService>,
+) -> Result<(), DomainError> {
+    svc.rename(&collection, &old_name, &new_name)
+}
+
+#[tauri::command]
 pub fn save_flow(
     collection: String,
     flow: FlowDto,

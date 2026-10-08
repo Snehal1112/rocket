@@ -44,6 +44,17 @@ describe('flow tauri-api bindings', () => {
     });
   });
 
+  it('renameFlow invokes rename_flow with collection, oldName and newName', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { renameFlow } = await import('@/lib/tauri-api');
+    await renameFlow('my-collection', 'My Flow', 'Sign In');
+    expect(invoke).toHaveBeenCalledWith('rename_flow', {
+      collection: 'my-collection',
+      oldName: 'My Flow',
+      newName: 'Sign In',
+    });
+  });
+
   it('runFlow invokes run_flow with a nested input object and resolves with the summary', async () => {
     const summary = { runId: 'run-1', steps: [], stoppedReason: 'completed' };
     vi.mocked(invoke).mockResolvedValue(summary);

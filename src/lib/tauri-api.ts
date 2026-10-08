@@ -2178,6 +2178,9 @@ export const saveFlow = (collection: string, flow: Flow) =>
 export const deleteFlow = (collection: string, name: string) =>
   invoke<void>('delete_flow', { collection, name });
 
+export const renameFlow = (collection: string, oldName: string, newName: string) =>
+  invoke<void>('rename_flow', { collection, oldName, newName });
+
 /** Backend-reported node status. `'idle'` is frontend-only. */
 export type FlowRunNodeStatus = Exclude<FlowNodeStatus, 'idle'>;
 
