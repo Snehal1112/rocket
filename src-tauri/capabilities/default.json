@@ -23,6 +23,7 @@
     "fs:allow-write-file",
     "notification:default",
     "opener:default",
-    "dialog:default"
+    "dialog:default",
+    "clipboard-manager:allow-write-text"
   ]
 }

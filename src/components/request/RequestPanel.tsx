@@ -49,6 +49,7 @@ import { useInheritedAuthSource } from '@/hooks/useInheritedAuthSource';
 import { useSelectedOperationKind } from '@/hooks/useSelectedOperationKind';
 import { authStateForType } from '@/lib/auth-type-defaults';
 import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
+import { copyTextAsync } from '@/lib/clipboard';
 import { generateCurlCommand } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
@@ -459,11 +460,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       toast.warning("AWS SigV4 signing isn't included — this command won't be pre-signed.");
     }
     try {
-      const resolved = await resolveRequestFields(tab.id, request);
-      const command = generateCurlCommand(resolved, request.method);
-      await navigator.clipboard.writeText(command);
+      // The write starts now, so the click's user activation is still valid.
+      await copyTextAsync(
+        resolveRequestFields(tab.id, request).then((resolved) =>
+          generateCurlCommand(resolved, request.method),
+        ),
+      );
       toast.success('Copied as cURL');
-    } catch {
+    } catch (err) {
+      console.error('Copy as cURL failed.', err);
       toast.error('Failed to copy as cURL');
     }
   }, [tab.id, request]);
