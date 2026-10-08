@@ -7,6 +7,7 @@
 //! Results are deterministic: nodes in file order, rules in a fixed order.
 
 use crate::flow::{Flow, FlowNode};
+use crate::graph::FlowGraphError;
 use crate::handle;
 use crate::node::FlowNodeKind;
 use crate::validate::kind_name;
@@ -77,6 +78,7 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
             continue;
         }
         lints.extend(exit_lints(node, &index));
+        lints.extend(no_path_lint(node, &index));
     }
     lints
 }
@@ -85,6 +87,8 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
 struct GraphIndex<'a> {
     /// The exits of each node that have at least one wire.
     wired_exits: HashMap<&'a str, HashSet<&'a str>>,
+    /// Ids with a path to an Output, or `None` when the flow has no Output.
+    reaching_output: Option<HashSet<&'a str>>,
 }
 
 impl<'a> GraphIndex<'a> {
@@ -96,7 +100,10 @@ impl<'a> GraphIndex<'a> {
                 .or_default()
                 .insert(edge.source_handle.as_str());
         }
-        Self { wired_exits }
+        Self {
+            wired_exits,
+            reaching_output: nodes_reaching_output(flow),
+        }
     }
 
     fn is_wired(&self, node_id: &str, exit: &str) -> bool {
@@ -192,6 +199,145 @@ fn exit_lints(node: &FlowNode, index: &GraphIndex<'_>) -> Vec<FlowLint> {
         ));
     }
     lints
+}
+
+/// Walks wires backwards from every Output. Every wire kind counts as a
+/// path. The visited set makes a cycle safe, and ids of missing nodes
+/// do no harm, because only real nodes are linted.
+fn nodes_reaching_output(flow: &Flow) -> Option<HashSet<&str>> {
+    let mut stack: Vec<&str> = flow
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, FlowNodeKind::Output { .. }))
+        .map(|n| n.id.as_str())
+        .collect();
+    if stack.is_empty() {
+        return None;
+    }
+    let mut sources_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for edge in &flow.edges {
+        sources_of
+            .entry(edge.target_node_id.as_str())
+            .or_default()
+            .push(edge.source_node_id.as_str());
+    }
+    let mut reached: HashSet<&str> = stack.iter().copied().collect();
+    while let Some(id) = stack.pop() {
+        for &source in sources_of.get(id).into_iter().flatten() {
+            if reached.insert(source) {
+                stack.push(source);
+            }
+        }
+    }
+    Some(reached)
+}
+
+/// A node with no path to any Output, in a flow that has one. Output
+/// nodes are skipped, and so is an Auth node that applies to inherited
+/// auth, because it acts on requests without a wire.
+fn no_path_lint(node: &FlowNode, index: &GraphIndex<'_>) -> Option<FlowLint> {
+    let reached = index.reaching_output.as_ref()?;
+    let exempt = match &node.kind {
+        FlowNodeKind::Output { .. } => true,
+        FlowNodeKind::Auth {
+            apply_to_inherit, ..
+        } => *apply_to_inherit,
+        _ => false,
+    };
+    if exempt || reached.contains(node.id.as_str()) {
+        return None;
+    }
+    Some(warning(
+        NO_PATH_TO_OUTPUT,
+        node,
+        format!(
+            "'{}' does not lead to any Output, so its result is never shown.",
+            display_label(node)
+        ),
+        "Wire it towards an Output to see its result. Ignore this if the node runs only for its effect.",
+    ))
+}
+
+/// Hint of an `invalid_graph` lint.
+const FIX: &str = "Fix this before you save or run the flow.";
+/// Hint of an `invalid_graph` lint on a cycle.
+const LOOP: &str = "Remove one of the wires in the loop.";
+
+/// Turns a `validate` failure into error lints, one per node or wire it
+/// names, so the canvas can mark each one. An unknown node is reported on
+/// the first wire that points to it, because its id is not on the canvas.
+pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
+    let lint = |node_id: Option<&str>, edge_id: Option<&str>, message: String, hint: &str| {
+        FlowLint {
+            code: INVALID_GRAPH.to_string(),
+            severity: LintSeverity::Error,
+            node_id: node_id.map(str::to_string),
+            edge_id: edge_id.map(str::to_string),
+            message,
+            hint: Some(hint.to_string()),
+        }
+    };
+    // Built once, so a large loop stays linear. The first node of an id wins.
+    let mut labels: HashMap<&str, &FlowNode> = HashMap::with_capacity(flow.nodes.len());
+    for n in &flow.nodes {
+        labels.entry(n.id.as_str()).or_insert(n);
+    }
+    let label_of = |node_id: &str| {
+        labels.get(node_id).map_or_else(
+            || "This node".to_string(),
+            |n| format!("'{}'", display_label(n)),
+        )
+    };
+    match error {
+        FlowGraphError::Cycle { node_ids, edge_ids } => node_ids
+            .iter()
+            .map(|id| {
+                let message = format!(
+                    "{} is part of a loop. A flow must not lead back to itself.",
+                    label_of(id.as_str())
+                );
+                lint(Some(id.as_str()), None, message, LOOP)
+            })
+            .chain(edge_ids.iter().map(|id| {
+                let message =
+                    "This wire is part of a loop. A flow must not lead back to itself.".to_string();
+                lint(None, Some(id.as_str()), message, LOOP)
+            }))
+            .collect(),
+        FlowGraphError::UnknownNode { node_id } => {
+            let wire = flow
+                .edges
+                .iter()
+                .find(|e| e.source_node_id == *node_id || e.target_node_id == *node_id);
+            let message = "This wire is connected to a node that does not exist.".to_string();
+            vec![lint(None, wire.map(|e| e.id.as_str()), message, FIX)]
+        }
+        FlowGraphError::DuplicateNode { node_id } => {
+            let message = "More than one node has the same id.".to_string();
+            vec![lint(Some(node_id.as_str()), None, message, FIX)]
+        }
+        FlowGraphError::InvalidNode { node_id, reason } => {
+            let message = format!("{}: {}", label_of(node_id.as_str()), sentence(reason));
+            vec![lint(Some(node_id.as_str()), None, message, FIX)]
+        }
+        FlowGraphError::InvalidEdge { edge_id, reason } => {
+            vec![lint(None, Some(edge_id.as_str()), sentence(reason), FIX)]
+        }
+    }
+}
+
+/// Makes a `validate` reason read as a sentence: a capital first letter and
+/// an end mark.
+fn sentence(reason: &str) -> String {
+    let mut chars = reason.trim().chars();
+    let Some(first) = chars.next() else {
+        return "The flow has a structural problem.".to_string();
+    };
+    let mut out: String = first.to_uppercase().chain(chars).collect();
+    if !out.ends_with(&['.', '!', '?'][..]) {
+        out.push('.');
+    }
+    out
 }
 
 #[cfg(test)]
@@ -464,5 +610,291 @@ mod tests {
         let exits = only(&lints, EXIT_WITHOUT_EDGE);
         assert_eq!(exits.len(), 1);
         assert!(exits[0].message.contains("'First'"));
+    }
+
+    use crate::graph::FlowGraphError;
+    use crate::validate::validate;
+
+    fn auth(id: &str, apply_to_inherit: bool) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Auth {
+                label: id.to_string(),
+                auth: rocket_shared::types::Auth::Bearer {
+                    token: "{{token}}".to_string(),
+                },
+                apply_to_inherit,
+            },
+        )
+    }
+
+    fn keys(lints: &[FlowLint]) -> Vec<(Option<&str>, Option<&str>, &str)> {
+        lints
+            .iter()
+            .map(|l| (l.node_id.as_deref(), l.edge_id.as_deref(), l.code.as_str()))
+            .collect()
+    }
+
+    fn graph_lints(f: &Flow) -> Vec<FlowLint> {
+        let error = validate(f).expect_err("the flow must be invalid");
+        graph_error_lints(f, &error)
+    }
+
+    #[test]
+    fn an_empty_flow_has_no_lints() {
+        assert!(lint(&flow(vec![], vec![])).is_empty());
+    }
+
+    #[test]
+    fn a_node_with_no_path_to_an_output_is_warned() {
+        let f = flow(
+            vec![input("in1"), output("out1"), input("in2")],
+            vec![edge("e1", "in1", handle::RESULT, "out1", "value")],
+        );
+        let lints = lint(&f);
+        assert_eq!(keys(&lints), vec![(Some("in2"), None, NO_PATH_TO_OUTPUT)]);
+        assert_eq!(lints[0].severity, LintSeverity::Warning);
+        assert_eq!(
+            lints[0].message,
+            "'in2' does not lead to any Output, so its result is never shown."
+        );
+        assert!(lints[0].hint.is_some());
+    }
+
+    #[test]
+    fn no_output_means_no_reach_lint() {
+        let f = flow(vec![input("in1"), input("in2")], vec![]);
+        assert!(lint(&f).is_empty());
+    }
+
+    #[test]
+    fn paths_through_trigger_and_auth_wires_reach_the_output() {
+        let f = flow(
+            vec![auth("a1", false), request("r1"), request("r2"), output("out")],
+            vec![
+                edge("e1", "a1", handle::RESULT, "r1", handle::AUTH),
+                edge("e2", "r1", handle::RESULT, "r2", handle::TRIGGER),
+                edge("e3", "r2", handle::RESULT, "out", "value"),
+            ],
+        );
+        assert!(lint(&f).is_empty());
+    }
+
+    #[test]
+    fn an_auth_node_that_applies_to_inherited_auth_is_not_flagged() {
+        let applies = flow(
+            vec![auth("a1", true), request("r1"), output("out")],
+            vec![edge("e1", "r1", handle::RESULT, "out", "value")],
+        );
+        assert!(lint(&applies).is_empty());
+        let idle = flow(
+            vec![auth("a1", false), request("r1"), output("out")],
+            vec![edge("e1", "r1", handle::RESULT, "out", "value")],
+        );
+        assert_eq!(keys(&lint(&idle)), vec![(Some("a1"), None, NO_PATH_TO_OUTPUT)]);
+    }
+
+    #[test]
+    fn a_cycle_does_not_hang_the_reach_rule() {
+        let f = flow(
+            vec![output("a"), output("b"), input("c")],
+            vec![
+                edge("e1", "a", handle::RESULT, "b", "value"),
+                edge("e2", "b", handle::RESULT, "a", "value"),
+            ],
+        );
+        assert_eq!(keys(&lint(&f)), vec![(Some("c"), None, NO_PATH_TO_OUTPUT)]);
+    }
+
+    /// in1 -> sw; sw.case c1 -> if1; if1.true -> out1; lonely has no wire.
+    fn mixed_flow(reverse_edges: bool) -> Flow {
+        let mut edges = vec![
+            edge("e1", "in1", handle::RESULT, "sw", handle::INPUT),
+            edge("e2", "sw", &handle::case_handle("c1"), "if1", handle::INPUT),
+            edge("e3", "if1", handle::TRUE, "out1", "value"),
+        ];
+        if reverse_edges {
+            edges.reverse();
+        }
+        flow(
+            vec![
+                input("in1"),
+                switch_node("sw", "Route", &[("Gold", "gold")]),
+                if_node("if1", "Check"),
+                output("out1"),
+                input("lonely"),
+            ],
+            edges,
+        )
+    }
+
+    #[test]
+    fn results_follow_node_order_and_ignore_edge_order() {
+        let first = lint(&mixed_flow(false));
+        assert_eq!(
+            keys(&first),
+            vec![
+                (Some("sw"), None, SWITCH_WITHOUT_DEFAULT),
+                (Some("if1"), None, EXIT_WITHOUT_EDGE),
+                (Some("lonely"), None, NO_PATH_TO_OUTPUT),
+            ]
+        );
+        assert_eq!(lint(&mixed_flow(false)), first);
+        assert_eq!(lint(&mixed_flow(true)), first);
+    }
+
+    #[test]
+    fn messages_never_quote_values_or_expressions() {
+        let secret = "s3cr3t-value";
+        let f = flow(
+            vec![
+                node(
+                    "in1",
+                    FlowNodeKind::Input {
+                        label: "Token".to_string(),
+                        value: rocket_shared::VariableValue::simple(secret),
+                    },
+                ),
+                node(
+                    "if1",
+                    FlowNodeKind::If {
+                        label: "Check".to_string(),
+                        condition: format!("response.body.token === '{secret}'"),
+                    },
+                ),
+                node(
+                    "sw",
+                    FlowNodeKind::Switch {
+                        label: "Route".to_string(),
+                        value: "{{api_key}}".to_string(),
+                        cases: vec![SwitchCase {
+                            id: "c1".to_string(),
+                            label: String::new(),
+                            matches: secret.to_string(),
+                        }],
+                    },
+                ),
+                node(
+                    "a1",
+                    FlowNodeKind::Auth {
+                        label: "Sign in".to_string(),
+                        auth: rocket_shared::types::Auth::Bearer {
+                            token: secret.to_string(),
+                        },
+                        apply_to_inherit: false,
+                    },
+                ),
+                output("out"),
+            ],
+            vec![
+                edge("e1", "in1", handle::RESULT, "if1", handle::INPUT),
+                edge("e2", "in1", handle::RESULT, "sw", handle::INPUT),
+            ],
+        );
+        let lints = lint(&f);
+        assert!(!lints.is_empty());
+        for l in &lints {
+            let text = format!("{} {}", l.message, l.hint.as_deref().unwrap_or(""));
+            assert!(!text.contains("s3cr3t"), "leaked in: {text}");
+            assert!(!text.contains("api_key"), "leaked in: {text}");
+        }
+    }
+
+    #[test]
+    fn a_large_flow_lints_in_linear_time() {
+        const N: usize = 20_000;
+        let mut nodes = vec![input("in")];
+        let mut edges = vec![edge("e-in", "in", handle::RESULT, "if0", handle::INPUT)];
+        for i in 0..N {
+            nodes.push(if_node(&format!("if{i}"), &format!("Check {i}")));
+            let (next, field) = if i + 1 == N {
+                ("out".to_string(), "value")
+            } else {
+                (format!("if{}", i + 1), handle::INPUT)
+            };
+            edges.push(edge(&format!("e{i}"), &format!("if{i}"), handle::TRUE, &next, field));
+        }
+        nodes.push(output("out"));
+        let f = flow(nodes, edges);
+        let started = std::time::Instant::now();
+        let lints = lint(&f);
+        let elapsed = started.elapsed();
+        assert_eq!(lints.len(), N, "one unwired 'false' exit per If");
+        assert!(lints.iter().all(|l| l.code == EXIT_WITHOUT_EDGE));
+        // A rule that scans every wire for every node takes seconds here.
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_cycle_becomes_one_error_per_node_and_wire() {
+        let f = flow(
+            vec![output("a"), output("b")],
+            vec![
+                edge("e1", "a", handle::RESULT, "b", "value"),
+                edge("e2", "b", handle::RESULT, "a", "value"),
+            ],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(
+            keys(&lints),
+            vec![
+                (Some("a"), None, INVALID_GRAPH),
+                (Some("b"), None, INVALID_GRAPH),
+                (None, Some("e1"), INVALID_GRAPH),
+                (None, Some("e2"), INVALID_GRAPH),
+            ]
+        );
+        assert!(lints.iter().all(|l| l.severity == LintSeverity::Error));
+        assert_eq!(
+            lints[0].message,
+            "'a' is part of a loop. A flow must not lead back to itself."
+        );
+    }
+
+    #[test]
+    fn an_invalid_node_names_its_label() {
+        let f = flow(vec![if_node("if1", "Logged in?")], vec![]);
+        let lints = graph_lints(&f);
+        assert_eq!(keys(&lints), vec![(Some("if1"), None, INVALID_GRAPH)]);
+        assert_eq!(
+            lints[0].message,
+            "'Logged in?': The If node needs exactly one input wire, found 0."
+        );
+        assert!(lints[0].hint.is_some());
+    }
+
+    #[test]
+    fn an_invalid_edge_carries_the_edge_id() {
+        let f = flow(
+            vec![output("a"), output("b")],
+            vec![edge("e9", "a", handle::RESULT, "b", "value")],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(keys(&lints), vec![(None, Some("e9"), INVALID_GRAPH)]);
+        assert!(lints[0].message.ends_with('.'));
+    }
+
+    #[test]
+    fn an_unknown_node_is_reported_on_the_wire_that_names_it() {
+        let f = flow(
+            vec![input("in1"), output("out")],
+            vec![
+                edge("e1", "in1", handle::RESULT, "out", "value"),
+                edge("e2", "in1", handle::RESULT, "ghost", "value"),
+            ],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(keys(&lints), vec![(None, Some("e2"), INVALID_GRAPH)]);
+        assert!(!lints[0].message.contains("ghost"));
+    }
+
+    #[test]
+    fn a_duplicate_node_id_is_reported_on_that_id() {
+        let f = flow(vec![output("a"), output("a")], vec![]);
+        let lints = graph_lints(&f);
+        assert_eq!(keys(&lints), vec![(Some("a"), None, INVALID_GRAPH)]);
     }
 }
