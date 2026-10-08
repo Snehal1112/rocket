@@ -100,7 +100,7 @@ fn takes_input(kind: &FlowNodeKind) -> bool {
     is_routing(kind) || matches!(kind, FlowNodeKind::Transform { .. })
 }
 
-fn kind_name(kind: &FlowNodeKind) -> &'static str {
+pub(crate) fn kind_name(kind: &FlowNodeKind) -> &'static str {
     match kind {
         FlowNodeKind::Request { .. } => "Request",
         FlowNodeKind::Input { .. } => "Input",
