@@ -186,7 +186,7 @@ export interface FlowNodeDetail {
   logs?: import('@/lib/tauri-api').FlowLogEntry[];
   /** Wire values and routing decision of the last run, masked by the backend. */
   trace?: import('@/lib/tauri-api').FlowStepTrace;
-  /** True while a partial run is in progress and this result is from the earlier run it builds on. */
+  /** True when this result is from an earlier run than the tab's last run. */
   cached?: boolean;
 }
 

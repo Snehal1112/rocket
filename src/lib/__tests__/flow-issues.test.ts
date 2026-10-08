@@ -241,6 +241,13 @@ describe('computeFlowIssues: save errors', () => {
     ]);
   });
 
+  it('hints at running again, not saving, for a refused run', () => {
+    const issues = computeFlowIssues(nodes, [], {
+      save: { nodeIds: ['b'], edgeIds: [], message: 'Invalid input: changed — node(s): b; edge(s): ', kind: 'run' },
+    });
+    expect(only(issues, 'save')[0].hint).toBe('Run the full flow, or Run from the named node.');
+  });
+
   it('drops ids of nodes and wires that no longer exist', () => {
     const edges = [wire('e1', 'a', 'b', 'value')];
     const issues = computeFlowIssues(nodes, edges, {

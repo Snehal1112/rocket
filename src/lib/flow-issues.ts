@@ -31,6 +31,8 @@ export interface SaveErrorInfo {
   nodeIds: string[];
   edgeIds: string[];
   message: string | null;
+  /** Where the error came from. A refused run reads differently from a refused save. */
+  kind?: 'save' | 'run';
 }
 
 export interface FlowIssueContext {
@@ -319,7 +321,10 @@ export function cleanSaveMessage(message: string): string {
 
 function saveIssues(save: SaveErrorInfo, nodeIds: Set<string>, edgeIds: Set<string>): FlowIssue[] {
   const message = cleanSaveMessage(save.message ?? '');
-  const hint = 'Fix this, then save again.';
+  const hint =
+    save.kind === 'run'
+      ? 'Run the full flow, or Run from the named node.'
+      : 'Fix this, then save again.';
   return [
     ...save.nodeIds
       .filter((id) => nodeIds.has(id))

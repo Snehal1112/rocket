@@ -412,19 +412,6 @@ export interface PaneState {
 // a fresh one by chance.
 let runIdCounter = 0;
 
-// Drops the earlier-run marks once a partial run is over.
-function clearCachedMarks(
-  detail: Record<string, FlowNodeDetail> | undefined,
-): Record<string, FlowNodeDetail> | undefined {
-  if (!detail || !Object.values(detail).some((d) => d.cached)) return detail;
-  const next: Record<string, FlowNodeDetail> = {};
-  for (const [id, d] of Object.entries(detail)) {
-    const { cached: _cached, ...rest } = d;
-    next[id] = rest;
-  }
-  return next;
-}
-
 export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
 
@@ -1228,10 +1215,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           };
         }
         // A change without a run id, such as a refused start, keeps the last run.
-        // The earlier-run marks last only while a partial run is in progress.
         return {
           ...tab,
-          nodeDetail: clearCachedMarks(tab.nodeDetail),
           runState,
           runId: runId ?? tab.runId,
           pendingRunId: undefined,

@@ -90,6 +90,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const [cycleEdgeIds, setCycleEdgeIds] = useState<string[]>([]);
   // The full text of the last failed save. The panel shows it for flagged nodes.
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [errorFromRun, setErrorFromRun] = useState(false);
   // Kept across nodes, so after a run the user can click through Last run.
   const [panelTab, setPanelTab] = useState<PanelTab>('settings');
   // UI state only. The panel opens on request and stays while that node is the sole selection.
@@ -132,10 +133,15 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       computeFlowIssues(tab.nodes, tab.edges, {
         save:
           cycleNodeIds.length > 0 || cycleEdgeIds.length > 0
-            ? { nodeIds: cycleNodeIds, edgeIds: cycleEdgeIds, message: saveErrorMessage }
+            ? {
+                nodeIds: cycleNodeIds,
+                edgeIds: cycleEdgeIds,
+                message: saveErrorMessage,
+                kind: errorFromRun ? 'run' : 'save',
+              }
             : undefined,
       }),
-    [tab.nodes, tab.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage],
+    [tab.nodes, tab.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage, errorFromRun],
   );
   // A deleted node closes its panel.
   useEffect(() => {
@@ -375,6 +381,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         setCycleNodeIds(parsed.nodeIds);
         setCycleEdgeIds(parsed.edgeIds);
         setSaveErrorMessage(message);
+        setErrorFromRun(false);
       }
       toast.error(`Could not save flow: ${message}`);
       return false;
@@ -506,10 +513,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               onRunError={(message) => {
                 // A refused partial run names nodes the same way a save error does.
                 const parsed = parseGraphErrorMessage(message);
-                if (!parsed) return;
-                setCycleNodeIds(parsed.nodeIds);
-                setCycleEdgeIds(parsed.edgeIds);
-                setSaveErrorMessage(message);
+                setCycleNodeIds(parsed?.nodeIds ?? []);
+                setCycleEdgeIds(parsed?.edgeIds ?? []);
+                setSaveErrorMessage(parsed ? message : null);
+                setErrorFromRun(Boolean(parsed));
               }}
               onRunRequested={(runId) => setFlowPendingRun(tab.id, runId)}
               tabRunState={tab.runState}

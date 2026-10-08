@@ -49,6 +49,11 @@ describe('RequestNode', () => {
     expect(screen.getByTestId('node-progress')).toHaveTextContent('attempt 2/5');
   });
 
+  it('notes that a failed result is from an earlier run', () => {
+    renderNode({ kind: baseKind, status: 'failed', statusCode: 500, error: 'boom', cached: true });
+    expect(screen.getByTestId('node-cached-caption')).toHaveTextContent('from an earlier run');
+  });
+
   it('renders idle state with method badge, label, and field rows', () => {
     renderNode({ kind: baseKind, status: 'idle' });
     expect(screen.getByText('Get Auth Token')).toBeInTheDocument();

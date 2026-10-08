@@ -60,11 +60,11 @@ describe('startPartialFlowRun', () => {
     expect(stored().nodeDetail).toEqual({});
   });
 
-  it('drops the marks but keeps the results when the run ends', () => {
+  it('keeps the marks and the results when the run ends', () => {
     usePaneStore.getState().startPartialFlowRun(tab.id, 'run-1', ['b']);
     usePaneStore.getState().setFlowRunState(tab.id, 'done', 'run-1');
     expect(stored().nodeStatus).toEqual({ a: 'success', c: 'failed' });
-    expect(stored().nodeDetail?.a).toEqual({ value: 'one' });
+    expect(stored().nodeDetail?.a).toEqual({ value: 'one', cached: true });
   });
 
   it('keeps the base run and its results when a refused run ends without an id', () => {

@@ -21,7 +21,7 @@ export interface RequestNodeData {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
-  /** True while a partial run is in progress and this result is from the earlier run. */
+  /** True when this result is from an earlier run than the tab's last run. */
   cached?: boolean;
   /** Attempts a repeat-until run made. Set after a run. */
   attempts?: number;
@@ -100,6 +100,11 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
           {data.attempts === undefined
             ? `✕ ${statusCode ?? 'Error'} · ${error ?? `${durationMs}ms`}`
             : `✕ ${statusCode ?? 'Error'} · ${attemptsLabel(data.attempts)} · ${error ?? msToSecondsLabel(durationMs ?? 0)}`}
+        </div>
+      )}
+      {status === 'failed' && data.cached && (
+        <div data-testid='node-cached-caption' className='px-2 italic text-muted-foreground'>
+          Result from an earlier run
         </div>
       )}
       {/* The line above already shows a failure, so the caption covers skips only. */}

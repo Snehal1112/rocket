@@ -26,6 +26,7 @@ export function NodeStatusCaption({
         className='line-clamp-3 break-words px-2 pt-1 text-red-600'
       >
         ✕ {message}
+        {cached ? ' · from an earlier run' : ''}
       </div>
     );
   }

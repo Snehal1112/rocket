@@ -1437,7 +1437,9 @@ describe('FlowToolbar', () => {
       renderToolbar(withBase);
       ask(runB);
       ask({ tabId: 'tab-1' });
-      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
+      await act(async () => {});
+      await act(async () => {});
+      expect(tauriApi.runFlow).toHaveBeenCalledTimes(1);
     });
 
     it('passes the partial info from flow-run-started on', async () => {
@@ -1454,6 +1456,55 @@ describe('FlowToolbar', () => {
         partial: info,
       });
       expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123', info);
+    });
+
+    const twoCallbacks = [
+      { nodeId: 'w1', name: 'one', url: 'http://h:1/cb/one' },
+      { nodeId: 'w2', name: 'two', url: 'http://h:1/cb/two' },
+    ];
+    const partialInfo = {
+      baseRunId: 'run-0',
+      startNodeId: 'w2',
+      mode: 'node' as const,
+      nodeIds: ['w2'],
+    };
+
+    it('keeps only the callback URLs of Waits inside the partial run', async () => {
+      const onCallbackUrls = vi.fn();
+      renderToolbar({ ...withBase, onCallbackUrls });
+      ask(runB);
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      startedHandler?.({
+        type: 'flowRunStarted',
+        run_id: 'run-123',
+        flow_name: 'my-flow',
+        collection: 'my-collection',
+        total_nodes: 1,
+        callbacks: twoCallbacks,
+        partial: partialInfo,
+      });
+      expect(onCallbackUrls).toHaveBeenCalledWith({ w2: 'http://h:1/cb/two' });
+    });
+
+    it('a remounted toolbar passes the partial info and filters callbacks', async () => {
+      const onCallbackUrls = vi.fn();
+      renderToolbar({
+        ...withBase,
+        tabPendingRunId: 'run-7',
+        onCallbackUrls,
+      });
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      startedHandler?.({
+        type: 'flowRunStarted',
+        run_id: 'run-7',
+        flow_name: 'my-flow',
+        collection: 'my-collection',
+        total_nodes: 1,
+        callbacks: twoCallbacks,
+        partial: partialInfo,
+      });
+      expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-7', partialInfo);
+      expect(onCallbackUrls).toHaveBeenCalledWith({ w2: 'http://h:1/cb/two' });
     });
 
     it('keeps the base run id when the backend refuses', async () => {

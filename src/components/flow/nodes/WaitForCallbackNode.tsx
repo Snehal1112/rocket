@@ -24,7 +24,7 @@ export interface WaitForCallbackNodeData {
   durationMs?: number;
   /** Live text while waiting, such as "waiting… 42s left". */
   progress?: string;
-  /** True while a partial run is in progress and this result is from the earlier run. */
+  /** True when this result is from an earlier run than the tab's last run. */
   cached?: boolean;
   /** This run's callback URL. Set only while the run is active. */
   callbackUrl?: string;

@@ -120,9 +120,15 @@ function forwardProgress(
   else handler(event.node_id, event.message);
 }
 
-// Maps the run-started callbacks to node id and URL.
+// Maps the run-started callbacks to node id and URL. A partial run lists only
+// its own Waits, because the backend opens an endpoint for every Wait.
 function callbackUrlsFrom(event: FlowRunStartedEvent): Record<string, string> {
-  return Object.fromEntries((event.callbacks ?? []).map((c) => [c.nodeId, c.url]));
+  const inRun = event.partial ? new Set(event.partial.nodeIds) : null;
+  return Object.fromEntries(
+    (event.callbacks ?? [])
+      .filter((c) => !inRun || inRun.has(c.nodeId))
+      .map((c) => [c.nodeId, c.url]),
+  );
 }
 
 // Ids of runs whose own handleRun still listens, even after its toolbar unmounted.
@@ -216,7 +222,8 @@ export function FlowToolbar({
     void onFlowRunStarted((event) => {
       if (disposed) return;
       if (event.run_id !== resumedRunId) return;
-      onRunStateChangeRef.current('running', event.run_id);
+      if (event.partial) onRunStateChangeRef.current('running', event.run_id, event.partial);
+      else onRunStateChangeRef.current('running', event.run_id);
       // After the run state, because a new run drops older URLs.
       const urls = callbackUrlsFrom(event);
       if (Object.keys(urls).length > 0) onCallbackUrlsRef.current?.(urls);
@@ -438,7 +445,7 @@ export function FlowToolbar({
         });
       }
       // A refused partial run keeps the tab's last run, so the user can retry.
-      if (partial) onRunStateChange('done', partial.baseRunId);
+      if (partial && !hasStarted()) onRunStateChange('done', partial.baseRunId);
       else onRunStateChange('done');
     } finally {
       ownedRunIds.delete(runId);

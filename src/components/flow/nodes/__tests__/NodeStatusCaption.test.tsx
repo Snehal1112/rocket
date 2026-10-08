@@ -33,5 +33,6 @@ describe('NodeStatusCaption', () => {
   it('keeps showing the error of a failed node', () => {
     render(<NodeStatusCaption status='failed' error='boom' cached />);
     expect(screen.getByTestId('node-error')).toHaveTextContent('boom');
+    expect(screen.getByTestId('node-error')).toHaveTextContent('from an earlier run');
   });
 });

@@ -18,7 +18,7 @@ export type TransformNodeData = {
   error?: string;
   /** Progress text while running. */
   progress?: string;
-  /** True while a partial run is in progress and this result is from the earlier run. */
+  /** True when this result is from an earlier run than the tab's last run. */
   cached?: boolean;
   /** How long the last run of this node took. */
   durationMs?: number;
