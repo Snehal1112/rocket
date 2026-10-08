@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { scheduleAutoSave } from '@/lib/auto-save';
+import { mergeRunResult } from '@/lib/flow-run-result';
 import {
   collectAllTabs,
   createDefaultLeaf,
@@ -35,6 +36,7 @@ import type {
   CollectionSection,
   CollectionTab,
   ContractTab,
+  FlowLastRun,
   FlowNodeDetail,
   FlowTab,
   FolderSection,
@@ -289,6 +291,8 @@ export interface PaneState {
   ) => void;
   patchFlowNodeProgress: (tabId: string, nodeId: string, message: string) => void;
   setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
+  /** Stores the finished run's result. Pass undefined to clear it. */
+  setFlowRunResult: (tabId: string, lastRun: FlowLastRun | undefined) => void;
 }
 
 // Monotonic source for RunnerTab.runId. Module-level (not per-tab) is
@@ -973,9 +977,23 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         // A new run starts from a clean canvas. Otherwise the last run's
         // results stay on nodes this run skips or never reaches.
         if (runState === 'running') {
-          return { ...tab, runState, runId, nodeStatus: {}, nodeDetail: {} };
+          return { ...tab, runState, runId, nodeStatus: {}, nodeDetail: {}, lastRun: undefined };
         }
         return { ...tab, runState, runId };
+      }),
+    });
+  },
+
+  setFlowRunResult(tabId, lastRun) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isFlowTab(tab)) return tab;
+        if (!lastRun) return { ...tab, lastRun: undefined };
+        // A late result from an older run must not show during a newer run.
+        if (tab.runState === 'running' && tab.runId !== undefined && tab.runId !== lastRun.runId) {
+          return tab;
+        }
+        return { ...tab, lastRun: mergeRunResult(tab.lastRun, lastRun) };
       }),
     });
   },

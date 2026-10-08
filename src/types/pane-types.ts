@@ -184,6 +184,22 @@ export interface FlowNodeDetail {
   logs?: import('@/lib/tauri-api').FlowLogEntry[];
 }
 
+/** Outcome of the last finished run, shown in the run-result strip. */
+export interface FlowLastRun {
+  runId: string;
+  /** `completed`, `cancelled`, `error`, or another backend reason. */
+  stoppedReason: string;
+  /** Wall-clock time in ms. Null when this client did not time the run. */
+  totalMs: number | null;
+  /** First node that failed. Absent for a clean or cancelled run. */
+  failedNodeId?: string;
+  /** Label of that node when the run ended, kept even if the node is renamed later. */
+  failedLabel?: string;
+  failedCount: number;
+  /** Nodes skipped because an upstream node failed. Not-taken branches are excluded. */
+  skippedCount: number;
+}
+
 export interface FlowTab extends BaseTab {
   tabType: 'flow';
   collectionName: string | null;
@@ -196,6 +212,8 @@ export interface FlowTab extends BaseTab {
   nodeDetail?: Record<string, FlowNodeDetail>;
   runState: 'idle' | 'running' | 'done';
   runId?: string;
+  /** Result of the last finished run. Cleared when the next run starts. */
+  lastRun?: FlowLastRun;
 }
 
 export function isFlowTab(tab: Tab): tab is FlowTab {
