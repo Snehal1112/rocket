@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePaneStore } from '@/stores/pane-store';
+import type { FlowTab } from '@/types/pane-types';
 import { useKeyboardShortcuts } from '../useKeyboardShortcuts';
 
 vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn() }));
@@ -14,6 +15,19 @@ vi.mock('@/lib/tauri-api', async () => {
 const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
 );
+
+const flowTab = (isDirty: boolean): FlowTab => ({
+  id: 'flow-close-1',
+  title: 'Flow: my-flow',
+  isDirty,
+  tabType: 'flow',
+  collectionName: 'demo',
+  flowName: 'my-flow',
+  nodes: [],
+  edges: [],
+  nodeStatus: {},
+  runState: 'idle',
+});
 
 function pressCtrlW() {
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true }));
@@ -60,6 +74,22 @@ describe('Ctrl+W close guard', () => {
     pressCtrlW();
     expect(requested).toEqual([]);
     expect(closeTab).toHaveBeenCalledWith(id, usePaneStore.getState().activeGroupId);
+  });
+
+  it('requests a guarded close for a dirty flow tab', () => {
+    usePaneStore.getState().openTab(flowTab(true));
+    renderHook(() => useKeyboardShortcuts(), { wrapper });
+    pressCtrlW();
+    expect(requested).toEqual(['flow-close-1']);
+    expect(closeTab).not.toHaveBeenCalled();
+  });
+
+  it('closes a clean flow tab directly', () => {
+    usePaneStore.getState().openTab(flowTab(false));
+    renderHook(() => useKeyboardShortcuts(), { wrapper });
+    pressCtrlW();
+    expect(requested).toEqual([]);
+    expect(closeTab).toHaveBeenCalledWith('flow-close-1', usePaneStore.getState().activeGroupId);
   });
 
   it.each([false, true])('closes a request tab directly (dirty=%s)', (dirty) => {

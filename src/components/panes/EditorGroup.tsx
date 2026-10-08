@@ -60,9 +60,10 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
-import { saveScriptFile } from '@/lib/tauri-api';
+import { flowPayloadFromTab } from '@/lib/flow-save';
+import { saveFlow, saveScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import type { LeafNode, ScriptTab } from '@/types/pane-types';
+import type { FlowTab, LeafNode, ScriptTab } from '@/types/pane-types';
 import {
   isConflictTab,
   isContractDiffTab,
@@ -186,6 +187,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   const markScriptSaved = usePaneStore((s) => s.markScriptSaved);
   const pendingTab = pendingCloseTabId ? node.tabs.find((t) => t.id === pendingCloseTabId) : null;
   const pendingScript = pendingTab && isScriptTab(pendingTab) ? pendingTab : null;
+  const pendingFlow = pendingTab && isFlowTab(pendingTab) ? pendingTab : null;
 
   const saveScriptAndClose = async (tab: ScriptTab) => {
     try {
@@ -196,6 +198,25 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       toast.error(
         `Could not save "${tab.title}": ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  };
+
+  // Returns true when the flow was saved and its tab closed.
+  const saveFlowAndClose = async (tab: FlowTab): Promise<boolean> => {
+    const payload = flowPayloadFromTab(tab);
+    if (!payload) {
+      toast.error(`Could not save "${tab.title}": no flow is open in this tab.`);
+      return false;
+    }
+    try {
+      await saveFlow(payload.collection, payload.flow);
+      closeTab(tab.id, node.groupId);
+      return true;
+    } catch (err) {
+      toast.error(
+        `Could not save "${tab.title}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
     }
   };
 
@@ -334,6 +355,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               {(() => {
                 if (!pendingCloseTabId) return null;
                 const found = node.tabs.find((t) => t.id === pendingCloseTabId);
+                if (found && isFlowTab(found)) {
+                  return 'This flow has unsaved changes. Save them before closing?';
+                }
                 if (found && isScriptTab(found)) {
                   return 'This script has unsaved changes. Save them before closing?';
                 }
@@ -352,6 +376,19 @@ export function EditorGroup({ node }: { node: LeafNode }) {
                   // Keep the dialog open until the save finishes.
                   e.preventDefault();
                   void saveScriptAndClose(pendingScript).then(() => setPendingCloseTabId(null));
+                }}
+              >
+                Save and close
+              </AlertDialogAction>
+            )}
+            {pendingFlow && (
+              <AlertDialogAction
+                onClick={(e) => {
+                  // Keep the dialog open until the save finishes, and after it fails.
+                  e.preventDefault();
+                  void saveFlowAndClose(pendingFlow).then((saved) => {
+                    if (saved) setPendingCloseTabId(null);
+                  });
                 }}
               >
                 Save and close
