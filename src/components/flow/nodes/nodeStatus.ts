@@ -32,3 +32,25 @@ export function issueRingClassName(issues?: FlowIssue[]): string | undefined {
   if (worst === 'warning') return 'ring-1 ring-amber-500';
   return undefined;
 }
+
+// The status in words, for accessible names and announcements. A skip with no
+// reason predates Phase 2 and can only mean an upstream failure, as in the caption.
+export function nodeStatusLabel(
+  status: FlowNodeStatus,
+  detail?: { skipReason?: FlowSkipReason },
+): string {
+  switch (status) {
+    case 'idle':
+      return 'not run';
+    case 'running':
+      return 'running';
+    case 'success':
+      return 'succeeded';
+    case 'failed':
+      return 'failed';
+    case 'skipped':
+      return detail?.skipReason === 'branch_not_taken'
+        ? 'skipped, branch not taken'
+        : 'skipped, upstream failed';
+  }
+}

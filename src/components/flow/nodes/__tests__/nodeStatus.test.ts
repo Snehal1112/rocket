@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { issueRingClassName, nodeStatusCaption, nodeStatusClassName } from '../nodeStatus';
+import {
+  issueRingClassName,
+  nodeStatusCaption,
+  nodeStatusClassName,
+  nodeStatusLabel,
+} from '../nodeStatus';
 
 describe('nodeStatusClassName', () => {
   it('keeps the existing per-status styles', () => {
@@ -59,5 +64,27 @@ describe('issueRingClassName', () => {
   it('draws no ring without issues', () => {
     expect(issueRingClassName(undefined)).toBeUndefined();
     expect(issueRingClassName([])).toBeUndefined();
+  });
+});
+
+describe('nodeStatusLabel', () => {
+  it('names every status in words', () => {
+    expect(nodeStatusLabel('idle')).toBe('not run');
+    expect(nodeStatusLabel('running')).toBe('running');
+    expect(nodeStatusLabel('success')).toBe('succeeded');
+    expect(nodeStatusLabel('failed')).toBe('failed');
+  });
+
+  it('says why a node was skipped', () => {
+    expect(nodeStatusLabel('skipped', { skipReason: 'branch_not_taken' })).toBe(
+      'skipped, branch not taken',
+    );
+    expect(nodeStatusLabel('skipped', { skipReason: 'upstream_failed' })).toBe(
+      'skipped, upstream failed',
+    );
+  });
+
+  it('treats a skip with no reason as an upstream failure, like the caption does', () => {
+    expect(nodeStatusLabel('skipped')).toBe('skipped, upstream failed');
   });
 });

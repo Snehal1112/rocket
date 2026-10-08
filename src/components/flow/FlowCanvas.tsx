@@ -1,4 +1,5 @@
 import {
+  type AriaLabelConfig,
   Background,
   BackgroundVariant,
   type Connection,
@@ -15,7 +16,7 @@ import {
   useReactFlow,
 } from '@xyflow/react';
 import { LayoutGrid, Search } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,7 @@ import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { FlowSearchBar } from './FlowSearchBar';
+import { flowEdgeAriaLabel, flowNodeAriaLabel } from './flowA11y';
 import { edgeRunState, exitLabel } from './flowExits';
 import { minimapNodeColor } from './minimap';
 import { AuthNode } from './nodes/AuthNode';
@@ -104,6 +106,17 @@ export interface FlowCanvasProps {
 
 type Measured = { width: number; height: number };
 
+// Wording for this canvas. In 12.12.0 the description shown while keyboard use is
+// enabled is the key named `keyboardDisabled`, so both node keys get the same text.
+const NODE_HELP =
+  'Press Enter or Space to select this step. With it selected, use the arrow keys to move it, Delete or Backspace to remove it, and Escape to cancel.';
+const ARIA_LABEL_CONFIG: Partial<AriaLabelConfig> = {
+  'node.a11yDescription.default': NODE_HELP,
+  'node.a11yDescription.keyboardDisabled': NODE_HELP,
+  'edge.a11yDescription.default':
+    'Press Enter or Space to select this wire. With it selected, press Delete or Backspace to remove it, or Escape to cancel.',
+};
+
 // Maps our backend-shaped FlowNode/FlowEdge into React Flow's own Node/Edge
 // shape. `type` selects the nodeTypes entry above; everything else our
 // custom node components need travels in `data`.
@@ -133,6 +146,7 @@ function toRfNodes(
     return {
       id: n.id,
       type: n.kind.kind,
+      ariaLabel: flowNodeAriaLabel(n.kind, nodeStatus[n.id] ?? 'idle', nodeDetail?.[n.id]),
       position: n.position,
       data: {
         kind: n.kind,
@@ -205,6 +219,7 @@ export function toRfEdges(
     if (isTrigger) classes.push('flow-edge-trigger');
     return {
       id: e.id,
+      ariaLabel: flowEdgeAriaLabel(e, byId, run),
       source: e.sourceNodeId,
       sourceHandle: handle,
       target: e.targetNodeId,
@@ -341,6 +356,7 @@ function FlowCanvasInner({
   // (what Tauri runs on Linux) does not — leaving focus stuck in whatever
   // text field was last active and silently breaking Backspace/Delete.
   const paneRef = useRef<HTMLDivElement>(null);
+  const helpId = useId();
   const focusPane = () => paneRef.current?.focus();
   const [searchOpen, setSearchOpen] = useState(false);
   // Bumped by Ctrl+F so an open search bar takes focus again.
@@ -595,11 +611,18 @@ function FlowCanvasInner({
       onDrop={handleDrop}
       onKeyDown={handleKeyDown}
     >
+      <p id={helpId} className='sr-only'>
+        Flow canvas. Press Tab to move between steps. Press Enter to select a step, Delete or
+        Backspace to remove it, and Ctrl+A to select every step. Right-drag or scroll to pan.
+      </p>
       <FlowNodeActionsContext.Provider value={nodeActions}>
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={nodeTypes}
+          aria-label='Flow canvas'
+          aria-describedby={helpId}
+          ariaLabelConfig={ARIA_LABEL_CONFIG}
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
