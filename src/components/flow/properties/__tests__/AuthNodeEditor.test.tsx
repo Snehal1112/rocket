@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -814,9 +814,26 @@ describe('AuthNodeEditor Authenticate button', () => {
     expect(entry?.auth.oauth2?.accessToken).toBe('authenticated-token-123456');
     expect(screen.getByText(/^Token valid until/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Authenticate again' })).toBeInTheDocument();
-    expect(screen.getByTestId('authenticate-section').outerHTML).not.toContain(
-      'authenticated-token-123456',
+    // The AuthEditor stand-in prints the token on purpose, so it is left out of the check.
+    const page = document.body.cloneNode(true) as HTMLElement;
+    page.querySelector('[data-testid="access-token"]')?.remove();
+    expect(page.innerHTML).not.toContain('authenticated-token-123456');
+  });
+
+  it('discards the token when the active environment changes during sign-in', async () => {
+    const pending = createDeferred<typeof tokenResult>();
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(pending.promise);
+    renderGrant('authorization_code');
+    await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+
+    act(() => useEnvStore.setState({ activeEnvId: 'other' }));
+    pending.resolve(tokenResult);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'The sign-in settings changed, so the new token was not saved.',
     );
+    expect(useFlowAuthStore.getState().auths).toEqual({});
+    expect(screen.getByText('No token')).toBeInTheDocument();
   });
 
   it('uses no more than one sign-in for two quick clicks', async () => {

@@ -167,10 +167,39 @@ describe('AuthenticateButton', () => {
     render(ui(authNode(), oauth({ accessToken: TOKEN, expiresIn: 3600, tokenAcquiredAt: now() })));
     await userEvent.click(screen.getByRole('button', { name: 'Authenticate again' }));
     await screen.findByRole('status');
-    expect(screen.getByTestId('authenticate-section').outerHTML).not.toContain(TOKEN);
+    expect(document.body.innerHTML).not.toContain(TOKEN);
   });
 
-  it('ignores a result that arrives after the component unmounted', async () => {
+  it('only lets the token be written while the environment scope is unchanged', async () => {
+    const pending = createDeferred<AuthenticateResult>();
+    preflight.authenticateAuthNode.mockReturnValue(pending.promise);
+    const { rerender } = render(ui());
+    await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+    const options = preflight.authenticateAuthNode.mock.calls[0][2] as {
+      shouldWrite: () => boolean;
+    };
+    expect(options.shouldWrite()).toBe(true);
+
+    rerender(
+      <AuthenticateButton
+        node={authNode()}
+        scope={{ ...scope, environmentName: 'prod' }}
+        oauth={oauth()}
+      />,
+    );
+    expect(options.shouldWrite()).toBe(false);
+    rerender(
+      <AuthenticateButton
+        node={authNode()}
+        scope={{ ...scope, globalEnvName: 'other' }}
+        oauth={oauth()}
+      />,
+    );
+    expect(options.shouldWrite()).toBe(false);
+    await act(async () => pending.resolve({ accessToken: TOKEN, source: 'signed-in' }));
+  });
+
+  it('does not log an error when a result arrives after the component unmounted', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const pending = createDeferred<AuthenticateResult>();
     preflight.authenticateAuthNode.mockReturnValue(pending.promise);

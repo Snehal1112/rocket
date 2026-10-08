@@ -73,10 +73,11 @@ export function AuthenticateButton({
   const [message, setMessage] = useState<Message | null>(null);
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
-  // The node's persisted auth as of the latest render. A sign-in compares it with
-  // the value at click time, to notice an edit made while the window was open.
+  // The node's persisted auth and scope as of the latest render. A sign-in compares
+  // them with the value at click time, to notice an edit or an environment switch
+  // made while the window was open.
   const latestAuthRef = useRef('');
-  latestAuthRef.current = JSON.stringify(node.kind.auth);
+  latestAuthRef.current = JSON.stringify([node.kind.auth, scope]);
 
   useEffect(() => {
     mountedRef.current = true;
