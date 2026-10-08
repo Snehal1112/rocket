@@ -6,6 +6,10 @@ import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
 
+vi.mock('@/hooks/useCollectionVariableContext', () => ({
+  useCollectionVariableContext: () => ({ variableContext: new Map() }),
+}));
+
 // Monaco cannot load in jsdom, so a textarea stands in for the editor.
 vi.mock('@/components/editor/MonacoWrapper', () => ({
   MonacoWrapper: ({ value, onChange }: { value: string; onChange?: (v: string) => void }) => (

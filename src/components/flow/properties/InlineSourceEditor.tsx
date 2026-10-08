@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { FlowEdge, InlineHeader, InlineRequestData } from '@/lib/tauri-api';
+import { useFlowVariableContext } from './flowVariableContext';
 import { usePanelRefocus } from './panelFocus';
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
@@ -34,6 +35,7 @@ export function InlineSourceEditor({
   outOfRangeWires: FlowEdge[];
 }) {
   const refocusPanel = usePanelRefocus();
+  const variableContext = useFlowVariableContext();
   const setHeader = (index: number, patch: Partial<InlineHeader>) =>
     onChange({
       ...request,
@@ -73,6 +75,8 @@ export function InlineSourceEditor({
           value={request.url}
           onChange={(url) => onChange({ ...request, url })}
           placeholder='https://api.example.com/{{path}}'
+          variableContext={variableContext}
+          readOnlyVariables
         />
       </div>
 
@@ -101,6 +105,8 @@ export function InlineSourceEditor({
               value={header.name}
               onChange={(name) => setHeader(i, { name })}
               placeholder='Name'
+              variableContext={variableContext}
+              readOnlyVariables
             />
             <SingleLineEditor
               aria-label={`Header ${i + 1} value`}
@@ -108,6 +114,8 @@ export function InlineSourceEditor({
               value={header.value}
               onChange={(value) => setHeader(i, { value })}
               placeholder='Value'
+              variableContext={variableContext}
+              readOnlyVariables
             />
             <Button
               type='button'
@@ -138,6 +146,7 @@ export function InlineSourceEditor({
             value={request.body ?? ''}
             onChange={(body) => onChange({ ...request, body: body === '' ? null : body })}
             contentType={contentType}
+            variableContext={variableContext}
             height='100%'
           />
         </div>

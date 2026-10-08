@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { AuthNodeEditor } from './AuthNodeEditor';
+import { FlowVariableScope } from './FlowVariableScope';
 import { InputNodeEditor } from './InputNodeEditor';
 import { LabelOnlyEditor } from './LabelOnlyEditor';
 import { LastRunTab } from './LastRunTab';
@@ -33,18 +34,24 @@ function editorFor(
   switch (kind.kind) {
     case 'Request':
       return (
-        <RequestNodeEditor
-          // Keyed by node, so a pending confirmation never carries over to another node.
-          key={node.id}
-          nodeId={node.id}
-          kind={kind}
-          edges={edges}
-          collection={collection}
-          onChange={onChange}
-        />
+        <FlowVariableScope collection={collection}>
+          <RequestNodeEditor
+            // Keyed by node, so a pending confirmation never carries over to another node.
+            key={node.id}
+            nodeId={node.id}
+            kind={kind}
+            edges={edges}
+            collection={collection}
+            onChange={onChange}
+          />
+        </FlowVariableScope>
       );
     case 'Input':
-      return <InputNodeEditor kind={kind} onChange={onChange} />;
+      return (
+        <FlowVariableScope collection={collection}>
+          <InputNodeEditor kind={kind} onChange={onChange} />
+        </FlowVariableScope>
+      );
     case 'If':
       return (
         <div className='space-y-3'>

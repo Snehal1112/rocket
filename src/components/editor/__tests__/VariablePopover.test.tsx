@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { VariablePopover } from '../VariablePopover';
@@ -37,5 +38,30 @@ describe('VariablePopover secret handling', () => {
     expect(input).toHaveValue('●●●●');
     expect(input).toHaveAttribute('readonly');
     expect(document.body.innerHTML).not.toContain(SECRET);
+  });
+});
+
+describe('VariablePopover readOnly prop', () => {
+  it('is editable for an environment variable by default', () => {
+    renderPopover(entry());
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('readonly');
+  });
+
+  it('is read-only when the editor cannot save the change', async () => {
+    const onCommit = vi.fn(async () => undefined);
+    render(
+      <VariablePopover
+        varName='apiKey'
+        entry={entry()}
+        tokenType='variable'
+        readOnly
+        onCommit={onCommit}
+        onClose={vi.fn()}
+      />,
+    );
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveAttribute('readonly');
+    await userEvent.type(input, 'x{Enter}');
+    expect(onCommit).not.toHaveBeenCalled();
   });
 });

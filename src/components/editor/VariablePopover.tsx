@@ -15,6 +15,8 @@ export interface VariablePopoverProps {
   entry: VariableScopeEntry | undefined;
   /** Token type — 'variable' or 'pathParam'. */
   tokenType: 'variable' | 'pathParam';
+  /** Forces the value read-only, for an editor whose scope the popover cannot save to. */
+  readOnly?: boolean;
   /** Called to save the edited value. */
   onCommit: (newValue: string) => Promise<void>;
   /** Called to close the popover without saving. */
@@ -61,6 +63,7 @@ export function VariablePopover({
   varName,
   entry,
   tokenType,
+  readOnly: forceReadOnly,
   onCommit,
   onClose,
   onNavigateToSource,
@@ -93,7 +96,7 @@ export function VariablePopover({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const readOnly = resolvedEntry?.secret || !isEditable(resolvedEntry);
+  const readOnly = forceReadOnly || resolvedEntry?.secret || !isEditable(resolvedEntry);
 
   const handleCommit = useCallback(async () => {
     if (committedRef.current || readOnly) return;

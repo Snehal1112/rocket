@@ -10,6 +10,10 @@ import type { FlowTab } from '@/types/pane-types';
 import { isFlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
 
+vi.mock('@/hooks/useCollectionVariableContext', () => ({
+  useCollectionVariableContext: () => ({ variableContext: new Map() }),
+}));
+
 // The Request editor pulls in Monaco, which jsdom cannot load.
 vi.mock('@/components/editor/MonacoWrapper', () => ({ MonacoWrapper: () => null }));
 

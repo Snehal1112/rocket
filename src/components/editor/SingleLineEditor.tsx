@@ -42,6 +42,11 @@ export interface SingleLineEditorProps {
   variableContext?: Map<string, VariableScopeEntry>;
   /** Called when user clicks "Navigate to source →" in popover. */
   onNavigateToSource?: (source: VariableSource | 'pathParam', key: string) => void;
+  /**
+   * When true, the click popover shows the value but cannot save it. Use it where
+   * the variable scope is not the active collection's, such as the flow editors.
+   */
+  readOnlyVariables?: boolean;
 
   // ── Secret masking ───────────────────────────────────────
   /** When true, non-variable text is masked with ● characters. */
@@ -78,6 +83,7 @@ export function SingleLineEditor({
   disabled,
   variableContext,
   onNavigateToSource,
+  readOnlyVariables,
   isSecret,
   pathParams,
   queryParams,
@@ -287,6 +293,7 @@ export function SingleLineEditor({
   // re-renders between mousedown (which clears popoverState) and the subsequent blur.
   const handlePopoverCommit = useCallback(
     async (newValue: string) => {
+      if (readOnlyVariables) return;
       const ps = popoverStateRef.current;
       if (!ps) return;
       if (ps.tokenType === 'pathParam' && onPathParamChange) {
@@ -295,7 +302,7 @@ export function SingleLineEditor({
         await commitVariable(ps.varName, newValue, ps.entry?.source ?? null);
       }
     },
-    [commitVariable, onPathParamChange],
+    [commitVariable, onPathParamChange, readOnlyVariables],
   );
 
   // Close popover handler.
@@ -315,6 +322,7 @@ export function SingleLineEditor({
             varName={popoverState.varName}
             entry={popoverState.entry}
             tokenType={popoverState.tokenType}
+            readOnly={readOnlyVariables}
             onCommit={handlePopoverCommit}
             onClose={handlePopoverClose}
             onNavigateToSource={onNavigateToSource}

@@ -1,5 +1,6 @@
 import { SingleLineEditor } from '@/components/editor';
 import type { FlowNodeKind } from '@/lib/tauri-api';
+import { useFlowVariableContext } from './flowVariableContext';
 import { LabelField } from './LabelField';
 
 type InputKind = Extract<FlowNodeKind, { kind: 'Input' }>;
@@ -11,6 +12,7 @@ export function InputNodeEditor({
   kind: InputKind;
   onChange: (kind: FlowNodeKind) => void;
 }) {
+  const variableContext = useFlowVariableContext();
   return (
     <div className='space-y-3'>
       <LabelField value={kind.label} onChange={(label) => onChange({ ...kind, label })} />
@@ -22,6 +24,8 @@ export function InputNodeEditor({
             value={kind.value}
             onChange={(value) => onChange({ ...kind, value })}
             placeholder='Text or {{variable}}'
+            variableContext={variableContext}
+            readOnlyVariables
           />
         ) : (
           // A structured value from an older file. Editing it as text would

@@ -4,6 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FlowNode, FlowNodeKind } from '@/lib/tauri-api';
 import { NodePropertiesPanel } from '../NodePropertiesPanel';
 
+const scope = vi.hoisted(() => ({ variableContext: new Map<string, unknown>() }));
+const editorProps = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
+
+vi.mock('@/hooks/useCollectionVariableContext', () => ({
+  useCollectionVariableContext: () => scope,
+}));
+
 // The real CodeMirror editor needs Tauri and react-query. A plain input with
 // the same value/onChange contract is enough here.
 vi.mock('@/components/editor', () => ({
@@ -11,13 +18,16 @@ vi.mock('@/components/editor', () => ({
     value: string;
     onChange: (v: string) => void;
     'aria-label'?: string;
-  }) => (
-    <input
-      aria-label={props['aria-label']}
-      value={props.value}
-      onChange={(e) => props.onChange(e.target.value)}
-    />
-  ),
+  }) => {
+    editorProps.last = props as unknown as Record<string, unknown>;
+    return (
+      <input
+        aria-label={props['aria-label']}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+    );
+  },
 }));
 
 // The Request editor pulls in Monaco, which jsdom cannot load.
@@ -321,5 +331,17 @@ describe('Wires tab in the panel', () => {
       label: 'Pickx',
       script: 'return 1;',
     });
+  });
+
+  it('gives an Input node value editor the collection variables, read-only for saving', () => {
+    scope.variableContext.set('user', {
+      value: 'alice',
+      source: 'environment',
+      label: 'dev',
+      secret: false,
+    });
+    renderPanel(node('in1', { kind: 'Input', label: 'User', value: '{{user}}' }));
+    expect(editorProps.last?.variableContext).toBe(scope.variableContext);
+    expect(editorProps.last?.readOnlyVariables).toBe(true);
   });
 });
