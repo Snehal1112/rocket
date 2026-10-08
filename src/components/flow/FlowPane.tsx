@@ -14,6 +14,15 @@ import {
 } from '@/components/ui/select';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
+import {
+  canPasteInto,
+  copySelection,
+  type FlowClip,
+  getFlowClipboard,
+  instantiatePaste,
+  nextPasteStep,
+  setFlowClipboard,
+} from '@/lib/flow-clipboard';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
 import type { FlowRunResult } from '@/lib/flow-run-result';
@@ -206,6 +215,62 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   }, [redoFlow, tabId]);
   const handleGestureStart = useCallback(() => beginFlowGesture(tabId), [beginFlowGesture, tabId]);
   const handleGestureEnd = useCallback(() => endFlowGesture(tabId), [endFlowGesture, tabId]);
+
+  // Adds a clip to the flow as new nodes in one store write, which is one undo step.
+  const pasteClip = useCallback(
+    (clip: FlowClip, step: number) => {
+      const latest = latestFlowTab();
+      if (!latest) return;
+      const blocked = canPasteInto(clip, latest.collectionName);
+      if (blocked) {
+        toast.error(blocked);
+        return;
+      }
+      const result = instantiatePaste(clip, latest.nodes, step);
+      updateFlowGraph(
+        tabId,
+        [...latest.nodes, ...result.nodes],
+        [...latest.edges, ...result.edges],
+      );
+      // The pasted nodes become the selection. The panel stays closed.
+      handleSelectedNodeIdsChange(new Set(result.nodes.map((n) => n.id)));
+      for (const notice of result.notices) toast.info(notice);
+    },
+    [latestFlowTab, tabId, updateFlowGraph, handleSelectedNodeIdsChange],
+  );
+
+  const handleCopy = useCallback(() => {
+    const latest = latestFlowTab();
+    if (!latest) return;
+    const clip = copySelection(latest.nodes, latest.edges, selectedNodeIds, latest.collectionName);
+    if (!clip) return;
+    setFlowClipboard(clip);
+    toast.info(clip.nodes.length === 1 ? 'Copied 1 node.' : `Copied ${clip.nodes.length} nodes.`);
+  }, [latestFlowTab, selectedNodeIds]);
+
+  const handlePaste = useCallback(() => {
+    const clip = getFlowClipboard();
+    if (clip) pasteClip(clip, nextPasteStep());
+  }, [pasteClip]);
+
+  // Duplicating copies and pastes in one go and leaves the clipboard alone.
+  const duplicateNodes = useCallback(
+    (ids: ReadonlySet<string>) => {
+      const latest = latestFlowTab();
+      if (!latest) return;
+      const clip = copySelection(latest.nodes, latest.edges, ids, latest.collectionName);
+      if (clip) pasteClip(clip, 1);
+    },
+    [latestFlowTab, pasteClip],
+  );
+  const handleDuplicate = useCallback(
+    () => duplicateNodes(selectedNodeIds),
+    [duplicateNodes, selectedNodeIds],
+  );
+  const handleDuplicateNode = useCallback(
+    (nodeId: string) => duplicateNodes(new Set([nodeId])),
+    [duplicateNodes],
+  );
 
   // Undo and redo can remove a selected node, so drop ids that no longer exist.
   useEffect(() => {
@@ -547,6 +612,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             onGestureEnd={handleGestureEnd}
             onUndo={handleUndo}
             onRedo={handleRedo}
+            onCopy={handleCopy}
+            onPaste={handlePaste}
+            onDuplicate={handleDuplicate}
+            onDuplicateNode={handleDuplicateNode}
             onConnect={handleConnect}
             onAddNode={handleAddNode}
             flowCollectionName={tab.collectionName}

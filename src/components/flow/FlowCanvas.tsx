@@ -85,6 +85,12 @@ export interface FlowCanvasProps {
   // Ctrl+Z, and Ctrl+Shift+Z or Ctrl+Y. Absent means the keys do nothing.
   onUndo?: () => void;
   onRedo?: () => void;
+  // Ctrl+C, Ctrl+V and Ctrl+D. Copy and duplicate only fire with a selection.
+  onCopy?: () => void;
+  onPaste?: () => void;
+  onDuplicate?: () => void;
+  // Duplicates one node, for its menu entry.
+  onDuplicateNode?: (nodeId: string) => void;
 }
 
 type Measured = { width: number; height: number };
@@ -208,6 +214,8 @@ const CANVAS_HINTS = [
   'Right-drag or scroll to pan',
   'Ctrl+scroll to zoom',
   'Ctrl+Z undo',
+  'Ctrl+C/V copy and paste',
+  'Ctrl+D duplicate',
 ];
 
 // A Delete press makes a node write and an edge write in the same tick, so a 50 ms window folds them into one step.
@@ -275,6 +283,10 @@ function FlowCanvasInner({
   onGestureEnd,
   onUndo,
   onRedo,
+  onCopy,
+  onPaste,
+  onDuplicate,
+  onDuplicateNode,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const [localSelection, setLocalSelection] = useState<ReadonlySet<string>>(() => new Set());
@@ -374,8 +386,9 @@ function FlowCanvasInner({
         selectNodesRef.current(new Set([nodeId]));
         onOpenPropertiesRef.current?.(nodeId);
       },
+      duplicateNode: onDuplicateNode,
     }),
-    [onNodeKindChange, onRemoveSwitchCase],
+    [onNodeKindChange, onRemoveSwitchCase, onDuplicateNode],
   );
 
   // Refuses wires the backend would reject, while the user is still dragging.
@@ -473,6 +486,24 @@ function FlowCanvasInner({
     if (key === 'y' && onRedo) {
       e.preventDefault();
       onRedo();
+      return;
+    }
+    // Plain Ctrl+C, V and D only. Shift variants belong to the browser.
+    if (e.shiftKey) return;
+    if (key === 'c' && onCopy && selectedNodeIds.size > 0) {
+      e.preventDefault();
+      onCopy();
+      return;
+    }
+    if (key === 'v' && onPaste) {
+      e.preventDefault();
+      onPaste();
+      return;
+    }
+    if (key === 'd' && onDuplicate) {
+      // Ctrl+D is a bookmark shortcut in some webviews, so always stop it.
+      e.preventDefault();
+      if (selectedNodeIds.size > 0) onDuplicate();
     }
   };
 

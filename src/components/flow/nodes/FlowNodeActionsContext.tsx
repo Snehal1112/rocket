@@ -6,6 +6,8 @@ export interface FlowNodeActions {
   removeSwitchCase: (nodeId: string, caseId: string) => void;
   /** Selects exactly this node, which opens its properties panel. */
   openProperties: (nodeId: string) => void;
+  /** Duplicates just this node. Absent when the canvas cannot duplicate. */
+  duplicateNode?: (nodeId: string) => void;
 }
 
 const noop = () => {
