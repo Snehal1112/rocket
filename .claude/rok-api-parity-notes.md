@@ -8,7 +8,7 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 
 | Part | Scope | Status |
 |---|---|---|
-| A | Sync, state-only gaps | Spec and plans committed: `docs/superpowers/plans/rok-parity-a/` (index plus 2 plans). Not implemented yet. |
+| A | Sync, state-only gaps | Spec and plans committed: `docs/superpowers/plans/rok-parity-a/` (index plus 2 plans). Implemented on branch worktree-rok-parity-a (plans 01 and 02, final review fixed). Follow-ups: OAuth2 credential APIs, per-folder `__dirname`, collection read-all op for the overlay, optional Developer gate for `getProcessEnv` (currently ungated in Safe mode), getSize after setBody, spec wording (null writes, empty-string misses). |
 | B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`. No plan yet. |
 | C | Cookies: `rok.cookies.*`, `jar()` | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Depends on B's `ScriptHost`. No plan yet. |
 | D | `runner.iterationData`, `iterationIndex`, `totalIterations` | Deferred. Needs a runner CSV/JSON data-file feature first. |
