@@ -23,6 +23,9 @@ pub mod flow_execution_service;
 pub(crate) mod flow_partial;
 pub(crate) mod flow_poll;
 pub(crate) mod flow_routing;
+// Used only by tests until Task 3 of plan P19 wires it into the engine.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod flow_run_cache;
 pub mod flow_service;
 pub(crate) mod flow_trace;
 pub(crate) mod flow_wait;
