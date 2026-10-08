@@ -18,7 +18,7 @@ use crate::flow_auth::{
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange};
 use crate::flow_partial::{PartialPlan, PartialRun};
-use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults, MAX_CACHED_RUNS};
+use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::runner_sequence::{build_step_input, RunItem};
 
@@ -31,8 +31,9 @@ pub enum CapturedOutput {
 }
 
 /// A node that ran: its captured output plus the exit it left through
-/// (`handle::RESULT` for every non-routing node).
-#[derive(Debug, Clone)]
+/// (`handle::RESULT` for every non-routing node). Holds a raw output and
+/// possibly a raw credential, so its `Debug` shows neither.
+#[derive(Clone)]
 pub(crate) struct ExecutedNode {
     pub(crate) output: CapturedOutput,
     pub(crate) chosen_exit: String,
@@ -44,6 +45,15 @@ pub(crate) struct ExecutedNode {
     /// The credential value a Request sent for its Auth node, when it was
     /// resolved at send time. A later partial run masks it too.
     pub(crate) sent_secret: Option<String>,
+}
+
+impl std::fmt::Debug for ExecutedNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutedNode")
+            .field("chosen_exit", &self.chosen_exit)
+            .field("polled", &self.poll.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ExecutedNode {
@@ -1061,6 +1071,13 @@ impl FlowExecutionService {
         for (key, value) in callbacks.mask_secrets() {
             external_secrets.insert(key, value);
         }
+        // Masked values as the run starts, kept for this run's cache entry.
+        let start_secret_values = exec.secret_values(
+            input.global_env_name.as_deref(),
+            Some(&input.collection),
+            input.environment_name.as_deref(),
+            &external_secrets,
+        );
 
         let run_id = Ulid::new().to_string();
         let (registration, cancel_signal) = RunRegistration::new(self, &run_id);
@@ -1247,6 +1264,35 @@ impl FlowExecutionService {
         // Deregister before `FlowRunFinished`, as before this guard existed.
         drop(registration);
 
+        // Every value this run masked, so a partial run built on it masks
+        // them too, even after a token rotates. The start-of-run set covers a
+        // secret a script rotated during the run.
+        let mut masking_secrets = start_secret_values;
+        masking_secrets.extend(exec.secret_values(
+            input.global_env_name.as_deref(),
+            Some(&input.collection),
+            input.environment_name.as_deref(),
+            &external_secrets,
+        ));
+        masking_secrets.extend(credentials.secret_forms());
+        masking_secrets.extend(sent_secrets);
+        outcomes.retain(|id, _| !seeded.contains(id));
+        captured.retain(|id, _| !seeded.contains(id));
+        // Cached before `FlowRunFinished`, so a partial run started on that
+        // event finds this run.
+        self.remember_run(
+            &run_id,
+            &input,
+            &flow,
+            prepared.as_ref(),
+            RunResults {
+                outcomes,
+                captured,
+                masking_secrets,
+            },
+            &fingerprints,
+        );
+
         let failed_count = steps
             .iter()
             .filter(|s| s.status == FlowNodeStatus::Failed)
@@ -1267,31 +1313,6 @@ impl FlowExecutionService {
             skipped_count,
             not_taken_count,
         });
-
-        // Every value this run masked, so a partial run built on it masks
-        // them too, even after a token rotates.
-        let mut masking_secrets = exec.secret_values(
-            input.global_env_name.as_deref(),
-            Some(&input.collection),
-            input.environment_name.as_deref(),
-            &external_secrets,
-        );
-        masking_secrets.extend(credentials.secret_forms());
-        masking_secrets.extend(sent_secrets);
-        outcomes.retain(|id, _| !seeded.contains(id));
-        captured.retain(|id, _| !seeded.contains(id));
-        self.remember_run(
-            &run_id,
-            &input,
-            &flow,
-            prepared.as_ref(),
-            RunResults {
-                outcomes,
-                captured,
-                masking_secrets,
-            },
-            &fingerprints,
-        );
 
         Ok(FlowRunSummary {
             run_id,
@@ -1343,9 +1364,8 @@ impl FlowExecutionService {
             .ok()
             .and_then(|mut cache| cache.get(&partial.base_run_id))
             .ok_or_else(|| crate::flow_partial::PartialRefusal {
-                message: format!(
-                    "the earlier run this builds on is no longer kept (the last {MAX_CACHED_RUNS} runs stay in memory until Rocket restarts or the workspace changes). Run the full flow first"
-                ),
+                message: "the earlier run this builds on is no longer kept (Rocket keeps only a few recent runs in memory, fewer when their outputs are large, and forgets them on restart). Run the full flow first"
+                    .to_string(),
                 node_ids: vec![partial.start_node_id.clone()],
                 edge_ids: Vec::new(),
             })?;
@@ -9371,6 +9391,45 @@ mod tests {
             "the request sends the token resolved at send time, not the run-start value"
         );
         assert_masked_in_run_output(&summary, "fresh-token-222222");
+    }
+
+    /// A secret rotated during a run stays in that run's cache masks, so a
+    /// partial run that reads a cached response with the old value masks it.
+    #[tokio::test]
+    async fn a_secret_rotated_mid_run_stays_in_the_cache_masks() {
+        let mut environment = rocket_environment::Environment::new("dev");
+        environment.set_variable(rocket_environment::Variable::secret(
+            "token",
+            "start-secret-123456",
+        ));
+        let env = Arc::new(std::sync::Mutex::new(environment));
+        let executor = LoginEchoExecutor::new(&env, "rotated-value-654321");
+        let exec = template_exec(&env, &executor, FakeCollectionRepo::new());
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![saved_flow_node("login", "login.yml")],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let login = Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "login.yml", login)),
+            Box::new(NullEventPublisher),
+        );
+
+        let summary = service.run(&exec, dev_input()).await.expect("run");
+
+        let cached = service
+            .run_cache
+            .lock()
+            .expect("lock cache")
+            .get(&summary.run_id)
+            .expect("the run is cached");
+        assert!(
+            cached.masking_secrets.contains("start-secret-123456"),
+            "the start-of-run secret is kept"
+        );
     }
 
     /// A folder or request variable named `token` shadows the environment at

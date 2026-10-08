@@ -120,15 +120,19 @@ resolved template (`{{token}}-{{unset}}`) is not masked by the Auth node; and
 `FlowExecutionService::run_partial` re-runs one node (`FlowPartialMode::Node`)
 or a node and its descendants (`FromHere`) on top of a cached earlier run.
 `flow_run_cache` keeps the last 8 runs in memory (64 MiB of outputs, 16 MiB
-per output, never persisted, never sent over IPC, cleared on workspace
-switch). Input and Auth nodes always run again; their outputs are never
-cached. A run is refused before any event when the base run is gone, used
-other environments, a node upstream changed (Merkle fingerprints, saved
-request text without `uid`), a needed input was skipped, failed or not kept,
-a seed is stale after an earlier partial run, or a Wait's callback sender is
-outside the run. Variable value changes are not detected (decision D5).
-Values the base run masked are masked again under `}}prev-run.<n>`
-external-secret keys, which no `{{template}}` can reference.
+per output, never persisted, never sent over IPC). It is to be cleared on
+workspace switch by P20 (`clear_run_cache` must be wired there); until then
+only a restart clears it. Input and Auth nodes always run again; their
+outputs are never cached. A run is refused before any event when the base
+run is gone, used other environments, a node upstream changed (Merkle
+fingerprints, saved request text without `uid`), a needed input was skipped,
+failed or not kept, a seed is stale after an earlier partial run, or a Wait's
+callback sender is outside the run. Not detected: variable value changes
+(decision D5), folder and collection settings a saved request inherits,
+shared `.js` script files, and auth tokens supplied for the partial run (they
+are not compared with the base run's). Values the base run masked are masked
+again under `}}prev-run.<n>` external-secret keys. No `{{template}}` can
+reference them, but a script can read one by exact name (`rok.getSecretVar`).
 
 ## Flow step trace (`flow_trace.rs`)
 

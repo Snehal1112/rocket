@@ -1,6 +1,8 @@
 //! In-memory results of recent Flow runs, so a partial run can reuse them
 //! (`flow_partial`). Outputs are raw and unmasked: nothing here is
 //! persisted, sent over IPC or printed. `CachedRun`'s `Debug` shows counts.
+//! TODO(P20): call `FlowExecutionService::clear_run_cache` on workspace
+//! switch. Until then the cache is only cleared when Rocket restarts.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -109,17 +111,13 @@ fn index(flow: &Flow) -> HashMap<&str, &FlowNode> {
     flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect()
 }
 
-/// Builds one node's entry. `used` is the output bytes the run already holds.
-/// An output that would take the run past `budget` is dropped, so one run can
-/// never pin more than the budget. Which of several outputs is dropped
-/// depends on map order, but the planner refuses a dropped one cleanly.
+/// Builds one node's entry. The run's byte budget is applied later, by
+/// `keep_within_budget`.
 fn cached_node(
     flow_node: Option<&FlowNode>,
     outcome: NodeOutcome,
     output: Option<CapturedOutput>,
     fingerprint: u64,
-    used: &mut usize,
-    budget: usize,
 ) -> CachedNode {
     // Input and Auth nodes always run again, and an Auth output is a token.
     let never_seeded = flow_node.is_some_and(|n| is_free_node(&n.kind));
@@ -131,22 +129,43 @@ fn cached_node(
             }
             o
         })
-        .filter(|o| {
-            let size = output_size(o);
-            let keep = !never_seeded
-                && size <= MAX_CACHED_OUTPUT_BYTES
-                && used.saturating_add(size) <= budget;
-            if keep {
-                *used += size;
-            }
-            keep
-        })
+        .filter(|o| !never_seeded && output_size(o) <= MAX_CACHED_OUTPUT_BYTES)
         .map(Arc::new);
     CachedNode {
         outcome,
         output,
         fingerprint,
         stale: false,
+    }
+}
+
+/// Drops outputs until the run holds at most `budget` bytes, so one run can
+/// never pin more than the budget. Smaller outputs are kept first, then the
+/// ones earlier in the flow, so the kept set never depends on map order. The
+/// planner refuses a dropped output cleanly.
+fn keep_within_budget(nodes: &mut HashMap<String, CachedNode>, flow: &Flow, budget: usize) {
+    let position: HashMap<String, usize> = rocket_flow::graph::topological_sort(flow)
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(i, id)| (id, i))
+        .collect();
+    let mut candidates: Vec<(usize, usize, String)> = nodes
+        .iter()
+        .filter_map(|(id, node)| {
+            let size = output_size(node.output.as_ref()?);
+            let at = position.get(id).copied().unwrap_or(usize::MAX);
+            Some((size, at, id.clone()))
+        })
+        .collect();
+    candidates.sort();
+    let mut used: usize = 0;
+    for (size, _, id) in candidates {
+        if used.saturating_add(size) <= budget {
+            used += size;
+        } else if let Some(node) = nodes.get_mut(&id) {
+            node.output = None;
+        }
     }
 }
 
@@ -168,14 +187,13 @@ impl CachedRun {
         fingerprints: &HashMap<String, u64>,
         budget: usize,
     ) -> Self {
-        let mut used = 0;
         let nodes_by_id = index(flow);
         let RunResults {
             outcomes,
             mut captured,
             masking_secrets,
         } = results;
-        let nodes = outcomes
+        let mut nodes = outcomes
             .into_iter()
             .map(|(id, outcome)| {
                 let node = cached_node(
@@ -183,12 +201,11 @@ impl CachedRun {
                     outcome,
                     captured.remove(&id),
                     fingerprints.get(&id).copied().unwrap_or_default(),
-                    &mut used,
-                    budget,
                 );
                 (id, node)
             })
             .collect();
+        keep_within_budget(&mut nodes, flow, budget);
         Self {
             scope: scope.clone(),
             nodes,
@@ -234,14 +251,6 @@ impl CachedRun {
             masking_secrets,
         } = results;
         let mut nodes = self.nodes.clone();
-        // Kept outputs of the base count first, except those this run replaces.
-        let mut used: usize = self
-            .nodes
-            .iter()
-            .filter(|(id, _)| !outcomes.contains_key(*id))
-            .filter_map(|(_, node)| node.output.as_ref())
-            .map(|output| output_size(output))
-            .sum();
         let ran: HashSet<String> = outcomes.keys().cloned().collect();
         for (id, outcome) in outcomes {
             let node = cached_node(
@@ -249,8 +258,6 @@ impl CachedRun {
                 outcome,
                 captured.remove(&id),
                 fingerprints.get(&id).copied().unwrap_or_default(),
-                &mut used,
-                budget,
             );
             nodes.insert(id, node);
         }
@@ -258,9 +265,13 @@ impl CachedRun {
         affected.push(start_node_id.to_string());
         for id in affected.iter().filter(|id| !ran.contains(*id)) {
             if let Some(node) = nodes.get_mut(id) {
+                // A stale node never seeds a run, so its output is not kept.
                 node.stale = true;
+                node.output = None;
             }
         }
+        // Base outputs and this run's outputs share one budget.
+        keep_within_budget(&mut nodes, flow, budget);
         let mut masks = self.masking_secrets.clone();
         masks.extend(masking_secrets);
         Self {
@@ -483,8 +494,9 @@ pub(crate) fn fingerprints(
 
 /// The external-secrets key under which a partial run masks a value from an
 /// earlier run. A `{{name}}` lookup ends at the first `}}`
-/// (`rocket_environment::resolve`), so a key that starts with `}}` can never
-/// be referenced from a template.
+/// (`rocket_environment::resolve`), so no template can reference a key that
+/// starts with `}}`. A script can still read the value by its exact name,
+/// for example through `rok.getSecretVar`.
 pub(crate) fn previous_run_secret_key(index: usize) -> String {
     format!("}}}}prev-run.{index}")
 }
@@ -1013,6 +1025,52 @@ mod tests {
         );
         assert!(merged.nodes["a"].output.is_some());
         assert!(merged.nodes["b"].output.is_none());
+    }
+
+    #[test]
+    fn the_kept_outputs_do_not_depend_on_insertion_order() {
+        let (flow, order) = chain(&["a", "b", "c"]);
+        let big = "x".repeat(600);
+        let small = "y".repeat(300);
+        let forward = [("a", big.as_str()), ("b", small.as_str()), ("c", big.as_str())];
+        let mut backward = forward;
+        backward.reverse();
+        for _ in 0..20 {
+            for entries in [&forward, &backward] {
+                let run = CachedRun::from_full_run_with_budget(
+                    &scope(),
+                    &flow,
+                    results(entries),
+                    &fingerprints(&flow, &order, &|_| None),
+                    1_000,
+                );
+                let mut kept: Vec<&str> = run
+                    .nodes
+                    .iter()
+                    .filter(|(_, n)| n.output.is_some())
+                    .map(|(id, _)| id.as_str())
+                    .collect();
+                kept.sort_unstable();
+                assert_eq!(kept, vec!["a", "b"], "smallest first, then flow order");
+            }
+        }
+    }
+
+    #[test]
+    fn a_stale_node_keeps_no_output() {
+        let (flow, order) = chain(&["a", "b", "c"]);
+        let base = full_run(&flow, &order, &[("a", "1"), ("b", "2"), ("c", "3")]);
+        // A partial run of b alone leaves c stale.
+        let merged = base.merge_partial(
+            &scope(),
+            &flow,
+            "b",
+            results(&[("b", "9")]),
+            &fingerprints(&flow, &order, &|_| None),
+        );
+        assert!(merged.nodes["c"].stale);
+        assert!(merged.nodes["c"].output.is_none());
+        assert_eq!(value_of(&base, "c"), Some("3"), "the base is untouched");
     }
 
     #[test]

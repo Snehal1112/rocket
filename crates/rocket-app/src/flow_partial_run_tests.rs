@@ -353,9 +353,20 @@ async fn editing_the_start_node_itself_is_allowed() {
     let h = harness(login_then_b());
     h.http.set_body("/login", "https://api.example.com/profile");
     let base = h.service.run(&h.exec, input()).await.expect("base run");
-    h.flows.edit(|f| f.nodes[1] = request("b", "https://api.example.com/other"));
+    let mut edited = request("b", "https://api.example.com/other");
+    if let FlowNodeKind::Request {
+        source: RequestSource::Inline { request },
+        ..
+    } = &mut edited.kind
+    {
+        request.method = "post".to_string();
+        request.body = Some("edited-body".to_string());
+    }
+    h.flows.edit(|f| f.nodes[1] = edited);
+    let sent_before = h.http.sent_urls().len();
 
-    h.service
+    let summary = h
+        .service
         .run_partial(
             &h.exec,
             input(),
@@ -364,6 +375,17 @@ async fn editing_the_start_node_itself_is_allowed() {
         )
         .await
         .expect("only the start node changed");
+
+    // The edited node ran with its new body, still fed by the cached login.
+    assert_eq!(node_ids(&summary), vec!["b"]);
+    assert_eq!(step(&summary, "b").status, FlowNodeStatus::Success);
+    let sent = h.http.sent_urls();
+    assert_eq!(sent.len(), sent_before + 1, "{sent:?}");
+    assert!(sent.last().is_some_and(|u| u.contains("/profile")), "{sent:?}");
+    assert_eq!(
+        h.http.sent_bodies().last().cloned().flatten().as_deref(),
+        Some("edited-body")
+    );
 }
 
 #[tokio::test]
