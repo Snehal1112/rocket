@@ -37,6 +37,7 @@ vi.mock('@/lib/tauri-api', async () => {
     onFlowStepStarted: vi.fn(),
     onFlowStepCompleted: vi.fn(),
     onFlowStepProgress: vi.fn(),
+    onFlowRunFinished: vi.fn(async () => () => undefined),
   };
 });
 

@@ -1099,6 +1099,21 @@ describe('Flow tab actions', () => {
     expect(findFirstFlowTab()?.callbackUrls).toBeUndefined();
   });
 
+  it('a run that ends while its tab is parked leaves no callback URLs behind', async () => {
+    const tabId = await flowTabWithNode();
+    usePaneStore.getState().setActiveCollection('my-collection');
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');
+    usePaneStore.getState().setFlowCallbackUrls(tabId, { w: 'http://h:1/cb/t' });
+
+    usePaneStore.getState().switchCollection('other');
+    usePaneStore.getState().setFlowRunState(tabId, 'done', 'r1');
+    usePaneStore.getState().switchCollection('my-collection');
+
+    const tab = findFirstFlowTab();
+    expect(tab?.runState).toBe('done');
+    expect(tab?.callbackUrls).toBeUndefined();
+  });
+
   it('a new run drops the previous run callback URLs', async () => {
     const tabId = await flowTabWithNode();
     usePaneStore.getState().setFlowRunState(tabId, 'running', 'r1');

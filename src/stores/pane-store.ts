@@ -1109,8 +1109,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   setFlowRunState(tabId, runState, runId) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    // Also updates a tab parked by switchCollection, so a run that ends there leaves no stale URL.
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         // A new run starts from a clean canvas. Otherwise the last run's
         // results stay on nodes this run skips or never reaches. Callback URLs
@@ -1128,15 +1129,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         }
         return { ...tab, runState, runId, callbackUrls: undefined };
       }),
-    });
+    );
   },
 
   setFlowCallbackUrls(tabId, urls) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) =>
+    set(
+      updateTabEverywhere(get(), tabId, (tab) =>
         isFlowTab(tab) && tab.runState === 'running' ? { ...tab, callbackUrls: urls } : tab,
       ),
-    });
+    );
   },
 
   setFlowRunResult(tabId, lastRun) {
