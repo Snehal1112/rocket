@@ -44,23 +44,33 @@ Scope not covered:
 Header and auth behavior:
 - `inherited_headers` collapses same-name duplicates inside one level when a folder sets enabled headers. The legacy `merge_headers` keeps them (for example two `Set-Cookie`). With no enabled folder headers the legacy merge is used.
 - Header-name matching is case-sensitive on the backend and case-insensitive on the frontend send path (existing rules, kept as is).
+- Because of that, a request header `x-env` and a folder header `X-Env` both go on the wire. The frontend drops the folder header from its pre-merge, then the backend merges the folder chain again with exact case.
 - The backend treats a request's `none` auth like `inherit`, so a frontend `none` request gets folder auth.
 
 Folder OAuth2 token cache (frontend `folder-auth-store`):
 - The fingerprint compares raw `{{var}}` strings, so an environment switch does not invalidate a cached token. This is systemic, the collection and request stores do the same.
 - There is no expiry check on a cached folder token.
 - Tokens are not cleared when a folder is renamed or deleted. `clearFolderAuth` wiring is a follow-up.
-- Fetching a token marks the tab dirty even when the persisted shape did not change.
 
 Execution:
-- The folder chain is read twice per execution, once for the secret scan in `execute` and once in `begin_phases`. A transient failure between the reads could let an unscanned folder script run. The effect is an empty secret substitution, not a leak. Fix: read once and pass it to both.
-- Folder variables marked secret are not added to the secret values, so they are not redacted in script console output. Collection variables are. `rok.getFolderVar` makes them easier to reach.
+- The folder chain can be read twice per execution. The first read happens only when a vault binding failed to fetch (`references_alias` in `execute` reads the chain only then). The second is in `begin_phases`. A transient failure between the reads could let an unscanned folder script run. The window is narrow and the effect is an empty secret substitution, not a leak. Fix: read once and pass it to both.
+- The Folder Vars secret toggle is not persisted; the value is stored as plain text in folder.yml. Hide the toggle for folders or map it to OcSecretVariable (follow-up). A folder variable is never secret at run time: `From<OcVariable> for CollectionVariable` (`conversions/variables.rs`) sets `secret: false`, and the folder.yml variable has no secret field. This predates the Folder Settings tab.
 - `getFolderVar` returns `""` for a missing key.
 - `FsCollectionRepo::validate_path` is a lexical check and lets `ghost/../../evil` pass (it predates this work). `save_folder_variables` could create directories outside the collection. Consider rejecting parent-dir components.
 
 File churn and UI:
 - A first save of a Bruno `folder.yml` rewrites `timeout: 5000` as `5000.0`, because `InheritableNumber` is an f64. The value is still a schema number.
 - `MarkdownEditor` edit mode is a shadcn Textarea, not Monaco. The Docs tab (and the collection and workspace docs tabs) inherit this.
+
+Dirty folder tabs:
+- Unsaved edits live in `useFolderSettings` local state. Only the active tab is mounted, so switching to another tab drops them.
+- Cmd/Ctrl+W closes a dirty folder tab without asking (`src/hooks/useKeyboardShortcuts.ts` guards script tabs only).
+- When the close dialog does show for a folder tab, it says "This request has unsaved changes" (`src/components/panes/EditorGroup.tsx`).
+- `hasDirtyScriptTabs` (`src/components/collections/tree-utils.ts`) ignores dirty folder tabs, so deleting a folder does not warn about them.
+
+Moved folders:
+- A drag-and-drop move does not retarget open folder tabs. Only rename calls `renameFolderTabs`.
+- A tab whose folder was moved shows default settings, because a missing `folder.yml` reads as empty. A save then fails with a toast.
 
 ## Manual checklist
 

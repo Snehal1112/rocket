@@ -18,7 +18,7 @@ interface FolderSettingsTabProps {
   tab: FolderTab;
 }
 
-// Folder settings shell: a header and one sub-tab per section. The sections fill in over plans 09 to 11.
+// Folder settings tab: a header and one sub-tab per section of the folder's folder.yml.
 export function FolderSettingsTab({ tab }: FolderSettingsTabProps) {
   const updateFolderSection = usePaneStore((s) => s.updateFolderSection);
   const folderName = tab.folderPath.split('/').pop() ?? tab.folderPath;
