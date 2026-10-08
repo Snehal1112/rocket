@@ -1,11 +1,13 @@
 // src/components/flow/properties/WiresTab.tsx
-import { ArrowLeft, ArrowRight, Pencil } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronRight, Pencil } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { usePanelRefocus } from './panelFocus';
-import { incomingRows, outgoingGroups, type WireRow } from './wireRows';
+import { incomingRows, outgoingGroups, type WireResolved, type WireRow } from './wireRows';
 
 interface WiresTabProps {
   node: FlowNode;
@@ -41,6 +43,53 @@ function NodeLink({ row, onSelectNode }: { row: WireRow; onSelectNode: (id: stri
   );
 }
 
+// The value the last run put on a wire. Collapsed, because one can be 16 KB.
+function ResolvedValue({ resolved }: { resolved: WireResolved }) {
+  const [open, setOpen] = useState(false);
+  if (resolved.credential) {
+    return (
+      <p data-testid='wire-credential' className='italic text-muted-foreground'>
+        Credential (hidden)
+      </p>
+    );
+  }
+  if (resolved.error) {
+    return (
+      <p
+        data-testid='wire-error'
+        className='select-text whitespace-pre-wrap break-words text-red-600'
+      >
+        {resolved.error}
+      </p>
+    );
+  }
+  if (resolved.value === undefined) return null;
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button type='button' variant='ghost' size='sm' className='h-5 px-1 text-[11px]'>
+          <ChevronRight
+            className={
+              open ? 'h-3 w-3 rotate-90 transition-transform' : 'h-3 w-3 transition-transform'
+            }
+            aria-hidden='true'
+          />
+          Last value
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre
+          data-testid='wire-value'
+          className='mt-1 max-h-40 select-text overflow-auto whitespace-pre-wrap rounded-md border p-1.5 font-mono text-[11px] [overflow-wrap:anywhere]'
+        >
+          {resolved.value === '' ? <span className='italic'>(empty)</span> : resolved.value}
+        </pre>
+        {resolved.truncated && <p className='text-muted-foreground'>Cut at 16 KB.</p>}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function Row({
   row,
   direction,
@@ -55,9 +104,11 @@ function Row({
   return (
     <div
       data-testid='wire-row'
+      data-failed={row.failed ? 'true' : undefined}
       className={cn(
         'flex items-start gap-1.5 rounded-md border px-2 py-1.5',
         row.notTaken && 'opacity-50',
+        row.failed && 'border-red-500/60 bg-red-500/5',
       )}
     >
       <div className='min-w-0 flex-1 space-y-0.5'>
@@ -81,6 +132,7 @@ function Row({
         <p className='truncate font-mono text-[11px] text-muted-foreground'>
           {row.preview ?? '(no script)'}
         </p>
+        {row.resolved && <ResolvedValue resolved={row.resolved} />}
       </div>
       {row.editable && (
         <Button

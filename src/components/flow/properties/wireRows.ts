@@ -9,6 +9,14 @@ import type { FlowEdge, FlowNode, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { edgeRunState, exitLabel } from '../flowExits';
 
+/** What the last run delivered on a wire, as the backend masked it. */
+export interface WireResolved {
+  value?: string;
+  truncated: boolean;
+  credential: boolean;
+  error?: string;
+}
+
 export interface WireRow {
   edgeId: string;
   field: string;
@@ -18,6 +26,10 @@ export interface WireRow {
   preview: string | null;
   editable: boolean;
   notTaken: boolean;
+  /** What the last run delivered on this wire, when the target node recorded it. */
+  resolved?: WireResolved;
+  /** True when this wire failed its target node in the last run. */
+  failed: boolean;
 }
 
 export interface OutgoingGroup {
@@ -99,6 +111,9 @@ function row(
   const preview = noScript ? null : scriptPreview(edge.expression);
   const handle = exitHandle(edge);
   const exitLabel = handle === null ? null : exitDisplayLabel(source, handle);
+  // The target node's step recorded what arrived on this wire.
+  const targetTrace = nodeDetail?.[edge.targetNodeId]?.trace;
+  const recorded = targetTrace?.wires?.find((w) => w.edgeId === edge.id);
   return {
     edgeId: edge.id,
     field: fieldLabel(edge.targetField),
@@ -109,6 +124,14 @@ function row(
     // A wire with no script, or to a missing node, cannot be edited.
     editable: !noScript && other !== undefined,
     notTaken: isNotTaken(edge, source, nodeStatus, nodeDetail),
+    resolved: recorded && {
+      // A credential wire never shows a value, even if one arrived.
+      value: recorded.credential ? undefined : recorded.value,
+      truncated: recorded.truncated ?? false,
+      credential: recorded.credential ?? false,
+      error: recorded.error,
+    },
+    failed: targetTrace?.failedEdgeId === edge.id,
   };
 }
 

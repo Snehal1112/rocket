@@ -182,4 +182,81 @@ describe('WiresTab', () => {
     expect(link).toHaveAttribute('title', 'A very long node label');
     expect(link).toHaveClass('truncate', 'min-w-0', 'max-w-full');
   });
+
+  it('keeps the last value collapsed until asked', async () => {
+    renderTab(out, {
+      nodeStatus: { out: 'success' },
+      nodeDetail: {
+        out: {
+          trace: {
+            wires: [
+              { edgeId: 'e3', sourceNodeId: 'check', targetField: 'value', value: 'big value', truncated: true },
+            ],
+          },
+        },
+      },
+    });
+    expect(screen.queryByTestId('wire-value')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Last value/ }));
+    expect(screen.getByTestId('wire-value')).toHaveTextContent('big value');
+    expect(screen.getByText('Cut at 16 KB.')).toBeInTheDocument();
+  });
+
+  it('shows a credential wire as hidden', () => {
+    const auth = n('signin', {
+      kind: 'Auth',
+      label: 'Sign in',
+      auth: { authType: 'bearer', token: 't' },
+      applyToInherit: false,
+    });
+    render(
+      <WiresTab
+        node={users}
+        nodes={[auth, users]}
+        edges={[
+          { id: 'ea', sourceNodeId: 'signin', targetNodeId: 'users', targetField: 'auth', expression: '' },
+        ]}
+        nodeDetail={{
+          users: {
+            trace: {
+              wires: [
+                {
+                  edgeId: 'ea',
+                  sourceNodeId: 'signin',
+                  targetField: 'auth',
+                  credential: true,
+                  value: 'leaked-token-123456',
+                },
+              ],
+            },
+          },
+        }}
+        onEditWire={vi.fn()}
+        onSelectNode={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('wire-credential')).toHaveTextContent('Credential (hidden)');
+    expect(screen.queryByRole('button', { name: /Last value/ })).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('leaked-token-123456');
+  });
+
+  it('highlights only the wire that failed', () => {
+    renderTab(check, {
+      nodeStatus: { check: 'failed' },
+      nodeDetail: {
+        check: {
+          trace: {
+            wires: [{ edgeId: 'e1', sourceNodeId: 'login', targetField: 'input', error: 'boom' }],
+            failedEdgeId: 'e1',
+          },
+        },
+      },
+    });
+    const incoming = within(screen.getByTestId('wires-incoming')).getByTestId('wire-row');
+    expect(incoming).toHaveAttribute('data-failed', 'true');
+    expect(within(incoming).getByTestId('wire-error')).toHaveTextContent('boom');
+    for (const row of within(screen.getByTestId('wires-outgoing')).getAllByTestId('wire-row')) {
+      expect(row).not.toHaveAttribute('data-failed');
+    }
+  });
 });

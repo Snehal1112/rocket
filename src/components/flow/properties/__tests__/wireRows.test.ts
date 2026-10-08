@@ -348,3 +348,58 @@ describe('auth wires', () => {
     );
   });
 });
+
+describe('last run values', () => {
+  const into = edge({
+    id: 'e1',
+    sourceNodeId: 'login',
+    targetNodeId: 'users',
+    targetField: 'headers[Authorization].value',
+    expression: 'response.body.token',
+  });
+
+  it('reads the value from the target node trace for incoming and outgoing rows', () => {
+    const detail = {
+      users: { trace: { wires: [{ edgeId: 'e1', sourceNodeId: 'login', targetField: 'x', value: '••••••' }] } },
+    };
+    const [incoming] = incomingRows(users, [login, users], [into], {}, detail);
+    expect(incoming.resolved).toEqual({ value: '••••••', truncated: false, credential: false });
+    const [group] = outgoingGroups(login, [login, users], [into], {}, detail);
+    expect(group.rows[0].resolved?.value).toBe('••••••');
+  });
+
+  it('has no value before a run', () => {
+    const [row] = incomingRows(users, [login, users], [into]);
+    expect(row.resolved).toBeUndefined();
+    expect(row.failed).toBe(false);
+  });
+
+  it('drops a value from a credential wire', () => {
+    const detail = {
+      users: {
+        trace: {
+          wires: [
+            { edgeId: 'e1', sourceNodeId: 'login', targetField: 'auth', credential: true, value: 'tok-123456' },
+          ],
+        },
+      },
+    };
+    const [row] = incomingRows(users, [login, users], [into], {}, detail);
+    expect(row.resolved).toEqual({ value: undefined, truncated: false, credential: true });
+  });
+
+  it('marks the wire that failed', () => {
+    const second = edge({ id: 'e2', sourceNodeId: 'login', targetNodeId: 'users', targetField: 'url' });
+    const detail = {
+      users: {
+        trace: {
+          wires: [{ edgeId: 'e2', sourceNodeId: 'login', targetField: 'url', error: 'boom' }],
+          failedEdgeId: 'e2',
+        },
+      },
+    };
+    const rows = incomingRows(users, [login, users], [into, second], {}, detail);
+    expect(rows.map((r) => r.failed)).toEqual([false, true]);
+    expect(rows[1].resolved?.error).toBe('boom');
+  });
+});
