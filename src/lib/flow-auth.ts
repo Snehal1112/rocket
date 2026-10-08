@@ -298,3 +298,27 @@ export function isTokenExpired(
   if (!oauth.expiresIn || !oauth.tokenAcquiredAt) return false;
   return nowSeconds >= oauth.tokenAcquiredAt + oauth.expiresIn - EXPIRY_MARGIN_SECONDS;
 }
+
+/** What an Auth node holds: no token, a usable one (with its expiry), or an expired one. */
+export type Oauth2TokenStatus =
+  | { kind: 'none' }
+  | { kind: 'valid'; expiresAt: number | null }
+  | { kind: 'expired' };
+
+/**
+ * The token status of an OAuth2 state, by the token the node sends (the ID token
+ * when the node says so). `expiresAt` is in seconds since the epoch, and null when
+ * the token has no lifetime. Never returns the token.
+ */
+export function oauth2TokenStatus(
+  oauth: OAuth2State | undefined,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): Oauth2TokenStatus {
+  if (!oauth) return { kind: 'none' };
+  const token = oauth.tokenSource === 'idToken' ? oauth.idToken : oauth.accessToken;
+  if (!token) return { kind: 'none' };
+  if (isTokenExpired(oauth, nowSeconds)) return { kind: 'expired' };
+  const expiresAt =
+    oauth.expiresIn && oauth.tokenAcquiredAt ? oauth.tokenAcquiredAt + oauth.expiresIn : null;
+  return { kind: 'valid', expiresAt };
+}

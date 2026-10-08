@@ -8,6 +8,7 @@ import {
   isOAuth2,
   isTokenExpired,
   oauth2Fingerprint,
+  oauth2TokenStatus,
   pickAuthState,
   resetTokenOnConfigChange,
 } from '@/lib/flow-auth';
@@ -361,5 +362,51 @@ describe('pickAuthState', () => {
                 `${grant}/${headerPrefix}/${addTokenTo}/${tokenSource}/${tokenId}`,
               ).toBe(stored);
             }
+  });
+});
+
+describe('oauth2TokenStatus', () => {
+  const o = (patch: Partial<NonNullable<AuthState['oauth2']>>) =>
+    ({
+      accessToken: 'tok',
+      idToken: '',
+      refreshToken: '',
+      tokenSource: 'accessToken',
+      expiresIn: 3600,
+      tokenAcquiredAt: 1000,
+      ...patch,
+    }) as NonNullable<AuthState['oauth2']>;
+
+  it('is none without state, without a token, or with only a refresh token', () => {
+    expect(oauth2TokenStatus(undefined, 1000)).toEqual({ kind: 'none' });
+    expect(oauth2TokenStatus(o({ accessToken: '' }), 1000)).toEqual({ kind: 'none' });
+    expect(oauth2TokenStatus(o({ accessToken: '', refreshToken: 'r' }), 1000)).toEqual({
+      kind: 'none',
+    });
+  });
+
+  it('is valid with the expiry time while the token has lifetime left', () => {
+    expect(oauth2TokenStatus(o({}), 1100)).toEqual({ kind: 'valid', expiresAt: 4600 });
+  });
+
+  it('is valid without an expiry time when the token has no lifetime', () => {
+    expect(oauth2TokenStatus(o({ expiresIn: null }), 9999)).toEqual({
+      kind: 'valid',
+      expiresAt: null,
+    });
+  });
+
+  it('is expired once the lifetime is used up, with the 30 second margin', () => {
+    expect(oauth2TokenStatus(o({}), 1000 + 3600 - 31)).toEqual({ kind: 'valid', expiresAt: 4600 });
+    expect(oauth2TokenStatus(o({}), 1000 + 3600 - 29)).toEqual({ kind: 'expired' });
+  });
+
+  it('reads the ID token when the node uses it', () => {
+    expect(
+      oauth2TokenStatus(o({ tokenSource: 'idToken', accessToken: 'a', idToken: '' }), 1100),
+    ).toEqual({ kind: 'none' });
+    expect(
+      oauth2TokenStatus(o({ tokenSource: 'idToken', accessToken: '', idToken: 'id' }), 1100),
+    ).toEqual({ kind: 'valid', expiresAt: 4600 });
   });
 });
