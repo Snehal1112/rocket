@@ -25,34 +25,89 @@
   globalThis.console = console;
 
   // ── rok ─────────────────────────────────────────────────────────────────────
+  // ── read-your-writes overlay ────────────────────────────────────────────────
+  // Ops read a snapshot taken before the script ran. These maps remember this
+  // script's own sets and deletes so later reads in the same script agree.
+  const _GONE = Symbol('gone');
+  const _ov = { runtime: new Map(), env: new Map(), collection: new Map(), global: new Map() };
+
+  function _ovRead(scope, key, base) {
+    const m = _ov[scope];
+    if (m.has(key)) { const v = m.get(key); return v === _GONE ? "" : v; }
+    return base(key);
+  }
+  function _ovHas(scope, key, base) {
+    const m = _ov[scope];
+    if (m.has(key)) return m.get(key) !== _GONE;
+    return base(key);
+  }
+  function _ovAll(scope, base) {
+    const out = base();
+    for (const [k, v] of _ov[scope]) {
+      if (v === _GONE) delete out[k]; else out[k] = v;
+    }
+    return out;
+  }
+  function _ovDeleteAll(scope, base) {
+    for (const k of Object.keys(_ovAll(scope, base))) _ov[scope].set(k, _GONE);
+  }
+
   globalThis.rok = {
-    getVar:            (key)        => __ops.op_rok_get_var(key),
-    setVar:            (key, value) => __ops.op_rok_set_var(key, JSON.stringify(value)),
-    getEnvVar:         (key)        => __ops.op_rok_get_env_var(key),
-    setEnvVar:         (key, value, opts) => __ops.op_rok_set_env_var(key, JSON.stringify(value), !!(opts && opts.persist)),
-    hasEnvVar:         (key)        => __ops.op_rok_has_env_var(key),
-    deleteEnvVar:      (key)        => __ops.op_rok_delete_env_var(key),
+    getVar:     (key) => _ovRead('runtime', key, (k) => __ops.op_rok_get_var(k)),
+    setVar:     (key, value) => { __ops.op_rok_set_var(key, JSON.stringify(value)); _ov.runtime.set(key, value); },
+    hasVar:     (key) => _ovHas('runtime', key, (k) => __ops.op_rok_has_var(k)),
+    getAllVars: () => _ovAll('runtime', () => JSON.parse(__ops.op_rok_get_all_vars())),
+    deleteVar:  (key) => { __ops.op_rok_delete_var(key); _ov.runtime.set(key, _GONE); },
+    deleteAllVars: () => {
+      _ovDeleteAll('runtime', () => JSON.parse(__ops.op_rok_get_all_vars()));
+      __ops.op_rok_delete_all_vars();
+    },
+
+    getEnvVar:  (key) => _ovRead('env', key, (k) => __ops.op_rok_get_env_var(k)),
+    setEnvVar:  (key, value, opts) => {
+      __ops.op_rok_set_env_var(key, JSON.stringify(value), !!(opts && opts.persist));
+      _ov.env.set(key, value);
+    },
+    hasEnvVar:  (key) => _ovHas('env', key, (k) => __ops.op_rok_has_env_var(k)),
+    getAllEnvVars: () => _ovAll('env', () => JSON.parse(__ops.op_rok_get_all_env_vars())),
+    deleteEnvVar: (key) => { __ops.op_rok_delete_env_var(key); _ov.env.set(key, _GONE); },
+    deleteAllEnvVars: () => {
+      _ovDeleteAll('env', () => JSON.parse(__ops.op_rok_get_all_env_vars()));
+      __ops.op_rok_delete_all_env_vars();
+    },
+
+    getCollectionVar: (key) => _ovRead('collection', key, (k) => __ops.op_rok_get_collection_var(k)),
+    setCollectionVar: (key, value) => {
+      __ops.op_rok_set_collection_var(key, JSON.stringify(value));
+      _ov.collection.set(key, value);
+    },
+    hasCollectionVar: (key) => _ovHas('collection', key, (k) => __ops.op_rok_has_collection_var(k)),
+    deleteCollectionVar: (key) => { __ops.op_rok_delete_collection_var(key); _ov.collection.set(key, _GONE); },
+    // Known limit: after deleteAllCollectionVars(), snapshot keys the script never
+    // touched still read as their snapshot value, as there is no read-all op.
+    deleteAllCollectionVars: () => {
+      // The collection scope has no read-all op, so remember which keys the
+      // script touched and let the op expand the snapshot keys.
+      for (const k of Array.from(_ov.collection.keys())) _ov.collection.set(k, _GONE);
+      __ops.op_rok_delete_all_collection_vars();
+    },
+
+    getGlobalEnvVar: (key) => _ovRead('global', key, (k) => __ops.op_rok_get_global_env_var(k)),
+    setGlobalEnvVar: (key, value) => {
+      __ops.op_rok_set_global_env_var(key, JSON.stringify(value));
+      _ov.global.set(key, value);
+    },
+    hasGlobalEnvVar: (key) => _ovHas('global', key, (k) => __ops.op_rok_has_global_env_var(k)),
+    getAllGlobalEnvVars: () => _ovAll('global', () => JSON.parse(__ops.op_rok_get_all_global_env_vars())),
+    deleteGlobalEnvVar: (key) => { __ops.op_rok_delete_global_env_var(key); _ov.global.set(key, _GONE); },
+    deleteAllGlobalEnvVars: () => {
+      _ovDeleteAll('global', () => JSON.parse(__ops.op_rok_get_all_global_env_vars()));
+      __ops.op_rok_delete_all_global_env_vars();
+    },
     getEnvName:        ()           => __ops.op_rok_get_env_name(),
     getSecretVar:      (key)        => __ops.op_rok_get_secret_var(key),
-    getCollectionVar:  (key)        => __ops.op_rok_get_collection_var(key),
-    setCollectionVar:  (key, value) => __ops.op_rok_set_collection_var(key, JSON.stringify(value)),
     getFolderVar:      (key)        => __ops.op_rok_get_folder_var(key),
-    getGlobalEnvVar:   (key)        => __ops.op_rok_get_global_env_var(key),
-    setGlobalEnvVar:   (key, value) => __ops.op_rok_set_global_env_var(key, JSON.stringify(value)),
-    deleteVar:                (key) => __ops.op_rok_delete_var(key),
-    deleteAllVars:            ()    => __ops.op_rok_delete_all_vars(),
-    deleteAllEnvVars:         ()    => __ops.op_rok_delete_all_env_vars(),
-    deleteCollectionVar:      (key) => __ops.op_rok_delete_collection_var(key),
-    deleteAllCollectionVars:  ()    => __ops.op_rok_delete_all_collection_vars(),
-    deleteGlobalEnvVar:       (key) => __ops.op_rok_delete_global_env_var(key),
-    deleteAllGlobalEnvVars:   ()    => __ops.op_rok_delete_all_global_env_vars(),
     interpolate:       (template)   => __ops.op_rok_interpolate(template),
-    getAllEnvVars:       ()    => JSON.parse(__ops.op_rok_get_all_env_vars()),
-    getAllVars:          ()    => JSON.parse(__ops.op_rok_get_all_vars()),
-    getAllGlobalEnvVars: ()    => JSON.parse(__ops.op_rok_get_all_global_env_vars()),
-    hasVar:              (key) => __ops.op_rok_has_var(key),
-    hasGlobalEnvVar:     (key) => __ops.op_rok_has_global_env_var(key),
-    hasCollectionVar:    (key) => __ops.op_rok_has_collection_var(key),
     getRequestVar:       (key) => __ops.op_rok_get_request_var(key),
     getProcessEnv:       (key) => (__ops.op_rok_has_process_env(key) ? __ops.op_rok_get_process_env(key) : undefined),
     setNextRequest:      (name) => __ops.op_rok_set_next_request(name == null ? "" : String(name)),

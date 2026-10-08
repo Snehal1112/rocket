@@ -2554,4 +2554,70 @@ mod tests {
             );
         });
     }
+
+    #[tokio::test]
+    async fn rok_get_var_sees_an_earlier_set_in_the_same_script() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('a', 1); rok.setVar('b', rok.getVar('a') + 1)");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("b").expect("b present"), 2);
+    }
+
+    #[tokio::test]
+    async fn rok_has_and_get_all_vars_follow_set_and_delete() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("old".into(), "1".into());
+        let mut ctx = minimal_ctx(
+            "rok.setVar('fresh', 'x'); rok.deleteVar('old'); \
+             rok.setVar('out', [rok.hasVar('fresh'), rok.hasVar('old'), \
+             Object.keys(rok.getAllVars()).sort().join(',')].join('|'))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "true|false|fresh"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_env_reads_follow_set_delete_and_delete_all() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("A".into(), "1".into());
+        let mut ctx = minimal_ctx(
+            "rok.setEnvVar('B', '2'); \
+             const before = Object.keys(rok.getAllEnvVars()).sort().join(','); \
+             rok.deleteAllEnvVars(); \
+             rok.setVar('out', before + '|' + rok.hasEnvVar('A') + '|' + rok.hasEnvVar('B') \
+               + '|' + Object.keys(rok.getAllEnvVars()).length)",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "A,B|false|false|0"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_collection_and_global_reads_follow_writes() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.collection.insert("c".into(), "1".into());
+        let mut ctx = minimal_ctx(
+            "rok.setCollectionVar('c', '2'); rok.setGlobalEnvVar('g', 'x'); \
+             const c1 = rok.getCollectionVar('c'); \
+             rok.deleteCollectionVar('c'); \
+             rok.setVar('out', c1 + '|' + rok.hasCollectionVar('c') + '|' + rok.getGlobalEnvVar('g') \
+               + '|' + rok.hasGlobalEnvVar('g'))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "2|false|x|true"
+        );
+    }
 }
