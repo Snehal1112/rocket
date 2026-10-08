@@ -14,7 +14,7 @@ use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 use crate::callback_listener::ReceivedCall;
 use crate::execution_service::{ExecuteRequestOutput, RequestExecutionService};
 use crate::flow_callbacks::RunCallbacks;
-use crate::flow_debug::{rejected_call, EXCHANGE_BODY_LIMIT, LIVE_REJECTED_BODY_LIMIT};
+use crate::flow_debug::{live_rejected_call, rejected_call, EXCHANGE_BODY_LIMIT};
 use crate::flow_execution_service::{
     CapturedOutput, ExecutedNode, FlowExecutionService, NodeRunContext, RunFlowInput,
 };
@@ -78,6 +78,7 @@ impl FlowExecutionService {
         timeout_ms: u64,
         accept_when: Option<&str>,
         secret_values: &HashSet<String>,
+        trace_masks: &HashSet<String>,
         logs: &mut Vec<FlowLogEntry>,
         exchange: &mut Option<FlowDebugRequest>,
         trace: &mut NodeTrace,
@@ -134,14 +135,17 @@ impl FlowExecutionService {
                             "true" => {}
                             "false" => {
                                 ignored += 1;
+                                // Masked once, kept whole in the trace; the live copy is cut.
+                                let record = rejected_call(
+                                    &call,
+                                    trace_masks,
+                                    EXCHANGE_BODY_LIMIT,
+                                    REJECT_REASON,
+                                );
+                                let live_record = live_rejected_call(&record);
                                 if let Some(wait) = trace.step.wait.as_mut() {
                                     wait.ignored = ignored;
-                                    wait.last_rejected = Some(rejected_call(
-                                        &call,
-                                        secret_values,
-                                        EXCHANGE_BODY_LIMIT,
-                                        REJECT_REASON,
-                                    ));
+                                    wait.last_rejected = Some(record);
                                 }
                                 // Shown at once, with a smaller body than the trace keeps.
                                 let remaining = deadline.saturating_duration_since(Instant::now());
@@ -156,12 +160,7 @@ impl FlowExecutionService {
                                     FlowLiveProgress {
                                         remaining_ms: Some(millis(remaining)),
                                         ignored: Some(ignored),
-                                        last_rejected: Some(rejected_call(
-                                            &call,
-                                            secret_values,
-                                            LIVE_REJECTED_BODY_LIMIT,
-                                            REJECT_REASON,
-                                        )),
+                                        last_rejected: Some(live_record),
                                         ..Default::default()
                                     },
                                 );

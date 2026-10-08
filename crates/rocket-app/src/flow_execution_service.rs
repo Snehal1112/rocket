@@ -976,6 +976,11 @@ impl FlowExecutionService {
         let mut callbacks =
             crate::flow_callbacks::RunCallbacks::open_all(self.callback_listener.as_ref(), &flow)
                 .await?;
+        // The callback URL and token are bearer secrets: mask them in every
+        // sink, like a credential. Only `FlowRunStarted` carries the URL.
+        for (key, value) in callbacks.mask_secrets() {
+            external_secrets.insert(key, value);
+        }
 
         let run_id = Ulid::new().to_string();
         let (registration, cancel_signal) = RunRegistration::new(self, &run_id);
@@ -1532,6 +1537,7 @@ impl FlowExecutionService {
                     *timeout_ms,
                     accept_when.as_deref(),
                     &secret_values,
+                    &trace_masks,
                     logs,
                     exchange,
                     trace,
@@ -7918,6 +7924,105 @@ mod tests {
         assert!(live
             .iter()
             .all(|l| l.ignored.is_some() && l.remaining_ms.is_some()));
+    }
+
+    fn echoing_call(url: &str) -> crate::callback_listener::ReceivedCall {
+        crate::callback_listener::ReceivedCall {
+            method: "POST".to_string(),
+            path: "/cb/tok-secret-0".to_string(),
+            query: vec![("back".to_string(), url.to_string())],
+            headers: vec![("X-Callback".to_string(), url.to_string())],
+            body: format!(r#"{{"reply":"{url}","token":"tok-secret-0"}}"#),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_turned_down_call_echoing_its_callback_url_is_masked_everywhere() {
+        let fake = crate::test_doubles::FakeCallbackListener::with_long_tokens();
+        fake.queue_on_open(echoing_call("http://fake:1/cb/tok-secret-0"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "const request",
+                Scripted::Value(serde_json::json!(false)),
+            )]),
+        );
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 1000, Some("request.body.ok"))),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+
+        let summary = service.run(&exec, run_input("cb")).await.expect("run");
+
+        let step = step_of(&summary, "w");
+        let rejected = step
+            .trace
+            .clone()
+            .and_then(|t| t.wait)
+            .and_then(|w| w.last_rejected)
+            .expect("the turned-down call");
+        let kept = serde_json::to_string(&rejected).expect("serialize");
+        assert!(kept.contains(crate::redaction::REDACTED), "{kept}");
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("tok-secret-0"), "{json}");
+        let mut live_seen = false;
+        for event in publisher.events() {
+            if matches!(event, DomainEvent::FlowRunStarted { .. }) {
+                continue;
+            }
+            if let DomainEvent::FlowStepProgress { live: Some(l), .. } = &event {
+                live_seen |= l.last_rejected.is_some();
+            }
+            let json = serde_json::to_string(&event).expect("serialize");
+            assert!(!json.contains("tok-secret-0"), "{json}");
+        }
+        assert!(live_seen, "the live event carried the turned-down call");
+    }
+
+    #[tokio::test]
+    async fn a_request_that_sends_the_callback_url_never_shows_its_token() {
+        let fake = crate::test_doubles::FakeCallbackListener::with_long_tokens();
+        fake.queue_on_open(echoing_call("http://fake:1/cb/tok-secret-0"));
+        let mut reg = request_flow_node(
+            "reg",
+            "https://api.example.com/register?cb={{callback.payment}}",
+        );
+        if let FlowNodeKind::Request { debug, .. } = &mut reg.kind {
+            *debug = true;
+        }
+        let flow = Flow {
+            name: "cb".to_string(),
+            nodes: vec![reg, wait_node("w", "payment")],
+            edges: vec![trigger_edge("e1", "reg", handle::RESULT, "w")],
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher)
+            .with_callback_listener(Box::new(Arc::clone(&fake)));
+
+        let summary = service.run(&exec, run_input("cb")).await.expect("run");
+
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/register?cb=http://fake:1/cb/tok-secret-0".to_string()],
+            "the request itself still sends the real URL"
+        );
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("tok-secret-0"), "{json}");
+        for event in publisher.events() {
+            let json = serde_json::to_string(&event).expect("serialize");
+            match &event {
+                DomainEvent::FlowRunStarted { callbacks, .. } => {
+                    assert_eq!(callbacks[0].url, "http://fake:1/cb/tok-secret-0");
+                }
+                _ => assert!(!json.contains("tok-secret-0"), "{json}"),
+            }
+        }
     }
 
     #[tokio::test]

@@ -238,6 +238,16 @@ pub(crate) fn rejected_call(
     }
 }
 
+/// The live copy of an already masked turned-down call, with the body cut
+/// to `LIVE_REJECTED_BODY_LIMIT` at a char boundary.
+pub(crate) fn live_rejected_call(record: &FlowRejectedCall) -> FlowRejectedCall {
+    let mut live = record.clone();
+    if cap_text(&mut live.body, LIVE_REJECTED_BODY_LIMIT) {
+        live.body_truncated = true;
+    }
+    live
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,6 +689,26 @@ mod tests {
         assert!(record.body_truncated);
         assert!(record.body.len() <= LIVE_REJECTED_BODY_LIMIT);
         assert!(!record.body.contains("sek"), "half a secret leaked");
+    }
+
+    #[test]
+    fn the_live_copy_cuts_the_masked_body_and_flags_it() {
+        let body = format!(
+            "{}é{}",
+            "a".repeat(LIVE_REJECTED_BODY_LIMIT - 1),
+            "b".repeat(50)
+        );
+        let full = rejected_call(
+            &turned_down(&body),
+            &secrets(&[]),
+            EXCHANGE_BODY_LIMIT,
+            "no",
+        );
+        assert!(!full.body_truncated);
+        let live = live_rejected_call(&full);
+        assert!(live.body_truncated);
+        assert!(live.body.len() <= LIVE_REJECTED_BODY_LIMIT);
+        assert_eq!(full.body.len(), body.len(), "the full record is untouched");
     }
 
     #[test]

@@ -137,3 +137,8 @@ node. `FlowRunStarted.callbacks` is the only place a callback URL leaves the
 backend, because the URL holds a bearer token. Never put it in a
 `FlowRunSummary`, a step, an exchange, a log, a live progress event or
 history. The field is omitted when empty and defaults on old payloads.
+Each endpoint's full URL and bare token also join the run's
+`external_secrets` (`flow-callback.<node id>.url` and `.token`, from
+`RunCallbacks::mask_secrets`), so a sender that echoes its URL is masked in
+every other sink. A token under `MIN_REDACTION_LEN` is not masked alone (a
+real one is 32 characters); the full URL still is.

@@ -871,6 +871,8 @@ pub struct FakeCallbackListener {
     /// Calls put into the next endpoint the moment it opens, so a test can
     /// deliver a call before its node's turn.
     queued: Mutex<Vec<ReceivedCall>>,
+    /// When set, the URL token is `tok-secret-<i>` (long enough to be masked).
+    long_tokens: bool,
 }
 
 impl FakeCallbackListener {
@@ -879,6 +881,17 @@ impl FakeCallbackListener {
             endpoints: Mutex::new(Vec::new()),
             fail_with: None,
             queued: Mutex::new(Vec::new()),
+            long_tokens: false,
+        })
+    }
+
+    /// A listener whose URLs end in `/cb/tok-secret-<i>`, like a real token.
+    pub fn with_long_tokens() -> Arc<Self> {
+        Arc::new(Self {
+            endpoints: Mutex::new(Vec::new()),
+            fail_with: None,
+            queued: Mutex::new(Vec::new()),
+            long_tokens: true,
         })
     }
 
@@ -894,6 +907,7 @@ impl FakeCallbackListener {
             endpoints: Mutex::new(Vec::new()),
             fail_with: Some((opened, message.to_string())),
             queued: Mutex::new(Vec::new()),
+            long_tokens: false,
         })
     }
 
@@ -968,7 +982,11 @@ impl CallbackListener for Arc<FakeCallbackListener> {
             host: host.map(str::to_string),
         });
         Ok(CallbackEndpoint {
-            url: format!("http://fake:1/cb/{index}"),
+            url: if self.long_tokens {
+                format!("http://fake:1/cb/tok-secret-{index}")
+            } else {
+                format!("http://fake:1/cb/{index}")
+            },
             calls,
             guard: Box::new(FakeGuard(closed)),
         })

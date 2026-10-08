@@ -62,6 +62,30 @@ impl RunCallbacks {
         &self.infos
     }
 
+    /// Each endpoint's full URL and bare token, keyed for the run's secret
+    /// map. They join the mask set, so a sender that echoes its own callback
+    /// URL cannot put the bearer token in a step, an exchange, history or an
+    /// event. A real token is 32 characters; a shorter one (under
+    /// `MIN_REDACTION_LEN`) is not masked alone, but the full URL still is.
+    pub(crate) fn mask_secrets(&self) -> Vec<(String, String)> {
+        let mut secrets = Vec::new();
+        for info in &self.infos {
+            secrets.push((
+                format!("flow-callback.{}.url", info.node_id),
+                info.url.clone(),
+            ));
+            if let Some((_, token)) = info.url.rsplit_once("/cb/") {
+                if !token.is_empty() {
+                    secrets.push((
+                        format!("flow-callback.{}.token", info.node_id),
+                        token.to_string(),
+                    ));
+                }
+            }
+        }
+        secrets
+    }
+
     pub(crate) fn endpoint_mut(&mut self, node_id: &str) -> Option<&mut CallbackEndpoint> {
         self.endpoints.get_mut(node_id)
     }
