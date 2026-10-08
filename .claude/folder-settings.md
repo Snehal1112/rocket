@@ -37,7 +37,7 @@ These were found in review and left on purpose. Check them before building on th
 Scope not covered:
 - gRPC requests do not inherit folder settings. `grpc_service.rs` does not read the folder chain.
 - Collection-level scripts do not exist as a feature. They are preserved in `opencollection.yml`, never run.
-- Importers do not read or write the script flow (`extensions.bruno.scripts.flow`). A Bruno collection imported through `rocket-import` ends with the default sandwich flow. Hand edits to `opencollection.yml` are kept by Rocket saves.
+- The importer does not interpret the script flow (`extensions.bruno.scripts.flow`). A `.bru` import gets the default sandwich flow. A source `opencollection.yml` has its root `extensions` copied as is (`merge_root_defaults` in `rocket-import` `importer.rs`), so its flow carries over. Hand edits to `opencollection.yml` are kept by Rocket saves.
 - There is no `folder.bru` importer. A Bruno `.bru` collection loses folder-level settings on import.
 - Folder OAuth2 on Flow and the collection runner has no interactive token step. A non-client-credentials grant (auth code, password, implicit) with no cached token sends no Authorization header, silently. Folder OAuth2 goes out as a plain bearer and ignores `addTokenTo` and `headerPrefix`.
 
