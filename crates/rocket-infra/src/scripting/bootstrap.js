@@ -119,6 +119,9 @@
     runner: {
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),
+      stopExecution:   ()      => __ops.op_rok_stop_execution(),
+      iterationIndex:  0,
+      totalIterations: 1,
     },
   };
 
@@ -344,22 +347,34 @@
   ));
   const _resBody = (raw) => { try { return JSON.parse(raw); } catch { return raw; } };
 
+  // A body set by res.setBody replaces the stored one for the rest of this script.
+  let _resBodyOverride = null;
+  const _rawBody = () => (_resBodyOverride !== null ? _resBodyOverride : __ops.op_res_get_body());
+
   globalThis.res = {
     getStatus:        ()      => __ops.op_res_get_status(),
     getStatusText:    ()      => __ops.op_res_get_status_text(),
     getHeader:        (name)  => _resHeaders().get(name),
     getHeaders:       ()      => _resHeaders().toObject(),
     getBody:          (opts)  => {
-      const raw = __ops.op_res_get_body();
+      const raw = _rawBody();
       return (opts && opts.raw) ? raw : _resBody(raw);
     },
+    setBody:          (body)  => {
+      const raw = typeof body === 'string' ? body : JSON.stringify(body);
+      __ops.op_res_set_body(raw);
+      _resBodyOverride = raw;
+    },
+    getUrl:           ()      => __ops.op_res_get_url(),
+    getSize:          ()      => JSON.parse(__ops.op_res_get_size()),
     getResponseTime:  ()      => __ops.op_res_get_response_time(),
   };
   Object.defineProperties(globalThis.res, {
     status:       { get: () => __ops.op_res_get_status(), enumerable: false },
     statusText:   { get: () => __ops.op_res_get_status_text(), enumerable: false },
     headers:      { get: () => _resHeaders().toObject(), enumerable: false },
-    body:         { get: () => _resBody(__ops.op_res_get_body()), enumerable: false },
+    body:         { get: () => _resBody(_rawBody()), enumerable: false },
+    url:          { get: () => __ops.op_res_get_url(), enumerable: false },
     responseTime: { get: () => __ops.op_res_get_response_time(), enumerable: false },
     headerList:   { get: _resHeaders, enumerable: false },
   });

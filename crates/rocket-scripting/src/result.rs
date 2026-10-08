@@ -57,6 +57,11 @@ pub struct ScriptResult {
     #[serde(default)]
     pub console_entries: Vec<ConsoleEntry>,
 
+    /// Replacement response body set via `res.setBody`. Later scripts see it. The
+    /// stored response and the UI are not changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_body: Option<String>,
+
     /// Script-level error message if execution threw an uncaught exception.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

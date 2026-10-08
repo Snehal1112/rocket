@@ -523,6 +523,12 @@ declare const rok: {
     setNextRequest(name: string | null): void;
     /** Skip this request during a Collection Runner run — no HTTP call is made and no later phase runs for this step. Only meaningful from the before-request phase. */
     skipRequest(): void;
+    /** Stop the whole run. Before the request it also skips sending it. Only meaningful during a Collection Runner run. */
+    stopExecution(): void;
+    /** Zero-based index of the current iteration. Always 0 until data-driven runs exist. */
+    readonly iterationIndex: number;
+    /** Total number of iterations. Always 1 until data-driven runs exist. */
+    readonly totalIterations: number;
   };
 };
 /** Collection directory. Developer mode only. */
@@ -590,6 +596,14 @@ declare const res: {
   getBody(opts?: { raw?: boolean }): unknown;
   /** Returns the total response time in milliseconds. */
   getResponseTime(): number;
+  /** The request URL. The final redirect URL is not tracked. */
+  getUrl(): string;
+  /** Response size in bytes. */
+  getSize(): { body: number; headers: number; total: number };
+  /** Replaces the body that later scripts see. The stored response is not changed. */
+  setBody(body: unknown): void;
+  /** The request URL. Same as getUrl(). */
+  readonly url: string;
   /** The HTTP status code. Same as getStatus(). */
   readonly status: number;
   /** The HTTP status text. Same as getStatusText(). */

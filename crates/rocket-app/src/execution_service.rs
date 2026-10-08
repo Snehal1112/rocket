@@ -265,6 +265,8 @@ pub(crate) struct PhaseState {
     /// Scripts of every phase in run order: the folder chain and the request's
     /// own script, built once in `begin_phases`.
     pub scripts: PhaseScripts,
+    /// Body set by an after-response `res.setBody`, shown to the tests script only.
+    pub response_body_override: Option<String>,
 }
 
 impl PhaseState {
@@ -1540,6 +1542,7 @@ impl RequestExecutionService {
             sandbox_mode,
             file_scope,
             scripts,
+            response_body_override: None,
         })
     }
 
@@ -1823,6 +1826,9 @@ impl RequestExecutionService {
             if result.next_request.is_some() {
                 state.next_request = result.next_request.clone();
             }
+            if result.response_body.is_some() {
+                state.response_body_override = result.response_body.clone();
+            }
             // A failed script ends its phase.
             if failed {
                 break;
@@ -1842,12 +1848,13 @@ impl RequestExecutionService {
         let env_name = input.environment_name.clone();
 
         let scripts = state.scripts.tests.clone();
+        let script_response = with_body_override(response, state.response_body_override.as_deref());
         for script in &scripts {
             let ctx = ScriptContext::tests(
                 script.code.clone(),
                 state.var_ctx.clone(),
                 state.http_request.clone(),
-                response.clone(),
+                script_response.clone(),
                 env_name.clone(),
                 request_name.clone(),
                 input.tags.clone(),
@@ -2253,6 +2260,18 @@ fn remove_variable(vars: &mut Vec<rocket_collection::CollectionVariable>, key: &
 ///
 /// Non-string values are kept as JSON text so a number or object set with
 /// `rok.setVar` survives into the next script phase. A null value is skipped.
+/// Returns a copy of `response` whose text body is replaced, for later script phases.
+fn with_body_override(response: &HttpResponse, body: Option<&str>) -> HttpResponse {
+    let mut patched = response.clone();
+    if let Some(body) = body {
+        patched.body = body.to_string();
+        patched.size_bytes = body.len();
+        patched.is_binary = false;
+        patched.body_base64 = None;
+    }
+    patched
+}
+
 fn merge_runtime_vars(var_ctx: &mut rocket_environment::VariableContext, result: &ScriptResult) {
     for (key, value) in &result.runtime_vars {
         let text = match value {
@@ -5464,8 +5483,6 @@ mod tests {
             })
         }
 
-        // Used by the response-phase tests in a later task.
-        #[allow(dead_code)]
         fn with_after_response(result: ScriptResult) -> Arc<Self> {
             Arc::new(Self {
                 contexts: Mutex::new(Vec::new()),
@@ -5859,6 +5876,57 @@ mod tests {
         assert!(contexts
             .iter()
             .all(|c| c.collection_name.as_deref() == Some("Payments")));
+    }
+
+    #[test]
+    fn with_body_override_replaces_text_body_and_size() {
+        let original = HttpResponse {
+            status: 200,
+            body: "{\"a\":1}".into(),
+            size_bytes: 7,
+            is_binary: true,
+            body_base64: Some("e30=".into()),
+            ..Default::default()
+        };
+        let patched = with_body_override(&original, Some("{\"a\":22}"));
+        assert_eq!(patched.body, "{\"a\":22}");
+        assert_eq!(patched.size_bytes, 8);
+        assert!(!patched.is_binary);
+        assert!(patched.body_base64.is_none());
+        assert_eq!(patched.status, 200);
+
+        let unchanged = with_body_override(&original, None);
+        assert_eq!(unchanged.body, "{\"a\":1}");
+    }
+
+    #[tokio::test]
+    async fn tests_script_sees_the_body_set_by_the_after_response_script() {
+        let capture = CapturingScriptEngine::with_after_response(ScriptResult {
+            response_body: Some("patched".into()),
+            ..Default::default()
+        });
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        input.tests_script = Some("// tests".into());
+        let output = svc.execute(input).await.expect("execute failed");
+
+        let contexts = capture.contexts();
+        let tests_ctx = contexts
+            .iter()
+            .find(|c| c.phase == rocket_scripting::ScriptPhase::Tests)
+            .expect("tests phase ran");
+        assert_eq!(
+            tests_ctx.response.as_ref().map(|r| r.body.as_str()),
+            Some("patched")
+        );
+        // The response shown to the user is the real one.
+        assert_ne!(output.response.body, "patched");
     }
 
     #[tokio::test]

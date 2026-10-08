@@ -451,7 +451,19 @@ pub fn op_rok_get_assertion_results(state: &OpState) -> String {
     serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
 }
 
-/// rok.getCollectionName()— display name of the collection, or empty string.
+/// rok.runner.stopExecution() - stops the run. Before the request it also skips the send.
+#[op2(fast)]
+pub fn op_rok_stop_execution(state: &mut OpState) {
+    let before_request =
+        state.borrow::<ScriptInputState>().phase == rocket_scripting::ScriptPhase::BeforeRequest;
+    let out = state.borrow_mut::<ScriptOutputState>();
+    out.next_request = Some(NextRequest::Stop);
+    if before_request {
+        out.skip_request = true;
+    }
+}
+
+/// rok.getCollectionName() — display name of the collection, or empty string.
 #[op2]
 #[string]
 pub fn op_rok_get_collection_name(state: &OpState) -> String {

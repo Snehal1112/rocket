@@ -56,6 +56,7 @@ pub struct ScriptOutputState {
     pub skip_request: bool,
     pub test_results: Vec<TestResult>,
     pub console_entries: Vec<ConsoleEntry>,
+    pub response_body: Option<String>,
 }
 
 impl ScriptOutputState {

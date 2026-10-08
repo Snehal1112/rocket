@@ -183,6 +183,7 @@ extension!(
         rok::op_rok_interpolate,
         rok::op_rok_set_next_request,
         rok::op_rok_skip_request,
+        rok::op_rok_stop_execution,
         rok::op_rok_get_all_env_vars,
         rok::op_rok_get_all_vars,
         rok::op_rok_get_all_global_env_vars,
@@ -222,6 +223,9 @@ extension!(
         res::op_res_get_status_text,
         res::op_res_get_header_list,
         res::op_res_get_body,
+        res::op_res_get_url,
+        res::op_res_get_size,
+        res::op_res_set_body,
         res::op_res_get_response_time,
         // console ops
         console::op_console_log,
@@ -361,6 +365,7 @@ fn run_script(
         skip_request: out.skip_request,
         test_results: out.test_results,
         console_entries: out.console_entries,
+        response_body: out.response_body,
         error: script_error,
     })
 }
@@ -391,6 +396,106 @@ mod tests {
             collection_name: None,
             assertion_results: vec![],
         }
+    }
+
+    fn response_ctx(code: &str, body: &str) -> ScriptContext {
+        let mut ctx = minimal_ctx(code);
+        ctx.phase = ScriptPhase::AfterResponse;
+        ctx.response = Some(rocket_http::HttpResponse {
+            status: 200,
+            status_text: "OK".into(),
+            body: body.into(),
+            duration_ms: 5,
+            ttfb_ms: 1,
+            size_bytes: body.len(),
+            ..Default::default()
+        });
+        ctx
+    }
+
+    #[tokio::test]
+    async fn res_url_and_get_url_return_the_request_url() {
+        let engine = DenoScriptEngine::new();
+        let ctx = response_ctx("rok.setVar('u', res.url + '|' + res.getUrl())", "{}");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("u").expect("u present"),
+            "https://example.com|https://example.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn res_get_size_reports_body_headers_and_total() {
+        let engine = DenoScriptEngine::new();
+        let ctx = response_ctx("rok.setVar('s', JSON.stringify(res.getSize()))", "{\"a\":1}");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("s").expect("s present"),
+            "{\"body\":7,\"headers\":0,\"total\":7}"
+        );
+    }
+
+    #[tokio::test]
+    async fn res_get_size_uses_size_bytes_for_a_binary_body() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = response_ctx("rok.setVar('b', res.getSize().body)", "");
+        if let Some(response) = ctx.response.as_mut() {
+            response.is_binary = true;
+            response.size_bytes = 2048;
+        }
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("b").expect("b present"), 2048);
+    }
+
+    #[tokio::test]
+    async fn res_set_body_is_visible_in_the_script_and_returned() {
+        let engine = DenoScriptEngine::new();
+        let ctx = response_ctx(
+            "res.setBody({ a: 2 }); rok.setVar('seen', res.body.a)",
+            "{\"a\":1}",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("seen").expect("seen present"), 2);
+        assert_eq!(result.response_body.as_deref(), Some("{\"a\":2}"));
+    }
+
+    #[tokio::test]
+    async fn res_set_body_before_the_response_exists_throws() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("res.setBody('x')");
+        let result = engine.execute(ctx).await.expect("execute");
+        let error = result.error.expect("script error");
+        assert!(error.contains("res is not available"), "got: {error}");
+    }
+
+    #[tokio::test]
+    async fn rok_stop_execution_stops_and_skips_only_before_the_request() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.runner.stopExecution()");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(matches!(
+            result.next_request,
+            Some(rocket_scripting::NextRequest::Stop)
+        ));
+        assert!(result.skip_request);
+
+        let ctx = response_ctx("rok.runner.stopExecution()", "{}");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(matches!(
+            result.next_request,
+            Some(rocket_scripting::NextRequest::Stop)
+        ));
+        assert!(!result.skip_request);
+    }
+
+    #[tokio::test]
+    async fn rok_runner_iteration_values_default_to_a_single_iteration() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "rok.setVar('i', rok.runner.iterationIndex + ',' + rok.runner.totalIterations)",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("i").expect("i present"), "0,1");
     }
 
     #[tokio::test]
