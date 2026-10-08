@@ -15,6 +15,7 @@ import {
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
+import { pruneSelection } from '@/lib/flow-history';
 import type { FlowRunResult } from '@/lib/flow-run-result';
 import { flowPayloadFromTab } from '@/lib/flow-save';
 import {
@@ -39,6 +40,7 @@ import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
+import { FlowHistoryButtons } from './FlowHistoryButtons';
 import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
@@ -59,6 +61,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
   const setFlowRunResult = usePaneStore((s) => s.setFlowRunResult);
   const markClean = usePaneStore((s) => s.markClean);
+  const undoFlow = usePaneStore((s) => s.undoFlow);
+  const redoFlow = usePaneStore((s) => s.redoFlow);
+  const beginFlowGesture = usePaneStore((s) => s.beginFlowGesture);
+  const endFlowGesture = usePaneStore((s) => s.endFlowGesture);
   // There is no `activeEnvironmentName` anywhere. The active environment's
   // name is env-store's `activeEnvId` (it holds the name; see
   // src/lib/execute-request.ts, which passes it as environmentName).
@@ -138,7 +144,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const handleNodeKindChange = useCallback(
     (nodeId: string, kind: FlowNodeKind) => {
       const latest = latestFlowTab();
-      if (latest) updateFlowNodes(tabId, replaceNodeKind(latest.nodes, nodeId, kind));
+      if (latest) {
+        updateFlowNodes(tabId, replaceNodeKind(latest.nodes, nodeId, kind), {
+          coalesceKey: `kind:${nodeId}`,
+        });
+      }
     },
     [latestFlowTab, tabId, updateFlowNodes],
   );
@@ -174,6 +184,28 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     },
     [focusCanvas, latestFlowTab, tabId, updateFlowGraph],
   );
+
+  // Undo and redo can leave a failed-save highlight pointing at a changed graph, so clear it.
+  const handleUndo = useCallback(() => {
+    undoFlow(tabId);
+    setCycleNodeIds([]);
+    setCycleEdgeIds([]);
+    setSaveErrorMessage(null);
+  }, [undoFlow, tabId]);
+  const handleRedo = useCallback(() => {
+    redoFlow(tabId);
+    setCycleNodeIds([]);
+    setCycleEdgeIds([]);
+    setSaveErrorMessage(null);
+  }, [redoFlow, tabId]);
+  const handleGestureStart = useCallback(() => beginFlowGesture(tabId), [beginFlowGesture, tabId]);
+  const handleGestureEnd = useCallback(() => endFlowGesture(tabId), [endFlowGesture, tabId]);
+
+  // Undo and redo can remove a selected node, so drop ids that no longer exist.
+  useEffect(() => {
+    const live = new Set(tab.nodes.map((n) => n.id));
+    setSelectedNodeIds((prev) => pruneSelection(prev, live));
+  }, [tab.nodes]);
 
   // Adds the failed node's label while the node still exists, so the strip
   // keeps naming it after a rename or delete.
@@ -408,9 +440,23 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             {tab.nodes.some((n) => n.kind.kind === 'WaitForCallback') && (
               <CallbackHostSetting
                 value={tab.callbackHost}
-                onChange={(host) => setFlowCallbackHost(tab.id, host)}
+                onChange={(host) =>
+                  setFlowCallbackHost(tab.id, host, { coalesceKey: 'callback-host' })
+                }
               />
             )}
+            <FlowHistoryButtons
+              canUndo={(tab.history?.past.length ?? 0) > 0}
+              canRedo={(tab.history?.future.length ?? 0) > 0}
+              onUndo={() => {
+                handleUndo();
+                focusCanvas();
+              }}
+              onRedo={() => {
+                handleRedo();
+                focusCanvas();
+              }}
+            />
             <FlowToolbar
               collection={collectionName}
               flowName={flowName}
@@ -486,8 +532,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             nodeDetail={tab.nodeDetail}
             cycleNodeIds={cycleNodeIds}
             cycleEdgeIds={cycleEdgeIds}
-            onNodesChange={(nodes) => updateFlowNodes(tab.id, nodes)}
-            onEdgesChange={(edges) => updateFlowEdges(tab.id, edges)}
+            onNodesChange={(nodes, options) => updateFlowNodes(tab.id, nodes, options)}
+            onEdgesChange={(edges, options) => updateFlowEdges(tab.id, edges, options)}
+            onGestureStart={handleGestureStart}
+            onGestureEnd={handleGestureEnd}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
             onConnect={handleConnect}
             onAddNode={handleAddNode}
             flowCollectionName={tab.collectionName}

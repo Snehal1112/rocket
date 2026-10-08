@@ -13,11 +13,12 @@ import {
   SelectionMode,
   useReactFlow,
 } from '@xyflow/react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
+import { type FlowWriteOptions, pruneSelection } from '@/lib/flow-history';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
@@ -49,8 +50,9 @@ export interface FlowCanvasProps {
   nodes: FlowNode[];
   edges: FlowEdge[];
   nodeStatus: Record<string, FlowNodeStatus>;
-  onNodesChange: (nodes: FlowNode[]) => void;
-  onEdgesChange: (edges: FlowEdge[]) => void;
+  // The options say how the write joins the undo history. See FlowWriteOptions.
+  onNodesChange: (nodes: FlowNode[], options?: FlowWriteOptions) => void;
+  onEdgesChange: (edges: FlowEdge[], options?: FlowWriteOptions) => void;
   onConnect: (connection: Connection) => void;
   // Called when a wire is double-clicked, to edit its script.
   onEdgeEdit?: (edgeId: string) => void;
@@ -77,6 +79,12 @@ export interface FlowCanvasProps {
   onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
   // Called when a node's menu button or a double-click opens its properties.
   onOpenProperties?: (nodeId: string) => void;
+  // A node or selection drag starts or ends. The owner brackets the drag's writes into one undo step.
+  onGestureStart?: () => void;
+  onGestureEnd?: () => void;
+  // Ctrl+Z, and Ctrl+Shift+Z or Ctrl+Y. Absent means the keys do nothing.
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 type Measured = { width: number; height: number };
@@ -193,6 +201,29 @@ export function toRfEdges(
   });
 }
 
+// Shortcut hints shown at the bottom of the canvas. Each plan that adds a shortcut appends one entry.
+const CANVAS_HINTS = [
+  'Drag to select',
+  'Ctrl+A select all',
+  'Right-drag or scroll to pan',
+  'Ctrl+scroll to zoom',
+  'Ctrl+Z undo',
+];
+
+// A Delete press makes a node write and an edge write in the same tick, so a 50 ms window folds them into one step.
+const REMOVE_WRITE: FlowWriteOptions = { coalesceKey: 'canvas-remove', coalesceMs: 50 };
+const GESTURE_WRITE: FlowWriteOptions = { gesture: true };
+
+// Tells the store how a batch of node changes joins the undo history.
+export function nodeWriteOptions(
+  changes: NodeChange[],
+  dragging: boolean,
+): FlowWriteOptions | undefined {
+  if (changes.some((c) => c.type === 'remove')) return REMOVE_WRITE;
+  if (dragging && changes.some((c) => c.type === 'position')) return GESTURE_WRITE;
+  return undefined;
+}
+
 // Applies select and remove changes to a selection set. It returns the same
 // set when nothing changed, so React skips the re-render.
 function nextSelection(
@@ -240,6 +271,10 @@ function FlowCanvasInner({
   selectedNodeIds: selectedNodeIdsProp,
   onSelectedNodeIdsChange,
   onOpenProperties,
+  onGestureStart,
+  onGestureEnd,
+  onUndo,
+  onRedo,
 }: FlowCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const [localSelection, setLocalSelection] = useState<ReadonlySet<string>>(() => new Set());
@@ -259,6 +294,16 @@ function FlowCanvasInner({
   // A ref, not state: React Flow already holds the new size internally, so
   // recording it must not trigger a re-render.
   const measuredRef = useRef(new Map<string, Measured>());
+  // True between the start and end of a drag, so its position writes form one undo step.
+  const draggingRef = useRef(false);
+  const startGesture = () => {
+    draggingRef.current = true;
+    onGestureStart?.();
+  };
+  const endGesture = () => {
+    draggingRef.current = false;
+    onGestureEnd?.();
+  };
   // React Flow's delete-key handler no-ops while focus sits on an
   // input/textarea/contenteditable (@xyflow/react's isInputDOMNode check).
   // Clicking a node only flips its `selected` flag; it never moves DOM
@@ -316,6 +361,11 @@ function FlowCanvasInner({
     () => toRfEdges(edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds),
     [edges, nodes, nodeStatus, selectedEdgeIds, nodeDetail, cycleEdgeIds],
   );
+  // Undo can remove a selected wire, so drop ids that no longer exist.
+  useEffect(() => {
+    const live = new Set(edges.map((e) => e.id));
+    setSelectedEdgeIds((prev) => pruneSelection(prev, live));
+  }, [edges]);
   const nodeActions = useMemo<FlowNodeActions>(
     () => ({
       updateNodeKind: (nodeId, kind) => onNodeKindChange?.(nodeId, kind),
@@ -350,7 +400,11 @@ function FlowCanvasInner({
       }
     }
     selectNodes(nextSelection(selectedNodeIds, changes));
-    if (next !== nodes) onNodesChange(next);
+    if (next !== nodes) {
+      const options = nodeWriteOptions(changes, draggingRef.current);
+      if (options) onNodesChange(next, options);
+      else onNodesChange(next);
+    }
   };
 
   const handleEdgesChange = (changes: EdgeChange[]) => {
@@ -361,7 +415,10 @@ function FlowCanvasInner({
       }
     }
     setSelectedEdgeIds((prev) => nextSelection(prev, changes));
-    if (next !== edges) onEdgesChange(next);
+    if (next !== edges) {
+      if (changes.some((c) => c.type === 'remove')) onEdgesChange(next, REMOVE_WRITE);
+      else onEdgesChange(next);
+    }
   };
 
   // Drag-and-drop from the collection sidebar. A drop with no valid flow-drag
@@ -396,12 +453,27 @@ function FlowCanvasInner({
     });
   };
 
-  // Ctrl+A (Cmd+A on macOS) selects every node, unless a field owns the keys.
+  // Ctrl or Cmd shortcuts on the canvas, unless a field owns the keys.
+  // Add a branch per key; each branch ends with `return`.
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key.toLowerCase() !== 'a' || !(e.ctrlKey || e.metaKey)) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
     if (e.target instanceof Element && e.target.closest(EDITABLE_TARGET)) return;
-    e.preventDefault();
-    selectNodes(new Set(nodes.map((n) => n.id)));
+    const key = e.key.toLowerCase();
+    if (key === 'a') {
+      e.preventDefault();
+      selectNodes(new Set(nodes.map((n) => n.id)));
+      return;
+    }
+    if (key === 'z' && onUndo && onRedo) {
+      e.preventDefault();
+      if (e.shiftKey) onRedo();
+      else onUndo();
+      return;
+    }
+    if (key === 'y' && onRedo) {
+      e.preventDefault();
+      onRedo();
+    }
   };
 
   return (
@@ -440,6 +512,10 @@ function FlowCanvasInner({
           onPaneClick={focusPane}
           // A box-select does not fire a pane click, so refocus the pane here.
           onSelectionEnd={focusPane}
+          onNodeDragStart={startGesture}
+          onNodeDragStop={endGesture}
+          onSelectionDragStart={startGesture}
+          onSelectionDragStop={endGesture}
           // Tolerate small jitter so a click is not turned into an empty selection.
           paneClickDistance={4}
           // Left-drag draws a selection box. Middle and right drag pan instead.
@@ -460,9 +536,7 @@ function FlowCanvasInner({
           />
           <Controls />
           <Panel position='bottom-left' className='pointer-events-none ml-14 mb-3'>
-            <span className='text-[11px] text-muted-foreground/70'>
-              Drag to select · Ctrl+A select all · Right-drag or scroll to pan · Ctrl+scroll to zoom
-            </span>
+            <span className='text-[11px] text-muted-foreground/70'>{CANVAS_HINTS.join(' · ')}</span>
           </Panel>
         </ReactFlow>
       </FlowNodeActionsContext.Provider>
