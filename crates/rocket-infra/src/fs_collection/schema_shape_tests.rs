@@ -10,9 +10,10 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use rocket_collection::settings::SandboxMode;
 use rocket_collection::{
-    CollectionItem, CollectionRepository, CollectionSettings, CollectionVariable, FolderSettings,
-    Request,
+    resolve_folder_auth, CollectionItem, CollectionRepository, CollectionSettings,
+    CollectionVariable, FolderSettings, Request, ScriptFlow,
 };
+use rocket_shared::description::Description;
 use rocket_shared::oauth2::{
     OAuth2ClientCredentials, OAuth2Flow, OAuth2PKCE, OAuth2ResourceOwner, OAuth2Settings,
 };
@@ -72,6 +73,10 @@ const MULTIPART_PART: &[&str] = &[
 const FILE_VARIANT: &[&str] = &["filePath", "contentType", "selected"];
 const VARIABLE: &[&str] = &["name", "value", "description", "disabled"];
 const SCRIPT: &[&str] = &["type", "code"];
+/// `Script.type` values in the spec. `hooks` entries are kept untouched by Rocket.
+const SCRIPT_TYPES: &[&str] = &["before-request", "after-response", "tests", "hooks"];
+/// A `docs` object has exactly these keys. A plain string is also legal.
+const DOCS_OBJECT: &[&str] = &["content", "type"];
 const GRAPHQL_REQUEST: &[&str] = &["info", "graphql", "runtime", "settings", "docs"];
 const GRAPHQL_DETAILS: &[&str] = &["method", "url", "headers", "params", "body", "auth"];
 const GRAPHQL_BODY: &[&str] = &["query", "variables"];
@@ -314,6 +319,25 @@ fn check_http_body(v: &mut Violations, at: &str, body: &Value) {
     }
 }
 
+fn check_scripts(v: &mut Violations, at: &str, scripts: Option<&Value>) {
+    for script in seq(scripts) {
+        v.keys("Script", at, script, SCRIPT);
+        let ty = script.get("type").and_then(Value::as_str).unwrap_or("");
+        if !SCRIPT_TYPES.contains(&ty) {
+            v.0.push(format!(
+                "{at}: script type `{ty}` is not a spec Script type"
+            ));
+        }
+    }
+}
+
+fn check_docs(v: &mut Violations, at: &str, docs: Option<&Value>) {
+    if let Some(docs) = docs {
+        // A string has no keys, so `keys` skips it.
+        v.keys("Docs", at, docs, DOCS_OBJECT);
+    }
+}
+
 fn check_request_defaults(v: &mut Violations, at: &str, req: &Value) {
     v.keys("RequestDefaults", at, req, REQUEST_DEFAULTS);
     for h in seq(req.get("headers")) {
@@ -325,9 +349,7 @@ fn check_request_defaults(v: &mut Violations, at: &str, req: &Value) {
     for var in seq(req.get("variables")) {
         v.keys("Variable", at, var, VARIABLE);
     }
-    for s in seq(req.get("scripts")) {
-        v.keys("Script", at, s, SCRIPT);
-    }
+    check_scripts(v, at, req.get("scripts"));
     if let Some(settings) = req.get("settings") {
         v.keys("RequestSettings", at, settings, HTTP_SETTINGS);
     }
@@ -354,6 +376,7 @@ fn check_folder(v: &mut Violations, at: &str, doc: &Value) {
     if let Some(req) = doc.get("request") {
         check_request_defaults(v, at, req);
     }
+    check_docs(v, at, doc.get("docs"));
 }
 
 fn check_http_request(v: &mut Violations, at: &str, doc: &Value) {
@@ -1064,8 +1087,6 @@ fn fully_populated_folder_yml_only_uses_schema_keys() {
 
 #[test]
 fn script_flow_is_written_only_under_bruno_extensions() {
-    use rocket_collection::ScriptFlow;
-
     let (dir, repo) = setup();
     repo.create("api").expect("create collection");
     let path = dir.path().join("api/opencollection.yml");
@@ -1117,4 +1138,419 @@ fn script_flow_is_written_only_under_bruno_extensions() {
         doc.get("extensions").and_then(|e| e.get("bruno")).is_none(),
         "no bruno key for sandwich"
     );
+}
+
+#[test]
+fn checker_flags_bad_folder_scripts_docs_and_rocket_keys() {
+    let mut v = Violations::default();
+    let doc: Value = serde_yaml::from_str(
+        "info:\n  name: f\n  type: folder\nrequest:\n  scripts:\n  - type: pre-request\n    code: x\n  - type: tests\n    code: y\n    extra: z\n  scriptFlow: sequential\ndocs:\n  content: a\n  format: md\n",
+    )
+    .expect("fixture yaml");
+    check_folder(&mut v, "bad folder", &doc);
+    // `pre-request` is not a script type (1), `extra` on a script (1), `scriptFlow` on
+    // RequestDefaults (1) and `format` on docs (1).
+    assert_eq!(v.0.len(), 4, "{:#?}", v.0);
+}
+
+fn populated_settings(auth: Auth) -> FolderSettings {
+    FolderSettings {
+        headers: vec![
+            Header::new("X-Team", "billing"),
+            Header {
+                key: "X-Off".into(),
+                value: "1".into(),
+                enabled: false,
+                description: Some(Description::text("Debug only")),
+            },
+        ],
+        auth: Some(auth),
+        variables: vec![
+            CollectionVariable {
+                key: "region".into(),
+                value: "eu".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            },
+            CollectionVariable {
+                key: "legacy".into(),
+                value: "old".into(),
+                initial_value: String::new(),
+                enabled: false,
+                secret: false,
+            },
+        ],
+        pre_request_script: Some("console.log('pre');".into()),
+        post_response_script: Some("console.log('post');".into()),
+        tests_script: Some("test('ok', function () {});".into()),
+        docs: Some("# Billing\n\nNotes.".into()),
+    }
+}
+
+/// Asserts the `folder.yml` has only spec sections and none of the names Rocket uses in memory.
+fn assert_only_folder_sections(raw: &Value, at: &str) {
+    let top = raw.as_mapping().expect("folder.yml is a mapping");
+    for key in top.keys().filter_map(Value::as_str) {
+        assert!(
+            ["info", "request", "docs"].contains(&key),
+            "{at}: unexpected top-level key `{key}`"
+        );
+    }
+    let request = raw
+        .get("request")
+        .and_then(Value::as_mapping)
+        .expect("request block");
+    for key in request.keys().filter_map(Value::as_str) {
+        assert!(
+            REQUEST_DEFAULTS.contains(&key),
+            "{at}: unexpected request key `{key}`"
+        );
+    }
+    let text = serde_yaml::to_string(raw).expect("yaml text");
+    for banned in [
+        "scriptFlow",
+        "script_flow",
+        "preRequestScript",
+        "postResponseScript",
+        "testsScript",
+        "initialValue",
+    ] {
+        assert!(!text.contains(banned), "{at}: Rocket-only name `{banned}`");
+    }
+}
+
+#[test]
+fn populated_folder_yml_only_uses_schema_keys() {
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    let mut v = Violations::default();
+    for (name, auth) in sample_auths() {
+        let folder = format!("f-{name}");
+        repo.create_folder("api", &folder).expect("create folder");
+        repo.save_folder_settings("api", &folder, &populated_settings(auth))
+            .expect("save folder settings");
+        let rel = format!("{folder}/folder.yml");
+        let raw = read_yaml(&dir.path().join("api").join(&rel));
+        check_folder(&mut v, &rel, &raw);
+        assert_only_folder_sections(&raw, &rel);
+        let mut types: Vec<&str> = raw["request"]["scripts"]
+            .as_sequence()
+            .expect("scripts written")
+            .iter()
+            .filter_map(|s| s["type"].as_str())
+            .collect();
+        types.sort_unstable();
+        assert_eq!(
+            types,
+            vec!["after-response", "before-request", "tests"],
+            "{rel}"
+        );
+    }
+    assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
+}
+
+#[test]
+fn empty_folder_sections_are_omitted() {
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    repo.create_folder("api", "empty").expect("create folder");
+    repo.save_folder_settings("api", "empty", &FolderSettings::default())
+        .expect("save empty settings");
+    let raw = read_yaml(&dir.path().join("api/empty/folder.yml"));
+    let request = raw.get("request");
+    for section in ["headers", "auth", "variables", "scripts"] {
+        assert!(
+            request.and_then(|r| r.get(section)).is_none(),
+            "empty `{section}` must be omitted: {raw:?}"
+        );
+    }
+    assert!(
+        raw.get("docs").is_none(),
+        "empty docs must be omitted: {raw:?}"
+    );
+}
+
+/// A `folder.yml` as Bruno writes it: every section, a disabled header and variable, descriptions,
+/// all three script types plus `hooks`, untyped `metadata` and `settings`, and typed `docs`.
+const BRUNO_FOLDER: &str = r#"info:
+  name: Billing
+  type: folder
+  seq: 2
+request:
+  headers:
+  - name: X-Team
+    value: billing
+    description: Owning team
+  - name: X-Debug
+    value: '1'
+    disabled: true
+  auth:
+    type: bearer
+    token: '{{billingToken}}'
+  variables:
+  - name: region
+    value: eu
+    description: Deployment region
+  - name: legacy
+    value: old
+    disabled: true
+  scripts:
+  - type: before-request
+    code: |-
+      console.log('folder pre');
+  - type: after-response
+    code: |-
+      console.log('folder post');
+  - type: tests
+    code: |-
+      test('ok', function () {});
+  - type: hooks
+    code: |-
+      // hook body kept as written
+  metadata:
+  - name: x-trace
+    value: '1'
+  settings:
+    timeout: 5000
+    followRedirects: false
+docs:
+  content: |-
+    # Billing
+
+    Folder notes.
+  type: text/markdown
+"#;
+
+/// A Bruno folder that inherits auth and uses the plain-string form of `docs`.
+const BRUNO_INHERIT_FOLDER: &str = "info:\n  name: Inner\n  type: folder\nrequest:\n  auth: inherit\n  headers:\n  - name: X-Inner\n    value: '1'\ndocs: Inner notes\n";
+
+/// Creates `api` with one folder whose `folder.yml` is the given text, and returns its path.
+fn write_folder_fixture(
+    folder: &str,
+    yaml: &str,
+) -> (TempDir, FsCollectionRepo, std::path::PathBuf) {
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    repo.create_folder("api", folder).expect("create folder");
+    let path = dir.path().join("api").join(folder).join("folder.yml");
+    fs::write(&path, yaml).expect("write fixture");
+    (dir, repo, path)
+}
+
+#[test]
+fn bruno_authored_folder_loads_into_folder_settings() {
+    let (_dir, repo, _path) = write_folder_fixture("billing", BRUNO_FOLDER);
+    let loaded = repo
+        .get_folder_settings("api", "billing")
+        .expect("a Bruno folder.yml loads");
+
+    assert_eq!(loaded.headers.len(), 2);
+    assert_eq!(loaded.headers[0].key, "X-Team");
+    assert_eq!(
+        loaded.headers[0]
+            .description
+            .as_ref()
+            .and_then(Description::content),
+        Some("Owning team")
+    );
+    assert!(
+        !loaded.headers[1].enabled,
+        "a disabled header stays disabled"
+    );
+    assert_eq!(
+        loaded.auth,
+        Some(Auth::Bearer {
+            token: "{{billingToken}}".into()
+        })
+    );
+    assert_eq!(loaded.variables.len(), 2);
+    assert_eq!(loaded.variables[0].key, "region");
+    assert!(!loaded.variables[1].enabled);
+    assert_eq!(
+        loaded.pre_request_script.as_deref(),
+        Some("console.log('folder pre');")
+    );
+    assert_eq!(
+        loaded.post_response_script.as_deref(),
+        Some("console.log('folder post');")
+    );
+    assert_eq!(
+        loaded.tests_script.as_deref(),
+        Some("test('ok', function () {});")
+    );
+    assert_eq!(loaded.docs.as_deref(), Some("# Billing\n\nFolder notes."));
+}
+
+#[test]
+fn bruno_folder_keeps_untyped_sections_across_a_save() {
+    let (_dir, repo, path) = write_folder_fixture("billing", BRUNO_FOLDER);
+    let loaded = repo.get_folder_settings("api", "billing").expect("load");
+    repo.save_folder_settings("api", "billing", &loaded)
+        .expect("save");
+
+    let raw = read_yaml(&path);
+    let req = &raw["request"];
+    assert_eq!(raw["info"]["seq"].as_u64(), Some(2));
+    assert!(
+        raw["info"].get("uid").is_none(),
+        "a save must not stamp a uid on a Bruno folder: {raw:?}"
+    );
+    // Rocket writes settings numbers as floats (`5000.0`), which is still a schema `number`.
+    assert_eq!(req["settings"]["timeout"].as_f64(), Some(5000.0));
+    assert_eq!(req["settings"]["followRedirects"].as_bool(), Some(false));
+    assert_eq!(req["metadata"][0]["name"].as_str(), Some("x-trace"));
+
+    let scripts = req["scripts"].as_sequence().expect("scripts");
+    assert_eq!(scripts.len(), 4, "three typed scripts plus the hooks entry");
+    let hooks = scripts
+        .iter()
+        .find(|s| s["type"].as_str() == Some("hooks"))
+        .expect("hooks entry kept");
+    assert_eq!(hooks["code"].as_str(), Some("// hook body kept as written"));
+
+    assert_eq!(
+        req["headers"][0]["description"].as_str(),
+        Some("Owning team")
+    );
+    assert_eq!(req["headers"][1]["disabled"].as_bool(), Some(true));
+    assert_eq!(req["auth"]["type"].as_str(), Some("bearer"));
+    let vars = req["variables"].as_sequence().expect("variables");
+    assert_eq!(vars[0]["description"].as_str(), Some("Deployment region"));
+    assert_eq!(vars[1]["disabled"].as_bool(), Some(true));
+    assert!(
+        vars.iter().all(|var| var.get("initial").is_none()),
+        "folder variables must not gain the deferred `initial` key: {vars:?}"
+    );
+    assert_eq!(
+        raw["docs"]
+            .as_str()
+            .or_else(|| raw["docs"]["content"].as_str()),
+        Some("# Billing\n\nFolder notes.")
+    );
+
+    let mut v = Violations::default();
+    check_folder(&mut v, "billing/folder.yml", &raw);
+    assert_only_folder_sections(&raw, "billing/folder.yml");
+    assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
+}
+
+#[test]
+fn second_folder_save_is_byte_stable() {
+    let (_dir, repo, path) = write_folder_fixture("billing", BRUNO_FOLDER);
+    let loaded = repo.get_folder_settings("api", "billing").expect("load");
+    repo.save_folder_settings("api", "billing", &loaded)
+        .expect("first save");
+    let first = fs::read_to_string(&path).expect("read first save");
+
+    let reloaded = repo.get_folder_settings("api", "billing").expect("reload");
+    assert_eq!(reloaded, loaded, "a save must not change what loads");
+    repo.save_folder_settings("api", "billing", &reloaded)
+        .expect("second save");
+    let second = fs::read_to_string(&path).expect("read second save");
+    assert_eq!(second, first, "the second save must be byte-identical");
+}
+
+#[test]
+fn bruno_inherit_folder_resolves_to_no_folder_auth() {
+    let (_dir, repo, path) = write_folder_fixture("inner", BRUNO_INHERIT_FOLDER);
+    let loaded = repo.get_folder_settings("api", "inner").expect("load");
+    assert!(
+        matches!(loaded.auth, None | Some(Auth::Inherit)),
+        "auth: inherit is no folder auth, got {:?}",
+        loaded.auth
+    );
+    assert_eq!(resolve_folder_auth(std::slice::from_ref(&loaded)), None);
+    assert_eq!(loaded.headers.len(), 1);
+    assert_eq!(loaded.docs.as_deref(), Some("Inner notes"));
+
+    repo.save_folder_settings("api", "inner", &loaded)
+        .expect("save");
+    let raw = read_yaml(&path);
+    let auth = &raw["request"]["auth"];
+    assert!(
+        auth.is_null() || auth.as_str() == Some("inherit"),
+        "auth must stay absent or `inherit`, got {auth:?}"
+    );
+    assert_eq!(raw["docs"].as_str(), Some("Inner notes"));
+}
+
+#[test]
+fn script_flow_survives_settings_and_folder_saves() {
+    let (dir, repo) = setup();
+    repo.create("api").expect("create collection");
+    let oc_path = dir.path().join("api/opencollection.yml");
+
+    // Author the Bruno extension by hand, with a sibling key that Rocket does not own.
+    let mut doc = read_yaml(&oc_path);
+    let root = doc.as_mapping_mut().expect("root mapping");
+    let ext_key = Value::String("extensions".into());
+    let mut ext = match root.get(&ext_key) {
+        Some(Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    ext.insert(
+        Value::String("bruno".into()),
+        serde_yaml::from_str("scripts:\n  flow: sequential\nother: keep\n").expect("bruno ext"),
+    );
+    root.insert(ext_key, Value::Mapping(ext));
+    fs::write(&oc_path, serde_yaml::to_string(&doc).expect("yaml")).expect("write opencollection");
+
+    let mut settings = repo.get_settings("api").expect("settings");
+    assert_eq!(settings.script_flow, ScriptFlow::Sequential);
+
+    // A collection settings save keeps the flow and the sibling key.
+    settings.docs = Some("changed".into());
+    repo.save_settings("api", &settings).expect("save settings");
+    let after = read_yaml(&oc_path);
+    assert_eq!(
+        after["extensions"]["bruno"]["scripts"]["flow"].as_str(),
+        Some("sequential")
+    );
+    assert_eq!(after["extensions"]["bruno"]["other"].as_str(), Some("keep"));
+
+    // A folder settings save never touches opencollection.yml.
+    let before = fs::read_to_string(&oc_path).expect("read before folder save");
+    repo.create_folder("api", "users").expect("create folder");
+    repo.save_folder_settings("api", "users", &populated_settings(Auth::None))
+        .expect("save folder settings");
+    assert_eq!(
+        fs::read_to_string(&oc_path).expect("read after folder save"),
+        before
+    );
+    assert_eq!(
+        repo.get_settings("api").expect("settings").script_flow,
+        ScriptFlow::Sequential
+    );
+
+    // Switching back to the default is read back, and the sibling key still survives.
+    settings.script_flow = ScriptFlow::Sandwich;
+    repo.save_settings("api", &settings).expect("save sandwich");
+    assert_eq!(
+        repo.get_settings("api").expect("settings").script_flow,
+        ScriptFlow::Sandwich
+    );
+    let last = read_yaml(&oc_path);
+    assert_eq!(last["extensions"]["bruno"]["other"].as_str(), Some("keep"));
+}
+
+#[test]
+fn folder_variables_save_keeps_descriptions_without_initial() {
+    let (_dir, repo, path) = write_folder_fixture("billing", BRUNO_FOLDER);
+    let vars = repo.get_folder_variables("api", "billing").expect("load");
+    repo.save_folder_variables("api", "billing", vars)
+        .expect("save variables");
+
+    let raw = read_yaml(&path);
+    let vars = raw["request"]["variables"]
+        .as_sequence()
+        .expect("variables");
+    assert_eq!(vars[0]["description"].as_str(), Some("Deployment region"));
+    assert!(
+        vars.iter().all(|var| var.get("initial").is_none()),
+        "{vars:?}"
+    );
+    let mut v = Violations::default();
+    check_folder(&mut v, "billing/folder.yml", &raw);
+    assert!(v.0.is_empty(), "schema violations:\n{}", v.0.join("\n"));
 }
