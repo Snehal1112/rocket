@@ -54,6 +54,7 @@ import { FlowCanvas } from './FlowCanvas';
 import { FlowExportMenu } from './FlowExportMenu';
 import { FlowHistoryButtons } from './FlowHistoryButtons';
 import { FlowIssuesButton } from './FlowIssuesButton';
+import { FlowRunAnnouncer } from './FlowRunAnnouncer';
 import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
@@ -666,6 +667,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               />
             </div>
           )}
+          <FlowRunAnnouncer
+            nodes={tab.nodes}
+            nodeStatus={tab.nodeStatus}
+            nodeDetail={tab.nodeDetail}
+            runState={tab.runState}
+          />
           <NodePalette onAddNode={handleAddNode} nodes={tab.nodes} />
           <FlowCanvas
             nodes={tab.nodes}
