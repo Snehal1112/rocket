@@ -455,6 +455,12 @@ declare const rok: {
   deleteEnvVar(key: string): void;
   /** Returns the active environment name. */
   getEnvName(): string | undefined;
+  /** Display name of the collection this request belongs to. */
+  getCollectionName(): string;
+  /** True in Safe mode, false in Developer mode. */
+  isSafeMode(): boolean;
+  /** Absolute path of the collection directory. Developer mode only, throws in Safe mode. */
+  cwd(): string;
   /** Read an External Secret fetched from RocketVault, keyed "alias.secretName". Returns "" when unknown. */
   getSecretVar(key: string): string;
   /** Read a collection variable. */
@@ -515,6 +521,10 @@ declare const rok: {
     skipRequest(): void;
   };
 };
+/** Collection directory. Developer mode only. */
+declare const __dirname: string;
+/** Always undefined in top-level scripts. */
+declare const __filename: string | undefined;
 `;
 
 const HEADER_LIST_DEFS = `

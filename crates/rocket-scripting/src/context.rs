@@ -101,6 +101,8 @@ pub struct ScriptContext {
 
     /// Local-file `require()` scope. `None` disables local requires.
     pub file_scope: Option<ScriptFileScope>,
+    /// Display name of the collection the request belongs to, for `rok.getCollectionName()`.
+    pub collection_name: Option<String>,
 }
 
 impl ScriptContext {
@@ -129,6 +131,7 @@ impl ScriptContext {
             request_tags,
             path_params,
             file_scope: None,
+            collection_name: None,
         }
     }
 
@@ -158,6 +161,7 @@ impl ScriptContext {
             request_tags,
             path_params,
             file_scope: None,
+            collection_name: None,
         }
     }
 
@@ -187,6 +191,7 @@ impl ScriptContext {
             request_tags,
             path_params,
             file_scope: None,
+            collection_name: None,
         }
     }
 
@@ -202,6 +207,12 @@ impl ScriptContext {
     /// from the collection's `sandbox_mode` setting for every phase.
     pub fn with_sandbox_mode(mut self, mode: SandboxMode) -> Self {
         self.sandbox_mode = mode;
+        self
+    }
+
+    /// Sets the collection name returned by `rok.getCollectionName()`.
+    pub fn with_collection_name(mut self, name: Option<String>) -> Self {
+        self.collection_name = name;
         self
     }
 

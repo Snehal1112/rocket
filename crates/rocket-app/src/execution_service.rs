@@ -1574,7 +1574,8 @@ impl RequestExecutionService {
             )
             .with_execution_mode(mode)
             .with_sandbox_mode(state.sandbox_mode)
-            .with_file_scope(state.file_scope.clone());
+            .with_file_scope(state.file_scope.clone())
+            .with_collection_name(input.collection.clone());
             let had_error = state.script_error.is_some();
             let result = self
                 .run_script_phase(
@@ -1793,7 +1794,8 @@ impl RequestExecutionService {
             )
             .with_execution_mode(mode)
             .with_sandbox_mode(state.sandbox_mode)
-            .with_file_scope(state.file_scope.clone());
+            .with_file_scope(state.file_scope.clone())
+            .with_collection_name(input.collection.clone());
             let result = self
                 .run_script_phase(
                     script,
@@ -1853,7 +1855,8 @@ impl RequestExecutionService {
             )
             .with_execution_mode(mode)
             .with_sandbox_mode(state.sandbox_mode)
-            .with_file_scope(state.file_scope.clone());
+            .with_file_scope(state.file_scope.clone())
+            .with_collection_name(input.collection.clone());
             let result = self
                 .run_script_phase(script, ctx, &request_name, "tests", &mut state.console)
                 .await;
@@ -5444,6 +5447,57 @@ mod tests {
         }
     }
 
+    struct CapturingScriptEngine {
+        contexts: Mutex<Vec<ScriptContext>>,
+        after_response_result: Mutex<ScriptResult>,
+    }
+
+    impl CapturingScriptEngine {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                contexts: Mutex::new(Vec::new()),
+                after_response_result: Mutex::new(ScriptResult::default()),
+            })
+        }
+
+        // Used by the response-phase tests in a later task.
+        #[allow(dead_code)]
+        fn with_after_response(result: ScriptResult) -> Arc<Self> {
+            Arc::new(Self {
+                contexts: Mutex::new(Vec::new()),
+                after_response_result: Mutex::new(result),
+            })
+        }
+
+        fn contexts(&self) -> Vec<ScriptContext> {
+            self.contexts.lock().expect("lock poisoned").clone()
+        }
+    }
+
+    struct SharedCapture(Arc<CapturingScriptEngine>);
+
+    #[async_trait]
+    impl ScriptEngine for SharedCapture {
+        async fn execute(
+            &self,
+            ctx: ScriptContext,
+        ) -> rocket_shared::error::DomainResult<ScriptResult> {
+            use rocket_scripting::ScriptPhase;
+            let phase = ctx.phase.clone();
+            self.0.contexts.lock().expect("lock poisoned").push(ctx);
+            if phase == ScriptPhase::AfterResponse {
+                Ok(self
+                    .0
+                    .after_response_result
+                    .lock()
+                    .expect("lock poisoned")
+                    .clone())
+            } else {
+                Ok(ScriptResult::default())
+            }
+        }
+    }
+
     struct RecordingEnvRepo {
         initial: Mutex<Option<Environment>>,
         saved: Mutex<Vec<Environment>>,
@@ -5778,6 +5832,29 @@ mod tests {
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(engine)
+    }
+
+    #[tokio::test]
+    async fn user_scripts_receive_the_collection_name() {
+        let capture = CapturingScriptEngine::new();
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("Payments".into());
+        input.pre_request_script = Some("// pre".into());
+        input.post_response_script = Some("// post".into());
+        input.tests_script = Some("// tests".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let contexts = capture.contexts();
+        assert_eq!(contexts.len(), 3);
+        assert!(contexts
+            .iter()
+            .all(|c| c.collection_name.as_deref() == Some("Payments")));
     }
 
     #[tokio::test]

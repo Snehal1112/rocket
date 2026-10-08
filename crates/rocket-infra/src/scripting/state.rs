@@ -3,10 +3,11 @@ use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
     CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest, RequestMutations,
-    ScriptPhase, TestResult, TestStatus,
+    SandboxMode, ScriptPhase, TestResult, TestStatus,
 };
 use rocket_shared::types::PathParam;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 /// Holds everything ops need to read from the `ScriptContext`.
 /// Stored in `deno_core::OpState` as a read-only snapshot.
@@ -30,6 +31,12 @@ pub struct ScriptInputState {
     /// field so ops that only need the redaction list (console/test-fail
     /// ops) don't have to reach through `variables`.
     pub secret_values: HashSet<String>,
+    /// Capability level of this run. Decides `rok.isSafeMode()` and `rok.cwd()`.
+    pub sandbox_mode: SandboxMode,
+    /// Collection display name, empty when unknown.
+    pub collection_name: String,
+    /// Absolute collection directory, for `rok.cwd()` and `__dirname`.
+    pub collection_root: Option<PathBuf>,
 }
 
 /// Accumulates all side-effects produced by ops during execution.

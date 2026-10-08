@@ -105,6 +105,9 @@
       __ops.op_rok_delete_all_global_env_vars();
     },
     getEnvName:        ()           => __ops.op_rok_get_env_name(),
+    getCollectionName: ()           => __ops.op_rok_get_collection_name(),
+    isSafeMode:        ()           => __ops.op_rok_is_safe_mode(),
+    cwd:               ()           => __ops.op_rok_cwd(),
     getSecretVar:      (key)        => __ops.op_rok_get_secret_var(key),
     getFolderVar:      (key)        => __ops.op_rok_get_folder_var(key),
     interpolate:       (template)   => __ops.op_rok_interpolate(template),
@@ -116,6 +119,15 @@
       skipRequest:    ()      => __ops.op_rok_skip_request(),
     },
   };
+
+  // ── Developer-mode globals ──────────────────────────────────────────────────
+  // __dirname is the collection root. The executing script's own path is not
+  // known here, so __filename stays undefined. Local modules loaded through
+  // require() get their own __dirname and __filename from their wrapper.
+  if (!__ops.op_rok_is_safe_mode()) {
+    try { globalThis.__dirname = __ops.op_rok_cwd(); } catch (_e) { /* No collection directory. */ }
+    globalThis.__filename = undefined;
+  }
 
   // ── HeaderList (PropertyList) ────────────────────────────────────────────────
   // One implementation backs req.headerList (writable) and res.headerList

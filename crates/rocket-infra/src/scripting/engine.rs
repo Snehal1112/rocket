@@ -163,6 +163,9 @@ extension!(
         rok::op_rok_has_env_var,
         rok::op_rok_delete_env_var,
         rok::op_rok_get_env_name,
+        rok::op_rok_get_collection_name,
+        rok::op_rok_is_safe_mode,
+        rok::op_rok_cwd,
         rok::op_rok_get_collection_var,
         rok::op_rok_set_collection_var,
         rok::op_rok_get_folder_var,
@@ -255,6 +258,7 @@ fn run_script(
 ) -> DomainResult<ScriptResult> {
     let code = ctx.code;
     let sandbox_mode = ctx.sandbox_mode;
+    let collection_root = ctx.file_scope.as_ref().map(|s| s.collection_root.clone());
 
     let mut extensions = vec![rocket_scripting_ext::init()];
     if sandbox_mode == SandboxMode::Developer {
@@ -313,6 +317,9 @@ fn run_script(
             path_params: ctx.path_params,
             local_roots,
             secret_values,
+            sandbox_mode,
+            collection_name: ctx.collection_name.unwrap_or_default(),
+            collection_root,
         });
         state.put(ScriptOutputState::default());
     }
@@ -378,6 +385,7 @@ mod tests {
             path_params: vec![],
             sandbox_mode: SandboxMode::Safe,
             file_scope: None,
+            collection_name: None,
         }
     }
 
@@ -2315,6 +2323,7 @@ mod tests {
         let ctx = ScriptContext {
             sandbox_mode: SandboxMode::Developer,
             file_scope: None,
+            collection_name: None,
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
@@ -2340,6 +2349,7 @@ mod tests {
         let ctx = ScriptContext {
             sandbox_mode: SandboxMode::Developer,
             file_scope: None,
+            collection_name: None,
             ..minimal_ctx(
                 "const result = process.exec('echo', ['hello-from-script']); \
                  rok.setVar('stdout', result.stdout); \
@@ -2378,6 +2388,7 @@ mod tests {
         let ctx = ScriptContext {
             sandbox_mode: SandboxMode::Developer,
             file_scope: None,
+            collection_name: None,
             ..minimal_ctx(&code)
         };
         let result = engine.execute(ctx).await.expect("execute");
@@ -2724,5 +2735,72 @@ mod tests {
                 "missing null write for {key}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn rok_get_collection_name_returns_the_name_or_empty() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx("rok.setVar('n', rok.getCollectionName())");
+        ctx.collection_name = Some("Payments".into());
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("n").expect("n present"), "Payments");
+
+        let ctx = minimal_ctx("rok.setVar('n', rok.getCollectionName())");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("n").expect("n present"), "");
+    }
+
+    #[tokio::test]
+    async fn rok_is_safe_mode_follows_the_sandbox_mode() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('safe', rok.isSafeMode())");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("safe").expect("safe present"), true);
+
+        let mut ctx = minimal_ctx("rok.setVar('safe', rok.isSafeMode())");
+        ctx.sandbox_mode = SandboxMode::Developer;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("safe").expect("safe present"), false);
+    }
+
+    #[tokio::test]
+    async fn rok_cwd_throws_in_safe_mode_and_dirname_is_undefined() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx("rok.cwd()");
+        ctx.file_scope = Some(ScriptFileScope {
+            collection_root: std::path::PathBuf::from("/tmp/some-collection"),
+            additional_roots: vec![],
+        });
+        let result = engine.execute(ctx).await.expect("execute");
+        let error = result.error.expect("script error");
+        assert!(error.contains("requires Developer mode"), "got: {error}");
+
+        let ctx = minimal_ctx("rok.setVar('t', typeof __dirname)");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("t").expect("t present"), "undefined");
+    }
+
+    #[tokio::test]
+    async fn rok_cwd_and_dirname_return_the_collection_root_in_developer_mode() {
+        let engine = DenoScriptEngine::new();
+        let mut ctx = minimal_ctx(
+            "rok.setVar('cwd', rok.cwd()); rok.setVar('dir', __dirname); \
+             rok.setVar('file', String(__filename))",
+        );
+        ctx.sandbox_mode = SandboxMode::Developer;
+        ctx.file_scope = Some(ScriptFileScope {
+            collection_root: std::path::PathBuf::from("/tmp/some-collection"),
+            additional_roots: vec![],
+        });
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("cwd").expect("cwd present"),
+            "/tmp/some-collection"
+        );
+        assert_eq!(
+            result.runtime_vars.get("dir").expect("dir present"),
+            "/tmp/some-collection"
+        );
+        assert_eq!(result.runtime_vars.get("file").expect("file present"), "undefined");
     }
 }

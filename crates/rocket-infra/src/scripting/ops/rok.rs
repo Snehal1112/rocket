@@ -1,6 +1,7 @@
+use crate::scripting::ops::ScriptOpError;
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use deno_core::{op2, OpState};
-use rocket_scripting::{CollectionVarWrite, EnvVarWrite, NextRequest};
+use rocket_scripting::{CollectionVarWrite, EnvVarWrite, NextRequest, SandboxMode};
 use std::collections::{BTreeSet, HashMap};
 
 // ── Variable reads ────────────────────────────────────────────────────────────
@@ -402,4 +403,32 @@ pub fn op_rok_set_next_request(state: &mut OpState, #[string] name: String) {
 #[op2(fast)]
 pub fn op_rok_skip_request(state: &mut OpState) {
     state.borrow_mut::<ScriptOutputState>().skip_request = true;
+}
+
+/// rok.getCollectionName() — display name of the collection, or empty string.
+#[op2]
+#[string]
+pub fn op_rok_get_collection_name(state: &OpState) -> String {
+    state.borrow::<ScriptInputState>().collection_name.clone()
+}
+
+/// rok.isSafeMode() — true in Safe mode, false in Developer mode.
+#[op2(fast)]
+pub fn op_rok_is_safe_mode(state: &OpState) -> bool {
+    state.borrow::<ScriptInputState>().sandbox_mode == SandboxMode::Safe
+}
+
+/// rok.cwd() — absolute collection directory. Developer mode only.
+#[op2]
+#[string]
+pub fn op_rok_cwd(state: &OpState) -> Result<String, ScriptOpError> {
+    let input = state.borrow::<ScriptInputState>();
+    if input.sandbox_mode == SandboxMode::Safe {
+        return Err(ScriptOpError("rok.cwd() requires Developer mode".into()));
+    }
+    input
+        .collection_root
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .ok_or_else(|| ScriptOpError("rok.cwd() has no collection directory here".into()))
 }
