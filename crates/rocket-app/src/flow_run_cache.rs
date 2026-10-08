@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use rocket_collection::Request;
 use rocket_flow::{Flow, FlowEdge, FlowNode, FlowNodeKind, RequestSource};
+use rocket_shared::VariableValue;
 
 use crate::flow_execution_service::{CapturedOutput, RunFlowInput};
 use crate::flow_partial::{is_free_node, label_in, PartialRefusal, SeedView};
@@ -63,20 +64,44 @@ pub(crate) struct RunResults {
     pub(crate) masking_secrets: HashSet<String>,
 }
 
-/// Bytes an output holds: body, base64 body and headers.
+/// Bytes an output holds: response body, base64 body, headers, status text,
+/// script console, test results, script error and any deferred History entry.
 pub(crate) fn output_size(output: &CapturedOutput) -> usize {
     match output {
         CapturedOutput::Request(out) => {
             let response = &out.response;
+            let history = out.deferred_history.as_ref().map_or(0, |h| {
+                h.id.len()
+                    + h.method.len()
+                    + h.url.len()
+                    + h.collection.as_ref().map_or(0, String::len)
+                    + h.request_name.as_ref().map_or(0, String::len)
+            });
             response.body.len()
+                + response.status_text.len()
                 + response.body_base64.as_ref().map_or(0, String::len)
                 + response
                     .headers
                     .iter()
                     .map(|h| h.key.len() + h.value.len())
                     .sum::<usize>()
+                + out
+                    .console_entries
+                    .iter()
+                    .map(|e| e.message.len())
+                    .sum::<usize>()
+                + out
+                    .test_results
+                    .iter()
+                    .map(|t| t.name.len() + t.error.as_ref().map_or(0, String::len))
+                    .sum::<usize>()
+                + out.script_error.as_ref().map_or(0, String::len)
+                + history
         }
-        CapturedOutput::Value(value) => value.data().len(),
+        CapturedOutput::Value(VariableValue::Simple(text)) => text.len(),
+        CapturedOutput::Value(VariableValue::Typed { data, value_type }) => {
+            data.len() + value_type.len()
+        }
     }
 }
 
@@ -84,16 +109,38 @@ fn index(flow: &Flow) -> HashMap<&str, &FlowNode> {
     flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect()
 }
 
+/// Builds one node's entry. `used` is the output bytes the run already holds.
+/// An output that would take the run past `budget` is dropped, so one run can
+/// never pin more than the budget. Which of several outputs is dropped
+/// depends on map order, but the planner refuses a dropped one cleanly.
 fn cached_node(
     flow_node: Option<&FlowNode>,
     outcome: NodeOutcome,
     output: Option<CapturedOutput>,
     fingerprint: u64,
+    used: &mut usize,
+    budget: usize,
 ) -> CachedNode {
     // Input and Auth nodes always run again, and an Auth output is a token.
     let never_seeded = flow_node.is_some_and(|n| is_free_node(&n.kind));
     let output = output
-        .filter(|o| !never_seeded && output_size(o) <= MAX_CACHED_OUTPUT_BYTES)
+        .map(|mut o| {
+            // A partial run never needs the deferred History entry.
+            if let CapturedOutput::Request(out) = &mut o {
+                out.deferred_history = None;
+            }
+            o
+        })
+        .filter(|o| {
+            let size = output_size(o);
+            let keep = !never_seeded
+                && size <= MAX_CACHED_OUTPUT_BYTES
+                && used.saturating_add(size) <= budget;
+            if keep {
+                *used += size;
+            }
+            keep
+        })
         .map(Arc::new);
     CachedNode {
         outcome,
@@ -111,6 +158,17 @@ impl CachedRun {
         results: RunResults,
         fingerprints: &HashMap<String, u64>,
     ) -> Self {
+        Self::from_full_run_with_budget(scope, flow, results, fingerprints, CACHE_BYTE_BUDGET)
+    }
+
+    fn from_full_run_with_budget(
+        scope: &RunFlowInput,
+        flow: &Flow,
+        results: RunResults,
+        fingerprints: &HashMap<String, u64>,
+        budget: usize,
+    ) -> Self {
+        let mut used = 0;
         let nodes_by_id = index(flow);
         let RunResults {
             outcomes,
@@ -125,6 +183,8 @@ impl CachedRun {
                     outcome,
                     captured.remove(&id),
                     fingerprints.get(&id).copied().unwrap_or_default(),
+                    &mut used,
+                    budget,
                 );
                 (id, node)
             })
@@ -148,6 +208,25 @@ impl CachedRun {
         results: RunResults,
         fingerprints: &HashMap<String, u64>,
     ) -> Self {
+        self.merge_partial_with_budget(
+            scope,
+            flow,
+            start_node_id,
+            results,
+            fingerprints,
+            CACHE_BYTE_BUDGET,
+        )
+    }
+
+    fn merge_partial_with_budget(
+        &self,
+        scope: &RunFlowInput,
+        flow: &Flow,
+        start_node_id: &str,
+        results: RunResults,
+        fingerprints: &HashMap<String, u64>,
+        budget: usize,
+    ) -> Self {
         let nodes_by_id = index(flow);
         let RunResults {
             outcomes,
@@ -155,6 +234,14 @@ impl CachedRun {
             masking_secrets,
         } = results;
         let mut nodes = self.nodes.clone();
+        // Kept outputs of the base count first, except those this run replaces.
+        let mut used: usize = self
+            .nodes
+            .iter()
+            .filter(|(id, _)| !outcomes.contains_key(*id))
+            .filter_map(|(_, node)| node.output.as_ref())
+            .map(|output| output_size(output))
+            .sum();
         let ran: HashSet<String> = outcomes.keys().cloned().collect();
         for (id, outcome) in outcomes {
             let node = cached_node(
@@ -162,6 +249,8 @@ impl CachedRun {
                 outcome,
                 captured.remove(&id),
                 fingerprints.get(&id).copied().unwrap_or_default(),
+                &mut used,
+                budget,
             );
             nodes.insert(id, node);
         }
@@ -315,10 +404,20 @@ fn canonical(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// Text no other call returns, for a value that failed to serialize. A
+/// failure then reads as a change instead of hiding an edit.
+fn unserializable_text() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!(
+        "<unserializable:{}>",
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 fn canonical_text<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_value(value)
         .map(|v| canonical(v).to_string())
-        .unwrap_or_default()
+        .unwrap_or_else(|_| unserializable_text())
 }
 
 /// The text a saved request is fingerprinted by. `uid`, `file_name` and
@@ -336,7 +435,8 @@ pub(crate) fn saved_request_text(request: &Request) -> String {
 /// saved request text, its incoming edges and its sources' fingerprints. An
 /// edit anywhere upstream changes every fingerprint below it. Positions are
 /// not hashed. `DefaultHasher` is fine because the value never leaves this
-/// process.
+/// process. Settings a saved request inherits from its folder or collection
+/// are not hashed, so an edit to them goes unseen (decision D5).
 pub(crate) fn fingerprints(
     flow: &Flow,
     order: &[String],
@@ -464,7 +564,6 @@ mod tests {
     use super::*;
     use rocket_flow::{handle, InlineRequestData, NodePosition};
     use rocket_shared::types::HttpMethod;
-    use rocket_shared::VariableValue;
 
     fn request(id: &str) -> FlowNode {
         FlowNode {
@@ -500,7 +599,7 @@ mod tests {
         }
     }
 
-    /// `ids[0] -url-> ids[1] -url-> ...`, with edge ids e0, e1, ...
+    /// `ids[0] -url-> ids[1] -url-> ...`, with edge ids e0, e1 and so on.
     fn chain(ids: &[&str]) -> (Flow, Vec<String>) {
         let nodes = ids.iter().map(|id| request(id)).collect();
         let edges = ids
@@ -765,7 +864,12 @@ mod tests {
     fn a_previous_run_secret_key_cannot_be_referenced_from_a_template() {
         let key = previous_run_secret_key(0);
         assert_eq!(key, "}}prev-run.0");
-        let vars = HashMap::from([(key, "old-token-123456".to_string())]);
+        let vars = HashMap::from([
+            (key, "old-token-123456".to_string()),
+            ("prev".to_string(), "control-value".to_string()),
+        ]);
+        let control = rocket_environment::resolve("{{prev}}", &vars).output;
+        assert_eq!(control, "control-value", "a normal key resolves in this harness");
         for template in ["{{}}prev-run.0}}", "{{ }}prev-run.0 }}", "{{prev-run.0}}"] {
             let out = rocket_environment::resolve(template, &vars).output;
             assert!(!out.contains("old-token-123456"), "{template} -> {out}");
@@ -786,6 +890,148 @@ mod tests {
         let printed = format!("{run:?}");
         assert!(printed.contains("CachedRun"));
         assert!(!printed.contains("123456"), "{printed}");
+    }
+
+    fn request_output(
+        body: &str,
+        with_history: bool,
+    ) -> crate::execution_service::ExecuteRequestOutput {
+        crate::execution_service::ExecuteRequestOutput {
+            response: rocket_http::HttpResponse {
+                status: 200,
+                status_text: String::new(),
+                headers: Vec::new(),
+                body: body.to_string(),
+                duration_ms: 0,
+                ttfb_ms: 0,
+                size_bytes: 0,
+                is_binary: false,
+                body_base64: None,
+            },
+            test_results: Vec::new(),
+            console_entries: Vec::new(),
+            script_error: None,
+            deferred_history: with_history.then(|| {
+                rocket_history::HistoryEntry::new("GET", "https://api.example.com/aaaa", 200, 1, 1)
+            }),
+        }
+    }
+
+    #[test]
+    fn output_size_counts_console_tests_script_error_history_and_typed_values() {
+        let plain = output_size(&CapturedOutput::Request(Box::new(request_output("", false))));
+        let mut full = request_output("", true);
+        full.console_entries.push(rocket_scripting::ConsoleEntry {
+            level: rocket_scripting::ConsoleLevel::Log,
+            message: "c".repeat(100),
+        });
+        full.test_results.push(rocket_scripting::TestResult {
+            name: "n".repeat(10),
+            status: rocket_scripting::TestStatus::Failed,
+            error: Some("e".repeat(20)),
+        });
+        full.script_error = Some("s".repeat(30));
+        let bigger = output_size(&CapturedOutput::Request(Box::new(full)));
+        assert!(bigger >= plain + 100 + 10 + 20 + 30 + "https://api.example.com/aaaa".len());
+        let typed = CapturedOutput::Value(VariableValue::typed("abc", "number"));
+        assert_eq!(output_size(&typed), 9);
+    }
+
+    #[test]
+    fn a_cached_request_output_drops_its_deferred_history() {
+        let flow = Flow {
+            name: "f".to_string(),
+            nodes: vec![request("r")],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let order = vec!["r".to_string()];
+        let mut run_results = results(&[]);
+        run_results.outcomes.insert(
+            "r".to_string(),
+            NodeOutcome::Succeeded {
+                chosen_exit: handle::RESULT.to_string(),
+            },
+        );
+        run_results.captured.insert(
+            "r".to_string(),
+            CapturedOutput::Request(Box::new(request_output("body", true))),
+        );
+        let run = CachedRun::from_full_run(
+            &scope(),
+            &flow,
+            run_results,
+            &fingerprints(&flow, &order, &|_| None),
+        );
+        match run.nodes["r"].output.as_deref() {
+            Some(CapturedOutput::Request(out)) => assert!(out.deferred_history.is_none()),
+            _ => panic!("the request output should be cached"),
+        }
+    }
+
+    #[test]
+    fn a_run_over_the_byte_budget_drops_outputs_and_the_planner_sees_them_missing() {
+        let (flow, order) = chain(&["a", "b", "c"]);
+        let text = "x".repeat(600);
+        let run = CachedRun::from_full_run_with_budget(
+            &scope(),
+            &flow,
+            results(&[("a", text.as_str()), ("b", text.as_str()), ("c", text.as_str())]),
+            &fingerprints(&flow, &order, &|_| None),
+            1_000,
+        );
+        let kept: usize = run
+            .nodes
+            .values()
+            .filter_map(|n| n.output.as_ref())
+            .map(|o| output_size(o))
+            .sum();
+        assert!(kept <= 1_000, "{kept}");
+        assert_eq!(run.nodes.len(), 3, "outcomes are never dropped");
+        let views = run.seed_views();
+        assert_eq!(views.values().filter(|v| !v.has_output).count(), 2);
+    }
+
+    #[test]
+    fn a_partial_merge_counts_the_base_outputs_against_the_budget() {
+        let (flow, order) = chain(&["a", "b"]);
+        let text = "x".repeat(600);
+        let base = CachedRun::from_full_run_with_budget(
+            &scope(),
+            &flow,
+            results(&[("a", text.as_str())]),
+            &fingerprints(&flow, &order, &|_| None),
+            1_000,
+        );
+        let merged = base.merge_partial_with_budget(
+            &scope(),
+            &flow,
+            "b",
+            results(&[("b", text.as_str())]),
+            &fingerprints(&flow, &order, &|_| None),
+            1_000,
+        );
+        assert!(merged.nodes["a"].output.is_some());
+        assert!(merged.nodes["b"].output.is_none());
+    }
+
+    #[test]
+    fn a_serialization_failure_never_hides_an_edit() {
+        assert_ne!(unserializable_text(), unserializable_text());
+    }
+
+    #[test]
+    fn an_over_budget_newest_run_evicts_the_older_runs_but_stays() {
+        let (flow, order) = chain(&["a"]);
+        let big = "x".repeat(2_000);
+        let mut cache = FlowRunCache::with_limits(2, 1_000);
+        cache.insert("r1".to_string(), full_run(&flow, &order, &[("a", "1")]));
+        cache.insert("r2".to_string(), full_run(&flow, &order, &[("a", big.as_str())]));
+        assert!(cache.contains("r2") && !cache.contains("r1"));
+        cache.insert("r3".to_string(), full_run(&flow, &order, &[("a", "3")]));
+        cache.insert("r4".to_string(), full_run(&flow, &order, &[("a", big.as_str())]));
+        assert!(cache.contains("r4"));
+        assert!(!cache.contains("r2") && !cache.contains("r3"));
     }
 
     #[test]
