@@ -431,18 +431,12 @@ fn request_texts(source: &RequestSource, saved: &HashMap<String, Request>) -> Ve
             texts
         }
         RequestSource::Saved { request_path } => {
-            let Some(request) = saved.get(request_path) else {
-                return Vec::new();
-            };
-            let mut texts = vec![request.url.clone()];
-            for header in &request.headers {
-                texts.push(header.key.clone());
-                texts.push(header.value.clone());
-            }
-            texts.extend(request.query_params.iter().map(|q| q.value.clone()));
-            texts.extend(request.body.as_ref().and_then(|b| b.content.clone()));
-            texts.extend(request.pre_request_script.clone());
-            texts
+            // The whole request as text, so a mention in form data, path
+            // params, variables, auth, scripts or tests counts too.
+            saved
+                .get(request_path)
+                .map(|request| vec![crate::flow_run_cache::saved_request_text(request)])
+                .unwrap_or_default()
         }
     }
 }
@@ -927,5 +921,50 @@ mod tests {
         let saved = HashMap::from([("pay.yml".to_string(), saved_request)]);
         let senders = callback_senders(&flow, &saved);
         assert_eq!(senders.get("w"), Some(&ids(&["s"])));
+    }
+
+    #[test]
+    fn a_saved_request_sending_the_callback_in_form_data_is_refused() {
+        let flow = Flow {
+            name: "f".to_string(),
+            nodes: vec![
+                node(
+                    "s",
+                    FlowNodeKind::Request {
+                        label: "s".to_string(),
+                        debug: false,
+                        repeat_until: None,
+                        source: RequestSource::Saved {
+                            request_path: "pay.yml".to_string(),
+                        },
+                    },
+                ),
+                wait("w", "pay"),
+            ],
+            edges: vec![edge("e1", "s", handle::RESULT, "w", handle::TRIGGER)],
+            callback_host: None,
+        };
+        let order = vec!["s".to_string(), "w".to_string()];
+        let mut saved_request =
+            Request::new("Pay", HttpMethod::Post, "https://api.example.com/pay");
+        saved_request.body = Some(rocket_shared::types::Body {
+            mode: rocket_shared::types::BodyMode::FormUrlEncoded,
+            content: None,
+            form_data: Some(vec![rocket_shared::types::FormDataEntry {
+                key: "notify".to_string(),
+                value: "{{callback.pay}}".to_string(),
+                entry_type: rocket_shared::types::FormDataType::Text,
+                enabled: true,
+                content_type: None,
+                description: None,
+            }]),
+            file_path: None,
+        });
+        let saved = HashMap::from([("pay.yml".to_string(), saved_request)]);
+        let senders = callback_senders(&flow, &saved);
+        assert_eq!(senders.get("w"), Some(&ids(&["s"])));
+        let err = select_nodes(&flow, &order, &partial("w", FlowPartialMode::FromHere), &senders)
+            .expect_err("the sender is upstream of the run");
+        assert!(err.message.contains("is not part of this run"), "{}", err.message);
     }
 }
