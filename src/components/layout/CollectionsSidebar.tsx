@@ -47,7 +47,6 @@ import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import { isFlowTab } from '@/types/pane-types';
 import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
@@ -117,26 +116,7 @@ export function CollectionsSidebar() {
         }
         await deleteFlow(deleteTarget.collection, deleteTarget.name);
         // Drop tabs parked in collection snapshots too, so none comes back after a switch.
-        usePaneStore.setState((s) => ({
-          collectionTabState: Object.fromEntries(
-            Object.entries(s.collectionTabState).map(([key, entry]) => {
-              const tabs = entry.tabs.filter(
-                (t) =>
-                  !(
-                    isFlowTab(t) &&
-                    t.collectionName === deleteTarget.collection &&
-                    t.flowName === deleteTarget.name
-                  ),
-              );
-              if (tabs.length === entry.tabs.length) return [key, entry];
-              const activeKept = tabs.some((t) => t.id === entry.activeTabId);
-              return [
-                key,
-                { tabs, activeTabId: activeKept ? entry.activeTabId : (tabs[0]?.id ?? '') },
-              ];
-            }),
-          ),
-        }));
+        usePaneStore.getState().dropParkedFlowTabs(deleteTarget.collection, deleteTarget.name);
         // The flow is gone, so its in-memory Auth tokens go too, whichever tab held them.
         useFlowAuthStore.getState().clearFlow(deleteTarget.collection, deleteTarget.name);
         void getQueryClient().invalidateQueries({

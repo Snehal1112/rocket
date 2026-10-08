@@ -164,6 +164,7 @@ describe('CollectionsSidebar flow delete', () => {
   beforeEach(() => {
     usePaneStore.getState().reset();
     vi.mocked(toast.error).mockReset();
+    useFlowAuthStore.setState({ auths: {} });
     vi.mocked(tauriApi.listCollections).mockResolvedValue([summary]);
     vi.mocked(tauriApi.listWorkspaces).mockResolvedValue([
       { id: 'ws1', repositoryId: 'r1', name: 'WS', path: '/w', pinned: false },
@@ -245,5 +246,23 @@ describe('CollectionsSidebar flow delete', () => {
     await waitFor(() => expect(tauriApi.deleteFlow).toHaveBeenCalledWith('col', 'Login'));
     expect(useFlowAuthStore.getState().auths[key]).toBeUndefined();
     expect(usePaneStore.getState().collectionTabState.other?.tabs).toEqual([]);
+  });
+
+  it('keeps tabs and tokens when the delete fails', async () => {
+    vi.mocked(tauriApi.deleteFlow).mockRejectedValue('Io error: disk');
+    const key = flowAuthKey('col', 'Login', 'a1', null, null);
+    useFlowAuthStore.setState({ auths: { [key]: { auth: { authType: 'bearer' } as never } } });
+    usePaneStore.getState().openTab(loginTab());
+    render(<CollectionsSidebar />, { wrapper });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for Login' }));
+    await userEvent.click(await screen.findByText('Delete'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('Could not delete')),
+    );
+    expect(flowTabs()).toHaveLength(1);
+    expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([key]);
   });
 });

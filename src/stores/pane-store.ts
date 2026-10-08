@@ -308,6 +308,10 @@ export interface PaneState {
   updateScriptContent: (tabId: string, content: string) => void;
   markScriptSaved: (tabId: string, content: string) => void;
   renameScriptTabs: (collection: string, oldPath: string, newPath: string) => void;
+  /** Retargets open (and parked) tabs of a renamed flow and clears the old flow's Auth tokens. */
+  renameFlowTabs: (collection: string, oldName: string, newName: string) => void;
+  /** Removes tabs of a deleted flow that are parked in collection snapshots. */
+  dropParkedFlowTabs: (collection: string, flowName: string) => void;
   /** Opens or focuses the settings tab of a folder. Returns true when an open tab was reused. */
   openFolderTab: (collection: string, folderPath: string, section?: FolderSection) => boolean;
   updateFolderSection: (tabId: string, section: FolderSection) => void;
@@ -823,6 +827,43 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       };
     }
     set({ root: next.root, collectionTabState: next.collectionTabState });
+  },
+
+  renameFlowTabs(collection, oldName, newName) {
+    // Matching by tab id keeps ids stable, so panes keep their active tab. The tab keeps its
+    // nodes and dirty flag. Without the new name, its next Save would recreate the old flow.
+    const tabs = findFlowTabs(get().root, get().collectionTabState, collection, oldName);
+    let next = get();
+    for (const found of tabs) {
+      next = {
+        ...next,
+        ...updateTabEverywhere(next, found.id, (tab) =>
+          isFlowTab(tab) ? { ...tab, flowName: newName, title: `Flow: ${newName}` } : tab,
+        ),
+      };
+    }
+    if (tabs.length > 0) set({ root: next.root, collectionTabState: next.collectionTabState });
+    // Tokens are keyed by flow name and are not migrated. The user signs in again.
+    useFlowAuthStore.getState().clearFlow(collection, oldName);
+    useFlowAuthStore.getState().clearFlow(collection, newName);
+  },
+
+  dropParkedFlowTabs(collection, flowName) {
+    const parked: CollectionTabState = {};
+    for (const [key, entry] of Object.entries(get().collectionTabState)) {
+      const tabs = entry.tabs.filter(
+        (t) => !(isFlowTab(t) && t.collectionName === collection && t.flowName === flowName),
+      );
+      if (tabs.length === entry.tabs.length) {
+        parked[key] = entry;
+        continue;
+      }
+      const activeTabId = tabs.some((t) => t.id === entry.activeTabId)
+        ? entry.activeTabId
+        : (tabs[0]?.id ?? '');
+      parked[key] = { ...entry, tabs, activeTabId };
+    }
+    set({ collectionTabState: parked });
   },
 
   async openRunnerTab(collectionName, folderPath) {
