@@ -14,7 +14,7 @@ import {
   SelectionMode,
   useReactFlow,
 } from '@xyflow/react';
-import { Search } from 'lucide-react';
+import { LayoutGrid, Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import '@xyflow/react/dist/style.css';
@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { decodeFlowRequestDragPayload } from '@/lib/flow-drag';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { type FlowWriteOptions, pruneSelection } from '@/lib/flow-history';
+import { layoutFlow } from '@/lib/flow-layout';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
@@ -342,6 +343,30 @@ function FlowCanvasInner({
     setSearchOpen(false);
     focusPane();
   };
+  // Lays the graph out left to right in one write, which is one undo step. With
+  // two or more nodes selected it moves only those. A failure leaves the graph alone.
+  const handleTidy = () => {
+    try {
+      const only = selectedNodeIds.size >= 2 ? selectedNodeIds : undefined;
+      const next = layoutFlow(nodes, edges, measuredRef.current, only);
+      if (next === nodes) {
+        toast.info('The layout is already tidy.');
+        return;
+      }
+      onNodesChange(next);
+      // Wait one tick, so React Flow has the new positions before it fits the view.
+      setTimeout(() => {
+        void fitView({
+          ...(only ? { nodes: [...only].map((id) => ({ id })) } : {}),
+          duration: 300,
+          padding: 0.2,
+        });
+      }, 0);
+    } catch (err) {
+      toast.error(`Could not tidy the layout: ${String(err)}`);
+    }
+  };
+
   // Selects the match and brings it into view. The properties panel stays as it is.
   const showSearchMatch = (nodeId: string) => {
     selectNodes(new Set([nodeId]));
@@ -608,6 +633,19 @@ function FlowCanvasInner({
             style={{ marginBottom: 28 }}
           />
           <Panel position='top-center' className='nokey flex items-center gap-2'>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              className='h-8 gap-1.5'
+              aria-label='Tidy layout'
+              title='Tidy layout'
+              disabled={nodes.length === 0}
+              onClick={handleTidy}
+            >
+              <LayoutGrid className='h-3.5 w-3.5' aria-hidden='true' />
+              Tidy
+            </Button>
             <Button
               type='button'
               size='sm'
