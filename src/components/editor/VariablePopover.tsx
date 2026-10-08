@@ -169,7 +169,11 @@ export function VariablePopover({
             setEditValue(e.target.value);
           }}
           onKeyDown={handleKeyDown}
-          onBlur={() => void handleCommit()}
+          onBlur={() => {
+            // A forced read-only popover cannot commit, so a blur just closes it.
+            if (forceReadOnly) onClose();
+            else void handleCommit();
+          }}
         />
       </div>
 

@@ -65,3 +65,44 @@ describe('VariablePopover readOnly prop', () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 });
+
+describe('VariablePopover blur', () => {
+  it('closes a forced read-only popover on blur without committing', async () => {
+    const onCommit = vi.fn(async () => undefined);
+    const onClose = vi.fn();
+    render(
+      <VariablePopover
+        varName='apiKey'
+        entry={entry()}
+        tokenType='variable'
+        readOnly
+        onCommit={onCommit}
+        onClose={onClose}
+      />,
+    );
+    const input = screen.getByRole('textbox');
+    input.focus();
+    input.blur();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('still commits an editable popover on blur', async () => {
+    const onCommit = vi.fn(async () => undefined);
+    const onClose = vi.fn();
+    render(
+      <VariablePopover
+        varName='apiKey'
+        entry={entry()}
+        tokenType='variable'
+        onCommit={onCommit}
+        onClose={onClose}
+      />,
+    );
+    const input = screen.getByRole('textbox');
+    input.focus();
+    input.blur();
+    await vi.waitFor(() => expect(onCommit).toHaveBeenCalledWith(SECRET));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+});

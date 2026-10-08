@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowNode, FlowNodeKind } from '@/lib/tauri-api';
 import { NodePropertiesPanel } from '../NodePropertiesPanel';
 
@@ -332,6 +332,8 @@ describe('Wires tab in the panel', () => {
       script: 'return 1;',
     });
   });
+
+  afterEach(() => scope.variableContext.clear());
 
   it('gives an Input node value editor the collection variables, read-only for saving', () => {
     scope.variableContext.set('user', {

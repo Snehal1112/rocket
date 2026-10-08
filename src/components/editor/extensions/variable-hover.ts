@@ -1,9 +1,9 @@
-import type { Extension } from '@codemirror/state';
+import type { Extension, Transaction } from '@codemirror/state';
 import { type EditorView, hoverTooltip, type Tooltip } from '@codemirror/view';
 import { isDynamicVar } from '@/lib/dynamic-vars';
 import { sourceBadgeClass, type VariableScopeEntry } from '@/lib/url-variables';
 import { variableContextField } from './variable-context-facet';
-import { findVarTokenAt, getActivePopover } from './variable-popover';
+import { findVarTokenAt, getActivePopover, openPopoverEffect } from './variable-popover';
 
 /** How long the pointer rests on a token before the value shows. */
 const HOVER_DELAY_MS = 300;
@@ -80,7 +80,15 @@ export function variableHoverSource(view: EditorView, pos: number, side: -1 | 1)
   };
 }
 
+/** True when a transaction opens the click popover, so the hover card must close. */
+export function hideOnPopoverOpen(tr: Transaction): boolean {
+  return tr.effects.some((e) => e.is(openPopoverEffect));
+}
+
 /** Shows a variable's scope and value when the pointer rests on its `{{name}}` token. */
 export function variableHover(): Extension {
-  return hoverTooltip(variableHoverSource, { hoverTime: HOVER_DELAY_MS });
+  return hoverTooltip(variableHoverSource, {
+    hoverTime: HOVER_DELAY_MS,
+    hideOn: hideOnPopoverOpen,
+  });
 }

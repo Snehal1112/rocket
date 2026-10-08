@@ -5,6 +5,7 @@ import type { VariableScopeEntry } from '@/lib/url-variables';
 import { setVariableContextEffect, variableContextField } from '../variable-context-facet';
 import {
   buildVariableHoverDom,
+  hideOnPopoverOpen,
   truncateForHover,
   variableHover,
   variableHoverSource,
@@ -176,8 +177,13 @@ describe('variableHoverSource', () => {
 });
 
 describe('variableHover extension', () => {
-  it('installs in an editor without throwing', () => {
+  it('closes the hover card when the click popover opens', () => {
     const v = createView('{{host}}', new Map([['host', entry()]]));
-    expect(v.dom.querySelector('.cm-content')).not.toBeNull();
+    const open = v.state.update({
+      effects: openPopoverEffect.of({ varName: 'host', from: 0, to: 8, tokenType: 'variable', entry: entry() }),
+    });
+    const other = v.state.update({ changes: { from: 0, insert: 'x' } });
+    expect(hideOnPopoverOpen(open)).toBe(true);
+    expect(hideOnPopoverOpen(other)).toBe(false);
   });
 });
