@@ -129,3 +129,11 @@ named by `wire_err` and never quote a resolved value. The run loop fills
 Wires are recorded with the credential captured at run start, so a credential
 that changes at send time is not in the trace mask (same caveat as the
 send-time note above).
+
+## Flow callback URLs
+
+`RunCallbacks::infos()` lists `(node id, name, url)` per Wait for callback
+node. `FlowRunStarted.callbacks` is the only place a callback URL leaves the
+backend, because the URL holds a bearer token. Never put it in a
+`FlowRunSummary`, a step, an exchange, a log, a live progress event or
+history. The field is omitted when empty and defaults on old payloads.

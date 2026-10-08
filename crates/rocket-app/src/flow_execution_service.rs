@@ -984,6 +984,7 @@ impl FlowExecutionService {
             flow_name: input.flow_name.clone(),
             collection: input.collection.clone(),
             total_nodes: flow.nodes.len(),
+            callbacks: callbacks.infos().to_vec(),
         });
 
         let mut captured: HashMap<String, CapturedOutput> = HashMap::new();
@@ -7917,6 +7918,57 @@ mod tests {
         assert!(live
             .iter()
             .all(|l| l.ignored.is_some() && l.remaining_ms.is_some()));
+    }
+
+    #[tokio::test]
+    async fn run_started_lists_the_callback_urls_and_nothing_else_does() {
+        use rocket_shared::events::FlowCallbackInfo;
+
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.completed"));
+        let publisher = RecordingPublisher::new();
+        let flow = Flow {
+            name: "cb-urls".to_string(),
+            nodes: vec![wait_node_with("w", 60_000, None)],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = service_with_publisher(flow, &publisher)
+            .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service.run(&exec, run_input("cb-urls")).await.expect("run");
+
+        let events = publisher.events();
+        let callbacks = events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::FlowRunStarted { callbacks, .. } => Some(callbacks.clone()),
+                _ => None,
+            })
+            .expect("run started");
+        assert_eq!(
+            callbacks,
+            vec![FlowCallbackInfo {
+                node_id: "w".to_string(),
+                name: "payment".to_string(),
+                url: "http://fake:1/cb/0".to_string(),
+            }]
+        );
+        // The fake's token is "0"; neither the URL nor its token path may appear elsewhere.
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(
+            !json.contains("http://fake:1/cb/0") && !json.contains("/cb/0"),
+            "{json}"
+        );
+        for event in events
+            .iter()
+            .filter(|e| !matches!(e, DomainEvent::FlowRunStarted { .. }))
+        {
+            let json = serde_json::to_string(event).expect("serialize");
+            assert!(!json.contains("/cb/0"), "{json}");
+        }
     }
 
     #[tokio::test]

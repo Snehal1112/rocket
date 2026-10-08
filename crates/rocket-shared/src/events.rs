@@ -161,6 +161,16 @@ pub struct FlowWaitDetail {
     pub last_rejected: Option<FlowRejectedCall>,
 }
 
+/// The callback URL of one Wait for callback node. The URL holds a bearer
+/// token and works only while its run is active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowCallbackInfo {
+    pub node_id: String,
+    pub name: String,
+    pub url: String,
+}
+
 /// Structured progress of a node that is still running. Every field is
 /// optional, so each node kind sends only what applies to it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -397,6 +407,11 @@ pub enum DomainEvent {
         flow_name: String,
         collection: String,
         total_nodes: usize,
+        /// Every Wait for callback node's URL. Sent here only: the URL is a
+        /// bearer token, so it never goes into the summary, a step or history.
+        /// The nested fields are camelCase inside this snake_case event.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        callbacks: Vec<FlowCallbackInfo>,
     },
     /// Emitted immediately before a node is dispatched — once per node that
     /// is actually attempted, never for a node marked `Skipped` (those never
@@ -993,12 +1008,44 @@ mod tests {
     }
 
     #[test]
+    fn flow_run_started_carries_callback_urls_in_camel_case() {
+        let event = DomainEvent::FlowRunStarted {
+            run_id: "01J".into(),
+            flow_name: "Pay".into(),
+            collection: "acme".into(),
+            total_nodes: 2,
+            callbacks: vec![FlowCallbackInfo {
+                node_id: "w".into(),
+                name: "payment".into(),
+                url: "http://10.0.0.5:4000/cb/tok".into(),
+            }],
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert!(
+            json.contains(
+                r#""callbacks":[{"nodeId":"w","name":"payment","url":"http://10.0.0.5:4000/cb/tok"}]"#
+            ),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn flow_run_started_without_callbacks_still_deserializes() {
+        let json = r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"Login Flow","collection":"acme","total_nodes":3}"#;
+        match serde_json::from_str::<DomainEvent>(json).expect("old payload") {
+            DomainEvent::FlowRunStarted { callbacks, .. } => assert!(callbacks.is_empty()),
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
+
+    #[test]
     fn flow_run_started_wire_shape() {
         let event = DomainEvent::FlowRunStarted {
             run_id: "01J".into(),
             flow_name: "Login Flow".into(),
             collection: "acme".into(),
             total_nodes: 3,
+            callbacks: Vec::new(),
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
