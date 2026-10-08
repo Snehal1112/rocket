@@ -343,5 +343,6 @@ describe('Wires tab in the panel', () => {
     renderPanel(node('in1', { kind: 'Input', label: 'User', value: '{{user}}' }));
     expect(editorProps.last?.variableContext).toBe(scope.variableContext);
     expect(editorProps.last?.readOnlyVariables).toBe(true);
+    expect(editorProps.last?.hoverPreview).toBe(true);
   });
 });

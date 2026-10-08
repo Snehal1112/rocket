@@ -21,6 +21,7 @@ import {
   variableAutocomplete,
   variableContextField,
   variableHighlight,
+  variableHover,
   variablePopoverExtension,
 } from './extensions';
 import { VariablePopover } from './VariablePopover';
@@ -47,6 +48,11 @@ export interface SingleLineEditorProps {
    * the variable scope is not the active collection's, such as the flow editors.
    */
   readOnlyVariables?: boolean;
+  /**
+   * When true, hovering a {{variable}} shows its scope and value. Needs variableContext.
+   * Off by default, so only editors that opt in change.
+   */
+  hoverPreview?: boolean;
 
   // ── Secret masking ───────────────────────────────────────
   /** When true, non-variable text is masked with ● characters. */
@@ -84,6 +90,7 @@ export function SingleLineEditor({
   variableContext,
   onNavigateToSource,
   readOnlyVariables,
+  hoverPreview,
   isSecret,
   pathParams,
   queryParams,
@@ -166,6 +173,7 @@ export function SingleLineEditor({
         variableAutocomplete(),
         variablePopoverExtension(),
       );
+      if (hoverPreview) exts.push(variableHover());
     }
 
     if (disabled) {
@@ -194,6 +202,7 @@ export function SingleLineEditor({
     return exts;
   }, [
     !!variableContext,
+    !!hoverPreview,
     !!onSubmit,
     !!disabled,
     placeholder,

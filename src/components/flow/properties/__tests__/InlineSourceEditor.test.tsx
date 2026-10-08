@@ -166,6 +166,17 @@ describe('InlineSourceEditor variable context', () => {
     }
   });
 
+  it('turns the hover preview on for the URL and header editors', () => {
+    render(
+      <FlowVariableContextProvider value={ctx}>
+        <InlineSourceEditor request={request} onChange={vi.fn()} outOfRangeWires={[]} />
+      </FlowVariableContextProvider>,
+    );
+    for (const label of ['URL', 'Header 1 name', 'Header 1 value']) {
+      expect(latest(label)?.hoverPreview).toBe(true);
+    }
+  });
+
   it('gives the body editor the flow context', () => {
     render(
       <FlowVariableContextProvider value={ctx}>

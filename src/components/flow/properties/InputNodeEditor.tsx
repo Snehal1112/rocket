@@ -26,6 +26,7 @@ export function InputNodeEditor({
             placeholder='Text or {{variable}}'
             variableContext={variableContext}
             readOnlyVariables
+            hoverPreview
           />
         ) : (
           // A structured value from an older file. Editing it as text would

@@ -77,6 +77,7 @@ export function InlineSourceEditor({
           placeholder='https://api.example.com/{{path}}'
           variableContext={variableContext}
           readOnlyVariables
+          hoverPreview
         />
       </div>
 
@@ -107,6 +108,7 @@ export function InlineSourceEditor({
               placeholder='Name'
               variableContext={variableContext}
               readOnlyVariables
+              hoverPreview
             />
             <SingleLineEditor
               aria-label={`Header ${i + 1} value`}
@@ -116,6 +118,7 @@ export function InlineSourceEditor({
               placeholder='Value'
               variableContext={variableContext}
               readOnlyVariables
+              hoverPreview
             />
             <Button
               type='button'
