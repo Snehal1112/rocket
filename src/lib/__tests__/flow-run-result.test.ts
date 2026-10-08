@@ -158,4 +158,16 @@ describe('formatRunDuration', () => {
     expect(formatRunDuration(2300)).toBe('2.3 s');
     expect(formatRunDuration(125_000)).toBe('2 m 5 s');
   });
+
+  it('switches to minutes where seconds would round to 60.0 s', () => {
+    expect(formatRunDuration(999)).toBe('999 ms');
+    expect(formatRunDuration(1000)).toBe('1.0 s');
+    expect(formatRunDuration(59_949)).toBe('59.9 s');
+    expect(formatRunDuration(59_950)).toBe('1 m 0 s');
+    expect(formatRunDuration(59_999)).toBe('1 m 0 s');
+    expect(formatRunDuration(60_000)).toBe('1 m 0 s');
+    for (const ms of [999, 1000, 59_949, 59_950, 59_999, 60_000]) {
+      expect(formatRunDuration(ms)).not.toContain('60.0 s');
+    }
+  });
 });

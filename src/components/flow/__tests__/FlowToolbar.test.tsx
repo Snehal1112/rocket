@@ -983,6 +983,20 @@ describe('FlowToolbar', () => {
       expect(onRunStateChange).not.toHaveBeenCalled();
     });
 
+    it('ignores a late finished event after the resumed toolbar unmounts', async () => {
+      const onRunResult = vi.fn();
+      const { unmount } = renderToolbar({
+        onRunResult,
+        tabRunState: 'running',
+        tabRunId: 'run-9',
+      });
+      await waitFor(() => expect(finishedHandler).toBeDefined());
+      unmount();
+      finishedHandler?.(finishedEvent());
+      expect(onRunResult).not.toHaveBeenCalled();
+      expect(onRunStateChange).not.toHaveBeenCalled();
+    });
+
     it('does not subscribe to the finished event when no run is being resumed', async () => {
       renderToolbar({ onRunResult: vi.fn() });
       await userEvent.click(screen.getByRole('button', { name: 'Run' }));

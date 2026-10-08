@@ -156,6 +156,7 @@ export function FlowToolbar({
     let unlistenFinished: UnlistenFn | undefined;
     let disposed = false;
     void onFlowStepStarted((event) => {
+      if (disposed) return;
       if (event.run_id !== resumedRunId) return;
       onPatchStatusRef.current(event.node_id, 'running');
     }).then((fn) => {
@@ -163,6 +164,7 @@ export function FlowToolbar({
       else unlistenStarted = fn;
     });
     void onFlowStepCompleted((event) => {
+      if (disposed) return;
       if (event.run_id !== resumedRunId) return;
       onPatchStatusRef.current(event.node_id, event.status, detailFromEvent(event));
     }).then((fn) => {
@@ -170,6 +172,7 @@ export function FlowToolbar({
       else unlistenStep = fn;
     });
     void onFlowStepProgress((event) => {
+      if (disposed) return;
       if (event.run_id !== resumedRunId) return;
       onPatchProgressRef.current?.(event.node_id, event.message);
     }).then((fn) => {
@@ -177,6 +180,7 @@ export function FlowToolbar({
       else unlistenProgress = fn;
     });
     void onFlowRunFinished((event) => {
+      if (disposed) return;
       if (event.run_id !== resumedRunId) return;
       // The mount that started the run applies the timed summary later, which
       // replaces this counts-only result.

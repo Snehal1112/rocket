@@ -47,7 +47,7 @@ export function mergeRunResult(prev: FlowLastRun | undefined, next: FlowLastRun)
 
 export function formatRunDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  if (ms < 59_950) return `${(ms / 1000).toFixed(1)} s`;
   const total = Math.round(ms / 1000);
   return `${Math.floor(total / 60)} m ${total % 60} s`;
 }

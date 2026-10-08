@@ -36,7 +36,7 @@ function describeRun(result: FlowLastRun): { text: string; Icon: LucideIcon; ton
 }
 
 // One line under the toolbar: how the last run ended, and which node failed first.
-// It is a plain group, not a live region. The run announcer owns spoken updates.
+// It is a labelled region, not a live region. The run announcer owns spoken updates.
 export function RunResultStrip({ result, canSelectFailed, onSelectFailed }: RunResultStripProps) {
   const { text, Icon, tone } = describeRun(result);
   const skipped = result.skippedCount > 0 ? ` · ${result.skippedCount} skipped` : '';
