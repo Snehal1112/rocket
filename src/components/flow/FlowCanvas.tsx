@@ -5,6 +5,7 @@ import {
   Controls,
   type Edge,
   type EdgeChange,
+  MiniMap,
   type Node,
   type NodeChange,
   Panel,
@@ -24,6 +25,7 @@ import type { SavedRequestPreview } from '@/lib/saved-request-preview';
 import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { edgeRunState, exitLabel } from './flowExits';
+import { minimapNodeColor } from './minimap';
 import { AuthNode } from './nodes/AuthNode';
 import { type FlowNodeActions, FlowNodeActionsContext } from './nodes/FlowNodeActionsContext';
 import { IfNode } from './nodes/IfNode';
@@ -566,7 +568,20 @@ function FlowCanvasInner({
             color='hsl(var(--muted-foreground))'
           />
           <Controls />
-          <Panel position='bottom-left' className='pointer-events-none ml-14 mb-3'>
+          {/* Plain colours only. WebKitGTK hangs on some CSS paint effects. */}
+          <MiniMap
+            pannable
+            zoomable
+            ariaLabel='Flow minimap'
+            position='bottom-right'
+            nodeColor={minimapNodeColor}
+            nodeStrokeWidth={2}
+            bgColor='hsl(var(--card))'
+            maskColor='hsl(var(--muted-foreground) / 0.25)'
+            // Lifts the minimap clear of the React Flow attribution link.
+            style={{ marginBottom: 28 }}
+          />
+          <Panel position='bottom-left' className='pointer-events-none ml-14 mb-3 max-w-[50%]'>
             <span className='text-[11px] text-muted-foreground/70'>{CANVAS_HINTS.join(' · ')}</span>
           </Panel>
         </ReactFlow>
