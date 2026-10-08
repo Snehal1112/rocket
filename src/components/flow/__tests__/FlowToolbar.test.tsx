@@ -1305,6 +1305,27 @@ describe('FlowToolbar', () => {
       expect(vi.mocked(tauriApi.runFlow).mock.calls[1][5]).toEqual({ runId: 'run-b' });
     });
 
+    it('frees listeners that finish subscribing after the toolbar unmounted', async () => {
+      const unlisten = vi.fn();
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(tauriApi.onFlowRunStarted).mockImplementation(async () => {
+        await gate;
+        return unlisten;
+      });
+      vi.mocked(tauriApi.onFlowStepStarted).mockImplementation(async () => unlisten);
+      vi.mocked(tauriApi.onFlowStepCompleted).mockImplementation(async () => unlisten);
+      vi.mocked(tauriApi.onFlowStepProgress).mockImplementation(async () => unlisten);
+      const view = renderToolbar();
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.onFlowRunStarted).toHaveBeenCalled());
+      view.unmount();
+      release();
+      await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(4));
+    });
+
     it('a remounted toolbar follows a run that has not announced itself yet', async () => {
       const onCallbackUrls = vi.fn();
       renderToolbar({

@@ -229,6 +229,28 @@ describe('two tabs running the same flow', () => {
     expect(stored('flow-a').nodeStatus).toEqual({});
   });
 
+  it('a refused start keeps the previous run id and results, and clears the pending id', async () => {
+    render(<Pane id='flow-a' />);
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(runFlow).toHaveBeenCalledTimes(1));
+    const id = sentRunId(0);
+    startedBus.emit(startedEvent(id));
+    completedBus.emit(completedEvent(id, 'success'));
+    await act(async () => {
+      resolvers.get(id)?.(summary(id, 'success'));
+    });
+    await waitFor(() => expect(stored('flow-a').runState).toBe('done'));
+    expect(stored('flow-a').nodeStatus).toEqual({ out1: 'success' });
+
+    vi.mocked(runFlow).mockRejectedValueOnce('A run with this id exists');
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(runFlow).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(stored('flow-a').pendingRunId).toBeUndefined());
+    expect(stored('flow-a').runId).toBe(id);
+    expect(stored('flow-a').nodeStatus).toEqual({ out1: 'success' });
+    expect(stored('flow-a').runState).toBe('done');
+  });
+
   it('a tab whose pane remounts before its run starts still follows it', async () => {
     const view = render(<Pane id='flow-a' />);
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));

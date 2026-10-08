@@ -350,7 +350,13 @@ export function FlowToolbar({
       if (!isOurs(event.run_id)) return;
       forwardProgress(onPatchProgressRef.current, event);
     });
-    unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
+    const subscribed = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
+    if (mountedRef.current) {
+      unlistenRefs.current = subscribed;
+    } else {
+      // The unmount cleanup already ran, so nothing else would free these.
+      for (const unlisten of subscribed) unlisten();
+    }
     // Known before the request goes out, so Stop works and a remounted
     // toolbar can follow the run before flow-run-started arrives.
     setActiveRunId(runId);

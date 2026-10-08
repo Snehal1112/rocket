@@ -116,6 +116,14 @@ describe('pane-store pending flow run', () => {
     expect(stored().pendingRunId).toBeUndefined();
   });
 
+  it('a refused start keeps the previous run id and results and clears the pending id', () => {
+    usePaneStore.getState().setFlowPendingRun(tabId, 'run-1');
+    usePaneStore.getState().setFlowRunState(tabId, 'done');
+    expect(stored().pendingRunId).toBeUndefined();
+    expect(stored().runId).toBe('run-0');
+    expect(stored().nodeStatus).toEqual({ a: 'success' });
+  });
+
   it('reaches a tab parked in a collection snapshot', () => {
     usePaneStore.setState({
       collectionTabState: { other: { tabs: [{ ...flowTab, id: 'parked' }], activeTabId: 'parked' } },

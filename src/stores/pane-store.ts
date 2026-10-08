@@ -1212,7 +1212,14 @@ export const usePaneStore = create<PaneState>((set, get) => ({
             callbackUrls: undefined,
           };
         }
-        return { ...tab, runState, runId, pendingRunId: undefined, callbackUrls: undefined };
+        // A change without a run id, such as a refused start, keeps the last run.
+        return {
+          ...tab,
+          runState,
+          runId: runId ?? tab.runId,
+          pendingRunId: undefined,
+          callbackUrls: undefined,
+        };
       }),
     );
   },
