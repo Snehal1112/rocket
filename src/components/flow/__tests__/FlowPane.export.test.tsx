@@ -11,6 +11,7 @@ vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
   return {
     ...actual,
+    lintFlow: vi.fn().mockResolvedValue([]),
     listCollections: vi.fn(),
     listFlows: vi.fn(),
     saveFlow: vi.fn(),

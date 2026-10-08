@@ -10,7 +10,8 @@ import { FlowPane } from '../FlowPane';
 vi.mock('@/components/editor/MonacoWrapper', () => ({ MonacoWrapper: () => null }));
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, listCollections: vi.fn(), listFlows: vi.fn(), saveFlow: vi.fn() };
+  return { ...actual,
+    lintFlow: vi.fn().mockResolvedValue([]), listCollections: vi.fn(), listFlows: vi.fn(), saveFlow: vi.fn() };
 });
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 vi.mock('@/components/editor', () => ({

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { useBackendFlowLints } from '@/hooks/useBackendFlowLints';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import {
@@ -17,6 +18,7 @@ import {
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
 import { computeFlowIssues } from '@/lib/flow-issues';
+import { mergeFlowIssues } from '@/lib/flow-lint';
 import { buildRunRecord } from '@/lib/flow-run-history';
 import { requestFlowRun } from '@/lib/flow-run-request';
 import type { FlowRunResult } from '@/lib/flow-run-result';
@@ -126,9 +128,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // A removed Auth node's in-memory token goes with it.
   useClearRemovedAuthTokens(tab.collectionName, tab.flowName, tab.nodes);
 
-  // Client-side checks plus whatever the last rejected save named. The popover
-  // count and the node badges read this one list.
-  const issues = useMemo(
+  // Client-side checks plus whatever the last rejected save named.
+  const clientIssues = useMemo(
     () =>
       computeFlowIssues(tab.nodes, tab.edges, {
         save:
@@ -142,6 +143,18 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             : undefined,
       }),
     [tab.nodes, tab.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage, errorFromRun],
+  );
+  // The backend lints the unsaved graph, so its issues follow every edit. A
+  // viewed past run shows its own snapshot, so nothing is linted then.
+  const lintTarget = useMemo(
+    () => (tab.viewedRunId ? null : (flowPayloadFromTab(tab)?.flow ?? null)),
+    [tab],
+  );
+  const backendIssues = useBackendFlowLints(tab.collectionName ?? null, lintTarget);
+  // The popover count and the node badges read this one list.
+  const issues = useMemo(
+    () => mergeFlowIssues(clientIssues, backendIssues),
+    [clientIssues, backendIssues],
   );
   // A deleted node closes its panel.
   useEffect(() => {
