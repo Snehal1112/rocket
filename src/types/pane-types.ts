@@ -231,6 +231,11 @@ export interface FlowTab extends BaseTab {
   runState: 'idle' | 'running' | 'done';
   runId?: string;
   /**
+   * Id of a run this tab sent whose flow-run-started has not arrived yet.
+   * Lets Stop and a remounted toolbar find the run. Cleared on any run state change.
+   */
+  pendingRunId?: string;
+  /**
    * Callback URL per Wait for callback node id, set from `flow-run-started`.
    * Each URL holds a token, so it is kept only while the run is active.
    */

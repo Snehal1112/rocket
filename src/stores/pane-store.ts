@@ -392,6 +392,8 @@ export interface PaneState {
     live?: FlowLiveProgress,
   ) => void;
   setFlowRunState: (tabId: string, runState: 'idle' | 'running' | 'done', runId?: string) => void;
+  /** Remembers the id of a run the tab sent, until its run state changes. */
+  setFlowPendingRun: (tabId: string, runId: string | undefined) => void;
   /** Stores the running flow's callback URLs. Ignored when no run is active. */
   setFlowCallbackUrls: (tabId: string, urls: Record<string, string> | undefined) => void;
   /** Stores the finished run's result. Pass undefined to clear it. */
@@ -1196,11 +1198,13 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         // A new run starts from a clean canvas. Otherwise the last run's
         // results stay on nodes this run skips or never reaches. Callback URLs
         // work only while their run is active, so every change drops them.
+        // The pending id has done its job once the run state moves.
         if (runState === 'running') {
           return {
             ...tab,
             runState,
             runId,
+            pendingRunId: undefined,
             nodeStatus: {},
             nodeDetail: {},
             lastRun: undefined,
@@ -1208,8 +1212,17 @@ export const usePaneStore = create<PaneState>((set, get) => ({
             callbackUrls: undefined,
           };
         }
-        return { ...tab, runState, runId, callbackUrls: undefined };
+        return { ...tab, runState, runId, pendingRunId: undefined, callbackUrls: undefined };
       }),
+    );
+  },
+
+  // Keeps the last run and its results. Parked tabs get it too, like the run state.
+  setFlowPendingRun(tabId, runId) {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) =>
+        isFlowTab(tab) ? { ...tab, pendingRunId: runId } : tab,
+      ),
     );
   },
 

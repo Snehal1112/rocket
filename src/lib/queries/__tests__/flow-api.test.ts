@@ -114,6 +114,21 @@ describe('flow tauri-api bindings', () => {
     });
   });
 
+  it('runFlow sends the run id the client chose', async () => {
+    vi.mocked(invoke).mockResolvedValue({ runId: 'r', steps: [], stoppedReason: 'completed' });
+    const { runFlow } = await import('@/lib/tauri-api');
+    await runFlow('my-collection', 'My Flow', null, null, undefined, { runId: 'run-abc' });
+    expect(invoke).toHaveBeenCalledWith('run_flow', {
+      input: {
+        collection: 'my-collection',
+        flowName: 'My Flow',
+        environmentName: null,
+        globalEnvName: null,
+        runId: 'run-abc',
+      },
+    });
+  });
+
   it('cancelFlowRun invokes cancel_flow_run with the run id', async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
     const { cancelFlowRun } = await import('@/lib/tauri-api');

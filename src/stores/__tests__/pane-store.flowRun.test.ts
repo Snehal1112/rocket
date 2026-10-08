@@ -90,3 +90,38 @@ describe('pane-store flow run result', () => {
     expect(stored().lastRun).toBeUndefined();
   });
 });
+
+describe('pane-store pending flow run', () => {
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    usePaneStore
+      .getState()
+      .openTab({ ...flowTab, nodeStatus: { a: 'success' }, runState: 'done', runId: 'run-0' });
+  });
+
+  it('stores the pending id and keeps the last run and its results', () => {
+    usePaneStore.getState().setFlowPendingRun(tabId, 'run-1');
+    expect(stored().pendingRunId).toBe('run-1');
+    expect(stored().runId).toBe('run-0');
+    expect(stored().runState).toBe('done');
+    expect(stored().nodeStatus).toEqual({ a: 'success' });
+  });
+
+  it('every run state change clears the pending id', () => {
+    usePaneStore.getState().setFlowPendingRun(tabId, 'run-1');
+    usePaneStore.getState().setFlowRunState(tabId, 'running', 'run-1');
+    expect(stored().pendingRunId).toBeUndefined();
+    usePaneStore.getState().setFlowPendingRun(tabId, 'run-2');
+    usePaneStore.getState().setFlowRunState(tabId, 'done');
+    expect(stored().pendingRunId).toBeUndefined();
+  });
+
+  it('reaches a tab parked in a collection snapshot', () => {
+    usePaneStore.setState({
+      collectionTabState: { other: { tabs: [{ ...flowTab, id: 'parked' }], activeTabId: 'parked' } },
+    });
+    usePaneStore.getState().setFlowPendingRun('parked', 'run-3');
+    const parked = usePaneStore.getState().collectionTabState.other?.tabs[0];
+    expect(parked && isFlowTab(parked) ? parked.pendingRunId : null).toBe('run-3');
+  });
+});

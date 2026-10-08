@@ -68,6 +68,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const patchFlowNodeStatus = usePaneStore((s) => s.patchFlowNodeStatus);
   const patchFlowNodeProgress = usePaneStore((s) => s.patchFlowNodeProgress);
   const setFlowRunState = usePaneStore((s) => s.setFlowRunState);
+  const setFlowPendingRun = usePaneStore((s) => s.setFlowPendingRun);
   const setFlowCallbackUrls = usePaneStore((s) => s.setFlowCallbackUrls);
   const setFlowRunResult = usePaneStore((s) => s.setFlowRunResult);
   const recordFlowRun = usePaneStore((s) => s.recordFlowRun);
@@ -482,8 +483,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               }
               onCallbackUrls={(urls) => setFlowCallbackUrls(tab.id, urls)}
               onRunStateChange={(state, runId) => setFlowRunState(tab.id, state, runId)}
+              onRunRequested={(runId) => setFlowPendingRun(tab.id, runId)}
               tabRunState={tab.runState}
               tabRunId={tab.runId}
+              tabPendingRunId={tab.pendingRunId}
               onBeforeRun={handleBeforeRun}
               onPrepareAuth={() =>
                 collectFlowAuthTokens({

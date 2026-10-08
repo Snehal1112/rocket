@@ -2340,10 +2340,20 @@ export interface FlowAuthToken {
   accessToken: string;
 }
 
+/** Extra settings for one run_flow call. */
+export interface RunFlowOptions {
+  /**
+   * Run id chosen by the client, a UUID. The backend uses it in every
+   * flow-run-* event and for Stop, so a tab matches only its own run. The
+   * backend picks one when absent and refuses a malformed or used id.
+   */
+  runId?: string;
+}
+
 /**
  * Runs a flow. The promise resolves only when the run ENDS. Subscribe to
- * the flow-run-* events before calling this; the run id arrives first on
- * `flow-run-started`.
+ * the flow-run-* events before calling this, and match them by
+ * `options.runId`.
  */
 export const runFlow = (
   collection: string,
@@ -2351,6 +2361,7 @@ export const runFlow = (
   environmentName?: string | null,
   globalEnvName?: string | null,
   authTokens?: Record<string, FlowAuthToken>,
+  options?: RunFlowOptions,
 ) =>
   invoke<FlowRunSummary>('run_flow', {
     input: {
@@ -2361,6 +2372,8 @@ export const runFlow = (
       // Sent only when there is something to send, so a flow without Auth nodes
       // calls the command exactly as before.
       ...(authTokens && Object.keys(authTokens).length > 0 ? { authTokens } : {}),
+      // Sent only when chosen, so other callers keep the old payload.
+      ...(options?.runId ? { runId: options.runId } : {}),
     },
   });
 

@@ -385,16 +385,19 @@ describe('FlowPane run logs', () => {
     render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(progress).toBeDefined());
+    await waitFor(() => expect(runFlow).toHaveBeenCalled());
+    // The toolbar ignores events of any run but the one it sent.
+    const runId = vi.mocked(runFlow).mock.calls[0][5]?.runId ?? '';
     startedHandler?.({
       type: 'flowRunStarted',
-      run_id: 'r1',
+      run_id: runId,
       flow_name: 'login-flow',
       collection: 'demo',
       total_nodes: 1,
     });
     progress?.({
       type: 'flowStepProgress',
-      run_id: 'r1',
+      run_id: runId,
       node_id: 'n1',
       attempt: 2,
       max_attempts: 10,
@@ -422,9 +425,12 @@ describe('FlowPane run logs', () => {
     render(<FlowPane tab={logTab} groupId={usePaneStore.getState().activeGroupId} />);
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(progress).toBeDefined());
+    await waitFor(() => expect(runFlow).toHaveBeenCalled());
+    // The toolbar ignores events of any run but the one it sent.
+    const runId = vi.mocked(runFlow).mock.calls[0][5]?.runId ?? '';
     startedHandler?.({
       type: 'flowRunStarted',
-      run_id: 'r1',
+      run_id: runId,
       flow_name: 'login-flow',
       collection: 'demo',
       total_nodes: 1,
@@ -432,7 +438,7 @@ describe('FlowPane run logs', () => {
     });
     progress?.({
       type: 'flowStepProgress',
-      run_id: 'r1',
+      run_id: runId,
       node_id: 'n1',
       attempt: null,
       max_attempts: null,
@@ -546,9 +552,14 @@ describe('FlowPane run logs', () => {
       environmentName: 'dev',
       globalEnvName: 'g1',
     });
-    expect(runFlow).toHaveBeenCalledWith('demo', 'login-flow', 'dev', 'g1', {
-      auth1: { accessToken: 'tok-abcdef123' },
-    });
+    expect(runFlow).toHaveBeenCalledWith(
+      'demo',
+      'login-flow',
+      'dev',
+      'g1',
+      { auth1: { accessToken: 'tok-abcdef123' } },
+      { runId: expect.any(String) },
+    );
     useEnvStore.setState({ activeEnvId: null });
   });
 

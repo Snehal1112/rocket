@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
+import { newFlowRunId } from '@/lib/flow-run-id';
 import { type FlowRunResult, resultFromFinishedEvent, summarizeRun } from '@/lib/flow-run-result';
 import {
   cancelFlowRun,
@@ -39,6 +40,11 @@ interface FlowToolbarProps {
   // so a remounted toolbar reads an in-progress run from here.
   tabRunState?: 'idle' | 'running' | 'done';
   tabRunId?: string;
+  // Id of a run this tab sent whose flow-run-started has not arrived yet.
+  tabPendingRunId?: string;
+  // Receives the run id the toolbar chose, right before the run is sent. The
+  // tab stores it, so Stop and a remounted toolbar know the run early.
+  onRunRequested?: (runId: string) => void;
   // Runs before a new run starts. `run_flow` runs the flow saved on disk, so
   // this saves unsaved canvas edits first. Returning false aborts the run.
   onBeforeRun?: () => Promise<boolean>;
@@ -115,6 +121,8 @@ export function FlowToolbar({
   onRunStateChange,
   tabRunState,
   tabRunId,
+  tabPendingRunId,
+  onRunRequested,
   onBeforeRun,
   onPrepareAuth,
   onStepLogs,
@@ -122,9 +130,12 @@ export function FlowToolbar({
   onRunResult,
 }: FlowToolbarProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  // A run started by an earlier mount of this toolbar, still in progress.
-  const resumedRunId =
-    activeRunId === null && tabRunState === 'running' ? (tabRunId ?? null) : null;
+  // A run started by an earlier mount of this toolbar, still in progress. A
+  // run that has not announced itself yet is found by the tab's pending id.
+  let resumedRunId: string | null = null;
+  if (activeRunId === null) {
+    resumedRunId = tabRunState === 'running' ? (tabRunId ?? null) : (tabPendingRunId ?? null);
+  }
   const liveRunId = activeRunId ?? resumedRunId;
   // The parent passes a new callback each render. A ref keeps the resumed
   // subscription below from resubscribing on every status patch.
@@ -136,10 +147,11 @@ export function FlowToolbar({
   onRunResultRef.current = onRunResult;
   const onRunStateChangeRef = useRef(onRunStateChange);
   onRunStateChangeRef.current = onRunStateChange;
-  const unlistenRefs = useRef<UnlistenFn[]>([]);
-  // A ref, not state: `activeRunId` is only set once the `flow-run-started`
-  // event round-trips through the backend, so between a click and that
-  // event the Run button's `disabled` prop alone does not prevent a second,
+  const onCallbackUrlsRef = useRef(onCallbackUrls);
+  onCallbackUrlsRef.current = onCallbackUrls;
+  // A ref, not state: `activeRunId` is only set after the save, the sign-in
+  // and the event subscriptions, which all await, so between a click and that
+  // point the Run button's `disabled` prop alone does not prevent a second,
   // concurrent `handleRun` call (e.g. a fast double-click). Two concurrent
   // calls would each subscribe their own listener pair and overwrite
   // `unlistenRefs.current`, permanently orphaning whichever pair loses the
@@ -147,6 +159,7 @@ export function FlowToolbar({
   // A ref guard, checked and set synchronously before any `await`, closes
   // that window regardless of render timing.
   const isStartingRef = useRef(false);
+  const unlistenRefs = useRef<UnlistenFn[]>([]);
   // True while the pre-run sign-in step is pending. State, so the button shows it.
   const [preparing, setPreparing] = useState(false);
   // Abandons the pending sign-in wait of the current attempt. Null when none.
@@ -171,14 +184,28 @@ export function FlowToolbar({
   useEffect(() => cleanupListeners, [cleanupListeners]);
 
   // Keep streaming step results for a run this mount did not start. The
-  // mount that started it still applies the final summary when it ends.
+  // mount that started it still applies the final summary when it ends. A
+  // run found by its pending id is marked running when it announces itself.
   useEffect(() => {
-    if (!resumedRunId) return;
+    // The mount that is starting a run follows it itself.
+    if (!resumedRunId || isStartingRef.current) return;
+    let unlistenRun: UnlistenFn | undefined;
     let unlistenStep: UnlistenFn | undefined;
     let unlistenStarted: UnlistenFn | undefined;
     let unlistenProgress: UnlistenFn | undefined;
     let unlistenFinished: UnlistenFn | undefined;
     let disposed = false;
+    void onFlowRunStarted((event) => {
+      if (disposed) return;
+      if (event.run_id !== resumedRunId) return;
+      onRunStateChangeRef.current('running', event.run_id);
+      // After the run state, because a new run drops older URLs.
+      const urls = callbackUrlsFrom(event);
+      if (Object.keys(urls).length > 0) onCallbackUrlsRef.current?.(urls);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlistenRun = fn;
+    });
     void onFlowStepStarted((event) => {
       if (disposed) return;
       if (event.run_id !== resumedRunId) return;
@@ -216,6 +243,7 @@ export function FlowToolbar({
     });
     return () => {
       disposed = true;
+      unlistenRun?.();
       unlistenStarted?.();
       unlistenStep?.();
       unlistenProgress?.();
@@ -286,40 +314,47 @@ export function FlowToolbar({
       }
     }
     cleanupListeners();
-    // Held in a local, not state, so the event handlers see it at once.
-    let runId: string | null = null;
-    // Wall-clock start. The run-started event moves it to the real start.
+    // Chosen here, before anything is sent, so each event can be matched to
+    // this run alone. Another tab running the same flow has its own id.
+    const runId = newFlowRunId();
+    // Set by flow-run-started for this id. Until then, the wall-clock start.
+    let started = false;
     let startedAt = performance.now();
-    // A function, because TypeScript narrows `runId` to null in the catch block
-    // below, while the event handlers assign it later.
-    const currentRunId = (): string | null => runId;
+    // Set once run_flow settles. Events that arrive after it change nothing.
+    let ended = false;
+    // A function, because TypeScript keeps `started` narrowed to false in the
+    // catch block below, while the event handler sets it later.
+    const hasStarted = (): boolean => started;
+    const isOurs = (eventRunId: string) => !ended && eventRunId === runId;
 
     // Subscribe first. run_flow only resolves when the run ends, so every
     // event is emitted while its promise is still pending.
     const unlistenStarted = await onFlowRunStarted((event) => {
-      if (runId !== null) return;
-      if (event.collection !== collection || event.flow_name !== flowName) return;
-      runId = event.run_id;
+      if (started || !isOurs(event.run_id)) return;
+      started = true;
       startedAt = performance.now();
-      setActiveRunId(event.run_id);
-      onRunStateChange('running', event.run_id);
+      onRunStateChange('running', runId);
       // After the run state, because a new run drops older URLs.
       const urls = callbackUrlsFrom(event);
       if (Object.keys(urls).length > 0) onCallbackUrls?.(urls);
     });
     const unlistenStepStarted = await onFlowStepStarted((event) => {
-      if (runId === null || event.run_id !== runId) return;
+      if (!isOurs(event.run_id)) return;
       onPatchStatus(event.node_id, 'running');
     });
     const unlistenStep = await onFlowStepCompleted((event) => {
-      if (runId === null || event.run_id !== runId) return;
+      if (!isOurs(event.run_id)) return;
       onPatchStatus(event.node_id, event.status, detailFromEvent(event));
     });
     const unlistenProgress = await onFlowStepProgress((event) => {
-      if (runId === null || event.run_id !== runId) return;
+      if (!isOurs(event.run_id)) return;
       forwardProgress(onPatchProgressRef.current, event);
     });
     unlistenRefs.current = [unlistenStarted, unlistenStepStarted, unlistenStep, unlistenProgress];
+    // Known before the request goes out, so Stop works and a remounted
+    // toolbar can follow the run before flow-run-started arrives.
+    setActiveRunId(runId);
+    onRunRequested?.(runId);
 
     try {
       // Read fresh at click-time, not from a prop snapshotted at an earlier
@@ -330,11 +365,17 @@ export function FlowToolbar({
       // this at execution time rather than caching it.
       const globalEnvName = getActiveGlobalEnvName();
       // Tokens are sent only when there are some, so a flow without Auth nodes
-      // calls the command exactly as before.
-      const summary =
-        authTokens && Object.keys(authTokens).length > 0
-          ? await runFlow(collection, flowName, environmentName, globalEnvName ?? null, authTokens)
-          : await runFlow(collection, flowName, environmentName, globalEnvName ?? null);
+      // sends no authTokens key.
+      const tokens = authTokens && Object.keys(authTokens).length > 0 ? authTokens : undefined;
+      const summary = await runFlow(
+        collection,
+        flowName,
+        environmentName,
+        globalEnvName ?? null,
+        tokens,
+        { runId },
+      );
+      ended = true;
       // The summary is the authoritative final state. Event delivery is not
       // guaranteed to finish before the command response arrives.
       for (const step of summary.steps) {
@@ -348,13 +389,13 @@ export function FlowToolbar({
       });
       onRunStateChange('done', summary.runId);
     } catch (err) {
+      ended = true;
       // A run that cannot start rejects before any event is emitted.
       toast.error(`Could not run flow: ${String(err)}`);
       // A run that had started leaves a result, so its partial results stay viewable.
-      const startedRunId = currentRunId();
-      if (startedRunId !== null) {
+      if (hasStarted()) {
         onRunResult?.({
-          runId: startedRunId,
+          runId,
           stoppedReason: 'error',
           totalMs: Math.round(performance.now() - startedAt),
           failedCount: 0,

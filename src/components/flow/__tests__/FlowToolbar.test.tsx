@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
+import { newFlowRunId } from '@/lib/flow-run-id';
 import * as tauriApi from '@/lib/tauri-api';
 import { FlowToolbar } from '../FlowToolbar';
 
@@ -28,6 +29,8 @@ vi.mock('@/lib/execute-request', () => ({
 }));
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
+// The toolbar's run id. Tests send events with this id.
+vi.mock('@/lib/flow-run-id', () => ({ newFlowRunId: vi.fn() }));
 
 const onPatchStatus = vi.fn();
 const onRunStateChange = vi.fn();
@@ -67,6 +70,8 @@ const renderToolbar = (extra: Partial<React.ComponentProps<typeof FlowToolbar>> 
 
 describe('FlowToolbar', () => {
   beforeEach(() => {
+    vi.mocked(newFlowRunId).mockReset();
+    vi.mocked(newFlowRunId).mockReturnValue('run-123');
     startedHandler = undefined;
     stepHandler = undefined;
     startedStepHandler = undefined;
@@ -169,11 +174,18 @@ describe('FlowToolbar', () => {
     expect(onStepDebug).toHaveBeenCalledWith('a', debugA);
   });
 
-  it('subscribes before running, takes the run id from flow-run-started, and finishes on resolve', async () => {
+  it('subscribes before running, sends its own run id, and finishes on resolve', async () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() =>
-      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null),
+      expect(tauriApi.runFlow).toHaveBeenCalledWith(
+        'my-collection',
+        'my-flow',
+        null,
+        null,
+        undefined,
+        { runId: 'run-123' },
+      ),
     );
     expect(startedHandler).toBeDefined();
     expect(stepHandler).toBeDefined();
@@ -185,12 +197,15 @@ describe('FlowToolbar', () => {
     await waitFor(() => expect(onRunStateChange).toHaveBeenCalledWith('done', 'run-123'));
   });
 
-  it('ignores a flow-run-started event for a different flow', async () => {
+  it('ignores a flow-run-started event for another run of the same flow', async () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
-    await waitFor(() => expect(startedHandler).toBeDefined());
-    started('run-other', 'some-other-flow');
+    await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+    // Same collection and flow name, another tab's run.
+    started('run-other');
     expect(onRunStateChange).not.toHaveBeenCalled();
+    started('run-123');
+    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
   });
 
   it('a step-completed event for a different run id is ignored', async () => {
@@ -510,6 +525,8 @@ describe('FlowToolbar', () => {
         'my-flow',
         null,
         'shared-global',
+        undefined,
+        { runId: 'run-123' },
       ),
     );
   });
@@ -529,6 +546,8 @@ describe('FlowToolbar', () => {
         'my-flow',
         null,
         'fresh-global',
+        undefined,
+        { runId: 'run-123' },
       ),
     );
   });
@@ -538,18 +557,30 @@ describe('FlowToolbar', () => {
     renderToolbar({ onPrepareAuth });
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() =>
-      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null, {
-        a: { accessToken: 'tok-123456' },
-      }),
+      expect(tauriApi.runFlow).toHaveBeenCalledWith(
+        'my-collection',
+        'my-flow',
+        null,
+        null,
+        { a: { accessToken: 'tok-123456' } },
+        { runId: 'run-123' },
+      ),
     );
   });
 
-  it('keeps the four-argument runFlow call when there are no tokens', async () => {
+  it('sends no tokens when there are none', async () => {
     const onPrepareAuth = vi.fn().mockResolvedValue({});
     renderToolbar({ onPrepareAuth });
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() =>
-      expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null),
+      expect(tauriApi.runFlow).toHaveBeenCalledWith(
+        'my-collection',
+        'my-flow',
+        null,
+        null,
+        undefined,
+        { runId: 'run-123' },
+      ),
     );
   });
 
@@ -611,7 +642,7 @@ describe('FlowToolbar', () => {
     renderToolbar();
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(startedHandler).toBeDefined());
-    started('run-1');
+    started('run-123');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
   });
 
@@ -806,13 +837,13 @@ describe('FlowToolbar', () => {
     await waitFor(() => expect(startedHandler).toBeDefined());
     startedHandler?.({
       type: 'flowRunStarted',
-      run_id: 'run-1',
+      run_id: 'run-123',
       flow_name: 'my-flow',
       collection: 'my-collection',
       total_nodes: 2,
       callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://10.0.0.5:4000/cb/tok' }],
     });
-    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-1');
+    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
     expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://10.0.0.5:4000/cb/tok' });
     // The run state is set first, because a new run drops older URLs.
     expect(onRunStateChange.mock.invocationCallOrder[0]).toBeLessThan(
@@ -825,7 +856,7 @@ describe('FlowToolbar', () => {
     renderToolbar({ onCallbackUrls });
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(startedHandler).toBeDefined());
-    started('run-1');
+    started('run-123');
     expect(onCallbackUrls).not.toHaveBeenCalled();
   });
 
@@ -875,9 +906,14 @@ describe('FlowToolbar', () => {
       expect(onPrepareAuth).toHaveBeenCalledTimes(2);
       second.resolve({ a: { accessToken: 'tok-123456' } });
       await waitFor(() =>
-        expect(tauriApi.runFlow).toHaveBeenCalledWith('my-collection', 'my-flow', null, null, {
-          a: { accessToken: 'tok-123456' },
-        }),
+        expect(tauriApi.runFlow).toHaveBeenCalledWith(
+          'my-collection',
+          'my-flow',
+          null,
+          null,
+          { a: { accessToken: 'tok-123456' } },
+          { runId: 'run-123' },
+        ),
       );
     });
 
@@ -1002,7 +1038,7 @@ describe('FlowToolbar', () => {
       fire('tab-1');
       await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(startedHandler).toBeDefined());
-      started('run-1');
+      started('run-123');
       fire('tab-1');
       await act(async () => {});
       expect(tauriApi.runFlow).toHaveBeenCalledTimes(1);
@@ -1033,6 +1069,10 @@ describe('FlowToolbar', () => {
   });
 
   describe('run result', () => {
+    beforeEach(() => {
+      vi.mocked(newFlowRunId).mockReturnValue('run-1');
+    });
+
     const base = { statusCode: null, durationMs: null, error: null, value: null };
 
     const finishedEvent = (
@@ -1203,6 +1243,92 @@ describe('FlowToolbar', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Run' }));
       await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
       expect(tauriApi.onFlowRunFinished).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('client run id', () => {
+    const lateStep = (runId: string) =>
+      stepHandler?.({
+        type: 'flowStepCompleted',
+        run_id: runId,
+        node_id: 'node-a',
+        status: 'failed',
+        status_code: null,
+        duration_ms: null,
+        error: 'late',
+        value: null,
+      });
+
+    it('stores its run id on the tab before the run is sent', async () => {
+      const onRunRequested = vi.fn();
+      renderToolbar({ onRunRequested });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+      expect(onRunRequested).toHaveBeenCalledWith('run-123');
+      expect(onRunRequested.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(tauriApi.runFlow).mock.invocationCallOrder[0],
+      );
+    });
+
+    it('Stop cancels its own run before flow-run-started arrives', async () => {
+      renderToolbar();
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-123');
+    });
+
+    it('ignores late events of its run once run_flow settled', async () => {
+      renderToolbar();
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalled());
+      started('run-123');
+      resolveRun({ runId: 'run-123', steps: [], stoppedReason: 'completed' });
+      await waitFor(() => expect(onRunStateChange).toHaveBeenCalledWith('done', 'run-123'));
+      onPatchStatus.mockClear();
+      // The fake unlisten keeps the handler, like an event already queued.
+      lateStep('run-123');
+      expect(onPatchStatus).not.toHaveBeenCalled();
+    });
+
+    it('uses a new id for every run', async () => {
+      vi.mocked(newFlowRunId).mockReturnValueOnce('run-a').mockReturnValueOnce('run-b');
+      renderToolbar();
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
+      started('run-a');
+      resolveRun({ runId: 'run-a', steps: [], stoppedReason: 'completed' });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(tauriApi.runFlow).mock.calls[0][5]).toEqual({ runId: 'run-a' });
+      expect(vi.mocked(tauriApi.runFlow).mock.calls[1][5]).toEqual({ runId: 'run-b' });
+    });
+
+    it('a remounted toolbar follows a run that has not announced itself yet', async () => {
+      const onCallbackUrls = vi.fn();
+      renderToolbar({
+        tabRunState: 'done',
+        tabRunId: 'run-0',
+        tabPendingRunId: 'run-7',
+        onCallbackUrls,
+      });
+      expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-8');
+      expect(onRunStateChange).not.toHaveBeenCalled();
+      startedHandler?.({
+        type: 'flowRunStarted',
+        run_id: 'run-7',
+        flow_name: 'my-flow',
+        collection: 'my-collection',
+        total_nodes: 1,
+        callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' }],
+      });
+      expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-7');
+      expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://h:1/cb/tok' });
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-7');
     });
   });
 });

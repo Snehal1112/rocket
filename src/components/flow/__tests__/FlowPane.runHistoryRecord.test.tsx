@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findTabInTree } from '@/lib/pane-utils';
+import { newFlowRunId } from '@/lib/flow-run-id';
 import {
   type FlowRunSummary,
   listCollections,
@@ -35,6 +36,7 @@ vi.mock('@/lib/tauri-api', async () => {
 vi.mock('@/lib/execute-request', () => ({ getActiveGlobalEnvName: vi.fn() }));
 vi.mock('@/lib/flow-auth-preflight', () => ({ collectFlowAuthTokens: vi.fn(async () => ({})) }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
+vi.mock('@/lib/flow-run-id', () => ({ newFlowRunId: vi.fn(() => 'unused') }));
 
 const tabId = 'flow-record-1';
 
@@ -95,6 +97,8 @@ async function runOnce(runId: string, status: 'success' | 'failed') {
   );
   startedHandler = undefined;
   await waitFor(() => expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled());
+  // The run-started event below must carry the id the toolbar sends.
+  vi.mocked(newFlowRunId).mockReturnValueOnce(runId);
   await userEvent.click(screen.getByRole('button', { name: 'Run' }));
   await waitFor(() => expect(startedHandler).toBeDefined());
   act(() => {
