@@ -88,7 +88,7 @@ const popoverTooltip = showTooltip.computeN([activePopoverField], (state) => {
  * Finds the {{variable}} token at the given document position.
  * Returns the variable name, start, and end offsets, or null.
  */
-function findVarTokenAt(
+export function findVarTokenAt(
   doc: string,
   pos: number,
 ): { varName: string; from: number; to: number } | null {

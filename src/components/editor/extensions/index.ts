@@ -5,6 +5,7 @@ export { urlTokens } from './url-tokens';
 export { variableAutocomplete, variableCompletionSource } from './variable-autocomplete';
 export { setVariableContextEffect, variableContextField } from './variable-context-facet';
 export { variableHighlight } from './variable-highlight';
+export { variableHover } from './variable-hover';
 export {
   closePopover,
   closePopoverEffect,
