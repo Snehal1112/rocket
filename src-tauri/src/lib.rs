@@ -681,6 +681,7 @@ pub fn run() {
             commands::flow::delete_flow,
             commands::flow::rename_flow,
             commands::flow::save_flow,
+            commands::flow::lint_flow,
             commands::flow::run_flow,
             commands::flow::cancel_flow_run,
             commands::load_test::run_load_test_command,

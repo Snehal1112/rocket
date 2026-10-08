@@ -461,6 +461,60 @@ pub fn save_flow(
     svc.save(&collection, flow.into())
 }
 
+/// Severity of one lint. IPC DTO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FlowLintSeverityDto {
+    Error,
+    Warning,
+}
+
+/// One finding of the lint tier, shaped like the client `FlowIssue`. IPC DTO.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowLintDto {
+    pub code: String,
+    pub severity: FlowLintSeverityDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_id: Option<String>,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+impl From<rocket_flow::lint::FlowLint> for FlowLintDto {
+    fn from(lint: rocket_flow::lint::FlowLint) -> Self {
+        Self {
+            code: lint.code,
+            severity: match lint.severity {
+                rocket_flow::lint::LintSeverity::Error => FlowLintSeverityDto::Error,
+                rocket_flow::lint::LintSeverity::Warning => FlowLintSeverityDto::Warning,
+            },
+            node_id: lint.node_id,
+            edge_id: lint.edge_id,
+            message: lint.message,
+            hint: lint.hint,
+        }
+    }
+}
+
+/// Lints the graph the canvas holds now, saved or not. Never fails because
+/// of what the graph contains: problems come back as lints.
+#[tauri::command]
+pub fn lint_flow(
+    collection: String,
+    flow: FlowDto,
+    svc: State<'_, FlowService>,
+) -> Result<Vec<FlowLintDto>, DomainError> {
+    Ok(svc
+        .lint(&collection, &flow.into())
+        .into_iter()
+        .map(FlowLintDto::from)
+        .collect())
+}
+
 /// A token the UI obtained before the run. `Debug` never shows the value.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -580,6 +634,55 @@ pub fn cancel_flow_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use rocket_flow::lint::{FlowLint, LintSeverity};
+
+    const LINT_FIXTURE: &str = include_str!("../../../src/lib/__tests__/fixtures/flow-lint.json");
+
+    #[test]
+    fn lint_dto_matches_the_golden_fixture() {
+        let parsed: Vec<FlowLintDto> = serde_json::from_str(LINT_FIXTURE).expect("fixture parses");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].severity, FlowLintSeverityDto::Warning);
+        assert_eq!(parsed[1].node_id, None);
+        let reserialized = serde_json::to_value(&parsed).expect("serialize");
+        let original: serde_json::Value = serde_json::from_str(LINT_FIXTURE).expect("fixture json");
+        assert_eq!(reserialized, original, "keys, casing and omitted optionals must match");
+    }
+
+    #[test]
+    fn lint_dto_maps_every_field_of_a_domain_lint() {
+        let dto = FlowLintDto::from(FlowLint {
+            code: "exit_without_edge".to_string(),
+            severity: LintSeverity::Warning,
+            node_id: Some("check".to_string()),
+            edge_id: None,
+            message: "The 'false' exit of 'Check status' has no wire.".to_string(),
+            hint: Some("Wire it to a node, or remove the branch.".to_string()),
+        });
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"code":"exit_without_edge","severity":"warning","nodeId":"check","message":"The 'false' exit of 'Check status' has no wire.","hint":"Wire it to a node, or remove the branch."}"#
+        );
+    }
+
+    #[test]
+    fn an_error_lint_serializes_its_severity_as_error() {
+        let dto = FlowLintDto::from(FlowLint {
+            code: "invalid_graph".to_string(),
+            severity: LintSeverity::Error,
+            node_id: None,
+            edge_id: Some("e7".to_string()),
+            message: "bad wire".to_string(),
+            hint: None,
+        });
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"code":"invalid_graph","severity":"error","edgeId":"e7","message":"bad wire"}"#
+        );
+    }
 
     #[test]
     fn run_flow_input_carries_auth_tokens_into_the_run() {

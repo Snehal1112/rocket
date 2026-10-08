@@ -1,0 +1,15 @@
+[
+  {
+    "code": "exit_without_edge",
+    "severity": "warning",
+    "nodeId": "check",
+    "message": "The 'false' exit of 'Check status' has no wire.",
+    "hint": "Wire it to a node, or remove the branch."
+  },
+  {
+    "code": "invalid_graph",
+    "severity": "error",
+    "edgeId": "e7",
+    "message": "an 'auth' wire must go from an Auth node into a Request node"
+  }
+]

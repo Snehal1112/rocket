@@ -2175,6 +2175,22 @@ export const getFlow = (collection: string, name: string) =>
 export const saveFlow = (collection: string, flow: Flow) =>
   invoke<void>('save_flow', { collection, flow });
 
+export type FlowLintSeverity = 'error' | 'warning';
+
+/** One finding of the backend lint tier. Optional keys are omitted, never null. */
+export interface FlowLint {
+  code: string;
+  severity: FlowLintSeverity;
+  nodeId?: string;
+  edgeId?: string;
+  message: string;
+  hint?: string;
+}
+
+/** Lints the graph as the canvas holds it now, saved or not. */
+export const lintFlow = (collection: string, flow: Flow) =>
+  invoke<FlowLint[]>('lint_flow', { collection, flow });
+
 export const deleteFlow = (collection: string, name: string) =>
   invoke<void>('delete_flow', { collection, name });
 
