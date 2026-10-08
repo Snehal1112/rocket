@@ -247,11 +247,20 @@ fn no_path_lint(node: &FlowNode, index: &GraphIndex<'_>) -> Option<FlowLint> {
     if exempt || reached.contains(node.id.as_str()) {
         return None;
     }
+    // An If or a Switch has no result exit of its own.
+    let consequence = if matches!(
+        node.kind,
+        FlowNodeKind::If { .. } | FlowNodeKind::Switch { .. }
+    ) {
+        "nothing after it reaches an Output"
+    } else {
+        "its result is never shown"
+    };
     Some(warning(
         NO_PATH_TO_OUTPUT,
         node,
         format!(
-            "'{}' does not lead to any Output, so its result is never shown.",
+            "'{}' does not lead to any Output, so {consequence}.",
             display_label(node)
         ),
         "Wire it towards an Output to see its result. Ignore this if the node runs only for its effect.",
@@ -326,54 +335,105 @@ pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
     }
 }
 
-/// Handle names that `validate` may quote in a reason. They are fixed words.
-const FIXED_QUOTES: [&str; 4] = [handle::INPUT, handle::TRIGGER, handle::AUTH, handle::RESULT];
+/// The kinds whose reasons name a field or a count.
+const ROUTED_KINDS: [&str; 3] = ["If", "Switch", "Transform"];
+
+/// Reasons of `validate` that hold no user text, matched exactly.
+const FIXED_REASONS: [&str; 12] = [
+    "only If, Switch and Transform nodes have an 'input' input",
+    "only Request, Output and Wait for callback nodes have a 'trigger' input",
+    "Input nodes cannot receive wires",
+    "Auth nodes cannot receive wires",
+    "an 'auth' wire must go from an Auth node into a Request node",
+    "a Request node can take only one 'auth' wire",
+    "Wait for callback nodes only have a 'trigger' input",
+    "the repeat-until condition is empty",
+    "repeat-until timeout must not be shorter than the interval",
+    "the Auth node needs an auth type other than none or inherit",
+    "only one Auth node can apply to inherited auth; turn this one or the other off",
+    "the Wait for callback node's accept_when is empty",
+];
+
+/// Reasons of `validate` that end in numbers from constants, as
+/// `(prefix, suffix)`. The middle must be one or two plain numbers.
+const NUMBERED_REASONS: [(&str, &str); 4] = [
+    ("repeat-until interval must be at least ", " ms"),
+    ("repeat-until max attempts must be between 1 and ", ""),
+    ("repeat-until timeout must be at most ", " ms"),
+    ("the Wait for callback timeout must be between ", " ms"),
+];
 
 /// The reason as a sentence that never holds user-typed text. `validate`
-/// builds a few reasons from a match value, an id, a name or a handle, and
-/// those get fixed text. A reason with any other quoted text is replaced
-/// by a generic sentence, so a secret typed into a field is never echoed.
+/// builds some reasons from a match value, an id, a name or a handle, and
+/// those get fixed text. Every other known reason is passed on, and a
+/// reason that matches nothing here gets a generic sentence.
 fn sentence(reason: &str) -> String {
     let reason = reason.trim();
     let fixed = if reason.starts_with("more than one case matches") {
-        Some("Two cases of this Switch have the same match value.")
+        Some("Two cases of this Switch have the same match value.".to_string())
     } else if reason.starts_with("more than one case has id") {
-        Some("Two cases of this Switch have the same id.")
+        Some("Two cases of this Switch have the same id.".to_string())
     } else if reason.starts_with("the source node has no exit named") {
-        Some("The wire leaves an exit that the source node does not have.")
+        Some("The wire leaves an exit that the source node does not have.".to_string())
     } else if reason.starts_with("the Wait for callback name") {
-        Some("The Wait for callback name must use only letters, digits and _.")
+        Some("The Wait for callback name must use only letters, digits and _.".to_string())
     } else if reason.starts_with("more than one Wait for callback node is named") {
-        Some("More than one Wait for callback node has the same name.")
-    } else if reason.contains("node's wire must target") {
-        Some("The wire must target the 'input' handle of this node.")
-    } else if reason.contains("{{") {
-        Some("A Request uses a callback value but is not wired before this Wait for callback node.")
+        Some("More than one Wait for callback node has the same name.".to_string())
+    } else if reason.starts_with("Request '") && reason.contains(" sends {{callback.") {
+        Some(
+            "A Request uses a callback value but is not wired before this Wait for callback node."
+                .to_string(),
+        )
     } else {
-        None
+        routed_reason(reason).or_else(|| known_reason(reason))
     };
-    if let Some(text) = fixed {
-        return text.to_string();
+    fixed.unwrap_or_else(|| "The flow has a structural problem.".to_string())
+}
+
+/// Reasons about the wire or the field of an If, Switch or Transform node.
+fn routed_reason(reason: &str) -> Option<String> {
+    let rest = reason.strip_prefix("the ")?;
+    let kind = ROUTED_KINDS.iter().find(|k| rest.starts_with(**k))?;
+    let rest = rest.strip_prefix(*kind)?.strip_prefix(" node")?;
+    if rest.starts_with("'s wire must target '") {
+        return Some(format!("The {kind} node's wire must target its 'input' handle."));
     }
-    // Quoted spans are the odd parts when the text is split on quotes.
-    let only_fixed_quotes = reason
-        .split('\'')
-        .skip(1)
-        .step_by(2)
-        .all(|span| FIXED_QUOTES.contains(&span));
-    let balanced = reason.matches('\'').count().is_multiple_of(2);
-    if reason.is_empty() || !only_fixed_quotes || !balanced {
-        return "The flow has a structural problem.".to_string();
+    if let Some(count) = rest.strip_prefix(" needs exactly one input wire, found ") {
+        let plain = !count.is_empty() && count.chars().all(|c| c.is_ascii_digit());
+        return plain.then(|| format!("The {kind} node needs exactly one input wire, found {count}."));
+    }
+    let field = match *kind {
+        "If" => "condition",
+        "Switch" => "value",
+        _ => "script",
+    };
+    (rest == format!("'s {field} is empty"))
+        .then(|| format!("The {kind} node's {field} is empty."))
+}
+
+/// Reasons with no user text: the exact list and the numbered ones.
+fn known_reason(reason: &str) -> Option<String> {
+    let known = FIXED_REASONS.contains(&reason)
+        || NUMBERED_REASONS.iter().any(|(prefix, suffix)| {
+            reason
+                .strip_prefix(prefix)
+                .and_then(|r| r.strip_suffix(suffix))
+                .is_some_and(|numbers| {
+                    numbers
+                        .split(" and ")
+                        .all(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+                })
+        });
+    if !known {
+        return None;
     }
     let mut chars = reason.chars();
-    let mut out: String = match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => return "The flow has a structural problem.".to_string(),
-    };
-    if !out.ends_with(&['.', '!', '?'][..]) {
+    let first = chars.next()?;
+    let mut out: String = first.to_uppercase().chain(chars).collect();
+    if !out.ends_with(['.', '!', '?']) {
         out.push('.');
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]
@@ -836,14 +896,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_large_flow_lints_in_linear_time() {
-        const N: usize = 20_000;
+    /// in -> if0 -> if1 -> ... -> out, each If with an unwired 'false' exit.
+    fn chain_flow(n: usize) -> Flow {
         let mut nodes = vec![input("in")];
         let mut edges = vec![edge("e-in", "in", handle::RESULT, "if0", handle::INPUT)];
-        for i in 0..N {
+        for i in 0..n {
             nodes.push(if_node(&format!("if{i}"), &format!("Check {i}")));
-            let (next, field) = if i + 1 == N {
+            let (next, field) = if i + 1 == n {
                 ("out".to_string(), "value")
             } else {
                 (format!("if{}", i + 1), handle::INPUT)
@@ -851,17 +910,61 @@ mod tests {
             edges.push(edge(&format!("e{i}"), &format!("if{i}"), handle::TRUE, &next, field));
         }
         nodes.push(output("out"));
-        let f = flow(nodes, edges);
-        let started = std::time::Instant::now();
-        let lints = lint(&f);
-        let elapsed = started.elapsed();
-        assert_eq!(lints.len(), N, "one unwired 'false' exit per If");
-        assert!(lints.iter().all(|l| l.code == EXIT_WITHOUT_EDGE));
-        // A rule that scans every wire for every node takes seconds here.
+        flow(nodes, edges)
+    }
+
+    /// n Output nodes wired into one big cycle.
+    fn ring_flow(n: usize) -> Flow {
+        let nodes: Vec<FlowNode> = (0..n).map(|i| output(&format!("n{i}"))).collect();
+        let edges: Vec<FlowEdge> = (0..n)
+            .map(|i| {
+                edge(
+                    &format!("e{i}"),
+                    &format!("n{i}"),
+                    handle::RESULT,
+                    &format!("n{}", (i + 1) % n),
+                    "value",
+                )
+            })
+            .collect();
+        flow(nodes, edges)
+    }
+
+    /// The fastest of three runs of `work` on a flow of `n` nodes.
+    fn best_of_three(n: usize, build: fn(usize) -> Flow, work: fn(&Flow)) -> std::time::Duration {
+        let f = build(n);
+        (0..3)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                work(&f);
+                started.elapsed()
+            })
+            .min()
+            .unwrap_or_default()
+    }
+
+    /// A linear rule grows about 8x from 2,000 to 16,000 nodes and a
+    /// quadratic one about 64x, so a ratio under 20 tells them apart
+    /// without depending on the speed of the machine.
+    fn assert_linear(build: fn(usize) -> Flow, work: fn(&Flow)) {
+        let small = best_of_three(2_000, build, work).max(std::time::Duration::from_micros(50));
+        let big = best_of_three(16_000, build, work);
         assert!(
-            elapsed < std::time::Duration::from_secs(1),
-            "took {elapsed:?}"
+            big < small * 20,
+            "not linear: 2,000 nodes took {small:?}, 16,000 took {big:?}"
         );
+        assert!(big < std::time::Duration::from_secs(10), "took {big:?}");
+    }
+
+    #[test]
+    fn a_large_flow_lints_in_linear_time() {
+        let lints = lint(&chain_flow(20_000));
+        assert_eq!(lints.len(), 20_000, "one unwired 'false' exit per If");
+        assert!(lints.iter().all(|l| l.code == EXIT_WITHOUT_EDGE));
+        // A rule that scans every wire for every node is quadratic.
+        assert_linear(chain_flow, |f| {
+            let _ = lint(f);
+        });
     }
 
     #[test]
@@ -987,11 +1090,32 @@ mod tests {
         let same = flow(vec![wait("w1", "pay"), wait("w2", "pay")], vec![]);
         let lints = graph_lints(&same);
         assert!(lints[0].message.contains("same name"), "{}", lints[0].message);
-        let odd = flow(
-            vec![input("in1"), wait("w1", "pay")],
-            vec![edge("e1", "in1", handle::RESULT, "w1", CANARY)],
+        // The callback name is valid here, and only the order rule quotes it.
+        let late = flow(
+            vec![
+                node(
+                    "r1",
+                    FlowNodeKind::Request {
+                        label: "Pay".to_string(),
+                        source: RequestSource::Inline {
+                            request: crate::node::InlineRequestData {
+                                method: "POST".to_string(),
+                                url: "https://x.test/{{callback.canarycallback9f3a}}".to_string(),
+                                headers: Vec::new(),
+                                body: None,
+                            },
+                        },
+                        debug: false,
+                        repeat_until: None,
+                    },
+                ),
+                wait("w1", "canarycallback9f3a"),
+            ],
+            vec![],
         );
-        assert_no_canary(&graph_lints(&odd));
+        let lints = graph_lints(&late);
+        assert_eq!(keys(&lints), vec![(Some("w1"), None, INVALID_GRAPH)]);
+        assert!(!lints[0].message.contains("canarycallback9f3a"));
     }
 
     #[test]
@@ -1010,29 +1134,14 @@ mod tests {
 
     #[test]
     fn a_huge_ring_reports_its_cycle_in_linear_time() {
-        const N: usize = 20_000;
-        let nodes: Vec<FlowNode> = (0..N).map(|i| output(&format!("n{i}"))).collect();
-        let edges: Vec<FlowEdge> = (0..N)
-            .map(|i| {
-                edge(
-                    &format!("e{i}"),
-                    &format!("n{i}"),
-                    handle::RESULT,
-                    &format!("n{}", (i + 1) % N),
-                    "value",
-                )
-            })
-            .collect();
-        let f = flow(nodes, edges);
-        let started = std::time::Instant::now();
+        let f = ring_flow(20_000);
         let error = validate(&f).expect_err("a ring is a cycle");
-        let lints = graph_error_lints(&f, &error);
-        let elapsed = started.elapsed();
-        assert_eq!(lints.len(), 2 * N);
-        assert!(
-            elapsed < std::time::Duration::from_secs(1),
-            "took {elapsed:?}"
-        );
+        assert_eq!(graph_error_lints(&f, &error).len(), 40_000);
+        assert_linear(ring_flow, |f| {
+            if let Err(error) = validate(f) {
+                let _ = graph_error_lints(f, &error);
+            }
+        });
     }
 
     #[test]
@@ -1058,6 +1167,156 @@ mod tests {
         assert_eq!(
             keys(&graph_lints(&f)),
             vec![(Some("out"), None, INVALID_GRAPH)]
+        );
+    }
+
+    #[test]
+    fn a_routing_node_without_a_path_does_not_claim_a_result() {
+        let f = flow(
+            vec![input("in1"), if_node("if1", "Check"), input("in2"), output("out")],
+            vec![
+                edge("e1", "in1", handle::RESULT, "if1", handle::INPUT),
+                edge("e2", "in2", handle::RESULT, "out", "value"),
+            ],
+        );
+        let lints = lint(&f);
+        let found = only(&lints, NO_PATH_TO_OUTPUT);
+        assert_eq!(found.len(), 2);
+        assert_eq!(
+            found[1].message,
+            "'Check' does not lead to any Output, so nothing after it reaches an Output."
+        );
+    }
+
+    #[test]
+    fn mapped_reasons_read_as_fixed_sentences() {
+        let cases = [
+            (
+                "more than one case matches 'x'",
+                "Two cases of this Switch have the same match value.",
+            ),
+            (
+                "more than one case has id 'x'",
+                "Two cases of this Switch have the same id.",
+            ),
+            (
+                "the source node has no exit named 'x'",
+                "The wire leaves an exit that the source node does not have.",
+            ),
+            (
+                "the Wait for callback name 'x y' must use only letters, digits and _",
+                "The Wait for callback name must use only letters, digits and _.",
+            ),
+            (
+                "more than one Wait for callback node is named 'x'",
+                "More than one Wait for callback node has the same name.",
+            ),
+            (
+                "Request 'r1' sends {{callback.x}} but is not wired before this Wait for callback node; wire its 'result' exit into this node's 'trigger' input",
+                "A Request uses a callback value but is not wired before this Wait for callback node.",
+            ),
+            (
+                "the If node's wire must target 'input', not 'x'",
+                "The If node's wire must target its 'input' handle.",
+            ),
+            (
+                "the Transform node's wire must target 'input', not 'x'",
+                "The Transform node's wire must target its 'input' handle.",
+            ),
+            (
+                "the Switch node needs exactly one input wire, found 3",
+                "The Switch node needs exactly one input wire, found 3.",
+            ),
+            (
+                "the If node's condition is empty",
+                "The If node's condition is empty.",
+            ),
+            (
+                "the Switch node's value is empty",
+                "The Switch node's value is empty.",
+            ),
+            (
+                "the Transform node's script is empty",
+                "The Transform node's script is empty.",
+            ),
+            (
+                "the Wait for callback node's accept_when is empty",
+                "The Wait for callback node's accept_when is empty.",
+            ),
+            (
+                "only If, Switch and Transform nodes have an 'input' input",
+                "Only If, Switch and Transform nodes have an 'input' input.",
+            ),
+            (
+                "only Request, Output and Wait for callback nodes have a 'trigger' input",
+                "Only Request, Output and Wait for callback nodes have a 'trigger' input.",
+            ),
+            ("Input nodes cannot receive wires", "Input nodes cannot receive wires."),
+            ("Auth nodes cannot receive wires", "Auth nodes cannot receive wires."),
+            (
+                "an 'auth' wire must go from an Auth node into a Request node",
+                "An 'auth' wire must go from an Auth node into a Request node.",
+            ),
+            (
+                "a Request node can take only one 'auth' wire",
+                "A Request node can take only one 'auth' wire.",
+            ),
+            (
+                "Wait for callback nodes only have a 'trigger' input",
+                "Wait for callback nodes only have a 'trigger' input.",
+            ),
+            (
+                "the repeat-until condition is empty",
+                "The repeat-until condition is empty.",
+            ),
+            (
+                "repeat-until interval must be at least 100 ms",
+                "Repeat-until interval must be at least 100 ms.",
+            ),
+            (
+                "repeat-until max attempts must be between 1 and 50",
+                "Repeat-until max attempts must be between 1 and 50.",
+            ),
+            (
+                "repeat-until timeout must be at most 600000 ms",
+                "Repeat-until timeout must be at most 600000 ms.",
+            ),
+            (
+                "repeat-until timeout must not be shorter than the interval",
+                "Repeat-until timeout must not be shorter than the interval.",
+            ),
+            (
+                "the Auth node needs an auth type other than none or inherit",
+                "The Auth node needs an auth type other than none or inherit.",
+            ),
+            (
+                "only one Auth node can apply to inherited auth; turn this one or the other off",
+                "Only one Auth node can apply to inherited auth; turn this one or the other off.",
+            ),
+            (
+                "the Wait for callback timeout must be between 1000 and 3600000 ms",
+                "The Wait for callback timeout must be between 1000 and 3600000 ms.",
+            ),
+        ];
+        for (reason, expected) in cases {
+            assert_eq!(sentence(reason), expected, "for: {reason}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_or_malformed_reason_gets_the_generic_sentence() {
+        let generic = "The flow has a structural problem.";
+        assert_eq!(sentence("something sk-live-canary-9f3a new"), generic);
+        assert_eq!(sentence("it holds 'sk-live-canary-9f3a"), generic);
+        assert_eq!(sentence(""), generic);
+        // A known shape with a non-numeric count is not trusted.
+        assert_eq!(
+            sentence("the If node needs exactly one input wire, found sk-live"),
+            generic
+        );
+        assert_eq!(
+            sentence("the Foo node's condition is empty"),
+            generic
         );
     }
 }

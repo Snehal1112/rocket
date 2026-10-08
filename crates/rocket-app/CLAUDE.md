@@ -194,4 +194,5 @@ canvas, saved or not) and never fails or touches the repository: a
 `rocket_flow::validate_with_warnings` warnings. It passes `NoLintContext`
 until F-21 and F-22 add a context built from the collection. `save` and the
 run path do not call it, so lints never block either. The `lint_flow` IPC
-command is plan P21.
+command is plan P21. `lint` runs `validate` first, which is super-linear on very
+large flows (about 3.5 s at 20k If nodes), so it is fine at drawn sizes.
