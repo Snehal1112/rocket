@@ -30,7 +30,7 @@ import {
   type FlowNodeKind,
   getCollectionSettings,
 } from '@/lib/tauri-api';
-import { buildScopedContext } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
@@ -114,13 +114,15 @@ export function AuthNodeEditor({
     () =>
       buildScopedContext({
         envVars,
+        envSecretKeys: secretKeysOf(activeEnv?.variables),
         envLabel: activeEnvId ?? undefined,
         externalSecrets: activeEnv?.externalSecrets,
         globalVars,
+        globalSecretKeys: secretKeysOf(globalEnv?.variables),
         processEnvVars,
         collectionVars,
       }),
-    [activeEnvId, activeEnv, envVars, globalVars, processEnvVars, collectionVars],
+    [activeEnvId, activeEnv, envVars, globalEnv, globalVars, processEnvVars, collectionVars],
   );
 
   // Resolves {{vars}} for the token fingerprint exactly as the pre-run step

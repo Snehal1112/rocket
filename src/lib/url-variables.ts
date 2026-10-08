@@ -1,4 +1,4 @@
-import type { CollectionVariable, ExternalSecretBinding } from '@/lib/tauri-api';
+import type { CollectionVariable, ExternalSecretBinding, Variable } from '@/lib/tauri-api';
 import { generateDynamicVar, listDynamicVars } from './dynamic-vars';
 
 // Matches {{variable.name}} style placeholders.
@@ -38,11 +38,21 @@ export function buildResolver(
     });
 }
 
+// The keys of the enabled variables flagged secret. Callers pass this next to
+// the plain key-to-value map they already build, so the scoped context can
+// mask those entries instead of showing the real value.
+export function secretKeysOf(
+  vars: readonly Pick<Variable, 'key' | 'enabled' | 'secret'>[] | null | undefined,
+): Set<string> {
+  return new Set((vars ?? []).filter((v) => v.enabled && v.secret).map((v) => v.key));
+}
+
 // Builds a scope-aware variable map for the overlay UI.
 // Lower-priority scopes are written first; higher-priority scopes overwrite them.
 // Priority (lowest → highest): dynamic → process → global → collection → vault → env → folder → request → runtime.
 // Vault entries come from the active environment's External Secrets bindings.
 // Their values are only fetched at send time, so they are always masked here.
+// Secret entries keep their value in memory (OAuth2 resolves from it) and are masked by the consumers that read entry.secret.
 export function buildScopedContext(params: {
   runtimeVars?: Record<string, string>;
   requestVars?: CollectionVariable[];
@@ -50,8 +60,12 @@ export function buildScopedContext(params: {
   collectionVars?: CollectionVariable[];
   envVars?: Record<string, string>;
   envLabel?: string;
+  /** Keys in `envVars` that are secret. Their entries keep the value but carry `secret: true`. */
+  envSecretKeys?: ReadonlySet<string>;
   externalSecrets?: ExternalSecretBinding[];
   globalVars?: Record<string, string>;
+  /** Keys in `globalVars` that are secret. */
+  globalSecretKeys?: ReadonlySet<string>;
   processEnvVars?: Record<string, string>;
 }): Map<string, VariableScopeEntry> {
   const out = new Map<string, VariableScopeEntry>();
@@ -62,7 +76,8 @@ export function buildScopedContext(params: {
     add(`$${name}`, generateDynamicVar(name) ?? '', 'dynamic', 'Dynamic');
   for (const [k, v] of Object.entries(params.processEnvVars ?? {}))
     add(`process.env.${k}`, v, 'process', 'Process Env');
-  for (const [k, v] of Object.entries(params.globalVars ?? {})) add(k, v, 'global', 'Global');
+  for (const [k, v] of Object.entries(params.globalVars ?? {}))
+    add(k, v, 'global', 'Global', params.globalSecretKeys?.has(k) ?? false);
   for (const v of (params.collectionVars ?? []).filter((v) => v.enabled)) {
     const val = v.value || v.initialValue || '';
     if (val) add(v.key, val, 'collection', 'Collection', v.secret);
@@ -73,7 +88,13 @@ export function buildScopedContext(params: {
       add(`${binding.alias}.${ref.name}`, '', 'vault', `Vault (${binding.alias})`, true);
   }
   for (const [k, v] of Object.entries(params.envVars ?? {}))
-    add(k, v, 'environment', params.envLabel ?? 'Environment');
+    add(
+      k,
+      v,
+      'environment',
+      params.envLabel ?? 'Environment',
+      params.envSecretKeys?.has(k) ?? false,
+    );
   for (const v of (params.folderVars ?? []).filter((v) => v.enabled)) {
     const val = v.value || v.initialValue || '';
     if (val) add(v.key, val, 'folder', 'Folder', v.secret);

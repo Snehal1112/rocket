@@ -31,7 +31,7 @@ import type {
   Variable,
 } from '@/lib/tauri-api';
 import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
-import { buildScopedContext } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 import { CertificatesTab } from './CertificatesTab';
 import { EnvironmentSidebar } from './EnvironmentSidebar';
@@ -411,8 +411,10 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       : {};
     return buildScopedContext({
       envVars,
+      envSecretKeys: secretKeysOf(selectedEnv?.variables),
       envLabel: selectedEnv?.name,
       globalVars,
+      globalSecretKeys: secretKeysOf(globalEnv?.variables),
       processEnvVars,
     });
   }, [selectedEnv, globalEnv, processEnvVars]);

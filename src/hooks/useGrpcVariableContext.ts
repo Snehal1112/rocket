@@ -11,7 +11,7 @@ import {
   getFolderVariables,
   getRequestVariables,
 } from '@/lib/tauri-api';
-import { buildScopedContext, type VariableScopeEntry } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 
 export interface GrpcVariableScope {
@@ -83,9 +83,11 @@ export function useGrpcVariableContext(
       : {};
     return buildScopedContext({
       envVars,
+      envSecretKeys: secretKeysOf(activeEnv?.variables),
       envLabel: activeEnvId ?? undefined,
       externalSecrets: activeEnv?.externalSecrets,
       globalVars,
+      globalSecretKeys: secretKeysOf(globalEnv?.variables),
       processEnvVars,
       collectionVars,
       folderVars,

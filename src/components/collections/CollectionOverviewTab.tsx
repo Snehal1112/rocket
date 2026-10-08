@@ -34,7 +34,7 @@ import {
   getCollectionSettings,
   saveCollectionSettings,
 } from '@/lib/tauri-api';
-import { buildScopedContext } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useEnvStore } from '@/stores/env-store';
@@ -146,9 +146,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       : {};
     return buildScopedContext({
       envVars,
+      envSecretKeys: secretKeysOf(activeEnv?.variables),
       envLabel: activeEnvId ?? undefined,
       externalSecrets: activeEnv?.externalSecrets,
       globalVars,
+      globalSecretKeys: secretKeysOf(globalEnv?.variables),
       processEnvVars,
       collectionVars: variables,
     });

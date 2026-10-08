@@ -76,7 +76,7 @@ import {
 } from '@/lib/tauri-api';
 import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
 import type { VariableSource } from '@/lib/url-variables';
-import { buildScopedContext } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { useGraphQlSchemaStore } from '@/stores/graphql-schema-store';
@@ -549,9 +549,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       : {};
     return buildScopedContext({
       envVars,
+      envSecretKeys: secretKeysOf(activeEnv?.variables),
       envLabel: activeEnvIdForScope ?? undefined,
       externalSecrets: activeEnv?.externalSecrets,
       globalVars,
+      globalSecretKeys: secretKeysOf(globalEnv?.variables),
       processEnvVars,
       collectionVars: collectionVariables,
       folderVars: folderVariables,

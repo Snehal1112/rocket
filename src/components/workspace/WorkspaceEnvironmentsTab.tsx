@@ -16,7 +16,7 @@ import {
 } from '@/lib/queries/environment-queries';
 import type { Variable } from '@/lib/tauri-api';
 import { deleteGlobalEnvironment, saveGlobalEnvironment } from '@/lib/tauri-api';
-import { buildScopedContext } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
 
 export function WorkspaceEnvironmentsTab() {
   const { data: environments = [] } = useGlobalEnvironments();
@@ -133,6 +133,7 @@ export function WorkspaceEnvironmentsTab() {
     for (const v of editingVars) if (v.enabled) envVars[v.key] = v.value;
     return buildScopedContext({
       envVars,
+      envSecretKeys: secretKeysOf(editingVars),
       envLabel: selectedName ?? undefined,
       processEnvVars,
     });

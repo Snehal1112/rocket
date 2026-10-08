@@ -11,7 +11,7 @@ import {
   getCollectionSettings,
   getFolderChainVariables,
 } from '@/lib/tauri-api';
-import { buildScopedContext, type VariableScopeEntry } from '@/lib/url-variables';
+import { buildScopedContext, secretKeysOf, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 
 export interface FolderVariableScope {
@@ -68,9 +68,11 @@ export function useFolderVariableContext(
       : {};
     return buildScopedContext({
       envVars,
+      envSecretKeys: secretKeysOf(activeEnv?.variables),
       envLabel: activeEnvId ?? undefined,
       externalSecrets: activeEnv?.externalSecrets,
       globalVars,
+      globalSecretKeys: secretKeysOf(globalEnv?.variables),
       processEnvVars,
       collectionVars,
       folderVars: [...chainVars, ...ownVariables],
