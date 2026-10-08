@@ -111,6 +111,28 @@ function updateTabInSnapshots(
 }
 
 // Finds a tab by id inside the collection snapshots.
+// Returns the same object when no tab matched, so callers can skip a store update.
+function removeParkedTabs(
+  state: CollectionTabState,
+  match: (tab: Tab) => boolean,
+): CollectionTabState {
+  let changed = false;
+  const next: CollectionTabState = {};
+  for (const [key, entry] of Object.entries(state)) {
+    const tabs = entry.tabs.filter((t) => !match(t));
+    if (tabs.length === entry.tabs.length) {
+      next[key] = entry;
+      continue;
+    }
+    changed = true;
+    const activeTabId = tabs.some((t) => t.id === entry.activeTabId)
+      ? entry.activeTabId
+      : (tabs[0]?.id ?? '');
+    next[key] = { ...entry, tabs, activeTabId };
+  }
+  return changed ? next : state;
+}
+
 function findTabInSnapshots(state: CollectionTabState, tabId: string): Tab | undefined {
   for (const entry of Object.values(state)) {
     const tab = entry.tabs.find((t) => t.id === tabId);
@@ -849,21 +871,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   dropParkedFlowTabs(collection, flowName) {
-    const parked: CollectionTabState = {};
-    for (const [key, entry] of Object.entries(get().collectionTabState)) {
-      const tabs = entry.tabs.filter(
-        (t) => !(isFlowTab(t) && t.collectionName === collection && t.flowName === flowName),
-      );
-      if (tabs.length === entry.tabs.length) {
-        parked[key] = entry;
-        continue;
-      }
-      const activeTabId = tabs.some((t) => t.id === entry.activeTabId)
-        ? entry.activeTabId
-        : (tabs[0]?.id ?? '');
-      parked[key] = { ...entry, tabs, activeTabId };
-    }
-    set({ collectionTabState: parked });
+    const parked = removeParkedTabs(
+      get().collectionTabState,
+      (t) => isFlowTab(t) && t.collectionName === collection && t.flowName === flowName,
+    );
+    if (parked !== get().collectionTabState) set({ collectionTabState: parked });
   },
 
   async openRunnerTab(collectionName, folderPath) {
@@ -1011,13 +1023,23 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   async openFlowTab(collectionName, flowName) {
     // An open tab only needs focusing. A second copy could diverge and later overwrite the first.
-    if (collectionName && flowName) {
-      const existing = findFlowTabs(get().root, {}, collectionName, flowName)[0];
-      if (existing) {
-        get().openTab(existing);
-        return;
+    // A tab parked in a collection snapshot comes back here, with its unsaved edits.
+    const focusExisting = (name: string): boolean => {
+      if (!collectionName) return false;
+      const live = findFlowTabs(get().root, {}, collectionName, name)[0];
+      if (live) {
+        get().openTab(live);
+        return true;
       }
-    }
+      const parked = findFlowTabs(get().root, get().collectionTabState, collectionName, name)[0];
+      if (!parked) return false;
+      set({
+        collectionTabState: removeParkedTabs(get().collectionTabState, (t) => t.id === parked.id),
+      });
+      get().openTab(parked);
+      return true;
+    };
+    if (collectionName && flowName && focusExisting(flowName)) return;
     let nodes: FlowNode[] = [];
     let edges: FlowEdge[] = [];
     let callbackHost: string | null = null;
@@ -1033,6 +1055,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         resolvedFlowName = null;
       }
     }
+    // Another open of the same flow may have finished while this one was reading from disk.
+    if (collectionName && resolvedFlowName && focusExisting(resolvedFlowName)) return;
     const tab: FlowTab = {
       id: crypto.randomUUID(),
       title: resolvedFlowName ? `Flow: ${resolvedFlowName}` : 'Flow',

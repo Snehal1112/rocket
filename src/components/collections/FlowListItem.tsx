@@ -125,7 +125,7 @@ export function FlowListItem({ name, collectionName, onDelete }: FlowListItemPro
 
   return (
     <div className='group relative flex items-center'>
-      <TreeItem value={`flow-${collectionName}-${name}`} className='w-full'>
+      <TreeItem value={JSON.stringify(['flow', collectionName, name])} className='w-full'>
         <TreeItemContent
           className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
           onClick={() => void open()}
