@@ -16,7 +16,8 @@ export const REDACTED = '<redacted>';
 export const EXPORT_BODY_LIMIT = 65_536;
 
 // A key or parameter name that holds a credential: it ends in one of these words.
-const KEY_NAME = String.raw`[\w.-]*(?:token|secret|password|passwd|api[_-]?key|apikey|credential|authorization|cookie)`;
+// The short words pass and pwd must stand alone, so "compass" is left alone.
+const KEY_NAME = String.raw`(?:[\w.-]*(?:token|secret|password|passwd|api[_-]?key|apikey|credential|authorization|cookie|private[_-]?key|client[_-]?assertion|secret[_-]?access[_-]?key|signature)|(?:[\w.-]*[_.-])?(?:pass|pwd))`;
 const HEADER_LINE =
   /\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)(\s*[:=]\s*)([^\r\n]*)/gi;
 // A Bearer or Basic credential. It must look like a token (a digit or . = + /), so
@@ -31,9 +32,16 @@ const SENSITIVE_HEADER = new RegExp(
 );
 const SENSITIVE_LABEL = /secret|password|passwd|token|api[\s_-]?key|credential/i;
 
-// Empty, already redacted, or only variable references: nothing to hide.
-const nothingToHide = (value: string): boolean =>
-  value.trim() === '' || value === REDACTED || isVariableReference(value);
+const SCHEME_WORD = /^\s*(?:Bearer|Basic|Token|Digest|NTLM|OAuth)(?:\s+|$)/i;
+// The password part of `://user:password@host`.
+const URL_PASSWORD = /(:\/\/[^\s/:@?#]*:)([^\s/@?#]*)(@)/g;
+
+// Empty, already redacted, or only variable references: nothing to hide. A leading
+// scheme word such as Bearer does not count, so `Bearer {{token}}` is safe.
+const nothingToHide = (value: string): boolean => {
+  const rest = value.replace(SCHEME_WORD, '');
+  return rest.trim() === '' || rest === REDACTED || isVariableReference(rest);
+};
 
 /**
  * Replaces credentials in free text: authorization-style header lines, Bearer and
@@ -46,6 +54,9 @@ export function redactKnownSecrets(text: string): string {
   return text
     .replace(HEADER_LINE, (match, name: string, sep: string, value: string) =>
       nothingToHide(value.trim()) ? match : `${name}${sep}${REDACTED}`,
+    )
+    .replace(URL_PASSWORD, (match, lead: string, pw: string, at: string) =>
+      nothingToHide(pw) ? match : `${lead}${REDACTED}${at}`,
     )
     .replace(BEARER, (_match, scheme: string, space: string) => `${scheme}${space}${REDACTED}`)
     .replace(JSON_PAIR, (match, open: string, value: string, close: string) =>
@@ -228,6 +239,15 @@ function cleanExchange(ex: FlowDebugRequest, includeBodies: boolean): ReportExch
   };
 }
 
+// An Input value has no secret flag, so its label decides, as in maskNode.
+function reportValue(node: FlowNode, value: string): string {
+  const kind = node.kind;
+  if (kind.kind === 'Input' && SENSITIVE_LABEL.test(kind.label) && !nothingToHide(value)) {
+    return REDACTED;
+  }
+  return redactKnownSecrets(value);
+}
+
 function reportNode(
   node: FlowNode,
   status: FlowNodeStatus,
@@ -245,7 +265,7 @@ function reportNode(
     ...(detail?.branch ? { branch: detail.branch } : {}),
     ...(detail?.skipReason ? { skipReason: detail.skipReason } : {}),
     ...(detail?.error ? { error: redactKnownSecrets(detail.error) } : {}),
-    ...(detail?.value !== undefined ? { value: cap(redactKnownSecrets(detail.value)) } : {}),
+    ...(detail?.value !== undefined ? { value: cap(reportValue(node, detail.value)) } : {}),
     ...(detail?.exchange ? { exchange: cleanExchange(detail.exchange, includeBodies) } : {}),
     ...(detail?.logs?.length
       ? {

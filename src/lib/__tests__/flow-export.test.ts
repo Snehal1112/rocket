@@ -74,6 +74,60 @@ describe('redactKnownSecrets', () => {
   });
 });
 
+describe('redactKnownSecrets scheme words, URL passwords and key names', () => {
+  it('keeps a scheme followed only by references', () => {
+    expect(redactKnownSecrets('Authorization: Bearer {{token}}')).toBe(
+      'Authorization: Bearer {{token}}',
+    );
+    expect(redactKnownSecrets('Authorization: Basic {{creds}}')).toBe(
+      'Authorization: Basic {{creds}}',
+    );
+    expect(redactKnownSecrets('Authorization: Bearer')).toBe('Authorization: Bearer');
+  });
+
+  it('still redacts a literal after a scheme word', () => {
+    expect(redactKnownSecrets('Authorization: Basic dXNlcjpwdw==')).toBe(
+      `Authorization: ${REDACTED}`,
+    );
+    expect(redactKnownSecrets('Authorization: Token abc')).toBe(`Authorization: ${REDACTED}`);
+  });
+
+  it('redacts a password in a URL and keeps the user and host', () => {
+    expect(redactKnownSecrets('GET https://u:PWURL123@h.test/x?a=1')).toBe(
+      `GET https://u:${REDACTED}@h.test/x?a=1`,
+    );
+  });
+
+  it('keeps a URL password that is only references, and a URL without one', () => {
+    expect(redactKnownSecrets('https://u:{{pw}}@h.test/x')).toBe('https://u:{{pw}}@h.test/x');
+    expect(redactKnownSecrets('https://h.test:8080/x')).toBe('https://h.test:8080/x');
+    expect(redactKnownSecrets('https://u@h.test/x')).toBe('https://u@h.test/x');
+  });
+
+  it('is idempotent for URL passwords and scheme words', () => {
+    const once = redactKnownSecrets('https://u:pw1@h.test Authorization: Basic {{c}}');
+    expect(redactKnownSecrets(once)).toBe(once);
+  });
+
+  it.each([
+    'private_key',
+    'client_assertion',
+    'pass',
+    'pwd',
+    'secret_access_key',
+    'x-amz-signature',
+    'signature',
+  ])('redacts a parameter named %s', (name) => {
+    expect(redactKnownSecrets(`/p?${name}=abc123&x=1`)).toBe(`/p?${name}=${REDACTED}&x=1`);
+  });
+
+  it('keeps look-alike names that are not credentials', () => {
+    expect(redactKnownSecrets('/p?token_type=Bearer&compass=1&x=1')).toBe(
+      '/p?token_type=Bearer&compass=1&x=1',
+    );
+  });
+});
+
 describe('exportableFlow and maskFlowSecrets', () => {
   const flow: Flow = {
     name: 'login',
@@ -190,6 +244,50 @@ describe('exportableFlow and maskFlowSecrets', () => {
     expect(inline.source.request.body).toBe(`{"password":"${REDACTED}","name":"n"}`);
   });
 
+  it('does not mask or count a scheme word followed only by a reference', () => {
+    const f: Flow = {
+      name: 'x',
+      edges: [],
+      nodes: [
+        node('rq', {
+          kind: 'Request',
+          label: 'R',
+          source: {
+            type: 'Inline',
+            request: {
+              method: 'GET',
+              url: 'https://u:{{pw}}@h.test/x',
+              headers: [{ name: 'Authorization', value: 'Bearer {{token}}' }],
+            },
+          },
+        }),
+      ],
+    };
+    const out = maskFlowSecrets(f);
+    expect(out.maskedCount).toBe(0);
+    expect(out.flow).toEqual(f);
+  });
+
+  it('masks a password in an inline request URL and counts it', () => {
+    const f: Flow = {
+      name: 'x',
+      edges: [],
+      nodes: [
+        node('rq', {
+          kind: 'Request',
+          label: 'R',
+          source: {
+            type: 'Inline',
+            request: { method: 'GET', url: 'https://u:PWURL123@h.test/x', headers: [] },
+          },
+        }),
+      ],
+    };
+    const out = maskFlowSecrets(f);
+    expect(JSON.stringify(out.flow)).not.toContain('PWURL123');
+    expect(out.maskedCount).toBe(1);
+  });
+
   it('does not change its input and reports zero for a clean flow', () => {
     const before = JSON.stringify(flow);
     maskFlowSecrets(flow);
@@ -281,6 +379,37 @@ describe('buildRunReport', () => {
         },
       },
     });
+  });
+
+  it('redacts the run value of a sensitive Input node in both formats', () => {
+    const t = tab({
+      nodes: [node('in1', { kind: 'Input', label: 'API token', value: 'x' })],
+      nodeStatus: { in1: 'success' },
+      nodeDetail: { in1: { value: 'sk_live_INPUTVAL' } },
+    });
+    const out = buildRunReport(t, { includeBodies: false, now: fixedNow });
+    expect(out.json).not.toContain('sk_live_INPUTVAL');
+    expect(out.markdown).not.toContain('sk_live_INPUTVAL');
+    expect(JSON.parse(out.json).nodes[0].value).toBe(REDACTED);
+  });
+
+  it('keeps the run value of a plain Input node and of an Output node', () => {
+    const out = JSON.parse(buildRunReport(tab(), { includeBodies: false, now: fixedNow }).json);
+    expect(out.nodes[0].value).toBe('alice');
+  });
+
+  it('redacts a password in an exchange URL', () => {
+    const t = tab({
+      nodeDetail: {
+        rq1: {
+          exchange: { method: 'GET', url: 'https://u:PWURL123@h.test/x', headers: [] },
+        },
+      },
+    });
+    const out = buildRunReport(t, { includeBodies: false, now: fixedNow });
+    expect(out.json).not.toContain('PWURL123');
+    expect(out.markdown).not.toContain('PWURL123');
+    expect(out.json).toContain(`https://u:${REDACTED}@h.test/x`);
   });
 
   it('describes the run, with a summary, in canvas order', () => {

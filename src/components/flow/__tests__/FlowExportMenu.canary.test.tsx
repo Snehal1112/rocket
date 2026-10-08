@@ -78,7 +78,7 @@ const tab: FlowTab = {
   nodeStatus: { a1: 'success', in1: 'success', rq1: 'failed' },
   nodeDetail: {
     a1: {},
-    in1: {},
+    in1: { value: FLOW_CANARIES[1] },
     rq1: {
       statusCode: 401,
       error: `Request failed: access_token=${REPORT_CANARIES[0]} was rejected`,
