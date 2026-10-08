@@ -496,7 +496,7 @@ declare const rok: {
   /** Every variable of the active environment. */
   getAllEnvVars(): Record<string, string>;
   /** Every runtime variable. */
-  getAllVars(): Record<string, string>;
+  getAllVars(): Record<string, unknown>;
   /** Every global environment variable. */
   getAllGlobalEnvVars(): Record<string, string>;
   /** Returns true if the runtime variable exists. */
@@ -532,7 +532,7 @@ declare const rok: {
   };
 };
 /** Collection directory. Developer mode only. */
-declare const __dirname: string;
+declare const __dirname: string | undefined;
 /** Always undefined in top-level scripts. */
 declare const __filename: string | undefined;
 `;

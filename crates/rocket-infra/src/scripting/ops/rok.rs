@@ -347,7 +347,11 @@ pub fn op_rok_delete_collection_var(state: &mut OpState, #[string] key: String) 
 /// rok.deleteAllCollectionVars() — null-writes every collection variable.
 #[op2(fast)]
 pub fn op_rok_delete_all_collection_vars(state: &mut OpState) {
-    let snapshot = state.borrow::<ScriptInputState>().variables.collection.clone();
+    let snapshot = state
+        .borrow::<ScriptInputState>()
+        .variables
+        .collection
+        .clone();
     let out = state.borrow_mut::<ScriptOutputState>();
     let keys = scope_keys(&snapshot, out.collection_var_writes.iter().map(|w| &w.key));
     for key in keys {
@@ -374,7 +378,11 @@ pub fn op_rok_delete_global_env_var(state: &mut OpState, #[string] key: String) 
 /// rok.deleteAllGlobalEnvVars() — null-writes every global environment variable.
 #[op2(fast)]
 pub fn op_rok_delete_all_global_env_vars(state: &mut OpState) {
-    let snapshot = state.borrow::<ScriptInputState>().variables.global_env.clone();
+    let snapshot = state
+        .borrow::<ScriptInputState>()
+        .variables
+        .global_env
+        .clone();
     let out = state.borrow_mut::<ScriptOutputState>();
     let keys = scope_keys(&snapshot, out.global_env_var_writes.iter().map(|w| &w.key));
     for key in keys {

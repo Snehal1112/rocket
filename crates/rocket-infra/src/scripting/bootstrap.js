@@ -24,7 +24,6 @@
   };
   globalThis.console = console;
 
-  // ── rok ─────────────────────────────────────────────────────────────────────
   // ── read-your-writes overlay ────────────────────────────────────────────────
   // Ops read a snapshot taken before the script ran. These maps remember this
   // script's own sets and deletes so later reads in the same script agree.
@@ -52,6 +51,7 @@
     for (const k of Object.keys(_ovAll(scope, base))) _ov[scope].set(k, _GONE);
   }
 
+  // ── rok ─────────────────────────────────────────────────────────────────────
   globalThis.rok = {
     getVar:     (key) => _ovRead('runtime', key, (k) => __ops.op_rok_get_var(k)),
     setVar:     (key, value) => { __ops.op_rok_set_var(key, JSON.stringify(value)); _ov.runtime.set(key, value); },
@@ -83,11 +83,9 @@
     },
     hasCollectionVar: (key) => _ovHas('collection', key, (k) => __ops.op_rok_has_collection_var(k)),
     deleteCollectionVar: (key) => { __ops.op_rok_delete_collection_var(key); _ov.collection.set(key, _GONE); },
-    // Known limit: after deleteAllCollectionVars(), snapshot keys the script never
-    // touched still read as their snapshot value, as there is no read-all op.
+    // Known limit: the collection scope has no read-all op, so only keys this
+    // script touched are marked gone; untouched snapshot keys still read normally.
     deleteAllCollectionVars: () => {
-      // The collection scope has no read-all op, so remember which keys the
-      // script touched and let the op expand the snapshot keys.
       for (const k of Array.from(_ov.collection.keys())) _ov.collection.set(k, _GONE);
       __ops.op_rok_delete_all_collection_vars();
     },
@@ -104,6 +102,7 @@
       _ovDeleteAll('global', () => JSON.parse(__ops.op_rok_get_all_global_env_vars()));
       __ops.op_rok_delete_all_global_env_vars();
     },
+
     getEnvName:        ()           => __ops.op_rok_get_env_name(),
     getCollectionName: ()           => __ops.op_rok_get_collection_name(),
     getTestResults:      () => JSON.parse(__ops.op_rok_get_test_results()),

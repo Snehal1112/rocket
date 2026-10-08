@@ -2,8 +2,8 @@ use crate::scripting::local_modules::LocalRoots;
 use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
-    AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest, RequestMutations,
-    SandboxMode, ScriptPhase, TestResult, TestStatus,
+    AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest,
+    RequestMutations, SandboxMode, ScriptPhase, TestResult, TestStatus,
 };
 use rocket_shared::types::PathParam;
 use std::collections::{HashMap, HashSet};

@@ -427,7 +427,10 @@ mod tests {
     #[tokio::test]
     async fn res_get_size_reports_body_headers_and_total() {
         let engine = DenoScriptEngine::new();
-        let ctx = response_ctx("rok.setVar('s', JSON.stringify(res.getSize()))", "{\"a\":1}");
+        let ctx = response_ctx(
+            "rok.setVar('s', JSON.stringify(res.getSize()))",
+            "{\"a\":1}",
+        );
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(
             result.runtime_vars.get("s").expect("s present"),
@@ -586,9 +589,15 @@ mod tests {
         );
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
-        assert!(result.collection_var_writes.iter().all(|w| w.value.is_null()));
+        assert!(result
+            .collection_var_writes
+            .iter()
+            .all(|w| w.value.is_null()));
         assert!(result.collection_var_writes.iter().any(|w| w.key == "c2"));
-        assert!(result.global_env_var_writes.iter().all(|w| w.value.is_null()));
+        assert!(result
+            .global_env_var_writes
+            .iter()
+            .all(|w| w.value.is_null()));
         assert!(result.global_env_var_writes.iter().any(|w| w.key == "g1"));
     }
 
@@ -641,12 +650,14 @@ mod tests {
         let mut vars = VariableContext::default();
         vars.env.insert("A".into(), "1".into());
         vars.env.insert("B".into(), "2".into());
-        let mut ctx = minimal_ctx(
-            "rok.setVar('keys', Object.keys(rok.getAllEnvVars()).sort().join(','))",
-        );
+        let mut ctx =
+            minimal_ctx("rok.setVar('keys', Object.keys(rok.getAllEnvVars()).sort().join(','))");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("keys").expect("keys present"), "A,B");
+        assert_eq!(
+            result.runtime_vars.get("keys").expect("keys present"),
+            "A,B"
+        );
     }
 
     #[tokio::test]
@@ -693,14 +704,18 @@ mod tests {
         let mut ctx = minimal_ctx("rok.setVar('v', rok.getRequestVar('source'))");
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("v").expect("v present"), "warehouse-a");
+        assert_eq!(
+            result.runtime_vars.get("v").expect("v present"),
+            "warehouse-a"
+        );
     }
 
     #[tokio::test]
     async fn rok_get_process_env_returns_value_or_undefined() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
-        vars.process_env.insert("HOME_DIR".into(), "/home/me".into());
+        vars.process_env
+            .insert("HOME_DIR".into(), "/home/me".into());
         let mut ctx = minimal_ctx(
             "rok.setVar('out', rok.getProcessEnv('HOME_DIR') + '|' + String(rok.getProcessEnv('NOPE')))",
         );
@@ -2756,7 +2771,10 @@ mod tests {
         ctx.variables = vars;
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(result.runtime_vars.get("k").expect("k present"), 1);
-        assert_eq!(result.runtime_vars.get("has").expect("has present"), "true|1");
+        assert_eq!(
+            result.runtime_vars.get("has").expect("has present"),
+            "true|1"
+        );
         assert!(!result.runtime_var_deletes.contains(&"k".to_string()));
     }
 
@@ -2843,7 +2861,9 @@ mod tests {
         assert!(w.iter().any(|x| x.key == "new" && x.value == "n"));
         for key in ["new", "snap", "touched"] {
             assert!(
-                w.iter().rposition(|x| x.key == key && x.value.is_null()).is_some(),
+                w.iter()
+                    .rposition(|x| x.key == key && x.value.is_null())
+                    .is_some(),
                 "missing null write for {key}"
             );
         }
@@ -2910,7 +2930,10 @@ mod tests {
         let mut ctx = minimal_ctx("rok.setVar('safe', rok.isSafeMode())");
         ctx.sandbox_mode = SandboxMode::Developer;
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("safe").expect("safe present"), false);
+        assert_eq!(
+            result.runtime_vars.get("safe").expect("safe present"),
+            false
+        );
     }
 
     #[tokio::test]
@@ -2927,7 +2950,10 @@ mod tests {
 
         let ctx = minimal_ctx("rok.setVar('t', typeof __dirname)");
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("t").expect("t present"), "undefined");
+        assert_eq!(
+            result.runtime_vars.get("t").expect("t present"),
+            "undefined"
+        );
     }
 
     #[tokio::test]
@@ -2951,6 +2977,9 @@ mod tests {
             result.runtime_vars.get("dir").expect("dir present"),
             "/tmp/some-collection"
         );
-        assert_eq!(result.runtime_vars.get("file").expect("file present"), "undefined");
+        assert_eq!(
+            result.runtime_vars.get("file").expect("file present"),
+            "undefined"
+        );
     }
 }
