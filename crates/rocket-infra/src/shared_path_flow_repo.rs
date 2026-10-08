@@ -48,6 +48,10 @@ impl FlowRepository for SharedPathFlowRepo {
     fn delete(&self, collection: &str, name: &str) -> DomainResult<()> {
         self.repo().delete(collection, name)
     }
+
+    fn rename(&self, collection: &str, old_name: &str, new_name: &str) -> DomainResult<()> {
+        self.repo().rename(collection, old_name, new_name)
+    }
 }
 
 #[cfg(test)]
@@ -86,5 +90,26 @@ mod tests {
             repo.list("acme").expect("list b").is_empty(),
             "after workspace switch, list() should show workspace B's flows"
         );
+    }
+
+    #[test]
+    fn rename_goes_through_the_fs_override_and_follows_the_workspace() {
+        let dir = TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("collections").join("acme"))
+            .expect("create collection");
+        let shared_path = Arc::new(Mutex::new(dir.path().to_path_buf()));
+        let repo = SharedPathFlowRepo::new(shared_path);
+
+        repo.save("acme", &sample("Login Flow")).expect("save");
+        // A case-only rename fails on the trait default, so this proves the override is used.
+        repo.rename("acme", "Login Flow", "login flow")
+            .expect("case-only rename");
+        repo.rename("acme", "login flow", "Sign In").expect("rename");
+
+        assert_eq!(repo.list("acme").expect("list"), vec!["Sign In".to_string()]);
+        let files: Vec<_> = std::fs::read_dir(dir.path().join("collections/acme/flows"))
+            .expect("read flows dir")
+            .collect();
+        assert_eq!(files.len(), 1, "a rename must never leave two flow files");
     }
 }

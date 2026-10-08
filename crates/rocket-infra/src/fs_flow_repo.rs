@@ -42,6 +42,56 @@ impl FsFlowRepo {
         serde_yaml::from_str(&content)
             .map_err(|e| DomainError::InvalidInput(format!("Failed to parse flow YAML: {e}")))
     }
+
+    /// The rename algorithm. `remove` deletes the old file and is a parameter
+    /// only so a test can make it fail. Order matters: the new file is fully
+    /// written before the old one goes, so a crash leaves at least one copy,
+    /// and a failed removal deletes the new copy again so there is never a
+    /// duplicate.
+    fn rename_with(
+        &self,
+        collection: &str,
+        old_name: &str,
+        new_name: &str,
+        remove: &dyn Fn(&Path) -> std::io::Result<()>,
+    ) -> DomainResult<()> {
+        let old_path = self.file_path(collection, old_name)?;
+        // Rejects a target whose slug is empty before anything is touched.
+        let new_path = self.file_path(collection, new_name)?;
+        if !old_path.exists() {
+            return Err(not_found(collection, old_name));
+        }
+        let mut flow = Self::read_flow(&old_path)?;
+        // A different name that shares the slug is a different flow.
+        if flow.name != old_name {
+            return Err(not_found(collection, old_name));
+        }
+        flow.name = new_name.to_string();
+        let yaml = serde_yaml::to_string(&flow)
+            .map_err(|e| DomainError::Internal(format!("Failed to serialize flow: {e}")))?;
+
+        // Case or punctuation only: both names use one file, so rewrite it in place.
+        if old_path == new_path {
+            return atomic_write(&new_path, yaml.as_bytes())
+                .map_err(|e| DomainError::Io(format!("Failed to write flow file: {e}")));
+        }
+        if new_path.exists() {
+            return Err(DomainError::Conflict(format!(
+                "Flow name '{new_name}' collides with an existing flow in collection '{collection}'"
+            )));
+        }
+        atomic_write(&new_path, yaml.as_bytes())
+            .map_err(|e| DomainError::Io(format!("Failed to write flow file: {e}")))?;
+        if let Err(e) = remove(&old_path) {
+            // Best effort: if this also fails there is nothing more to do, and the
+            // original error is the one worth reporting.
+            let _ = fs::remove_file(&new_path);
+            return Err(DomainError::Io(format!(
+                "Failed to remove the old flow file: {e}"
+            )));
+        }
+        Ok(())
+    }
 }
 
 fn not_found(collection: &str, name: &str) -> DomainError {
@@ -145,6 +195,12 @@ impl FlowRepository for FsFlowRepo {
             }
         }
         fs::remove_file(&path).map_err(|e| DomainError::Io(e.to_string()))
+    }
+
+    fn rename(&self, collection: &str, old_name: &str, new_name: &str) -> DomainResult<()> {
+        self.rename_with(collection, old_name, new_name, &|path: &Path| {
+            fs::remove_file(path)
+        })
     }
 }
 
@@ -874,5 +930,169 @@ edges:
             !raw.contains("timeoutMs"),
             "no camelCase on disk, got:\n{raw}"
         );
+    }
+
+    fn flow_files(dir: &TempDir) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir.path().join("acme").join("flows"))
+            .expect("read flows dir")
+            .map(|e| {
+                e.expect("dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn rename_moves_the_flow_to_a_new_file_and_keeps_its_content() {
+        let (dir, repo) = setup();
+        let original = sample("Login Flow");
+        repo.save("acme", &original).expect("save");
+
+        repo.rename("acme", "Login Flow", "Sign In").expect("rename");
+
+        assert_eq!(flow_files(&dir), vec!["sign-in.yml".to_string()]);
+        assert!(matches!(
+            repo.get("acme", "Login Flow"),
+            Err(DomainError::NotFound(_))
+        ));
+        let loaded = repo.get("acme", "Sign In").expect("get renamed");
+        assert_eq!(loaded.name, "Sign In");
+        assert_eq!(loaded.nodes, original.nodes);
+        assert_eq!(repo.list("acme").expect("list"), vec!["Sign In".to_string()]);
+    }
+
+    #[test]
+    fn rename_that_only_changes_case_rewrites_the_same_file() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Login Flow")).expect("save");
+
+        repo.rename("acme", "Login Flow", "login flow")
+            .expect("case-only rename");
+
+        assert_eq!(flow_files(&dir), vec!["login-flow.yml".to_string()]);
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["login flow".to_string()]
+        );
+        assert!(repo.get("acme", "Login Flow").is_err());
+        assert!(repo.get("acme", "login flow").is_ok());
+    }
+
+    #[test]
+    fn rename_that_only_changes_punctuation_rewrites_the_same_file() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("My Flow")).expect("save");
+
+        repo.rename("acme", "My Flow", "My Flow!").expect("rename");
+
+        assert_eq!(flow_files(&dir), vec!["my-flow.yml".to_string()]);
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["My Flow!".to_string()]
+        );
+    }
+
+    #[test]
+    fn rename_onto_an_existing_flow_is_a_conflict_and_changes_nothing() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Login Flow")).expect("save a");
+        repo.save("acme", &sample("Other Flow")).expect("save b");
+
+        let err = repo
+            .rename("acme", "Login Flow", "Other Flow")
+            .expect_err("target exists");
+        assert!(matches!(err, DomainError::Conflict(_)));
+        assert_eq!(
+            flow_files(&dir),
+            vec!["login-flow.yml".to_string(), "other-flow.yml".to_string()]
+        );
+        assert!(repo.get("acme", "Login Flow").is_ok());
+        assert!(repo.get("acme", "Other Flow").is_ok());
+    }
+
+    #[test]
+    fn rename_onto_a_different_name_with_the_same_slug_is_a_conflict() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("My Flow")).expect("save a");
+        repo.save("acme", &sample("Old")).expect("save b");
+
+        // "my-flow" slugifies to the file that holds "My Flow".
+        let err = repo
+            .rename("acme", "Old", "my-flow")
+            .expect_err("slug is taken");
+        assert!(matches!(err, DomainError::Conflict(_)));
+        assert_eq!(
+            flow_files(&dir),
+            vec!["my-flow.yml".to_string(), "old.yml".to_string()]
+        );
+        assert_eq!(
+            repo.get("acme", "My Flow").expect("get").name,
+            "My Flow".to_string()
+        );
+    }
+
+    #[test]
+    fn rename_with_a_wrong_old_name_is_not_found_and_leaves_the_file_alone() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Login Flow")).expect("save");
+
+        // Same slug, different name, so it is a different flow.
+        let err = repo
+            .rename("acme", "Login flow", "Sign In")
+            .expect_err("wrong old name");
+        assert!(matches!(err, DomainError::NotFound(_)));
+        let err = repo
+            .rename("acme", "No Such Flow", "Sign In")
+            .expect_err("missing flow");
+        assert!(matches!(err, DomainError::NotFound(_)));
+        assert_eq!(flow_files(&dir), vec!["login-flow.yml".to_string()]);
+        assert_eq!(
+            repo.get("acme", "Login Flow").expect("get").name,
+            "Login Flow".to_string()
+        );
+    }
+
+    #[test]
+    fn rename_to_a_name_with_an_empty_slug_is_rejected_and_keeps_the_old_file() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Login Flow")).expect("save");
+
+        let err = repo
+            .rename("acme", "Login Flow", "!!!")
+            .expect_err("empty slug");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert_eq!(flow_files(&dir), vec!["login-flow.yml".to_string()]);
+        assert!(repo.get("acme", "Login Flow").is_ok());
+    }
+
+    #[test]
+    fn failed_removal_of_the_old_file_rolls_back_so_there_is_never_a_second_flow() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Login Flow")).expect("save");
+
+        let err = repo
+            .rename_with("acme", "Login Flow", "Sign In", &|_: &Path| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "locked",
+                ))
+            })
+            .expect_err("removal fails");
+        assert!(matches!(err, DomainError::Io(_)));
+
+        // Only the original file remains, still under the old name, and no temp file is left.
+        assert_eq!(flow_files(&dir), vec!["login-flow.yml".to_string()]);
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["Login Flow".to_string()]
+        );
+        assert!(matches!(
+            repo.get("acme", "Sign In"),
+            Err(DomainError::NotFound(_))
+        ));
     }
 }

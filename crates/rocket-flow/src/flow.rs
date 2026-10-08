@@ -1,5 +1,5 @@
 use crate::node::{FlowNodeKind, NodePosition};
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
 /// A placed node. `id` is the only identity key within a `Flow`'s `nodes`.
@@ -62,6 +62,22 @@ pub trait FlowRepository: Send + Sync {
     fn get(&self, collection: &str, name: &str) -> DomainResult<Flow>;
     fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()>;
     fn delete(&self, collection: &str, name: &str) -> DomainResult<()>;
+
+    /// Renames a flow. The default body (get, check the target, save under the
+    /// new name, delete the old one) suits name-keyed stores. File-backed
+    /// stores whose keys are derived from the name must override it, because
+    /// two names can map to one key.
+    fn rename(&self, collection: &str, old_name: &str, new_name: &str) -> DomainResult<()> {
+        let mut flow = self.get(collection, old_name)?;
+        if self.get(collection, new_name).is_ok() {
+            return Err(DomainError::Conflict(format!(
+                "Flow '{new_name}' already exists in collection '{collection}'"
+            )));
+        }
+        flow.name = new_name.to_string();
+        self.save(collection, &flow)?;
+        self.delete(collection, old_name)
+    }
 }
 
 #[cfg(test)]
@@ -388,5 +404,49 @@ mod tests {
         );
         let back: Flow = serde_yaml::from_str(&yaml).expect("deserialize");
         assert_eq!(back, flow);
+    }
+
+    #[test]
+    fn default_rename_moves_the_flow_to_the_new_name() {
+        let repo = FakeRepo::new();
+        let flow = sample_flow();
+        repo.save("my-collection", &flow).expect("save");
+        repo.rename("my-collection", &flow.name, "Renamed")
+            .expect("rename");
+        assert!(repo.get("my-collection", &flow.name).is_err());
+        let renamed = repo.get("my-collection", "Renamed").expect("get renamed");
+        assert_eq!(renamed.name, "Renamed");
+        assert_eq!(renamed.nodes, flow.nodes);
+        assert_eq!(repo.list("my-collection").expect("list").len(), 1);
+    }
+
+    #[test]
+    fn default_rename_onto_an_existing_flow_is_a_conflict() {
+        let repo = FakeRepo::new();
+        let flow = sample_flow();
+        repo.save("my-collection", &flow).expect("save first");
+        let mut other = sample_flow();
+        other.name = "Other".to_string();
+        repo.save("my-collection", &other).expect("save other");
+        let err = repo
+            .rename("my-collection", &flow.name, "Other")
+            .expect_err("target exists");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::Conflict(_)
+        ));
+        assert_eq!(repo.list("my-collection").expect("list").len(), 2);
+    }
+
+    #[test]
+    fn default_rename_of_a_missing_flow_is_not_found() {
+        let repo = FakeRepo::new();
+        let err = repo
+            .rename("my-collection", "nope", "Renamed")
+            .expect_err("missing");
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::NotFound(_)
+        ));
     }
 }
