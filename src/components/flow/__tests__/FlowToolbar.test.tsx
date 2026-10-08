@@ -1399,4 +1399,71 @@ describe('FlowToolbar', () => {
       expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-7');
     });
   });
+
+  describe('partial runs', () => {
+    const ask = (detail: object) =>
+      act(() => {
+        window.dispatchEvent(new CustomEvent('rocket:flow-run', { detail }));
+      });
+    const runB = { tabId: 'tab-1', partial: { startNodeId: 'b', mode: 'node' } };
+    const withBase = { tabId: 'tab-1', tabRunState: 'done' as const, tabRunId: 'run-0' };
+
+    it('runs the requested part on top of the tab run', async () => {
+      renderToolbar(withBase);
+      ask(runB);
+      await waitFor(() =>
+        expect(tauriApi.runFlow).toHaveBeenCalledWith(
+          'my-collection',
+          'my-flow',
+          null,
+          null,
+          undefined,
+          {
+            runId: 'run-123',
+            partial: { baseRunId: 'run-0', startNodeId: 'b', mode: 'node' },
+          },
+        ),
+      );
+    });
+
+    it('ignores a partial request when the tab has no run to build on', async () => {
+      renderToolbar({ tabId: 'tab-1' });
+      ask(runB);
+      await act(async () => {});
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+    });
+
+    it('starts one run when asked twice', async () => {
+      renderToolbar(withBase);
+      ask(runB);
+      ask({ tabId: 'tab-1' });
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
+    });
+
+    it('passes the partial info from flow-run-started on', async () => {
+      renderToolbar(withBase);
+      ask(runB);
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      const info = { baseRunId: 'run-0', startNodeId: 'b', mode: 'node' as const, nodeIds: ['b'] };
+      startedHandler?.({
+        type: 'flowRunStarted',
+        run_id: 'run-123',
+        flow_name: 'my-flow',
+        collection: 'my-collection',
+        total_nodes: 1,
+        partial: info,
+      });
+      expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123', info);
+    });
+
+    it('keeps the base run id when the backend refuses', async () => {
+      const refusal = "Invalid input: 'a' changed since the earlier run — node(s): a; edge(s): ";
+      vi.mocked(tauriApi.runFlow).mockRejectedValue(refusal);
+      const onRunError = vi.fn();
+      renderToolbar({ ...withBase, onRunError });
+      ask(runB);
+      await waitFor(() => expect(onRunError).toHaveBeenCalledWith(refusal));
+      expect(onRunStateChange).toHaveBeenLastCalledWith('done', 'run-0');
+    });
+  });
 });

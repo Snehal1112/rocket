@@ -4,6 +4,11 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { newFlowRunId } from '@/lib/flow-run-id';
+import {
+  FLOW_RUN_EVENT,
+  type FlowRunRequestDetail,
+  type PartialRunRequest,
+} from '@/lib/flow-run-request';
 import { type FlowRunResult, resultFromFinishedEvent, summarizeRun } from '@/lib/flow-run-result';
 import {
   cancelFlowRun,
@@ -11,6 +16,8 @@ import {
   type FlowDebugRequest,
   type FlowLiveProgress,
   type FlowLogEntry,
+  type FlowPartialRunInfo,
+  type FlowPartialRunRequest,
   type FlowRunStartedEvent,
   type FlowStepCompletedEvent,
   type FlowStepProgressEvent,
@@ -20,6 +27,7 @@ import {
   onFlowStepCompleted,
   onFlowStepProgress,
   onFlowStepStarted,
+  type RunFlowOptions,
   runFlow,
 } from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
@@ -35,7 +43,14 @@ interface FlowToolbarProps {
   onPatchProgress?: (nodeId: string, message: string, live?: FlowLiveProgress) => void;
   // Receives the callback URL of each Wait node when this toolbar's run starts.
   onCallbackUrls?: (urls: Record<string, string>) => void;
-  onRunStateChange: (state: 'running' | 'done', runId?: string) => void;
+  onRunStateChange: (
+    state: 'running' | 'done',
+    runId?: string,
+    partial?: FlowPartialRunInfo,
+  ) => void;
+  // Receives the message of a run that could not start, such as a refused
+  // partial run that names nodes.
+  onRunError?: (message: string) => void;
   // The tab's stored run state. The toolbar unmounts when its tab is hidden,
   // so a remounted toolbar reads an in-progress run from here.
   tabRunState?: 'idle' | 'running' | 'done';
@@ -122,6 +137,7 @@ export function FlowToolbar({
   onPatchProgress,
   onCallbackUrls,
   onRunStateChange,
+  onRunError,
   tabRunState,
   tabRunId,
   tabPendingRunId,
@@ -253,8 +269,15 @@ export function FlowToolbar({
     };
   }, [resumedRunId]);
 
-  const handleRun = async () => {
+  const handleRun = async (partialRequest?: PartialRunRequest) => {
     if (isStartingRef.current || liveRunId !== null) return;
+    // A partial run builds on the tab's last run. Without one there is
+    // nothing to reuse, and the menu does not offer it.
+    let partial: FlowPartialRunRequest | undefined;
+    if (partialRequest) {
+      if (!tabRunId) return;
+      partial = { baseRunId: tabRunId, ...partialRequest };
+    }
     isStartingRef.current = true;
     // The environment can change while the run is going, so keep the one it started with.
     const runEnvironment = environmentName;
@@ -338,7 +361,8 @@ export function FlowToolbar({
       if (started || !isOurs(event.run_id)) return;
       started = true;
       startedAt = performance.now();
-      onRunStateChange('running', runId);
+      if (event.partial) onRunStateChange('running', runId, event.partial);
+      else onRunStateChange('running', runId);
       // After the run state, because a new run drops older URLs.
       const urls = callbackUrlsFrom(event);
       if (Object.keys(urls).length > 0) onCallbackUrls?.(urls);
@@ -374,13 +398,14 @@ export function FlowToolbar({
       // Tokens are sent only when there are some, so a flow without Auth nodes
       // sends no authTokens key.
       const tokens = authTokens && Object.keys(authTokens).length > 0 ? authTokens : undefined;
+      const options: RunFlowOptions = partial ? { runId, partial } : { runId };
       const summary = await runFlow(
         collection,
         flowName,
         environmentName,
         globalEnvName ?? null,
         tokens,
-        { runId },
+        options,
       );
       ended = true;
       // The summary is the authoritative final state. Event delivery is not
@@ -398,7 +423,9 @@ export function FlowToolbar({
     } catch (err) {
       ended = true;
       // A run that cannot start rejects before any event is emitted.
-      toast.error(`Could not run flow: ${String(err)}`);
+      const message = String(err);
+      toast.error(`Could not run flow: ${message}`);
+      onRunError?.(message);
       // A run that had started leaves a result, so its partial results stay viewable.
       if (hasStarted()) {
         onRunResult?.({
@@ -410,7 +437,9 @@ export function FlowToolbar({
           environmentName: runEnvironment,
         });
       }
-      onRunStateChange('done');
+      // A refused partial run keeps the tab's last run, so the user can retry.
+      if (partial) onRunStateChange('done', partial.baseRunId);
+      else onRunStateChange('done');
     } finally {
       ownedRunIds.delete(runId);
       setActiveRunId(null);
@@ -426,11 +455,11 @@ export function FlowToolbar({
   useEffect(() => {
     if (!tabId) return;
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ tabId?: string }>).detail;
-      if (detail?.tabId === tabId) void handleRunRef.current();
+      const detail = (e as CustomEvent<Partial<FlowRunRequestDetail>>).detail;
+      if (detail?.tabId === tabId) void handleRunRef.current(detail.partial);
     };
-    window.addEventListener('rocket:flow-run', handler);
-    return () => window.removeEventListener('rocket:flow-run', handler);
+    window.addEventListener(FLOW_RUN_EVENT, handler);
+    return () => window.removeEventListener(FLOW_RUN_EVENT, handler);
   }, [tabId]);
 
   const handleStop = () => {

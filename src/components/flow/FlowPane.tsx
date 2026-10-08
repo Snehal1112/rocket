@@ -18,6 +18,7 @@ import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
 import { computeFlowIssues } from '@/lib/flow-issues';
 import { buildRunRecord } from '@/lib/flow-run-history';
+import { requestFlowRun } from '@/lib/flow-run-request';
 import type { FlowRunResult } from '@/lib/flow-run-result';
 import { flowPayloadFromTab } from '@/lib/flow-save';
 import {
@@ -31,6 +32,7 @@ import {
   type FlowNode,
   type FlowNodeKind,
   type FlowNodeStatus,
+  type FlowPartialMode,
   saveFlow,
 } from '@/lib/tauri-api';
 import { useConsoleStore } from '@/stores/console-store';
@@ -429,6 +431,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const shownDetail = viewedRecord ? viewedRecord.nodeDetail : tab.nodeDetail;
   const shownRun = viewedRecord ? viewedRecord.result : tab.lastRun;
 
+  // The toolbar owns the run lifecycle, so the node menu asks it to run.
+  const handleRunNode = (nodeId: string, mode: FlowPartialMode) =>
+    requestFlowRun({ tabId: tab.id, partial: { startNodeId: nodeId, mode } });
+
   return (
     <ResizablePanelGroup className='h-full'>
       <ResizablePanel id='flow-canvas-panel' minSize='40%'>
@@ -561,6 +567,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
           />
           <NodePalette onAddNode={handleAddNode} nodes={tab.nodes} />
           <FlowCanvas
+            onRunNode={tab.runId ? handleRunNode : undefined}
+            runBusy={tab.runState === 'running' || tab.pendingRunId !== undefined}
             nodes={tab.nodes}
             edges={tab.edges}
             nodeStatus={shownStatus}

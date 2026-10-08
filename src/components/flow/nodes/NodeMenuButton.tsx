@@ -1,4 +1,4 @@
-import { MoreVertical } from 'lucide-react';
+import { FastForward, MoreVertical, Play } from 'lucide-react';
 import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -6,6 +6,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
@@ -13,15 +14,19 @@ import { useFlowNodeActions } from './FlowNodeActionsContext';
 interface NodeMenuButtonProps {
   nodeId: string;
   label: string;
-  /** When set, the button opens a menu with a debug mode toggle. */
+  /** When set, the menu has a debug mode toggle. */
   debug?: { enabled: boolean; onToggle: (enabled: boolean) => void };
+  /** A Wait for callback node cannot run on its own, so "Run this node" is disabled. */
+  isWait?: boolean;
 }
 
-// Without `debug`, opens the node's properties panel. With it, opens a menu.
-// `nodrag nokey` keeps a click from dragging the node and keeps key presses on
-// the button away from the canvas.
-export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
-  const { openProperties, duplicateNode } = useFlowNodeActions();
+// Opens a menu when it has more than Edit properties: a debug toggle, or run
+// items once the tab has a run to build on. Otherwise a click opens the
+// node's properties panel directly. `nodrag nokey` keeps a click from
+// dragging the node and keeps key presses on the button away from the canvas.
+export function NodeMenuButton({ nodeId, label, debug, isWait = false }: NodeMenuButtonProps) {
+  const { openProperties, duplicateNode, runNode, runBusy = false } = useFlowNodeActions();
+  const hasMenu = debug !== undefined || runNode !== undefined;
   const openedProperties = useRef(false);
   const trigger = (
     <Button
@@ -30,13 +35,13 @@ export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
       size='icon'
       aria-label={`Edit ${label}`}
       className='nodrag nokey ml-auto h-5 w-5 shrink-0 text-muted-foreground'
-      onClick={debug ? undefined : () => openProperties(nodeId)}
+      onClick={hasMenu ? undefined : () => openProperties(nodeId)}
     >
       <MoreVertical className='h-3.5 w-3.5' aria-hidden='true' />
     </Button>
   );
 
-  if (!debug) return trigger;
+  if (!hasMenu) return trigger;
 
   return (
     <DropdownMenu>
@@ -65,12 +70,27 @@ export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
         {duplicateNode && (
           <DropdownMenuItem onSelect={() => duplicateNode(nodeId)}>Duplicate</DropdownMenuItem>
         )}
-        <DropdownMenuCheckboxItem
-          checked={debug.enabled}
-          onCheckedChange={(value) => debug.onToggle(value === true)}
-        >
-          Debug mode
-        </DropdownMenuCheckboxItem>
+        {runNode && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={runBusy || isWait} onSelect={() => runNode(nodeId, 'node')}>
+              <Play className='h-3.5 w-3.5' aria-hidden='true' />
+              Run this node
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={runBusy} onSelect={() => runNode(nodeId, 'fromHere')}>
+              <FastForward className='h-3.5 w-3.5' aria-hidden='true' />
+              Run from here
+            </DropdownMenuItem>
+          </>
+        )}
+        {debug && (
+          <DropdownMenuCheckboxItem
+            checked={debug.enabled}
+            onCheckedChange={(value) => debug.onToggle(value === true)}
+          >
+            Debug mode
+          </DropdownMenuCheckboxItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

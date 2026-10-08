@@ -74,7 +74,7 @@ export function WaitForCallbackNode({
         <span className='truncate font-medium'>{kind.label}</span>
         <NodeIssueBadge issues={data.issues} />
         <NodeStatusIcon status={data.status} />
-        <NodeMenuButton nodeId={id} label={kind.label} />
+        <NodeMenuButton nodeId={id} label={kind.label} isWait />
       </div>
 
       {status === 'success' && (

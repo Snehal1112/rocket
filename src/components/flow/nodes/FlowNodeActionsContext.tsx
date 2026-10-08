@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { FlowNodeKind } from '@/lib/tauri-api';
+import type { FlowNodeKind, FlowPartialMode } from '@/lib/tauri-api';
 
 export interface FlowNodeActions {
   updateNodeKind: (nodeId: string, kind: FlowNodeKind) => void;
@@ -8,6 +8,10 @@ export interface FlowNodeActions {
   openProperties: (nodeId: string) => void;
   /** Duplicates just this node. Absent when the canvas cannot duplicate. */
   duplicateNode?: (nodeId: string) => void;
+  /** Starts a partial run from this node. Absent until the tab has a run to build on. */
+  runNode?: (nodeId: string, mode: FlowPartialMode) => void;
+  /** True while a run is starting or in progress. Disables the run items. */
+  runBusy?: boolean;
 }
 
 const noop = () => {

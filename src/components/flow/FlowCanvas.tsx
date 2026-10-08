@@ -27,7 +27,13 @@ import { type FlowIssue, groupIssuesByNode } from '@/lib/flow-issues';
 import { layoutFlow } from '@/lib/flow-layout';
 import { type ConnectionLike, isValidFlowConnection } from '@/lib/flow-wiring';
 import type { SavedRequestPreview } from '@/lib/saved-request-preview';
-import type { FlowEdge, FlowNode, FlowNodeKind, FlowNodeStatus } from '@/lib/tauri-api';
+import type {
+  FlowEdge,
+  FlowNode,
+  FlowNodeKind,
+  FlowNodeStatus,
+  FlowPartialMode,
+} from '@/lib/tauri-api';
 import type { FlowNodeDetail } from '@/types/pane-types';
 import { FlowSearchBar } from './FlowSearchBar';
 import { flowEdgeAriaLabel, flowNodeAriaLabel } from './flowA11y';
@@ -88,6 +94,10 @@ export interface FlowCanvasProps {
   onSelectedNodeIdsChange?: (ids: ReadonlySet<string>) => void;
   // Called when a node's menu button or a double-click opens its properties.
   onOpenProperties?: (nodeId: string) => void;
+  // Starts a partial run from a node menu. Absent while the tab has no run to build on.
+  onRunNode?: (nodeId: string, mode: FlowPartialMode) => void;
+  // True while a run is starting or in progress. Disables the run items.
+  runBusy?: boolean;
   // The running flow's callback URL per Wait node id. Absent when no run is active.
   callbackUrls?: Record<string, string>;
   // A node or selection drag starts or ends. The owner brackets the drag's writes into one undo step.
@@ -310,6 +320,8 @@ function FlowCanvasInner({
   selectedNodeIds: selectedNodeIdsProp,
   onSelectedNodeIdsChange,
   onOpenProperties,
+  onRunNode,
+  runBusy,
   callbackUrls,
   onGestureStart,
   onGestureEnd,
@@ -465,6 +477,10 @@ function FlowCanvasInner({
     const live = new Set(edges.map((e) => e.id));
     setSelectedEdgeIds((prev) => pruneSelection(prev, live));
   }, [edges]);
+  // A ref, so a new callback each render does not rebuild every node.
+  const onRunNodeRef = useRef(onRunNode);
+  onRunNodeRef.current = onRunNode;
+  const canRunNode = onRunNode !== undefined;
   const nodeActions = useMemo<FlowNodeActions>(
     () => ({
       updateNodeKind: (nodeId, kind) => onNodeKindChange?.(nodeId, kind),
@@ -474,8 +490,10 @@ function FlowCanvasInner({
         onOpenPropertiesRef.current?.(nodeId);
       },
       duplicateNode: onDuplicateNode,
+      runNode: canRunNode ? (nodeId, mode) => onRunNodeRef.current?.(nodeId, mode) : undefined,
+      runBusy,
     }),
-    [onNodeKindChange, onRemoveSwitchCase, onDuplicateNode],
+    [onNodeKindChange, onRemoveSwitchCase, onDuplicateNode, canRunNode, runBusy],
   );
 
   // Refuses wires the backend would reject, while the user is still dragging.
