@@ -9,6 +9,7 @@ import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
+import { NodeStatusIcon } from './NodeStatusIcon';
 import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export interface RequestNodeData {
@@ -73,6 +74,7 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
           />
         )}
         <NodeIssueBadge issues={data.issues} />
+        <NodeStatusIcon status={data.status} />
         <NodeMenuButton
           nodeId={id}
           label={kind.label}

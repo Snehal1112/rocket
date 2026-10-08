@@ -15,6 +15,7 @@ import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
+import { NodeStatusIcon } from './NodeStatusIcon';
 import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export type SwitchNodeData = {
@@ -103,6 +104,7 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
         <span className='font-mono text-[10px] text-muted-foreground'>Switch</span>
         <span className='truncate font-medium'>{kind.label}</span>
         <NodeIssueBadge issues={data.issues} />
+        <NodeStatusIcon status={data.status} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 

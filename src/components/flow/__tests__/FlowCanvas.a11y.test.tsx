@@ -132,3 +132,96 @@ describe('FlowCanvas keyboard behaviour with names in place', () => {
     await waitFor(() => expect(onSelect).toHaveBeenLastCalledWith(new Set(['a', 'b', 'c'])));
   });
 });
+
+describe('FlowCanvas status icons', () => {
+  const at = { x: 0, y: 0 };
+  const everyKind: FlowNode[] = [
+    {
+      id: 'auth',
+      position: at,
+      kind: {
+        kind: 'Auth',
+        label: 'Sign in',
+        auth: { authType: 'bearer', token: 't' },
+        applyToInherit: false,
+      },
+    },
+    {
+      id: 'req',
+      position: at,
+      kind: {
+        kind: 'Request',
+        label: 'Fetch',
+        source: { type: 'Inline', request: { method: 'GET', url: 'https://x.test', headers: [] } },
+      },
+    },
+    { id: 'in', position: at, kind: { kind: 'Input', label: 'Key', value: 'k' } },
+    { id: 'out', position: at, kind: { kind: 'Output', label: 'Shown' } },
+    { id: 'if', position: at, kind: { kind: 'If', label: 'Check', condition: 'true' } },
+    {
+      id: 'sw',
+      position: at,
+      kind: {
+        kind: 'Switch',
+        label: 'Route',
+        value: 'x',
+        cases: [{ id: 'c1', label: 'One', matches: '1' }],
+      },
+    },
+    { id: 'tf', position: at, kind: { kind: 'Transform', label: 'Pick', script: 'return 1;' } },
+    {
+      id: 'wait',
+      position: at,
+      kind: { kind: 'WaitForCallback', label: 'Hook', name: 'cb', timeoutMs: 60000 },
+    },
+  ];
+  const cardIds = [
+    'auth-node-card',
+    'request-node-card',
+    'input-node-card',
+    'output-node-card',
+    'if-node-card',
+    'switch-node-card',
+    'transform-node-card',
+    'wait-node-card',
+  ];
+  const card = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+
+  function renderKinds(status: 'idle' | 'success' | 'failed' | 'skipped' | 'running') {
+    return render(
+      <FlowCanvas
+        nodes={everyKind}
+        edges={[]}
+        nodeStatus={Object.fromEntries(everyKind.map((n) => [n.id, status]))}
+        onNodesChange={vi.fn()}
+        onEdgesChange={vi.fn()}
+        onConnect={vi.fn()}
+      />,
+    );
+  }
+
+  it('shows no icon on idle nodes', () => {
+    renderKinds('idle');
+    for (const id of cardIds) {
+      expect(card(id)?.querySelector('[data-testid="node-status-icon"]'), id).toBeNull();
+    }
+  });
+
+  it.each(['running', 'success', 'failed', 'skipped'] as const)(
+    'shows a %s icon in the header of all eight node kinds',
+    (status) => {
+      renderKinds(status);
+      for (const id of cardIds) {
+        const icon = card(id)?.querySelector('[data-testid="node-status-icon"]');
+        expect(icon, id).toHaveAttribute('data-status', status);
+        expect(icon, id).toHaveAttribute('aria-hidden', 'true');
+      }
+    },
+  );
+
+  it('keeps the status in each node name, so the icon is not the only carrier', () => {
+    renderKinds('failed');
+    expect(nodeEl('req')).toHaveAttribute('aria-label', 'Fetch, request node, failed');
+    expect(nodeEl('wait')).toHaveAttribute('aria-label', 'Hook, wait for callback node, failed');
+  });
+});

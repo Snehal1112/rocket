@@ -11,6 +11,7 @@ import { CallbackUrlField } from '../CallbackUrlField';
 import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
+import { NodeStatusIcon } from './NodeStatusIcon';
 import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export interface WaitForCallbackNodeData {
@@ -72,6 +73,7 @@ export function WaitForCallbackNode({
         <Hourglass className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden='true' />
         <span className='truncate font-medium'>{kind.label}</span>
         <NodeIssueBadge issues={data.issues} />
+        <NodeStatusIcon status={data.status} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 

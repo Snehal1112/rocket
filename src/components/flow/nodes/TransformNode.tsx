@@ -9,6 +9,7 @@ import { DurationChip } from './DurationChip';
 import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
+import { NodeStatusIcon } from './NodeStatusIcon';
 import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export type TransformNodeData = {
@@ -60,6 +61,7 @@ export function TransformNode({
         <span className='font-mono text-[10px] text-muted-foreground'>Transform</span>
         <span className='truncate font-medium'>{kind.label}</span>
         <NodeIssueBadge issues={data.issues} />
+        <NodeStatusIcon status={data.status} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 

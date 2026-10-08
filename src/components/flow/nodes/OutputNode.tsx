@@ -11,6 +11,7 @@ import { DurationChip } from './DurationChip';
 import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
+import { NodeStatusIcon } from './NodeStatusIcon';
 import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export interface OutputNodeData {
@@ -65,6 +66,7 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
       <div className='flex items-center gap-1.5 border-b px-2 py-1.5 font-medium'>
         <span className='truncate'>{data.kind.label}</span>
         <NodeIssueBadge issues={data.issues} />
+        <NodeStatusIcon status={data.status} />
         <NodeMenuButton nodeId={id} label={data.kind.label} />
       </div>
       <NodeStatusCaption

@@ -12,6 +12,7 @@ import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeIssueBadge } from './NodeIssueBadge';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
+import { NodeStatusIcon } from './NodeStatusIcon';
 import { issueRingClassName, nodeStatusClassName } from './nodeStatus';
 
 export type IfNodeData = {
@@ -55,6 +56,7 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
         <span className='font-mono text-[10px] text-muted-foreground'>If</span>
         <span className='truncate font-medium'>{kind.label}</span>
         <NodeIssueBadge issues={data.issues} />
+        <NodeStatusIcon status={data.status} />
         <NodeMenuButton nodeId={id} label={kind.label} />
       </div>
 
