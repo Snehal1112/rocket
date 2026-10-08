@@ -134,6 +134,30 @@ are not compared with the base run's). Values the base run masked are masked
 again under `}}prev-run.<n>` external-secret keys. No `{{template}}` can
 reference them, but a script can read one by exact name (`rok.getSecretVar`).
 
+## Flow run ids (`flow_run_id.rs`)
+
+`FlowExecutionService::run_with_options(exec, input, tokens, FlowRunOptions { run_id, partial })`
+is the one run entry; `run_with_auth` and `run_partial` call it. The frontend
+chooses the run id (a UUID from `newFlowRunId()` in `src/lib/flow-run-id.ts`)
+and sends it as `runId` in `RunFlowInputDto`; without one the service makes a
+ULID (`choose_run_id`). A chosen id must be 1 to 64 ASCII letters, digits, `-`
+or `_`, or the run is refused with `InvalidInput` before any event (the message
+does not quote the id). `RunRegistration::reserve` registers the id first
+thing in the run and refuses with `AlreadyExists` an id that is in flight or
+still kept in the run cache. A run is cached before it leaves `in_flight`, so a
+used id is never free while it is kept. The id names the run in every
+`FlowRun*` and `FlowStep*` event, in `cancel` (`cancel_flow_run`), in the run
+cache and in `FlowRunSummary.run_id`. A `cancel` that arrives while secrets,
+tokens and callback endpoints are prepared is kept and stops the run before its
+first node (`FlowRunStarted` and `FlowRunFinished` still go out); the fetch
+itself is not interrupted (roadmap F-05).
+
+Frontend: `FlowToolbar` makes the id after the save and sign-in steps, stores it
+on the tab as `pendingRunId` (`setFlowPendingRun`) before `run_flow` is sent,
+and ignores every event with another id and every event after `run_flow`
+settled. A remounted toolbar follows the tab's `pendingRunId` until
+`flow-run-started`, then its `runId`. `setFlowRunState` clears `pendingRunId`.
+
 ## Flow step trace (`flow_trace.rs`)
 
 `execute_node` fills a `NodeTrace` out-param; the run loop moves it into
