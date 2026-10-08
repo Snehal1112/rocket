@@ -21,7 +21,7 @@ interface NodeMenuButtonProps {
 // `nodrag nokey` keeps a click from dragging the node and keeps key presses on
 // the button away from the canvas.
 export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
-  const { openProperties } = useFlowNodeActions();
+  const { openProperties, duplicateNode } = useFlowNodeActions();
   const openedProperties = useRef(false);
   const trigger = (
     <Button
@@ -62,6 +62,9 @@ export function NodeMenuButton({ nodeId, label, debug }: NodeMenuButtonProps) {
         >
           Edit properties
         </DropdownMenuItem>
+        {duplicateNode && (
+          <DropdownMenuItem onSelect={() => duplicateNode(nodeId)}>Duplicate</DropdownMenuItem>
+        )}
         <DropdownMenuCheckboxItem
           checked={debug.enabled}
           onCheckedChange={(value) => debug.onToggle(value === true)}
