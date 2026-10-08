@@ -1533,6 +1533,7 @@ impl FlowExecutionService {
                     &secret_values,
                     logs,
                     exchange,
+                    trace,
                     ctx,
                     callbacks,
                 )
@@ -6605,7 +6606,7 @@ mod tests {
 
         let exchange = step_of(&summary, "w").exchange.clone().expect("exchange");
         assert_eq!(exchange.method, "POST");
-        assert_eq!(exchange.url, "/cb/0");
+        assert_eq!(exchange.url, "/cb/…", "the token path is hidden");
         let response = exchange.response.expect("response");
         assert!(response.body.contains("payment.completed"));
     }
@@ -7793,6 +7794,129 @@ mod tests {
             Some("Invalid input: no matching callback within 1s (1 ignored)")
         );
         assert!(fake.is_closed(0), "the endpoint closes after a failure");
+    }
+
+    #[tokio::test]
+    async fn a_turned_down_callback_is_reported_live_and_kept_masked_in_the_trace() {
+        let mut env = env_with(&[]);
+        let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");
+        key.secret = true;
+        env.set_variable(key);
+        // `scoped_exec` answers every `!!(` script with "the body is acme", so
+        // the call is turned down and the wait times out after 1 s.
+        let exec = scoped_exec(env, Vec::new());
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(crate::callback_listener::ReceivedCall {
+            method: "POST".to_string(),
+            path: "/cb/0".to_string(),
+            query: vec![("key".to_string(), "sk-live-123456".to_string())],
+            headers: vec![
+                ("Authorization".to_string(), "Bearer abcdef-123".to_string()),
+                ("X-Echo".to_string(), "sk-live-123456".to_string()),
+            ],
+            body: r#"{"secret":"sk-live-123456"}"#.to_string(),
+        });
+        let flow = Flow {
+            name: "cb-reject".to_string(),
+            nodes: vec![wait_node_with("w", 1000, Some("request.body.ok"))],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow, &publisher)
+            .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let mut input = run_input("cb-reject");
+        input.environment_name = Some("dev".to_string());
+
+        let summary = service.run(&exec, input).await.expect("run");
+
+        let step = step_of(&summary, "w");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        let wait = step
+            .trace
+            .clone()
+            .and_then(|t| t.wait)
+            .expect("wait detail");
+        assert_eq!(wait.ignored, 1);
+        assert_eq!(wait.timeout_ms, 1000);
+        let rejected = wait.last_rejected.expect("the turned-down call");
+        assert_eq!(
+            rejected.url,
+            format!("/cb/…?key={}", crate::redaction::REDACTED)
+        );
+        assert!(
+            rejected
+                .headers
+                .iter()
+                .all(|h| h.value == crate::redaction::REDACTED),
+            "{:?}",
+            rejected.headers
+        );
+        assert!(rejected.body.contains(crate::redaction::REDACTED));
+
+        let events = publisher.events();
+        let live = events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::FlowStepProgress {
+                    node_id,
+                    live: Some(live),
+                    ..
+                } if node_id == "w" && live.last_rejected.is_some() => Some((**live).clone()),
+                _ => None,
+            })
+            .expect("a live event with the turned-down call");
+        assert_eq!(live.ignored, Some(1));
+        for event in &events {
+            let json = serde_json::to_string(event).expect("serialize");
+            assert!(!json.contains("sk-live-123456"), "{json}");
+        }
+        let json = serde_json::to_string(&summary).expect("serialize");
+        assert!(!json.contains("sk-live-123456"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn only_the_turn_down_event_carries_the_call() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.pending"));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "const request",
+                Scripted::Value(serde_json::json!(false)),
+            )]),
+        );
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 1000, Some("request.body.ok"))),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+
+        service.run(&exec, run_input("cb")).await.expect("run");
+
+        let live: Vec<rocket_shared::events::FlowLiveProgress> = publisher
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                DomainEvent::FlowStepProgress {
+                    node_id,
+                    live: Some(live),
+                    ..
+                } if node_id == "w" => Some(*live),
+                _ => None,
+            })
+            .collect();
+        assert!(live.len() >= 2, "ticks and the turn-down event: {live:?}");
+        assert_eq!(
+            live.iter().filter(|l| l.last_rejected.is_some()).count(),
+            1,
+            "the 1 Hz ticker carries counts only"
+        );
+        assert!(live
+            .iter()
+            .all(|l| l.ignored.is_some() && l.remaining_ms.is_some()));
     }
 
     #[tokio::test]

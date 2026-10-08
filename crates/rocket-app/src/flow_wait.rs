@@ -7,21 +7,31 @@ use std::time::Duration;
 use rocket_flow::FlowNode;
 use rocket_http::HttpResponse;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{FlowDebugRequest, FlowLogEntry};
+use rocket_shared::events::{FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowWaitDetail};
 use rocket_shared::types::Header;
 use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 
 use crate::callback_listener::ReceivedCall;
 use crate::execution_service::{ExecuteRequestOutput, RequestExecutionService};
 use crate::flow_callbacks::RunCallbacks;
+use crate::flow_debug::{rejected_call, EXCHANGE_BODY_LIMIT, LIVE_REJECTED_BODY_LIMIT};
 use crate::flow_execution_service::{
     CapturedOutput, ExecutedNode, FlowExecutionService, NodeRunContext, RunFlowInput,
 };
+use crate::flow_trace::NodeTrace;
 
 /// Whole seconds left, shown as the countdown.
 fn seconds_left(remaining: Duration) -> u64 {
     u64::try_from(remaining.as_millis().div_ceil(1000)).unwrap_or(u64::MAX)
 }
+
+/// Whole milliseconds, for the live payload.
+fn millis(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Why a call that `accept_when` answered with false was turned down.
+const REJECT_REASON: &str = "Accept when returned false.";
 
 /// The node's output for an accepted call, shaped like a response so a
 /// downstream wire reads it as `response.body` / `response.headers`.
@@ -70,6 +80,7 @@ impl FlowExecutionService {
         secret_values: &HashSet<String>,
         logs: &mut Vec<FlowLogEntry>,
         exchange: &mut Option<FlowDebugRequest>,
+        trace: &mut NodeTrace,
         ctx: &mut NodeRunContext,
         callbacks: &mut RunCallbacks,
     ) -> DomainResult<ExecutedNode> {
@@ -83,6 +94,12 @@ impl FlowExecutionService {
         // A late tick is skipped, not replayed in a burst.
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut ignored: u32 = 0;
+        // The trace keeps the count and the last turned-down call, also on a timeout.
+        trace.step.wait = Some(FlowWaitDetail {
+            ignored: 0,
+            timeout_ms,
+            last_rejected: None,
+        });
 
         loop {
             tokio::select! {
@@ -117,6 +134,37 @@ impl FlowExecutionService {
                             "true" => {}
                             "false" => {
                                 ignored += 1;
+                                if let Some(wait) = trace.step.wait.as_mut() {
+                                    wait.ignored = ignored;
+                                    wait.last_rejected = Some(rejected_call(
+                                        &call,
+                                        secret_values,
+                                        EXCHANGE_BODY_LIMIT,
+                                        REJECT_REASON,
+                                    ));
+                                }
+                                // Shown at once, with a smaller body than the trace keeps.
+                                let remaining = deadline.saturating_duration_since(Instant::now());
+                                self.publish_live_progress(
+                                    ctx,
+                                    None,
+                                    None,
+                                    format!(
+                                        "waiting… {}s left · {ignored} ignored call(s)",
+                                        seconds_left(remaining)
+                                    ),
+                                    FlowLiveProgress {
+                                        remaining_ms: Some(millis(remaining)),
+                                        ignored: Some(ignored),
+                                        last_rejected: Some(rejected_call(
+                                            &call,
+                                            secret_values,
+                                            LIVE_REJECTED_BODY_LIMIT,
+                                            REJECT_REASON,
+                                        )),
+                                        ..Default::default()
+                                    },
+                                );
                                 continue;
                             }
                             other => {
@@ -138,12 +186,21 @@ impl FlowExecutionService {
                     ))));
                 }
                 _ = ticker.tick() => {
-                    let left = seconds_left(deadline.saturating_duration_since(Instant::now()));
-                    self.publish_progress(
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    // The ticker carries counts only, never a call.
+                    self.publish_live_progress(
                         ctx,
                         None,
                         None,
-                        format!("waiting… {left}s left · {ignored} ignored call(s)"),
+                        format!(
+                            "waiting… {}s left · {ignored} ignored call(s)",
+                            seconds_left(remaining)
+                        ),
+                        FlowLiveProgress {
+                            remaining_ms: Some(millis(remaining)),
+                            ignored: Some(ignored),
+                            ..Default::default()
+                        },
                     );
                 }
             }

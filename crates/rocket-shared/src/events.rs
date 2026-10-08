@@ -91,6 +91,9 @@ pub struct FlowStepTrace {
     /// How a repeat-until poll went.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poll: Option<FlowPollDetail>,
+    /// How a callback wait went.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<FlowWaitDetail>,
     /// The wire whose failure failed the step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed_edge_id: Option<String>,
@@ -132,6 +135,32 @@ pub struct FlowRouteEval {
     pub matched_case: Option<String>,
 }
 
+/// A call a Wait for callback node turned down, already masked. The body is
+/// masked first and cut second.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowRejectedCall {
+    pub method: String,
+    /// The path and query. The token-bearing path is shown as `/cb/…`.
+    pub url: String,
+    pub headers: Vec<FlowDebugHeader>,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub body_truncated: bool,
+    /// Why the call was turned down.
+    pub reason: String,
+}
+
+/// How a callback wait went. Kept in the step trace, also on a timeout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowWaitDetail {
+    pub ignored: u32,
+    pub timeout_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rejected: Option<FlowRejectedCall>,
+}
+
 /// Structured progress of a node that is still running. Every field is
 /// optional, so each node kind sends only what applies to it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +180,10 @@ pub struct FlowLiveProgress {
     /// Calls a Wait for callback node turned down so far.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignored: Option<u32>,
+    /// The call just turned down, with its body cut at 2 KB. Only the
+    /// turn-down event carries it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rejected: Option<FlowRejectedCall>,
 }
 
 /// How a repeat-until poll went. Kept in the step trace, also on failure.
@@ -1670,5 +1703,29 @@ mod tests {
             DomainEvent::FlowStepCompleted { trace, .. } => assert!(trace.is_none()),
             other => panic!("unexpected event {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_flow_wait_detail_carries_the_last_rejected_call() {
+        let trace = FlowStepTrace {
+            wait: Some(FlowWaitDetail {
+                ignored: 2,
+                timeout_ms: 60_000,
+                last_rejected: Some(FlowRejectedCall {
+                    method: "POST".into(),
+                    url: "/cb/…?x=1".into(),
+                    headers: Vec::new(),
+                    body: "{}".into(),
+                    body_truncated: false,
+                    reason: "Accept when returned false.".into(),
+                }),
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&trace).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"wait":{"ignored":2,"timeoutMs":60000,"lastRejected":{"method":"POST","url":"/cb/…?x=1","headers":[],"body":"{}","reason":"Accept when returned false."}}}"#
+        );
     }
 }

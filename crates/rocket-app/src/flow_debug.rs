@@ -1,9 +1,12 @@
 //! Builds the masked record of a request a Flow step sent.
 
+use crate::callback_listener::ReceivedCall;
 use crate::execution_service::sensitive_auth_label;
 use crate::redaction::{is_sensitive_header, redact_secrets, redact_url_secrets, REDACTED};
 use rocket_http::{HttpRequest, HttpResponse};
-use rocket_shared::events::{FlowDebugHeader, FlowDebugRequest, FlowDebugResponse};
+use rocket_shared::events::{
+    FlowDebugHeader, FlowDebugRequest, FlowDebugResponse, FlowRejectedCall,
+};
 use rocket_shared::types::{Auth, Body, BodyMode, Header};
 use std::collections::HashSet;
 
@@ -150,22 +153,29 @@ pub(crate) fn cap_text(text: &mut String, limit: usize) -> bool {
     true
 }
 
-/// The record of an accepted callback. The call itself is the response,
-/// so a reader sees what arrived; the request side holds its method and
-/// path.
-pub(crate) fn callback_exchange(
-    call: &crate::callback_listener::ReceivedCall,
-    duration_ms: u64,
-    secret_values: &HashSet<String>,
-) -> FlowDebugRequest {
-    let query: Vec<String> = call.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
-    let url = if query.is_empty() {
-        call.path.clone()
+/// The path and query of a received call. The path of a callback endpoint is
+/// its bearer token, so it is shown as `/cb/…`.
+fn call_url(call: &ReceivedCall) -> String {
+    let path = if call.path.starts_with("/cb/") {
+        "/cb/…".to_string()
     } else {
-        format!("{}?{}", call.path, query.join("&"))
+        call.path.clone()
     };
-    let headers = call
-        .headers
+    let query: Vec<String> = call.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    if query.is_empty() {
+        path
+    } else {
+        format!("{path}?{}", query.join("&"))
+    }
+}
+
+/// A received call's headers. A sensitive header is always masked, and every
+/// other value has its secrets masked.
+fn mask_call_headers(
+    headers: &[(String, String)],
+    secret_values: &HashSet<String>,
+) -> Vec<FlowDebugHeader> {
+    headers
         .iter()
         .map(|(key, value)| FlowDebugHeader {
             key: key.clone(),
@@ -175,10 +185,20 @@ pub(crate) fn callback_exchange(
                 redact_secrets(value, secret_values)
             },
         })
-        .collect();
+        .collect()
+}
+
+/// The record of an accepted callback. The call itself is the response,
+/// so a reader sees what arrived; the request side holds its method and
+/// path.
+pub(crate) fn callback_exchange(
+    call: &ReceivedCall,
+    duration_ms: u64,
+    secret_values: &HashSet<String>,
+) -> FlowDebugRequest {
     cap_exchange(FlowDebugRequest {
         method: call.method.clone(),
-        url: redact_url_secrets(&url, secret_values),
+        url: redact_url_secrets(&call_url(call), secret_values),
         headers: Vec::new(),
         body: None,
         body_truncated: false,
@@ -187,12 +207,35 @@ pub(crate) fn callback_exchange(
             status_text: call.method.clone(),
             duration_ms,
             size_bytes: call.body.len() as u64,
-            headers,
+            headers: mask_call_headers(&call.headers, secret_values),
             body: redact_secrets(&call.body, secret_values),
             truncated: false,
         }),
         error: None,
     })
+}
+
+/// The largest turned-down call body a live progress event carries, in bytes.
+pub(crate) const LIVE_REJECTED_BODY_LIMIT: usize = 2_048;
+
+/// The masked record of a call a Wait for callback node turned down. The body
+/// is masked first and cut to `body_limit` second.
+pub(crate) fn rejected_call(
+    call: &ReceivedCall,
+    secret_values: &HashSet<String>,
+    body_limit: usize,
+    reason: &str,
+) -> FlowRejectedCall {
+    let mut body = redact_secrets(&call.body, secret_values);
+    let body_truncated = cap_text(&mut body, body_limit);
+    FlowRejectedCall {
+        method: call.method.clone(),
+        url: redact_url_secrets(&call_url(call), secret_values),
+        headers: mask_call_headers(&call.headers, secret_values),
+        body,
+        body_truncated,
+        reason: reason.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -557,7 +600,7 @@ mod tests {
         };
         let record = callback_exchange(&call, 42, &secrets(&["sekret-token"]));
         assert_eq!(record.method, "POST");
-        assert_eq!(record.url, "/cb/abc?event=paid");
+        assert_eq!(record.url, "/cb/…?event=paid", "the token path is hidden");
         let response = record.response.expect("response");
         assert_eq!(response.status, 200);
         assert_eq!(response.status_text, "POST");
@@ -588,6 +631,62 @@ mod tests {
             body: String::new(),
         };
         let record = callback_exchange(&call, 1, &secrets(&[secret]));
-        assert_eq!(record.url, "/cb/abc?plain=••••••&enc=••••••");
+        assert_eq!(record.url, "/cb/…?plain=••••••&enc=••••••");
+    }
+
+    fn turned_down(body: &str) -> crate::callback_listener::ReceivedCall {
+        crate::callback_listener::ReceivedCall {
+            method: "POST".into(),
+            path: "/cb/abc".into(),
+            query: vec![("token".into(), "sekret-token".into())],
+            headers: vec![
+                ("Authorization".into(), "Bearer x".into()),
+                ("X-Echo".into(), "sekret-token".into()),
+                ("Content-Type".into(), "application/json".into()),
+            ],
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn a_rejected_call_masks_sensitive_headers_secrets_and_the_url() {
+        let call = turned_down(r#"{"t":"sekret-token"}"#);
+        let record = rejected_call(
+            &call,
+            &secrets(&["sekret-token"]),
+            EXCHANGE_BODY_LIMIT,
+            "no match",
+        );
+        assert_eq!(record.method, "POST");
+        assert_eq!(record.url, format!("/cb/…?token={REDACTED}"));
+        assert_eq!(record.headers[0].value, REDACTED);
+        assert_eq!(record.headers[1].value, REDACTED);
+        assert_eq!(record.headers[2].value, "application/json");
+        assert_eq!(record.body, format!(r#"{{"t":"{REDACTED}"}}"#));
+        assert!(!record.body_truncated);
+        assert_eq!(record.reason, "no match");
+    }
+
+    #[test]
+    fn a_rejected_call_body_is_masked_before_it_is_cut() {
+        let body = format!("{}sekret-token", "a".repeat(LIVE_REJECTED_BODY_LIMIT - 4));
+        let record = rejected_call(
+            &turned_down(&body),
+            &secrets(&["sekret-token"]),
+            LIVE_REJECTED_BODY_LIMIT,
+            "no match",
+        );
+        assert!(record.body_truncated);
+        assert!(record.body.len() <= LIVE_REJECTED_BODY_LIMIT);
+        assert!(!record.body.contains("sek"), "half a secret leaked");
+    }
+
+    #[test]
+    fn a_path_outside_the_callback_prefix_is_kept() {
+        let mut call = turned_down("");
+        call.path = "/other".into();
+        call.query.clear();
+        let record = rejected_call(&call, &secrets(&[]), EXCHANGE_BODY_LIMIT, "no match");
+        assert_eq!(record.url, "/other");
     }
 }
