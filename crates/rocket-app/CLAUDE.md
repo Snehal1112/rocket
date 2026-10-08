@@ -185,3 +185,13 @@ Each endpoint's full URL and bare token also join the run's
 `RunCallbacks::mask_secrets`), so a sender that echoes its URL is masked in
 every other sink. A token under `MIN_REDACTION_LEN` is not masked alone (a
 real one is 32 characters); the full URL still is.
+
+## Flow lint (`flow_service.rs`)
+
+`FlowService::lint(collection, flow)` lints the graph it is given (the
+canvas, saved or not) and never fails or touches the repository: a
+`validate` failure first, as `invalid_graph` error lints, then the
+`rocket_flow::validate_with_warnings` warnings. It passes `NoLintContext`
+until F-21 and F-22 add a context built from the collection. `save` and the
+run path do not call it, so lints never block either. The `lint_flow` IPC
+command is plan P21.

@@ -1,3 +1,4 @@
+use rocket_flow::lint::{graph_error_lints, validate_with_warnings, FlowLint, NoLintContext};
 use rocket_flow::{validate, Flow, FlowGraphError, FlowRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -43,6 +44,22 @@ impl FlowService {
         validate(&flow).map_err(|e| DomainError::InvalidInput(graph_error_message(e)))?;
         self.flow_repo.save(collection, &flow)
     }
+
+    /// Lints `flow` as given, not the saved file, and never fails. A
+    /// structural `validate` failure comes first, as `invalid_graph` error
+    /// lints that carry its node or edge ids. Then come the warnings of
+    /// `validate_with_warnings`. Lints never block save or run.
+    pub fn lint(&self, collection: &str, flow: &Flow) -> Vec<FlowLint> {
+        // F-21 and F-22 build a context from `collection` here, for saved
+        // requests and known variables. Until then no lint needs one.
+        let _ = collection;
+        let mut lints = match validate(flow) {
+            Ok(_) => Vec::new(),
+            Err(error) => graph_error_lints(flow, &error),
+        };
+        lints.extend(validate_with_warnings(flow, &NoLintContext));
+        lints
+    }
 }
 
 /// Builds the save-error text. Every message that names graph elements ends
@@ -75,6 +92,7 @@ mod tests {
     use super::*;
     use rocket_flow::{FlowEdge, FlowNode, FlowNodeKind, NodePosition};
     use std::sync::Mutex;
+    use rocket_flow::lint::{LintSeverity, EXIT_WITHOUT_EDGE, INVALID_GRAPH, NO_PATH_TO_OUTPUT};
 
     fn sample_flow() -> Flow {
         Flow {
@@ -417,5 +435,149 @@ mod tests {
             err,
             rocket_shared::error::DomainError::NotFound(_)
         ));
+    }
+
+    /// Panics on every call, so a test proves lint never reads or writes the repo.
+    struct UntouchedRepo;
+    impl FlowRepository for UntouchedRepo {
+        fn list(&self, _collection: &str) -> DomainResult<Vec<String>> {
+            panic!("lint must not list flows");
+        }
+        fn get(&self, _collection: &str, _name: &str) -> DomainResult<Flow> {
+            panic!("lint must not read the saved flow");
+        }
+        fn save(&self, _collection: &str, _flow: &Flow) -> DomainResult<()> {
+            panic!("lint must not save");
+        }
+        fn delete(&self, _collection: &str, _name: &str) -> DomainResult<()> {
+            panic!("lint must not delete");
+        }
+    }
+
+    fn wire(id: &str, from: &str, exit: &str, to: &str, field: &str) -> FlowEdge {
+        FlowEdge {
+            id: id.to_string(),
+            source_node_id: from.to_string(),
+            target_node_id: to.to_string(),
+            target_field: field.to_string(),
+            expression: String::new(),
+            source_handle: exit.to_string(),
+        }
+    }
+
+    /// in -> if1; if1.true -> out. The 'false' exit has no wire.
+    fn routing_flow() -> Flow {
+        Flow {
+            name: "Routing".to_string(),
+            nodes: vec![
+                node_of(
+                    "in",
+                    FlowNodeKind::Input {
+                        label: "Status".to_string(),
+                        value: rocket_shared::VariableValue::simple("200"),
+                    },
+                ),
+                node_of(
+                    "if1",
+                    FlowNodeKind::If {
+                        label: "Check status".to_string(),
+                        condition: "response === '200'".to_string(),
+                    },
+                ),
+                node_of(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: "Result".to_string(),
+                    },
+                ),
+            ],
+            edges: vec![
+                wire("e1", "in", rocket_flow::handle::RESULT, "if1", rocket_flow::handle::INPUT),
+                wire("e2", "if1", rocket_flow::handle::TRUE, "out", "value"),
+            ],
+            callback_host: None,
+        }
+    }
+
+    fn lint_keys(lints: &[FlowLint]) -> Vec<(Option<&str>, Option<&str>, &str)> {
+        lints
+            .iter()
+            .map(|l| (l.node_id.as_deref(), l.edge_id.as_deref(), l.code.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn lint_reads_only_the_given_graph() {
+        let svc = FlowService::new(Box::new(UntouchedRepo));
+        let lints = svc.lint("demo", &routing_flow());
+        assert_eq!(lint_keys(&lints), vec![(Some("if1"), None, EXIT_WITHOUT_EDGE)]);
+        assert_eq!(lints[0].severity, LintSeverity::Warning);
+        assert_eq!(
+            lints[0].message,
+            "The 'false' exit of 'Check status' has no wire."
+        );
+    }
+
+    #[test]
+    fn lint_puts_structural_errors_first_and_is_stable() {
+        let svc = FlowService::new(Box::new(UntouchedRepo));
+        let mut flow = cyclic_flow();
+        flow.nodes.push(node_of(
+            "c",
+            FlowNodeKind::Input {
+                label: "Lonely".to_string(),
+                value: rocket_shared::VariableValue::simple("x"),
+            },
+        ));
+        let lints = svc.lint("demo", &flow);
+        assert_eq!(
+            lint_keys(&lints),
+            vec![
+                (Some("a"), None, INVALID_GRAPH),
+                (Some("b"), None, INVALID_GRAPH),
+                (None, Some("e1"), INVALID_GRAPH),
+                (None, Some("e2"), INVALID_GRAPH),
+                (Some("c"), None, NO_PATH_TO_OUTPUT),
+            ]
+        );
+        assert!(lints[..4].iter().all(|l| l.severity == LintSeverity::Error));
+        assert_eq!(lints[4].severity, LintSeverity::Warning);
+        assert_eq!(svc.lint("demo", &flow), lints);
+    }
+
+    #[test]
+    fn lint_names_an_invalid_node_by_its_label() {
+        let svc = FlowService::new(Box::new(UntouchedRepo));
+        let flow = Flow {
+            name: "Routing".to_string(),
+            nodes: vec![node_of(
+                "if1",
+                FlowNodeKind::If {
+                    label: "Logged in?".to_string(),
+                    condition: "response.status === 200".to_string(),
+                },
+            )],
+            edges: vec![],
+            callback_host: None,
+        };
+        let lints = svc.lint("demo", &flow);
+        assert_eq!(lints[0].code, INVALID_GRAPH);
+        assert_eq!(lints[0].node_id.as_deref(), Some("if1"));
+        assert!(
+            lints[0].message.starts_with("'Logged in?': "),
+            "got: {}",
+            lints[0].message
+        );
+        assert!(lints[1..].iter().all(|l| l.severity == LintSeverity::Warning));
+    }
+
+    #[test]
+    fn a_flow_with_warnings_still_saves_unchanged() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::new()));
+        let flow = routing_flow();
+        assert!(!svc.lint("demo", &flow).is_empty());
+        svc.save("demo", flow.clone())
+            .expect("a flow with warnings must still save");
+        assert_eq!(svc.get("demo", "Routing").expect("get"), flow);
     }
 }

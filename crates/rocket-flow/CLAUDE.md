@@ -32,6 +32,7 @@ cargo test -p rocket-flow -j4
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
 | `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V15 (spec §7, listed in the file header) |
+| `lint.rs` | Non-blocking lint tier: `validate_with_warnings(flow, ctx)`, `graph_error_lints`, `FlowLint`, `LintSeverity`, `LintContext` |
 
 ### Key Design Points
 
@@ -70,3 +71,18 @@ V13 and V14 are labelled in the code; the other wire rules are inline
 Secrets typed literally into an Auth node (client secret, password, token)
 are persisted in plaintext in the flow yml, as with collection auth; use
 `{{vars}}` or RocketVault references.
+
+## Lint tier (`lint.rs`)
+
+`validate_with_warnings(flow, ctx)` warns about a graph that runs but may not
+do what its author meant. It never blocks save or run, works on invalid
+graphs too, and is linear in graph size (one `GraphIndex` per call). Rules:
+`exit_without_edge` (If exits and Switch cases with no wire, one lint per
+node), `switch_without_default`, `no_path_to_output` (only when the flow has
+an Output; an Auth node with `apply_to_inherit` is exempt).
+`graph_error_lints` turns a `validate` failure into `invalid_graph` error
+lints, one per named node or wire. Output order is fixed: node file order,
+then rule order. Messages name nodes by label and never quote values,
+expressions, match values or auth fields. `LintContext` is the seam for
+facts that need I/O (saved requests, known variables): the app layer answers
+yes, no or `None`, and `None` never warns. No rule uses it yet (F-21, F-22).
