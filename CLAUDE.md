@@ -60,6 +60,7 @@ Rules in `.claude/rules/` — start with `.claude/rules/00-shortcuts.md` for a p
 See `.claude/frontend.md` for Zustand/tabs/UI state. See `.claude/tauri-commands.md` for IPC modules.
 See `.claude/script-files.md` for shared .js script files and local require().
 See `.claude/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
+See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
 
