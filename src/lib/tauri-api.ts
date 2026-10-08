@@ -2333,6 +2333,8 @@ export interface FlowRunSummary {
   runId: string;
   steps: FlowStepResult[];
   stoppedReason: 'completed' | 'cancelled' | string;
+  /** Set for a partial run. */
+  partial?: FlowPartialRunInfo;
 }
 
 /** A token the UI obtained for an Auth node. Held in memory only, never persisted. */
@@ -2340,8 +2342,26 @@ export interface FlowAuthToken {
   accessToken: string;
 }
 
+/** Which nodes a partial run executes: one node, or a node and everything below it. */
+export type FlowPartialMode = 'node' | 'fromHere';
+
+/** Asks run_flow to re-run part of the flow on top of the run `baseRunId`. */
+export interface FlowPartialRunRequest {
+  baseRunId: string;
+  startNodeId: string;
+  mode: FlowPartialMode;
+}
+
+/** Describes a partial run on flow-run-started and on the summary. Keys are camelCase in both. */
+export interface FlowPartialRunInfo extends FlowPartialRunRequest {
+  /** Every node the run executes, in order. */
+  nodeIds: string[];
+}
+
 /** Extra settings for one run_flow call. */
 export interface RunFlowOptions {
+  /** Re-runs part of the flow on top of an earlier run. A full run omits it. */
+  partial?: FlowPartialRunRequest;
   /**
    * Run id chosen by the client, a UUID. The backend uses it in every
    * flow-run-* event and for Stop, so a tab matches only its own run. The
@@ -2374,6 +2394,8 @@ export const runFlow = (
       ...(authTokens && Object.keys(authTokens).length > 0 ? { authTokens } : {}),
       // Sent only when chosen, so other callers keep the old payload.
       ...(options?.runId ? { runId: options.runId } : {}),
+      // A full run sends no partial key.
+      ...(options?.partial ? { partial: options.partial } : {}),
     },
   });
 
@@ -2389,6 +2411,8 @@ export interface FlowRunStartedEvent {
   total_nodes: number;
   /** Every Wait for callback node's URL. Omitted when the flow has none. Keys are camelCase. */
   callbacks?: FlowCallbackInfo[];
+  /** Set for a partial run. `total_nodes` then counts only its nodes. */
+  partial?: FlowPartialRunInfo;
 }
 
 export const onFlowRunStarted = (

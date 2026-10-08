@@ -1,8 +1,8 @@
 //! In-memory results of recent Flow runs, so a partial run can reuse them
 //! (`flow_partial`). Outputs are raw and unmasked: nothing here is
 //! persisted, sent over IPC or printed. `CachedRun`'s `Debug` shows counts.
-//! TODO(P20): call `FlowExecutionService::clear_run_cache` on workspace
-//! switch. Until then the cache is only cleared when Rocket restarts.
+//! `switch_workspace` calls `FlowExecutionService::clear_run_cache`, so runs
+//! never outlive their workspace.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};

@@ -1,12 +1,13 @@
 use rocket_app::{
-    FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowService, RequestExecutionService,
-    RunFlowInput,
+    FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowService, PartialRun,
+    RequestExecutionService, RunFlowInput,
 };
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
     RepeatUntil, RequestSource, SwitchCase,
 };
 use rocket_shared::error::DomainError;
+use rocket_shared::events::FlowPartialMode;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -472,6 +473,27 @@ impl std::fmt::Debug for FlowAuthTokenDto {
     }
 }
 
+/// "Run this node" or "Run from here", on top of the run `base_run_id`.
+/// It carries ids and the mode only, never cached outputs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartialRunDto {
+    pub base_run_id: String,
+    pub start_node_id: String,
+    /// `"node"` or `"fromHere"`.
+    pub mode: FlowPartialMode,
+}
+
+impl From<PartialRunDto> for PartialRun {
+    fn from(dto: PartialRunDto) -> Self {
+        Self {
+            base_run_id: dto.base_run_id,
+            start_node_id: dto.start_node_id,
+            mode: dto.mode,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunFlowInputDto {
@@ -485,6 +507,9 @@ pub struct RunFlowInputDto {
     /// The run id the frontend chose. Absent means the backend picks one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    /// Set for a partial run. Absent for a full run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial: Option<PartialRunDto>,
 }
 impl RunFlowInputDto {
     /// Takes what the run needs besides the input and the tokens. Call it
@@ -492,7 +517,7 @@ impl RunFlowInputDto {
     pub fn take_options(&mut self) -> FlowRunOptions {
         FlowRunOptions {
             run_id: self.run_id.take(),
-            partial: None,
+            partial: self.partial.take().map(PartialRun::from),
         }
     }
 
@@ -602,6 +627,43 @@ mod tests {
         );
         assert!(options.partial.is_none());
         assert!(dto.run_id.is_none(), "the id is taken, not copied");
+    }
+
+    #[test]
+    fn run_flow_input_carries_a_partial_run() {
+        let json = r#"{
+            "collection": "c",
+            "flowName": "f",
+            "environmentName": null,
+            "globalEnvName": null,
+            "partial": { "baseRunId": "01A", "startNodeId": "n2", "mode": "fromHere" }
+        }"#;
+        let mut dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+        let partial = dto.take_options().partial.expect("partial");
+        assert_eq!(
+            partial,
+            PartialRun {
+                base_run_id: "01A".to_string(),
+                start_node_id: "n2".to_string(),
+                mode: FlowPartialMode::FromHere,
+            }
+        );
+        assert!(dto.partial.is_none(), "the partial is taken, not copied");
+    }
+
+    #[test]
+    fn run_flow_input_without_partial_is_a_full_run() {
+        let json =
+            r#"{"collection":"c","flowName":"f","environmentName":null,"globalEnvName":null}"#;
+        let mut dto: RunFlowInputDto = serde_json::from_str(json).expect("deserialize");
+        assert!(dto.partial.is_none());
+        assert!(dto.take_options().partial.is_none());
+    }
+
+    #[test]
+    fn an_unknown_partial_mode_is_rejected() {
+        let json = r#"{"collection":"c","flowName":"f","environmentName":null,"globalEnvName":null,"partial":{"baseRunId":"01A","startNodeId":"n2","mode":"everything"}}"#;
+        assert!(serde_json::from_str::<RunFlowInputDto>(json).is_err());
     }
 
     #[test]

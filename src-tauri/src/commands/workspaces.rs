@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rocket_app::WorkspaceService;
+use rocket_app::{FlowExecutionService, WorkspaceService};
 use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
 use rocket_workspace::{RepositoryId, RequestGuardPolicy, Workspace, WorkspaceConfig};
@@ -74,12 +74,16 @@ pub fn switch_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
     watcher: State<'_, NotifyFileWatcher>,
+    flow_exec: State<'_, FlowExecutionService>,
     app: tauri::AppHandle,
 ) -> Result<WorkspaceDto, DomainError> {
     let workspace = svc
         .lock()
         .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
         .switch(&id)?;
+    // Cached flow runs belong to the old workspace. A same-named flow in the
+    // new one is a different flow.
+    flow_exec.clear_run_cache();
     // Restart the file watcher on the new workspace's collections directory so
     // filesystem changes in the new workspace trigger sidebar refreshes.
     let new_collections_dir = workspace.path.join("collections");
