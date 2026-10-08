@@ -4,7 +4,7 @@ import {
   hasDirtyScriptTabs,
   isPathWithin,
 } from '@/components/collections/tree-utils';
-import type { LeafNode, ScriptTab } from '@/types/pane-types';
+import type { FlowTab, LeafNode, ScriptTab } from '@/types/pane-types';
 
 function scriptTab(path: string, isDirty = false): ScriptTab {
   return {
@@ -43,5 +43,47 @@ describe('tree-utils delete matching', () => {
     const root = leaf([scriptTab('lib/a.js', true), scriptTab('lib2/b.js')]);
     expect(hasDirtyScriptTabs(root, folder)).toBe(true);
     expect(hasDirtyScriptTabs(root, { ...folder, path: 'lib2' })).toBe(false);
+  });
+});
+
+const flowTab = (id: string, flowName: string, collectionName = 'col'): FlowTab => ({
+  id,
+  title: `Flow: ${flowName}`,
+  isDirty: false,
+  tabType: 'flow',
+  collectionName,
+  flowName,
+  nodes: [],
+  edges: [],
+  nodeStatus: {},
+  runState: 'idle',
+});
+
+describe('tree-utils flow delete matching', () => {
+  const target = { type: 'flow' as const, collection: 'col', name: 'Login' };
+
+  it('matches the open tab of exactly that flow', () => {
+    const root = {
+      type: 'leaf',
+      groupId: 'g1',
+      tabs: [
+        flowTab('f1', 'Login'),
+        flowTab('f2', 'login'),
+        flowTab('f3', 'Login', 'other'),
+        scriptTab('lib/a.js'),
+      ],
+      activeTabId: 'f1',
+    } as LeafNode;
+    expect(findAffectedTabs(root, target).map((h) => h.tab.id)).toEqual(['f1']);
+  });
+
+  it('does not treat a flow target as a script or request target', () => {
+    const root = {
+      type: 'leaf',
+      groupId: 'g1',
+      tabs: [scriptTab('Login')],
+      activeTabId: 's:Login',
+    } as LeafNode;
+    expect(findAffectedTabs(root, target)).toEqual([]);
   });
 });

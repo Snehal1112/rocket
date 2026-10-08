@@ -59,6 +59,8 @@ vi.mock('@/lib/flow-auth-preflight', () => ({
 // here, before any test can override it, so the save/reload test below
 // exercises real store behavior regardless of test order.
 const realOpenFlowTab = usePaneStore.getState().openFlowTab;
+// The picker tests also stub `closeTab`, so capture the real one the same way.
+const realCloseTab = usePaneStore.getState().closeTab;
 
 function pickerTab(collectionName: string | null): FlowTab {
   return {
@@ -272,6 +274,8 @@ describe('FlowPane save', () => {
     const rootBefore = usePaneStore.getState().root;
     const idsBefore = new Set(rootBefore.type === 'leaf' ? rootBefore.tabs.map((t) => t.id) : []);
 
+    // Close the open tab first, because opening a flow that is already open only focuses it.
+    realCloseTab(flowTab.id, usePaneStore.getState().activeGroupId);
     await realOpenFlowTab('demo', 'my-flow');
 
     const { root } = usePaneStore.getState();

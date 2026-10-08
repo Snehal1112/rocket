@@ -1,6 +1,6 @@
 import { isPathWithin } from '@/lib/pane-utils';
 import type { PaneNode, Tab } from '@/types/pane-types';
-import { isFolderTab, isScriptTab } from '@/types/pane-types';
+import { isFlowTab, isFolderTab, isScriptTab } from '@/types/pane-types';
 
 // Returns true if any active tab in the pane tree matches the given tabId.
 export function isActiveRequest(node: PaneNode, tabId: string): boolean {
@@ -10,7 +10,7 @@ export function isActiveRequest(node: PaneNode, tabId: string): boolean {
 
 // Describes the item targeted for deletion in the shared confirmation dialog.
 export type DeleteTarget = {
-  type: 'collection' | 'folder' | 'request' | 'script';
+  type: 'collection' | 'folder' | 'request' | 'script' | 'flow';
   collection: string;
   path?: string;
   name: string;
@@ -33,6 +33,17 @@ export function findAffectedTabs(root: PaneNode, target: DeleteTarget): Affected
       return;
     }
     for (const tab of node.tabs) {
+      // Flow tabs have no source. They match by collection and flow name.
+      if (isFlowTab(tab)) {
+        if (
+          target.type === 'flow' &&
+          tab.collectionName === target.collection &&
+          tab.flowName === target.name
+        ) {
+          found.push({ tab, groupId: node.groupId });
+        }
+        continue;
+      }
       // Folder tabs have no source. They match by collection and folder path.
       if (isFolderTab(tab)) {
         if (tab.collectionName !== target.collection) continue;

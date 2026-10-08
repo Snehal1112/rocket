@@ -1,6 +1,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { FilePlus, Layers, LayoutDashboard, Plus, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { DeleteTarget } from '@/components/collections/tree-utils';
 import { findAffectedTabs, hasDirtyScriptTabs } from '@/components/collections/tree-utils';
@@ -21,8 +22,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tree } from '@/components/ui/tree';
+import { hasDirtyFlow, isFlowRunning } from '@/lib/flow-tabs';
 import { collectionKeys, useCollections } from '@/lib/queries/collection-queries';
 import { environmentKeys } from '@/lib/queries/environment-queries';
+import { flowKeys } from '@/lib/queries/flow-queries';
 import { useSetMultiWorkspaceMode, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
 import {
@@ -30,6 +33,7 @@ import {
   createCollection,
   createFolder,
   deleteCollection,
+  deleteFlow,
   deleteFolder,
   deleteRequest,
   deleteScriptFile,
@@ -40,8 +44,10 @@ import {
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
+import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
+import { isFlowTab } from '@/types/pane-types';
 import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
@@ -84,10 +90,59 @@ export function CollectionsSidebar() {
     deleteTarget ? hasDirtyScriptTabs(s.root, deleteTarget) : false,
   );
 
+  // The same warning for an open flow tab with unsaved edits.
+  const deleteHasDirtyFlows = usePaneStore((s) =>
+    deleteTarget?.type === 'flow'
+      ? hasDirtyFlow(s.root, s.collectionTabState, deleteTarget.collection, deleteTarget.name)
+      : false,
+  );
+
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     try {
-      if (deleteTarget.type === 'collection') {
+      if (deleteTarget.type === 'flow') {
+        // A run can start while the dialog is open, so check again here.
+        const before = usePaneStore.getState();
+        if (
+          isFlowRunning(
+            before.root,
+            before.collectionTabState,
+            deleteTarget.collection,
+            deleteTarget.name,
+          )
+        ) {
+          toast.error(`Stop the run of "${deleteTarget.name}" before deleting it.`);
+          setDeleteTarget(null);
+          return;
+        }
+        await deleteFlow(deleteTarget.collection, deleteTarget.name);
+        // Drop tabs parked in collection snapshots too, so none comes back after a switch.
+        usePaneStore.setState((s) => ({
+          collectionTabState: Object.fromEntries(
+            Object.entries(s.collectionTabState).map(([key, entry]) => {
+              const tabs = entry.tabs.filter(
+                (t) =>
+                  !(
+                    isFlowTab(t) &&
+                    t.collectionName === deleteTarget.collection &&
+                    t.flowName === deleteTarget.name
+                  ),
+              );
+              if (tabs.length === entry.tabs.length) return [key, entry];
+              const activeKept = tabs.some((t) => t.id === entry.activeTabId);
+              return [
+                key,
+                { tabs, activeTabId: activeKept ? entry.activeTabId : (tabs[0]?.id ?? '') },
+              ];
+            }),
+          ),
+        }));
+        // The flow is gone, so its in-memory Auth tokens go too, whichever tab held them.
+        useFlowAuthStore.getState().clearFlow(deleteTarget.collection, deleteTarget.name);
+        void getQueryClient().invalidateQueries({
+          queryKey: flowKeys.collection(deleteTarget.collection),
+        });
+      } else if (deleteTarget.type === 'collection') {
         await deleteCollection(deleteTarget.collection);
       } else if (deleteTarget.type === 'folder') {
         if (!deleteTarget.path) return;
@@ -107,6 +162,9 @@ export function CollectionsSidebar() {
       void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
     } catch (err) {
       console.error('Delete failed:', err);
+      if (deleteTarget.type === 'flow') {
+        toast.error(`Could not delete "${deleteTarget.name}": ${String(err)}`);
+      }
     }
     setDeleteTarget(null);
   }, [deleteTarget]);
@@ -618,8 +676,11 @@ export function CollectionsSidebar() {
                   ? `Delete folder '${deleteTarget.name}' and all requests inside it?`
                   : deleteTarget?.type === 'script'
                     ? `Delete script '${deleteTarget.name}'?`
-                    : `Delete request '${deleteTarget?.name}'?`}
+                    : deleteTarget?.type === 'flow'
+                      ? `Delete flow '${deleteTarget.name}'?`
+                      : `Delete request '${deleteTarget?.name}'?`}
               {deleteHasDirtyScripts && ' An open script has unsaved changes that will be lost.'}
+              {deleteHasDirtyFlows && ' An open flow has unsaved changes that will be lost.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

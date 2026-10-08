@@ -904,7 +904,10 @@ describe('Flow tab actions', () => {
       edges: [],
     });
     await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
-    await usePaneStore.getState().openFlowTab('my-collection', 'My Flow');
+    // Opening the same flow again only focuses it, so add the second copy directly.
+    const opened = findFirstFlowTab();
+    if (!opened) throw new Error('Expected a flow tab');
+    usePaneStore.getState().openTab({ ...opened, id: 'second-copy' });
     const root = usePaneStore.getState().root;
     if (root.type !== 'leaf') throw new Error('Expected a single leaf');
     const [first, second] = root.tabs.filter(isFlowTab);

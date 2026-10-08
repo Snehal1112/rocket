@@ -15,6 +15,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlowListItem } from '@/components/collections/FlowListItem';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
 import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
@@ -38,6 +39,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { useFlows } from '@/lib/queries/flow-queries';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type { Collection, CollectionSummary, Contract } from '@/lib/tauri-api';
 import {
@@ -61,6 +63,7 @@ import type { DeleteTarget } from './tree-utils';
 // causing React 18 to loop detecting "tearing."
 const EMPTY_CONTRACTS: Contract[] = [];
 const EMPTY_IDS: string[] = [];
+const EMPTY_NAMES: string[] = [];
 
 /** Tooltip label for the sidebar lock pin (spec §8.1). */
 function lockPinLabel(meta: { count: number; driftCount: number; breachCount: number }): string {
@@ -106,6 +109,8 @@ export function CollectionNode({
   const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
+  // Fetch the flow list only while the node is expanded.
+  const { data: flowNames = EMPTY_NAMES } = useFlows(summary.name, open);
 
   // Derive the filesystem path of this collection so we can talk to the
   // contract IPC commands. The backend stores contract metadata under
@@ -343,6 +348,9 @@ export function CollectionNode({
         )
       : filterableItems,
   );
+  const filteredFlows = filter
+    ? flowNames.filter((n) => n.toLowerCase().includes(filter.toLowerCase()))
+    : flowNames;
 
   return (
     <ContextMenu>
@@ -632,6 +640,19 @@ export function CollectionNode({
               />
             );
           })}
+          {filteredFlows.length > 0 && (
+            <div>
+              <div className='px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground'>Flows</div>
+              {filteredFlows.map((flowName) => (
+                <FlowListItem
+                  key={`flow-${flowName}`}
+                  name={flowName}
+                  collectionName={summary.name}
+                  onDelete={onDelete}
+                />
+              ))}
+            </div>
+          )}
           {creatingRequest && (
             <div className='flex items-center gap-1 px-2 py-1 text-sm'>
               <Input

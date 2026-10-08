@@ -12,6 +12,7 @@ import {
 } from '@/lib/flow-history';
 import { appendRunRecord } from '@/lib/flow-run-history';
 import { mergeRunResult } from '@/lib/flow-run-result';
+import { findFlowTabs } from '@/lib/flow-tabs';
 import {
   collectAllTabs,
   createDefaultLeaf,
@@ -968,6 +969,14 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   async openFlowTab(collectionName, flowName) {
+    // An open tab only needs focusing. A second copy could diverge and later overwrite the first.
+    if (collectionName && flowName) {
+      const existing = findFlowTabs(get().root, {}, collectionName, flowName)[0];
+      if (existing) {
+        get().openTab(existing);
+        return;
+      }
+    }
     let nodes: FlowNode[] = [];
     let edges: FlowEdge[] = [];
     let callbackHost: string | null = null;
