@@ -4,6 +4,7 @@ import { describeAuth } from '@/lib/flow-auth';
 import { RESULT_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { DurationChip } from './DurationChip';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -13,6 +14,8 @@ export type AuthNodeData = {
   status: FlowNodeStatus;
   error?: string;
   progress?: string;
+  /** How long the last run of this node took. */
+  durationMs?: number;
   skipReason?: FlowSkipReason;
   /** Set when a save was rejected because of this node. */
   hasCycleError?: boolean;
@@ -45,6 +48,7 @@ export function AuthNode({ id, data, isConnectable }: NodeProps & { data: AuthNo
         error={data.error}
         progress={data.progress}
       />
+      <DurationChip durationMs={data.durationMs} />
 
       <div className='space-y-0.5 px-2 py-1.5'>
         <p data-testid='auth-node-summary' className='truncate'>

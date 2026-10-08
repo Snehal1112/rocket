@@ -9,6 +9,7 @@ import { caseHandle, DEFAULT_HANDLE, INPUT_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason, SwitchCase } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { caseDisplayLabel, exitLabel } from '../flowExits';
+import { DurationChip } from './DurationChip';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
@@ -20,6 +21,8 @@ export type SwitchNodeData = {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
+  /** How long the last run of this node took. */
+  durationMs?: number;
   skipReason?: FlowSkipReason;
   /** Exit chosen by the last run: "case:<id>" or "default". */
   branch?: string;
@@ -113,6 +116,7 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
         error={data.error}
         progress={data.progress}
       />
+      <DurationChip durationMs={data.durationMs} />
 
       <div className='nodrag nowheel nokey space-y-1 px-2 py-1.5'>
         <span className='text-muted-foreground'>value</span>

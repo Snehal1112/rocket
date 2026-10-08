@@ -1,7 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { FlowDebugRequest, FlowDebugResponse, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
+import type {
+  FlowDebugRequest,
+  FlowDebugResponse,
+  FlowNode,
+  FlowNodeKind,
+  FlowStepTrace,
+} from '@/lib/tauri-api';
 import { LastRunTab } from '../LastRunTab';
 
 // Monaco cannot run in jsdom. A read-only textarea stands in for it.
@@ -369,5 +375,154 @@ describe('LastRunTab for a Transform node', () => {
     );
     expect(screen.getByText(/branch was not taken/i)).toBeInTheDocument();
     expect(screen.queryByTestId('last-run-value')).not.toBeInTheDocument();
+  });
+});
+
+describe('LastRunTab trace', () => {
+  const login = node({
+    kind: 'Request',
+    label: 'Login',
+    source: { type: 'Saved', requestPath: 'auth/login.yml' },
+  });
+  const sourceNode: FlowNode = {
+    id: 'src',
+    kind: { kind: 'Input', label: 'API Key', value: '{{apiKey}}' },
+    position: { x: 0, y: 0 },
+  };
+
+  it('lists the inputs the step received, as the backend masked them', () => {
+    const trace: FlowStepTrace = {
+      wires: [
+        { edgeId: 'e1', sourceNodeId: 'src', targetField: 'headers[X-Key].value', value: '••••••' },
+        { edgeId: 'e2', sourceNodeId: 'src', targetField: 'body', value: 'x'.repeat(10), truncated: true },
+      ],
+    };
+    render(<LastRunTab node={login} nodes={[sourceNode]} status='success' detail={{ trace }} />);
+    const rows = screen.getAllByTestId('last-run-input');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('X-Key');
+    expect(rows[0]).toHaveTextContent('← API Key');
+    expect(rows[0]).toHaveTextContent('••••••');
+    expect(rows[1]).toHaveTextContent('Cut at 16 KB.');
+  });
+
+  it('never shows a value on a credential input', () => {
+    const trace: FlowStepTrace = {
+      wires: [
+        {
+          edgeId: 'ea',
+          sourceNodeId: 'src',
+          targetField: 'auth',
+          credential: true,
+          value: 'leaked-token-123456',
+        },
+      ],
+    };
+    render(<LastRunTab node={login} status='success' detail={{ trace }} />);
+    expect(screen.getByTestId('last-run-input')).toHaveTextContent('Credential (hidden)');
+    expect(document.body).not.toHaveTextContent('leaked-token-123456');
+  });
+
+  it('marks the input that failed and shows its error', () => {
+    const trace: FlowStepTrace = {
+      wires: [
+        { edgeId: 'e1', sourceNodeId: 'src', targetField: 'url', value: 'ok' },
+        { edgeId: 'e2', sourceNodeId: 'src', targetField: 'body', error: 'ReferenceError: x' },
+      ],
+      failedEdgeId: 'e2',
+    };
+    render(<LastRunTab node={login} status='failed' detail={{ error: 'wire failed', trace }} />);
+    const rows = screen.getAllByTestId('last-run-input');
+    expect(rows[0]).not.toHaveAttribute('data-failed');
+    expect(rows[1]).toHaveAttribute('data-failed', 'true');
+    expect(screen.getByTestId('last-run-input-error')).toHaveTextContent('ReferenceError: x');
+  });
+
+  it('labels an input from a deleted node by its id', () => {
+    const trace: FlowStepTrace = {
+      wires: [{ edgeId: 'e1', sourceNodeId: 'gone', targetField: 'url', value: 'v' }],
+    };
+    render(<LastRunTab node={login} nodes={[]} status='success' detail={{ trace }} />);
+    expect(screen.getByTestId('last-run-input')).toHaveTextContent('← gone');
+  });
+
+  it('shows the If condition result', () => {
+    const ifNode = node({ kind: 'If', label: 'Ok?', condition: 'response.status === 200' });
+    render(
+      <LastRunTab
+        node={ifNode}
+        status='success'
+        detail={{ branch: 'true', trace: { route: { kind: 'if', value: 'true' } } }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Condition → true');
+    expect(screen.getByText('Passes its input through.')).toBeInTheDocument();
+  });
+
+  it('shows the Switch value and the case it matched', () => {
+    const sw = node({
+      kind: 'Switch',
+      label: 'Type',
+      value: 'response.body.type',
+      cases: [{ id: 'c1', label: 'Admin', matches: 'admin' }],
+    });
+    render(
+      <LastRunTab
+        node={sw}
+        status='success'
+        detail={{
+          branch: 'case:c1',
+          trace: { route: { kind: 'switch', value: 'admin', matchedCase: 'c1' } },
+        }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Value admin → case Admin');
+  });
+
+  it('shows a Switch that fell to the default exit', () => {
+    const sw = node({ kind: 'Switch', label: 'Type', value: 'x', cases: [] });
+    render(
+      <LastRunTab
+        node={sw}
+        status='success'
+        detail={{ branch: 'default', trace: { route: { kind: 'switch', value: 'pro' } } }}
+      />,
+    );
+    expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Value pro → default');
+  });
+
+  it('keeps the Took line when no route was recorded', () => {
+    const ifNode = node({ kind: 'If', label: 'Ok?', condition: 'true' });
+    render(<LastRunTab node={ifNode} status='success' detail={{ branch: 'false' }} />);
+    expect(screen.getByTestId('last-run-branch')).toHaveTextContent('Took: false');
+  });
+
+  it('says an Auth credential is hidden', () => {
+    const auth = node({
+      kind: 'Auth',
+      label: 'Sign in',
+      auth: { authType: 'bearer', token: 't' },
+      applyToInherit: true,
+    });
+    render(<LastRunTab node={auth} status='success' detail={{ durationMs: 1 }} />);
+    expect(screen.getByText('The credential is hidden.')).toBeInTheDocument();
+  });
+
+  it('notes a value that was cut', () => {
+    const out = node({ kind: 'Output', label: 'Token' });
+    render(
+      <LastRunTab
+        node={out}
+        status='success'
+        detail={{ value: 'abc', trace: { valueTruncated: true } }}
+      />,
+    );
+    expect(screen.getByText('Cut at 256 KB.')).toBeInTheDocument();
+  });
+
+  it('shows the duration of a non-HTTP node', () => {
+    const out = node({ kind: 'Output', label: 'Token' });
+    render(<LastRunTab node={out} status='success' detail={{ value: 'abc', durationMs: 3 }} />);
+    expect(screen.getByTestId('last-run-status')).toHaveTextContent('3ms');
   });
 });

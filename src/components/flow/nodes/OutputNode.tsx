@@ -6,6 +6,7 @@ import { TRIGGER_HANDLE } from '@/lib/flow-handles';
 import { formatOutputValue } from '@/lib/flow-output';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { DurationChip } from './DurationChip';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -17,6 +18,8 @@ export interface OutputNodeData {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
+  /** How long the last run of this node took. */
+  durationMs?: number;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
   value?: string;
@@ -67,6 +70,7 @@ export function OutputNode({ id, data, isConnectable }: NodeProps & { data: Outp
         error={data.error}
         progress={data.progress}
       />
+      <DurationChip durationMs={data.durationMs} />
       {/* Each input sits in a labelled row, like the Request node, so the
           data-less "Run when" gate is not mistaken for the `value` input. */}
       <div className='relative space-y-1 px-2 pt-1.5'>

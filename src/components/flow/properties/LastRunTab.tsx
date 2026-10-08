@@ -12,14 +12,19 @@ import type {
   FlowLogEntry,
   FlowNode,
   FlowNodeStatus,
+  FlowRouteEval,
+  FlowWireValue,
 } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import type { FlowNodeDetail } from '@/types/pane-types';
-import { exitDisplayLabel } from './wireRows';
+import { exitDisplayLabel, fieldLabel } from './wireRows';
 
 interface LastRunTabProps {
   node: FlowNode;
   status: FlowNodeStatus;
   detail?: FlowNodeDetail;
+  /** The flow's nodes, to name the source of each input. */
+  nodes?: FlowNode[];
 }
 
 // The badge text for a status. A branch that was not taken is a skip too,
@@ -237,7 +242,7 @@ const logClass: Record<FlowLogEntry['level'], string> = {
   error: 'text-red-600',
 };
 
-function ValueSection({ value }: { value: string }) {
+function ValueSection({ value, truncated = false }: { value: string; truncated?: boolean }) {
   return (
     <section className='space-y-1'>
       <div className='flex items-center justify-between'>
@@ -250,7 +255,106 @@ function ValueSection({ value }: { value: string }) {
       >
         {value === '' ? <span className='italic'>(empty)</span> : formatOutputValue(value)}
       </pre>
+      {truncated && <p className='text-muted-foreground'>Cut at 256 KB.</p>}
     </section>
+  );
+}
+
+// A wire's value as the step received it. A credential is never shown.
+function WireValueText({ wire }: { wire: FlowWireValue }) {
+  if (wire.credential) {
+    return <p className='italic text-muted-foreground'>Credential (hidden)</p>;
+  }
+  if (wire.error) {
+    return (
+      <p
+        data-testid='last-run-input-error'
+        className='select-text whitespace-pre-wrap break-words text-red-600'
+      >
+        {wire.error}
+      </p>
+    );
+  }
+  if (wire.value === undefined) return null;
+  return (
+    <>
+      <pre className='max-h-32 select-text overflow-auto whitespace-pre-wrap rounded-md border p-1.5 font-mono text-[11px] [overflow-wrap:anywhere]'>
+        {wire.value === '' ? <span className='italic'>(empty)</span> : wire.value}
+      </pre>
+      {wire.truncated && <p className='text-muted-foreground'>Cut at 16 KB.</p>}
+    </>
+  );
+}
+
+function InputsSection({
+  wires,
+  nodes,
+  failedEdgeId,
+}: {
+  wires: FlowWireValue[];
+  nodes?: FlowNode[];
+  failedEdgeId?: string;
+}) {
+  // A source deleted after the run is named by its id.
+  const sourceLabel = (id: string) => nodes?.find((n) => n.id === id)?.kind.label || id;
+  return (
+    <section data-testid='last-run-inputs' className='space-y-1.5'>
+      <h4 className='font-medium'>Inputs</h4>
+      {wires.map((wire) => {
+        const failed = wire.edgeId === failedEdgeId;
+        return (
+          <div
+            key={wire.edgeId}
+            data-testid='last-run-input'
+            data-failed={failed ? 'true' : undefined}
+            className={cn(
+              'space-y-1 rounded-md border px-2 py-1.5',
+              failed && 'border-red-500/60 bg-red-500/5',
+            )}
+          >
+            <p className='[overflow-wrap:anywhere]'>
+              <span className='font-medium'>{fieldLabel(wire.targetField)}</span>
+              <span className='text-muted-foreground'> ← {sourceLabel(wire.sourceNodeId)}</span>
+            </p>
+            <WireValueText wire={wire} />
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+// How a routing node decided. A run from before routes were recorded only
+// knows the exit it took.
+function RouteLine({
+  node,
+  branch,
+  route,
+}: {
+  node: FlowNode;
+  branch: string;
+  route?: FlowRouteEval;
+}) {
+  const exit = exitDisplayLabel(node, branch);
+  if (!route) {
+    return (
+      <p data-testid='last-run-branch'>
+        Took: <span className='font-mono'>{exit}</span>
+      </p>
+    );
+  }
+  if (route.kind === 'if') {
+    return (
+      <p data-testid='last-run-branch'>
+        Condition → <span className='font-mono'>{route.value}</span>
+      </p>
+    );
+  }
+  return (
+    <p data-testid='last-run-branch' className='[overflow-wrap:anywhere]'>
+      Value <span className='font-mono'>{route.value}</span> →{' '}
+      {route.matchedCase ? `case ${exit}` : 'default'}
+    </p>
   );
 }
 
@@ -273,7 +377,7 @@ function LogsSection({ logs }: { logs: FlowLogEntry[] }) {
   );
 }
 
-export function LastRunTab({ node, status, detail }: LastRunTabProps) {
+export function LastRunTab({ node, status, detail, nodes }: LastRunTabProps) {
   if (status === 'idle') {
     return (
       <p className='text-xs text-muted-foreground'>
@@ -304,6 +408,13 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
         </div>
       )}
       {status === 'skipped' && <p className='text-muted-foreground'>{skipText(detail)}</p>}
+      {detail?.trace?.wires && detail.trace.wires.length > 0 && (
+        <InputsSection
+          wires={detail.trace.wires}
+          nodes={nodes}
+          failedEdgeId={detail.trace.failedEdgeId}
+        />
+      )}
       {(node.kind.kind === 'Request' || node.kind.kind === 'WaitForCallback') &&
         detail?.exchange && (
           <ExchangeSections
@@ -313,14 +424,20 @@ export function LastRunTab({ node, status, detail }: LastRunTabProps) {
           />
         )}
       {(node.kind.kind === 'If' || node.kind.kind === 'Switch') && detail?.branch && (
-        <p data-testid='last-run-branch'>
-          Took: <span className='font-mono'>{exitDisplayLabel(node, detail.branch)}</span>
-        </p>
+        <RouteLine node={node} branch={detail.branch} route={detail.trace?.route} />
+      )}
+      {(node.kind.kind === 'If' || node.kind.kind === 'Switch') && status === 'success' && (
+        <p className='text-muted-foreground'>Passes its input through.</p>
+      )}
+      {node.kind.kind === 'Auth' && status === 'success' && (
+        <p className='text-muted-foreground'>The credential is hidden.</p>
       )}
       {(node.kind.kind === 'Output' ||
         node.kind.kind === 'Input' ||
         node.kind.kind === 'Transform') &&
-        detail?.value !== undefined && <ValueSection value={detail.value} />}
+        detail?.value !== undefined && (
+          <ValueSection value={detail.value} truncated={detail.trace?.valueTruncated} />
+        )}
       {detail?.logs && detail.logs.length > 0 && <LogsSection logs={detail.logs} />}
     </div>
   );

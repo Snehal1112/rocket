@@ -6,6 +6,7 @@ import { FALSE_HANDLE, INPUT_HANDLE, TRUE_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { exitLabel } from '../flowExits';
+import { DurationChip } from './DurationChip';
 import { useFlowNodeActions } from './FlowNodeActionsContext';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
@@ -17,6 +18,8 @@ export type IfNodeData = {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
+  /** How long the last run of this node took. */
+  durationMs?: number;
   skipReason?: FlowSkipReason;
   /** Exit chosen by the last run: "true" or "false". */
   branch?: string;
@@ -65,6 +68,7 @@ export function IfNode({ id, data, isConnectable }: NodeProps & { data: IfNodeDa
         error={data.error}
         progress={data.progress}
       />
+      <DurationChip durationMs={data.durationMs} />
 
       {/* nodrag/nowheel/nokey keep typing, selecting text and scrolling in
           the editor from dragging the node or deleting it on Backspace. */}

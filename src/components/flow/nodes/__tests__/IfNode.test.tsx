@@ -90,4 +90,14 @@ describe('IfNode', () => {
     renderIf({ kind, status: 'skipped', skipReason: 'branch_not_taken' });
     expect(screen.getByTestId('node-status-caption')).toHaveTextContent('Not taken');
   });
+
+  it('shows how long the last run took', () => {
+    renderIf({ kind, status: 'success', branch: 'true', durationMs: 12 });
+    expect(screen.getByTestId('duration-chip')).toHaveTextContent('12ms');
+  });
+
+  it('shows no duration before a run', () => {
+    renderIf({ kind, status: 'idle' });
+    expect(screen.queryByTestId('duration-chip')).not.toBeInTheDocument();
+  });
 });

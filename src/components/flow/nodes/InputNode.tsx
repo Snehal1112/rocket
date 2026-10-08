@@ -2,6 +2,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { RESULT_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { DurationChip } from './DurationChip';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -13,6 +14,8 @@ export interface InputNodeData {
   error?: string;
   /** Progress text while running, such as "attempt 3/30". */
   progress?: string;
+  /** How long the last run of this node took. */
+  durationMs?: number;
   /** Set when this node is named in a save validation error, such as a cycle. */
   hasCycleError?: boolean;
 }
@@ -40,6 +43,7 @@ export function InputNode({ id, data, isConnectable }: NodeProps & { data: Input
         error={data.error}
         progress={data.progress}
       />
+      <DurationChip durationMs={data.durationMs} />
       <div className='truncate px-2 py-1.5 text-muted-foreground'>{display}</div>
       <Handle
         type='source'

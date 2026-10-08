@@ -233,7 +233,7 @@ export function NodePropertiesPanel({
             </div>
           </TabsContent>
           <TabsContent value='last-run' className='min-h-0 flex-1 overflow-y-auto p-3'>
-            <LastRunTab node={node} status={status} detail={detail} />
+            <LastRunTab node={node} status={status} detail={detail} nodes={nodes} />
           </TabsContent>
           <TabsContent value='wires' className='min-h-0 flex-1 overflow-y-auto p-3'>
             <WiresTab

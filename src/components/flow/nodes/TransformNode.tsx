@@ -4,6 +4,7 @@ import { INPUT_HANDLE, RESULT_HANDLE } from '@/lib/flow-handles';
 import type { FlowNodeKind, FlowNodeStatus, FlowSkipReason } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { scriptPreview } from '../properties/wireRows';
+import { DurationChip } from './DurationChip';
 import { NodeMenuButton } from './NodeMenuButton';
 import { NodeStatusCaption } from './NodeStatusCaption';
 import { nodeStatusClassName } from './nodeStatus';
@@ -14,6 +15,8 @@ export type TransformNodeData = {
   error?: string;
   /** Progress text while running. */
   progress?: string;
+  /** How long the last run of this node took. */
+  durationMs?: number;
   skipReason?: FlowSkipReason;
   /** Set when a save was rejected because of this node. */
   hasCycleError?: boolean;
@@ -63,6 +66,7 @@ export function TransformNode({
         error={data.error}
         progress={data.progress}
       />
+      <DurationChip durationMs={data.durationMs} />
 
       <div className='px-2 py-1.5'>
         <span className='text-muted-foreground'>script</span>

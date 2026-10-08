@@ -52,6 +52,30 @@ describe('InputNode', () => {
     );
     expect(screen.getByTestId('input-node-card')).toBeInTheDocument();
   });
+
+  it('shows how long the last run took', () => {
+    wrap(
+      <InputNode
+        id='i1'
+        data={{
+          kind: { kind: 'Input', label: 'API Key', value: 'sk-123' },
+          status: 'success',
+          durationMs: 1500,
+        }}
+        selected={false}
+        type='Input'
+        dragging={false}
+        zIndex={0}
+        isConnectable
+        draggable
+        selectable
+        deletable
+        positionAbsoluteX={0}
+        positionAbsoluteY={0}
+      />,
+    );
+    expect(screen.getByTestId('duration-chip')).toHaveTextContent('1.5s');
+  });
 });
 
 describe('OutputNode', () => {
