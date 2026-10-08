@@ -55,8 +55,10 @@ import { FlowSaveShortcut } from './FlowSaveShortcut';
 import { FlowToolbar } from './FlowToolbar';
 import { NodePalette } from './NodePalette';
 import { NodePropertiesPanel, type PanelTab } from './properties/NodePropertiesPanel';
+import { RunHistorySelect } from './RunHistorySelect';
 import { RunResultStrip } from './RunResultStrip';
 import { useClearRemovedAuthTokens } from './useClearRemovedAuthTokens';
+import { ViewedRunBanner } from './ViewedRunBanner';
 import { WireScriptDialog } from './WireScriptDialog';
 
 // A new wire and the dialog that finishes it are one undo step, however long the dialog stays open.
@@ -78,6 +80,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const setFlowCallbackUrls = usePaneStore((s) => s.setFlowCallbackUrls);
   const setFlowRunResult = usePaneStore((s) => s.setFlowRunResult);
   const recordFlowRun = usePaneStore((s) => s.recordFlowRun);
+  const setViewedFlowRun = usePaneStore((s) => s.setViewedFlowRun);
   const markClean = usePaneStore((s) => s.markClean);
   const undoFlow = usePaneStore((s) => s.undoFlow);
   const redoFlow = usePaneStore((s) => s.redoFlow);
@@ -507,6 +510,15 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     : undefined;
 
   const panelNode = panelNodeId ? tab.nodes.find((n) => n.id === panelNodeId) : undefined;
+  // A past run chosen in the selector replaces the live results on screen. An id
+  // that is no longer in the history counts as live. The toolbar and the run
+  // announcer keep reading the live maps.
+  const viewedRecord = tab.viewedRunId
+    ? ((tab.runHistory ?? []).find((r) => r.runId === tab.viewedRunId) ?? null)
+    : null;
+  const shownStatus = viewedRecord ? viewedRecord.nodeStatus : tab.nodeStatus;
+  const shownDetail = viewedRecord ? viewedRecord.nodeDetail : tab.nodeDetail;
+  const shownRun = viewedRecord ? viewedRecord.result : tab.lastRun;
 
   return (
     <ResizablePanelGroup className='h-full'>
@@ -537,6 +549,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                 handleRedo();
                 focusCanvas();
               }}
+            />
+            <RunHistorySelect
+              history={tab.runHistory ?? []}
+              viewedRunId={viewedRecord ? viewedRecord.runId : null}
+              disabled={tab.runState === 'running'}
+              onChange={(runId) => setViewedFlowRun(tab.id, runId)}
             />
             <FlowToolbar
               collection={collectionName}
@@ -599,12 +617,20 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               Save
             </Button>
           </div>
-          {tab.lastRun && (
+          {shownRun && (
             <div className='absolute top-12 right-2 z-10 max-w-[60%]'>
               <RunResultStrip
-                result={tab.lastRun}
-                canSelectFailed={tab.nodes.some((n) => n.id === tab.lastRun?.failedNodeId)}
+                result={shownRun}
+                canSelectFailed={tab.nodes.some((n) => n.id === shownRun.failedNodeId)}
                 onSelectFailed={handleOpenNodeOnLastRun}
+              />
+            </div>
+          )}
+          {viewedRecord && (
+            <div className='absolute top-14 left-3 z-10 max-w-[45%]'>
+              <ViewedRunBanner
+                record={viewedRecord}
+                onBack={() => setViewedFlowRun(tab.id, null)}
               />
             </div>
           )}
@@ -612,8 +638,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
           <FlowCanvas
             nodes={tab.nodes}
             edges={tab.edges}
-            nodeStatus={tab.nodeStatus}
-            nodeDetail={tab.nodeDetail}
+            nodeStatus={shownStatus}
+            nodeDetail={shownDetail}
             cycleNodeIds={cycleNodeIds}
             cycleEdgeIds={cycleEdgeIds}
             onNodesChange={(nodes, options) => updateFlowNodes(tab.id, nodes, options)}
@@ -685,10 +711,10 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               nodes={tab.nodes}
               collection={collectionName}
               flowName={flowName}
-              status={tab.nodeStatus[panelNode.id] ?? 'idle'}
-              detail={tab.nodeDetail?.[panelNode.id]}
-              nodeStatus={tab.nodeStatus}
-              nodeDetail={tab.nodeDetail}
+              status={shownStatus[panelNode.id] ?? 'idle'}
+              detail={shownDetail?.[panelNode.id]}
+              nodeStatus={shownStatus}
+              nodeDetail={shownDetail}
               saveError={
                 saveErrorMessage && cycleNodeIds.includes(panelNode.id)
                   ? saveErrorMessage
