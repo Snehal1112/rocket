@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -521,10 +521,17 @@ describe('FlowToolbar', () => {
     expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-123');
   });
 
-  it('Stop is a no-op when no run is active', async () => {
+  it('Stop is disabled when no run is active', () => {
     renderToolbar();
-    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(tauriApi.cancelFlowRun).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+  });
+
+  it('Stop is enabled once a run is active', async () => {
+    renderToolbar();
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-1');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
   });
 
   it('a rapid double-click on Run only starts one run and does not orphan a listener pair', async () => {
@@ -807,6 +814,61 @@ describe('FlowToolbar', () => {
       expect(onPrepareAuth).toHaveBeenCalledTimes(2);
       second.resolve({});
       await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  describe('rocket:flow-run shortcut', () => {
+    const fire = (tabId: string) =>
+      act(() => {
+        window.dispatchEvent(new CustomEvent('rocket:flow-run', { detail: { tabId } }));
+      });
+
+    it('starts a run for its own tab', async () => {
+      renderToolbar({ tabId: 'tab-1' });
+      fire('tab-1');
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
+    });
+
+    it('ignores an event for another tab', async () => {
+      renderToolbar({ tabId: 'tab-1' });
+      fire('tab-2');
+      await act(async () => {});
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+    });
+
+    it('starts only one run when pressed twice, and none while running', async () => {
+      renderToolbar({ tabId: 'tab-1' });
+      fire('tab-1');
+      fire('tab-1');
+      await waitFor(() => expect(tauriApi.runFlow).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-1');
+      fire('tab-1');
+      await act(async () => {});
+      expect(tauriApi.runFlow).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not start a run while sign-in is pending', async () => {
+      const onPrepareAuth = vi.fn(() => new Promise<null>(() => undefined));
+      renderToolbar({ tabId: 'tab-1', onPrepareAuth });
+      fire('tab-1');
+      await waitFor(() => expect(onPrepareAuth).toHaveBeenCalledTimes(1));
+      fire('tab-1');
+      await act(async () => {});
+      expect(onPrepareAuth).toHaveBeenCalledTimes(1);
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+    });
+
+    it('does nothing without a tab id, and stops listening after unmount', async () => {
+      const { unmount } = renderToolbar();
+      fire('tab-1');
+      await act(async () => {});
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
+      unmount();
+      renderToolbar({ tabId: 'tab-1' }).unmount();
+      fire('tab-1');
+      await act(async () => {});
+      expect(tauriApi.runFlow).not.toHaveBeenCalled();
     });
   });
 });

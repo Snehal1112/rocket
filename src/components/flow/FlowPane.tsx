@@ -388,6 +388,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             <FlowToolbar
               collection={collectionName}
               flowName={flowName}
+              tabId={tab.id}
               environmentName={activeEnvironmentName}
               onPatchStatus={(nodeId, status, detail) =>
                 patchFlowNodeStatus(tab.id, nodeId, status as FlowNodeStatus, detail)

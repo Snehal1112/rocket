@@ -44,6 +44,9 @@ export function useKeyboardShortcuts() {
           } else {
             sendRequest(tab.id, tab.request);
           }
+        } else if (tab && isFlowTab(tab)) {
+          // The flow toolbar owns the run lifecycle, so it starts the run.
+          window.dispatchEvent(new CustomEvent('rocket:flow-run', { detail: { tabId: tab.id } }));
         }
         return;
       }

@@ -21,6 +21,8 @@ import type { FlowNodeDetail } from '@/types/pane-types';
 interface FlowToolbarProps {
   collection: string;
   flowName: string;
+  // The tab this toolbar belongs to. Lets Ctrl+Enter start this tab's run.
+  tabId?: string;
   environmentName: string | null;
   onPatchStatus: (nodeId: string, status: string, detail?: FlowNodeDetail) => void;
   // Receives progress text for a running node, such as "attempt 3/30".
@@ -76,6 +78,7 @@ function detailFromStep(step: FlowStepResult): FlowNodeDetail {
 export function FlowToolbar({
   collection,
   flowName,
+  tabId,
   environmentName,
   onPatchStatus,
   onPatchProgress,
@@ -289,6 +292,20 @@ export function FlowToolbar({
     }
   };
 
+  // The global Ctrl+Enter handler dispatches this event. The ref keeps the
+  // listener from using a stale handler, and handleRun guards double starts.
+  const handleRunRef = useRef(handleRun);
+  handleRunRef.current = handleRun;
+  useEffect(() => {
+    if (!tabId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ tabId?: string }>).detail;
+      if (detail?.tabId === tabId) void handleRunRef.current();
+    };
+    window.addEventListener('rocket:flow-run', handler);
+    return () => window.removeEventListener('rocket:flow-run', handler);
+  }, [tabId]);
+
   const handleStop = () => {
     if (abandonPrepareRef.current) {
       abandonPrepareRef.current();
@@ -305,7 +322,12 @@ export function FlowToolbar({
       <Button size='sm' onClick={() => void handleRun()} disabled={liveRunId !== null || preparing}>
         {preparing ? 'Signing in…' : 'Run'}
       </Button>
-      <Button size='sm' variant='outline' onClick={handleStop}>
+      <Button
+        size='sm'
+        variant='outline'
+        onClick={handleStop}
+        disabled={liveRunId === null && !preparing}
+      >
         Stop
       </Button>
     </div>
