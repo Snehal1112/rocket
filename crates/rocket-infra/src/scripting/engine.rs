@@ -2620,4 +2620,109 @@ mod tests {
             "2|false|x|true"
         );
     }
+
+    #[tokio::test]
+    async fn rok_delete_then_set_leaves_the_key_set() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.runtime.insert("k".into(), "old".into());
+        let mut ctx = minimal_ctx(
+            "rok.deleteVar('k'); rok.setVar('k', 1); \
+             rok.setVar('has', String(rok.hasVar('k')) + '|' + rok.getVar('k'))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("k").expect("k present"), 1);
+        assert_eq!(result.runtime_vars.get("has").expect("has present"), "true|1");
+        assert!(!result.runtime_var_deletes.contains(&"k".to_string()));
+    }
+
+    #[tokio::test]
+    async fn rok_get_all_vars_keeps_value_types() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "rok.setVar('n', 5); rok.setVar('t', typeof rok.getAllVars().n + ':' + rok.getAllVars().n)",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("n").expect("n present"), 5);
+        assert_eq!(result.runtime_vars.get("t").expect("t present"), "number:5");
+    }
+
+    #[tokio::test]
+    async fn rok_env_ops_still_persist_set_and_delete_all() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env.insert("A".into(), "1".into());
+        let mut ctx = minimal_ctx("rok.setEnvVar('B', '2'); rok.deleteAllEnvVars()");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let w = &result.env_var_writes;
+        let set_b = w
+            .iter()
+            .position(|x| x.key == "B" && x.value == "2")
+            .expect("set for B recorded");
+        let null_b = w
+            .iter()
+            .rposition(|x| x.key == "B" && x.value.is_null())
+            .expect("null write for B");
+        assert!(set_b < null_b, "the delete must come after the set");
+        assert!(w.iter().any(|x| x.key == "A" && x.value.is_null()));
+    }
+
+    #[tokio::test]
+    async fn rok_global_reads_and_ops_follow_set_and_delete_all() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.global_env.insert("g1".into(), "1".into());
+        let mut ctx = minimal_ctx(
+            "rok.setGlobalEnvVar('g2', 'x'); \
+             const before = Object.keys(rok.getAllGlobalEnvVars()).sort().join(','); \
+             rok.deleteAllGlobalEnvVars(); \
+             rok.setVar('out', before + '|' + Object.keys(rok.getAllGlobalEnvVars()).length)",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "g1,g2|0"
+        );
+        let w = &result.global_env_var_writes;
+        let set_g2 = w
+            .iter()
+            .position(|x| x.key == "g2" && x.value == "x")
+            .expect("set for g2 recorded");
+        let null_g2 = w
+            .iter()
+            .rposition(|x| x.key == "g2" && x.value.is_null())
+            .expect("null write for g2");
+        assert!(set_g2 < null_g2);
+        assert!(w.iter().any(|x| x.key == "g1" && x.value.is_null()));
+    }
+
+    #[tokio::test]
+    async fn rok_delete_all_collection_vars_overlay_limit_and_ops() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.collection.insert("snap".into(), "s".into());
+        vars.collection.insert("touched".into(), "t".into());
+        let mut ctx = minimal_ctx(
+            "rok.setCollectionVar('new', 'n'); rok.deleteAllCollectionVars(); \
+             rok.setVar('out', [rok.hasCollectionVar('new'), rok.hasCollectionVar('snap')].join('|'))",
+        );
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        // Touched keys read as gone; the untouched snapshot key is the documented limit.
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "false|true"
+        );
+        let w = &result.collection_var_writes;
+        assert!(w.iter().any(|x| x.key == "new" && x.value == "n"));
+        for key in ["new", "snap", "touched"] {
+            assert!(
+                w.iter().rposition(|x| x.key == key && x.value.is_null()).is_some(),
+                "missing null write for {key}"
+            );
+        }
+    }
 }
