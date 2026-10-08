@@ -17,12 +17,15 @@ import {
   flowAuthKey,
   flowAuthResolver,
   flowAuthState,
+  isInteractiveGrant,
 } from '@/lib/flow-auth';
+import type { AuthNode, AuthNodeScope } from '@/lib/flow-auth-preflight';
 import { plaintextSecretFields } from '@/lib/flow-secrets';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import type { FlowNodeKind } from '@/lib/tauri-api';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { AuthState } from '@/types/pane-types';
+import { AuthenticateButton } from './AuthenticateButton';
 import { LabelField } from './LabelField';
 
 type AuthKind = Extract<FlowNodeKind, { kind: 'Auth' }>;
@@ -88,6 +91,22 @@ export function AuthNodeEditor({
       onChange({ ...kind, auth: toPersistedAuth(entry.auth) });
     },
     [key, kind, onChange, rv, setAuth, state, stored],
+  );
+
+  // The node and scope the Authenticate button signs in with. The scope holds the
+  // same environment names as `key` above, so the token lands where `stored` reads it.
+  const authNode = useMemo<AuthNode>(
+    () => ({ id: nodeId, kind, position: { x: 0, y: 0 } }),
+    [nodeId, kind],
+  );
+  const authScope = useMemo<AuthNodeScope>(
+    () => ({
+      collection,
+      flowName,
+      environmentName: activeEnvId ?? undefined,
+      globalEnvName: globalEnvName ?? undefined,
+    }),
+    [collection, flowName, activeEnvId, globalEnvName],
   );
 
   return (
@@ -156,6 +175,10 @@ export function AuthNodeEditor({
         collection={collection}
         environmentName={environmentName}
       />
+
+      {isInteractiveGrant(kind.auth) && (
+        <AuthenticateButton node={authNode} scope={authScope} oauth={state.oauth2} />
+      )}
     </div>
   );
 }

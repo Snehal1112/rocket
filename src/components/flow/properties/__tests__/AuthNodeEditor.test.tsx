@@ -4,8 +4,10 @@ import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flowAuthKey, oauth2Fingerprint } from '@/lib/flow-auth';
 import { fromPersistedAuth } from '@/lib/persisted-auth';
+import * as tauriApi from '@/lib/tauri-api';
 import type { Auth, FlowNodeKind } from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
+import { createDeferred } from '@/test/deferred';
 import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
@@ -72,6 +74,15 @@ vi.mock('@/components/request/AuthEditor', () => ({
         <button
           type='button'
           onClick={() =>
+            props.auth.oauth2 &&
+            props.onChange({ ...props.auth, oauth2: { ...props.auth.oauth2, scope: 'changed' } })
+          }
+        >
+          change scope
+        </button>
+        <button
+          type='button'
+          onClick={() =>
             props.onChange({ authType: 'bearer', bearer: { token: 'typed-token-123456' } })
           }
         >
@@ -120,6 +131,8 @@ vi.mock('@/lib/queries/environment-queries', () => ({
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
+  oauth2GetToken: vi.fn(),
+  oauth2RefreshToken: vi.fn(),
   getCollectionSettings: vi.fn(async () => ({
     headers: [],
     variables: [
@@ -132,6 +145,14 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
       },
     ],
     sandboxMode: 'safe',
+  })),
+}));
+
+vi.mock('@/lib/execute-request', () => ({
+  buildOAuth2VarContext: vi.fn(async () => ({
+    clientId: 'dev-client',
+    tokenUrl: 'https://idp/token',
+    tenant: 'acme',
   })),
 }));
 
@@ -706,5 +727,154 @@ describe('AuthNodeEditor plaintext credential warning', () => {
   it('does not warn for an empty credential', () => {
     renderKind({ authType: 'bearer', token: '' });
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+});
+
+describe('AuthNodeEditor Authenticate button', () => {
+  const grantKind = (flow: string): AuthKind => ({
+    ...kind,
+    auth: {
+      authType: 'o-auth2',
+      flow,
+      accessTokenUrl: '{{tokenUrl}}',
+      authorizationUrl: 'https://idp/authorize',
+      credentials: { clientId: '{{clientId}}', clientSecret: '{{secret}}' },
+    } as unknown as Auth,
+  });
+  const tokenResult = {
+    access_token: 'authenticated-token-123456',
+    token_type: 'Bearer',
+    expires_in: 3600,
+    refresh_token: 'refresh-123456',
+  };
+  const renderGrant = (flow: string) =>
+    render(
+      <AuthNodeEditor
+        kind={grantKind(flow)}
+        onChange={vi.fn()}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+
+  beforeEach(() => {
+    useFlowAuthStore.setState({ auths: {} });
+    useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'api' });
+    globalEnvState.name = 'global';
+    vi.mocked(tauriApi.oauth2GetToken).mockReset();
+  });
+
+  it.each(['authorization_code', 'implicit'])('shows the button for the %s grant', (flow) => {
+    renderGrant(flow);
+    expect(screen.getByRole('button', { name: 'Authenticate' })).toBeInTheDocument();
+    expect(screen.getByText('No token')).toBeInTheDocument();
+  });
+
+  it.each(['client_credentials', 'resource_owner_password_credentials'])(
+    'shows no button for the %s grant',
+    (flow) => {
+      renderGrant(flow);
+      expect(screen.queryByRole('button', { name: /^Authenticate/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows no button for a static auth type', () => {
+    render(
+      <AuthNodeEditor
+        kind={kind}
+        onChange={vi.fn()}
+        collection='api'
+        flowName='login'
+        nodeId='n1'
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /^Authenticate/ })).not.toBeInTheDocument();
+  });
+
+  it('signs in, stores the token under the displayed key and shows the status', async () => {
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(tokenResult);
+    renderGrant('authorization_code');
+    await waitFor(() =>
+      expect(authEditorProps.last?.variableContext?.get('tokenUrl')?.value).toBe(
+        'https://idp/token',
+      ),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Signed in.');
+    expect(tauriApi.oauth2GetToken).toHaveBeenCalledWith(
+      expect.objectContaining({ grantType: 'authorization_code', clientId: 'dev-client' }),
+    );
+    // The token sits under the key the editor reads, so the status and the editor see it.
+    const entry = useFlowAuthStore
+      .getState()
+      .getEntry(flowAuthKey('api', 'login', 'n1', 'dev', 'global'));
+    expect(entry?.auth.oauth2?.accessToken).toBe('authenticated-token-123456');
+    expect(screen.getByText(/^Token valid until/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Authenticate again' })).toBeInTheDocument();
+    expect(screen.getByTestId('authenticate-section').outerHTML).not.toContain(
+      'authenticated-token-123456',
+    );
+  });
+
+  it('uses no more than one sign-in for two quick clicks', async () => {
+    const pending = createDeferred<typeof tokenResult>();
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(pending.promise);
+    renderGrant('authorization_code');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Signing in…' }));
+
+    expect(tauriApi.oauth2GetToken).toHaveBeenCalledTimes(1);
+    pending.resolve(tokenResult);
+    expect(await screen.findByRole('status')).toBeInTheDocument();
+  });
+
+  it('shows a failed sign-in as an alert and stores no token', async () => {
+    vi.mocked(tauriApi.oauth2GetToken).mockRejectedValue(new Error('window closed'));
+    renderGrant('authorization_code');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Sign-in for Auth node "Sign in" failed: window closed',
+    );
+    expect(
+      useFlowAuthStore.getState().getEntry(flowAuthKey('api', 'login', 'n1', 'dev', 'global')),
+    ).toBeUndefined();
+  });
+
+  it('drops the token when the configuration is edited while the sign-in window is open', async () => {
+    const pending = createDeferred<typeof tokenResult>();
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(pending.promise);
+    // Feeds each reported node back in, as the flow pane does.
+    function Harness() {
+      const [current, setCurrent] = useState<AuthKind>(grantKind('authorization_code'));
+      return (
+        <AuthNodeEditor
+          kind={current}
+          onChange={(k) => setCurrent(k as AuthKind)}
+          collection='api'
+          flowName='login'
+          nodeId='n1'
+        />
+      );
+    }
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'change scope' }));
+    pending.resolve(tokenResult);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'The sign-in settings changed, so the new token was not saved.',
+    );
+    const entry = useFlowAuthStore
+      .getState()
+      .getEntry(flowAuthKey('api', 'login', 'n1', 'dev', 'global'));
+    expect(entry?.auth.oauth2?.accessToken ?? '').toBe('');
+    expect(screen.getByText('No token')).toBeInTheDocument();
   });
 });
