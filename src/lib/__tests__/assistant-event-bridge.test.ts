@@ -85,6 +85,16 @@ describe('useAssistantEventBridge', () => {
     expect(lastMessage()).toMatchObject({ kind: 'agent', text: 'Hello', streaming: false });
   });
 
+  it('does not apply events after the bridge is unmounted', async () => {
+    activate();
+    store().appendUserMessage('hi');
+    const view = renderHook(() => useAssistantEventBridge());
+    await waitFor(() => expect(mocks.handlers.chunk).toBeDefined());
+    view.unmount();
+    emit('chunk', { session_id: 's1', text: 'late' });
+    expect(lastMessage()).toMatchObject({ kind: 'agent', text: '' });
+  });
+
   it('ignores events for another session', async () => {
     activate();
     store().appendUserMessage('hi');

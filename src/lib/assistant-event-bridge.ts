@@ -40,36 +40,61 @@ export function useAssistantEventBridge(): void {
   useEffect(() => {
     void sweepStaleAssistantSessions();
     const store = () => useAssistantStore.getState();
+    let disposed = false;
+    // Handlers ignore events once the effect is torn down, so an overlapping
+    // mount (StrictMode, HMR) never applies an event twice.
+    const guard =
+      <T>(handler: (event: T) => void) =>
+      (event: T) => {
+        if (!disposed) handler(event);
+      };
 
-    const unsubs = Promise.all([
-      onAgentSessionChunk((e) => store().appendChunk(e.session_id, e.text)),
-      onAgentSessionFinished((e) => store().completeMessage(e.session_id)),
-      onAgentSessionFailed((e) => store().failMessage(e.session_id, e.error)),
-      onAgentToolActivity((e) =>
-        store().upsertToolActivity(e.session_id, {
-          callId: e.call_id,
-          title: e.title,
-          status: e.status,
-        }),
+    const registrations = [
+      onAgentSessionChunk(guard((e) => store().appendChunk(e.session_id, e.text))),
+      onAgentSessionFinished(guard((e) => store().completeMessage(e.session_id))),
+      onAgentSessionFailed(guard((e) => store().failMessage(e.session_id, e.error))),
+      onAgentToolActivity(
+        guard((e) =>
+          store().upsertToolActivity(e.session_id, {
+            callId: e.call_id,
+            title: e.title,
+            status: e.status,
+          }),
+        ),
       ),
       // Event options are snake_case. Plan 01's helper converts them.
-      onAgentConfigOptions((e) =>
-        store().setConfigOptions(e.session_id, configOptionsFromEvent(e.options)),
+      onAgentConfigOptions(
+        guard((e) => store().setConfigOptions(e.session_id, configOptionsFromEvent(e.options))),
       ),
-      onAgentUsage((e) =>
-        store().setUsage(e.session_id, {
-          used: e.used,
-          size: e.size,
-          costUsd: e.cost_usd ?? undefined,
+      onAgentUsage(
+        guard((e) =>
+          store().setUsage(e.session_id, {
+            used: e.used,
+            size: e.size,
+            costUsd: e.cost_usd ?? undefined,
+          }),
+        ),
+      ),
+      onAgentProposalCreated(
+        guard((e) => {
+          void refreshProposals(e.session_id);
         }),
       ),
-      onAgentProposalCreated((e) => {
-        void refreshProposals(e.session_id);
-      }),
-      onAgentProposalResolved((e) =>
-        store().resolveProposal(e.session_id, e.proposal_id, e.status),
+      onAgentProposalResolved(
+        guard((e) => store().resolveProposal(e.session_id, e.proposal_id, e.status)),
       ),
-    ]);
+    ];
+
+    // A listener that resolves after disposal is unlistened at once.
+    const settled = Promise.allSettled(registrations).then((results) => {
+      const fns: Array<() => void> = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') fns.push(result.value);
+        else console.error('[assistant] failed to register a listener', result.reason);
+      }
+      if (disposed) for (const fn of fns) fn();
+      return fns;
+    });
 
     // The first id is set during startup. Only a change from one workspace
     // to another ends the session.
@@ -80,8 +105,9 @@ export function useAssistantEventBridge(): void {
     });
 
     return () => {
+      disposed = true;
       unsubWorkspace();
-      void unsubs.then((fns) => {
+      void settled.then((fns) => {
         for (const fn of fns) fn();
       });
     };

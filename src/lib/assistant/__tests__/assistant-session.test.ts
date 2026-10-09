@@ -117,7 +117,16 @@ describe('assistant session flows', () => {
       streaming: false,
       error: 'agent exited',
     });
-    expect(store().session?.status).toBe('error');
+    expect(store().session?.status).toBe('active');
+  });
+
+  it('accepts a new message after a rejected prompt', async () => {
+    activate();
+    vi.mocked(api.sendAgentPrompt).mockRejectedValueOnce('agent busy');
+    await sendAssistantMessage('one');
+    vi.mocked(api.sendAgentPrompt).mockResolvedValueOnce('end_turn');
+    await sendAssistantMessage('two');
+    expect(api.sendAgentPrompt).toHaveBeenCalledTimes(2);
   });
 
   it('stops a running turn', async () => {

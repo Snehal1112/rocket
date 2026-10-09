@@ -73,7 +73,8 @@ export async function sendAssistantMessage(text: string): Promise<void> {
   try {
     await sendAgentPrompt(session.sessionId, trimmed);
   } catch (err) {
-    useAssistantStore.getState().failMessage(session.sessionId, String(err));
+    // A rejected prompt fails the turn only. A dead session arrives as its own event.
+    useAssistantStore.getState().failMessage(session.sessionId, String(err), false);
   }
 }
 

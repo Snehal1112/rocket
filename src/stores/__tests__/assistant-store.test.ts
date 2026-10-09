@@ -130,6 +130,23 @@ describe('assistant-store', () => {
     });
   });
 
+  it('keeps the session active on a non-fatal failure', () => {
+    activate();
+    store().appendUserMessage('hi');
+    store().failMessage('s1', 'busy', false);
+    expect(store().session?.status).toBe('active');
+    expect(lastMessage()).toMatchObject({ streaming: false, error: 'busy' });
+    expect(store().appendUserMessage('again')).toBe(true);
+  });
+
+  it('does not downgrade a resolved proposal back to pending', () => {
+    activate();
+    store().upsertProposal(makeProposal());
+    store().resolveProposal('s1', 'p1', 'accepted');
+    store().upsertProposal(makeProposal());
+    expect(store().proposals[0].status).toBe('accepted');
+  });
+
   it('ends the session, discards proposals and adds the notice', () => {
     activate();
     store().appendUserMessage('hi');

@@ -91,7 +91,8 @@ export interface AssistantState {
   appendUserMessage: (text: string) => boolean;
   appendChunk: (sessionId: string, text: string) => void;
   completeMessage: (sessionId: string) => void;
-  failMessage: (sessionId: string, error: string) => void;
+  /** A fatal failure ends the session. A non-fatal one only fails the turn. */
+  failMessage: (sessionId: string, error: string, fatal?: boolean) => void;
   upsertToolActivity: (sessionId: string, activity: ToolActivity) => void;
   setConfigOptions: (sessionId: string, options: ConfigOption[]) => void;
   setUsage: (sessionId: string, usage: AssistantUsage) => void;
@@ -212,11 +213,11 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     );
   },
 
-  failMessage(sessionId, error) {
+  failMessage(sessionId, error, fatal = true) {
     set((state) => {
       if (!state.session || !isCurrent(state, sessionId)) return state;
       return {
-        session: { ...state.session, status: 'error', error },
+        session: fatal ? { ...state.session, status: 'error', error } : state.session,
         messages: settleStreaming(state.messages, error),
       };
     });
@@ -263,6 +264,10 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       if (!isCurrent(state, proposal.sessionId)) return state;
       const index = state.proposals.findIndex((p) => p.id === proposal.id);
       if (index === -1) return { proposals: [...state.proposals, proposal] };
+      // A late list result must not undo a status the resolved event set.
+      if (proposal.status === 'pending' && state.proposals[index].status !== 'pending') {
+        return state;
+      }
       const proposals = state.proposals.slice();
       proposals[index] = proposal;
       return { proposals };
