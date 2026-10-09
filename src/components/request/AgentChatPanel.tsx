@@ -49,11 +49,11 @@ export function AgentChatPanel({
   // replies keep landing while this panel is unmounted or showing another tab.
 
   const handleStart = async () => {
-    if (!selectedAgentConfigId || !cwd) return;
+    if (!selectedAgentConfigId || !cwd || !collectionName) return;
     setStartError(null);
     beginAgentSession(tabId, selectedAgentConfigId);
     try {
-      const newSessionId = await startAgentSession(selectedAgentConfigId, cwd);
+      const newSessionId = await startAgentSession(selectedAgentConfigId, cwd, collectionName);
       // The store decides whether this session still has an owner. It
       // refuses when the tab was closed or dropped mid-handshake, and then
       // nothing else would ever end this credentialed agent process.

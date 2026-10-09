@@ -500,7 +500,7 @@ mod tests {
     use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
     use rocket_infra::{
         FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsSecretManagerRepo,
-        SharedCollectionEnvironmentRepo,
+        FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo,
     };
     use rocket_shared::events::NullEventPublisher;
     use rocket_shared::types::HttpMethod;
@@ -603,6 +603,8 @@ mod tests {
                 Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
                 Arc::new(exec_svc),
                 Arc::new(NullEventPublisher),
+                Box::new(FsWorkspaceConfigRepo::new()),
+                Arc::clone(&ws_path),
             ));
 
             let app = tauri::test::mock_builder()

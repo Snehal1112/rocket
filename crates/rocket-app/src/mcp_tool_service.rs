@@ -8,6 +8,7 @@
 //! trail.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -64,6 +65,17 @@ pub struct McpToolService {
     environment_repo_factory: Arc<dyn rocket_environment::EnvironmentRepositoryFactory>,
     execution_svc: Arc<RequestExecutionService>,
     event_publisher: Arc<dyn EventPublisher>,
+    /// Resolves `workspace.yml`'s `RequestGuardPolicy` at call time (never
+    /// cached from construction time), so `run_request` honors a workspace's
+    /// `block_script_redirects_to_internal_hosts`/`also_block_private_ranges`
+    /// opt-in instead of always running with the fully-permissive default.
+    config_repo: Box<dyn rocket_workspace::WorkspaceConfigRepository>,
+    /// Shared with `SharedPathCollectionRepo`/`SharedPathFlowRepo`/
+    /// `ReqwestExecutor::with_allowed_base` in `src-tauri`'s service graph —
+    /// resolved fresh on every `run_request` call, the same
+    /// "live workspace path" pattern `SharedPathCollectionRepo::repo()` uses,
+    /// so a workspace switch takes effect immediately.
+    active_workspace_path: Arc<Mutex<PathBuf>>,
     test_result_cache: Mutex<HashMap<TestResultKey, Vec<rocket_scripting::TestResult>>>,
 }
 
@@ -79,17 +91,22 @@ fn test_result_key(session_id: &str, collection: &str, request_path: &str) -> Te
 }
 
 impl McpToolService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
         environment_repo_factory: Arc<dyn rocket_environment::EnvironmentRepositoryFactory>,
         execution_svc: Arc<RequestExecutionService>,
         event_publisher: Arc<dyn EventPublisher>,
+        config_repo: Box<dyn rocket_workspace::WorkspaceConfigRepository>,
+        active_workspace_path: Arc<Mutex<PathBuf>>,
     ) -> Self {
         Self {
             collection_repo,
             environment_repo_factory,
             execution_svc,
             event_publisher,
+            config_repo,
+            active_workspace_path,
             test_result_cache: Mutex::new(HashMap::new()),
         }
     }
@@ -180,12 +197,26 @@ impl McpToolService {
             request_path: request_path.to_string(),
             request,
         };
+        // Resolved fresh on every call against the *current* active
+        // workspace path — never cached from construction time — mirroring
+        // `SharedPathCollectionRepo::repo()`'s own "resolve against the live
+        // workspace path on every call" pattern, so a workspace switch (or a
+        // mid-session `workspace.yml` edit) takes effect immediately, and so
+        // agent-driven tool calls honor the same
+        // `block_script_redirects_to_internal_hosts`/`also_block_private_ranges`
+        // opt-in the Collection Runner's `RunCollectionInput` already does.
+        let workspace_path = self
+            .active_workspace_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let request_guard_policy = self.config_repo.load(&workspace_path)?.request_guard_policy;
         let input = build_step_input(
             &item,
             collection,
             environment_name,
             None,
-            rocket_workspace::RequestGuardPolicy::default(),
+            request_guard_policy,
             rocket_shared::RunSource::Agent,
         );
         // `execution_svc.execute` can fail with `DomainError::Http` whose
@@ -354,6 +385,21 @@ impl McpToolService {
         );
         Ok(results)
     }
+
+    /// Drops every `test_result_cache` entry belonging to `session_id`. Call
+    /// this from wherever a session's `McpServerRegistry` entry is torn down
+    /// (e.g. `end_agent_session`) — `test_result_cache` has no eviction of
+    /// its own otherwise, and Plan 05 mints a fresh `session_id` per ACP
+    /// session, so entries would otherwise accumulate in memory for the life
+    /// of the process. A session that never ran an MCP tool call (e.g. agent
+    /// autonomy was disabled the whole time) simply has nothing to remove —
+    /// a no-op, not an error.
+    pub fn forget_session(&self, session_id: &str) {
+        self.test_result_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(sid, _, _), _| sid != session_id);
+    }
 }
 
 /// Depth-first walk of a `get_summaries()` tree, collecting one
@@ -395,6 +441,7 @@ fn collect_request_entries(
 mod tests {
     use super::*;
     use std::collections::HashMap as StdHashMap;
+    use std::path::Path;
     use std::sync::Mutex as StdMutex;
 
     use rocket_collection::{
@@ -405,12 +452,44 @@ mod tests {
         Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Variable,
     };
     use rocket_shared::types::HttpMethod;
+    use rocket_workspace::{RequestGuardPolicy, WorkspaceConfig, WorkspaceConfigRepository};
 
     use crate::test_doubles::{
         ConfigurableCollectionRepo, EmptySecretManagerRepo, InMemoryHistoryRepo, NullCookieRepo,
         NullEnvRepo, RecordingExecutor, RecordingPublisher, SharedCollectionRepo, SharedExecutor,
         SharedHistoryRepo, SharedPublisher,
     };
+
+    /// `WorkspaceConfigRepository` double that always reports a fixed
+    /// `RequestGuardPolicy`, ignoring the requested path entirely — fine for
+    /// every test in this file except the ones that specifically exercise
+    /// policy resolution below, which build their own.
+    struct FixedPolicyConfigRepo(RequestGuardPolicy);
+    impl FixedPolicyConfigRepo {
+        fn permissive() -> Box<dyn WorkspaceConfigRepository> {
+            Box::new(Self(RequestGuardPolicy::default()))
+        }
+    }
+    impl WorkspaceConfigRepository for FixedPolicyConfigRepo {
+        fn load(&self, _workspace_path: &Path) -> DomainResult<WorkspaceConfig> {
+            let mut config = WorkspaceConfig::new("test-workspace");
+            config.request_guard_policy = self.0.clone();
+            Ok(config)
+        }
+        fn save(&self, _workspace_path: &Path, _config: &WorkspaceConfig) -> DomainResult<()> {
+            Ok(())
+        }
+        fn read_collection_name(&self, _collection_dir: &Path) -> DomainResult<Option<String>> {
+            Ok(None)
+        }
+    }
+
+    /// A placeholder active-workspace path. `FixedPolicyConfigRepo::load`
+    /// ignores its argument entirely, so no real directory needs to exist at
+    /// this path for these tests.
+    fn dummy_workspace_path() -> Arc<StdMutex<PathBuf>> {
+        Arc::new(StdMutex::new(PathBuf::from("/dummy-workspace")))
+    }
 
     /// Environment repo factory double whose `for_collection` handles all
     /// share one underlying map, so a `set_env_var` write is visible to a
@@ -492,7 +571,14 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         ));
-        McpToolService::new(collection_repo, env_factory, exec_svc, publisher)
+        McpToolService::new(
+            collection_repo,
+            env_factory,
+            exec_svc,
+            publisher,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+        )
     }
 
     fn sample_request(name: &str) -> CollectionRequest {
@@ -670,7 +756,14 @@ mod tests {
         // `Self` resolution first and then fails to match `&repo`.
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
-        let svc = McpToolService::new(repo_dyn, env_factory, Arc::clone(&exec_svc), publisher_dyn);
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            Arc::clone(&exec_svc),
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+        );
 
         let result = svc
             .run_request("s1", "my-api", "login.yml", None)
@@ -739,7 +832,14 @@ mod tests {
         ));
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
-        let svc = McpToolService::new(repo_dyn, env_factory, Arc::clone(&exec_svc), publisher_dyn);
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            Arc::clone(&exec_svc),
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+        );
 
         // First run succeeds and populates the cache.
         svc.run_request("s1", "my-api", "login.yml", None)
@@ -794,7 +894,14 @@ mod tests {
         ));
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
-        let svc = McpToolService::new(repo_dyn, env_factory, Arc::clone(&exec_svc), publisher_dyn);
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            Arc::clone(&exec_svc),
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+        );
 
         const SECRET: &str = "super-secret";
         executor.set_error(
@@ -1050,5 +1157,112 @@ mod tests {
             .list_collection_requests("s1", "my-api")
             .expect_err("the very next call must be refused once autonomy is disabled");
         assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn forget_session_evicts_only_that_sessions_cached_results() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+
+        svc.run_request("session-a", "my-api", "login.yml", None)
+            .await
+            .expect("run_request for session-a");
+        svc.run_request("session-b", "my-api", "login.yml", None)
+            .await
+            .expect("run_request for session-b");
+
+        svc.forget_session("session-a");
+
+        let forgotten = svc
+            .get_test_results("session-a", "my-api", "login.yml")
+            .expect_err("session-a's cached results must be gone after forget_session");
+        assert!(matches!(forgotten, DomainError::NotFound(_)));
+        svc.get_test_results("session-b", "my-api", "login.yml")
+            .expect("session-b's cached results must survive forgetting a different session");
+    }
+
+    #[test]
+    fn forget_session_on_a_session_with_nothing_cached_is_a_harmless_no_op() {
+        let repo = ConfigurableCollectionRepo::new();
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(repo, env_factory, publisher);
+
+        // Must not panic — a session that never ran an MCP tool call (e.g.
+        // agent autonomy was disabled the whole time) still gets swept.
+        svc.forget_session("never-existed");
+    }
+
+    #[tokio::test]
+    async fn run_request_resolves_the_request_guard_policy_from_config_repo_at_call_time() {
+        // Proof that `run_request` no longer hard-codes
+        // `RequestGuardPolicy::default()` (Post-Plan-03 review caveat (d)):
+        // a `WorkspaceConfigRepository` reporting the guard as enabled makes
+        // a script's redirect to a blocked host fail the run, instead of the
+        // permissive default silently allowing it through.
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let mut request = sample_request("Login");
+        // A non-empty pre-request script is required for the before-request
+        // phase (and therefore the guard check) to run at all.
+        request.pre_request_script = Some("// pre".to_string());
+        repo.with_request("my-api", "login.yml", request);
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+
+        let engine = crate::test_doubles::ProgrammableEngine::new();
+        engine.on(
+            "Login",
+            "before-request",
+            rocket_scripting::ScriptResult {
+                request_mutations: Some(rocket_scripting::RequestMutations {
+                    url: Some("http://169.254.169.254/latest/meta-data/".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+
+        let executor: Arc<dyn rocket_http::HttpExecutor> = RecordingExecutor::new();
+        let history = InMemoryHistoryRepo::new();
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_script_engine(Box::new(crate::test_doubles::SharedEngine(engine))),
+        );
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let guarded_config_repo: Box<dyn WorkspaceConfigRepository> =
+            Box::new(FixedPolicyConfigRepo(RequestGuardPolicy {
+                block_script_redirects_to_internal_hosts: true,
+                also_block_private_ranges: false,
+            }));
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            Arc::clone(&exec_svc),
+            publisher_dyn,
+            guarded_config_repo,
+            dummy_workspace_path(),
+        );
+
+        let err = svc
+            .run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect_err("a redirect to a blocked internal host must fail once the guard is on");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
     }
 }

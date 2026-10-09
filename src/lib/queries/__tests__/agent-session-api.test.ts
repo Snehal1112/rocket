@@ -9,10 +9,15 @@ describe('ACP chat session tauri-api bindings', () => {
   it('startAgentSession invokes start_agent_session with camelCase args', async () => {
     vi.mocked(invoke).mockResolvedValue('session-1');
     const { startAgentSession } = await import('@/lib/tauri-api');
-    const result = await startAgentSession('agent-1', '/collections/my-collection');
+    const result = await startAgentSession(
+      'agent-1',
+      '/collections/my-collection',
+      'my-collection',
+    );
     expect(invoke).toHaveBeenCalledWith('start_agent_session', {
       agentConfigId: 'agent-1',
       cwd: '/collections/my-collection',
+      collection: 'my-collection',
     });
     expect(result).toBe('session-1');
   });

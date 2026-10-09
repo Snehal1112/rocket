@@ -1,6 +1,9 @@
 mod audit_bridge;
 mod callback_adapter;
-mod commands;
+// `pub` so integration tests in `src-tauri/tests/` can drive command
+// orchestration directly (e.g. `commands::acp_sessions::
+// start_agent_session_inner`) — mirrors why `mcp` below is already `pub`.
+pub mod commands;
 pub mod mcp;
 mod tauri_event_bus;
 mod tauri_tracing_layer;
@@ -445,12 +448,12 @@ pub fn run() {
                     env_secret_store(),
                 )),
                 Arc::clone(&executor),
-                Box::new(FsHistoryRepo::new(history_dir)),
+                Box::new(FsHistoryRepo::new(history_dir.clone())),
                 // Sends read the folder chain, so the repo must follow workspace switches.
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(
                     &active_workspace_path,
                 ))),
-                Box::new(FsCookieRepo::new(cookies_dir)),
+                Box::new(FsCookieRepo::new(cookies_dir.clone())),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
                 Box::new(rocket_infra::FsSecretManagerRepo::new(
@@ -497,6 +500,71 @@ pub fn run() {
                 )
             };
             let oauth2_svc = make_oauth2_service();
+
+            // MCP tool server backend (Plan 05, Post-Plan-03 review caveats
+            // (a)-(b)): a dedicated Arc<RequestExecutionService> for
+            // agent-driven tool calls, rather than switching exec_svc's
+            // managed state to Arc (caveat (a)'s other option) — exec_svc is
+            // `app.manage`d by value and consumed by several commands'
+            // `State<'_, RequestExecutionService>` today. This mirrors
+            // exec_svc's own construction, except: (1) SharedPathCollectionRepo
+            // instead of a path-pinned FsCollectionRepo for collection_repo,
+            // reusing acp_collection_repo, since the agent's target collection
+            // is resolved from the sidebar and must follow workspace switches
+            // (same reasoning as acp_collection_repo's own doc comment); (2)
+            // SharedCollectionEnvironmentRepo::with_secret_store (caveat (b))
+            // for the per-collection env factory, never the secret-dropping
+            // `::new()` — McpToolService::set_env_var's read-modify-write
+            // would otherwise permanently erase any legacy plaintext secret
+            // sharing an environment file with the key being written.
+            let mcp_exec_svc = Arc::new(
+                RequestExecutionService::new_with_audit(
+                    Box::new(FsEnvironmentRepo::with_secret_store(
+                        environments_dir.clone(),
+                        env_secret_store(),
+                    )),
+                    Arc::clone(&executor),
+                    Box::new(FsHistoryRepo::new(history_dir.clone())),
+                    Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                        &active_workspace_path,
+                    ))),
+                    Box::new(FsCookieRepo::new(cookies_dir.clone())),
+                    Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                    audit_publisher.clone(),
+                    Box::new(rocket_infra::FsSecretManagerRepo::new(
+                        data_dir.join("secret_managers.yml"),
+                    )),
+                    Arc::clone(&vault_connection_secret_store),
+                    Arc::clone(&vault_fetcher),
+                )
+                .with_script_engine(Box::new(DenoScriptEngine::new()))
+                .with_collection_env_repo_factory(Box::new(
+                    SharedCollectionEnvironmentRepo::with_secret_store(
+                        Arc::clone(&active_workspace_path),
+                        env_secret_store(),
+                    ),
+                )),
+            );
+
+            // The production Arc<McpToolService> — no earlier plan
+            // constructs or `app.manage`s this (Plan 04's "Next Plan" left it
+            // to this one); every MCP tool call fails in
+            // `mcp_tool_service()`'s `try_state` lookup without it. Its
+            // `config_repo`/`active_workspace_path` pair (caveat (d)) lets
+            // `run_request` resolve the active workspace's
+            // `RequestGuardPolicy` fresh on every call, instead of always
+            // running with the fully-permissive default.
+            let mcp_tool_svc = Arc::new(rocket_app::McpToolService::new(
+                Arc::clone(&acp_collection_repo),
+                Arc::new(SharedCollectionEnvironmentRepo::with_secret_store(
+                    Arc::clone(&active_workspace_path),
+                    env_secret_store(),
+                )),
+                Arc::clone(&mcp_exec_svc),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                Box::new(FsWorkspaceConfigRepo::new()),
+                Arc::clone(&active_workspace_path),
+            ));
 
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows
@@ -605,6 +673,7 @@ pub fn run() {
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
             app.manage(Arc::clone(&mcp_server_registry));
+            app.manage(mcp_tool_svc);
 
             // Agent processes run in their own process groups, so a signal
             // sent to Rocket alone never reaches them. Route those signals

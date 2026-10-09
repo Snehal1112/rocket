@@ -2510,8 +2510,8 @@ export const onFlowRunFinished = (
   listen<FlowRunFinishedEvent>('flow-run-finished', (e) => handler(e.payload));
 
 // ==== AI Assist (ACP chat sessions) ====
-export const startAgentSession = (agentConfigId: string, cwd: string) =>
-  invoke<string>('start_agent_session', { agentConfigId, cwd });
+export const startAgentSession = (agentConfigId: string, cwd: string, collection: string) =>
+  invoke<string>('start_agent_session', { agentConfigId, cwd, collection });
 
 export const sendAgentPrompt = (sessionId: string, prompt: string) =>
   invoke<string>('send_agent_prompt', { sessionId, prompt });

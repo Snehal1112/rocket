@@ -24,6 +24,18 @@ pub struct AcpSessionService {
 /// Fixed per-prompt timeout from the spec. It is not user-configurable.
 const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Plain-data credentials for the per-session MCP HTTP tool server, built by
+/// the Tauri command layer (which owns the `AppHandle` needed to spawn the
+/// real HTTP server — see this crate's `CLAUDE.md`/the plan's Design Note for
+/// why that spawn does not happen in this crate) and passed into
+/// `start_session` as plain values, keeping this crate free of a `tauri`
+/// dependency for this feature.
+#[derive(Debug, Clone)]
+pub struct McpHttpServerCredentials {
+    pub port: u16,
+    pub token: String,
+}
+
 impl AcpSessionService {
     /// Production constructor. Uses the fixed 120-second prompt timeout.
     pub fn new(
@@ -67,11 +79,31 @@ impl AcpSessionService {
     /// propagate unchanged. No event is published on failure, because no
     /// session id exists yet. On success, `AcpSessionStarted` is published
     /// and the new session id is returned.
+    ///
+    /// `collection` gates whether any MCP servers are attached at all: a
+    /// collection that has not opted into agent autonomy gets none —
+    /// chat-only mode. This re-checks `get_settings` on every call (not just
+    /// once), matching the design spec's "checked on every call" rule for
+    /// the tools themselves, and propagates a lookup failure instead of
+    /// silently falling back to chat-only mode, so a broken collection name
+    /// surfaces loudly rather than silently degrading.
+    ///
+    /// `mcp_http` carries the port/token of an already-running MCP HTTP
+    /// server (see `McpHttpServerCredentials`'s doc comment for why this
+    /// crate never spawns that server itself). When autonomy is enabled and
+    /// credentials are present, both an `Http` and a `Stdio` spec are
+    /// offered to the agent — the `Stdio` spec points back at this same
+    /// server through the hidden `--acp-mcp-stdio-bridge` CLI mode, for
+    /// agents that only support MCP over stdio. When autonomy is disabled,
+    /// or the caller could not spawn the HTTP server (`mcp_http` is `None`),
+    /// no MCP servers are attached — the latter fails open to chat-only mode
+    /// rather than failing the whole session start over a tool-server hiccup.
     pub async fn start_session(
         &self,
         agent_config_id: &str,
         cwd: &str,
-        collection: Option<&str>,
+        collection: &str,
+        mcp_http: Option<McpHttpServerCredentials>,
     ) -> DomainResult<String> {
         let config = self.agent_config_service.get(agent_config_id)?;
         let credential = self
@@ -79,7 +111,48 @@ impl AcpSessionService {
             .resolve_credential(agent_config_id)
             .await?;
         let env = vec![(config.credential_env_var.clone(), credential)];
-        let mcp_servers = self.mcp_server_specs_for(collection)?;
+
+        let autonomy_enabled = self
+            .collection_repo
+            .get_settings(collection)?
+            .agent_autonomy_enabled;
+        let mcp_servers: Vec<rocket_acp::McpServerSpec> = match (autonomy_enabled, mcp_http) {
+            (true, Some(creds)) => {
+                let exe = std::env::current_exe().map_err(|e| {
+                    DomainError::Internal(format!("could not resolve current executable: {e}"))
+                })?;
+                vec![
+                    rocket_acp::McpServerSpec::Http {
+                        name: "rocket".to_string(),
+                        // The path literal ("/mcp") must match
+                        // `src_tauri::mcp::tool_server::MCP_HTTP_PATH`
+                        // exactly — the bare origin 404s (Plan 04's Final
+                        // Review). This crate cannot import that constant
+                        // (`rocket-app` never depends on `src-tauri` — this
+                        // repo's DDD boundary runs the other way), so it is
+                        // duplicated here as a literal; if that constant's
+                        // value ever changes, this literal must change with
+                        // it.
+                        url: format!("http://127.0.0.1:{}/mcp", creds.port),
+                        token: creds.token.clone(),
+                    },
+                    rocket_acp::McpServerSpec::Stdio {
+                        name: "rocket".to_string(),
+                        command: exe.to_string_lossy().into_owned(),
+                        args: vec!["--acp-mcp-stdio-bridge".to_string()],
+                        env: vec![
+                            ("ROCKET_MCP_PORT".to_string(), creds.port.to_string()),
+                            ("ROCKET_MCP_TOKEN".to_string(), creds.token),
+                        ],
+                    },
+                ]
+            }
+            // Autonomy is off, or the caller couldn't spawn the HTTP server
+            // (fails open to chat-only mode rather than failing the whole
+            // session start over a tool-server hiccup) — no MCP servers.
+            _ => Vec::new(),
+        };
+
         let session_id = self
             .session_client
             .start_session(&config.command, &config.args, cwd, &env, &mcp_servers)
@@ -89,31 +162,6 @@ impl AcpSessionService {
                 session_id: session_id.clone(),
             });
         Ok(session_id)
-    }
-
-    /// Resolves the MCP servers to attach to a new session. A session with
-    /// no target collection, or whose collection has not opted into agent
-    /// autonomy, gets none — chat-only mode, identical to subproject C's
-    /// existing behavior. No MCP server implementation exists yet (the HTTP
-    /// backend lands in Plan 04, the Stdio shim in Plan 05), so an opted-in
-    /// collection also gets an empty list today — there is nothing yet to
-    /// attach. This still re-checks `get_settings` on every call (not just
-    /// once), matching the design spec's "checked on every call" rule for
-    /// the tools themselves, and still propagates a lookup failure instead
-    /// of silently falling back to chat-only mode, so a broken collection
-    /// name surfaces loudly rather than silently degrading.
-    fn mcp_server_specs_for(
-        &self,
-        collection: Option<&str>,
-    ) -> DomainResult<Vec<rocket_acp::McpServerSpec>> {
-        let Some(collection) = collection else {
-            return Ok(Vec::new());
-        };
-        let settings = self.collection_repo.get_settings(collection)?;
-        if !settings.agent_autonomy_enabled {
-            return Ok(Vec::new());
-        }
-        Ok(Vec::new())
     }
 
     /// Sends one prompt turn and returns the agent's stop reason string.
@@ -485,7 +533,7 @@ mod tests {
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", None)
+            .start_session("agent-1", "/tmp", "demo", None)
             .await
             .expect("start_session should succeed");
         assert_eq!(session_id, "session-1");
@@ -568,7 +616,7 @@ mod tests {
         );
 
         let err = service
-            .start_session("no-such-agent", "/tmp", None)
+            .start_session("no-such-agent", "/tmp", "demo", None)
             .await
             .expect_err("unknown agent_config_id must error");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -593,7 +641,7 @@ mod tests {
         );
 
         let err = service
-            .start_session("agent-1", "/tmp", None)
+            .start_session("agent-1", "/tmp", "demo", None)
             .await
             .expect_err("spawn failure must propagate");
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -616,7 +664,7 @@ mod tests {
         );
 
         let err = service
-            .start_session("agent-1", "/tmp", None)
+            .start_session("agent-1", "/tmp", "demo", None)
             .await
             .expect_err("a stale vault secret must fail start_session, not silently proceed");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -714,7 +762,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_with_no_collection_still_works_exactly_as_before() {
+    async fn start_session_with_default_unconfigured_settings_still_works() {
+        // A collection that was never explicitly configured (no
+        // `set_autonomy` call) falls back to `CollectionSettings::default()`
+        // (autonomy off), matching the real repos' "missing settings file"
+        // behavior — this must not error.
         let publisher = Arc::new(FakeEventPublisher::new());
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
@@ -724,51 +776,77 @@ mod tests {
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", None)
+            .start_session("agent-1", "/tmp", "unconfigured-collection", None)
             .await
-            .expect("start_session with no collection must keep working");
+            .expect("an unconfigured collection must still start a chat-only session");
         assert_eq!(session_id, "session-1");
     }
 
     #[tokio::test]
-    async fn start_session_with_autonomy_disabled_still_succeeds_with_no_mcp_servers() {
+    async fn start_session_with_autonomy_disabled_ignores_provided_mcp_http_credentials() {
         let publisher = Arc::new(FakeEventPublisher::new());
+        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let client = CapturingSessionClient {
+            captured_servers: Arc::clone(&captured_servers),
+        };
         let collection_repo = ConfigurableCollectionRepo::new();
         collection_repo.set_autonomy("my-api", false);
         let service = AcpSessionService::new(
-            Box::new(FakeSessionClient::default()),
+            Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
             collection_repo,
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", Some("my-api"))
+            .start_session(
+                "agent-1",
+                "/tmp",
+                "my-api",
+                Some(McpHttpServerCredentials {
+                    port: 1234,
+                    token: "unused-token".to_string(),
+                }),
+            )
             .await
             .expect("a disabled collection must still be able to start a chat-only session");
         assert_eq!(session_id, "session-1");
+        assert!(
+            captured_servers.lock().expect("lock").is_empty(),
+            "a disabled collection must get no MCP servers even when credentials were provided"
+        );
     }
 
     #[tokio::test]
-    async fn start_session_with_autonomy_enabled_still_succeeds_since_no_mcp_backend_exists_yet() {
+    async fn start_session_with_autonomy_enabled_but_no_mcp_http_credentials_fails_open_to_chat_only()
+    {
+        // The HTTP tool server could not be spawned (or autonomy was enabled
+        // after the caller already decided not to try) — this must not fail
+        // the whole session start, only skip attaching any MCP servers.
         let publisher = Arc::new(FakeEventPublisher::new());
+        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let client = CapturingSessionClient {
+            captured_servers: Arc::clone(&captured_servers),
+        };
         let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("my-api", true);
         let service = AcpSessionService::new(
-            Box::new(FakeSessionClient::default()),
+            Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
             collection_repo,
         );
 
-        // Plan 03 has no HTTP backend or Stdio shim to attach yet, so an
-        // opted-in collection behaves identically to a disabled one today —
-        // this is this plan's complete, correct behavior (see this plan's
-        // "Deviations from the Plan Index" item 4), not a bug to fix later.
         let session_id = service
-            .start_session("agent-1", "/tmp", Some("my-api"))
+            .start_session("agent-1", "/tmp", "my-api", None)
             .await
-            .expect("an opted-in collection must still start a session");
+            .expect("a missing MCP HTTP server must fail open to a chat-only session");
         assert_eq!(session_id, "session-1");
+        assert!(
+            captured_servers.lock().expect("lock").is_empty(),
+            "no MCP servers should be attached without credentials, even with autonomy enabled"
+        );
     }
 
     #[tokio::test]
@@ -784,7 +862,7 @@ mod tests {
         );
 
         let err = service
-            .start_session("agent-1", "/tmp", Some("broken-collection"))
+            .start_session("agent-1", "/tmp", "broken-collection", None)
             .await
             .expect_err(
                 "a broken collection settings read must fail start_session, not silently degrade to chat-only",
@@ -794,5 +872,88 @@ mod tests {
             publisher.events.lock().expect("lock").is_empty(),
             "no event should publish when the settings lookup fails before any session starts"
         );
+    }
+
+    struct CapturingSessionClient {
+        captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>>,
+    }
+    #[async_trait::async_trait]
+    impl AcpSessionClient for CapturingSessionClient {
+        async fn start_session(
+            &self,
+            _command: &str,
+            _args: &[String],
+            _cwd: &str,
+            _env: &[(String, String)],
+            mcp_servers: &[rocket_acp::McpServerSpec],
+        ) -> DomainResult<String> {
+            *self.captured_servers.lock().expect("lock") = mcp_servers.to_vec();
+            Ok("session-1".to_string())
+        }
+        async fn send_prompt(
+            &self,
+            _session_id: &str,
+            _prompt: String,
+            _chunk_tx: UnboundedSender<String>,
+        ) -> DomainResult<String> {
+            unreachable!("not exercised by this test")
+        }
+        async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
+            unreachable!("not exercised by this test")
+        }
+        async fn end_all_sessions(&self) -> DomainResult<()> {
+            unreachable!("not exercised by this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn start_session_with_autonomy_enabled_builds_http_and_stdio_specs_with_token_only_in_env(
+    ) {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let client = CapturingSessionClient {
+            captured_servers: Arc::clone(&captured_servers),
+        };
+        let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("demo", true);
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            agent_config_service(),
+            collection_repo,
+        );
+
+        service
+            .start_session(
+                "agent-1",
+                "/tmp",
+                "demo",
+                Some(McpHttpServerCredentials {
+                    port: 54321,
+                    token: "s3cr3t-token".to_string(),
+                }),
+            )
+            .await
+            .expect("start_session should succeed");
+
+        let servers = captured_servers.lock().expect("lock").clone();
+        assert_eq!(
+            servers.len(),
+            2,
+            "expected one Http and one Stdio spec, got {servers:?}"
+        );
+        for server in &servers {
+            if let rocket_acp::McpServerSpec::Stdio { args, env, .. } = server {
+                assert!(
+                    !args.iter().any(|a| a.contains("s3cr3t-token")),
+                    "the token must never appear in argv, got args {args:?}"
+                );
+                assert!(
+                    env.iter()
+                        .any(|(k, v)| k == "ROCKET_MCP_TOKEN" && v == "s3cr3t-token"),
+                    "the token must be passed via the ROCKET_MCP_TOKEN env var, got {env:?}"
+                );
+            }
+        }
     }
 }

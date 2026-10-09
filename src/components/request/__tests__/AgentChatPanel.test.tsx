@@ -85,6 +85,7 @@ describe('AgentChatPanel', () => {
       expect(tauriApi.startAgentSession).toHaveBeenCalledWith(
         'agent-1',
         '/ws/root/collections/my-collection',
+        'my-collection',
       ),
     );
     await waitFor(() =>

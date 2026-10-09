@@ -78,6 +78,8 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
         env_repo_factory,
         exec_svc,
         Arc::new(rocket_shared::events::NullEventPublisher),
+        Box::new(rocket_infra::FsWorkspaceConfigRepo::new()),
+        Arc::clone(&workspace_path),
     ));
 
     let app = tauri::test::mock_builder()

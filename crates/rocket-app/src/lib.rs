@@ -50,7 +50,7 @@ pub mod vault_secret_resolution;
 pub mod websocket_service;
 pub mod workspace_service;
 
-pub use acp_session_service::AcpSessionService;
+pub use acp_session_service::{AcpSessionService, McpHttpServerCredentials};
 pub use agent_config_service::AgentConfigService;
 pub use callback_listener::{CallbackEndpoint, CallbackListener, NoCallbackListener, ReceivedCall};
 pub use collection_runner_service::{

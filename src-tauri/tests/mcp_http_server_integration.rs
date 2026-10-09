@@ -14,7 +14,7 @@ use rocket_environment::{NullSecretStore, NullVaultSecretFetcher};
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsSecretManagerRepo,
-    SharedCollectionEnvironmentRepo,
+    FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo,
 };
 use rocket_lib::mcp::registry::McpServerRegistry;
 use rocket_lib::mcp::tool_server::{spawn_mcp_http_server, McpHttpServerHandle, MCP_HTTP_PATH};
@@ -104,6 +104,8 @@ async fn spawn_test_server(
         Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
         Arc::new(exec_svc),
         Arc::new(NullEventPublisher),
+        Box::new(FsWorkspaceConfigRepo::new()),
+        Arc::clone(&ws_path),
     ));
 
     let app = tauri::test::mock_builder()
