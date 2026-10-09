@@ -362,11 +362,18 @@ pub fn run() {
             .with_workspace_identity({
                 // A proposal is stale once another workspace is active.
                 let active = Arc::clone(&active_workspace_path);
-                Arc::new(move || {
-                    active
-                        .lock()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_default()
+                Arc::new(move || match active.lock() {
+                    Ok(path) => path.display().to_string(),
+                    // Fail closed: a poisoned lock gives a value that never
+                    // equals a stored identity, so proposals turn stale.
+                    Err(_) => {
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        static UNREADABLE: AtomicU64 = AtomicU64::new(0);
+                        format!(
+                            "unreadable-workspace-{}",
+                            UNREADABLE.fetch_add(1, Ordering::Relaxed)
+                        )
+                    }
                 })
             }));
             let history_svc = HistoryService::new(

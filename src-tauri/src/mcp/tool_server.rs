@@ -783,15 +783,15 @@ fn to_tool_result<T: serde::Serialize>(result: DomainResult<T>) -> CallToolResul
 /// or a value.
 const INTERNAL_MESSAGE_FOR_AGENT: &str = "the proposal could not be checked; try again later";
 
-/// Maps an internal error to a generic one. Validation errors (invalid input,
-/// not found, already exists) stay as they are, because the agent needs them
-/// to fix its proposal.
+/// Allowlist: only validation errors (invalid input, not found, already
+/// exists) reach the agent as they are, because it needs them to fix its
+/// proposal. Every other error becomes the generic message.
 fn for_agent(error: DomainError) -> DomainError {
     match error {
-        DomainError::Io(_) | DomainError::Internal(_) | DomainError::Serialization(_) => {
-            DomainError::Internal(INTERNAL_MESSAGE_FOR_AGENT.to_string())
+        DomainError::InvalidInput(_) | DomainError::NotFound(_) | DomainError::AlreadyExists(_) => {
+            error
         }
-        other => other,
+        _ => DomainError::Internal(INTERNAL_MESSAGE_FOR_AGENT.to_string()),
     }
 }
 
@@ -1845,6 +1845,7 @@ mod tests {
             DomainError::Io("open /home/me/.rocket-api/secret.yml".into()),
             DomainError::Internal("lock poisoned".into()),
             DomainError::Serialization("bad token sk-hidden".into()),
+            DomainError::Conflict("clash at /home/me/secret.yml".into()),
         ] {
             let text = for_agent(error).to_string();
             assert!(text.contains(INTERNAL_MESSAGE_FOR_AGENT), "{text}");

@@ -145,6 +145,10 @@ pub struct McpToolService {
     /// Each session's mode, keyed by the real ACP session id (see
     /// `McpSessionBinding` in `src-tauri`).
     modes: Mutex<HashMap<String, AssistantMode>>,
+    /// The workspace path that was active when each session was opened. A
+    /// tool call from a session whose workspace is no longer active is
+    /// refused.
+    workspace_pins: Mutex<HashMap<String, PathBuf>>,
     /// Outlines waiting for each assistant session's first prompt.
     pending_outlines: Mutex<HashMap<String, PendingOutline>>,
     test_result_cache: Mutex<HashMap<TestResultKey, Vec<rocket_scripting::TestResult>>>,
@@ -181,6 +185,7 @@ impl McpToolService {
             active_workspace_path,
             history_repo,
             modes: Mutex::new(HashMap::new()),
+            workspace_pins: Mutex::new(HashMap::new()),
             pending_outlines: Mutex::new(HashMap::new()),
             test_result_cache: Mutex::new(HashMap::new()),
         }
@@ -202,7 +207,13 @@ impl McpToolService {
     /// Refuses a collection that is not one of the active workspace's
     /// collections. The list is read fresh on every call, so a workspace
     /// switch takes effect at once. Only an exact name matches.
-    fn check_in_workspace(&self, collection: &str) -> DomainResult<()> {
+    fn check_in_workspace(&self, session_id: &str, collection: &str) -> DomainResult<()> {
+        self.check_session_workspace(session_id)?;
+        self.check_collection_listed(collection)
+    }
+
+    /// The collection must be listed by the active workspace.
+    fn check_collection_listed(&self, collection: &str) -> DomainResult<()> {
         let in_workspace = self
             .collection_repo
             .list()?
@@ -272,6 +283,12 @@ impl McpToolService {
 
     /// Records a session's starting mode. Called when a session starts.
     pub fn open_session(&self, session_id: &str, mode: AssistantMode) {
+        if let Ok(path) = self.active_workspace_path.lock() {
+            self.workspace_pins
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(session_id.to_string(), path.clone());
+        }
         self.modes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -304,7 +321,37 @@ impl McpToolService {
     }
 
     /// Refuses when the session's mode is below `required`.
+    /// Refuses a session that was opened in another workspace than the
+    /// active one. A session with no pin is not checked. An unreadable
+    /// active path counts as a mismatch.
+    pub fn check_session_workspace(&self, session_id: &str) -> DomainResult<()> {
+        let pinned = self
+            .workspace_pins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(session_id)
+            .cloned();
+        let Some(pinned) = pinned else {
+            return Ok(());
+        };
+        let same = self
+            .active_workspace_path
+            .lock()
+            .map(|current| *current == pinned)
+            .unwrap_or(false);
+        if same {
+            Ok(())
+        } else {
+            Err(DomainError::InvalidInput(
+                "The workspace changed since this assistant session started. Ask the user to \
+                 start a new session."
+                    .to_string(),
+            ))
+        }
+    }
+
     pub fn check_mode(&self, session_id: &str, required: AssistantMode) -> DomainResult<()> {
+        self.check_session_workspace(session_id)?;
         let current = self.mode(session_id);
         if current >= required {
             Ok(())
@@ -396,6 +443,7 @@ impl McpToolService {
         collection: Option<&str>,
         folder: Option<&str>,
     ) -> DomainResult<String> {
+        self.check_session_workspace(session_id)?;
         let (text, count) = self.build_workspace_outline(collection, folder)?;
         self.publish_tool_invoked(
             session_id,
@@ -418,7 +466,7 @@ impl McpToolService {
         };
         let names: Vec<String> = match collection {
             Some(name) => {
-                self.check_in_workspace(name)?;
+                self.check_collection_listed(name)?;
                 vec![name.to_string()]
             }
             None => {
@@ -512,7 +560,7 @@ impl McpToolService {
         collection: &str,
         request_path: &str,
     ) -> DomainResult<MaskedRequest> {
-        self.check_in_workspace(collection)?;
+        self.check_in_workspace(session_id, collection)?;
         let request = self.read_request(collection, request_path)?;
         let view = MaskedRequest::from_request(request_path, &request);
         self.publish_tool_invoked(
@@ -528,7 +576,7 @@ impl McpToolService {
         session_id: &str,
         collection: &str,
     ) -> DomainResult<MaskedSettings> {
-        self.check_in_workspace(collection)?;
+        self.check_in_workspace(session_id, collection)?;
         let settings = self.collection_repo.get_settings(collection)?;
         let view = MaskedSettings::from_settings(&settings);
         self.publish_tool_invoked(
@@ -545,7 +593,7 @@ impl McpToolService {
         collection: &str,
         environment: &str,
     ) -> DomainResult<MaskedEnvironment> {
-        self.check_in_workspace(collection)?;
+        self.check_in_workspace(session_id, collection)?;
         Self::validate_environment_name(environment)?;
         let env = self
             .environment_repo_factory
@@ -571,7 +619,7 @@ impl McpToolService {
         request_path: &str,
         limit: usize,
     ) -> DomainResult<Vec<HistoryBrief>> {
-        self.check_in_workspace(collection)?;
+        self.check_in_workspace(session_id, collection)?;
         let request = self.read_request(collection, request_path)?;
         let mut entries: Vec<rocket_history::HistoryEntry> = self
             .history_repo
@@ -601,7 +649,7 @@ impl McpToolService {
         environment_name: Option<&str>,
     ) -> DomainResult<McpRunResult> {
         self.check_mode(session_id, AssistantMode::Agent)?;
-        self.check_in_workspace(collection)?;
+        self.check_in_workspace(session_id, collection)?;
         self.check_autonomy_enabled(collection)?;
         if let Some(name) = environment_name {
             Self::validate_environment_name(name)?;
@@ -712,7 +760,7 @@ impl McpToolService {
         collection: &str,
         request_path: &str,
     ) -> DomainResult<Vec<rocket_scripting::TestResult>> {
-        self.check_in_workspace(collection)?;
+        self.check_in_workspace(session_id, collection)?;
         let results = self
             .test_result_cache
             .lock()
@@ -745,6 +793,10 @@ impl McpToolService {
             .unwrap_or_else(|e| e.into_inner())
             .retain(|(sid, _, _), _| sid != session_id);
         self.modes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(session_id);
+        self.workspace_pins
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(session_id);
@@ -1564,6 +1616,28 @@ mod tests {
             .await
             .expect_err("a traversal-shaped environment name must be refused");
         assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn a_session_is_refused_after_the_active_workspace_changed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+        );
+        svc.open_session("pinned", AssistantMode::Agent);
+        svc.check_mode("pinned", AssistantMode::Edit)
+            .expect("same workspace");
+        svc.get_request("pinned", "my-api", "login.yml")
+            .expect("same workspace");
+
+        *svc.active_workspace_path.lock().expect("lock") = PathBuf::from("/other-workspace");
+        assert!(svc.check_mode("pinned", AssistantMode::Edit).is_err());
+        assert!(svc.get_request("pinned", "my-api", "login.yml").is_err());
+        svc.forget_session("pinned");
+        assert!(svc.check_session_workspace("pinned").is_ok(), "pin is gone");
     }
 
     #[tokio::test]
