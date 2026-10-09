@@ -6,6 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::scripting::budget::ScriptLimits;
 use crate::scripting::host_bridge::{serve_host_call, HostCall, HostChannel};
 use crate::scripting::local_modules::build_roots;
 use crate::scripting::ops::{console, fs, host, modules, process, redact, req, res, rok};
@@ -24,11 +25,20 @@ use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 /// `op_print` or `op_panic` directly through either handle. The wrappers
 /// keep working because they call through an ops reference captured in a
 /// closure before those deletions.
-pub struct DenoScriptEngine;
+pub struct DenoScriptEngine {
+    limits: ScriptLimits,
+}
 
 impl DenoScriptEngine {
     pub fn new() -> Self {
-        Self
+        Self {
+            limits: ScriptLimits::DEFAULT,
+        }
+    }
+
+    /// An engine with other time limits. Tests use short ones.
+    pub fn with_limits(limits: ScriptLimits) -> Self {
+        Self { limits }
     }
 }
 
@@ -37,14 +47,6 @@ impl Default for DenoScriptEngine {
         Self::new()
     }
 }
-
-/// Wall-clock budget for a single script execution.
-///
-/// Five seconds comfortably exceeds any legitimate pre-request, post-response,
-/// or test script. Those scripts do in-memory templating, signing, and small
-/// JSON manipulation. They have no network or filesystem access at all, so
-/// there is nothing legitimate for them to wait on.
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Best-effort V8 heap cap for a single script execution.
 ///
@@ -55,7 +57,7 @@ const SCRIPT_HEAP_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 #[async_trait]
 impl ScriptEngine for DenoScriptEngine {
     async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
-        run_script_bounded(ctx, None, SCRIPT_TIMEOUT).await
+        run_script_bounded(ctx, None, self.limits).await
     }
 
     async fn execute_with_host(
@@ -63,7 +65,7 @@ impl ScriptEngine for DenoScriptEngine {
         ctx: ScriptContext,
         host: &dyn ScriptHost,
     ) -> DomainResult<ScriptResult> {
-        run_script_bounded(ctx, Some(host), SCRIPT_TIMEOUT).await
+        run_script_bounded(ctx, Some(host), self.limits).await
     }
 }
 
@@ -78,16 +80,17 @@ impl ScriptEngine for DenoScriptEngine {
 async fn run_script_bounded(
     ctx: ScriptContext,
     host: Option<&dyn ScriptHost>,
-    timeout: Duration,
+    limits: ScriptLimits,
 ) -> DomainResult<ScriptResult> {
     // JsRuntime is !Send, so all V8 work must stay on one thread.
     let (handle_tx, handle_rx) = oneshot::channel();
     let (call_tx, mut call_rx) = mpsc::unbounded_channel::<HostCall>();
     // Without a host the sender is dropped, so host ops find no channel and reject.
     let call_tx = host.map(|_| call_tx);
-    let mut join = tokio::task::spawn_blocking(move || run_script(ctx, handle_tx, call_tx));
+    let mut join =
+        tokio::task::spawn_blocking(move || run_script(ctx, handle_tx, call_tx, limits));
     let mut serving = FuturesUnordered::new();
-    let deadline = tokio::time::sleep(timeout);
+    let deadline = tokio::time::sleep(limits.cpu);
     tokio::pin!(deadline);
 
     loop {
@@ -130,17 +133,22 @@ async fn run_script_bounded(
         }
     });
     Err(DomainError::Internal(format!(
-        "script execution timed out after {timeout:?}"
+        "script execution timed out after {:?}",
+        limits.cpu
     )))
 }
 
-/// Runs a script with no host and a plain time limit. The timeout tests use it.
+/// Runs a script with no host and a plain busy-time limit. The timeout tests use it.
 #[cfg(test)]
 async fn run_script_with_timeout(
     ctx: ScriptContext,
     timeout: Duration,
 ) -> DomainResult<ScriptResult> {
-    run_script_bounded(ctx, None, timeout).await
+    let limits = ScriptLimits {
+        cpu: timeout,
+        ..ScriptLimits::DEFAULT
+    };
+    run_script_bounded(ctx, None, limits).await
 }
 
 // ── test runner ops ──────────────────────────────────────────────────────────
@@ -307,12 +315,13 @@ fn run_script(
     ctx: ScriptContext,
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
     calls: Option<mpsc::UnboundedSender<HostCall>>,
+    limits: ScriptLimits,
 ) -> DomainResult<ScriptResult> {
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| DomainError::Internal(format!("script runtime could not start: {e}")))?;
-    tokio_rt.block_on(run_script_async(ctx, handle_tx, calls))
+    tokio_rt.block_on(run_script_async(ctx, handle_tx, calls, limits))
 }
 
 /// Wraps user code as the body of an async function, so top-level `await` and
@@ -357,6 +366,7 @@ async fn run_script_async(
     ctx: ScriptContext,
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
     calls: Option<mpsc::UnboundedSender<HostCall>>,
+    limits: ScriptLimits,
 ) -> DomainResult<ScriptResult> {
     let code = ctx.code;
     let sandbox_mode = ctx.sandbox_mode;
@@ -426,6 +436,7 @@ async fn run_script_async(
         });
         state.put(ScriptOutputState::default());
         state.put(HostChannel(calls));
+        state.put(limits);
     }
 
     const BOOTSTRAP: &str = include_str!("bootstrap.js");
@@ -1088,6 +1099,41 @@ mod tests {
         let names: Vec<_> = result.test_results.iter().map(|t| t.name.clone()).collect();
         assert_eq!(names, vec!["a", "b", "c"]);
         assert_eq!(result.test_results[1].status, TestStatus::Failed);
+    }
+
+    // ── limits ───────────────────────────────────────────────────────────────
+
+    use crate::scripting::budget::ScriptLimits;
+
+    #[tokio::test]
+    async fn limits_cap_a_long_sleep() {
+        let limits = ScriptLimits {
+            sleep_cap: Duration::from_millis(50),
+            ..ScriptLimits::DEFAULT
+        };
+        let ctx = minimal_ctx(
+            "const t = Date.now(); await rok.sleep(10000); rok.setVar('short', Date.now() - t < 1000)",
+        );
+        let result = DenoScriptEngine::with_limits(limits)
+            .execute(ctx)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("short").expect("short present"), true);
+    }
+
+    #[tokio::test]
+    async fn limits_set_the_engine_cpu_budget() {
+        let limits = ScriptLimits {
+            cpu: Duration::from_millis(200),
+            ..ScriptLimits::DEFAULT
+        };
+        let started = std::time::Instant::now();
+        let outcome = DenoScriptEngine::with_limits(limits)
+            .execute(minimal_ctx("while (true) {}"))
+            .await;
+        let err = outcome.expect_err("a busy loop must time out");
+        assert!(err.to_string().contains("timed out"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[tokio::test]

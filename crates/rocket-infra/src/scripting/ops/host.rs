@@ -8,6 +8,7 @@ use deno_core::{op2, OpState};
 use rocket_scripting::{HostError, HostRequest};
 use tokio::sync::oneshot;
 
+use crate::scripting::budget::ScriptLimits;
 use crate::scripting::host_bridge::{HostCall, HostChannel};
 use crate::scripting::ops::{redact, ScriptHostError};
 
@@ -61,13 +62,17 @@ pub async fn op_rok_send_request(
     }
 }
 
-/// Longest single `rok.sleep`, in milliseconds.
-pub(crate) const MAX_SLEEP_MS: f64 = 60_000.0;
-
-/// rok.sleep(ms) — waits without blocking the event loop. The value is
-/// clamped to 0..=60000. The JS wrapper rejects non-numbers first.
+/// rok.sleep(ms) — waits without blocking the event loop. The value is clamped
+/// to 0 and the run's sleep cap (60 s by default). The JS wrapper rejects
+/// non-numbers first.
 #[op2]
-pub async fn op_rok_sleep(ms: f64) {
-    let ms = if ms.is_nan() { 0.0 } else { ms.clamp(0.0, MAX_SLEEP_MS) };
+pub async fn op_rok_sleep(state: Rc<RefCell<OpState>>, ms: f64) {
+    let cap = state
+        .borrow()
+        .try_borrow::<ScriptLimits>()
+        .map(|limits| limits.sleep_cap)
+        .unwrap_or(ScriptLimits::DEFAULT.sleep_cap);
+    let cap_ms = cap.as_millis() as f64;
+    let ms = if ms.is_nan() { 0.0 } else { ms.clamp(0.0, cap_ms) };
     tokio::time::sleep(Duration::from_millis(ms as u64)).await;
 }
