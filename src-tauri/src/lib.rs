@@ -937,6 +937,7 @@ pub fn run() {
             commands::acp_sessions::cancel_agent_prompt,
             commands::acp_sessions::set_agent_config_option,
             commands::acp_sessions::end_agent_session,
+            commands::acp_sessions::end_stale_assistant_sessions,
             commands::websocket::ws_connect,
             commands::websocket::ws_send,
             commands::websocket::ws_disconnect,

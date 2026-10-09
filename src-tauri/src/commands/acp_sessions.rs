@@ -194,3 +194,15 @@ pub async fn end_agent_session(
     // forgets the tool caches and removes the scratch directories.
     svc.end_session(&session_id).await
 }
+
+/// Ends every agent session the backend still tracks and returns how many.
+/// The webview calls this once per load, from its app-lifetime assistant
+/// event bridge, and every assistant start waits for it. At that point the
+/// webview owns no session, so every tracked session is a leftover from
+/// before a reload.
+#[tauri::command]
+pub async fn end_stale_assistant_sessions(
+    svc: State<'_, AcpSessionService>,
+) -> Result<usize, DomainError> {
+    Ok(svc.end_tracked_sessions().await)
+}

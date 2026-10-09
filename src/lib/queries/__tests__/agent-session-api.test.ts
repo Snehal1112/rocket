@@ -76,6 +76,14 @@ describe('ACP chat session tauri-api bindings', () => {
     expect(invoke).toHaveBeenCalledWith('end_agent_session', { sessionId: 'session-1' });
   });
 
+  it('endStaleAssistantSessions invokes end_stale_assistant_sessions and returns the count', async () => {
+    vi.mocked(invoke).mockResolvedValue(2);
+    const { endStaleAssistantSessions } = await import('@/lib/tauri-api');
+    const ended = await endStaleAssistantSessions();
+    expect(invoke).toHaveBeenCalledWith('end_stale_assistant_sessions');
+    expect(ended).toBe(2);
+  });
+
   it('onAgentSessionStarted subscribes to agent-session-started and unwraps the payload', async () => {
     const payload = { type: 'acpSessionStarted', session_id: 'session-1' };
     vi.mocked(listen).mockImplementation(((

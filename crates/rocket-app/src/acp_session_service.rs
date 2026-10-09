@@ -443,6 +443,25 @@ impl AcpSessionService {
         }
         result
     }
+
+    /// Ends every session this service still tracks, one at a time, and
+    /// returns how many it ended. Each one runs its cleanup once. Unlike
+    /// `end_all_sessions`, the client keeps accepting new sessions, so the
+    /// webview can start a fresh one right after this sweep.
+    pub async fn end_tracked_sessions(&self) -> usize {
+        let tracked: Vec<String> = self
+            .live_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .collect();
+        for session_id in &tracked {
+            let _ = self.session_client.end_session(session_id).await;
+            self.release(session_id);
+        }
+        tracked.len()
+    }
 }
 
 #[cfg(test)]
@@ -1807,6 +1826,54 @@ mod tests {
             .expect_err("spawn failure must propagate");
         service.end_all_sessions().await.expect("end_all_sessions");
 
+        assert!(cleanup.ended().is_empty());
+    }
+
+    #[tokio::test]
+    async fn end_tracked_sessions_ends_every_tracked_session_without_shutting_the_client_down() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let end_all_sessions_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            start_ids: Arc::new(Mutex::new(VecDeque::from(vec![
+                "s-a".to_string(),
+                "s-b".to_string(),
+            ]))),
+            end_session_called: Arc::clone(&end_session_called),
+            end_all_sessions_called: Arc::clone(&end_all_sessions_called),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+        start(&service).await;
+        start(&service).await;
+
+        assert_eq!(service.end_tracked_sessions().await, 2);
+
+        let mut ended = cleanup.ended();
+        ended.sort();
+        assert_eq!(ended, vec!["s-a".to_string(), "s-b".to_string()]);
+        assert!(end_session_called.load(Ordering::SeqCst));
+        assert!(
+            !end_all_sessions_called.load(Ordering::SeqCst),
+            "end_all_sessions would make the client refuse every later session"
+        );
+
+        start(&service).await;
+        assert_eq!(service.end_tracked_sessions().await, 1);
+    }
+
+    #[tokio::test]
+    async fn end_tracked_sessions_with_nothing_tracked_ends_nothing() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+
+        assert_eq!(service.end_tracked_sessions().await, 0);
+        assert!(!end_session_called.load(Ordering::SeqCst));
         assert!(cleanup.ended().is_empty());
     }
 }

@@ -2567,6 +2567,14 @@ export const setAgentConfigOption = (sessionId: string, configId: string, value:
 export const endAgentSession = (sessionId: string) =>
   invoke<void>('end_agent_session', { sessionId });
 
+/**
+ * Ends every agent session the backend still tracks and resolves to how many
+ * it ended. Call once per webview load, before starting a session (Plan 05's
+ * assistant event bridge does this, and every start waits for it). Sessions
+ * started by this webview would be ended too.
+ */
+export const endStaleAssistantSessions = () => invoke<number>('end_stale_assistant_sessions');
+
 // Event payloads are DomainEvent JSON. Their fields are snake_case, like
 // every other DomainEvent. Do not camelCase them here.
 export interface AgentSessionStartedEvent {
