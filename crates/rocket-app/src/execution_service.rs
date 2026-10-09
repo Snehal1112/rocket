@@ -19,7 +19,7 @@ use rocket_http::{
 };
 use rocket_scripting::{
     context::SandboxMode, ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext,
-    ScriptEngine, ScriptFileScope, ScriptResult, TestResult, TestStatus,
+    ScriptEngine, ScriptFileScope, ScriptHost, ScriptResult, TestResult, TestStatus,
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -35,6 +35,9 @@ mod folder_chain_e2e_tests;
 #[cfg(test)]
 mod folder_var_script_tests;
 pub(crate) mod script_chain;
+pub(crate) mod script_host;
+#[cfg(test)]
+mod script_host_tests;
 use self::script_chain::{
     folder_labels, folder_mentions, script_mentions, ChainedScript, PhaseScripts,
 };
@@ -1162,12 +1165,22 @@ impl RequestExecutionService {
         }
     }
 
+    /// The host for one script run of a request. Script requests reuse the
+    /// request's TLS, redirect, cookie and client-certificate options.
+    fn script_host(&self, state: &PhaseState) -> script_host::ExecutionScriptHost<'_> {
+        script_host::ExecutionScriptHost {
+            svc: self,
+            options: state.http_request.options.clone(),
+        }
+    }
+
     /// Runs one chained script. A failure is published as `ScriptError` and
     /// returned in `error`. Both name the folder when the script came from one.
     async fn run_script_phase(
         &self,
         script: &ChainedScript,
         ctx: ScriptContext,
+        host: &dyn ScriptHost,
         request_name: &str,
         phase: &str,
         all_console: &mut Vec<ConsoleEntry>,
@@ -1176,7 +1189,7 @@ impl RequestExecutionService {
             Some(e) => e,
             None => return ScriptResult::default(),
         };
-        match engine.execute(ctx).await {
+        match engine.execute_with_host(ctx, host).await {
             Ok(mut result) => {
                 if let Some(err) = result.error.take() {
                     let message = script.attribute(phase, &err);
@@ -1582,10 +1595,12 @@ impl RequestExecutionService {
             .with_file_scope(state.file_scope.clone())
             .with_collection_name(input.collection.clone());
             let had_error = state.script_error.is_some();
+            let host = self.script_host(state);
             let result = self
                 .run_script_phase(
                     script,
                     ctx,
+                    &host,
                     &request_name,
                     "before-request",
                     &mut state.console,
@@ -1801,10 +1816,12 @@ impl RequestExecutionService {
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
             .with_collection_name(input.collection.clone());
+            let host = self.script_host(state);
             let result = self
                 .run_script_phase(
                     script,
                     ctx,
+                    &host,
                     &request_name,
                     "after-response",
                     &mut state.console,
@@ -1870,8 +1887,9 @@ impl RequestExecutionService {
                 &input.assertions,
                 response,
             ));
+            let host = self.script_host(state);
             let result = self
-                .run_script_phase(script, ctx, &request_name, "tests", &mut state.console)
+                .run_script_phase(script, ctx, &host, &request_name, "tests", &mut state.console)
                 .await;
             self.apply_script_side_effects(
                 &result,
