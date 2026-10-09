@@ -157,6 +157,9 @@ pub struct ExecuteRequestOutput {
     pub script_error: Option<String>,
     /// The History entry of a request run with `skip_history`, not yet saved.
     pub deferred_history: Option<HistoryEntry>,
+    /// Every secret value the run resolved: secret variables of each scope
+    /// and RocketVault values. Callers use it to mask text they hand on.
+    pub run_secret_values: std::collections::HashSet<String>,
 }
 
 /// What `apply_script_side_effects` needs to keep vault secrets off disk.
@@ -2064,6 +2067,7 @@ impl RequestExecutionService {
             console_entries: state.console.clone(),
             script_error: state.script_error.clone(),
             deferred_history,
+            run_secret_values: state.var_ctx.secret_values.clone(),
         }
     }
 

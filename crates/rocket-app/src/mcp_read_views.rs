@@ -21,7 +21,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, Header, QueryParam};
 use serde_json::Value;
 
-use crate::redaction::{is_sensitive_header, redact_secrets, REDACTED};
+use crate::redaction::{is_sensitive_header, redact_url_secrets, redaction_forms, REDACTED};
 use crate::runner_sequence::folder_dir_name;
 
 /// Most request entries the outline lists before it falls back to counts.
@@ -52,7 +52,18 @@ const CREDENTIAL_NAME_PARTS: &[&str] = &[
     "cookie",
     "credential",
     "signature",
+    "sig",
     "private",
+    "key",
+    "code",
+];
+
+/// Auth fields that hold a URL. They are shown through `mask_url`.
+const AUTH_URL_FIELDS: &[&str] = &[
+    "accessTokenUrl",
+    "authorizationUrl",
+    "refreshTokenUrl",
+    "callbackUrl",
 ];
 
 /// Auth fields shown as they are. Every other string in an auth block is a
@@ -300,7 +311,12 @@ pub(crate) fn is_credential_name(name: &str) -> bool {
     if is_sensitive_header(name) {
         return true;
     }
-    let lower = name.to_ascii_lowercase();
+    // A percent-encoded name such as `client%5Fsecret` is matched decoded.
+    let decoded = percent_encoding::percent_decode_str(name).decode_utf8_lossy();
+    let lower = decoded.to_ascii_lowercase();
+    if is_sensitive_header(&decoded) {
+        return true;
+    }
     CREDENTIAL_NAME_PARTS.iter().any(|part| lower.contains(part))
 }
 
@@ -403,7 +419,11 @@ pub(crate) fn mask_url(url: &str) -> String {
         out.push('?');
         out.push_str(&mask_query_string(query));
     }
-    out.push_str(fragment);
+    if let Some(fragment) = fragment.strip_prefix('#') {
+        out.push('#');
+        // A fragment such as `access_token=...` holds name=value pairs.
+        out.push_str(&mask_query_string(fragment));
+    }
     out
 }
 
@@ -420,7 +440,11 @@ fn mask_userinfo(base: &str) -> String {
     };
     let userinfo = &authority[..at];
     let Some(colon) = userinfo.find(':') else {
-        return base.to_string();
+        // User-info without a colon is a bare token (`ghp_XXXX@host`).
+        if userinfo.is_empty() || is_reference_only(userinfo) {
+            return base.to_string();
+        }
+        return format!("{}{REDACTED}{}", &base[..authority_start], &rest[at..]);
     };
     let password = &userinfo[colon + 1..];
     if password.is_empty() || is_reference_only(password) {
@@ -446,6 +470,10 @@ pub(crate) fn mask_auth(auth: &Auth) -> Value {
 fn mask_auth_value(value: &mut Value, field: Option<&str>) {
     match value {
         Value::String(text) => {
+            if field.is_some_and(|f| AUTH_URL_FIELDS.contains(&f)) {
+                *text = mask_url(text);
+                return;
+            }
             let visible = field.is_some_and(|f| AUTH_VISIBLE_FIELDS.contains(&f));
             if !visible && !text.is_empty() && !is_reference_only(text) {
                 *text = REDACTED.to_string();
@@ -472,6 +500,125 @@ fn auth_type_name(auth: &Value) -> String {
         .to_string()
 }
 
+/// Adds a credential value and, for a multi-word value such as
+/// `Bearer sk-live-1`, each word after the first, so an echo of the token
+/// alone is masked too.
+fn add_credential(value: &str, out: &mut HashSet<String>) {
+    if value.is_empty() || value == REDACTED {
+        return;
+    }
+    out.insert(value.to_string());
+    for word in value.split_whitespace().skip(1) {
+        out.insert(word.to_string());
+    }
+}
+
+fn add_credential_pairs(query: &str, out: &mut HashSet<String>) {
+    for pair in query.split('&') {
+        if let Some((name, value)) = pair.split_once('=') {
+            if mask_named_value(name, value) != value {
+                add_credential(value, out);
+            }
+        }
+    }
+}
+
+/// Collects the literal strings that `mask_auth` replaced.
+fn collect_masked_auth(original: &Value, masked: &Value, out: &mut HashSet<String>) {
+    match (original, masked) {
+        (Value::String(orig), Value::String(mask)) if mask == REDACTED => {
+            add_credential(orig, out);
+        }
+        (Value::Object(orig), Value::Object(mask)) => {
+            for (key, value) in orig {
+                if let Some(masked_value) = mask.get(key) {
+                    collect_masked_auth(value, masked_value, out);
+                }
+            }
+        }
+        (Value::Array(orig), Value::Array(mask)) => {
+            for (value, masked_value) in orig.iter().zip(mask) {
+                collect_masked_auth(value, masked_value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn add_url_credentials(url: &str, out: &mut HashSet<String>) {
+    let before_fragment = url.split('#').next().unwrap_or(url);
+    if let Some((_, fragment)) = url.split_once('#') {
+        add_credential_pairs(fragment, out);
+    }
+    let (base, query) = match before_fragment.split_once('?') {
+        Some((base, query)) => (base, Some(query)),
+        None => (before_fragment, None),
+    };
+    if let Some(query) = query {
+        add_credential_pairs(query, out);
+    }
+    if let Some(scheme_end) = base.find("://") {
+        let rest = &base[scheme_end + 3..];
+        let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
+        if let Some(at) = authority.rfind('@') {
+            let userinfo = &authority[..at];
+            let secret = userinfo.split_once(':').map_or(userinfo, |(_, p)| p);
+            if !is_reference_only(secret) {
+                add_credential(secret, out);
+            }
+        }
+    }
+}
+
+/// The literal credentials `mask_auth` and `mask_named_value` would mask in
+/// a request, and in the collection settings that apply to it. A response
+/// that echoes the request (an `/anything` endpoint) must not return them
+/// either.
+pub(crate) fn literal_credential_values(
+    request: &Request,
+    settings: Option<&CollectionSettings>,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let add_auth = |auth: &Auth, out: &mut HashSet<String>| {
+        if let Ok(original) = serde_json::to_value(auth) {
+            let masked = mask_auth(auth);
+            collect_masked_auth(&original, &masked, out);
+        }
+    };
+    add_auth(&request.auth, &mut out);
+    let mut headers: Vec<&Header> = request.headers.iter().collect();
+    if let Some(settings) = settings {
+        if let Some(auth) = settings.auth.as_ref() {
+            add_auth(auth, &mut out);
+        }
+        headers.extend(settings.headers.iter());
+    }
+    for header in headers {
+        if mask_named_value(&header.key, &header.value) != header.value {
+            add_credential(&header.value, &mut out);
+        }
+    }
+    for param in &request.query_params {
+        if mask_named_value(&param.key, &param.value) != param.value {
+            add_credential(&param.value, &mut out);
+        }
+    }
+    add_url_credentials(&request.url, &mut out);
+    if let Some(body) = request.body.as_ref() {
+        for entry in body.form_data.iter().flatten() {
+            if mask_named_value(&entry.key, &entry.value) != entry.value {
+                add_credential(&entry.value, &mut out);
+            }
+        }
+        if matches!(body.mode, BodyMode::FormUrlEncoded) {
+            if let Some(content) = body.content.as_deref() {
+                add_credential_pairs(content, &mut out);
+            }
+        }
+    }
+    out
+}
+
 /// Cuts `text` to at most `max_bytes`, backing off to a character
 /// boundary. Returns the text and whether it was cut.
 pub(crate) fn truncate_utf8(text: &str, max_bytes: usize) -> (String, bool) {
@@ -489,7 +636,12 @@ pub(crate) fn truncate_utf8(text: &str, max_bytes: usize) -> (String, bool) {
 /// `RESPONSE_BODY_CAP_BYTES`. Masking first means a cut can never leave a
 /// fragment of a secret behind.
 pub(crate) fn mask_response_body(body: &str, secret_values: &HashSet<String>) -> (String, bool) {
-    let masked = redact_secrets(body, secret_values);
+    // Encoded and per-line forms of each secret are masked too.
+    let mut all: HashSet<String> = HashSet::new();
+    for secret in secret_values {
+        all.extend(redaction_forms(secret));
+    }
+    let masked = redact_url_secrets(body, &all);
     truncate_utf8(&masked, RESPONSE_BODY_CAP_BYTES)
 }
 
@@ -949,4 +1101,77 @@ mod tests {
         assert_eq!(history_limit(3), 3);
         assert_eq!(history_limit(50), HISTORY_LIMIT_MAX);
     }
+
+    #[test]
+    fn bare_token_userinfo_is_masked() {
+        assert_eq!(
+            mask_url("https://ghp_abcdef123456@github.com/x"),
+            format!("https://{REDACTED}@github.com/x")
+        );
+        assert_eq!(
+            mask_url("https://{{token}}@github.com/x"),
+            "https://{{token}}@github.com/x"
+        );
+    }
+
+    #[test]
+    fn credential_names_cover_keys_signatures_codes_and_encoded_names() {
+        for name in ["access_key", "apiKey", "X-Amz-Signature", "sig", "code", "client%5Fsecret"] {
+            assert_eq!(mask_named_value(name, "literal-value-1"), REDACTED, "{name}");
+        }
+        assert_eq!(
+            mask_query_string("client%5Fsecret=cs-1234567&page=2"),
+            format!("client%5Fsecret={REDACTED}&page=2")
+        );
+    }
+
+    #[test]
+    fn url_fragments_with_credentials_are_masked() {
+        assert_eq!(
+            mask_url("https://app.test/cb#access_token=abc123456&state=xyz"),
+            format!("https://app.test/cb#access_token={REDACTED}&state=xyz")
+        );
+    }
+
+    #[test]
+    fn auth_url_fields_go_through_url_masking() {
+        let mut auth = serde_json::json!({
+            "authType": "oauth2",
+            "accessTokenUrl": "https://u:pw-secret-1@idp.test/token?client_secret=cs-12345678",
+            "clientId": "client-1",
+        });
+        mask_auth_value(&mut auth, None);
+        let json = auth.to_string();
+        assert!(!json.contains("pw-secret-1"), "{json}");
+        assert!(!json.contains("cs-12345678"), "{json}");
+        assert!(json.contains("idp.test/token"), "{json}");
+    }
+
+    #[test]
+    fn literal_credentials_cover_headers_auth_query_and_userinfo() {
+        let mut request = Request::new("R", HttpMethod::Get, "https://alice:pw-literal-1@api.test/x?token=tk-literal-2")
+            .with_header("Authorization", "Bearer sk-literal-3")
+            .with_auth(Auth::Bearer {
+                token: "sk-literal-4".into(),
+            });
+        request.query_params.push(QueryParam {
+            key: "api_key".into(),
+            value: "qk-literal-5".into(),
+            enabled: true,
+            description: None,
+        });
+        let found = literal_credential_values(&request, None);
+        for secret in [
+            "pw-literal-1",
+            "tk-literal-2",
+            "sk-literal-3",
+            "Bearer sk-literal-3",
+            "sk-literal-4",
+            "qk-literal-5",
+        ] {
+            assert!(found.contains(secret), "{secret} missing from {found:?}");
+        }
+        assert!(!found.contains("alice"));
+    }
 }
+

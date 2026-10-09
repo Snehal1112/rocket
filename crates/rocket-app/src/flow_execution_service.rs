@@ -2586,6 +2586,7 @@ mod tests {
             console_entries: Vec::new(),
             script_error: None,
             deferred_history: None,
+            run_secret_values: Default::default(),
         }
     }
 

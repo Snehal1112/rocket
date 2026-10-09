@@ -564,9 +564,11 @@ pub fn run() {
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 Box::new(FsWorkspaceConfigRepo::new()),
                 Arc::clone(&active_workspace_path),
-                // The same history directory the execution services write
-                // to, so get_history sees agent and manual runs alike.
-                Box::new(FsHistoryRepo::new(history_dir.clone())),
+                // Follows the live workspace, like the scope check does, so
+                // get_history never returns another workspace's runs.
+                Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
             ));
 
             // Flow CRUD and Flow execution both need to follow workspace switches, the

@@ -16,7 +16,7 @@
 //! effect at once. Every successful call publishes
 //! `DomainEvent::AcpToolInvoked` for the audit trail.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -26,9 +26,9 @@ use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::execution_service::RequestExecutionService;
 use crate::mcp_read_views::{
-    filter_folder, history_limit, mask_response_body, normalize_folder, outline_entries,
-    render_outline, CollectionBrief, HistoryBrief, MaskedEnvironment, MaskedRequest,
-    MaskedSettings, OutlineCollection,
+    filter_folder, history_limit, literal_credential_values, mask_response_body,
+    normalize_folder, outline_entries, render_outline, CollectionBrief, HistoryBrief,
+    MaskedEnvironment, MaskedRequest, MaskedSettings, OutlineCollection,
 };
 use crate::runner_sequence::{build_step_input, RunItem};
 
@@ -161,32 +161,29 @@ impl McpToolService {
         Ok(())
     }
 
-    /// The secret values `run_request` masks in a response body: the
-    /// collection's secret variables and, when one is chosen, the
-    /// environment's. Vault values are not known here; they are fetched
-    /// only inside the send.
-    fn known_secret_values(&self, collection: &str, environment_name: Option<&str>) -> HashSet<String> {
-        let mut secrets = HashSet::new();
-        if let Ok(settings) = self.collection_repo.get_settings(collection) {
-            secrets.extend(
-                settings
-                    .variables
-                    .into_iter()
-                    .filter(|v| v.secret && !v.value.is_empty())
-                    .map(|v| v.value),
-            );
+    /// Reads a request for the agent. A path under `environments/` is
+    /// refused, and a read or parse failure is reported with fixed text,
+    /// because the raw YAML error can quote file content.
+    fn read_request(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<rocket_collection::Request> {
+        let under_environments = request_path
+            .split(['/', '\\'])
+            .find(|segment| !segment.is_empty() && *segment != ".")
+            .is_some_and(|segment| segment.eq_ignore_ascii_case("environments"));
+        if under_environments {
+            return Err(DomainError::InvalidInput(
+                "environments are not requests; use get_environment".to_string(),
+            ));
         }
-        if let Some(name) = environment_name {
-            if let Ok(env) = self.environment_repo_factory.for_collection(collection).get(name) {
-                secrets.extend(
-                    env.variables
-                        .into_iter()
-                        .filter(|v| v.secret && !v.value.is_empty())
-                        .map(|v| v.value),
-                );
-            }
+        match self.collection_repo.get_request(collection, request_path) {
+            Err(DomainError::Internal(_)) => Err(DomainError::InvalidInput(format!(
+                "request '{request_path}' could not be read"
+            ))),
+            other => other,
         }
-        secrets
     }
 
     fn publish_tool_invoked(&self, session_id: &str, tool: &str, summary: String) {
@@ -313,7 +310,7 @@ impl McpToolService {
         request_path: &str,
     ) -> DomainResult<MaskedRequest> {
         self.check_in_workspace(collection)?;
-        let request = self.collection_repo.get_request(collection, request_path)?;
+        let request = self.read_request(collection, request_path)?;
         let view = MaskedRequest::from_request(request_path, &request);
         self.publish_tool_invoked(
             session_id,
@@ -372,7 +369,7 @@ impl McpToolService {
         limit: usize,
     ) -> DomainResult<Vec<HistoryBrief>> {
         self.check_in_workspace(collection)?;
-        let request = self.collection_repo.get_request(collection, request_path)?;
+        let request = self.read_request(collection, request_path)?;
         let mut entries: Vec<rocket_history::HistoryEntry> = self
             .history_repo
             .list(None)?
@@ -412,7 +409,13 @@ impl McpToolService {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&test_result_key(session_id, collection, request_path));
-        let request = self.collection_repo.get_request(collection, request_path)?;
+        let request = self.read_request(collection, request_path)?;
+        // The request's own literal credentials, which are not secret
+        // variables, are masked in the returned body too.
+        let literal_credentials = literal_credential_values(
+            &request,
+            self.collection_repo.get_settings(collection).ok().as_ref(),
+        );
         let item = RunItem::http(request.name.clone(), request_path.to_string(), request);
         // Resolved fresh on every call against the current active workspace,
         // so a workspace switch or a `workspace.yml` edit takes effect at
@@ -455,7 +458,10 @@ impl McpToolService {
             .count();
         let test_fail_count = output.test_results.len() - test_pass_count;
 
-        let secrets = self.known_secret_values(collection, environment_name);
+        // The run's own secret set holds every secret variable the executor
+        // resolved (collection, environment, global, vault).
+        let mut secrets = output.run_secret_values.clone();
+        secrets.extend(literal_credentials);
         let (body, body_truncated) = mask_response_body(&output.response.body, &secrets);
 
         self.test_result_cache
@@ -1732,4 +1738,102 @@ mod tests {
         assert!(!result.body.contains("sk-live-collection-secret"));
         assert!(result.body.contains(REDACTED));
     }
+
+    /// Runs `login.yml` in `my-api` against a fake server that answers with
+    /// `echo`, and returns the tool result.
+    async fn run_with_echo(repo: Arc<ConfigurableCollectionRepo>, echo: &str) -> McpRunResult {
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.test", echo);
+        let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
+            Arc::new(SharedExecutor(Arc::clone(&executor)));
+        let history = InMemoryHistoryRepo::new();
+        let exec_svc = Arc::new(RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::clone(&executor_dyn),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        ));
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            exec_svc,
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(history)),
+        );
+        svc.run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect("run_request")
+    }
+
+    #[tokio::test]
+    async fn a_secret_collection_variable_with_only_an_initial_value_is_masked_in_the_body() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                agent_autonomy_enabled: true,
+                variables: vec![CollectionVariable {
+                    key: "token".into(),
+                    value: String::new(),
+                    initial_value: "sk-live-x-initial".into(),
+                    enabled: true,
+                    secret: true,
+                }],
+                ..Default::default()
+            },
+        );
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+
+        let result = run_with_echo(repo, "{\"echo\":\"sk-live-x-initial\"}").await;
+        assert!(!result.body.contains("sk-live-x-initial"), "{}", result.body);
+        assert!(result.body.contains(REDACTED));
+    }
+
+    #[tokio::test]
+    async fn literal_request_credentials_are_masked_in_an_echoing_response() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let request = sample_request("Login")
+            .with_header("Authorization", "Bearer sk-live-header-token")
+            .with_auth(Auth::Basic {
+                username: "alice".into(),
+                password: "hunter2-literal".into(),
+            });
+        repo.with_request("my-api", "login.yml", request);
+
+        let echo = "Authorization: Bearer sk-live-header-token; password=hunter2-literal; \
+                    token only: sk-live-header-token";
+        let result = run_with_echo(repo, echo).await;
+        for secret in ["sk-live-header-token", "hunter2-literal"] {
+            assert!(!result.body.contains(secret), "{secret} leaked: {}", result.body);
+        }
+        assert!(result.body.contains("alice") || result.body.contains(REDACTED));
+    }
+
+    #[test]
+    fn get_request_refuses_environment_files() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", false);
+        repo.with_request("my-api", "environments/prod.yml", sample_request("Env"));
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        for path in ["environments/prod.yml", "./Environments/prod.yml", "/environments/x.yml"] {
+            let err = svc
+                .get_request("s1", "my-api", path)
+                .expect_err("an environment file is not a request");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{path}: {err:?}");
+        }
+    }
 }
+

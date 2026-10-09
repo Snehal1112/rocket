@@ -926,6 +926,7 @@ mod tests {
             deferred_history: with_history.then(|| {
                 rocket_history::HistoryEntry::new("GET", "https://api.example.com/aaaa", 200, 1, 1)
             }),
+            run_secret_values: Default::default(),
         }
     }
 
