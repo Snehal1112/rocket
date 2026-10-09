@@ -126,6 +126,28 @@ describe('PromptEditor history', () => {
   });
 });
 
+describe('PromptEditor stability', () => {
+  it('does not send on Enter during IME composition', () => {
+    const { content, props, view } = setup({ value: 'hello' });
+    Object.defineProperty(view, 'composing', { value: true });
+    press(content, 'Enter');
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('keeps the view, cursor and undo history when placeholder or disabled change', () => {
+    const { props, rerender, view, container } = setup({ value: 'abc' });
+    view.dispatch({ selection: { anchor: 2 } });
+    rerender(<PromptEditor {...props} placeholder='Ask' disabled aria-label='Other' />);
+    rerender(<PromptEditor {...props} placeholder='Ask' aria-label='Other' />);
+    const after = EditorView.findFromDOM(
+      container.querySelector('.cm-editor') as HTMLElement,
+    ) as EditorView;
+    expect(after).toBe(view);
+    expect(after.state.selection.main.head).toBe(2);
+    expect(container.querySelector('.cm-content')?.getAttribute('aria-label')).toBe('Other');
+  });
+});
+
 describe('PromptEditor setup', () => {
   it('labels the editor as a multi-line textbox', () => {
     const { content } = setup();

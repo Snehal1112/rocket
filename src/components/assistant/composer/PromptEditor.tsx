@@ -1,8 +1,8 @@
 import { autocompletion, completionStatus } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, insertNewline } from '@codemirror/commands';
-import { Annotation, EditorState, type Extension, Prec } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, type Extension, Prec } from '@codemirror/state';
 import { placeholder as cmPlaceholder, EditorView, keymap, tooltips } from '@codemirror/view';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   rocketTheme,
   rocketThemeDark,
@@ -44,6 +44,14 @@ export interface PromptEditorProps {
   'aria-label': string;
 }
 
+function ariaExtension(label: string): Extension {
+  return EditorView.contentAttributes.of({ 'aria-label': label, 'aria-multiline': 'true' });
+}
+
+function editableExtension(disabled: boolean): Extension {
+  return disabled ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
+}
+
 // Marks the change a history recall makes, so it does not reset the recall cursor.
 const historyRecall = Annotation.define<boolean>();
 
@@ -74,21 +82,31 @@ export function PromptEditor({
   const isSyncingRef = useRef(false);
   const historyCursorRef = useRef<HistoryCursor>(IDLE_HISTORY_CURSOR);
 
+  // Cosmetic and state props live in compartments, so changing them keeps the view.
+  const ariaCompartment = useRef(new Compartment());
+  const placeholderCompartment = useRef(new Compartment());
+  const editableCompartment = useRef(new Compartment());
+
   // The extensions are built once, so they read the latest props through refs.
   const propsRef = useRef({ onChange, onSubmit, onStop, running, promptHistory, onHistoryCommit });
-  propsRef.current = { onChange, onSubmit, onStop, running, promptHistory, onHistoryCommit };
   const referenceSourceRef = useRef(referenceSource);
-  referenceSourceRef.current = referenceSource;
   const commandSourceRef = useRef(commandSource);
-  commandSourceRef.current = commandSource;
   const onReferencePickedRef = useRef(onReferencePicked);
-  onReferencePickedRef.current = onReferencePicked;
   const variableContextRef = useRef(variableContext);
-  variableContextRef.current = variableContext;
+  // Refs update after render commits, so a discarded concurrent render never leaks in.
+  useLayoutEffect(() => {
+    propsRef.current = { onChange, onSubmit, onStop, running, promptHistory, onHistoryCommit };
+    referenceSourceRef.current = referenceSource;
+    commandSourceRef.current = commandSource;
+    onReferencePickedRef.current = onReferencePicked;
+    variableContextRef.current = variableContext;
+  });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: extensions rebuild only when presence toggles, not on identity change.
   const extensions = useMemo(() => {
     const submit = (view: EditorView): boolean => {
+      // Enter during IME composition confirms the text and must not send.
+      if (view.composing || view.compositionStarted) return false;
       const props = propsRef.current;
       // A running turn ignores Enter, so one turn never queues a second prompt.
       if (props.running) return true;
@@ -173,14 +191,14 @@ export function PromptEditor({
         if (!recalled) historyCursorRef.current = IDLE_HISTORY_CURSOR;
         propsRef.current.onChange(update.state.doc.toString());
       }),
-      EditorView.contentAttributes.of({ 'aria-label': ariaLabel, 'aria-multiline': 'true' }),
+      ariaCompartment.current.of(ariaExtension(ariaLabel)),
+      placeholderCompartment.current.of(placeholder ? cmPlaceholder(placeholder) : []),
+      editableCompartment.current.of(editableExtension(!!disabled)),
     ];
 
-    if (placeholder) exts.push(cmPlaceholder(placeholder));
     if (variableContext) exts.push(variableContextField, variableHighlight());
-    if (disabled) exts.push(EditorState.readOnly.of(true), EditorView.editable.of(false));
     return exts;
-  }, [!!variableContext, !!disabled, placeholder, ariaLabel]);
+  }, [!!variableContext]);
 
   // Create the EditorView. It is rebuilt only when the extension set changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: initial doc only, live sync is in the value effect below.
@@ -212,6 +230,17 @@ export function PromptEditor({
       isSyncingRef.current = false;
     }
   }, [value]);
+
+  // Reconfigure the compartments in place, so undo history and the cursor survive.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: [
+        ariaCompartment.current.reconfigure(ariaExtension(ariaLabel)),
+        placeholderCompartment.current.reconfigure(placeholder ? cmPlaceholder(placeholder) : []),
+        editableCompartment.current.reconfigure(editableExtension(!!disabled)),
+      ],
+    });
+  }, [ariaLabel, placeholder, disabled]);
 
   // Keep the highlight context current.
   useEffect(() => {
