@@ -2559,7 +2559,14 @@ export interface AssistantResponseChip {
   headers: { key: string; value: string }[];
   body: string;
   isBinary: boolean;
-  tests: { name: string; passed: boolean; error: string | null }[];
+  tests: { name: string; passed: boolean; error?: string | null }[];
+  /** The tab's request as it is on screen, so unsaved credentials are masked too. */
+  request?: {
+    headers: Header[];
+    queryParams: QueryParam[];
+    body?: Body;
+    auth: Auth;
+  };
 }
 
 /**
@@ -2577,12 +2584,22 @@ export const buildAssistantChipResource = (
     path: path ?? null,
   });
 
-/** Masks the last response of a request tab and returns it as a text resource. */
+/**
+ * Masks the last response of a request tab and returns it as a text resource.
+ * `environmentName` is the tab's active environment, whose vault secrets are masked too.
+ */
 export const maskAssistantResponse = (
   collection: string,
   requestPath: string,
   response: AssistantResponseChip,
-) => invoke<PromptResourceDto>('mask_assistant_response', { collection, requestPath, response });
+  environmentName?: string,
+) =>
+  invoke<PromptResourceDto>('mask_assistant_response', {
+    collection,
+    requestPath,
+    environmentName: environmentName ?? null,
+    response,
+  });
 
 /** Resolves with the stop reason. A stopped turn resolves with `cancelled`. */
 export const sendAgentPrompt = (

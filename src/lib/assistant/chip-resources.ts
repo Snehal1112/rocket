@@ -1,9 +1,11 @@
+import { toApiAuth, toApiBody } from '@/lib/execute-request';
 import {
   type AssistantResponseChip,
   buildAssistantChipResource,
   maskAssistantResponse,
   type PromptResourceDto,
 } from '@/lib/tauri-api';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab, ResponseState } from '@/types/pane-types';
 import { findRequestTab } from './request-tabs';
@@ -35,6 +37,7 @@ export function chipUri(chip: ReferenceItem): string {
 
 /** What the backend needs to mask a tab's last response. Nothing is masked here. */
 function responsePayload(tab: RequestTab, response: ResponseState): AssistantResponseChip {
+  const request = tab.request;
   return {
     method: tab.request.method,
     url: tab.request.url,
@@ -50,6 +53,16 @@ function responsePayload(tab: RequestTab, response: ResponseState): AssistantRes
       passed: test.status === 'passed',
       error: test.error,
     })),
+    request: {
+      headers: request.headers.map((h) => ({ key: h.key, value: h.value, enabled: h.enabled })),
+      queryParams: request.queryParams.map((q) => ({
+        key: q.key,
+        value: q.value,
+        enabled: q.enabled,
+      })),
+      body: toApiBody(request.body),
+      auth: toApiAuth(request.auth),
+    },
   };
 }
 
@@ -64,7 +77,12 @@ async function loadChip(chip: ReferenceItem): Promise<PromptResourceDto> {
         text: `No response is available for ${chip.label}.`,
       };
     }
-    return maskAssistantResponse(chip.collection, path, responsePayload(tab, tab.response));
+    return maskAssistantResponse(
+      chip.collection,
+      path,
+      responsePayload(tab, tab.response),
+      useEnvStore.getState().activeEnvId ?? undefined,
+    );
   }
   return buildAssistantChipResource(chip.kind, chip.collection, chip.path);
 }

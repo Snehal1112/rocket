@@ -42,12 +42,20 @@ describe('assistant chip commands', () => {
       headers: [],
       body: '{}',
       isBinary: false,
-      tests: [],
+      tests: [{ name: 'a', passed: false }],
     };
     await maskAssistantResponse('shop', 'list.yml', response);
     expect(invoke).toHaveBeenCalledWith('mask_assistant_response', {
       collection: 'shop',
       requestPath: 'list.yml',
+      environmentName: null,
+      response,
+    });
+    await maskAssistantResponse('shop', 'list.yml', response, 'dev');
+    expect(invoke).toHaveBeenLastCalledWith('mask_assistant_response', {
+      collection: 'shop',
+      requestPath: 'list.yml',
+      environmentName: 'dev',
       response,
     });
   });

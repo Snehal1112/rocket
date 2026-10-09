@@ -8,6 +8,7 @@ import {
 import type { ReferenceItem } from '@/lib/assistant/types';
 import { createDefaultLeaf, createDefaultRequest } from '@/lib/pane-utils';
 import { buildAssistantChipResource, maskAssistantResponse } from '@/lib/tauri-api';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab, ResponseState } from '@/types/pane-types';
 
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.mocked(buildAssistantChipResource).mockReset();
   vi.mocked(maskAssistantResponse).mockReset();
   usePaneStore.setState({ root: createDefaultLeaf('g1'), activeGroupId: 'g1' });
+  useEnvStore.setState({ activeEnvId: null });
 });
 
 describe('chipToResource', () => {
@@ -90,8 +92,14 @@ describe('chipToResource', () => {
     expect(buildAssistantChipResource).toHaveBeenCalledWith('collection', 'shop', undefined);
   });
 
-  it('sends the open tab response to the backend for masking and builds no text itself', async () => {
-    openTab(requestTab(RESPONSE));
+  it('sends the open tab response and request to the backend for masking', async () => {
+    const tab = requestTab(RESPONSE);
+    tab.request = {
+      ...tab.request,
+      headers: [{ id: 'k1', key: 'Authorization', value: 'Bearer unsaved-token', enabled: true }],
+    };
+    openTab(tab);
+    useEnvStore.setState({ activeEnvId: 'dev' });
     vi.mocked(maskAssistantResponse).mockResolvedValue({
       uri: 'rocket://last-response/shop/orders/list.yml',
       mimeType: 'text/plain',
@@ -99,21 +107,30 @@ describe('chipToResource', () => {
     });
     const resource = await chipToResource({ ...REQUEST_CHIP, kind: 'last-response' });
     expect(buildAssistantChipResource).not.toHaveBeenCalled();
-    expect(maskAssistantResponse).toHaveBeenCalledWith('shop', 'orders/list.yml', {
-      method: 'GET',
-      url: 'https://api.test/orders',
-      status: 200,
-      statusText: 'OK',
-      durationMs: 12,
-      sizeBytes: 11,
-      headers: [{ key: 'Set-Cookie', value: 'sid=abc123xyz' }],
-      body: '{"ok":true}',
-      isBinary: false,
-      tests: [
-        { name: 'ok', passed: true, error: null },
-        { name: 'bad', passed: false, error: 'boom' },
-      ],
-    });
+    expect(maskAssistantResponse).toHaveBeenCalledWith(
+      'shop',
+      'orders/list.yml',
+      expect.objectContaining({
+        method: 'GET',
+        url: 'https://api.test/orders',
+        status: 200,
+        statusText: 'OK',
+        durationMs: 12,
+        sizeBytes: 11,
+        headers: [{ key: 'Set-Cookie', value: 'sid=abc123xyz' }],
+        body: '{"ok":true}',
+        isBinary: false,
+        tests: [
+          { name: 'ok', passed: true, error: null },
+          { name: 'bad', passed: false, error: 'boom' },
+        ],
+        request: expect.objectContaining({
+          headers: [{ key: 'Authorization', value: 'Bearer unsaved-token', enabled: true }],
+          queryParams: [],
+        }),
+      }),
+      'dev',
+    );
     expect(resource.text).toBe('masked response');
   });
 
