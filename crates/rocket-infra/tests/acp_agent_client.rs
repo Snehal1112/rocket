@@ -9,7 +9,7 @@
 use agent_client_protocol::schema::v1::InitializeRequest;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent as AgentRole, Client, ConnectionTo};
-use rocket_acp::{AcpSessionClient, McpServerSpec};
+use rocket_acp::{AcpSessionClient, AcpUpdate, McpServerSpec, PromptPart, ToolCallStatus};
 use rocket_infra::AcpAgentClient;
 use rocket_shared::error::DomainError;
 use tokio::sync::mpsc;
@@ -57,9 +57,10 @@ async fn acp_agent_client_fixture_agent_completes_initialize_handshake() {
 async fn acp_agent_client_start_session_returns_a_session_id() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session should succeed against the fixture agent");
+        .expect("start_session should succeed against the fixture agent")
+        .session_id;
     assert!(!session_id.is_empty());
 }
 
@@ -67,7 +68,14 @@ async fn acp_agent_client_start_session_returns_a_session_id() {
 async fn acp_agent_client_start_session_fails_clearly_for_a_nonexistent_command() {
     let client = AcpAgentClient::new();
     let err = client
-        .start_session("definitely-not-a-real-binary-xyz123", &[], "/tmp", &[], &[])
+        .start_session(
+            "definitely-not-a-real-binary-xyz123",
+            &[],
+            "/tmp",
+            &[],
+            &[],
+            None,
+        )
         .await
         .expect_err("nonexistent command must fail, not panic");
     assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -86,6 +94,7 @@ async fn acp_agent_client_start_session_error_never_contains_the_credential_valu
                 "sk-super-secret-test-value".to_string(),
             )],
             &[],
+            None,
         )
         .await
         .expect_err("nonexistent command must fail");
@@ -115,8 +124,7 @@ async fn acp_agent_client_async_handshake_failure_never_contains_the_credential_
                 "ANTHROPIC_API_KEY".to_string(),
                 "sk-super-secret-async-value".to_string(),
             )],
-            &[],
-        )
+            &[], None)
         .await
         .expect_err(
             "a process that exits immediately without speaking ACP must fail the handshake, not panic or hang",
@@ -139,36 +147,52 @@ async fn acp_agent_client_async_handshake_failure_never_contains_the_credential_
 async fn acp_agent_client_send_prompt_streams_a_chunk_and_returns_a_stop_reason() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session");
+        .expect("start_session")
+        .session_id;
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let stop_reason = client
-        .send_prompt(&session_id, "hello".to_string(), tx)
+        .send_prompt(&session_id, vec![PromptPart::Text("hello".to_string())], tx)
         .await
         .expect("send_prompt should succeed against the fixture agent");
 
     assert_eq!(stop_reason, "end_turn");
-    assert_eq!(rx.recv().await, Some("fixture reply".to_string()));
+    assert_eq!(
+        rx.recv().await,
+        Some(AcpUpdate::Text {
+            text: "fixture reply".to_string()
+        })
+    );
 }
 
 #[tokio::test]
 async fn acp_agent_client_send_prompt_works_twice_on_the_same_session_for_multi_turn_chat() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session");
+        .expect("start_session")
+        .session_id;
 
     for _ in 0..2 {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let stop_reason = client
-            .send_prompt(&session_id, "hello again".to_string(), tx)
+            .send_prompt(
+                &session_id,
+                vec![PromptPart::Text("hello again".to_string())],
+                tx,
+            )
             .await
             .expect("send_prompt should succeed on a reused session");
         assert_eq!(stop_reason, "end_turn");
-        assert_eq!(rx.recv().await, Some("fixture reply".to_string()));
+        assert_eq!(
+            rx.recv().await,
+            Some(AcpUpdate::Text {
+                text: "fixture reply".to_string()
+            })
+        );
     }
 }
 
@@ -177,7 +201,11 @@ async fn acp_agent_client_send_prompt_on_unknown_session_id_errors() {
     let client = AcpAgentClient::new();
     let (tx, _rx) = mpsc::unbounded_channel();
     let err = client
-        .send_prompt("no-such-session", "hi".to_string(), tx)
+        .send_prompt(
+            "no-such-session",
+            vec![PromptPart::Text("hi".to_string())],
+            tx,
+        )
         .await
         .expect_err("unknown session id must error, not panic");
     assert!(matches!(err, DomainError::NotFound(_)));
@@ -187,9 +215,10 @@ async fn acp_agent_client_send_prompt_on_unknown_session_id_errors() {
 async fn acp_agent_client_end_session_kills_the_process_and_removes_the_session() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session");
+        .expect("start_session")
+        .session_id;
 
     client
         .end_session(&session_id)
@@ -198,7 +227,7 @@ async fn acp_agent_client_end_session_kills_the_process_and_removes_the_session(
 
     let (tx, _rx) = mpsc::unbounded_channel();
     let err = client
-        .send_prompt(&session_id, "hi".to_string(), tx)
+        .send_prompt(&session_id, vec![PromptPart::Text("hi".to_string())], tx)
         .await
         .expect_err("session must be gone after end_session");
     assert!(matches!(err, DomainError::NotFound(_)));
@@ -218,13 +247,18 @@ async fn acp_agent_client_end_session_on_unknown_session_id_errors() {
 async fn acp_agent_client_a_crashed_agent_is_removed_from_the_session_map() {
     let client = AcpAgentClient::new();
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session");
+        .expect("start_session")
+        .session_id;
 
     let (tx, _rx) = mpsc::unbounded_channel();
     let err = client
-        .send_prompt(&session_id, "__CRASH__".to_string(), tx)
+        .send_prompt(
+            &session_id,
+            vec![PromptPart::Text("__CRASH__".to_string())],
+            tx,
+        )
         .await
         .expect_err("an abrupt process exit must surface as an error, not panic or hang");
     assert!(matches!(err, DomainError::Internal(_)));
@@ -234,7 +268,7 @@ async fn acp_agent_client_a_crashed_agent_is_removed_from_the_session_map() {
     // second crash-shaped error.
     let (tx2, _rx2) = mpsc::unbounded_channel();
     let err = client
-        .send_prompt(&session_id, "hi".to_string(), tx2)
+        .send_prompt(&session_id, vec![PromptPart::Text("hi".to_string())], tx2)
         .await
         .expect_err("a crashed session must be removed from the map, not left dangling");
     assert!(matches!(err, DomainError::NotFound(_)));
@@ -246,16 +280,21 @@ async fn acp_agent_client_end_session_unblocks_an_in_flight_prompt() {
     // pending. The pending `send_prompt` must then fail promptly, not hang.
     let client = std::sync::Arc::new(AcpAgentClient::new());
     let session_id = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session");
+        .expect("start_session")
+        .session_id;
 
     let prompt_client = std::sync::Arc::clone(&client);
     let prompt_session = session_id.clone();
     let pending = tokio::spawn(async move {
         let (tx, _rx) = mpsc::unbounded_channel();
         prompt_client
-            .send_prompt(&prompt_session, "__HANG__".to_string(), tx)
+            .send_prompt(
+                &prompt_session,
+                vec![PromptPart::Text("__HANG__".to_string())],
+                tx,
+            )
             .await
     });
 
@@ -300,7 +339,7 @@ async fn acp_agent_client_cancelled_start_session_kills_the_whole_process_group(
     let client = AcpAgentClient::new();
     let outcome = tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        client.start_session("sh", &["-c".to_string(), script], "/tmp", &[], &[]),
+        client.start_session("sh", &["-c".to_string(), script], "/tmp", &[], &[], None),
     )
     .await;
     assert!(outcome.is_err(), "the handshake must still be pending");
@@ -339,9 +378,10 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
 
     for _ in 0..5 {
         let session_id = client
-            .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+            .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
             .await
-            .expect("start_session");
+            .expect("start_session")
+            .session_id;
         client
             .end_session(&session_id)
             .await
@@ -369,13 +409,15 @@ async fn acp_agent_client_end_session_aborts_the_background_dispatch_task() {
 async fn acp_agent_client_end_all_sessions_kills_every_running_session() {
     let client = AcpAgentClient::new();
     let session_a = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session a");
+        .expect("start_session a")
+        .session_id;
     let session_b = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
-        .expect("start_session b");
+        .expect("start_session b")
+        .session_id;
 
     client
         .end_all_sessions()
@@ -384,14 +426,14 @@ async fn acp_agent_client_end_all_sessions_kills_every_running_session() {
 
     let (tx_a, _rx_a) = tokio::sync::mpsc::unbounded_channel();
     let err_a = client
-        .send_prompt(&session_a, "hi".to_string(), tx_a)
+        .send_prompt(&session_a, vec![PromptPart::Text("hi".to_string())], tx_a)
         .await
         .expect_err("session a must be gone after end_all_sessions");
     assert!(matches!(err_a, DomainError::NotFound(_)));
 
     let (tx_b, _rx_b) = tokio::sync::mpsc::unbounded_channel();
     let err_b = client
-        .send_prompt(&session_b, "hi".to_string(), tx_b)
+        .send_prompt(&session_b, vec![PromptPart::Text("hi".to_string())], tx_b)
         .await
         .expect_err("session b must be gone after end_all_sessions");
     assert!(matches!(err_b, DomainError::NotFound(_)));
@@ -421,7 +463,7 @@ async fn acp_agent_client_end_all_sessions_kills_a_session_still_in_its_handshak
         let client = std::sync::Arc::clone(&client);
         tokio::spawn(async move {
             client
-                .start_session("sh", &["-c".to_string(), script], "/tmp", &[], &[])
+                .start_session("sh", &["-c".to_string(), script], "/tmp", &[], &[], None)
                 .await
         })
     };
@@ -466,7 +508,7 @@ async fn acp_agent_client_start_session_after_end_all_sessions_is_refused() {
         .expect("end_all_sessions should succeed");
 
     let result = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[])
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await;
     assert!(
         result.is_err(),
@@ -500,6 +542,7 @@ async fn acp_agent_client_start_session_maps_http_mcp_server_spec_into_new_sessi
                 ("FIXTURE_ADVERTISE_MCP_HTTP".to_string(), "1".to_string()),
             ],
             &specs,
+            None,
         )
         .await
         .expect("start_session should succeed against the fixture agent");
@@ -546,6 +589,7 @@ async fn acp_agent_client_start_session_maps_stdio_mcp_server_spec_into_new_sess
                 dump_path.display().to_string(),
             )],
             &specs,
+            None,
         )
         .await
         .expect("start_session should succeed against the fixture agent");
@@ -577,6 +621,7 @@ async fn acp_agent_client_start_session_with_no_mcp_servers_sends_an_empty_list(
                 dump_path.display().to_string(),
             )],
             &[],
+            None,
         )
         .await
         .expect("start_session should succeed with no mcp servers");
@@ -610,9 +655,11 @@ async fn acp_agent_client_start_session_still_succeeds_when_agent_lacks_http_mcp
                 dump_path.display().to_string(),
             )],
             &specs,
+            None,
         )
         .await
-        .expect("a capability mismatch must not fail start_session");
+        .expect("a capability mismatch must not fail start_session")
+        .session_id;
     assert!(!session_id.is_empty());
 
     let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump mcp_servers");
@@ -654,6 +701,7 @@ async fn acp_agent_client_start_session_picks_http_over_stdio_when_agent_adverti
                 ("FIXTURE_ADVERTISE_MCP_HTTP".to_string(), "1".to_string()),
             ],
             &http_and_stdio_specs_with_same_name(),
+            None,
         )
         .await
         .expect("start_session should succeed against the fixture agent");
@@ -679,6 +727,7 @@ async fn acp_agent_client_start_session_falls_back_to_stdio_when_agent_lacks_htt
                 dump_path.display().to_string(),
             )],
             &http_and_stdio_specs_with_same_name(),
+            None,
         )
         .await
         .expect("start_session should succeed against the fixture agent");
@@ -704,6 +753,7 @@ async fn acp_agent_client_start_session_error_never_contains_the_mcp_token_value
             "/tmp",
             &[],
             &specs,
+            None,
         )
         .await
         .expect_err("nonexistent command must fail, not panic");
@@ -712,4 +762,357 @@ async fn acp_agent_client_start_session_error_never_contains_the_mcp_token_value
         !message.contains("sk-mcp-super-secret-test-value"),
         "error message must never contain the mcp token value, got: {message}"
     );
+}
+// Plan 01 (workspace AI assistant): typed updates, session info, meta,
+// option changes, cancel, permission deny and prompt parts.
+
+fn drain_updates(rx: &mut mpsc::UnboundedReceiver<AcpUpdate>) -> Vec<AcpUpdate> {
+    let mut updates = Vec::new();
+    while let Ok(update) = rx.try_recv() {
+        updates.push(update);
+    }
+    updates
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_returns_config_options_and_prompt_capabilities() {
+    let client = AcpAgentClient::new();
+    let info = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session");
+
+    assert_eq!(info.session_id, "fixture-session");
+    assert!(info.prompt_capabilities.embedded_context);
+    assert!(info.prompt_capabilities.image);
+    // The fixture also sends a boolean `fast` option, which must be skipped.
+    assert_eq!(
+        info.config_options.len(),
+        1,
+        "got {:?}",
+        info.config_options
+    );
+    let model = &info.config_options[0];
+    assert_eq!(model.id, "model");
+    assert_eq!(model.category.as_deref(), Some("model"));
+    assert_eq!(model.current_value, "default");
+    let values: Vec<&str> = model.choices.iter().map(|c| c.value.as_str()).collect();
+    assert_eq!(values, vec!["default", "opus"]);
+    assert_eq!(
+        model.choices[1].description.as_deref(),
+        Some("Most capable")
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_passes_meta_through_to_new_session_request() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dump_path = dir.path().join("meta.json");
+    let meta = serde_json::json!({ "claudeCode": { "options": { "tools": [] } } });
+
+    let client = AcpAgentClient::new();
+    client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "SESSION_META_DUMP_PATH".to_string(),
+                dump_path.display().to_string(),
+            )],
+            &[],
+            Some(meta.clone()),
+        )
+        .await
+        .expect("start_session");
+
+    let dumped = std::fs::read_to_string(&dump_path).expect("fixture should dump meta");
+    let dumped: serde_json::Value = serde_json::from_str(&dumped).expect("parse dump");
+    assert_eq!(dumped, meta);
+}
+
+#[tokio::test]
+async fn acp_agent_client_start_session_rejects_meta_that_is_not_an_object() {
+    let client = AcpAgentClient::new();
+    let err = client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[],
+            &[],
+            Some(serde_json::json!("not an object")),
+        )
+        .await
+        .expect_err("a non-object meta must be refused");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+}
+
+#[tokio::test]
+async fn acp_agent_client_send_prompt_forwards_tool_calls_usage_and_config_options() {
+    let client = AcpAgentClient::new();
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session")
+        .session_id;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let stop_reason = client
+        .send_prompt(
+            &session_id,
+            vec![PromptPart::Text("__TOOLS__".to_string())],
+            tx,
+        )
+        .await
+        .expect("send_prompt");
+    assert_eq!(stop_reason, "end_turn");
+
+    let updates = drain_updates(&mut rx);
+    assert_eq!(updates.len(), 5, "got {updates:?}");
+    assert_eq!(
+        updates[0],
+        AcpUpdate::ToolCall {
+            call_id: "call-1".to_string(),
+            title: "Read file".to_string(),
+            kind: "read".to_string(),
+            status: ToolCallStatus::Pending,
+        }
+    );
+    assert_eq!(
+        updates[1],
+        AcpUpdate::ToolCallUpdate {
+            call_id: "call-1".to_string(),
+            title: None,
+            status: Some(ToolCallStatus::Completed),
+        }
+    );
+    assert_eq!(
+        updates[2],
+        AcpUpdate::Usage {
+            used: 53_000,
+            size: 200_000,
+            cost_usd: Some(0.045),
+        }
+    );
+    match &updates[3] {
+        AcpUpdate::ConfigOptions { options } => {
+            let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
+            assert_eq!(ids, vec!["model", "effort"]);
+        }
+        other => panic!("expected ConfigOptions, got {other:?}"),
+    }
+    assert_eq!(
+        updates[4],
+        AcpUpdate::Text {
+            text: "fixture reply".to_string()
+        }
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_cancel_ends_the_turn_as_cancelled_and_keeps_the_session() {
+    let client = std::sync::Arc::new(AcpAgentClient::new());
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session")
+        .session_id;
+
+    let prompt_client = std::sync::Arc::clone(&client);
+    let prompt_session = session_id.clone();
+    let pending = tokio::spawn(async move {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        prompt_client
+            .send_prompt(
+                &prompt_session,
+                vec![PromptPart::Text("__WAIT_FOR_CANCEL__".to_string())],
+                tx,
+            )
+            .await
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // Cancel must not wait for the prompt lock that the pending turn holds.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        client.cancel(&session_id),
+    )
+    .await
+    .expect("cancel must not block on the running turn")
+    .expect("cancel should succeed");
+
+    let stop_reason = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("the cancelled turn must end")
+        .expect("prompt task must not panic")
+        .expect("a cancelled turn is a normal finish");
+    assert_eq!(stop_reason, "cancelled");
+
+    // The session is still alive after a cancel.
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let stop_reason = client
+        .send_prompt(&session_id, vec![PromptPart::Text("hello".to_string())], tx)
+        .await
+        .expect("the session must survive a cancel");
+    assert_eq!(stop_reason, "end_turn");
+    assert_eq!(
+        rx.recv().await,
+        Some(AcpUpdate::Text {
+            text: "fixture reply".to_string()
+        })
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_cancel_on_unknown_session_id_errors() {
+    let client = AcpAgentClient::new();
+    let err = client
+        .cancel("no-such-session")
+        .await
+        .expect_err("unknown session id must error");
+    assert!(matches!(err, DomainError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn acp_agent_client_set_config_option_returns_the_new_option_list() {
+    let client = AcpAgentClient::new();
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session")
+        .session_id;
+
+    let options = client
+        .set_config_option(&session_id, "model", "opus")
+        .await
+        .expect("set_config_option");
+    let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, vec!["model", "effort"]);
+    assert_eq!(options[0].current_value, "opus");
+    assert_eq!(options[1].category.as_deref(), Some("thought_level"));
+}
+
+#[tokio::test]
+async fn acp_agent_client_set_config_option_on_unknown_session_id_errors() {
+    let client = AcpAgentClient::new();
+    let err = client
+        .set_config_option("no-such-session", "model", "opus")
+        .await
+        .expect_err("unknown session id must error");
+    assert!(matches!(err, DomainError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn acp_agent_client_denies_permission_requests() {
+    let client = AcpAgentClient::new();
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session")
+        .session_id;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let stop_reason = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.send_prompt(
+            &session_id,
+            vec![PromptPart::Text("__PERMISSION__".to_string())],
+            tx,
+        ),
+    )
+    .await
+    .expect("a permission request must never hang the turn")
+    .expect("send_prompt");
+    assert_eq!(stop_reason, "end_turn");
+    assert_eq!(
+        drain_updates(&mut rx),
+        vec![AcpUpdate::Text {
+            text: "permission:selected:reject-once".to_string()
+        }]
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_sends_resources_as_embedded_resources_when_supported() {
+    let client = AcpAgentClient::new();
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session")
+        .session_id;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    client
+        .send_prompt(
+            &session_id,
+            vec![
+                PromptPart::Resource {
+                    uri: "rocket://request/a".to_string(),
+                    mime_type: Some("text/plain".to_string()),
+                    text: "GET /a".to_string(),
+                },
+                PromptPart::Text("__DESCRIBE__".to_string()),
+            ],
+            tx,
+        )
+        .await
+        .expect("send_prompt");
+    assert_eq!(
+        drain_updates(&mut rx),
+        vec![AcpUpdate::Text {
+            text: "resource:rocket://request/a:text/plain|text".to_string()
+        }]
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_sends_resources_as_text_without_embedded_context() {
+    let client = AcpAgentClient::new();
+    let info = client
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[("FIXTURE_NO_EMBEDDED_CONTEXT".to_string(), "1".to_string())],
+            &[],
+            None,
+        )
+        .await
+        .expect("start_session");
+    assert!(!info.prompt_capabilities.embedded_context);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    client
+        .send_prompt(
+            &info.session_id,
+            vec![
+                PromptPart::Resource {
+                    uri: "rocket://request/a".to_string(),
+                    mime_type: None,
+                    text: "GET /a".to_string(),
+                },
+                PromptPart::Text("__DESCRIBE__".to_string()),
+            ],
+            tx,
+        )
+        .await
+        .expect("send_prompt");
+    assert_eq!(
+        drain_updates(&mut rx),
+        vec![AcpUpdate::Text {
+            text: "text|text".to_string()
+        }]
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_send_prompt_with_no_parts_is_rejected() {
+    let client = AcpAgentClient::new();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let err = client
+        .send_prompt("no-such-session", Vec::new(), tx)
+        .await
+        .expect_err("an empty prompt must be refused");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
 }

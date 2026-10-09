@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rocket_acp::AcpSessionClient;
+use rocket_acp::{AcpSessionClient, AcpUpdate, PromptPart};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
@@ -155,8 +155,9 @@ impl AcpSessionService {
 
         let session_id = self
             .session_client
-            .start_session(&config.command, &config.args, cwd, &env, &mcp_servers)
-            .await?;
+            .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, None)
+            .await?
+            .session_id;
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: session_id.clone(),
@@ -185,18 +186,23 @@ impl AcpSessionService {
     /// On timeout, the session is force-killed via `end_session`, because a
     /// hung agent process is still running.
     pub async fn send_prompt(&self, session_id: &str, prompt: String) -> DomainResult<String> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpUpdate>();
         let session_id_owned = session_id.to_string();
 
         let drain_chunks = async {
-            while let Some(text) = rx.recv().await {
-                self.event_publisher.publish(DomainEvent::AcpSessionChunk {
-                    session_id: session_id_owned.clone(),
-                    text,
-                });
+            while let Some(update) = rx.recv().await {
+                // Task 2 of the ACP client upgrade publishes the other update kinds.
+                if let AcpUpdate::Text { text } = update {
+                    self.event_publisher.publish(DomainEvent::AcpSessionChunk {
+                        session_id: session_id_owned.clone(),
+                        text,
+                    });
+                }
             }
         };
-        let send = self.session_client.send_prompt(session_id, prompt, tx);
+        let send = self
+            .session_client
+            .send_prompt(session_id, vec![PromptPart::Text(prompt)], tx);
 
         let joined = tokio::time::timeout(self.prompt_timeout, async {
             tokio::join!(drain_chunks, send)
@@ -259,6 +265,7 @@ mod tests {
     use std::sync::Mutex;
 
     use rocket_acp::{AgentConfig, AgentConfigRepository};
+    use rocket_acp::{ConfigOption, PromptCapabilities, SessionInfo};
     use rocket_environment::external_secret::ExternalSecretRef;
     use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
     use rocket_environment::secret_store::SecretStore;
@@ -429,23 +436,33 @@ mod tests {
 
     struct FakeSessionClient {
         start_should_fail: bool,
-        prompt_chunks: Vec<String>,
+        start_config_options: Vec<ConfigOption>,
+        prompt_updates: Vec<AcpUpdate>,
+        update_interval: Duration,
         prompt_stop_reason: String,
         prompt_should_fail: bool,
         prompt_delay: Duration,
         end_session_called: Arc<AtomicBool>,
         end_all_sessions_called: Arc<AtomicBool>,
+        cancel_called: Arc<AtomicBool>,
+        options_after_set: Vec<ConfigOption>,
     }
     impl Default for FakeSessionClient {
         fn default() -> Self {
             Self {
                 start_should_fail: false,
-                prompt_chunks: vec!["hello".to_string()],
+                start_config_options: Vec::new(),
+                prompt_updates: vec![AcpUpdate::Text {
+                    text: "hello".to_string(),
+                }],
+                update_interval: Duration::ZERO,
                 prompt_stop_reason: "end_turn".to_string(),
                 prompt_should_fail: false,
                 prompt_delay: Duration::ZERO,
                 end_session_called: Arc::new(AtomicBool::new(false)),
                 end_all_sessions_called: Arc::new(AtomicBool::new(false)),
+                cancel_called: Arc::new(AtomicBool::new(false)),
+                options_after_set: Vec::new(),
             }
         }
     }
@@ -458,28 +475,49 @@ mod tests {
             _cwd: &str,
             _env: &[(String, String)],
             _mcp_servers: &[rocket_acp::McpServerSpec],
-        ) -> DomainResult<String> {
+            _meta: Option<serde_json::Value>,
+        ) -> DomainResult<SessionInfo> {
             if self.start_should_fail {
                 Err(DomainError::InvalidInput("command not found".to_string()))
             } else {
-                Ok("session-1".to_string())
+                Ok(SessionInfo {
+                    session_id: "session-1".to_string(),
+                    config_options: self.start_config_options.clone(),
+                    prompt_capabilities: PromptCapabilities {
+                        embedded_context: true,
+                        image: false,
+                    },
+                })
             }
         }
         async fn send_prompt(
             &self,
             _session_id: &str,
-            _prompt: String,
-            chunk_tx: UnboundedSender<String>,
+            _parts: Vec<PromptPart>,
+            update_tx: UnboundedSender<AcpUpdate>,
         ) -> DomainResult<String> {
             tokio::time::sleep(self.prompt_delay).await;
-            for chunk in &self.prompt_chunks {
-                let _ = chunk_tx.send(chunk.clone());
+            for update in &self.prompt_updates {
+                tokio::time::sleep(self.update_interval).await;
+                let _ = update_tx.send(update.clone());
             }
             if self.prompt_should_fail {
                 Err(DomainError::Internal("agent crashed".to_string()))
             } else {
                 Ok(self.prompt_stop_reason.clone())
             }
+        }
+        async fn cancel(&self, _session_id: &str) -> DomainResult<()> {
+            self.cancel_called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+        async fn set_config_option(
+            &self,
+            _session_id: &str,
+            _config_id: &str,
+            _value: &str,
+        ) -> DomainResult<Vec<ConfigOption>> {
+            Ok(self.options_after_set.clone())
         }
         async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
             self.end_session_called.store(true, Ordering::SeqCst);
@@ -547,7 +585,14 @@ mod tests {
     async fn send_prompt_publishes_every_chunk_before_finished_in_order() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let client = FakeSessionClient {
-            prompt_chunks: vec!["Hello, ".to_string(), "world!".to_string()],
+            prompt_updates: vec![
+                AcpUpdate::Text {
+                    text: "Hello, ".to_string(),
+                },
+                AcpUpdate::Text {
+                    text: "world!".to_string(),
+                },
+            ],
             ..Default::default()
         };
         let service = AcpSessionService::new(
@@ -819,8 +864,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_with_autonomy_enabled_but_no_mcp_http_credentials_fails_open_to_chat_only()
-    {
+    async fn start_session_with_autonomy_enabled_but_no_mcp_http_credentials_fails_open_to_chat_only(
+    ) {
         // The HTTP tool server could not be spawned (or autonomy was enabled
         // after the caller already decided not to try) — this must not fail
         // the whole session start, only skip attaching any MCP servers.
@@ -886,16 +931,32 @@ mod tests {
             _cwd: &str,
             _env: &[(String, String)],
             mcp_servers: &[rocket_acp::McpServerSpec],
-        ) -> DomainResult<String> {
+            _meta: Option<serde_json::Value>,
+        ) -> DomainResult<SessionInfo> {
             *self.captured_servers.lock().expect("lock") = mcp_servers.to_vec();
-            Ok("session-1".to_string())
+            Ok(SessionInfo {
+                session_id: "session-1".to_string(),
+                config_options: Vec::new(),
+                prompt_capabilities: PromptCapabilities::default(),
+            })
         }
         async fn send_prompt(
             &self,
             _session_id: &str,
-            _prompt: String,
-            _chunk_tx: UnboundedSender<String>,
+            _parts: Vec<PromptPart>,
+            _update_tx: UnboundedSender<AcpUpdate>,
         ) -> DomainResult<String> {
+            unreachable!("not exercised by this test")
+        }
+        async fn cancel(&self, _session_id: &str) -> DomainResult<()> {
+            unreachable!("not exercised by this test")
+        }
+        async fn set_config_option(
+            &self,
+            _session_id: &str,
+            _config_id: &str,
+            _value: &str,
+        ) -> DomainResult<Vec<ConfigOption>> {
             unreachable!("not exercised by this test")
         }
         async fn end_session(&self, _session_id: &str) -> DomainResult<()> {

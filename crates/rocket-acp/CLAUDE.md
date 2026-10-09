@@ -30,7 +30,11 @@ cargo test -p rocket-acp -j4
 | Module | Responsibility |
 |---|---|
 | `agent_config.rs` | `AgentConfig` struct + `AgentConfigRepository` trait |
-| `session.rs` | `AcpSessionClient` trait (`start_session`, `send_prompt`, `end_session`) |
+| `session.rs` | `AcpSessionClient` trait (`start_session`, `send_prompt`, `cancel`, `set_config_option`, `end_session`, `end_all_sessions`) |
+| `session_info.rs` | `SessionInfo`, `PromptCapabilities`; re-exports `ConfigOption`/`ConfigChoice` from `rocket_shared::acp` |
+| `update.rs` | `AcpUpdate` (typed agent updates) and `ToolCallStatus` |
+| `prompt.rs` | `PromptPart` (text and embedded text resources) |
+| `mcp_server_spec.rs` | `McpServerSpec` |
 
 ### Key Design Points
 
@@ -42,9 +46,10 @@ cargo test -p rocket-acp -j4
   `String` id, not by importing another domain crate's types.
 - `AcpSessionClient` must stay object-safe (`rocket-app` holds it as
   `Box<dyn AcpSessionClient>`) and must not depend on `agent-client-protocol`,
-  `DomainEvent`, or Tauri. `send_prompt` streams text through a plain
-  `tokio::sync::mpsc::UnboundedSender<String>` — event publishing belongs in
-  `rocket-app`'s `AcpSessionService`, not in this trait.
+  `DomainEvent`, or Tauri. `send_prompt` streams typed `AcpUpdate`s through a plain
+  `tokio::sync::mpsc::UnboundedSender<AcpUpdate>` — event publishing belongs in
+  `rocket-app`'s `AcpSessionService`, not in this trait. `ConfigOption` is
+  defined in `rocket-shared` because `DomainEvent` carries it.
 - Plain (non-camelCase) field names — this struct persists to its own
   app-level `agent_configs.yml`, not the OpenCollection format.
 
@@ -54,4 +59,4 @@ cargo test -p rocket-acp -j4
 - `serde` — serialization derives
 - `async-trait` — async methods on `AcpSessionClient`
 - `tokio` — only the `mpsc::UnboundedSender` channel type
-- `serde_json` (dev-only) — serde roundtrip tests
+- `serde_json` — the `_meta` value of `start_session`

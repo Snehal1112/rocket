@@ -9,16 +9,25 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, Weak};
 
 use agent_client_protocol::schema::v1::{
-    ClientCapabilities, ContentBlock, EnvVariable, FileSystemCapabilities, HttpHeader,
-    Implementation, InitializeRequest, McpServer, McpServerHttp, McpServerStdio, NewSessionRequest,
-    PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
+    CancelNotification, ClientCapabilities, ContentBlock, EmbeddedResource,
+    EmbeddedResourceResource, EnvVariable, FileSystemCapabilities, HttpHeader, Implementation,
+    InitializeRequest, McpServer, McpServerHttp, McpServerStdio, Meta, NewSessionRequest,
+    PermissionOption, PermissionOptionKind, PromptCapabilities as WirePromptCapabilities,
+    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionConfigSelectOptions, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, StopReason, TextContent, TextResourceContents,
+    ToolCallStatus as WireToolCallStatus, ToolKind,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent as AgentRole, ByteStreams, Client, ConnectionTo,
+    AcpAgent, AcpAgentConfig, Agent as AgentRole, ByteStreams, Client, ConnectionTo, Responder,
 };
 use async_process::Child;
-use rocket_acp::{AcpSessionClient, McpServerSpec};
+use rocket_acp::{
+    AcpSessionClient, AcpUpdate, ConfigChoice, ConfigOption, McpServerSpec, PromptCapabilities,
+    PromptPart, SessionInfo, ToolCallStatus,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -45,18 +54,22 @@ struct RunningSession {
     /// Shared (as a `Weak`) with the in-flight registry while the handshake
     /// runs, so `end_all_sessions` can reach it before it is in the map.
     process: SharedProcess,
-    /// Serializes prompts on one session. `current_chunk_tx` holds a single
+    /// Serializes prompts on one session. `current_update_tx` holds a single
     /// sender, so two overlapping prompts would otherwise steal or clear
-    /// each other's chunk stream. ACP also allows only one turn at a time.
+    /// each other's update stream. ACP also allows only one turn at a time.
+    /// `cancel` and `set_config_option` never take this lock.
     prompt_lock: Mutex<()>,
     /// Set by `send_prompt` for the duration of one call, read by the
     /// notification handler registered at connect time -- `session/update`
     /// is a push notification uncorrelated with any specific request, so
-    /// this indirection is how a fresh per-call `chunk_tx` receives it.
-    current_chunk_tx: ChunkSlot,
+    /// this indirection is how a fresh per-call `update_tx` receives it.
+    /// Updates that arrive between turns find no sender and are dropped.
+    current_update_tx: UpdateSlot,
+    /// What the agent accepts in a prompt, from its `initialize` answer.
+    prompt_capabilities: PromptCapabilities,
 }
 
-type ChunkSlot = Arc<std::sync::Mutex<Option<UnboundedSender<String>>>>;
+type UpdateSlot = Arc<std::sync::Mutex<Option<UnboundedSender<AcpUpdate>>>>;
 
 type SharedProcess = Arc<std::sync::Mutex<AgentProcess>>;
 
@@ -69,9 +82,9 @@ fn terminate_process(process: &SharedProcess) -> std::io::Result<()> {
         .terminate()
 }
 
-/// Sets the per-prompt chunk sender. A poisoned lock is recovered because
+/// Sets the per-prompt update sender. A poisoned lock is recovered because
 /// the guarded value is a plain `Option` that cannot be left half-written.
-fn set_chunk_sender(slot: &ChunkSlot, sender: Option<UnboundedSender<String>>) {
+fn set_update_sender(slot: &UpdateSlot, sender: Option<UnboundedSender<AcpUpdate>>) {
     *slot.lock().unwrap_or_else(PoisonError::into_inner) = sender;
 }
 
@@ -169,6 +182,16 @@ impl Default for AcpAgentClient {
 }
 
 impl AcpAgentClient {
+    /// Looks up a running session without holding the map lock afterwards.
+    async fn running(&self, session_id: &str) -> DomainResult<Arc<RunningSession>> {
+        self.sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| DomainError::NotFound(format!("acp session '{session_id}'")))
+    }
+
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
@@ -188,7 +211,18 @@ impl AcpSessionClient for AcpAgentClient {
         cwd: &str,
         env: &[(String, String)],
         mcp_servers: &[McpServerSpec],
-    ) -> DomainResult<String> {
+        meta: Option<serde_json::Value>,
+    ) -> DomainResult<SessionInfo> {
+        // `_meta` must be a JSON object. Checked before anything is spawned.
+        let meta: Option<Meta> = match meta {
+            None => None,
+            Some(serde_json::Value::Object(map)) => Some(map),
+            Some(_) => {
+                return Err(DomainError::InvalidInput(
+                    "session meta must be a JSON object".to_string(),
+                ))
+            }
+        };
         // `AcpAgentConfig` is built directly (rather than using
         // `AcpAgent::from_args`) so `env` is applied through its dedicated
         // `.envs()` builder method. `from_args` instead parses leading
@@ -219,8 +253,8 @@ impl AcpSessionClient for AcpAgentClient {
 
         let transport = ByteStreams::new(child_stdin, child_stdout);
 
-        let current_chunk_tx: ChunkSlot = Arc::new(std::sync::Mutex::new(None));
-        let notif_chunk_tx = Arc::clone(&current_chunk_tx);
+        let current_update_tx: UpdateSlot = Arc::new(std::sync::Mutex::new(None));
+        let notif_update_tx = Arc::clone(&current_update_tx);
 
         // See the `RunningSession` doc comment for why this whole connection
         // is driven from a background task instead of directly here. The
@@ -229,12 +263,13 @@ impl AcpSessionClient for AcpAgentClient {
         // waits forever so the background task keeps driving the dispatch
         // loop for the life of the session.
         let (ready_tx, ready_rx) =
-            oneshot::channel::<Result<(String, ConnectionTo<AgentRole>), String>>();
+            oneshot::channel::<Result<(SessionInfo, ConnectionTo<AgentRole>), String>>();
         let ready_tx = Arc::new(std::sync::Mutex::new(Some(ready_tx)));
         let ready_tx_for_task = Arc::clone(&ready_tx);
         let cwd = cwd.to_string();
         let command_owned = command.to_string();
         let mcp_servers_owned = mcp_servers.to_vec();
+        let meta_owned = meta;
 
         let dispatch_task = tokio::spawn(async move {
             // The agent's stderr must be drained. Dropping the pipe would make
@@ -248,14 +283,12 @@ impl AcpSessionClient for AcpAgentClient {
                 .builder()
                 .on_receive_notification(
                     move |notification: SessionNotification, _cx: ConnectionTo<AgentRole>| {
-                        let notif_chunk_tx = Arc::clone(&notif_chunk_tx);
+                        let notif_update_tx = Arc::clone(&notif_update_tx);
                         async move {
-                            if let SessionUpdate::AgentMessageChunk(chunk) = notification.update {
-                                if let ContentBlock::Text(text) = chunk.content {
-                                    if let Ok(guard) = notif_chunk_tx.lock() {
-                                        if let Some(tx) = guard.as_ref() {
-                                            let _ = tx.send(text.text);
-                                        }
+                            if let Some(update) = session_update_to_acp(notification.update) {
+                                if let Ok(guard) = notif_update_tx.lock() {
+                                    if let Some(tx) = guard.as_ref() {
+                                        let _ = tx.send(update);
                                     }
                                 }
                             }
@@ -264,46 +297,73 @@ impl AcpSessionClient for AcpAgentClient {
                     },
                     agent_client_protocol::on_receive_notification!(),
                 )
+                // Rocket never grants a permission. Answering at once means a
+                // permission request can never hang a turn. With built-in
+                // tools off and the Rocket tools allowed in advance (Plan 02),
+                // no request is expected.
+                .on_receive_request(
+                    move |request: RequestPermissionRequest,
+                          responder: Responder<RequestPermissionResponse>,
+                          _cx: ConnectionTo<AgentRole>| async move {
+                        tracing::warn!("the agent asked for a permission; Rocket denied it");
+                        responder.respond(RequestPermissionResponse::new(deny_outcome(
+                            &request.options,
+                        )))
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
                 .connect_with(transport, move |connection: ConnectionTo<AgentRole>| {
                     let ready_tx = Arc::clone(&ready_tx_for_task);
                     async move {
-                        let handshake =
-                            async {
-                                let init_response = connection
-                                    .send_request(
-                                        InitializeRequest::new(ProtocolVersion::V1)
-                                            .client_capabilities(
-                                                ClientCapabilities::new().fs(
-                                                    FileSystemCapabilities::new()
-                                                        .read_text_file(false)
-                                                        .write_text_file(false),
-                                                ),
-                                            )
-                                            .client_info(Implementation::new(
-                                                "rocket",
-                                                env!("CARGO_PKG_VERSION"),
-                                            )),
-                                    )
-                                    .block_task()
-                                    .await?;
-                                let selected_mcp_servers = select_mcp_servers_for_agent(
-                                    &mcp_servers_owned,
-                                    init_response.agent_capabilities.mcp_capabilities.http,
-                                );
-                                connection
-                                    .send_request(NewSessionRequest::new(cwd).mcp_servers(
-                                        mcp_server_specs_to_wire(&selected_mcp_servers),
-                                    ))
-                                    .block_task()
-                                    .await
-                            };
+                        let handshake = async {
+                            let init_response = connection
+                                .send_request(
+                                    InitializeRequest::new(ProtocolVersion::V1)
+                                        .client_capabilities(
+                                            ClientCapabilities::new().fs(
+                                                FileSystemCapabilities::new()
+                                                    .read_text_file(false)
+                                                    .write_text_file(false),
+                                            ),
+                                        )
+                                        .client_info(Implementation::new(
+                                            "rocket",
+                                            env!("CARGO_PKG_VERSION"),
+                                        )),
+                                )
+                                .block_task()
+                                .await?;
+                            let prompt_capabilities = prompt_capabilities_from_wire(
+                                &init_response.agent_capabilities.prompt_capabilities,
+                            );
+                            let selected_mcp_servers = select_mcp_servers_for_agent(
+                                &mcp_servers_owned,
+                                init_response.agent_capabilities.mcp_capabilities.http,
+                            );
+                            let response = connection
+                                .send_request(
+                                    NewSessionRequest::new(cwd)
+                                        .mcp_servers(mcp_server_specs_to_wire(
+                                            &selected_mcp_servers,
+                                        ))
+                                        .meta(meta_owned),
+                                )
+                                .block_task()
+                                .await?;
+                            Ok::<SessionInfo, agent_client_protocol::Error>(SessionInfo {
+                                session_id: response.session_id.to_string(),
+                                config_options: config_options_from_wire(
+                                    response.config_options.unwrap_or_default(),
+                                ),
+                                prompt_capabilities,
+                            })
+                        };
 
                         match handshake.await {
-                            Ok(response) => {
-                                let session_id = response.session_id.to_string();
+                            Ok(info) => {
                                 if let Ok(mut guard) = ready_tx.lock() {
                                     if let Some(tx) = guard.take() {
-                                        let _ = tx.send(Ok((session_id, connection.clone())));
+                                        let _ = tx.send(Ok((info, connection.clone())));
                                     }
                                 }
                                 // The session stays open until `end_session`
@@ -369,7 +429,7 @@ impl AcpSessionClient for AcpAgentClient {
                 "agent command '{command_owned}': ACP handshake task ended without a result"
             ))),
         };
-        let (session_id, connection) = match handshake {
+        let (info, connection) = match handshake {
             Ok(ready) => ready,
             Err(e) => {
                 let _ = terminate_process(&process);
@@ -381,7 +441,8 @@ impl AcpSessionClient for AcpAgentClient {
             connection,
             process,
             prompt_lock: Mutex::new(()),
-            current_chunk_tx,
+            current_update_tx,
+            prompt_capabilities: info.prompt_capabilities,
         });
         // The flag is read under the `sessions` lock, which the sweep also
         // takes after setting it. So a session is either stored before the
@@ -392,40 +453,37 @@ impl AcpSessionClient for AcpAgentClient {
             let _ = terminate_session(&running);
             return Err(shutting_down_error());
         }
-        sessions.insert(session_id.clone(), running);
-        Ok(session_id)
+        sessions.insert(info.session_id.clone(), running);
+        Ok(info)
     }
 
     async fn send_prompt(
         &self,
         session_id: &str,
-        prompt: String,
-        chunk_tx: UnboundedSender<String>,
+        parts: Vec<PromptPart>,
+        update_tx: UnboundedSender<AcpUpdate>,
     ) -> DomainResult<String> {
-        let running = self
-            .sessions
-            .lock()
-            .await
-            .get(session_id)
-            .cloned()
-            .ok_or_else(|| DomainError::NotFound(format!("acp session '{session_id}'")))?;
+        if parts.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "a prompt needs at least one part".to_string(),
+            ));
+        }
+        let running = self.running(session_id).await?;
+        let prompt = prompt_parts_to_wire(parts, running.prompt_capabilities.embedded_context);
 
         let _turn = running.prompt_lock.lock().await;
-        set_chunk_sender(&running.current_chunk_tx, Some(chunk_tx));
+        set_update_sender(&running.current_update_tx, Some(update_tx));
 
         // `connection.send_request(...)` takes `&self` and `ConnectionTo` is
         // cheaply `Clone` and safe to call concurrently, so no lock is needed
         // around the connection itself (see `RunningSession`'s doc comment).
         let result = running
             .connection
-            .send_request(PromptRequest::new(
-                session_id.to_string(),
-                vec![ContentBlock::Text(TextContent::new(prompt))],
-            ))
+            .send_request(PromptRequest::new(session_id.to_string(), prompt))
             .block_task()
             .await;
 
-        set_chunk_sender(&running.current_chunk_tx, None);
+        set_update_sender(&running.current_update_tx, None);
 
         match result {
             Ok(response) => Ok(stop_reason_to_wire_string(response.stop_reason)),
@@ -434,6 +492,36 @@ impl AcpSessionClient for AcpAgentClient {
                 Err(DomainError::Internal(format!("agent session failed: {e}")))
             }
         }
+    }
+
+    async fn cancel(&self, session_id: &str) -> DomainResult<()> {
+        // A notification, sent without the prompt lock: the running turn
+        // holds that lock until the agent answers it with `cancelled`.
+        let running = self.running(session_id).await?;
+        running
+            .connection
+            .send_notification(CancelNotification::new(session_id.to_string()))
+            .map_err(|e| DomainError::Internal(format!("failed to send cancel: {e}")))
+    }
+
+    async fn set_config_option(
+        &self,
+        session_id: &str,
+        config_id: &str,
+        value: &str,
+    ) -> DomainResult<Vec<ConfigOption>> {
+        let running = self.running(session_id).await?;
+        let response = running
+            .connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                session_id.to_string(),
+                config_id.to_string(),
+                SessionConfigOptionValue::value_id(value.to_string()),
+            ))
+            .block_task()
+            .await
+            .map_err(|e| DomainError::Internal(format!("failed to change option: {e}")))?;
+        Ok(config_options_from_wire(response.config_options))
     }
 
     async fn end_session(&self, session_id: &str) -> DomainResult<()> {
@@ -581,6 +669,163 @@ fn select_mcp_servers_for_agent(
         .collect()
 }
 
+/// Maps one `session/update` to Rocket's typed update. Kinds Rocket does not
+/// model (thoughts, user echoes, plans, modes, commands, session info) and
+/// non-text message chunks yield `None` and are dropped.
+fn session_update_to_acp(update: SessionUpdate) -> Option<AcpUpdate> {
+    match update {
+        SessionUpdate::AgentMessageChunk(chunk) => match chunk.content {
+            ContentBlock::Text(text) => Some(AcpUpdate::Text { text: text.text }),
+            _ => None,
+        },
+        SessionUpdate::ToolCall(call) => Some(AcpUpdate::ToolCall {
+            call_id: call.tool_call_id.to_string(),
+            title: call.title,
+            kind: tool_kind_to_wire(call.kind).to_string(),
+            status: tool_status_from_wire(call.status),
+        }),
+        SessionUpdate::ToolCallUpdate(update) => Some(AcpUpdate::ToolCallUpdate {
+            call_id: update.tool_call_id.to_string(),
+            title: update.fields.title,
+            status: update.fields.status.map(tool_status_from_wire),
+        }),
+        SessionUpdate::ConfigOptionUpdate(update) => Some(AcpUpdate::ConfigOptions {
+            options: config_options_from_wire(update.config_options),
+        }),
+        SessionUpdate::UsageUpdate(usage) => Some(AcpUpdate::Usage {
+            used: usage.used,
+            size: usage.size,
+            cost_usd: usage
+                .cost
+                .filter(|cost| cost.currency == "USD")
+                .map(|cost| cost.amount),
+        }),
+        _ => None,
+    }
+}
+
+fn tool_status_from_wire(status: WireToolCallStatus) -> ToolCallStatus {
+    match status {
+        WireToolCallStatus::Pending => ToolCallStatus::Pending,
+        WireToolCallStatus::InProgress => ToolCallStatus::InProgress,
+        WireToolCallStatus::Completed => ToolCallStatus::Completed,
+        WireToolCallStatus::Failed => ToolCallStatus::Failed,
+        _ => ToolCallStatus::InProgress,
+    }
+}
+
+/// The ACP tool kind in its snake_case wire spelling.
+fn tool_kind_to_wire(kind: ToolKind) -> &'static str {
+    match kind {
+        ToolKind::Read => "read",
+        ToolKind::Edit => "edit",
+        ToolKind::Delete => "delete",
+        ToolKind::Move => "move",
+        ToolKind::Search => "search",
+        ToolKind::Execute => "execute",
+        ToolKind::Think => "think",
+        ToolKind::Fetch => "fetch",
+        ToolKind::SwitchMode => "switch_mode",
+        _ => "other",
+    }
+}
+
+fn prompt_capabilities_from_wire(caps: &WirePromptCapabilities) -> PromptCapabilities {
+    PromptCapabilities {
+        embedded_context: caps.embedded_context,
+        image: caps.image,
+    }
+}
+
+/// Maps the agent's options. Boolean options are skipped: Rocket does not
+/// advertise boolean config support, and v1 shows no toggles.
+fn config_options_from_wire(options: Vec<SessionConfigOption>) -> Vec<ConfigOption> {
+    options
+        .into_iter()
+        .filter_map(config_option_from_wire)
+        .collect()
+}
+
+fn config_option_from_wire(option: SessionConfigOption) -> Option<ConfigOption> {
+    let SessionConfigKind::Select(select) = option.kind else {
+        return None;
+    };
+    let choices = match select.options {
+        SessionConfigSelectOptions::Ungrouped(options) => options,
+        SessionConfigSelectOptions::Grouped(groups) => {
+            groups.into_iter().flat_map(|group| group.options).collect()
+        }
+        _ => Vec::new(),
+    };
+    Some(ConfigOption {
+        id: option.id.to_string(),
+        name: option.name,
+        category: option.category.and_then(category_to_wire),
+        current_value: select.current_value.to_string(),
+        choices: choices
+            .into_iter()
+            .map(|choice| ConfigChoice {
+                value: choice.value.to_string(),
+                name: choice.name,
+                description: choice.description,
+            })
+            .collect(),
+    })
+}
+
+fn category_to_wire(category: SessionConfigOptionCategory) -> Option<String> {
+    match category {
+        SessionConfigOptionCategory::Mode => Some("mode".to_string()),
+        SessionConfigOptionCategory::Model => Some("model".to_string()),
+        SessionConfigOptionCategory::ModelConfig => Some("model_config".to_string()),
+        SessionConfigOptionCategory::ThoughtLevel => Some("thought_level".to_string()),
+        SessionConfigOptionCategory::Other(other) => Some(other),
+        _ => None,
+    }
+}
+
+/// Picks a reject option, so the agent hears a clear "no". Without one, the
+/// only other answer that grants nothing is `Cancelled`.
+fn deny_outcome(options: &[PermissionOption]) -> RequestPermissionOutcome {
+    let reject = options
+        .iter()
+        .find(|option| matches!(option.kind, PermissionOptionKind::RejectOnce))
+        .or_else(|| {
+            options
+                .iter()
+                .find(|option| matches!(option.kind, PermissionOptionKind::RejectAlways))
+        });
+    match reject {
+        Some(option) => RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+            option.option_id.clone(),
+        )),
+        None => RequestPermissionOutcome::Cancelled,
+    }
+}
+
+/// Builds the prompt blocks. A resource is embedded when the agent accepts
+/// embedded context, and sent as labelled plain text otherwise.
+fn prompt_parts_to_wire(parts: Vec<PromptPart>, embedded_context: bool) -> Vec<ContentBlock> {
+    parts
+        .into_iter()
+        .map(|part| match part {
+            PromptPart::Text(text) => ContentBlock::Text(TextContent::new(text)),
+            PromptPart::Resource {
+                uri,
+                mime_type,
+                text,
+            } if embedded_context => ContentBlock::Resource(EmbeddedResource::new(
+                EmbeddedResourceResource::TextResourceContents(
+                    TextResourceContents::new(text, uri).mime_type(mime_type),
+                ),
+            )),
+            PromptPart::Resource { uri, text, .. } => {
+                ContentBlock::Text(TextContent::new(format!("Context from {uri}:\n{text}")))
+            }
+        })
+        .collect()
+}
+
 /// Maps the real, `#[non_exhaustive]` `StopReason` (agent-client-protocol-
 /// schema-1.9.1, `src/v1/agent.rs:3178-3201`) to the lowercase `snake_case`
 /// wire strings the spec and `DomainEvent::AcpSessionFinished` expect. The
@@ -603,5 +848,231 @@ fn stop_reason_to_wire_string(reason: StopReason) -> String {
         StopReason::Refusal => "refusal".to_string(),
         StopReason::Cancelled => "cancelled".to_string(),
         _ => "unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::{
+        ConfigOptionUpdate, ContentChunk, Cost, ImageContent, SessionConfigSelectGroup,
+        SessionConfigSelectOption, ToolCall, ToolCallUpdate, ToolCallUpdateFields, UsageUpdate,
+    };
+
+    fn text_chunk(text: &str) -> ContentChunk {
+        ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
+    }
+
+    #[test]
+    fn text_chunks_become_text_updates() {
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::AgentMessageChunk(text_chunk("hi"))),
+            Some(AcpUpdate::Text {
+                text: "hi".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn non_text_chunks_and_unmodelled_updates_are_dropped() {
+        let image = ContentChunk::new(ContentBlock::Image(ImageContent::new("aGk=", "image/png")));
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::AgentMessageChunk(image)),
+            None
+        );
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::AgentThoughtChunk(text_chunk("thinking"))),
+            None
+        );
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::UserMessageChunk(text_chunk("echo"))),
+            None
+        );
+    }
+
+    #[test]
+    fn tool_calls_map_id_title_kind_and_status() {
+        let call = ToolCall::new("call-1", "Run tests")
+            .kind(ToolKind::Execute)
+            .status(WireToolCallStatus::InProgress);
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::ToolCall(call)),
+            Some(AcpUpdate::ToolCall {
+                call_id: "call-1".to_string(),
+                title: "Run tests".to_string(),
+                kind: "execute".to_string(),
+                status: ToolCallStatus::InProgress,
+            })
+        );
+    }
+
+    #[test]
+    fn tool_call_updates_keep_missing_fields_as_none() {
+        let update = ToolCallUpdate::new(
+            "call-1",
+            ToolCallUpdateFields::new().status(WireToolCallStatus::Failed),
+        );
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::ToolCallUpdate(update)),
+            Some(AcpUpdate::ToolCallUpdate {
+                call_id: "call-1".to_string(),
+                title: None,
+                status: Some(ToolCallStatus::Failed),
+            })
+        );
+    }
+
+    #[test]
+    fn usage_cost_is_kept_only_in_usd() {
+        let usd = UsageUpdate::new(10, 100).cost(Cost::new(1.5, "USD"));
+        let eur = UsageUpdate::new(10, 100).cost(Cost::new(1.5, "EUR"));
+        let none = UsageUpdate::new(10, 100);
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::UsageUpdate(usd)),
+            Some(AcpUpdate::Usage {
+                used: 10,
+                size: 100,
+                cost_usd: Some(1.5)
+            })
+        );
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::UsageUpdate(eur)),
+            Some(AcpUpdate::Usage {
+                used: 10,
+                size: 100,
+                cost_usd: None
+            })
+        );
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::UsageUpdate(none)),
+            Some(AcpUpdate::Usage {
+                used: 10,
+                size: 100,
+                cost_usd: None
+            })
+        );
+    }
+
+    #[test]
+    fn config_options_flatten_groups_and_skip_boolean_options() {
+        let grouped = SessionConfigOption::select(
+            "model",
+            "Model",
+            "b",
+            vec![
+                SessionConfigSelectGroup::new(
+                    "g1",
+                    "Group 1",
+                    vec![SessionConfigSelectOption::new("a", "A")],
+                ),
+                SessionConfigSelectGroup::new(
+                    "g2",
+                    "Group 2",
+                    vec![SessionConfigSelectOption::new("b", "B").description("Bee")],
+                ),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Other("custom".to_string()));
+        let boolean = SessionConfigOption::boolean("fast", "Fast", true);
+
+        let options = config_options_from_wire(vec![grouped, boolean]);
+        assert_eq!(
+            options,
+            vec![ConfigOption {
+                id: "model".to_string(),
+                name: "Model".to_string(),
+                category: Some("custom".to_string()),
+                current_value: "b".to_string(),
+                choices: vec![
+                    ConfigChoice {
+                        value: "a".to_string(),
+                        name: "A".to_string(),
+                        description: None,
+                    },
+                    ConfigChoice {
+                        value: "b".to_string(),
+                        name: "B".to_string(),
+                        description: Some("Bee".to_string()),
+                    },
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn config_option_updates_map_to_config_options() {
+        let option = SessionConfigOption::select(
+            "effort",
+            "Effort",
+            "high",
+            vec![SessionConfigSelectOption::new("high", "High")],
+        )
+        .category(SessionConfigOptionCategory::ThoughtLevel);
+        match session_update_to_acp(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+            vec![option],
+        ))) {
+            Some(AcpUpdate::ConfigOptions { options }) => {
+                assert_eq!(options.len(), 1);
+                assert_eq!(options[0].category.as_deref(), Some("thought_level"));
+            }
+            other => panic!("expected ConfigOptions, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deny_outcome_prefers_reject_once_then_reject_always_then_cancelled() {
+        let allow = PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce);
+        let reject_always =
+            PermissionOption::new("never", "Never", PermissionOptionKind::RejectAlways);
+        let reject_once = PermissionOption::new("no", "No", PermissionOptionKind::RejectOnce);
+
+        assert_eq!(
+            deny_outcome(&[allow.clone(), reject_always.clone(), reject_once]),
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("no"))
+        );
+        assert_eq!(
+            deny_outcome(&[allow.clone(), reject_always]),
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("never"))
+        );
+        assert_eq!(deny_outcome(&[allow]), RequestPermissionOutcome::Cancelled);
+    }
+
+    #[test]
+    fn resources_are_embedded_when_the_agent_supports_it() {
+        let blocks = prompt_parts_to_wire(
+            vec![PromptPart::Resource {
+                uri: "rocket://x".to_string(),
+                mime_type: Some("text/plain".to_string()),
+                text: "body".to_string(),
+            }],
+            true,
+        );
+        match &blocks[..] {
+            [ContentBlock::Resource(resource)] => match &resource.resource {
+                EmbeddedResourceResource::TextResourceContents(contents) => {
+                    assert_eq!(contents.uri, "rocket://x");
+                    assert_eq!(contents.text, "body");
+                    assert_eq!(contents.mime_type.as_deref(), Some("text/plain"));
+                }
+                other => panic!("expected text contents, got {other:?}"),
+            },
+            other => panic!("expected one resource block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resources_fall_back_to_text_without_embedded_context() {
+        let blocks = prompt_parts_to_wire(
+            vec![PromptPart::Resource {
+                uri: "rocket://x".to_string(),
+                mime_type: None,
+                text: "body".to_string(),
+            }],
+            false,
+        );
+        match &blocks[..] {
+            [ContentBlock::Text(text)] => assert_eq!(text.text, "Context from rocket://x:\nbody"),
+            other => panic!("expected one text block, got {other:?}"),
+        }
     }
 }

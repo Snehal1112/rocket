@@ -14,7 +14,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use rocket_acp::{AcpSessionClient, AgentConfig, AgentConfigRepository, McpServerSpec};
+use rocket_acp::{
+    AcpSessionClient, AcpUpdate, AgentConfig, AgentConfigRepository, ConfigOption, McpServerSpec,
+    PromptCapabilities, PromptPart, SessionInfo,
+};
 use rocket_app::{AcpSessionService, CollectionService};
 use rocket_collection::{CollectionRepository, CollectionSettings};
 use rocket_environment::external_secret::ExternalSecretRef;
@@ -164,20 +167,38 @@ impl AcpSessionClient for FakeSessionClient {
         _cwd: &str,
         _env: &[(String, String)],
         mcp_servers: &[McpServerSpec],
-    ) -> DomainResult<String> {
+        _meta: Option<serde_json::Value>,
+    ) -> DomainResult<SessionInfo> {
         *self.captured_servers.lock().expect("lock") = mcp_servers.to_vec();
         if self.should_fail {
-            Err(DomainError::Internal("agent process failed to start".to_string()))
+            Err(DomainError::Internal(
+                "agent process failed to start".to_string(),
+            ))
         } else {
-            Ok(self.real_session_id.clone())
+            Ok(SessionInfo {
+                session_id: self.real_session_id.clone(),
+                config_options: Vec::new(),
+                prompt_capabilities: PromptCapabilities::default(),
+            })
         }
     }
     async fn send_prompt(
         &self,
         _session_id: &str,
-        _prompt: String,
-        _chunk_tx: UnboundedSender<String>,
+        _parts: Vec<PromptPart>,
+        _update_tx: UnboundedSender<AcpUpdate>,
     ) -> DomainResult<String> {
+        unreachable!("not exercised by this test")
+    }
+    async fn cancel(&self, _session_id: &str) -> DomainResult<()> {
+        unreachable!("not exercised by this test")
+    }
+    async fn set_config_option(
+        &self,
+        _session_id: &str,
+        _config_id: &str,
+        _value: &str,
+    ) -> DomainResult<Vec<ConfigOption>> {
         unreachable!("not exercised by this test")
     }
     async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
@@ -250,8 +271,7 @@ async fn autonomy_enabled_session_spawns_and_registers_the_mcp_server_under_the_
         real_session_id: "acp-real-session-1".to_string(),
         captured_servers: Arc::clone(&captured_servers),
     };
-    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) =
-        build_fixture(true, client);
+    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) = build_fixture(true, client);
 
     let session_id = start_agent_session_inner(
         "agent-1".to_string(),
@@ -277,8 +297,12 @@ async fn autonomy_enabled_session_spawns_and_registers_the_mcp_server_under_the_
         2,
         "autonomy enabled + a spawned server must offer both Http and Stdio specs, got {servers:?}"
     );
-    assert!(servers.iter().any(|s| matches!(s, McpServerSpec::Http { .. })));
-    assert!(servers.iter().any(|s| matches!(s, McpServerSpec::Stdio { .. })));
+    assert!(servers
+        .iter()
+        .any(|s| matches!(s, McpServerSpec::Http { .. })));
+    assert!(servers
+        .iter()
+        .any(|s| matches!(s, McpServerSpec::Stdio { .. })));
 }
 
 #[tokio::test]
@@ -323,8 +347,7 @@ async fn session_start_failure_shuts_down_the_already_spawned_mcp_server() {
         real_session_id: "unused".to_string(),
         captured_servers: Arc::clone(&captured_servers),
     };
-    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) =
-        build_fixture(true, client);
+    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) = build_fixture(true, client);
 
     let err = start_agent_session_inner(
         "agent-1".to_string(),
