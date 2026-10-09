@@ -13,13 +13,14 @@ Code: `src/components/assistant/composer/` and `src/lib/assistant/`.
 ## Chips and resources
 
 - The focus chip names the open request and is added by default. `#` adds request, folder, collection, environment and last-response chips. At most 8 chips per message.
-- Chip text is built and masked by the backend (`build_assistant_chip_resource`, `mask_assistant_response`), capped at 8 KB per chip. `chipToResource` never rejects. A chip that cannot load becomes a placeholder, and `Composer` then refuses to send and keeps the draft (`isChipLoadFailure`).
+- Chip text is built and masked by the backend (`build_assistant_chip_resource`, `mask_assistant_response`), capped at 8 KB per chip. `tryChipResource` never rejects and reports `{ ok: false }` for a chip that cannot load; `Composer` then refuses to send and keeps the draft. `chipToResource` turns the same failure into a short placeholder.
+- A response chip fails closed: when the collection has vault bindings that cannot be resolved (or take over 8 s), the backend refuses it with "could not resolve vault secrets to mask this response; try again", so the message is not sent. The environment is sent only for a tab of the active collection, and the backend resolves every environment of the collection anyway.
 - URIs: `rocket://<kind>/<collection>/<path>`.
-- Credentials reach the agent only through the environment. The chip text never carries secret values.
+- Chip text is masked in the backend by name, shape and known secret values. A value that exists only at run time in the frontend, such as a script `setVar`, cannot be recognised (see `crates/rocket-app/CLAUDE.md`).
 
 ## Storage
 
-- Prompt history: `rocket-api:assistant-prompt-history:<workspaceId>`, last 50. The event bridge clears the old workspace's history on a workspace switch.
+- Prompt history: `rocket-api:assistant-prompt-history:<workspaceId>`, last 50. History is kept on a workspace switch and cleared only when that workspace is deleted.
 - Remembered model: `rocket-api:assistant-model:<agentConfigId>`, applied when the next session starts.
 - Every access is in try/catch. Broken storage only loses the convenience.
 

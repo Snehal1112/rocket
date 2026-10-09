@@ -77,11 +77,15 @@ async function loadChip(chip: ReferenceItem): Promise<PromptResourceDto> {
         text: `No response is available for ${chip.label}.`,
       };
     }
+    // The active environment belongs to the active collection only. For a tab of another
+    // collection no environment is sent, and the backend resolves every environment.
+    const { activeEnvId, activeCollection } = useEnvStore.getState();
+    const environmentName = activeCollection === chip.collection ? activeEnvId : null;
     return maskAssistantResponse(
       chip.collection,
       path,
       responsePayload(tab, tab.response),
-      useEnvStore.getState().activeEnvId ?? undefined,
+      environmentName ?? undefined,
     );
   }
   return buildAssistantChipResource(chip.kind, chip.collection, chip.path);

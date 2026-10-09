@@ -63,7 +63,7 @@ beforeEach(() => {
   vi.mocked(buildAssistantChipResource).mockReset();
   vi.mocked(maskAssistantResponse).mockReset();
   usePaneStore.setState({ root: createDefaultLeaf('g1'), activeGroupId: 'g1' });
-  useEnvStore.setState({ activeEnvId: null });
+  useEnvStore.setState({ activeEnvId: null, activeCollection: null });
 });
 
 describe('chipToResource', () => {
@@ -100,7 +100,7 @@ describe('chipToResource', () => {
       headers: [{ id: 'k1', key: 'Authorization', value: 'Bearer unsaved-token', enabled: true }],
     };
     openTab(tab);
-    useEnvStore.setState({ activeEnvId: 'dev' });
+    useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'shop' });
     vi.mocked(maskAssistantResponse).mockResolvedValue({
       uri: 'rocket://last-response/shop/orders/list.yml',
       mimeType: 'text/plain',
@@ -133,6 +133,18 @@ describe('chipToResource', () => {
       'dev',
     );
     expect(resource.text).toBe('masked response');
+  });
+
+  it('sends no environment for a tab of another collection', async () => {
+    openTab(requestTab(RESPONSE));
+    useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'other' });
+    vi.mocked(maskAssistantResponse).mockResolvedValue({
+      uri: 'rocket://last-response/shop/orders/list.yml',
+      mimeType: 'text/plain',
+      text: 'masked response',
+    });
+    await chipToResource({ ...REQUEST_CHIP, kind: 'last-response' });
+    expect(vi.mocked(maskAssistantResponse).mock.calls[0]?.[3]).toBeUndefined();
   });
 
   it('says so when the tab has no response, without calling the backend', async () => {
