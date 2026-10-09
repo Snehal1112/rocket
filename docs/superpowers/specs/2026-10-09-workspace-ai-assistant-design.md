@@ -42,8 +42,8 @@ This design turns AI Assist into an application-level assistant for the current 
 Frontend                         Tauri commands                rocket-app                       agent process
 -----------------------------    --------------------------    ----------------------------     ----------------------
 AssistantPanel (docked)  ------> start_workspace_assistant --> AcpSessionService  ------------->  claude-agent-acp
-assistant-store (zustand)        send_agent_prompt             WorkspaceToolService  <-- MCP -->  (isolated, no file
-focus chip (open request)        set_assistant_model           ProposalService                      or shell tools)
+assistant-store (zustand)        send_agent_prompt             McpToolService       <-- MCP -->  (isolated, no file
+focus chip (open request)        set_agent_config_option       ProposalService                      or shell tools)
 proposal cards   <-- events ---- accept/reject_agent_proposal  (applies via CollectionService,
                                  list_agent_proposals           EnvironmentService)
 ```
@@ -53,7 +53,7 @@ proposal cards   <-- events ---- accept/reject_agent_proposal  (applies via Coll
 - One assistant session per workspace, owned by `assistant-store`, not by a request tab.
 - `start_workspace_assistant(agent_config_id, model?)` resolves the active workspace in the backend. The frontend never sends a workspace path.
 - Switching workspace ends the session and discards pending proposals, with a notice in the panel.
-- On first mount after a webview load, the frontend asks the backend to end any assistant session it does not own. This closes the reload leak found in the lifecycle investigation.
+- Once per webview load, from the app-lifetime assistant event bridge, the frontend asks the backend to end every session it still tracks (`end_stale_assistant_sessions`). Every assistant start waits for that sweep. This closes the reload leak found in the lifecycle investigation.
 
 ### Agent isolation (the token fix)
 
@@ -88,8 +88,8 @@ Rocket registers no handler for `session/request_permission`. Plan 1 checks how 
 
 The adapter reports the available models as a session config option in the `session/new` response, and accepts `session/set_config_option` to change it mid-session.
 
-- `start_workspace_assistant` returns `{ session_id, models: [{ id, label }], current_model }`.
-- `set_assistant_model(session_id, model_id)` calls `session/set_config_option`.
+- `start_workspace_assistant(agent_config_id, mode, model?)` returns `{ sessionId, configOptions }`; the model is one of the config options (id `model`).
+- `set_agent_config_option(session_id, config_id, value)` calls `session/set_config_option` and returns the new option list.
 - The panel shows a model dropdown in the composer toolbar. The choice is remembered per agent config and applied when the next session starts.
 - The list comes from what the credential allows, so Rocket does not hard-code model names.
 - If the adapter returns no model option, the dropdown is hidden and the agent's default is used.
@@ -99,7 +99,7 @@ The adapter reports the available models as a session config option in the `sess
 
 The investigation of Rocket's current client found a text-only pipe. The composer needs this groundwork, built first (plan 1):
 
-- **Typed updates.** Replace the per-prompt `String` channel with a per-session stream of an `AcpUpdate` enum defined in `rocket-acp` (no ACP crate types): text, tool call, tool call update, config options, usage, available commands. Today every other update is dropped, and updates between turns are lost.
+- **Typed updates.** Replace the per-prompt `String` channel with a per-prompt stream of an `AcpUpdate` enum defined in `rocket-acp` (no ACP crate types): text, tool call, tool call update, config options, usage. Today every other update is dropped. Updates that arrive between turns are still dropped in v1. `ConfigOption` and `ConfigChoice` are defined in `rocket_shared::acp`, because `DomainEvent` carries them, and `rocket-acp` re-exports them.
 - **Session info.** Keep the `InitializeResponse` and `NewSessionResponse` data (model and effort option lists, prompt capabilities) and return it from `start_session`.
 - **Change an option.** A trait method and command that send `session/set_config_option`.
 - **Stop.** A trait method and command that send `session/cancel` without taking the prompt lock. A `cancelled` stop reason ends the turn normally, and the session stays alive.
@@ -112,6 +112,8 @@ The investigation of Rocket's current client found a text-only pipe. The compose
 
 One MCP server per session, as today. Its scope is the workspace, not a collection. Every tool that takes a `collection` checks that it is in the workspace. Paths keep today's traversal checks.
 
+The server starts before the ACP handshake, because its port and token go into `session/new`, so it starts with a provisional id. A shared `McpSessionBinding` is bound to the real ACP session id right after the handshake, and every later tool call carries that id. Mode, test results, the first-prompt outline and proposals all live under the real id that the frontend and the session cleanup use.
+
 ### Read tools (always allowed)
 
 | Tool | Returns |
@@ -121,7 +123,7 @@ One MCP server per session, as today. Its scope is the workspace, not a collecti
 | `get_request` | Full request definition, with credentials masked. |
 | `get_collection_settings` | Auth type, headers, variables (secret values masked), and the run switch. |
 | `get_environment` | Variable names and non-secret values. Secret variables appear by name only. |
-| `get_history` | Last N runs for a request, status and truncated body. |
+| `get_history` | Last N runs for a request: time, method, masked URL, status, duration and size. History stores no response body. |
 | `get_test_results` | Last test results from a run in this session. |
 | `list_proposals` | The session's proposals and their status. |
 
@@ -141,7 +143,7 @@ Masking rules: variables flagged secret and vault values are never returned. Lit
 
 ### Run tool
 
-`run_request` works only in collections whose switch is on. It keeps today's behavior: it uses the workspace `RequestGuardPolicy`, sanitizes errors, and caches test results for the session.
+`run_request` works only in collections whose switch is on. It keeps today's behavior: it uses the workspace `RequestGuardPolicy`, sanitizes errors, and caches test results for the session. Its result also carries the response body, secrets masked and cut to 8 KB.
 
 ### Modes
 
@@ -186,7 +188,7 @@ Each update-style change carries `base_fingerprint`: a hash of the item's stored
 ### Events and commands
 
 - Events: `AcpProposalCreated { session_id, proposal_id, summary }` and `AcpProposalResolved { session_id, proposal_id, status }`, mapped by `TauriEventBus` to `agent-proposal-created` and `agent-proposal-resolved`.
-- Commands: `list_agent_proposals`, `accept_agent_proposal`, `reject_agent_proposal`.
+- Commands: `list_agent_proposals`, `accept_agent_proposal`, `reject_agent_proposal`. They return `AgentProposalDto` (camelCase): `change` is tagged by `op` with camelCase values (`editScript`, ...), script phases are `preRequest`, `postResponse` and `tests`, a failure message is `statusMessage`, and the DTO carries no `baseFingerprint` and no before text. The panel reads the current request for the before side of a diff.
 
 ### Security effect
 
