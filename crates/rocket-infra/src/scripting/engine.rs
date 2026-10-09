@@ -3,10 +3,14 @@ use deno_core::{extension, op2, v8, JsRuntime, OpState, PollEventLoopOptions, Ru
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use rocket_scripting::{SandboxMode, ScriptContext, ScriptEngine, ScriptHost, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
+use std::future::Future;
+use std::sync::Arc;
+#[cfg(test)]
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::scripting::budget::ScriptLimits;
+use crate::scripting::budget::{check, BudgetClock, ScriptLimits, Verdict};
 use crate::scripting::host_bridge::{serve_host_call, HostCall, HostChannel};
 use crate::scripting::local_modules::build_roots;
 use crate::scripting::ops::{console, fs, host, modules, process, redact, req, res, rok};
@@ -69,31 +73,36 @@ impl ScriptEngine for DenoScriptEngine {
     }
 }
 
-/// Runs a script on a blocking thread, serves its host calls, and aborts it if
-/// `timeout` elapses.
+/// Runs a script on a blocking thread, serves its host calls, and stops it when
+/// it runs out of busy time or reaches the wall-clock ceiling.
 ///
 /// Host calls arrive over a channel and are served here, on the caller's task,
 /// because the host may borrow data that cannot move to the script thread.
-/// Cancelling the async future alone would not stop the OS thread running V8,
-/// so on timeout we ask V8 itself to abort the script through the isolate
-/// handle the thread published on start.
+/// Busy time is only the time the script thread spends running code, so a
+/// script that waits on the host or on `rok.sleep` keeps its budget.
 async fn run_script_bounded(
     ctx: ScriptContext,
     host: Option<&dyn ScriptHost>,
     limits: ScriptLimits,
 ) -> DomainResult<ScriptResult> {
+    let started = Instant::now();
+    let clock = BudgetClock::new();
     // JsRuntime is !Send, so all V8 work must stay on one thread.
     let (handle_tx, handle_rx) = oneshot::channel();
     let (call_tx, mut call_rx) = mpsc::unbounded_channel::<HostCall>();
     // Without a host the sender is dropped, so host ops find no channel and reject.
     let call_tx = host.map(|_| call_tx);
-    let mut join =
-        tokio::task::spawn_blocking(move || run_script(ctx, handle_tx, call_tx, limits));
+    let thread_clock = Arc::clone(&clock);
+    let mut join = tokio::task::spawn_blocking(move || {
+        run_script(ctx, handle_tx, call_tx, limits, thread_clock)
+    });
     let mut serving = FuturesUnordered::new();
-    let deadline = tokio::time::sleep(limits.cpu);
-    tokio::pin!(deadline);
 
-    loop {
+    let verdict = loop {
+        let wait = match check(&limits, clock.busy(), started.elapsed()) {
+            Verdict::Continue(wait) => wait,
+            stop => break stop,
+        };
         tokio::select! {
             joined = &mut join => {
                 return joined
@@ -105,10 +114,13 @@ async fn run_script_bounded(
                 }
             }
             Some(()) = serving.next(), if !serving.is_empty() => {}
-            () = &mut deadline => break,
+            () = tokio::time::sleep(wait) => {}
         }
-    }
+    };
 
+    // The abort flag ends a run that is waiting on an op. Termination ends
+    // JavaScript that is running. Neither is waited for here.
+    clock.abort();
     // Terminate whenever the handle arrives, however late. Bounding
     // this wait would abandon a script that had not started yet: it
     // would then run unterminated and pin a blocking thread forever,
@@ -122,20 +134,12 @@ async fn run_script_bounded(
     // polled, deadlocking against the `spawn_blocking` thread that
     // Runtime::Drop waits on. A `std::thread` keeps running
     // regardless of what happens to the runtime that spawned it.
-    //
-    // Terminating makes the blocking thread's execute_script return
-    // an "execution terminated" error; it then tears the runtime
-    // down on its own and its result is discarded, so we do not wait
-    // for it here.
     std::thread::spawn(move || {
         if let Ok(isolate_handle) = handle_rx.blocking_recv() {
             isolate_handle.terminate_execution();
         }
     });
-    Err(DomainError::Internal(format!(
-        "script execution timed out after {:?}",
-        limits.cpu
-    )))
+    Err(DomainError::Internal(verdict.message(&limits)))
 }
 
 /// Runs a script with no host and a plain busy-time limit. The timeout tests use it.
@@ -316,12 +320,19 @@ fn run_script(
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
     calls: Option<mpsc::UnboundedSender<HostCall>>,
     limits: ScriptLimits,
+    clock: Arc<BudgetClock>,
 ) -> DomainResult<ScriptResult> {
+    // A run that was stopped while it waited for a thread never starts.
+    if clock.is_aborted() {
+        return Err(DomainError::Internal(
+            "script execution timed out before it started".into(),
+        ));
+    }
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| DomainError::Internal(format!("script runtime could not start: {e}")))?;
-    tokio_rt.block_on(run_script_async(ctx, handle_tx, calls, limits))
+    tokio_rt.block_on(run_script_async(ctx, handle_tx, calls, limits, clock))
 }
 
 /// Wraps user code as the body of an async function, so top-level `await` and
@@ -334,24 +345,54 @@ fn wrap_user_code(code: &str) -> String {
 /// Runs the wrapped user code and the event loop, and returns the script error.
 ///
 /// The loop runs until the script's promise settles and then until no work is
-/// left, so callback-style work the script did not await still finishes.
-async fn run_user_code(runtime: &mut JsRuntime, code: &str) -> Option<String> {
-    let promise = match runtime.execute_script("<user>", wrap_user_code(code)) {
+/// left, so callback-style work the script did not await still finishes. Every
+/// stretch of running code counts as busy time. An aborted run returns `Err`.
+async fn run_user_code(
+    runtime: &mut JsRuntime,
+    code: &str,
+    clock: &BudgetClock,
+) -> DomainResult<Option<String>> {
+    let aborted = || DomainError::Internal("script execution timed out".into());
+
+    clock.enter_busy();
+    let started = runtime.execute_script("<user>", wrap_user_code(code));
+    clock.leave_busy();
+    let promise = match started {
         Ok(promise) => promise,
-        Err(e) => return Some(script_error_message(e.to_string())),
+        Err(e) => return Ok(Some(script_error_message(e.to_string()))),
     };
+
     let resolve = runtime.resolve(promise);
-    if let Err(e) = runtime
-        .with_event_loop_promise(resolve, PollEventLoopOptions::default())
-        .await
-    {
-        return Some(script_error_message(e.to_string()));
+    let settled = drive(
+        clock,
+        runtime.with_event_loop_promise(resolve, PollEventLoopOptions::default()),
+    )
+    .await
+    .ok_or_else(aborted)?;
+    if let Err(e) = settled {
+        return Ok(Some(script_error_message(e.to_string())));
     }
-    runtime
-        .run_event_loop(PollEventLoopOptions::default())
+
+    let drained = drive(clock, runtime.run_event_loop(PollEventLoopOptions::default()))
         .await
-        .err()
-        .map(|e| script_error_message(e.to_string()))
+        .ok_or_else(aborted)?;
+    Ok(drained.err().map(|e| script_error_message(e.to_string())))
+}
+
+/// Polls `fut` and counts each poll as busy time. Returns `None` once the run
+/// is aborted, even while `fut` waits on an op.
+async fn drive<F: Future>(clock: &BudgetClock, fut: F) -> Option<F::Output> {
+    let mut fut = std::pin::pin!(fut);
+    let tracked = std::future::poll_fn(|cx| {
+        clock.enter_busy();
+        let polled = fut.as_mut().poll(cx);
+        clock.leave_busy();
+        polled
+    });
+    tokio::select! {
+        out = tracked => Some(out),
+        () = clock.aborted() => None,
+    }
 }
 
 /// Keeps script errors in the shape they had before scripts ran as async functions.
@@ -367,6 +408,7 @@ async fn run_script_async(
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
     calls: Option<mpsc::UnboundedSender<HostCall>>,
     limits: ScriptLimits,
+    clock: Arc<BudgetClock>,
 ) -> DomainResult<ScriptResult> {
     let code = ctx.code;
     let sandbox_mode = ctx.sandbox_mode;
@@ -440,12 +482,13 @@ async fn run_script_async(
     }
 
     const BOOTSTRAP: &str = include_str!("bootstrap.js");
-    runtime
-        .execute_script("<bootstrap>", BOOTSTRAP)
-        .map_err(|e| DomainError::Internal(format!("bootstrap error: {e}")))?;
+    clock.enter_busy();
+    let booted = runtime.execute_script("<bootstrap>", BOOTSTRAP);
+    clock.leave_busy();
+    booted.map_err(|e| DomainError::Internal(format!("bootstrap error: {e}")))?;
 
     // Capture script-level exceptions rather than propagating them as errors.
-    let script_error = run_user_code(&mut runtime, &code).await;
+    let script_error = run_user_code(&mut runtime, &code, &clock).await?;
 
     let out = {
         let op_state = runtime.op_state();
@@ -1134,6 +1177,107 @@ mod tests {
         let err = outcome.expect_err("a busy loop must time out");
         assert!(err.to_string().contains("timed out"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    fn short_limits(cpu_ms: u64, ceiling_ms: u64) -> ScriptLimits {
+        ScriptLimits {
+            cpu: Duration::from_millis(cpu_ms),
+            ceiling: Duration::from_millis(ceiling_ms),
+            sleep_cap: ScriptLimits::DEFAULT.sleep_cap,
+        }
+    }
+
+    /// Host whose `send_request` takes a while, then answers 204.
+    struct SlowHost(Duration);
+
+    #[async_trait]
+    impl ScriptHost for SlowHost {
+        async fn send_request(&self, _request: HostRequest) -> Result<HostResponse, HostError> {
+            tokio::time::sleep(self.0).await;
+            Ok(HostResponse {
+                status: 204,
+                status_text: "No Content".into(),
+                headers: vec![],
+                body: String::new(),
+                response_time_ms: 400,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn budget_sleeping_does_not_use_busy_time() {
+        let ctx = minimal_ctx("await rok.sleep(400); rok.setVar('done', true)");
+        let result = run_script_bounded(ctx, None, short_limits(200, 60_000))
+            .await
+            .expect("waiting is not busy time");
+        assert_eq!(result.runtime_vars.get("done").expect("done present"), true);
+    }
+
+    #[tokio::test]
+    async fn budget_waiting_on_the_host_does_not_use_busy_time() {
+        let host = SlowHost(Duration::from_millis(400));
+        let ctx = minimal_ctx(
+            "const r = await rok.sendRequest({ url: 'https://x.test' }); rok.setVar('s', r.status)",
+        );
+        let result = run_script_bounded(ctx, Some(&host), short_limits(200, 60_000))
+            .await
+            .expect("waiting is not busy time");
+        assert_eq!(result.runtime_vars.get("s").expect("s present"), 204);
+    }
+
+    #[tokio::test]
+    async fn budget_a_busy_loop_after_an_await_still_dies() {
+        let started = std::time::Instant::now();
+        let ctx = minimal_ctx("await rok.sleep(10); while (true) {}");
+        let err = run_script_bounded(ctx, None, short_limits(200, 60_000))
+            .await
+            .expect_err("a busy loop must time out");
+        assert!(err.to_string().contains("of script time"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn budget_a_busy_loop_beside_a_slow_host_call_still_dies() {
+        let host = SlowHost(Duration::from_secs(10));
+        let started = std::time::Instant::now();
+        let ctx = minimal_ctx("rok.sendRequest({ url: 'https://x.test' }); while (true) {}");
+        let err = run_script_bounded(ctx, Some(&host), short_limits(200, 60_000))
+            .await
+            .expect_err("a busy loop must time out");
+        assert!(err.to_string().contains("of script time"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn budget_the_ceiling_ends_an_endless_polling_loop() {
+        let started = std::time::Instant::now();
+        let ctx = minimal_ctx("while (true) { await rok.sleep(20); }");
+        let err = run_script_bounded(ctx, None, short_limits(5_000, 300))
+            .await
+            .expect_err("the ceiling must end it");
+        assert!(err.to_string().contains("at most"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn budget_the_ceiling_ends_a_single_long_sleep() {
+        let started = std::time::Instant::now();
+        let ctx = minimal_ctx("await rok.sleep(10000)");
+        let err = run_script_bounded(ctx, None, short_limits(5_000, 300))
+            .await
+            .expect_err("the ceiling must end it");
+        assert!(err.to_string().contains("timed out"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        // The engine is not wedged afterwards.
+        let result = run_script_bounded(
+            minimal_ctx("rok.setVar('alive', 'yes')"),
+            None,
+            short_limits(5_000, 300),
+        )
+        .await
+        .expect("a later script still runs");
+        assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
     }
 
     #[tokio::test]
