@@ -269,7 +269,9 @@ impl AcpSessionService {
     /// as `AcpUsage`. Then exactly one terminal event follows:
     /// `AcpSessionFinished` on success (including the `cancelled` stop reason,
     /// which is a normal finish), or `AcpSessionFailed` on error or idle
-    /// timeout. The error is still returned to the caller.
+    /// timeout. The error is still returned to the caller. A prompt the
+    /// agent could not take (InvalidInput) publishes no terminal event,
+    /// because the session stays usable: only the error is returned.
     ///
     /// Ordering: the loop ends only once the client's future has resolved
     /// and the update channel has closed, so every update event is published
@@ -332,11 +334,11 @@ impl AcpSessionService {
                 if !matches!(e, DomainError::InvalidInput(_)) {
                     let _ = self.session_client.end_session(session_id).await;
                     self.release(session_id);
+                    self.event_publisher.publish(DomainEvent::AcpSessionFailed {
+                        session_id: session_id.to_string(),
+                        error: e.to_string(),
+                    });
                 }
-                self.event_publisher.publish(DomainEvent::AcpSessionFailed {
-                    session_id: session_id.to_string(),
-                    error: e.to_string(),
-                });
                 Err(e)
             }
             None => Err(DomainError::Internal(
@@ -1863,6 +1865,36 @@ mod tests {
 
         assert!(!end_session_called.load(Ordering::SeqCst));
         assert!(cleanup.ended().is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_input_prompt_error_publishes_no_failed_event() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_invalid_input: true,
+            ..Default::default()
+        };
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+        );
+
+        let err = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect_err("an invalid prompt must fail");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
+            "a recoverable error must not publish AcpSessionFailed, got {events:?}"
+        );
     }
 
     #[tokio::test]
