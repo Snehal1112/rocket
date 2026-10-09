@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   acceptProposal,
-  hasDirtyAffectedTab,
+  dirtyAffectedTabPlace,
   rejectProposal,
 } from '@/lib/assistant/proposal-actions';
 import {
@@ -39,9 +39,10 @@ const GENERIC_ACTION_ERROR = 'The action failed. Try again.';
 export function AssistantProposalCard({ proposal }: { proposal: AgentProposal }) {
   const target = proposalTarget(proposal.change);
   const preview = proposalPreview(proposal.change);
-  const blockedByEdits = usePaneStore(
-    (s) => proposal.status === 'pending' && hasDirtyAffectedTab(s, proposal.change),
+  const dirtyPlace = usePaneStore((s) =>
+    proposal.status === 'pending' ? dirtyAffectedTabPlace(s, proposal.change) : undefined,
   );
+  const blockedByEdits = dirtyPlace !== undefined;
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -74,6 +75,8 @@ export function AssistantProposalCard({ proposal }: { proposal: AgentProposal })
       });
     return () => {
       cancelled = true;
+      // The bail-out path would leave the flag set, so the effect resets it.
+      setDiffLoading(false);
     };
   }, [proposal, preview.kind, expanded, pending, diff, retryCount]);
 

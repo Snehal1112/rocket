@@ -9,26 +9,20 @@ import {
 } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { type PaneState, usePaneStore } from '@/stores/pane-store';
-import { isRequestTab, type RequestTab } from '@/types/pane-types';
+import { isRequestTab, type RequestTab, type Tab } from '@/types/pane-types';
 import { proposalTarget } from './proposal-view';
 
 type Change = AgentProposal['change'];
 type TabSource = Pick<PaneState, 'root' | 'collectionTabState'>;
 
-/**
- * Request tabs, live or parked after a collection switch, that show an item
- * this change rewrites, moves or renames. Creates and env vars touch none.
- */
-export function findAffectedRequestTabs(state: TabSource, change: Change): RequestTab[] {
+// Request tabs among `tabs` that show an item this change rewrites, moves or
+// renames. Creates and env vars touch none.
+function affectedAmong(tabs: Tab[], change: Change): RequestTab[] {
   if (change.op === 'createFolder' || change.op === 'createRequest') return [];
   if (change.op === 'setEnvVar') return [];
   const target = proposalTarget(change);
   const targetPath = target.path;
   if (!targetPath) return [];
-  const tabs = [
-    ...collectAllTabs(state.root),
-    ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
-  ];
   return tabs.filter(
     (tab): tab is RequestTab =>
       isRequestTab(tab) &&
@@ -37,9 +31,33 @@ export function findAffectedRequestTabs(state: TabSource, change: Change): Reque
   );
 }
 
+/** Request tabs, live or parked after a collection switch, that this change touches. */
+export function findAffectedRequestTabs(state: TabSource, change: Change): RequestTab[] {
+  return affectedAmong(
+    [
+      ...collectAllTabs(state.root),
+      ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
+    ],
+    change,
+  );
+}
+
 /** A dirty tab would later save its stale copy over the accepted change. */
 export function hasDirtyAffectedTab(state: TabSource, change: Change): boolean {
   return findAffectedRequestTabs(state, change).some((tab) => tab.isDirty);
+}
+
+/**
+ * Where a dirty tab of the changed item lives: 'open' for the live panes, or
+ * 'parked:<collection>' for a tab parked after a collection switch. A string
+ * keeps the result stable as a store selector.
+ */
+export function dirtyAffectedTabPlace(state: TabSource, change: Change): string | undefined {
+  if (affectedAmong(collectAllTabs(state.root), change).some((tab) => tab.isDirty)) return 'open';
+  for (const [key, entry] of Object.entries(state.collectionTabState)) {
+    if (affectedAmong(entry.tabs, change).some((tab) => tab.isDirty)) return `parked:${key}`;
+  }
+  return undefined;
 }
 
 function lastSegment(path: string): string {
@@ -58,7 +76,7 @@ function retarget(collection: string, oldPath: string, newPath: string, includeS
 }
 
 const DIRTY_WARNING =
-  'A tab of this request was edited while the change was applied. Its edits were kept, and saving them will overwrite the accepted change.';
+  'A tab of this request was edited while the change was applied. Its edits were kept. Saving them, which also happens when the tab is switched or closed, will overwrite the accepted change.';
 
 // Brings every open tab, live or parked, in line with an accepted change, so
 // no stale copy can later autosave over it. Returns a warning for the card
@@ -93,6 +111,8 @@ async function syncTabsAfterAccept(change: Change): Promise<string | undefined> 
         retarget(change.collection, change.path, joinPath(parent, change.newName), false);
         const request = await getRequest(change.collection, change.path).catch(() => undefined);
         if (request) {
+          // A tab with edits keeps them and only takes the new name, so its
+          // next save does not write the old name back.
           store.applyAcceptedRequest(
             change.collection,
             change.path,

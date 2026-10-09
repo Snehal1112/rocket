@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRequest } from '@/lib/pane-utils';
@@ -7,6 +7,7 @@ import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { makeProposal, makeRequest } from '@/test/assistant-fixtures';
+import { createDeferred } from '@/test/deferred';
 import { AssistantProposalCard } from '../AssistantProposalCard';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
@@ -16,7 +17,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   getRequest: vi.fn(),
 }));
 
-vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn() }));
+vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn(), cancelAutoSave: vi.fn() }));
 
 vi.mock('../ProposalDiffEditor', () => ({
   ProposalDiffEditor: ({
@@ -152,6 +153,42 @@ describe('AssistantProposalCard', () => {
     );
     expect(screen.getByText(/"name": "List orders"/)).toBeInTheDocument();
     expect(screen.queryByTestId('proposal-diff')).not.toBeInTheDocument();
+  });
+
+  it('stops loading when the proposal is resolved mid-load', async () => {
+    const pendingLoad = createDeferred<ReturnType<typeof makeRequest>>();
+    vi.mocked(api.getRequest).mockReturnValue(pendingLoad.promise);
+    const proposal = makeProposal();
+    showProposal(proposal);
+    await userEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    act(() => {
+      useAssistantStore.getState().upsertProposal({ ...proposal, status: 'rejected' });
+    });
+    expect(await screen.findByText('Diff no longer available.')).toBeInTheDocument();
+  });
+
+  it('names the collection when the unsaved edits are in a parked tab', () => {
+    usePaneStore.setState({
+      collectionTabState: {
+        billing: {
+          tabs: [
+            {
+              id: 'tab-1',
+              title: 'get.yml',
+              tabType: 'request',
+              request: createDefaultRequest(),
+              response: null,
+              isDirty: true,
+              source: { collection: 'orders', path: 'get.yml' },
+            },
+          ],
+          activeTabId: 'tab-1',
+        },
+      },
+    });
+    showProposal(makeProposal());
+    expect(screen.getByText(/parked tab of collection billing/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
   });
 
   it('keeps a triple backtick in a new request from breaking the preview', () => {

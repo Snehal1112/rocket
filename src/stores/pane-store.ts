@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { scheduleAutoSave } from '@/lib/auto-save';
+import { cancelAutoSave, scheduleAutoSave } from '@/lib/auto-save';
 import {
   emptyHistory,
   type FlowWriteOptions,
@@ -23,6 +23,7 @@ import {
   findScriptTab,
   findScriptTabsWithin,
   findTabInTree,
+  isPathWithin,
   removeLeaf,
   splitLeaf,
   updateLeaf,
@@ -710,8 +711,10 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         ...updateTabEverywhere(next, id, (tab) => {
           if (!isTarget(tab)) return tab;
           if (tab.isDirty) {
+            // The edits stay. A new name is still applied, so the tab's next
+            // save does not write the old name back.
             skipped.add(id);
-            return tab;
+            return title !== undefined ? { ...tab, title } : tab;
           }
           return { ...tab, request: fresh, isDirty: false, title: title ?? tab.title };
         }),
@@ -733,24 +736,47 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       for (const tab of entry.tabs) if (isTarget(tab)) ids.add(tab.id);
     }
     if (ids.size === 0) return;
+    // A pending autosave timer still holds the old path and could recreate it.
+    // Cancel it, and schedule the save again at the new path for dirty tabs.
+    const resave: RequestTab[] = [];
     let next = state;
     for (const id of ids) {
+      cancelAutoSave(id);
       next = {
         ...next,
         ...updateTabEverywhere(next, id, (tab) => {
           if (!isTarget(tab) || !tab.source) return tab;
           const target = `${newPath}${tab.source.path.slice(oldPath.length)}`;
-          return { ...tab, source: { collection, path: target } };
+          const moved = { ...tab, source: { collection, path: target } };
+          if (tab.isDirty) resave.push(moved);
+          return moved;
         }),
       };
     }
     set({ root: next.root, collectionTabState: next.collectionTabState });
+    for (const tab of resave) {
+      if (tab.source) {
+        scheduleAutoSave(tab.id, tab.source.collection, tab.source.path, tab.title, tab.request);
+      }
+    }
   },
 
   renameScriptTabs(collection, oldPath, newPath) {
     // Matches the file itself or any script below a renamed folder, by whole segments.
     // Matching by tab id keeps the id stable, so panes keep their active tab.
-    const tabs = findScriptTabsWithin(get().root, collection, oldPath);
+    // Tabs parked in collection snapshots are retargeted too.
+    const state = get();
+    const tabs: ScriptTab[] = [
+      ...findScriptTabsWithin(state.root, collection, oldPath),
+      ...Object.values(state.collectionTabState).flatMap((entry) =>
+        entry.tabs.filter(
+          (tab): tab is ScriptTab =>
+            isScriptTab(tab) &&
+            tab.collectionName === collection &&
+            isPathWithin(tab.scriptPath, oldPath),
+        ),
+      ),
+    ];
     if (tabs.length === 0) return;
     let next = get();
     for (const found of tabs) {
@@ -1528,7 +1554,19 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   renameFolderTabs(collection, oldPath, newPath) {
     // Matches the folder itself or any folder below it, by whole segments.
     // Matching by tab id keeps the id stable, so panes keep their active tab.
-    const tabs = findFolderTabsWithin(get().root, collection, oldPath);
+    // Tabs parked in collection snapshots are retargeted too.
+    const state = get();
+    const tabs: FolderTab[] = [
+      ...findFolderTabsWithin(state.root, collection, oldPath),
+      ...Object.values(state.collectionTabState).flatMap((entry) =>
+        entry.tabs.filter(
+          (tab): tab is FolderTab =>
+            isFolderTab(tab) &&
+            tab.collectionName === collection &&
+            isPathWithin(tab.folderPath, oldPath),
+        ),
+      ),
+    ];
     if (tabs.length === 0) return;
     let next = get();
     for (const found of tabs) {

@@ -50,6 +50,24 @@ describe('assistant session flows', () => {
     expect(store().session?.configOptions[0].currentValue).toBe('opus');
   });
 
+  it('ends the backend session of a failed session before starting a new one', async () => {
+    activate('s-old');
+    store().appendUserMessage('hi');
+    store().failMessage('s-old', 'agent crashed');
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    await startAssistant('agent-1');
+    expect(api.endAgentSession).toHaveBeenCalledWith('s-old');
+    expect(store().session).toMatchObject({ status: 'active', sessionId: 's2' });
+  });
+
+  it('does not end anything when the previous start never got a session id', async () => {
+    const token = store().beginSession('agent-1', 'edit');
+    store().failStart(token, 'no credential');
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    await startAssistant('agent-1');
+    expect(api.endAgentSession).not.toHaveBeenCalled();
+  });
+
   it('waits for the stale-session sweep before starting', async () => {
     const sweep = createDeferred<number>();
     vi.mocked(api.endStaleAssistantSessions).mockReturnValue(sweep.promise);

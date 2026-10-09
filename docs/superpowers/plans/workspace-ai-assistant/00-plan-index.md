@@ -244,7 +244,7 @@ interface AssistantState {
 // Signatures (Plan 05 deviations): beginSession(agentConfigId, mode) -> token; activateSession(token,
 // sessionId, configOptions) -> boolean; appendUserMessage(text) -> boolean (false while a turn runs);
 // event-driven actions take the session id first: appendChunk(sessionId, text), completeMessage(sessionId),
-// failMessage(sessionId, error), upsertToolActivity(sessionId, activity), setConfigOptions(sessionId, options),
+// failMessage(sessionId, error, fatal?), upsertToolActivity(sessionId, activity), setConfigOptions(sessionId, options),
 // setUsage(sessionId, usage), resolveProposal(sessionId, proposalId, status); endSession(notice?).
 // src/lib/assistant/assistant-session.ts: startAssistant(agentConfigId, mode?), sendAssistantMessage(text,
 // resources? [added by Plan 06]), stopAssistantTurn(), endAssistantSession(notice?), sweepStaleAssistantSessions().

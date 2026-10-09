@@ -47,6 +47,12 @@ export async function startAssistant(
   agentConfigId: string,
   mode: AssistantMode = DEFAULT_ASSISTANT_MODE,
 ): Promise<void> {
+  // A session that failed fatally may still have a live agent and MCP server
+  // behind it. Ending it before the new start keeps either from leaking.
+  const previous = useAssistantStore.getState().session;
+  if (previous?.status === 'error' && previous.sessionId) {
+    endInBackground(previous.sessionId, 'the failed session');
+  }
   const token = useAssistantStore.getState().beginSession(agentConfigId, mode);
   try {
     // A sweep still in flight would end the session started below.

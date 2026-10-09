@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { cancelAutoSave, scheduleAutoSave } from '@/lib/auto-save';
 import * as api from '@/lib/tauri-api';
 import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
@@ -15,7 +16,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   getRequest: vi.fn(),
 }));
 
-vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn() }));
+vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn(), cancelAutoSave: vi.fn() }));
 
 function requestTab(path: string, overrides: Partial<RequestTab> = {}): RequestTab {
   return {
@@ -201,5 +202,82 @@ describe('proposal actions', () => {
     await acceptProposal(request);
     expect(firstTab()?.source?.path).toBe('people/get.yml');
     expect(firstTab()?.title).toBe('Get one');
+  });
+
+  it('retitles a request tab that was dirtied during a rename without touching its edits', async () => {
+    usePaneStore.getState().openTab(requestTab('get.yml'));
+    const proposal = makeProposal({
+      change: { op: 'renameItem', collection: 'orders', path: 'get.yml', newName: 'Get one' },
+    });
+    useAssistantStore.getState().upsertProposal(proposal);
+    vi.mocked(api.acceptAgentProposal).mockImplementation(async () => {
+      usePaneStore.getState().updateRequest('tab:get.yml', { testsScript: 'mine();' });
+      return { ...proposal, status: 'accepted' };
+    });
+    vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ name: 'Get one' }));
+
+    await acceptProposal(proposal);
+
+    expect(firstTab()?.title).toBe('Get one');
+    expect(firstTab()?.request.testsScript).toBe('mine();');
+    expect(firstTab()?.isDirty).toBe(true);
+  });
+
+  it('cancels the pending autosave of a retargeted tab and re-schedules a dirty one', async () => {
+    usePaneStore.getState().openTab(requestTab('users/get.yml', { isDirty: true }));
+    usePaneStore.getState().retargetRequestTabs('orders', 'users', 'people');
+    expect(cancelAutoSave).toHaveBeenCalledWith('tab:users/get.yml');
+    expect(scheduleAutoSave).toHaveBeenCalledWith(
+      'tab:users/get.yml',
+      'orders',
+      'people/get.yml',
+      'users/get.yml',
+      expect.anything(),
+    );
+  });
+
+  it('does not re-schedule a clean retargeted tab', () => {
+    usePaneStore.getState().openTab(requestTab('users/get.yml'));
+    usePaneStore.getState().retargetRequestTabs('orders', 'users', 'people');
+    expect(cancelAutoSave).toHaveBeenCalledWith('tab:users/get.yml');
+    expect(scheduleAutoSave).not.toHaveBeenCalled();
+  });
+
+  it('retargets folder and script tabs parked in a snapshot', () => {
+    usePaneStore.setState({
+      collectionTabState: {
+        orders: {
+          tabs: [
+            {
+              id: 'folder:users',
+              title: 'users',
+              tabType: 'folder',
+              collectionName: 'orders',
+              folderPath: 'users',
+              isDirty: false,
+              section: 'overview',
+            },
+            {
+              id: 'script:users/a.js',
+              title: 'a.js',
+              tabType: 'script',
+              collectionName: 'orders',
+              scriptPath: 'users/a.js',
+              isDirty: false,
+              source: { collection: 'orders', path: 'users/a.js' },
+            },
+          ] as never,
+          activeTabId: 'folder:users',
+        },
+      },
+    });
+    usePaneStore.getState().renameFolderTabs('orders', 'users', 'people');
+    usePaneStore.getState().renameScriptTabs('orders', 'users', 'people');
+    const [folder, script] = usePaneStore.getState().collectionTabState.orders.tabs as never as [
+      { folderPath: string },
+      { scriptPath: string },
+    ];
+    expect(folder.folderPath).toBe('people');
+    expect(script.scriptPath).toBe('people/a.js');
   });
 });
