@@ -94,9 +94,8 @@ export interface CollectionSettings {
   /** Persisted at extensions.bruno.scripts.flow in opencollection.yml. */
   scriptFlow?: ScriptFlow;
   /**
-   * Lets an AI Assist agent run requests, edit scripts and change environment
-   * variables in this collection. Off by default. Persisted at
-   * extensions.rocketapi.agentAutonomyEnabled in opencollection.yml.
+   * Lets the AI Assistant send this collection's requests. Off by default.
+   * Persisted at extensions.rocketapi.agentAutonomyEnabled in opencollection.yml.
    */
   agentAutonomyEnabled?: boolean;
 }

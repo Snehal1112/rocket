@@ -1,6 +1,7 @@
 import { type as osType } from '@tauri-apps/plugin-os';
 import { Bot, Globe, Settings } from 'lucide-react';
 import { useState } from 'react';
+import { AssistantToggleButton } from '@/components/assistant/AssistantToggleButton';
 import { AgentConfigsDialog } from '@/components/settings/AgentConfigsDialog';
 import { ProxySettingsDialog } from '@/components/settings/ProxySettingsDialog';
 import { SecretManagerConnectionsDialog } from '@/components/settings/SecretManagerConnectionsDialog';
@@ -58,6 +59,7 @@ export function TitleBar() {
         >
           <Bot className='h-4 w-4' aria-hidden='true' />
         </Button>
+        <AssistantToggleButton />
         {!isMac && <WindowControls />}
       </div>
 

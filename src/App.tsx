@@ -1,6 +1,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { type as osType } from '@tauri-apps/plugin-os';
 import { useEffect, useState } from 'react';
+import { AssistantPanel } from '@/components/assistant/AssistantPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
@@ -21,6 +22,7 @@ import { getQueryClient } from '@/lib/query-client';
 import { getActiveWorkspace, listWorkspaces, type Workspace } from '@/lib/tauri-api';
 import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
 import { useWebSocketEventBridge } from '@/lib/websocket-event-bridge';
+import { useAssistantStore } from '@/stores/assistant-store';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -29,6 +31,7 @@ import type { CollectionTab } from '@/types/pane-types';
 
 function App() {
   const root = usePaneStore((s) => s.root);
+  const assistantPanelOpen = useAssistantStore((s) => s.panelOpen);
   const [showSplash, setShowSplash] = useState(true);
 
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
@@ -232,6 +235,11 @@ function App() {
             </ErrorBoundary>
           </div>
         </main>
+        {assistantPanelOpen && (
+          <ErrorBoundary>
+            <AssistantPanel />
+          </ErrorBoundary>
+        )}
       </div>
       <ConsolePanel
         isOpen={isConsoleOpen}

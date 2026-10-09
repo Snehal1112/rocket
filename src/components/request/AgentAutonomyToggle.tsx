@@ -1,5 +1,5 @@
 import { ShieldAlert } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,11 +23,12 @@ interface AgentAutonomyToggleProps {
 }
 
 /**
- * Per-collection opt-in that lets an AI Assist agent use Rocket's tools. The
- * backend attaches the tool server when a session starts, so a change only
- * applies to sessions started after it.
+ * Per-collection switch that lets the AI Assistant send this collection's
+ * requests. Reading the workspace and proposing changes is always allowed.
+ * Rendered once per collection, so every instance needs its own element id.
  */
 export function AgentAutonomyToggle({ collectionName }: AgentAutonomyToggleProps) {
+  const switchId = useId();
   // null while the setting is loading, so the switch never shows a guess.
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,17 +81,17 @@ export function AgentAutonomyToggle({ collectionName }: AgentAutonomyToggleProps
     <div className='flex flex-col gap-1.5'>
       <div className='flex items-start gap-2'>
         <Switch
-          id='agent-autonomy-switch'
+          id={switchId}
           checked={enabled === true}
           disabled={enabled === null || saving}
           onCheckedChange={handleCheckedChange}
         />
-        <Label htmlFor='agent-autonomy-switch' className='text-xs leading-snug'>
+        <Label htmlFor={switchId} className='text-xs leading-snug'>
           Allow the agent to run requests in this collection
         </Label>
       </div>
       <p className='text-xs text-muted-foreground'>
-        Applies to sessions you start after changing it.
+        Reading and proposing changes is always allowed.
       </p>
       {error && <p className='text-xs text-destructive'>{error}</p>}
 
@@ -99,13 +100,12 @@ export function AgentAutonomyToggle({ collectionName }: AgentAutonomyToggleProps
           <AlertDialogHeader>
             <AlertDialogTitle className='flex items-center gap-2'>
               <ShieldAlert className='h-4 w-4' aria-hidden='true' />
-              Let the agent act in this collection?
+              Let the agent run requests in this collection?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              The agent will be able to send this collection&apos;s requests, edit its request
-              scripts and change non-secret environment variables, without asking each time. A
-              request it sends can reach any public host, so turn this on only for agents and
-              collections you trust.
+              The agent will be able to send this collection&apos;s requests without asking each
+              time. A request it sends can reach any public host, so turn this on only for agents
+              and collections you trust.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

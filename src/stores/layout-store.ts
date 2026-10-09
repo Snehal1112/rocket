@@ -7,11 +7,13 @@ interface LayoutStore {
   sidebarWidth: number;
   isConsoleOpen: boolean;
   consoleHeight: number;
+  assistantPanelWidth: number;
 
   setRequestLayout: (dir: RequestLayout) => void;
   setSidebarWidth: (w: number) => void;
   setConsoleOpen: (open: boolean) => void;
   setConsoleHeight: (h: number) => void;
+  setAssistantPanelWidth: (w: number) => void;
 }
 
 export const useLayoutStore = create<LayoutStore>()((set) => ({
@@ -19,9 +21,11 @@ export const useLayoutStore = create<LayoutStore>()((set) => ({
   sidebarWidth: 280,
   isConsoleOpen: false,
   consoleHeight: 280,
+  assistantPanelWidth: 400,
 
   setRequestLayout: (dir) => set({ requestLayout: dir }),
   setSidebarWidth: (w) => set({ sidebarWidth: w }),
   setConsoleOpen: (open) => set({ isConsoleOpen: open }),
   setConsoleHeight: (h) => set({ consoleHeight: h }),
+  setAssistantPanelWidth: (w) => set({ assistantPanelWidth: w }),
 }));

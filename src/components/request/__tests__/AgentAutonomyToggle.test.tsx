@@ -52,7 +52,9 @@ describe('AgentAutonomyToggle', () => {
     await waitFor(() => expect(toggle).toBeEnabled());
 
     await userEvent.click(toggle);
-    expect(await screen.findByText('Let the agent act in this collection?')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Let the agent run requests in this collection?'),
+    ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(tauriApi.saveCollectionSettings).not.toHaveBeenCalled();
