@@ -97,6 +97,13 @@ async fn run_script_bounded(
         run_script(ctx, handle_tx, call_tx, limits, thread_clock)
     });
     let mut serving = FuturesUnordered::new();
+    // Stops the script thread on every way out except a normal finish, so a
+    // dropped run (a nested run whose caller ended first) cannot leak its thread.
+    let mut guard = StopOnDrop {
+        clock: Arc::clone(&clock),
+        handle_rx: Some(handle_rx),
+        armed: true,
+    };
 
     let verdict = loop {
         let wait = match check(&limits, clock.busy(), started.elapsed()) {
@@ -105,6 +112,7 @@ async fn run_script_bounded(
         };
         tokio::select! {
             joined = &mut join => {
+                guard.armed = false;
                 return joined
                     .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?;
             }
@@ -118,28 +126,53 @@ async fn run_script_bounded(
         }
     };
 
-    // The abort flag ends a run that is waiting on an op. Termination ends
-    // JavaScript that is running. Neither is waited for here.
-    clock.abort();
-    // Terminate whenever the handle arrives, however late. Bounding
-    // this wait would abandon a script that had not started yet: it
-    // would then run unterminated and pin a blocking thread forever,
-    // since dropping a spawn_blocking JoinHandle detaches rather than
-    // cancels it.
-    //
-    // This must be a plain OS thread, not a `tokio::spawn`ed task: a
-    // detached async task is tied to this call's Tokio runtime, and
-    // on a short-lived runtime (every #[tokio::test] creates and
-    // drops one per test) it can be cancelled before it ever gets
-    // polled, deadlocking against the `spawn_blocking` thread that
-    // Runtime::Drop waits on. A `std::thread` keeps running
-    // regardless of what happens to the runtime that spawned it.
-    std::thread::spawn(move || {
-        if let Ok(isolate_handle) = handle_rx.blocking_recv() {
-            isolate_handle.terminate_execution();
-        }
-    });
+    guard.stop();
     Err(DomainError::Internal(verdict.message(&limits)))
+}
+
+/// Ends a script run that did not finish by itself.
+///
+/// The abort flag ends a run that is waiting on an op. Termination ends
+/// JavaScript that is running. Neither is waited for.
+struct StopOnDrop {
+    clock: Arc<BudgetClock>,
+    handle_rx: Option<oneshot::Receiver<v8::IsolateHandle>>,
+    /// False once the script thread finished normally.
+    armed: bool,
+}
+
+impl StopOnDrop {
+    fn stop(&mut self) {
+        self.clock.abort();
+        // Terminate whenever the handle arrives, however late. Bounding
+        // this wait would abandon a script that had not started yet: it
+        // would then run unterminated and pin a blocking thread forever,
+        // since dropping a spawn_blocking JoinHandle detaches rather than
+        // cancels it.
+        //
+        // This must be a plain OS thread, not a `tokio::spawn`ed task: a
+        // detached async task is tied to this call's Tokio runtime, and
+        // on a short-lived runtime (every #[tokio::test] creates and
+        // drops one per test) it can be cancelled before it ever gets
+        // polled, deadlocking against the `spawn_blocking` thread that
+        // Runtime::Drop waits on. A `std::thread` keeps running
+        // regardless of what happens to the runtime that spawned it.
+        if let Some(handle_rx) = self.handle_rx.take() {
+            std::thread::spawn(move || {
+                if let Ok(isolate_handle) = handle_rx.blocking_recv() {
+                    isolate_handle.terminate_execution();
+                }
+            });
+        }
+    }
+}
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        if self.armed {
+            self.stop();
+        }
+    }
 }
 
 /// Runs a script with no host and a plain busy-time limit. The timeout tests use it.
@@ -1344,6 +1377,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_request_keeps_a_pending_write_the_nested_run_did_not_change() {
+        // Storage already holds E=a from an earlier phase, but the script's
+        // snapshot still says E=old. The nested run leaves E alone, so the
+        // script's own later write must survive the call.
+        let scopes = |env: &[(&str, &str)]| HostScopes {
+            env: map(env),
+            ..Default::default()
+        };
+        let outcome = HostRunOutcome {
+            scopes: Some(scopes(&[("E", "a")])),
+            scopes_before: Some(scopes(&[("E", "a")])),
+            ..ran(200, "{}")
+        };
+        let host = RunHost::answering(Ok(outcome));
+        let mut ctx = minimal_ctx(
+            "rok.setEnvVar('E', 'b'); await rok.runRequest('ping'); rok.setVar('seen', rok.getEnvVar('E'));",
+        );
+        ctx.variables.env = map(&[("E", "old")]);
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.runtime_vars.get("seen").expect("seen present"), "b");
+        let writes: Vec<_> = result
+            .env_var_writes
+            .iter()
+            .map(|w| (w.key.clone(), w.value.clone()))
+            .collect();
+        assert_eq!(writes.len(), 1, "{writes:?}");
+        assert_eq!(writes[0].0, "E");
+    }
+
+    #[tokio::test]
     async fn run_request_skipped_item_resolves_status_skipped() {
         let host = RunHost::answering(Ok(HostRunOutcome::default()));
         let ctx = minimal_ctx("const r = await rok.runRequest('ws'); rok.setVar('s', r.status)");
@@ -1598,6 +1665,36 @@ mod tests {
             .expect_err("the ceiling must end it");
         assert!(err.to_string().contains("at most"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// Dropping a run (as happens to a nested run when its caller ends) must
+    /// stop the script thread. A thread left running blocks the runtime drop.
+    #[test]
+    fn budget_dropping_a_run_stops_its_script_thread() {
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            rt.block_on(async {
+                let run = run_script_bounded(
+                    minimal_ctx("while (true) {}"),
+                    None,
+                    ScriptLimits::DEFAULT,
+                );
+                // The timeout drops the run long before its own limits apply.
+                let _ = tokio::time::timeout(Duration::from_millis(300), run).await;
+            });
+            // Dropping the runtime waits for blocking threads, so this hangs
+            // while the script thread is still looping.
+            drop(rt);
+            let _ = done_tx.send(());
+        });
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the script thread kept running after its run was dropped"
+        );
     }
 
     #[tokio::test]

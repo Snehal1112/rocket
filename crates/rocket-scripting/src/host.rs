@@ -75,6 +75,11 @@ pub struct HostRunOutcome {
     pub runtime_removed: Vec<String>,
     /// The scopes after the nested run, or `None` when nothing ran.
     pub scopes: Option<HostScopes>,
+    /// The scopes as stored just before the nested run. A key counts as changed
+    /// by the nested run only when it differs from here, not from the calling
+    /// script's snapshot, which can be older than the storage. `None` falls back
+    /// to the snapshot.
+    pub scopes_before: Option<HostScopes>,
 }
 
 /// Calls a script makes that need the application, such as network requests.

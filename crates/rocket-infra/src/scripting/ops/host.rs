@@ -158,9 +158,23 @@ fn merge_run_outcome(state: &mut OpState, run: &HostRunOutcome) -> ChangedKeys {
             input.variables.runtime.remove(key);
         }
         if let Some(scopes) = &run.scopes {
-            changed.env = changed_keys(&input.variables.env, &scopes.env);
-            changed.global = changed_keys(&input.variables.global_env, &scopes.global_env);
-            changed.collection = changed_keys(&input.variables.collection, &scopes.collection);
+            // Changed means "differs from the storage before the nested run". The
+            // snapshot can be older than the storage, which would count an earlier
+            // phase's saved write as the nested run's and drop the caller's own
+            // pending write to that key.
+            let before = run.scopes_before.as_ref();
+            changed.env = changed_keys(
+                before.map_or(&input.variables.env, |b| &b.env),
+                &scopes.env,
+            );
+            changed.global = changed_keys(
+                before.map_or(&input.variables.global_env, |b| &b.global_env),
+                &scopes.global_env,
+            );
+            changed.collection = changed_keys(
+                before.map_or(&input.variables.collection, |b| &b.collection),
+                &scopes.collection,
+            );
             input.variables.env = scopes.env.clone();
             input.variables.global_env = scopes.global_env.clone();
             input.variables.collection = scopes.collection.clone();

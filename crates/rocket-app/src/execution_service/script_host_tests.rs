@@ -463,6 +463,28 @@ async fn run_request_e2e_nested_env_writes_are_visible_after_the_call() {
 }
 
 #[tokio::test]
+async fn run_request_e2e_a_pending_env_write_survives_an_unrelated_nested_run() {
+    // An earlier phase saved E=a. The post-response script then writes E=b and
+    // runs a request that never touches E, so E must stay b.
+    let mut collection = main_and_login(
+        "rok.setEnvVar('E', 'a');",
+        "",
+        "",
+    );
+    if let Some(CollectionItem::Request(main)) = collection.root.items.first_mut() {
+        main.post_response_script = Some(
+            "rok.setEnvVar('E', 'b'); await rok.runRequest('auth/login'); \
+             console.log('E', rok.getEnvVar('E'));"
+                .into(),
+        );
+    }
+    let input = send_input(&collection, "main.yml");
+    let (svc, _executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(console(&out).contains(&"E b".to_string()), "{:?}", console(&out));
+}
+
+#[tokio::test]
 async fn run_request_e2e_other_protocols_are_skipped() {
     let mut collection = main_and_login(
         "const r = await rok.runRequest('socket'); console.log('ws', r.status);",

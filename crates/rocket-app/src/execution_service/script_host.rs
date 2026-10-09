@@ -140,6 +140,8 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         );
         let mut chain = self.chain.clone();
         chain.push(target);
+        // The scopes as stored now, so the engine can tell what the nested run changed.
+        let before = self.stored_scopes(collection);
         // Boxed, because this future holds another run of the same pipeline.
         let (output, runtime) = Box::pin(self.svc.execute_nested(
             nested,
@@ -150,6 +152,21 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         .await
         .map_err(|e| HostError::Failed(format!("rok.runRequest: {e}")))?;
         // The nested run saved its writes, so the scopes are read back from storage.
+        let scopes = self.stored_scopes(collection);
+        let (runtime_set, runtime_removed) = runtime_changes(&request.runtime_vars, &runtime);
+        Ok(HostRunOutcome {
+            response: Some(host_response(&output.response)),
+            runtime_set,
+            runtime_removed,
+            scopes: Some(scopes),
+            scopes_before: Some(before),
+        })
+    }
+}
+
+impl ExecutionScriptHost<'_> {
+    /// The env, global and collection scopes as they are stored right now.
+    fn stored_scopes(&self, collection: &str) -> HostScopes {
         let scopes = self.svc.build_variable_scopes(
             self.input.global_env_name.as_deref(),
             Some(collection),
@@ -157,18 +174,12 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             None,
             &self.external_secrets,
         );
-        let (runtime_set, runtime_removed) = runtime_changes(&request.runtime_vars, &runtime);
-        Ok(HostRunOutcome {
-            response: Some(host_response(&output.response)),
-            runtime_set,
-            runtime_removed,
-            scopes: Some(HostScopes {
-                env: scopes.env,
-                global_env: scopes.global_env,
-                collection: scopes.collection,
-                secret_values: scopes.secret_values.into_iter().collect(),
-            }),
-        })
+        HostScopes {
+            env: scopes.env,
+            global_env: scopes.global_env,
+            collection: scopes.collection,
+            secret_values: scopes.secret_values.into_iter().collect(),
+        }
     }
 }
 
