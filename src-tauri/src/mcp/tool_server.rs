@@ -84,6 +84,7 @@ use tokio_util::sync::CancellationToken;
 /// origin — the router below has no route at `/`.
 pub const MCP_HTTP_PATH: &str = "/mcp";
 
+use rocket_app::mcp_read_views::HISTORY_LIMIT_MAX;
 use rocket_app::McpToolService;
 
 /// One `RocketMcpToolServer` instance backs exactly one ACP session's MCP
@@ -155,8 +156,39 @@ fn mcp_tool_service<R: tauri::Runtime>(
 use rocket_shared::error::DomainResult;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct ListCollectionRequestsParams {
+pub struct WorkspaceOutlineParams {
+    /// Only this collection. Leave out for the whole workspace.
+    #[serde(default)]
+    pub collection: Option<String>,
+    /// Only requests under this folder of `collection`, for example "auth" or "auth/v2".
+    #[serde(default)]
+    pub folder: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CollectionParams {
     pub collection: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetRequestParams {
+    pub collection: String,
+    pub request_path: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetEnvironmentParams {
+    pub collection: String,
+    pub environment_name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct GetHistoryParams {
+    pub collection: String,
+    pub request_path: String,
+    /// How many runs to return, newest first. At most 10, the default.
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -174,13 +206,6 @@ pub struct EditScriptParams {
     /// One of "pre_request", "post_response", "tests".
     pub phase: String,
     pub body: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct GetEnvVarParams {
-    pub collection: String,
-    pub environment_name: String,
-    pub key: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -203,7 +228,7 @@ pub struct GetTestResultsParams {
 /// never a protocol-level failure — per the spec, a refusal (autonomy
 /// disabled, secret variable, not found) must reach the agent as something
 /// it can explain to the user, not a generic transport failure. This is also
-/// why `get_env_var`/`set_env_var`'s "not found" and "is secret" errors stay
+/// why `set_env_var`'s "not found" and "is secret" errors stay
 /// indistinguishable through this layer: both are plain `DomainError`
 /// values, both go through this one `e.to_string()` call, so nothing here
 /// can accidentally format one differently from the other.
@@ -215,6 +240,15 @@ fn to_tool_result<T: serde::Serialize>(result: DomainResult<T>) -> CallToolResul
             });
             CallToolResult::success(vec![ContentBlock::text(text)])
         }
+        Err(e) => CallToolResult::error(vec![ContentBlock::text(e.to_string())]),
+    }
+}
+
+/// Like `to_tool_result`, for tools whose result is already prose (the
+/// outline): the text goes out as it is, not as a quoted JSON string.
+fn to_text_tool_result(result: DomainResult<String>) -> CallToolResult {
+    match result {
+        Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
         Err(e) => CallToolResult::error(vec![ContentBlock::text(e.to_string())]),
     }
 }
@@ -238,18 +272,89 @@ fn parse_phase(phase: &str) -> Result<rocket_collection::RequestScriptPhase, Str
 
 #[tool_router]
 impl<R: tauri::Runtime> RocketMcpToolServer<R> {
-    #[tool(description = "List the requests in a Rocket collection (path, name, method, url).")]
-    async fn list_collection_requests(
+    #[tool(
+        description = "Compact index of the current workspace: each collection with its run permission, and METHOD path for each HTTP request. Capped at 400 requests; above that it lists counts only, and you pass collection (and optionally folder) to list requests."
+    )]
+    async fn get_workspace_outline(
         &self,
-        Parameters(params): Parameters<ListCollectionRequestsParams>,
+        Parameters(params): Parameters<WorkspaceOutlineParams>,
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.list_collection_requests(&self.session_id, &params.collection);
+        let result = svc.get_workspace_outline(
+            &self.session_id,
+            params.collection.as_deref(),
+            params.folder.as_deref(),
+        );
+        Ok(to_text_tool_result(result))
+    }
+
+    #[tool(
+        description = "List the workspace's collections with request counts, environment names and whether running requests is allowed."
+    )]
+    async fn list_collections(&self) -> Result<CallToolResult, McpError> {
+        let svc = mcp_tool_service(&self.app_handle)?;
+        Ok(to_tool_result(svc.list_collections(&self.session_id)))
+    }
+
+    #[tool(
+        description = "Read one request's full definition (URL, headers, params, body, auth, scripts). Literal credentials are masked; {{variable}} references are kept."
+    )]
+    async fn get_request(
+        &self,
+        Parameters(params): Parameters<GetRequestParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let svc = mcp_tool_service(&self.app_handle)?;
+        let result = svc.get_request(&self.session_id, &params.collection, &params.request_path);
         Ok(to_tool_result(result))
     }
 
     #[tool(
-        description = "Execute a saved request and return its status, duration, and test pass/fail counts."
+        description = "Read a collection's settings: auth type, default headers, variables (secret values masked) and whether running requests is allowed."
+    )]
+    async fn get_collection_settings(
+        &self,
+        Parameters(params): Parameters<CollectionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let svc = mcp_tool_service(&self.app_handle)?;
+        let result = svc.get_collection_settings(&self.session_id, &params.collection);
+        Ok(to_tool_result(result))
+    }
+
+    #[tool(
+        description = "Read one environment of a collection: variable names and non-secret values. Secret variables appear by name only."
+    )]
+    async fn get_environment(
+        &self,
+        Parameters(params): Parameters<GetEnvironmentParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let svc = mcp_tool_service(&self.app_handle)?;
+        let result = svc.get_environment(
+            &self.session_id,
+            &params.collection,
+            &params.environment_name,
+        );
+        Ok(to_tool_result(result))
+    }
+
+    #[tool(
+        description = "Read the last runs of a request, newest first: time, status, duration and size (at most 10)."
+    )]
+    async fn get_history(
+        &self,
+        Parameters(params): Parameters<GetHistoryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let svc = mcp_tool_service(&self.app_handle)?;
+        let result = svc.get_history(
+            &self.session_id,
+            &params.collection,
+            &params.request_path,
+            params.limit.unwrap_or(HISTORY_LIMIT_MAX),
+        );
+        Ok(to_tool_result(result))
+    }
+
+    #[tool(
+        description = "Execute a saved request in a collection whose run switch is on, and return its status, duration, test counts and the response body (secrets masked, cut to 8 KB)."
     )]
     async fn run_request(
         &self,
@@ -287,21 +392,6 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
             &params.request_path,
             phase,
             params.body,
-        );
-        Ok(to_tool_result(result))
-    }
-
-    #[tool(description = "Read one non-secret environment variable's value.")]
-    async fn get_env_var(
-        &self,
-        Parameters(params): Parameters<GetEnvVarParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.get_env_var(
-            &self.session_id,
-            &params.collection,
-            &params.environment_name,
-            &params.key,
         );
         Ok(to_tool_result(result))
     }
@@ -351,8 +441,10 @@ impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
                 env!("CARGO_PKG_VERSION"),
             ))
             .with_instructions(
-                "Rocket ACP tool server: run requests, edit scripts, and read/write \
-                 non-secret environment variables for one active session.",
+                "Rocket workspace tools for one assistant session: read the current \
+                 workspace (outline, collections, requests, settings, environments, history, \
+                 test results) with secrets masked, and run requests in collections where the \
+                 user allows it.",
             )
     }
 }
@@ -606,6 +698,7 @@ mod tests {
                 Arc::new(NullEventPublisher),
                 Box::new(FsWorkspaceConfigRepo::new()),
                 Arc::clone(&ws_path),
+                Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
             ));
 
             let app = tauri::test::mock_builder()
@@ -639,32 +732,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_collection_requests_returns_the_seeded_request_when_autonomy_is_enabled() {
+    async fn get_workspace_outline_returns_plain_text_with_the_seeded_request() {
         let fixture = TestFixture::new(true);
         let result = fixture
             .server()
-            .list_collection_requests(Parameters(ListCollectionRequestsParams {
-                collection: "demo".to_string(),
+            .get_workspace_outline(Parameters(WorkspaceOutlineParams {
+                collection: None,
+                folder: None,
             }))
             .await
             .expect("tool call");
 
         assert!(!tool_is_error(&result));
-        assert!(tool_text(&result).contains("ping"));
+        let text = tool_text(&result);
+        assert!(
+            text.starts_with("Workspace outline"),
+            "the outline is prose, not a quoted JSON string: {text}"
+        );
+        assert!(text.contains("GET ping.yml"));
+        assert!(text.contains("## demo (run: on, 1 request(s))"));
     }
 
     #[tokio::test]
-    async fn list_collection_requests_is_refused_when_autonomy_is_disabled() {
+    async fn read_tools_work_with_the_run_switch_off() {
         let fixture = TestFixture::new(false);
         let result = fixture
             .server()
-            .list_collection_requests(Parameters(ListCollectionRequestsParams {
+            .get_request(Parameters(GetRequestParams {
                 collection: "demo".to_string(),
+                request_path: "ping.yml".to_string(),
+            }))
+            .await
+            .expect("tool call");
+
+        assert!(!tool_is_error(&result), "{}", tool_text(&result));
+        assert!(tool_text(&result).contains("example.invalid/ping"));
+    }
+
+    #[tokio::test]
+    async fn a_collection_outside_the_workspace_is_an_agent_visible_refusal() {
+        let fixture = TestFixture::new(true);
+        let result = fixture
+            .server()
+            .get_collection_settings(Parameters(CollectionParams {
+                collection: "../elsewhere".to_string(),
             }))
             .await
             .expect("tool call");
 
         assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("not in the current workspace"));
     }
 
     #[tokio::test]
@@ -686,51 +803,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_env_var_gives_identical_errors_for_missing_and_secret_keys() {
-        let fixture = TestFixture::new(true);
-        let server = fixture.server();
-
-        let missing = server
-            .get_env_var(Parameters(GetEnvVarParams {
-                collection: "demo".to_string(),
-                environment_name: "dev".to_string(),
-                key: "DOES_NOT_EXIST".to_string(),
-            }))
-            .await
-            .expect("tool call");
-        let secret = server
-            .get_env_var(Parameters(GetEnvVarParams {
-                collection: "demo".to_string(),
-                environment_name: "dev".to_string(),
-                key: "SECRET_TOKEN".to_string(),
-            }))
-            .await
-            .expect("tool call");
-
-        assert!(tool_is_error(&missing));
-        assert!(tool_is_error(&secret));
-        assert_eq!(
-            tool_text(&missing),
-            tool_text(&secret),
-            "a missing key and a secret key must be indistinguishable to the agent"
-        );
-    }
-
-    #[tokio::test]
-    async fn get_env_var_returns_a_plain_variables_value() {
+    async fn get_environment_shows_the_plain_value_and_hides_the_secret_one() {
         let fixture = TestFixture::new(true);
         let result = fixture
             .server()
-            .get_env_var(Parameters(GetEnvVarParams {
+            .get_environment(Parameters(GetEnvironmentParams {
                 collection: "demo".to_string(),
                 environment_name: "dev".to_string(),
-                key: "API_KEY".to_string(),
             }))
             .await
             .expect("tool call");
 
-        assert!(!tool_is_error(&result));
-        assert!(tool_text(&result).contains("plain-value"));
+        assert!(!tool_is_error(&result), "{}", tool_text(&result));
+        let text = tool_text(&result);
+        assert!(text.contains("plain-value"));
+        assert!(text.contains("SECRET_TOKEN"));
+        assert!(!text.contains("secret-value"));
+    }
+
+    #[tokio::test]
+    async fn get_history_lists_a_run_made_through_run_request() {
+        let fixture = TestFixture::new(true);
+        let server = fixture.server();
+        let run = server
+            .run_request(Parameters(RunRequestParams {
+                collection: "demo".to_string(),
+                request_path: "ping.yml".to_string(),
+                environment_name: None,
+            }))
+            .await
+            .expect("tool call");
+        assert!(!tool_is_error(&run), "{}", tool_text(&run));
+
+        let result = server
+            .get_history(Parameters(GetHistoryParams {
+                collection: "demo".to_string(),
+                request_path: "ping.yml".to_string(),
+                limit: None,
+            }))
+            .await
+            .expect("tool call");
+        assert!(!tool_is_error(&result), "{}", tool_text(&result));
+        assert!(tool_text(&result).contains("\"status\":200"));
     }
 
     #[tokio::test]

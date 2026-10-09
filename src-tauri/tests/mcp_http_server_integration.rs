@@ -107,6 +107,7 @@ async fn spawn_test_server(
         Arc::new(NullEventPublisher),
         Box::new(FsWorkspaceConfigRepo::new()),
         Arc::clone(&ws_path),
+        Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
     ));
 
     let app = tauri::test::mock_builder()
@@ -368,23 +369,27 @@ async fn real_mcp_client_lists_and_calls_tools_over_http() {
         names,
         vec![
             "edit_script",
-            "get_env_var",
+            "get_collection_settings",
+            "get_environment",
+            "get_history",
+            "get_request",
             "get_test_results",
-            "list_collection_requests",
+            "get_workspace_outline",
+            "list_collections",
             "run_request",
             "set_env_var",
         ]
     );
 
-    let listed = client
+    let outline = client
         .call_tool(call_params(
-            "list_collection_requests",
+            "get_workspace_outline",
             serde_json::json!({"collection": "demo"}),
         ))
         .await
-        .expect("tools/call list_collection_requests");
-    assert_ne!(listed.is_error, Some(true), "{}", first_text(&listed));
-    assert!(first_text(&listed).contains("ping"));
+        .expect("tools/call get_workspace_outline");
+    assert_ne!(outline.is_error, Some(true), "{}", first_text(&outline));
+    assert!(first_text(&outline).contains("ping"));
 
     // Review Focus: two concurrent `run_request` calls on one server must
     // both complete, and must leave the per-session test-result cache usable.

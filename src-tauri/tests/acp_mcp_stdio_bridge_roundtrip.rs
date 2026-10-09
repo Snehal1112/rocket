@@ -80,6 +80,7 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
         Arc::new(rocket_shared::events::NullEventPublisher),
         Box::new(rocket_infra::FsWorkspaceConfigRepo::new()),
         Arc::clone(&workspace_path),
+        Box::new(rocket_infra::FsHistoryRepo::new(fixture.path().join("history"))),
     ));
 
     let app = tauri::test::mock_builder()
@@ -148,8 +149,8 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
         .map(|t| t["name"].as_str().expect("tool name is a string"))
         .collect();
     assert!(
-        tool_names.contains(&"list_collection_requests"),
-        "expected the real Plan 04 tool set to round-trip through the bridge, got {tool_names:?}"
+        tool_names.contains(&"get_workspace_outline"),
+        "expected the workspace tool set to round-trip through the bridge, got {tool_names:?}"
     );
 }
 

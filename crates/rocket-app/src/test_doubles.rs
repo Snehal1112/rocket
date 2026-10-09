@@ -304,6 +304,15 @@ impl ConfigurableCollectionRepo {
             .insert(collection.to_string(), settings);
     }
 
+    /// Replaces one collection's whole settings, for tests that need auth,
+    /// headers or variables and not only the run switch.
+    pub fn set_settings(&self, collection: &str, settings: CollectionSettings) {
+        self.settings
+            .lock()
+            .expect("lock settings")
+            .insert(collection.to_string(), settings);
+    }
+
     /// Makes `get_settings(collection)` fail with `DomainError::Internal`.
     pub fn fail_settings_for(&self, collection: &str) {
         *self
@@ -336,7 +345,21 @@ impl ConfigurableCollectionRepo {
 
 impl CollectionRepository for ConfigurableCollectionRepo {
     fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-        Ok(vec![])
+        let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        names.extend(self.settings.lock().expect("lock settings").keys().cloned());
+        names.extend(self.summaries.lock().expect("lock summaries").keys().cloned());
+        let requests = self.requests.lock().expect("lock requests");
+        names.extend(requests.keys().map(|(collection, _)| collection.clone()));
+        Ok(names
+            .into_iter()
+            .map(|name| {
+                let count = requests
+                    .keys()
+                    .filter(|(collection, _)| *collection == name)
+                    .count();
+                CollectionSummary::new("", &name, "", count, None)
+            })
+            .collect())
     }
     fn get(&self, name: &str) -> DomainResult<Collection> {
         self.summaries

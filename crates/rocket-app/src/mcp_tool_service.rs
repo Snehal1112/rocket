@@ -1,13 +1,22 @@
-//! Lets an ACP agent act on a Rocket collection: list requests, run one,
-//! edit a script, read/write a non-secret environment variable, and read
-//! the last cached test results. Every method first re-checks the target
-//! collection's `agent_autonomy_enabled` flag and refuses if it is off —
-//! this is the safety valve described in the design spec, checked fresh on
-//! every call so a mid-session toggle takes effect immediately. Every
-//! successful call publishes `DomainEvent::AcpToolInvoked` for the audit
-//! trail.
+//! Lets the workspace assistant (an ACP agent) read and act on the active
+//! workspace through MCP tools.
+//!
+//! Scope: every method that takes a `collection` first checks that it is
+//! one of the active workspace's collections (`check_in_workspace`), so a
+//! name from another workspace, a traversal-shaped name or a case variant
+//! is refused before anything is read or written.
+//!
+//! Read tools (`get_workspace_outline`, `list_collections`, `get_request`,
+//! `get_collection_settings`, `get_environment`, `get_history`,
+//! `get_test_results`) are always allowed and return masked views from
+//! `mcp_read_views`. `run_request`, and the direct-write tools until Plan
+//! 04 removes them, also need the collection's run switch
+//! (`agent_autonomy_enabled`, "Allow the agent to run requests in this
+//! collection"), re-checked on every call so a mid-session toggle takes
+//! effect at once. Every successful call publishes
+//! `DomainEvent::AcpToolInvoked` for the audit trail.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -16,66 +25,53 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::execution_service::RequestExecutionService;
-use crate::runner_sequence::{build_step_input, folder_dir_name, RunItem};
+use crate::mcp_read_views::{
+    filter_folder, history_limit, mask_response_body, normalize_folder, outline_entries,
+    render_outline, CollectionBrief, HistoryBrief, MaskedEnvironment, MaskedRequest,
+    MaskedSettings, OutlineCollection,
+};
+use crate::runner_sequence::{build_step_input, RunItem};
 
-/// One request entry in a `list_collection_requests` result. `path` is
-/// relative to the collection root, matching the shape `run_request` and
-/// `edit_script` expect back.
-///
-/// `Serialize` (not just the domain-side `Debug`/`Clone`/`PartialEq`) is
-/// needed because `src-tauri/src/mcp/tool_server.rs`'s `to_tool_result`
-/// helper serializes a successful `McpToolService` result straight to the
-/// MCP tool response's JSON text body.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct McpRequestEntry {
-    pub path: String,
-    pub name: String,
-    pub method: String,
-    pub url: String,
-}
-
-/// Summary of one `run_request` call, enough for an agent to decide what to
-/// do next without re-fetching the full response body. `Serialize` for the
-/// same reason as `McpRequestEntry` above.
+/// Summary of one `run_request` call. `Serialize` because
+/// `src-tauri/src/mcp/tool_server.rs`'s `to_tool_result` serializes a
+/// successful result straight into the MCP tool response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct McpRunResult {
     pub status: u16,
     pub duration_ms: u64,
     pub test_pass_count: usize,
     pub test_fail_count: usize,
+    /// The response body with the collection's and the chosen
+    /// environment's secret values masked, then cut to
+    /// `RESPONSE_BODY_CAP_BYTES`.
+    pub body: String,
+    /// Whether `body` was cut.
+    pub body_truncated: bool,
 }
 
-/// The single generic error returned by `get_env_var`/`set_env_var` for both
-/// "no such key" and "key is secret". Keeping these indistinguishable stops
-/// the tool from being an oracle for enumerating which env var names are
-/// secret-flagged.
+/// The single generic error `set_env_var` returns for both "no such key"
+/// and "key is secret", so the tool cannot be used to find out which names
+/// are secret.
 const VARIABLE_NOT_ACCESSIBLE: &str = "variable not accessible";
 
-/// Orchestrates the 6 MCP tools an ACP agent can call against a collection.
-/// Holds no process/filesystem state of its own — every method delegates to
-/// an existing domain repository or service. `test_result_cache` is the one
-/// piece of state this service owns: an in-memory map from
-/// `(session_id, collection, request_path)` to the test results of that
-/// triple's most recent `run_request` call, per the design spec's explicit
-/// choice not to persist test results into `rocket-history`. The collection
-/// is part of the key because two collections can hold the same relative
-/// request path.
+/// Orchestrates the workspace assistant's MCP tools. Holds no I/O of its
+/// own: every read and write goes through an injected repository or
+/// service. `test_result_cache` is the one piece of state it owns, keyed by
+/// `(session_id, collection, request_path)`, because the design keeps test
+/// results out of `rocket-history`.
 pub struct McpToolService {
     collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     environment_repo_factory: Arc<dyn rocket_environment::EnvironmentRepositoryFactory>,
     execution_svc: Arc<RequestExecutionService>,
     event_publisher: Arc<dyn EventPublisher>,
-    /// Resolves `workspace.yml`'s `RequestGuardPolicy` at call time (never
-    /// cached from construction time), so `run_request` honors a workspace's
-    /// `block_script_redirects_to_internal_hosts`/`also_block_private_ranges`
-    /// opt-in instead of always running with the fully-permissive default.
+    /// Resolves `workspace.yml`'s `RequestGuardPolicy` at call time, so
+    /// `run_request` honors the workspace's SSRF opt-ins.
     config_repo: Box<dyn rocket_workspace::WorkspaceConfigRepository>,
-    /// Shared with `SharedPathCollectionRepo`/`SharedPathFlowRepo`/
-    /// `ReqwestExecutor::with_allowed_base` in `src-tauri`'s service graph —
-    /// resolved fresh on every `run_request` call, the same
-    /// "live workspace path" pattern `SharedPathCollectionRepo::repo()` uses,
-    /// so a workspace switch takes effect immediately.
+    /// The live active workspace path, read on every `run_request`.
     active_workspace_path: Arc<Mutex<PathBuf>>,
+    /// Read by `get_history`. The same store `RequestExecutionService`
+    /// writes to, so an agent run shows up here.
+    history_repo: Box<dyn rocket_history::HistoryRepository>,
     test_result_cache: Mutex<HashMap<TestResultKey, Vec<rocket_scripting::TestResult>>>,
 }
 
@@ -99,6 +95,7 @@ impl McpToolService {
         event_publisher: Arc<dyn EventPublisher>,
         config_repo: Box<dyn rocket_workspace::WorkspaceConfigRepository>,
         active_workspace_path: Arc<Mutex<PathBuf>>,
+        history_repo: Box<dyn rocket_history::HistoryRepository>,
     ) -> Self {
         Self {
             collection_repo,
@@ -107,23 +104,41 @@ impl McpToolService {
             event_publisher,
             config_repo,
             active_workspace_path,
+            history_repo,
             test_result_cache: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Re-checks the opt-in flag for `collection`. Every public method calls
-    /// this first, before doing anything else — including the read-only
-    /// tools, per the design spec.
+    /// Re-checks the collection's run switch. `run_request` calls it on
+    /// every call; `edit_script` and `set_env_var` keep calling it until
+    /// Plan 04 replaces them with proposals. Read tools never call it.
     fn check_autonomy_enabled(&self, collection: &str) -> DomainResult<()> {
         let settings = self.collection_repo.get_settings(collection)?;
         if !settings.agent_autonomy_enabled {
             return Err(DomainError::InvalidInput(format!(
-                "the agent is not allowed to act on collection '{collection}' — \
-                 enable \"Allow this agent to run requests and edit files\" in \
-                 the chat panel first"
+                "the agent is not allowed to run requests in collection '{collection}'. \
+                 Turn on \"Allow the agent to run requests in this collection\" first"
             )));
         }
         Ok(())
+    }
+
+    /// Refuses a collection that is not one of the active workspace's
+    /// collections. The list is read fresh on every call, so a workspace
+    /// switch takes effect at once. Only an exact name matches.
+    fn check_in_workspace(&self, collection: &str) -> DomainResult<()> {
+        let in_workspace = self
+            .collection_repo
+            .list()?
+            .iter()
+            .any(|summary| summary.name == collection);
+        if in_workspace {
+            Ok(())
+        } else {
+            Err(DomainError::NotFound(format!(
+                "collection '{collection}' is not in the current workspace"
+            )))
+        }
     }
 
     /// Rejects an environment name that could escape the collection's
@@ -146,6 +161,34 @@ impl McpToolService {
         Ok(())
     }
 
+    /// The secret values `run_request` masks in a response body: the
+    /// collection's secret variables and, when one is chosen, the
+    /// environment's. Vault values are not known here; they are fetched
+    /// only inside the send.
+    fn known_secret_values(&self, collection: &str, environment_name: Option<&str>) -> HashSet<String> {
+        let mut secrets = HashSet::new();
+        if let Ok(settings) = self.collection_repo.get_settings(collection) {
+            secrets.extend(
+                settings
+                    .variables
+                    .into_iter()
+                    .filter(|v| v.secret && !v.value.is_empty())
+                    .map(|v| v.value),
+            );
+        }
+        if let Some(name) = environment_name {
+            if let Ok(env) = self.environment_repo_factory.for_collection(collection).get(name) {
+                secrets.extend(
+                    env.variables
+                        .into_iter()
+                        .filter(|v| v.secret && !v.value.is_empty())
+                        .map(|v| v.value),
+                );
+            }
+        }
+        secrets
+    }
+
     fn publish_tool_invoked(&self, session_id: &str, tool: &str, summary: String) {
         self.event_publisher.publish(DomainEvent::AcpToolInvoked {
             session_id: session_id.to_string(),
@@ -154,21 +197,200 @@ impl McpToolService {
         });
     }
 
-    pub fn list_collection_requests(
+    /// The compact workspace index (spec section 6). With no `collection`,
+    /// every collection in the workspace; with one, only that collection,
+    /// optionally under `folder`.
+    pub fn get_workspace_outline(
+        &self,
+        session_id: &str,
+        collection: Option<&str>,
+        folder: Option<&str>,
+    ) -> DomainResult<String> {
+        let folder = match folder {
+            Some(raw) => normalize_folder(raw)?,
+            None => None,
+        };
+        let names: Vec<String> = match collection {
+            Some(name) => {
+                self.check_in_workspace(name)?;
+                vec![name.to_string()]
+            }
+            None => {
+                if folder.is_some() {
+                    return Err(DomainError::InvalidInput(
+                        "a folder filter needs a collection".to_string(),
+                    ));
+                }
+                self.collection_repo
+                    .list()?
+                    .into_iter()
+                    .map(|summary| summary.name)
+                    .collect()
+            }
+        };
+        let collections: Vec<OutlineCollection> = names
+            .into_iter()
+            .map(|name| self.outline_collection(name, folder.as_deref()))
+            .collect();
+        let text = render_outline(&collections);
+        self.publish_tool_invoked(
+            session_id,
+            "get_workspace_outline",
+            format!("read the outline of {} collection(s)", collections.len()),
+        );
+        Ok(text)
+    }
+
+    /// One collection's outline section. A collection whose tree cannot be
+    /// read is listed as unreadable instead of failing the whole outline.
+    fn outline_collection(&self, name: String, folder: Option<&str>) -> OutlineCollection {
+        let run_allowed = self
+            .collection_repo
+            .get_settings(&name)
+            .map(|settings| settings.agent_autonomy_enabled)
+            .unwrap_or(false);
+        match self.collection_repo.get_summaries(&name) {
+            Ok(tree) => {
+                let entries = outline_entries(&tree.root);
+                let entries = match folder {
+                    Some(f) => filter_folder(entries, f),
+                    None => entries,
+                };
+                OutlineCollection {
+                    name,
+                    run_allowed,
+                    readable: true,
+                    entries,
+                }
+            }
+            Err(_) => OutlineCollection {
+                name,
+                run_allowed,
+                readable: false,
+                entries: Vec::new(),
+            },
+        }
+    }
+
+    pub fn list_collections(&self, session_id: &str) -> DomainResult<Vec<CollectionBrief>> {
+        let briefs: Vec<CollectionBrief> = self
+            .collection_repo
+            .list()?
+            .into_iter()
+            .map(|summary| {
+                let run_allowed = self
+                    .collection_repo
+                    .get_settings(&summary.name)
+                    .map(|settings| settings.agent_autonomy_enabled)
+                    .unwrap_or(false);
+                let mut environments: Vec<String> = self
+                    .environment_repo_factory
+                    .for_collection(&summary.name)
+                    .list()
+                    .map(|envs| envs.into_iter().map(|env| env.name).collect())
+                    .unwrap_or_default();
+                environments.sort();
+                CollectionBrief {
+                    name: summary.name,
+                    request_count: summary.request_count,
+                    run_allowed,
+                    environments,
+                }
+            })
+            .collect();
+        self.publish_tool_invoked(
+            session_id,
+            "list_collections",
+            format!("listed {} collection(s)", briefs.len()),
+        );
+        Ok(briefs)
+    }
+
+    pub fn get_request(
         &self,
         session_id: &str,
         collection: &str,
-    ) -> DomainResult<Vec<McpRequestEntry>> {
-        self.check_autonomy_enabled(collection)?;
-        let tree = self.collection_repo.get_summaries(collection)?;
-        let mut entries = Vec::new();
-        collect_request_entries(&tree.root, "", &mut entries);
+        request_path: &str,
+    ) -> DomainResult<MaskedRequest> {
+        self.check_in_workspace(collection)?;
+        let request = self.collection_repo.get_request(collection, request_path)?;
+        let view = MaskedRequest::from_request(request_path, &request);
         self.publish_tool_invoked(
             session_id,
-            "list_collection_requests",
-            format!("listed {} request(s) in '{collection}'", entries.len()),
+            "get_request",
+            format!("read request '{request_path}' in '{collection}'"),
         );
-        Ok(entries)
+        Ok(view)
+    }
+
+    pub fn get_collection_settings(
+        &self,
+        session_id: &str,
+        collection: &str,
+    ) -> DomainResult<MaskedSettings> {
+        self.check_in_workspace(collection)?;
+        let settings = self.collection_repo.get_settings(collection)?;
+        let view = MaskedSettings::from_settings(&settings);
+        self.publish_tool_invoked(
+            session_id,
+            "get_collection_settings",
+            format!("read the settings of '{collection}'"),
+        );
+        Ok(view)
+    }
+
+    pub fn get_environment(
+        &self,
+        session_id: &str,
+        collection: &str,
+        environment: &str,
+    ) -> DomainResult<MaskedEnvironment> {
+        self.check_in_workspace(collection)?;
+        Self::validate_environment_name(environment)?;
+        let env = self
+            .environment_repo_factory
+            .for_collection(collection)
+            .get(environment)?;
+        let view = MaskedEnvironment::from_environment(&env);
+        self.publish_tool_invoked(
+            session_id,
+            "get_environment",
+            format!("read environment '{environment}' of '{collection}'"),
+        );
+        Ok(view)
+    }
+
+    /// The last runs of a request, newest first, at most `HISTORY_LIMIT_MAX`
+    /// (0 means the maximum). History records the collection and the
+    /// request name, not the path, so two requests with the same name in
+    /// one collection share their history here.
+    pub fn get_history(
+        &self,
+        session_id: &str,
+        collection: &str,
+        request_path: &str,
+        limit: usize,
+    ) -> DomainResult<Vec<HistoryBrief>> {
+        self.check_in_workspace(collection)?;
+        let request = self.collection_repo.get_request(collection, request_path)?;
+        let mut entries: Vec<rocket_history::HistoryEntry> = self
+            .history_repo
+            .list(None)?
+            .into_iter()
+            .filter(|entry| {
+                entry.collection.as_deref() == Some(collection)
+                    && entry.request_name.as_deref() == Some(request.name.as_str())
+            })
+            .collect();
+        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        entries.truncate(history_limit(limit));
+        let briefs: Vec<HistoryBrief> = entries.iter().map(HistoryBrief::from_entry).collect();
+        self.publish_tool_invoked(
+            session_id,
+            "get_history",
+            format!("read {} history entr(ies) for '{request_path}'", briefs.len()),
+        );
+        Ok(briefs)
     }
 
     pub async fn run_request(
@@ -178,29 +400,24 @@ impl McpToolService {
         request_path: &str,
         environment_name: Option<&str>,
     ) -> DomainResult<McpRunResult> {
+        self.check_in_workspace(collection)?;
         self.check_autonomy_enabled(collection)?;
         if let Some(name) = environment_name {
             Self::validate_environment_name(name)?;
         }
-        // Evict any stale cache entry for this key up front, before
-        // dispatching the request. That way a failed run leaves no cached
-        // result behind — `get_test_results` naturally falls back to its
-        // "run the request first" `NotFound` instead of returning a prior
-        // run's now-stale results.
+        // Evict any stale cache entry before dispatching, so a failed run
+        // leaves no cached result behind and `get_test_results` falls back
+        // to its "run the request first" `NotFound`.
         self.test_result_cache
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&test_result_key(session_id, collection, request_path));
         let request = self.collection_repo.get_request(collection, request_path)?;
         let item = RunItem::http(request.name.clone(), request_path.to_string(), request);
-        // Resolved fresh on every call against the *current* active
-        // workspace path — never cached from construction time — mirroring
-        // `SharedPathCollectionRepo::repo()`'s own "resolve against the live
-        // workspace path on every call" pattern, so a workspace switch (or a
-        // mid-session `workspace.yml` edit) takes effect immediately, and so
-        // agent-driven tool calls honor the same
-        // `block_script_redirects_to_internal_hosts`/`also_block_private_ranges`
-        // opt-in the Collection Runner's `RunCollectionInput` already does.
+        // Resolved fresh on every call against the current active workspace,
+        // so a workspace switch or a `workspace.yml` edit takes effect at
+        // once, and agent runs honor the same request guard opt-ins as the
+        // Collection Runner.
         let workspace_path = self
             .active_workspace_path
             .lock()
@@ -215,19 +432,11 @@ impl McpToolService {
             request_guard_policy,
             rocket_shared::RunSource::Agent,
         );
-        // `execution_svc.execute` can fail with `DomainError::Http` whose
-        // `Display` text embeds the fully-resolved request URL (or, for an
-        // OAuth2 token-fetch failure, a response body) — either of which may
-        // contain a resolved `secret: true` variable's value. That text is
-        // safe for the human-facing "Send" button (see
-        // `rocket-infra/src/reqwest_executor.rs`), but here it would flow
-        // straight into the ACP agent's chat via `to_tool_result`, breaking
-        // the "secret variables never appear in chat" guarantee for the
-        // ordinary case of an unreachable host. Replace the message with
-        // fixed text before it propagates; keep the `Http` variant so
-        // callers matching on it still work. Other variants come from this
-        // service's own validation and carry no response/URL content, so
-        // they pass through unchanged.
+        // A `DomainError::Http` message can embed the resolved URL or an
+        // OAuth2 response body, either of which may hold a secret value.
+        // Replace it with fixed text before it reaches the agent; keep the
+        // variant. Other variants come from validation and carry no
+        // response or URL content.
         let output = match self.execution_svc.execute(input).await {
             Ok(output) => output,
             Err(DomainError::Http(_)) => {
@@ -245,6 +454,9 @@ impl McpToolService {
             .filter(|t| matches!(t.status, rocket_scripting::TestStatus::Passed))
             .count();
         let test_fail_count = output.test_results.len() - test_pass_count;
+
+        let secrets = self.known_secret_values(collection, environment_name);
+        let (body, body_truncated) = mask_response_body(&output.response.body, &secrets);
 
         self.test_result_cache
             .lock()
@@ -268,6 +480,8 @@ impl McpToolService {
             duration_ms: output.response.duration_ms,
             test_pass_count,
             test_fail_count,
+            body,
+            body_truncated,
         })
     }
 
@@ -279,6 +493,7 @@ impl McpToolService {
         phase: rocket_collection::RequestScriptPhase,
         body: String,
     ) -> DomainResult<()> {
+        self.check_in_workspace(collection)?;
         self.check_autonomy_enabled(collection)?;
         let phase_name = match phase {
             rocket_collection::RequestScriptPhase::PreRequest => "pre-request",
@@ -295,31 +510,6 @@ impl McpToolService {
         Ok(())
     }
 
-    pub fn get_env_var(
-        &self,
-        session_id: &str,
-        collection: &str,
-        environment_name: &str,
-        key: &str,
-    ) -> DomainResult<String> {
-        self.check_autonomy_enabled(collection)?;
-        Self::validate_environment_name(environment_name)?;
-        let repo = self.environment_repo_factory.for_collection(collection);
-        let env = repo.get(environment_name)?;
-        let value = env
-            .variables
-            .iter()
-            .find(|v| v.key == key && !v.secret)
-            .map(|v| v.value.clone())
-            .ok_or_else(|| DomainError::InvalidInput(VARIABLE_NOT_ACCESSIBLE.to_string()))?;
-        self.publish_tool_invoked(
-            session_id,
-            "get_env_var",
-            format!("read variable '{key}' from environment '{environment_name}'"),
-        );
-        Ok(value)
-    }
-
     pub fn set_env_var(
         &self,
         session_id: &str,
@@ -328,6 +518,7 @@ impl McpToolService {
         key: &str,
         value: String,
     ) -> DomainResult<()> {
+        self.check_in_workspace(collection)?;
         self.check_autonomy_enabled(collection)?;
         Self::validate_environment_name(environment_name)?;
         let repo = self.environment_repo_factory.for_collection(collection);
@@ -358,7 +549,7 @@ impl McpToolService {
         collection: &str,
         request_path: &str,
     ) -> DomainResult<Vec<rocket_scripting::TestResult>> {
-        self.check_autonomy_enabled(collection)?;
+        self.check_in_workspace(collection)?;
         let results = self
             .test_result_cache
             .lock()
@@ -382,64 +573,14 @@ impl McpToolService {
         Ok(results)
     }
 
-    /// Drops every `test_result_cache` entry belonging to `session_id`. Call
-    /// this from wherever a session's `McpServerRegistry` entry is torn down
-    /// (e.g. `end_agent_session`) — `test_result_cache` has no eviction of
-    /// its own otherwise, and Plan 05 mints a fresh `session_id` per ACP
-    /// session, so entries would otherwise accumulate in memory for the life
-    /// of the process. A session that never ran an MCP tool call (e.g. agent
-    /// autonomy was disabled the whole time) simply has nothing to remove —
-    /// a no-op, not an error.
+    /// Drops everything this service keeps for `session_id`. Called from
+    /// every session end path (Plan 02's `TauriSessionCleanup`, and
+    /// `end_agent_session`). A session with nothing stored is a no-op.
     pub fn forget_session(&self, session_id: &str) {
         self.test_result_cache
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|(sid, _, _), _| sid != session_id);
-    }
-}
-
-/// Depth-first walk of a `get_summaries()` tree, collecting one
-/// `McpRequestEntry` per `CollectionItem::Summary` leaf. Mirrors
-/// `runner_sequence::collect_items`'s traversal, but over summary leaves
-/// instead of full `Request` bodies — the two item shapes are different
-/// enum variants (`Summary` vs `Request`), so this is a separate, small
-/// walk rather than a shared generic one. The folder-path rule is shared via
-/// `folder_dir_name`, so the paths listed here match the ones the runner uses.
-fn collect_request_entries(
-    folder: &rocket_collection::Folder,
-    prefix: &str,
-    out: &mut Vec<McpRequestEntry>,
-) {
-    for item in &folder.items {
-        match item {
-            rocket_collection::CollectionItem::Summary(summary) => {
-                // Only plain HTTP requests are agent tools. GraphQL, WebSocket
-                // and gRPC files were opaque items before they got typed
-                // variants, and opaque items were never listed.
-                if !summary.kind.is_http() {
-                    continue;
-                }
-                let Some(file_name) = summary.file_name.as_ref() else {
-                    continue;
-                };
-                out.push(McpRequestEntry {
-                    path: format!("{prefix}{file_name}"),
-                    name: summary.name.clone(),
-                    method: summary.method.clone(),
-                    url: summary.url.clone(),
-                });
-            }
-            rocket_collection::CollectionItem::Folder(sub) => {
-                let sub_prefix = format!("{prefix}{}/", folder_dir_name(sub));
-                collect_request_entries(sub, &sub_prefix, out);
-            }
-            rocket_collection::CollectionItem::Request(_)
-            | rocket_collection::CollectionItem::OpaqueItem(_)
-            | rocket_collection::CollectionItem::GraphQl(_)
-            | rocket_collection::CollectionItem::WebSocket(_)
-            | rocket_collection::CollectionItem::Grpc(_)
-            | rocket_collection::CollectionItem::ScriptFile(_) => {}
-        }
     }
 }
 
@@ -451,15 +592,18 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     use rocket_collection::{
-        Collection, CollectionRepository, Folder, Request as CollectionRequest, RequestScriptPhase,
-        RequestSummary,
+        Collection, CollectionRepository, CollectionSettings, CollectionVariable, Folder,
+        Request as CollectionRequest, RequestScriptPhase, RequestSummary,
     };
     use rocket_environment::{
         Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Variable,
     };
-    use rocket_shared::types::HttpMethod;
+    use rocket_history::HistoryEntry;
+    use rocket_shared::types::{Auth, Header, HttpMethod};
     use rocket_workspace::{RequestGuardPolicy, WorkspaceConfig, WorkspaceConfigRepository};
 
+    use crate::mcp_read_views::{CollectionBrief, HISTORY_LIMIT_MAX, RESPONSE_BODY_CAP_BYTES};
+    use crate::redaction::REDACTED;
     use crate::test_doubles::{
         ConfigurableCollectionRepo, EmptySecretManagerRepo, InMemoryHistoryRepo, NullCookieRepo,
         NullEnvRepo, RecordingExecutor, RecordingPublisher, SharedCollectionRepo, SharedExecutor,
@@ -548,24 +692,18 @@ mod tests {
         }
     }
 
-    /// Builds an `McpToolService` plus its backing `RequestExecutionService`,
-    /// sharing one `ConfigurableCollectionRepo` and one `RecordingPublisher` between
-    /// them so a test can both drive HTTP dispatch and inspect every
-    /// `DomainEvent` (including `AcpToolInvoked`) either service published.
-    fn service_with(
+    /// Builds an `McpToolService` and its `RequestExecutionService`, sharing
+    /// one `ConfigurableCollectionRepo`, one `RecordingPublisher` and one
+    /// history store, so a run's history entry is visible to `get_history`.
+    fn service_with_history(
         collection_repo: Arc<ConfigurableCollectionRepo>,
         env_factory: Arc<FakeEnvRepoFactory>,
         publisher: Arc<RecordingPublisher>,
+        history: Arc<InMemoryHistoryRepo>,
     ) -> McpToolService {
-        // Annotated as `Arc<dyn HttpExecutor>` at the binding, not via an
-        // `as` cast (invalid Rust for `Arc`) or bare argument-position
-        // coercion (`Arc::clone`'s generic `Self` is resolved from the
-        // reference type before coercion applies, so it does not unify with
-        // a `dyn` target at the call site) — matching this crate's existing
-        // test style (e.g. `load_test_service.rs`'s
-        // `let load_exec: Arc<dyn HttpExecutor> = Arc::new(...)`).
+        // Bound as `Arc<dyn HttpExecutor>` at the binding: `Arc::clone`'s
+        // generic `Self` does not coerce to a `dyn` target at the call site.
         let executor: Arc<dyn rocket_http::HttpExecutor> = RecordingExecutor::new();
-        let history = InMemoryHistoryRepo::new();
         let exec_svc = Arc::new(RequestExecutionService::new(
             Box::new(NullEnvRepo),
             Arc::clone(&executor),
@@ -584,23 +722,30 @@ mod tests {
             publisher,
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(history)),
         )
+    }
+
+    fn service_with(
+        collection_repo: Arc<ConfigurableCollectionRepo>,
+        env_factory: Arc<FakeEnvRepoFactory>,
+        publisher: Arc<RecordingPublisher>,
+    ) -> McpToolService {
+        service_with_history(collection_repo, env_factory, publisher, InMemoryHistoryRepo::new())
     }
 
     fn sample_request(name: &str) -> CollectionRequest {
         CollectionRequest::new(name, HttpMethod::Get, "https://api.test/ping")
     }
 
-    /// Table-driven proof that all 6 tools refuse when autonomy is off — the
-    /// Review Focus item this plan and the index both call out.
+    /// The run switch still gates the direct-write tools (until Plan 04
+    /// replaces them with proposals). `run_request` is checked in its own
+    /// async test below.
     #[test]
-    fn every_tool_is_refused_when_autonomy_is_disabled() {
+    fn write_tools_are_refused_when_the_run_switch_is_off() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", false);
         repo.with_request("my-api", "login.yml", sample_request("Login"));
-        // A tree and a readable variable exist, so a missing gate would make
-        // these calls succeed rather than fail for an unrelated reason.
-        repo.with_summaries("my-api", Collection::new("my-api"));
         let env_factory = FakeEnvRepoFactory::new();
         env_factory.with_env(env_with_vars());
         let publisher = RecordingPublisher::new();
@@ -608,41 +753,15 @@ mod tests {
 
         let results: Vec<(&str, DomainResult<()>)> = vec![
             (
-                "list_collection_requests",
-                svc.list_collection_requests("s1", "my-api").map(|_| ()),
-            ),
-            (
                 "edit_script",
-                svc.edit_script(
-                    "s1",
-                    "my-api",
-                    "login.yml",
-                    RequestScriptPhase::Tests,
-                    "// x".into(),
-                ),
+                svc.edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into()),
             ),
-            (
-                "get_env_var",
-                svc.get_env_var("s1", "my-api", "dev", "HOST").map(|_| ()),
-            ),
-            (
-                "set_env_var",
-                svc.set_env_var("s1", "my-api", "dev", "HOST", "x".into()),
-            ),
-            (
-                "get_test_results",
-                svc.get_test_results("s1", "my-api", "login.yml")
-                    .map(|_| ()),
-            ),
+            ("set_env_var", svc.set_env_var("s1", "my-api", "dev", "HOST", "x".into())),
         ];
         for (tool, result) in results {
             assert_refused_by_autonomy_gate(tool, result);
         }
-        // run_request is async, so it is checked in its own test below.
-        assert!(
-            repo.saved_scripts().is_empty(),
-            "a refused edit_script must not write"
-        );
+        assert!(repo.saved_scripts().is_empty(), "a refused edit_script must not write");
         assert!(
             !publisher
                 .events()
@@ -652,14 +771,41 @@ mod tests {
         );
     }
 
-    /// Asserts `result` is the autonomy-gate refusal, not some other error.
+    /// Spec decision 4: reading any collection in the workspace is always
+    /// allowed; the switch only gates running (and, until Plan 04, writing).
+    #[test]
+    fn read_tools_work_with_the_run_switch_off() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", false);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        repo.with_summaries("my-api", two_level_tree());
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(env_with_vars());
+        let svc = service_with(Arc::clone(&repo), env_factory, RecordingPublisher::new());
+
+        svc.get_workspace_outline("s1", None, None).expect("outline");
+        svc.list_collections("s1").expect("list_collections");
+        svc.get_request("s1", "my-api", "login.yml").expect("get_request");
+        svc.get_collection_settings("s1", "my-api").expect("settings");
+        svc.get_environment("s1", "my-api", "dev").expect("environment");
+        svc.get_history("s1", "my-api", "login.yml", 5).expect("history");
+        let err = svc
+            .get_test_results("s1", "my-api", "login.yml")
+            .expect_err("nothing ran yet");
+        assert!(
+            matches!(err, DomainError::NotFound(_)),
+            "get_test_results is a read tool, not gated by the switch"
+        );
+    }
+
+    /// Asserts `result` is the run-switch refusal, not some other error.
     fn assert_refused_by_autonomy_gate(tool: &str, result: DomainResult<()>) {
         match result {
             Err(DomainError::InvalidInput(msg)) => assert!(
-                msg.contains("not allowed to act on collection"),
-                "{tool} failed, but not via the autonomy gate: {msg}"
+                msg.contains("not allowed to run requests in collection"),
+                "{tool} failed, but not via the run switch: {msg}"
             ),
-            other => panic!("{tool} must be refused by the autonomy gate, got {other:?}"),
+            other => panic!("{tool} must be refused by the run switch, got {other:?}"),
         }
     }
 
@@ -679,52 +825,297 @@ mod tests {
         assert_refused_by_autonomy_gate("run_request", result);
     }
 
-    #[test]
-    fn list_collection_requests_walks_folders_and_publishes_audit_event() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-
-        let mut collection = Collection::new("my-api");
-        collection.root.add_summary(RequestSummary {
-            uid: "u1".into(),
-            name: "Login".into(),
-            method: "POST".into(),
-            url: "https://api.test/login".into(),
-            file_name: Some("login.yml".into()),
+    fn request_summary(name: &str, method: &str, file: &str) -> RequestSummary {
+        RequestSummary {
+            uid: format!("uid-{file}"),
+            name: name.into(),
+            method: method.into(),
+            url: format!("https://api.test/{file}"),
+            file_name: Some(file.into()),
             kind: Default::default(),
-        });
+        }
+    }
+
+    /// `login.yml` at the root and `auth/refresh.yml` in a subfolder.
+    fn two_level_tree() -> Collection {
+        let mut collection = Collection::new("my-api");
+        collection
+            .root
+            .add_summary(request_summary("Login", "POST", "login.yml"));
         let mut auth = Folder::new("auth");
         auth.dir_name = Some("auth".into());
-        auth.add_summary(RequestSummary {
-            uid: "u2".into(),
-            name: "Refresh".into(),
-            method: "POST".into(),
-            url: "https://api.test/refresh".into(),
-            file_name: Some("refresh.yml".into()),
-            kind: Default::default(),
-        });
+        auth.add_summary(request_summary("Refresh", "POST", "refresh.yml"));
         collection.root.add_subfolder(auth);
-        repo.with_summaries("my-api", collection);
+        collection
+    }
 
+    #[test]
+    fn every_collection_tool_refuses_a_collection_outside_the_workspace() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
         let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(env_with_vars());
         let publisher = RecordingPublisher::new();
         let svc = service_with(Arc::clone(&repo), env_factory, Arc::clone(&publisher));
 
-        let entries = svc
-            .list_collection_requests("s1", "my-api")
-            .expect("list_collection_requests");
-
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].path, "login.yml");
-        assert_eq!(entries[1].path, "auth/refresh.yml");
-        assert_eq!(entries[1].method, "POST");
-
+        for outside in [
+            "other-api",
+            "../other-workspace/collections/my-api",
+            "My-Api",
+        ] {
+            let results: Vec<(&str, DomainResult<()>)> = vec![
+                (
+                    "get_workspace_outline",
+                    svc.get_workspace_outline("s1", Some(outside), None).map(|_| ()),
+                ),
+                ("get_request", svc.get_request("s1", outside, "login.yml").map(|_| ())),
+                (
+                    "get_collection_settings",
+                    svc.get_collection_settings("s1", outside).map(|_| ()),
+                ),
+                ("get_environment", svc.get_environment("s1", outside, "dev").map(|_| ())),
+                ("get_history", svc.get_history("s1", outside, "login.yml", 5).map(|_| ())),
+                (
+                    "get_test_results",
+                    svc.get_test_results("s1", outside, "login.yml").map(|_| ()),
+                ),
+                (
+                    "edit_script",
+                    svc.edit_script("s1", outside, "login.yml", RequestScriptPhase::Tests, "// x".into()),
+                ),
+                ("set_env_var", svc.set_env_var("s1", outside, "dev", "HOST", "x".into())),
+            ];
+            for (tool, result) in results {
+                match result {
+                    Err(DomainError::NotFound(msg)) => assert!(
+                        msg.contains("not in the current workspace"),
+                        "{tool}: {msg}"
+                    ),
+                    other => panic!("{tool} must refuse '{outside}' by the scope check, got {other:?}"),
+                }
+            }
+        }
+        assert!(repo.saved_scripts().is_empty(), "a refused write must not write");
         assert!(
-            publisher
+            !publisher
                 .events()
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "list_collection_requests")),
-            "expected an AcpToolInvoked event for list_collection_requests"
+                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+            "a refused call must not publish an audit event"
+        );
+    }
+
+    #[test]
+    fn get_workspace_outline_walks_folders_shows_the_run_switch_and_filters_by_folder() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_summaries("my-api", two_level_tree());
+        repo.set_autonomy("docs-api", false);
+        repo.with_summaries("docs-api", Collection::new("docs-api"));
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), Arc::clone(&publisher));
+
+        let text = svc
+            .get_workspace_outline("s1", None, None)
+            .expect("outline");
+        assert!(text.contains("## my-api (run: on, 2 request(s))"), "{text}");
+        assert!(text.contains("POST login.yml"));
+        assert!(text.contains("POST auth/refresh.yml"));
+        assert!(text.contains("## docs-api (run: off, 0 request(s))"));
+
+        let auth_only = svc
+            .get_workspace_outline("s1", Some("my-api"), Some("auth/"))
+            .expect("folder outline");
+        assert!(auth_only.contains("POST auth/refresh.yml"));
+        assert!(!auth_only.contains("POST login.yml"));
+
+        let err = svc
+            .get_workspace_outline("s1", None, Some("auth"))
+            .expect_err("a folder filter needs a collection");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        let err = svc
+            .get_workspace_outline("s1", Some("my-api"), Some("../x"))
+            .expect_err("a traversal-shaped folder must be refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+
+        assert!(publisher.events().iter().any(
+            |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "get_workspace_outline")
+        ));
+    }
+
+    #[test]
+    fn an_unreadable_collection_does_not_break_the_outline() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_summaries("my-api", two_level_tree());
+        // Known to the workspace, but with no tree: get_summaries fails.
+        repo.set_autonomy("broken", false);
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let text = svc
+            .get_workspace_outline("s1", None, None)
+            .expect("one broken collection must not fail the outline");
+        assert!(text.contains("## broken (run: off, could not be read)"));
+        assert!(text.contains("POST login.yml"));
+    }
+
+    #[test]
+    fn list_collections_reports_request_counts_the_run_switch_and_environment_names() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(env_with_vars());
+        let svc = service_with(Arc::clone(&repo), env_factory, RecordingPublisher::new());
+
+        let briefs = svc.list_collections("s1").expect("list_collections");
+        assert_eq!(
+            briefs,
+            vec![CollectionBrief {
+                name: "my-api".into(),
+                request_count: 1,
+                run_allowed: true,
+                environments: vec!["dev".into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn get_request_masks_literal_credentials_and_keeps_references_and_scripts() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", false);
+        let mut request = sample_request("Login")
+            .with_header("Authorization", "Bearer sk-live-abc123")
+            .with_header("X-Api-Key", "{{apiKey}}")
+            .with_header("Accept", "application/json")
+            .with_auth(Auth::Basic {
+                username: "alice".into(),
+                password: "hunter22".into(),
+            });
+        request.tests = Some("rok.test('ok', () => {});".to_string());
+        repo.with_request("my-api", "login.yml", request);
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let view = svc
+            .get_request("s1", "my-api", "login.yml")
+            .expect("reading needs no run switch");
+        let json = serde_json::to_string(&view).expect("serialize");
+        assert!(!json.contains("sk-live-abc123"));
+        assert!(!json.contains("hunter22"));
+        let header = |key: &str| {
+            view.headers
+                .iter()
+                .find(|h| h.key == key)
+                .map(|h| h.value.clone())
+                .expect("header present")
+        };
+        assert_eq!(header("Authorization"), REDACTED);
+        assert_eq!(header("X-Api-Key"), "{{apiKey}}");
+        assert_eq!(header("Accept"), "application/json");
+        assert_eq!(view.auth["username"], "alice");
+        assert_eq!(view.tests.as_deref(), Some("rok.test('ok', () => {});"));
+    }
+
+    #[test]
+    fn get_collection_settings_masks_auth_cookie_and_secret_variables() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                agent_autonomy_enabled: true,
+                auth: Some(Auth::Bearer {
+                    token: "sk-live-collection".into(),
+                }),
+                headers: vec![Header::new("Cookie", "session=abcdef123")],
+                variables: vec![
+                    CollectionVariable {
+                        key: "baseUrl".into(),
+                        value: "https://api.test".into(),
+                        initial_value: String::new(),
+                        enabled: true,
+                        secret: false,
+                    },
+                    CollectionVariable {
+                        key: "clientSecret".into(),
+                        value: "cs-live-999".into(),
+                        initial_value: String::new(),
+                        enabled: true,
+                        secret: true,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let view = svc
+            .get_collection_settings("s1", "my-api")
+            .expect("get_collection_settings");
+        let json = serde_json::to_string(&view).expect("serialize");
+        for secret in ["sk-live-collection", "abcdef123", "cs-live-999"] {
+            assert!(!json.contains(secret), "{secret} leaked");
+        }
+        assert_eq!(view.auth_type, "bearer");
+        assert!(view.run_allowed);
+        assert_eq!(view.variables[0].value.as_deref(), Some("https://api.test"));
+        assert_eq!(view.variables[1].value, None);
+    }
+
+    #[test]
+    fn get_history_returns_the_newest_runs_of_that_request_capped_at_ten() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let history = InMemoryHistoryRepo::new();
+        {
+            let mut entries = history.entries.lock().expect("lock history");
+            for i in 0..12u16 {
+                let url = if i == 11 {
+                    "https://api.test/ping?api_key=sk-live-zzz".to_string()
+                } else {
+                    format!("https://api.test/ping?page={i}")
+                };
+                let mut entry = HistoryEntry::new("GET", url, 200 + i, 5, 10)
+                    .with_collection("my-api", "Login");
+                entry.timestamp =
+                    chrono::Utc::now() - chrono::Duration::seconds(i64::from(100 - i));
+                entries.push(entry);
+            }
+            entries.push(
+                HistoryEntry::new("GET", "https://api.test/other", 500, 5, 10)
+                    .with_collection("my-api", "Other"),
+            );
+            entries.push(
+                HistoryEntry::new("GET", "https://other.test/", 404, 5, 10)
+                    .with_collection("other-api", "Login"),
+            );
+        }
+        let svc = service_with_history(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+            Arc::clone(&history),
+        );
+
+        let briefs = svc
+            .get_history("s1", "my-api", "login.yml", 50)
+            .expect("get_history");
+        assert_eq!(briefs.len(), HISTORY_LIMIT_MAX);
+        assert_eq!(briefs[0].status, 211, "newest first");
+        assert!(briefs.iter().all(|b| (202..=211).contains(&b.status)));
+        assert!(!briefs[0].url.contains("sk-live-zzz"));
+        assert_eq!(
+            svc.get_history("s1", "my-api", "login.yml", 3)
+                .expect("limit 3")
+                .len(),
+            3
+        );
+        assert_eq!(
+            svc.get_history("s1", "my-api", "login.yml", 0)
+                .expect("limit 0 means the maximum")
+                .len(),
+            HISTORY_LIMIT_MAX
         );
     }
 
@@ -771,6 +1162,7 @@ mod tests {
             publisher_dyn,
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
 
         let result = svc
@@ -847,6 +1239,7 @@ mod tests {
             publisher_dyn,
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
 
         // First run succeeds and populates the cache.
@@ -909,6 +1302,7 @@ mod tests {
             publisher_dyn,
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
 
         const SECRET: &str = "super-secret";
@@ -988,48 +1382,36 @@ mod tests {
     }
 
     #[test]
-    fn get_env_var_reads_a_non_secret_variable() {
+    fn get_environment_returns_plain_values_and_names_secrets_without_values() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         env_factory.with_env(env_with_vars());
         let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+        let svc = service_with(Arc::clone(&repo), env_factory, Arc::clone(&publisher));
 
-        let value = svc
-            .get_env_var("s1", "my-api", "dev", "HOST")
-            .expect("HOST is non-secret and must be readable");
-        assert_eq!(value, "api.example.com");
-    }
-
-    #[test]
-    fn get_env_var_not_found_and_is_secret_produce_the_identical_error_message() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-        let env_factory = FakeEnvRepoFactory::new();
-        env_factory.with_env(env_with_vars());
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
-
-        let not_found = svc
-            .get_env_var("s1", "my-api", "dev", "NO_SUCH_KEY")
-            .expect_err("unknown key must error");
-        let is_secret = svc
-            .get_env_var("s1", "my-api", "dev", "API_KEY")
-            .expect_err("secret key must error");
-
-        assert_eq!(
-            not_found.to_string(),
-            is_secret.to_string(),
-            "the two error messages must be indistinguishable"
-        );
-
-        // Case sensitivity: a differently-cased key is also just "not found",
-        // not a secret-detection bypass or a distinct error shape.
-        let wrong_case = svc
-            .get_env_var("s1", "my-api", "dev", "host")
-            .expect_err("key lookup is case-sensitive, so this must also be the same error");
-        assert_eq!(wrong_case.to_string(), not_found.to_string());
+        let view = svc
+            .get_environment("s1", "my-api", "dev")
+            .expect("get_environment");
+        let host = view
+            .variables
+            .iter()
+            .find(|v| v.key == "HOST")
+            .expect("HOST is listed");
+        assert_eq!(host.value.as_deref(), Some("api.example.com"));
+        let api_key = view
+            .variables
+            .iter()
+            .find(|v| v.key == "API_KEY")
+            .expect("a secret is listed by name");
+        assert_eq!(api_key.value, None);
+        assert!(api_key.secret);
+        assert!(!serde_json::to_string(&view)
+            .expect("serialize")
+            .contains("sk-live-abc"));
+        assert!(publisher.events().iter().any(
+            |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "get_environment")
+        ));
     }
 
     #[test]
@@ -1044,10 +1426,15 @@ mod tests {
         svc.set_env_var("s1", "my-api", "dev", "HOST", "api2.example.com".into())
             .expect("set_env_var on a non-secret existing key");
 
-        let value = svc
-            .get_env_var("s1", "my-api", "dev", "HOST")
+        let env = svc
+            .get_environment("s1", "my-api", "dev")
             .expect("read back");
-        assert_eq!(value, "api2.example.com");
+        let host = env
+            .variables
+            .iter()
+            .find(|v| v.key == "HOST")
+            .expect("HOST is listed");
+        assert_eq!(host.value.as_deref(), Some("api2.example.com"));
 
         assert!(
             publisher.events().iter().any(
@@ -1095,15 +1482,13 @@ mod tests {
     }
 
     #[test]
-    fn get_env_var_refuses_a_traversal_shaped_environment_name() {
+    fn get_environment_refuses_a_traversal_shaped_environment_name() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
-        let env_factory = FakeEnvRepoFactory::new();
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
 
         let err = svc
-            .get_env_var("s1", "my-api", "../../other-api/environments/prod", "HOST")
+            .get_environment("s1", "my-api", "../../other-api/environments/prod")
             .expect_err("a traversal-shaped environment name must be refused");
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
@@ -1145,25 +1530,19 @@ mod tests {
     }
 
     #[test]
-    fn disabling_autonomy_mid_session_blocks_the_very_next_call() {
+    fn disabling_the_run_switch_mid_session_blocks_the_very_next_write() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
-        // An empty tree so the autonomy-enabled first call below has
-        // something to list — the assertion this test cares about is the
-        // toggle behavior, not the walk itself.
-        repo.with_summaries("my-api", Collection::new("my-api"));
-        let env_factory = FakeEnvRepoFactory::new();
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
 
-        svc.list_collection_requests("s1", "my-api")
-            .expect("first call succeeds while autonomy is enabled");
+        svc.edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// 1".into())
+            .expect("the first write succeeds while the switch is on");
 
         repo.set_autonomy("my-api", false);
 
         let err = svc
-            .list_collection_requests("s1", "my-api")
-            .expect_err("the very next call must be refused once autonomy is disabled");
+            .edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// 2".into())
+            .expect_err("the very next write must be refused once the switch is off");
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
@@ -1265,6 +1644,7 @@ mod tests {
             publisher_dyn,
             guarded_config_repo,
             dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
 
         let err = svc
@@ -1272,5 +1652,84 @@ mod tests {
             .await
             .expect_err("a redirect to a blocked internal host must fail once the guard is on");
         assert!(matches!(err, DomainError::InvalidInput(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn run_request_refuses_a_collection_outside_the_workspace() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let err = svc
+            .run_request("s1", "../other-workspace/collections/my-api", "login.yml", None)
+            .await
+            .expect_err("a collection outside the workspace must be refused");
+        assert!(matches!(err, DomainError::NotFound(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn run_request_returns_a_masked_body_cut_to_eight_kilobytes() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                agent_autonomy_enabled: true,
+                variables: vec![CollectionVariable {
+                    key: "token".into(),
+                    value: "sk-live-collection-secret".into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: true,
+                }],
+                ..Default::default()
+            },
+        );
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+
+        let executor = RecordingExecutor::new();
+        executor.set_body(
+            "api.test",
+            &format!(
+                "{{\"token\":\"sk-live-collection-secret\"}}{}",
+                "x".repeat(9_000)
+            ),
+        );
+        let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
+            Arc::new(SharedExecutor(Arc::clone(&executor)));
+        let history = InMemoryHistoryRepo::new();
+        let exec_svc = Arc::new(RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::clone(&executor_dyn),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        ));
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            Arc::clone(&exec_svc),
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+        );
+
+        let result = svc
+            .run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect("run_request");
+        assert!(result.body_truncated);
+        assert!(result.body.len() <= RESPONSE_BODY_CAP_BYTES);
+        assert!(!result.body.contains("sk-live-collection-secret"));
+        assert!(result.body.contains(REDACTED));
     }
 }
