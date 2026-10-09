@@ -654,6 +654,13 @@ pub fn run() {
             // TauriSessionCleanup below, which ends one session's server.
             let mcp_server_registry = Arc::new(mcp::registry::McpServerRegistry::new());
 
+            // Remove scratch left by a crashed run, before any session can
+            // start. Failures are logged inside and never abort startup.
+            let swept = agent_session::scratch::sweep_stale_scratch();
+            if swept > 0 {
+                tracing::info!(swept, "removed stale agent scratch directories");
+            }
+
             // Per-session scratch directories and pre-handshake MCP ids.
             let session_resources =
                 Arc::new(agent_session::cleanup::SessionResourceRegistry::new());

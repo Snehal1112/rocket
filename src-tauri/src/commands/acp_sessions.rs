@@ -131,6 +131,18 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
                     mcp_session_id,
                 },
             );
+            // Tracked last, so a sweep never sees a session whose resources
+            // are not registered yet.
+            if !svc.track(&info.session_id) {
+                // The app is shutting down. Nothing tracks this session, so
+                // release its resources here and kill its agent.
+                registry.end_session(&info.session_id);
+                drop(resources.take(&info.session_id));
+                let _ = svc.end_session(&info.session_id).await;
+                return Err(DomainError::Internal(
+                    "the app is shutting down".to_string(),
+                ));
+            }
             // The `start_agent_session` command maps this to the DTO with
             // `.map(AgentSessionStartedDto::from)`, as Plan 01 left it.
             Ok(info)

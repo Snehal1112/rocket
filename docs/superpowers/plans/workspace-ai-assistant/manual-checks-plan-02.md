@@ -55,13 +55,19 @@ window, `cost_usd` the turn cost.
    - With the switch **off**, the agent reports no tools at all.
 4. Ask it to list the Rocket requests in the collection. The Rocket tool must
    run without a permission prompt or a hang (`allowedTools` allows it).
-5. While the session is open, run `ls -la "${TMPDIR:-/tmp}/rocket-agent-sessions"/*/`.
+5. While the session is open, run
+   `ls -la "$XDG_RUNTIME_DIR/rocket-agent-sessions"/*/`. The parent is
+   `$XDG_RUNTIME_DIR/rocket-agent-sessions`, else
+   `~/.rocket-api/rocket-agent-sessions`, else the temp dir.
    Expected: one `<uuid>/` with `cwd/` (empty) and `config/` (Claude Code may
    write `.claude.json` or `projects/` there). `~/.claude/projects/` gets no
    new entry for this session.
 6. End the session (End session, or close the tab). The `<uuid>/` directory
    must be gone. Repeat with an idle timeout (stop the network for 120 s
    mid-turn) and with app exit: the directory must be gone each time.
+   After a crash (`kill -9` the app mid-session), the leftover `<uuid>/` must
+   be removed by the startup sweep on the next launch. Other files in the
+   parent stay untouched.
 
 ## 3. Fallback when the options are not honoured
 

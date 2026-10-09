@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -40,6 +41,9 @@ pub struct AcpSessionService {
     event_publisher: Box<dyn EventPublisher>,
     cleanup: Arc<dyn SessionCleanup>,
     live_sessions: Mutex<HashSet<String>>,
+    /// Set once `end_all_sessions` ran. Written and read under the
+    /// `live_sessions` lock, so `track` and the drain never interleave.
+    shutting_down: AtomicBool,
     agent_config_service: Arc<AgentConfigService>,
     collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     prompt_idle_timeout: Duration,
@@ -100,17 +104,29 @@ impl AcpSessionService {
             event_publisher,
             cleanup,
             live_sessions: Mutex::new(HashSet::new()),
+            shutting_down: AtomicBool::new(false),
             agent_config_service,
             collection_repo,
             prompt_idle_timeout,
         }
     }
 
-    fn track(&self, session_id: &str) {
-        self.live_sessions
+    /// Starts owning a started session, so every end path runs its cleanup.
+    /// Idempotent. The caller registers the session's resources first and
+    /// calls this last, so a sweep never sees a session whose resources are
+    /// not yet in place. Returns false when `end_all_sessions` already ran.
+    /// The session is then not tracked, and the caller must release its own
+    /// resources and end the session.
+    pub fn track(&self, session_id: &str) -> bool {
+        let mut live = self
+            .live_sessions
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(session_id.to_string());
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return false;
+        }
+        live.insert(session_id.to_string());
+        true
     }
 
     /// Forgets a tracked session and runs its cleanup. Only the first caller
@@ -133,6 +149,9 @@ impl AcpSessionService {
     /// propagate unchanged. No event is published on failure, because no
     /// session id exists yet. On success, `AcpSessionStarted` is published
     /// and the session info is returned.
+    ///
+    /// The session is not tracked yet. The caller registers its resources
+    /// and then calls `track`, so a sweep cannot run between the two.
     ///
     /// `isolation`, when present, starts the agent isolated: its `_meta`
     /// comes from `SessionIsolation::meta`, and `CLAUDE_CONFIG_DIR` points at
@@ -221,7 +240,6 @@ impl AcpSessionService {
             .session_client
             .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, meta)
             .await?;
-        self.track(&info.session_id);
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
@@ -431,12 +449,14 @@ impl AcpSessionService {
     /// tracked session's resources. The client refuses new sessions
     /// afterwards. No event is published.
     pub async fn end_all_sessions(&self) -> DomainResult<()> {
-        let ended: Vec<String> = self
-            .live_sessions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain()
-            .collect();
+        let ended: Vec<String> = {
+            let mut live = self
+                .live_sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            self.shutting_down.store(true, Ordering::SeqCst);
+            live.drain().collect()
+        };
         let result = self.session_client.end_all_sessions().await;
         for session_id in &ended {
             self.cleanup.on_session_ended(session_id);
@@ -834,11 +854,14 @@ mod tests {
         )
     }
 
+    /// Starts a session and tracks it, as the command layer does once its
+    /// resources are registered.
     async fn start(service: &AcpSessionService) {
-        service
+        let info = service
             .start_session("agent-1", "/tmp", "demo", None, None)
             .await
             .expect("start_session should succeed");
+        assert!(service.track(&info.session_id));
     }
 
     /// Sends one text prompt. Keep the argument form identical to the
@@ -1874,6 +1897,42 @@ mod tests {
 
         assert_eq!(service.end_tracked_sessions().await, 0);
         assert!(!end_session_called.load(Ordering::SeqCst));
+        assert!(cleanup.ended().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_sweep_between_start_session_and_track_neither_ends_nor_leaks_the_session() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let service = service_with_cleanup(FakeSessionClient::default(), cleanup.clone());
+        let info = service
+            .start_session("agent-1", "/tmp", "demo", None, None)
+            .await
+            .expect("start_session should succeed");
+
+        // The command has not registered its resources yet, so the sweep
+        // must not see the session.
+        assert_eq!(service.end_tracked_sessions().await, 0);
+        assert!(cleanup.ended().is_empty());
+
+        assert!(service.track(&info.session_id));
+        assert!(service.track(&info.session_id), "track is idempotent");
+        assert_eq!(service.end_tracked_sessions().await, 1);
+        assert_eq!(cleanup.ended(), vec!["session-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn track_after_end_all_sessions_is_refused_and_runs_no_cleanup() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let service = service_with_cleanup(FakeSessionClient::default(), cleanup.clone());
+        let info = service
+            .start_session("agent-1", "/tmp", "demo", None, None)
+            .await
+            .expect("start_session should succeed");
+
+        service.end_all_sessions().await.expect("end_all_sessions");
+
+        assert!(!service.track(&info.session_id));
+        assert_eq!(service.end_tracked_sessions().await, 0);
         assert!(cleanup.ended().is_empty());
     }
 }

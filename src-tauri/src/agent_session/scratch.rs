@@ -62,8 +62,8 @@ impl SessionScratch {
 
 impl Drop for SessionScratch {
     fn drop(&mut self) {
-        // Best effort. A leftover directory holds no credential, because the
-        // API key reaches the agent through its environment only.
+        // Best effort. The config dir holds Claude Code transcripts and
+        // state, such as tool results, so a leftover is swept at startup.
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -78,6 +78,54 @@ fn scratch_parent() -> PathBuf {
         return home.join(".rocket-api").join(SCRATCH_PARENT_DIR);
     }
     std::env::temp_dir().join(SCRATCH_PARENT_DIR)
+}
+
+/// Removes every `<uuid>/` directory under the scratch parent, left behind
+/// by a crashed run. Run once at startup, before any session can start.
+/// Only real directories whose names parse as UUIDs are removed. Symlinks
+/// and other files are never followed or touched. Returns how many were
+/// removed. A missing parent is not an error.
+pub fn sweep_stale_scratch() -> usize {
+    sweep_stale_scratch_in(&scratch_parent())
+}
+
+/// Same as `sweep_stale_scratch`, for an explicit `parent`.
+pub fn sweep_stale_scratch_in(parent: &Path) -> usize {
+    let entries = match std::fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return 0,
+        Err(e) => {
+            tracing::warn!("cannot read the agent scratch parent {}: {e}", parent.display());
+            return 0;
+        }
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::warn!("cannot read an agent scratch entry: {e}");
+                continue;
+            }
+        };
+        let is_uuid = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| uuid::Uuid::parse_str(name).is_ok());
+        // `DirEntry::file_type` does not follow symlinks.
+        let is_real_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+        if !is_uuid || !is_real_dir {
+            continue;
+        }
+        match std::fs::remove_dir_all(entry.path()) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!(
+                "cannot remove the stale agent scratch {}: {e}",
+                entry.path().display()
+            ),
+        }
+    }
+    removed
 }
 
 /// Creates `parent` with mode 0700 when missing. On Unix an existing parent
@@ -243,5 +291,50 @@ mod tests {
         let (cwd, isolation) = scratch.isolation().expect("utf-8 paths");
         assert_eq!(Path::new(&cwd), scratch.cwd());
         assert_eq!(Path::new(&isolation.config_dir), scratch.config_dir());
+    }
+
+    #[test]
+    fn sweep_removes_uuid_dirs_and_leaves_everything_else() {
+        let parent = TempDir::new().expect("tempdir");
+        let stale = parent.path().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(stale.join("config/projects")).expect("stale dir");
+        std::fs::write(stale.join("config/.claude.json"), "{}").expect("stale file");
+        let other_dir = parent.path().join("not-a-uuid");
+        std::fs::create_dir(&other_dir).expect("other dir");
+        let uuid_named_file = parent.path().join(uuid::Uuid::new_v4().to_string() + ".txt");
+        std::fs::write(&uuid_named_file, "x").expect("other file");
+        let file_named_like_uuid = parent.path().join(uuid::Uuid::new_v4().to_string());
+        std::fs::write(&file_named_like_uuid, "x").expect("uuid-named file");
+
+        assert_eq!(sweep_stale_scratch_in(parent.path()), 1);
+
+        assert!(!stale.exists());
+        assert!(other_dir.is_dir());
+        assert!(uuid_named_file.is_file());
+        assert!(file_named_like_uuid.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sweep_does_not_follow_a_uuid_named_symlink() {
+        let base = TempDir::new().expect("tempdir");
+        let parent = base.path().join("parent");
+        std::fs::create_dir(&parent).expect("parent");
+        let target = base.path().join("target");
+        std::fs::create_dir(&target).expect("target");
+        std::fs::write(target.join("keep.txt"), "x").expect("target file");
+        let link = parent.join(uuid::Uuid::new_v4().to_string());
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        assert_eq!(sweep_stale_scratch_in(&parent), 0);
+
+        assert!(target.join("keep.txt").is_file());
+        assert!(std::fs::symlink_metadata(&link).is_ok());
+    }
+
+    #[test]
+    fn sweep_of_a_missing_parent_removes_nothing() {
+        let base = TempDir::new().expect("tempdir");
+        assert_eq!(sweep_stale_scratch_in(&base.path().join("absent")), 0);
     }
 }
