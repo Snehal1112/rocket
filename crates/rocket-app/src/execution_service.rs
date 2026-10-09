@@ -744,6 +744,25 @@ impl RequestExecutionService {
         .secret_values
     }
 
+    /// Secret variable values of every scope that applies to one request: the global
+    /// environment, the collection, the folder chain, the request and the named environment.
+    pub(crate) fn secret_values_for_request(
+        &self,
+        global_env_name: Option<&str>,
+        collection: &str,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+    ) -> std::collections::HashSet<String> {
+        self.build_variable_scopes(
+            global_env_name,
+            Some(collection),
+            environment_name,
+            request_path,
+            &std::collections::HashMap::new(),
+        )
+        .secret_values
+    }
+
     /// Builds a flattened variable map from all backend-accessible scopes
     /// (global env, collection, environment, folder-chain, request-level).
     ///

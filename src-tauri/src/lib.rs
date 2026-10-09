@@ -988,6 +988,8 @@ pub fn run() {
             commands::agent_configs::save_agent_config,
             commands::agent_configs::delete_agent_config,
             commands::agent_configs::test_agent_config,
+            commands::assistant_chips::build_assistant_chip_resource,
+            commands::assistant_chips::mask_assistant_response,
             commands::acp_sessions::send_agent_prompt,
             commands::acp_sessions::cancel_agent_prompt,
             commands::acp_sessions::set_agent_config_option,

@@ -35,6 +35,7 @@ pub mod graphql_request;
 pub mod graphql_schema;
 pub mod history_service;
 pub mod load_test_service;
+pub mod assistant_chip_text;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
@@ -82,6 +83,10 @@ pub use flow_execution_service::{
     CapturedOutput, FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowStepResult,
     RunFlowInput,
 };
+pub use assistant_chip_text::{
+    ChipKind, ChipResource, ResponseChipHeader, ResponseChipInput, ResponseChipTest,
+    CHIP_TEXT_LIMIT_BYTES,
+};
 pub use flow_partial::PartialRun;
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;
@@ -90,8 +95,8 @@ pub use grpc_service::{GrpcExecuteInput, GrpcService};
 pub use history_service::HistoryService;
 pub use load_test_service::LoadTestService;
 pub use mcp_read_views::{
-    CollectionBrief, HistoryBrief, MaskedBody, MaskedEnvironment, MaskedPair, MaskedRequest,
-    MaskedSettings, MaskedVariable,
+    CollectionBrief, HistoryBrief, MaskedBody, MaskedEnvironment, MaskedFolderSettings,
+    MaskedPair, MaskedRequest, MaskedSettings, MaskedVariable,
 };
 pub use mcp_tool_service::{
     AssistantMode, McpRunResult, McpToolService, OUTLINE_RESOURCE_URI,

@@ -210,6 +210,40 @@ impl MaskedSettings {
     }
 }
 
+/// A folder's own settings: auth, default headers, variables and scripts,
+/// with credentials masked.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MaskedFolderSettings {
+    pub auth_type: String,
+    pub auth: Value,
+    pub headers: Vec<MaskedPair>,
+    pub variables: Vec<MaskedVariable>,
+    pub pre_request_script: Option<String>,
+    pub post_response_script: Option<String>,
+    pub tests_script: Option<String>,
+    pub docs: Option<String>,
+}
+
+impl MaskedFolderSettings {
+    pub fn from_settings(settings: &FolderSettings) -> Self {
+        let auth = settings.auth.as_ref().map(mask_auth).unwrap_or(Value::Null);
+        Self {
+            auth_type: auth_type_name(&auth),
+            auth,
+            headers: settings.headers.iter().map(mask_header).collect(),
+            variables: settings
+                .variables
+                .iter()
+                .map(mask_collection_variable)
+                .collect(),
+            pre_request_script: settings.pre_request_script.clone(),
+            post_response_script: settings.post_response_script.clone(),
+            tests_script: settings.tests_script.clone(),
+            docs: settings.docs.clone(),
+        }
+    }
+}
+
 /// An environment: variable names with non-secret values, and its
 /// RocketVault references as `alias.secretName` names.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -704,13 +738,18 @@ pub(crate) fn truncate_utf8(text: &str, max_bytes: usize) -> (String, bool) {
 /// `RESPONSE_BODY_CAP_BYTES`. Masking first means a cut can never leave a
 /// fragment of a secret behind.
 pub(crate) fn mask_response_body(body: &str, secret_values: &HashSet<String>) -> (String, bool) {
-    // Encoded and per-line forms of each secret are masked too.
+    let masked = mask_secret_text(body, secret_values);
+    truncate_utf8(&masked, RESPONSE_BODY_CAP_BYTES)
+}
+
+/// Replaces every known secret value in `text`, in its plain, trimmed, per-line and
+/// percent-encoded forms.
+pub(crate) fn mask_secret_text(text: &str, secret_values: &HashSet<String>) -> String {
     let mut all: HashSet<String> = HashSet::new();
     for secret in secret_values {
         all.extend(redaction_forms(secret));
     }
-    let masked = redact_url_secrets(body, &all);
-    truncate_utf8(&masked, RESPONSE_BODY_CAP_BYTES)
+    redact_url_secrets(text, &all)
 }
 
 /// A requested history limit, where 0 means the maximum.

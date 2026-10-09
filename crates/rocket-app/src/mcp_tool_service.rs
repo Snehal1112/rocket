@@ -29,6 +29,8 @@ use std::sync::Mutex;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
+mod chips;
+
 use crate::execution_service::RequestExecutionService;
 use crate::mcp_read_views::{
     basic_header_values_from_secrets, filter_folder, history_limit, literal_credential_values, mask_response_body,
@@ -830,6 +832,7 @@ mod tests {
     use rocket_shared::types::{Auth, Header, HttpMethod};
     use rocket_workspace::{RequestGuardPolicy, WorkspaceConfig, WorkspaceConfigRepository};
 
+    use crate::assistant_chip_text::{ChipKind, ResponseChipInput};
     use crate::mcp_read_views::{CollectionBrief, HISTORY_LIMIT_MAX, RESPONSE_BODY_CAP_BYTES};
     use crate::redaction::REDACTED;
     use crate::test_doubles::{
@@ -2194,5 +2197,163 @@ mod tests {
         );
         svc.discard_outline("a1");
         assert!(svc.peek_outline_preamble("a1").is_none());
+    }
+
+    // Chip resources for the composer.
+
+    fn secret_env(name: &str, key: &str, value: &str) -> Environment {
+        let mut env = Environment::new(name);
+        env.set_variable(Variable {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            secret: true,
+            description: None,
+            value_variants: None,
+            secret_type: None,
+        });
+        env
+    }
+
+    fn chip_service() -> (McpToolService, Arc<ConfigurableCollectionRepo>) {
+        let repo = ConfigurableCollectionRepo::new();
+        let mut request = sample_request("Echo");
+        request.headers.push(Header::new("X-Key", "echo-literal-key-1"));
+        request.auth = Auth::Basic {
+            username: "alice".into(),
+            password: "basic-pass-9999".into(),
+        };
+        repo.with_request("my-api", "echo.yml", request);
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(secret_env("dev", "VENDOR_ID", "env-secret-value-77"));
+        let svc = service_with(Arc::clone(&repo), env_factory, RecordingPublisher::new());
+        (svc, repo)
+    }
+
+    fn echo_response(body: &str) -> ResponseChipInput {
+        use crate::assistant_chip_text::{ResponseChipHeader, ResponseChipTest};
+        ResponseChipInput {
+            method: "GET".into(),
+            url: "https://ghp_tokenvalue1234@api.test/echo".into(),
+            status: 302,
+            status_text: "Found".into(),
+            duration_ms: 12,
+            size_bytes: 40,
+            headers: vec![
+                ResponseChipHeader {
+                    key: "Location".into(),
+                    value: "https://app.test/cb#access_token=fragment-token-55&state=ok".into(),
+                },
+                ResponseChipHeader {
+                    key: "X-Echo-Key".into(),
+                    value: "echo-literal-key-1".into(),
+                },
+                ResponseChipHeader {
+                    key: "Content-Type".into(),
+                    value: "application/json".into(),
+                },
+            ],
+            body: body.into(),
+            is_binary: false,
+            tests: vec![ResponseChipTest {
+                name: "vendor".into(),
+                passed: false,
+                error: Some("expected env-secret-value-77".into()),
+            }],
+        }
+    }
+
+    #[test]
+    fn response_chip_masks_credentials_whatever_field_they_sit_in() {
+        use base64::Engine;
+        let (svc, _repo) = chip_service();
+        let basic = base64::engine::general_purpose::STANDARD.encode("alice:basic-pass-9999");
+        let body = format!(
+            r#"{{"echo":"echo-literal-key-1","vendor":"env-secret-value-77","auth":"Basic {basic}","plain":"keep-me"}}"#
+        );
+        let chip = svc
+            .mask_response_chip("my-api", "echo.yml", &echo_response(&body))
+            .expect("chip");
+
+        assert_eq!(chip.uri, "rocket://last-response/my-api/echo.yml");
+        for leaked in [
+            "echo-literal-key-1",
+            "env-secret-value-77",
+            &basic,
+            "fragment-token-55",
+            "ghp_tokenvalue1234",
+        ] {
+            assert!(!chip.text.contains(leaked), "{leaked} leaked: {}", chip.text);
+        }
+        assert!(chip.text.contains("keep-me"));
+        assert!(chip.text.contains("Status: 302 Found"));
+        assert!(chip.text.contains("state=ok"));
+        assert!(chip.text.contains("Content-Type: application/json"));
+        assert!(chip.text.contains("failed: vendor"));
+    }
+
+    #[test]
+    fn response_chip_text_is_capped_with_a_marker() {
+        let (svc, _repo) = chip_service();
+        let chip = svc
+            .mask_response_chip("my-api", "echo.yml", &echo_response(&"é".repeat(20_000)))
+            .expect("chip");
+        assert!(chip.text.len() <= crate::assistant_chip_text::CHIP_TEXT_LIMIT_BYTES);
+        assert!(chip.text.contains("[truncated:"));
+    }
+
+    #[test]
+    fn request_chip_uses_the_masked_view_and_the_last_pass() {
+        let (svc, repo) = chip_service();
+        let mut request = sample_request("Echo");
+        request.headers.push(Header::new("X-Key", "echo-literal-key-1"));
+        request.headers.push(Header::new("Ocp-Apim-Subscription-Key", "sub-key-abcdef"));
+        request.url = "https://tok-userinfo-12@api.test/p?sig=sig-value-1#access_token=frag-1".into();
+        request.pre_request_script =
+            Some("const v = 'env-secret-value-77';\n```\nnot a fence".into());
+        repo.with_request("my-api", "echo.yml", request);
+
+        let chip = svc
+            .build_chip_resource(ChipKind::Request, "my-api", Some("echo.yml"))
+            .expect("chip");
+
+        assert_eq!(chip.uri, "rocket://request/my-api/echo.yml");
+        for leaked in [
+            "echo-literal-key-1",
+            "sub-key-abcdef",
+            "tok-userinfo-12",
+            "sig-value-1",
+            "frag-1",
+            "env-secret-value-77",
+        ] {
+            assert!(!chip.text.contains(leaked), "{leaked} leaked: {}", chip.text);
+        }
+        assert!(chip.text.contains("Pre-request script:\n````javascript"));
+        assert!(chip.text.contains("Request: Echo"));
+    }
+
+    #[test]
+    fn environment_chip_names_secrets_without_values() {
+        let (svc, _repo) = chip_service();
+        let chip = svc
+            .build_chip_resource(ChipKind::Environment, "my-api", Some("dev"))
+            .expect("chip");
+        assert!(chip.text.contains("VENDOR_ID: (secret, value not shared)"));
+        assert!(!chip.text.contains("env-secret-value-77"));
+    }
+
+    #[test]
+    fn chips_refuse_a_collection_outside_the_workspace_and_bad_paths() {
+        let (svc, _repo) = chip_service();
+        assert!(matches!(
+            svc.build_chip_resource(ChipKind::Collection, "other-api", None),
+            Err(DomainError::NotFound(_))
+        ));
+        assert!(svc
+            .build_chip_resource(ChipKind::Request, "my-api", Some("../x.yml"))
+            .is_err());
+        assert!(svc
+            .mask_response_chip("other-api", "echo.yml", &echo_response(""))
+            .is_err());
     }
 }
