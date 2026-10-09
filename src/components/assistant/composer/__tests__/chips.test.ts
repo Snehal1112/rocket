@@ -36,6 +36,13 @@ describe('chips', () => {
     expect(chipKey(item(1))).not.toBe(chipKey({ ...item(1), kind: 'last-response' }));
   });
 
+  it('keeps two items apart even when a name holds a colon', () => {
+    const a: ReferenceItem = { kind: 'request', collection: 'a:b', path: 'c', label: 'x' };
+    const b: ReferenceItem = { kind: 'request', collection: 'a', path: 'b:c', label: 'x' };
+    expect(chipKey(a)).not.toBe(chipKey(b));
+    expect(addChip(addChip([], a).chips, b).outcome).toBe('added');
+  });
+
   it('removes a chip by key', () => {
     const chips = addChip(addChip([], item(1)).chips, item(2)).chips;
     expect(removeChip(chips, chipKey(item(1))).map((c) => c.item)).toEqual([item(2)]);

@@ -2545,6 +2545,45 @@ export interface PromptResourceDto {
   text: string;
 }
 
+/** The chip kinds whose text the backend builds from its masked views. */
+export type AssistantChipKind = 'request' | 'folder' | 'collection' | 'environment';
+
+/** The last response of a request tab, sent to the backend to be masked. */
+export interface AssistantResponseChip {
+  method: string;
+  url: string;
+  status: number;
+  statusText: string;
+  durationMs: number;
+  sizeBytes: number;
+  headers: { key: string; value: string }[];
+  body: string;
+  isBinary: boolean;
+  tests: { name: string; passed: boolean; error: string | null }[];
+}
+
+/**
+ * The masked, size-capped text resource of a request, folder, collection or environment
+ * chip. `path` is the request or folder path, or the environment name.
+ */
+export const buildAssistantChipResource = (
+  kind: AssistantChipKind,
+  collection: string,
+  path?: string,
+) =>
+  invoke<PromptResourceDto>('build_assistant_chip_resource', {
+    kind,
+    collection,
+    path: path ?? null,
+  });
+
+/** Masks the last response of a request tab and returns it as a text resource. */
+export const maskAssistantResponse = (
+  collection: string,
+  requestPath: string,
+  response: AssistantResponseChip,
+) => invoke<PromptResourceDto>('mask_assistant_response', { collection, requestPath, response });
+
 /** Resolves with the stop reason. A stopped turn resolves with `cancelled`. */
 export const sendAgentPrompt = (
   sessionId: string,

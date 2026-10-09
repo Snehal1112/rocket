@@ -20,14 +20,19 @@ const environmentsOf = (results: UseQueryResult<Environment[]>[]) =>
  * Every collection, folder, HTTP request and environment of the workspace, for the
  * `#` list. Trees load with the same lightweight summaries call as the sidebar, and
  * environments share the `useEnvironments` cache key.
+ *
+ * Nothing invalidates a tree when a request is added, so trees are always stale and load
+ * again each time `active` turns true. Pass the picker's open state as `active`.
  */
-export function useReferenceItems(): ReferenceItem[] {
+export function useReferenceItems(active = true): ReferenceItem[] {
   const { data: collections } = useCollections();
   const names = useMemo(() => (collections ?? []).map((c) => c.name), [collections]);
   const trees = useQueries({
     queries: names.map((name) => ({
       queryKey: ['assistant', 'reference-tree', name],
       queryFn: () => getCollectionSummaries(name),
+      enabled: active,
+      staleTime: 0,
     })),
     combine: treesOf,
   });

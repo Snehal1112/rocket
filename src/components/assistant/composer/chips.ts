@@ -14,7 +14,8 @@ export type AddChipOutcome = 'added' | 'duplicate' | 'limit';
 
 /** Identifies what a chip points at, so the same item is not added twice. */
 export function chipKey(item: ReferenceItem): string {
-  return `${item.kind}:${item.collection}:${item.path ?? ''}`;
+  // A JSON tuple, so a name that holds a colon cannot make two items share a key.
+  return JSON.stringify([item.kind, item.collection, item.path ?? '']);
 }
 
 /** Adds a chip unless it is already there or the message is full. */

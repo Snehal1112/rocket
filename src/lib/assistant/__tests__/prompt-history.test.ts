@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendPromptHistory,
+  clearPromptHistory,
   loadPromptHistory,
+  PROMPT_HISTORY_ENTRY_MAX,
   PROMPT_HISTORY_LIMIT,
   savePromptHistory,
 } from '@/lib/assistant/prompt-history';
@@ -30,6 +32,38 @@ describe('appendPromptHistory', () => {
     expect(next).toHaveLength(PROMPT_HISTORY_LIMIT);
     expect(next[0]).toBe('p1');
     expect(next[next.length - 1]).toBe('new');
+  });
+});
+
+describe('entry size', () => {
+  it('cuts a long prompt when it is appended', () => {
+    const next = appendPromptHistory([], 'x'.repeat(PROMPT_HISTORY_ENTRY_MAX + 500));
+    expect(next[0]).toHaveLength(PROMPT_HISTORY_ENTRY_MAX);
+  });
+
+  it('cuts a long stored entry when it is loaded', () => {
+    localStorage.setItem(
+      'rocket-api:assistant-prompt-history:w1',
+      JSON.stringify(['y'.repeat(PROMPT_HISTORY_ENTRY_MAX + 10)]),
+    );
+    expect(loadPromptHistory('w1')[0]).toHaveLength(PROMPT_HISTORY_ENTRY_MAX);
+  });
+});
+
+describe('clearPromptHistory', () => {
+  it('forgets one workspace only', () => {
+    savePromptHistory('w1', ['one']);
+    savePromptHistory('w2', ['two']);
+    clearPromptHistory('w1');
+    expect(loadPromptHistory('w1')).toEqual([]);
+    expect(loadPromptHistory('w2')).toEqual(['two']);
+  });
+
+  it('survives storage that throws', () => {
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    expect(() => clearPromptHistory('w1')).not.toThrow();
   });
 });
 
