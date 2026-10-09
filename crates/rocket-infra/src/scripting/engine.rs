@@ -245,6 +245,7 @@ extension!(
         // host ops
         host::op_rok_send_request,
         host::op_rok_sleep,
+        host::op_rok_run_request,
         // req read ops
         req::op_req_get_url,
         req::op_req_get_host,
@@ -1214,6 +1215,207 @@ mod tests {
         };
         assert_eq!(content_types(0), vec!["application/json".to_string()]);
         assert_eq!(content_types(1), vec!["application/vnd.api+json".to_string()]);
+    }
+
+    // ── runRequest ───────────────────────────────────────────────────────────
+
+    use rocket_scripting::{HostRunOutcome, HostRunRequest, HostScopes};
+
+    /// Host that answers `rok.runRequest` with a fixed outcome and records the calls.
+    struct RunHost {
+        seen: StdMutex<Vec<HostRunRequest>>,
+        answer: Result<HostRunOutcome, HostError>,
+    }
+
+    impl RunHost {
+        fn answering(answer: Result<HostRunOutcome, HostError>) -> Self {
+            Self {
+                seen: StdMutex::new(Vec::new()),
+                answer,
+            }
+        }
+
+        fn seen(&self) -> Vec<HostRunRequest> {
+            self.seen.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl ScriptHost for RunHost {
+        async fn run_request(&self, request: HostRunRequest) -> Result<HostRunOutcome, HostError> {
+            self.seen.lock().expect("lock").push(request);
+            self.answer.clone()
+        }
+    }
+
+    fn ran(status: u16, body: &str) -> HostRunOutcome {
+        HostRunOutcome {
+            response: Some(HostResponse {
+                status,
+                status_text: "OK".into(),
+                headers: vec![],
+                body: body.into(),
+                response_time_ms: 5,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn map(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn run_request_resolves_with_the_response_and_logs_it() {
+        let host = RunHost::answering(Ok(ran(200, "{\"ok\":true}")));
+        let ctx = minimal_ctx(
+            "const r = await rok.runRequest('auth/login'); rok.setVar('s', r.status + '|' + r.data.ok)",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.runtime_vars.get("s").expect("s present"), "200|true");
+        assert_eq!(host.seen()[0].path, "auth/login");
+        assert!(result
+            .console_entries
+            .iter()
+            .any(|c| c.message == "rok.runRequest auth/login -> 200"));
+    }
+
+    #[tokio::test]
+    async fn run_request_passes_the_callers_runtime_vars() {
+        let host = RunHost::answering(Ok(ran(200, "{}")));
+        let mut ctx = minimal_ctx("rok.setVar('b', 2); rok.deleteVar('a'); await rok.runRequest('x')");
+        ctx.variables.runtime = map(&[("a", "1"), ("keep", "k")]);
+        DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(host.seen()[0].runtime_vars, map(&[("keep", "k"), ("b", "2")]));
+    }
+
+    #[tokio::test]
+    async fn run_request_merges_the_nested_writes() {
+        let nested_secret = "sk-live-nested1";
+        let outcome = HostRunOutcome {
+            runtime_set: map(&[("token", "t1")]),
+            runtime_removed: vec!["gone".into()],
+            scopes: Some(HostScopes {
+                env: map(&[("E", "new"), ("F", "same")]),
+                global_env: map(&[]),
+                collection: map(&[("C", "c2")]),
+                secret_values: vec![nested_secret.into()],
+            }),
+            ..ran(200, "{}")
+        };
+        let host = RunHost::answering(Ok(outcome));
+        let mut ctx = minimal_ctx(&format!(
+            "rok.setVar('token', 'old'); rok.setEnvVar('E', 'mine'); rok.setEnvVar('F', 'mine-too'); \
+             await rok.runRequest('x'); \
+             rok.setVar('seen', [rok.getVar('token'), rok.getEnvVar('E'), rok.getEnvVar('F'), \
+               rok.getCollectionVar('C'), rok.hasVar('gone')].join('|')); \
+             console.log('{nested_secret}');"
+        ));
+        ctx.variables.runtime = map(&[("gone", "x")]);
+        ctx.variables.env = map(&[("E", "old"), ("F", "same")]);
+        ctx.variables.collection = map(&[("C", "c1")]);
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("seen").expect("seen present"),
+            "t1|new|mine-too|c2|false"
+        );
+        assert_eq!(result.runtime_vars.get("token").expect("token present"), "t1");
+        assert!(result.runtime_var_deletes.contains(&"gone".to_string()));
+        let env_keys: Vec<_> = result.env_var_writes.iter().map(|w| w.key.clone()).collect();
+        assert_eq!(env_keys, vec!["F".to_string()], "the nested run's E wins");
+        assert!(result
+            .console_entries
+            .iter()
+            .all(|c| !c.message.contains(nested_secret)));
+    }
+
+    #[tokio::test]
+    async fn run_request_skipped_item_resolves_status_skipped() {
+        let host = RunHost::answering(Ok(HostRunOutcome::default()));
+        let ctx = minimal_ctx("const r = await rok.runRequest('ws'); rok.setVar('s', r.status)");
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("s").expect("s present"), "skipped");
+        assert!(result
+            .console_entries
+            .iter()
+            .any(|c| c.message == "rok.runRequest ws -> skipped"));
+    }
+
+    #[tokio::test]
+    async fn run_request_failure_rejects_with_the_host_message() {
+        let host = RunHost::answering(Err(HostError::Failed(
+            "rok.runRequest: invalid request path - nope".into(),
+        )));
+        let ctx = minimal_ctx(
+            "try { await rok.runRequest('nope'); } catch (e) { rok.setVar('e', e.message); }",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("e").expect("e present"),
+            "rok.runRequest: invalid request path - nope"
+        );
+        assert!(result
+            .console_entries
+            .iter()
+            .any(|c| c.level == rocket_scripting::ConsoleLevel::Error));
+    }
+
+    #[tokio::test]
+    async fn run_request_without_a_host_rejects_as_not_available() {
+        let code = "try { await rok.runRequest('x'); } catch (e) { rok.setVar('e', e.message); }";
+        let without = DenoScriptEngine::new()
+            .execute(minimal_ctx(code))
+            .await
+            .expect("execute");
+        let bare = DenoScriptEngine::new()
+            .execute_with_host(minimal_ctx(code), &BareHost)
+            .await
+            .expect("execute");
+        for result in [without, bare] {
+            assert_eq!(
+                result.runtime_vars.get("e").expect("e present"),
+                "rok.runRequest is not available here"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn run_request_rejects_an_empty_path_before_the_host() {
+        let host = RunHost::answering(Ok(ran(200, "{}")));
+        let ctx = minimal_ctx(
+            "try { await rok.runRequest('  '); } \
+             catch (e) { rok.setVar('t', e instanceof TypeError); rok.setVar('m', e.message); }",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("t").expect("t present"), true);
+        assert_eq!(
+            result.runtime_vars.get("m").expect("m present"),
+            "rok.runRequest: path must be a non-empty string"
+        );
+        assert!(host.seen().is_empty());
     }
 
     // ── sleep and async tests ────────────────────────────────────────────────

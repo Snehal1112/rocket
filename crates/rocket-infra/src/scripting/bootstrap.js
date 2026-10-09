@@ -173,6 +173,19 @@
     sleep: (ms) => ((typeof ms !== 'number' || Number.isNaN(ms))
       ? Promise.reject(new TypeError('rok.sleep: ms must be a number'))
       : __ops.op_rok_sleep(ms)),
+    runRequest: async (path) => {
+      if (typeof path !== 'string' || path.trim() === '') {
+        throw new TypeError('rok.runRequest: path must be a non-empty string');
+      }
+      const out = JSON.parse(await __ops.op_rok_run_request(path));
+      // Reads after this call see the nested run's values, not this script's older writes.
+      for (const k of out.changed.runtime) _ov.runtime.delete(k);
+      for (const k of out.changed.env) _ov.env.delete(k);
+      for (const k of out.changed.global) _ov.global.delete(k);
+      for (const k of out.changed.collection) _ov.collection.delete(k);
+      if (out.response === null) return { status: 'skipped' };
+      return _hostResponse(out.response);
+    },
     runner: {
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),

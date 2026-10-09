@@ -539,6 +539,8 @@ declare const rok: {
   sendRequest(options: RokSendRequestOptions, callback: (err: Error | null, res: RokResponse | null) => unknown): Promise<unknown>;
   /** Wait ms milliseconds, clamped to 0..60000. Use with await. */
   sleep(ms: number): Promise<void>;
+  /** Run a saved request with its scripts, auth and variables. The path is relative to the collection root, without extension, e.g. "auth/login". Other protocols resolve to { status: "skipped" }. */
+  runRequest(path: string): Promise<RokResponse | { status: 'skipped' }>;
   /**
    * Controls the Collection Runner's sequencing (see
    * docs/superpowers/specs/2026-09-16-collection-runner-design.md). Only

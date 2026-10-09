@@ -4,7 +4,9 @@
 //! ops never touch the host. They send a `HostCall` with a oneshot reply, and
 //! `run_script_bounded` in `engine.rs` serves it on the caller's task.
 
-use rocket_scripting::{HostError, HostRequest, HostResponse, ScriptHost};
+use rocket_scripting::{
+    HostError, HostRequest, HostResponse, HostRunOutcome, HostRunRequest, ScriptHost,
+};
 use tokio::sync::{mpsc, oneshot};
 
 /// One call from a script to the host.
@@ -13,6 +15,11 @@ pub enum HostCall {
     Send {
         request: HostRequest,
         reply: oneshot::Sender<Result<HostResponse, HostError>>,
+    },
+    /// `rok.runRequest`.
+    Run {
+        request: HostRunRequest,
+        reply: oneshot::Sender<Result<HostRunOutcome, HostError>>,
     },
 }
 
@@ -24,6 +31,9 @@ pub async fn serve_host_call(host: &dyn ScriptHost, call: HostCall) {
     match call {
         HostCall::Send { request, reply } => {
             let _ = reply.send(host.send_request(request).await);
+        }
+        HostCall::Run { request, reply } => {
+            let _ = reply.send(host.run_request(request).await);
         }
     }
 }

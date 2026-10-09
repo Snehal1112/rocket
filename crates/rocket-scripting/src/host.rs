@@ -3,6 +3,8 @@
 //! `rocket-infra` runs the script and forwards each call to a `ScriptHost`.
 //! `rocket-app` implements it. The types are plain data, so this crate does no I/O.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +45,38 @@ pub enum HostError {
     Failed(String),
 }
 
+/// A `rok.runRequest` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostRunRequest {
+    /// Path relative to the collection root, without extension, as the script wrote it.
+    pub path: String,
+    /// The calling script's runtime variables, its own writes so far included.
+    pub runtime_vars: HashMap<String, String>,
+}
+
+/// Variable scopes as stored after a nested run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HostScopes {
+    pub env: HashMap<String, String>,
+    pub global_env: HashMap<String, String>,
+    pub collection: HashMap<String, String>,
+    /// Secret values of those scopes, added to the caller's redaction list.
+    pub secret_values: Vec<String>,
+}
+
+/// The outcome of a `rok.runRequest` call.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HostRunOutcome {
+    /// The response, or `None` when the item is not an HTTP request and was skipped.
+    pub response: Option<HostResponse>,
+    /// Runtime variables the nested run set or changed.
+    pub runtime_set: HashMap<String, String>,
+    /// Runtime variables the nested run removed.
+    pub runtime_removed: Vec<String>,
+    /// The scopes after the nested run, or `None` when nothing ran.
+    pub scopes: Option<HostScopes>,
+}
+
 /// Calls a script makes that need the application, such as network requests.
 ///
 /// Every method has a default that reports `Unavailable`, so a host implements
@@ -51,6 +85,11 @@ pub enum HostError {
 pub trait ScriptHost: Send + Sync {
     /// Sends one HTTP request for `rok.sendRequest`.
     async fn send_request(&self, _request: HostRequest) -> Result<HostResponse, HostError> {
+        Err(HostError::Unavailable)
+    }
+
+    /// Runs a saved request through the full pipeline for `rok.runRequest`.
+    async fn run_request(&self, _request: HostRunRequest) -> Result<HostRunOutcome, HostError> {
         Err(HostError::Unavailable)
     }
 }
