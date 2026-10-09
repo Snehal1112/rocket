@@ -1077,6 +1077,145 @@ mod tests {
         assert_eq!(host.sent().len(), 2);
     }
 
+    #[tokio::test]
+    async fn send_request_callback_gets_null_and_the_response() {
+        let host = FakeHost::ok(201, "{}");
+        let ctx = minimal_ctx(
+            "await rok.sendRequest({ url: 'https://x.test' }, (err, res) => { \
+               rok.setVar('cb', String(err) + '|' + res.status); })",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("cb").expect("cb present"), "null|201");
+    }
+
+    #[tokio::test]
+    async fn send_request_callback_gets_the_error_and_null() {
+        let host = FakeHost::failing("rok.sendRequest: refused");
+        let ctx = minimal_ctx(
+            "await rok.sendRequest({ url: 'https://x.test' }, (err, res) => { \
+               rok.setVar('cb', err.message + '|' + String(res)); })",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("cb").expect("cb present"),
+            "rok.sendRequest: refused|null"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_request_unawaited_callback_still_runs() {
+        let host = FakeHost::ok(201, "{}");
+        let ctx = minimal_ctx(
+            "rok.sendRequest({ url: 'https://x.test' }, (err, res) => rok.setVar('late', res.status));",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("late").expect("late present"), 201);
+    }
+
+    #[tokio::test]
+    async fn send_request_rejects_an_https_agent() {
+        let host = FakeHost::ok(200, "{}");
+        let ctx = minimal_ctx(
+            "try { await rok.sendRequest({ url: 'https://x.test', httpsAgent: {} }); } \
+             catch (e) { rok.setVar('e', e.message); }",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("e").expect("e present"),
+            "rok.sendRequest: httpsAgent is not supported"
+        );
+        assert!(host.sent().is_empty());
+    }
+
+    #[tokio::test]
+    async fn send_request_adds_a_console_entry() {
+        let host = FakeHost::ok(201, "{}");
+        let ctx = minimal_ctx("await rok.sendRequest({ url: 'https://x.test/a' })");
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(
+            result
+                .console_entries
+                .iter()
+                .any(|c| c.message == "rok.sendRequest GET https://x.test/a -> 201 (7 ms)"),
+            "{:?}",
+            result.console_entries
+        );
+    }
+
+    #[tokio::test]
+    async fn send_request_masks_secrets_in_errors_and_console_lines() {
+        let secret = "sk-live-abcdef123";
+        let host = FakeHost::failing(&format!(
+            "rok.sendRequest: error sending request for url (https://x.test/?k={secret})"
+        ));
+        let mut ctx = minimal_ctx(&format!(
+            "try {{ await rok.sendRequest({{ url: 'https://x.test/?k={secret}' }}); }} \
+             catch (e) {{ rok.setVar('e', e.message); }}"
+        ));
+        ctx.variables.secret_values.insert(secret.to_string());
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        let message = result
+            .runtime_vars
+            .get("e")
+            .and_then(|v| v.as_str())
+            .expect("e is a string")
+            .to_string();
+        assert!(!message.contains(secret), "{message}");
+        assert!(message.contains("••••••"), "{message}");
+        assert!(result
+            .console_entries
+            .iter()
+            .all(|c| !c.message.contains(secret)));
+        assert!(result
+            .console_entries
+            .iter()
+            .any(|c| c.level == rocket_scripting::ConsoleLevel::Error));
+    }
+
+    #[tokio::test]
+    async fn send_request_json_data_sets_the_content_type_once() {
+        let host = FakeHost::ok(200, "{}");
+        let ctx = minimal_ctx(
+            "await rok.sendRequest({ url: 'https://x.test/1', data: { a: 1 } }); \
+             await rok.sendRequest({ url: 'https://x.test/2', data: { a: 1 }, \
+               headers: { 'content-type': 'application/vnd.api+json' } });",
+        );
+        DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        let sent = host.sent();
+        let content_types = |i: usize| -> Vec<String> {
+            sent[i]
+                .headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                .map(|(_, v)| v.clone())
+                .collect()
+        };
+        assert_eq!(content_types(0), vec!["application/json".to_string()]);
+        assert_eq!(content_types(1), vec!["application/vnd.api+json".to_string()]);
+    }
+
     // ── sleep and async tests ────────────────────────────────────────────────
 
     #[tokio::test]

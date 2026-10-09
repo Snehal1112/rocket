@@ -80,6 +80,9 @@
         bodyIsJson = true;
       }
     }
+    if (bodyIsJson && !headers.some(([k]) => k.toLowerCase() === 'content-type')) {
+      headers.push(['Content-Type', 'application/json']);
+    }
     const timeout = typeof options.timeout === 'number' && options.timeout > 0
       ? Math.min(Math.floor(options.timeout), 300000)
       : 30000;
@@ -157,7 +160,16 @@
     getRequestVar:       (key) => __ops.op_rok_get_request_var(key),
     getProcessEnv:       (key) => (__ops.op_rok_has_process_env(key) ? __ops.op_rok_get_process_env(key) : undefined),
     setNextRequest:      (name) => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
-    sendRequest: async (options) => _hostResponse(JSON.parse(await __ops.op_rok_send_request(_sendOptions(options)))),
+    sendRequest: (options, callback) => {
+      const sent = (async () => {
+        if (options && typeof options === 'object' && options.httpsAgent !== undefined) {
+          throw new Error('rok.sendRequest: httpsAgent is not supported');
+        }
+        return _hostResponse(JSON.parse(await __ops.op_rok_send_request(_sendOptions(options))));
+      })();
+      if (typeof callback !== 'function') return sent;
+      return sent.then((res) => callback(null, res), (err) => callback(err, null));
+    },
     sleep: (ms) => ((typeof ms !== 'number' || Number.isNaN(ms))
       ? Promise.reject(new TypeError('rok.sleep: ms must be a number'))
       : __ops.op_rok_sleep(ms)),

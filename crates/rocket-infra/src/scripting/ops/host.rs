@@ -5,12 +5,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use deno_core::{op2, OpState};
-use rocket_scripting::{HostError, HostRequest};
+use rocket_scripting::{ConsoleLevel, HostError, HostRequest};
 use tokio::sync::oneshot;
 
 use crate::scripting::budget::ScriptLimits;
 use crate::scripting::host_bridge::{HostCall, HostChannel};
 use crate::scripting::ops::{redact, ScriptHostError};
+use crate::scripting::state::ScriptOutputState;
 
 /// The error for a call that has no host, or whose host went away.
 pub(crate) fn unavailable(api: &str) -> ScriptHostError {
@@ -40,8 +41,9 @@ pub(crate) fn host_error(state: &OpState, api: &str, error: HostError) -> Script
     ScriptHostError(redact(state, message))
 }
 
-/// rok.sendRequest(options) — sends one HTTP request through the host.
-/// Takes a `HostRequest` and returns a `HostResponse`, both as JSON.
+/// rok.sendRequest(options) — sends one HTTP request through the host and adds
+/// a Console line for it. Takes a `HostRequest` and returns a `HostResponse`,
+/// both as JSON. Secret values are masked in the line and in the error.
 #[op2]
 #[string]
 pub async fn op_rok_send_request(
@@ -51,14 +53,33 @@ pub async fn op_rok_send_request(
     const API: &str = "rok.sendRequest";
     let request: HostRequest = serde_json::from_str(&request_json)
         .map_err(|e| ScriptHostError(format!("{API}: invalid options - {e}")))?;
+    let label = format!("{API} {} {}", request.method, request.url);
     let (reply, answer) = oneshot::channel();
     send_host_call(&state, HostCall::Send { request, reply }, API)?;
     let outcome = answer.await.unwrap_or(Err(HostError::Unavailable));
-    let state = state.borrow();
+    let mut state = state.borrow_mut();
     match outcome {
-        Ok(response) => serde_json::to_string(&response)
-            .map_err(|e| ScriptHostError(format!("{API}: {e}"))),
-        Err(error) => Err(host_error(&state, API, error)),
+        Ok(response) => {
+            let line = redact(
+                &state,
+                format!(
+                    "{label} -> {} ({} ms)",
+                    response.status, response.response_time_ms
+                ),
+            );
+            state
+                .borrow_mut::<ScriptOutputState>()
+                .add_console(ConsoleLevel::Log, line);
+            serde_json::to_string(&response).map_err(|e| ScriptHostError(format!("{API}: {e}")))
+        }
+        Err(error) => {
+            let error = host_error(&state, API, error);
+            let line = redact(&state, format!("{label} failed: {}", error.0));
+            state
+                .borrow_mut::<ScriptOutputState>()
+                .add_console(ConsoleLevel::Error, line);
+            Err(error)
+        }
     }
 }
 

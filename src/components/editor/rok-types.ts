@@ -449,6 +449,8 @@ interface RokSendRequestOptions {
   data?: unknown;
   /** Time limit in milliseconds. Defaults to 30000. */
   timeout?: number;
+  /** Not supported. Passing it rejects the call. */
+  httpsAgent?: never;
 }
 interface RokResponse {
   status: number;
@@ -531,8 +533,10 @@ declare const rok: {
   getProcessEnv(key: string): string | undefined;
   /** Same as rok.runner.setNextRequest. Pass null to stop the run. */
   setNextRequest(name: string | null): void;
-  /** Send an HTTP request from the script. Variables in the options are not resolved; use rok.interpolate. */
+  /** Send an HTTP request from the script. Variables in the options are not resolved; use rok.interpolate. 4xx and 5xx responses resolve; network errors reject. */
   sendRequest(options: RokSendRequestOptions): Promise<RokResponse>;
+  /** Callback form: the callback gets (null, response) or (error, null), and the promise resolves to what it returns. */
+  sendRequest(options: RokSendRequestOptions, callback: (err: Error | null, res: RokResponse | null) => unknown): Promise<unknown>;
   /** Wait ms milliseconds, clamped to 0..60000. Use with await. */
   sleep(ms: number): Promise<void>;
   /**
