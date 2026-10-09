@@ -150,8 +150,9 @@ impl AcpSessionService {
     /// session id exists yet. On success, `AcpSessionStarted` is published
     /// and the session info is returned.
     ///
-    /// The session is not tracked yet. The caller registers its resources
-    /// and then calls `track`, so a sweep cannot run between the two.
+    /// The session is not tracked yet. The command layer is the only caller,
+    /// and it must register the session's resources and then call `track`,
+    /// so a sweep cannot run between the two.
     ///
     /// `isolation`, when present, starts the agent isolated: its `_meta`
     /// comes from `SessionIsolation::meta`, and `CLAUDE_CONFIG_DIR` points at
@@ -434,6 +435,14 @@ impl AcpSessionService {
             error: message.clone(),
         });
         DomainError::Internal(message)
+    }
+
+    /// Kills the agent of a session that `track` refused, and runs its
+    /// cleanup once. For an id that was never tracked. No event is published.
+    pub async fn end_untracked(&self, session_id: &str) -> DomainResult<()> {
+        let result = self.session_client.end_session(session_id).await;
+        self.cleanup.on_session_ended(session_id);
+        result
     }
 
     /// Ends the session and kills its agent process, then releases its
@@ -1934,5 +1943,31 @@ mod tests {
         assert!(!service.track(&info.session_id));
         assert_eq!(service.end_tracked_sessions().await, 0);
         assert!(cleanup.ended().is_empty());
+    }
+
+    #[tokio::test]
+    async fn end_untracked_kills_the_agent_and_runs_cleanup_once() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+        let info = service
+            .start_session("agent-1", "/tmp", "demo", None, None)
+            .await
+            .expect("start_session should succeed");
+        service.end_all_sessions().await.expect("end_all_sessions");
+        assert!(!service.track(&info.session_id));
+        end_session_called.store(false, Ordering::SeqCst);
+
+        service
+            .end_untracked(&info.session_id)
+            .await
+            .expect("end_untracked should succeed");
+
+        assert!(end_session_called.load(Ordering::SeqCst));
+        assert_eq!(cleanup.ended(), vec!["session-1".to_string()]);
     }
 }

@@ -135,10 +135,8 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
             // are not registered yet.
             if !svc.track(&info.session_id) {
                 // The app is shutting down. Nothing tracks this session, so
-                // release its resources here and kill its agent.
-                registry.end_session(&info.session_id);
-                drop(resources.take(&info.session_id));
-                let _ = svc.end_session(&info.session_id).await;
+                // kill its agent and run its cleanup here.
+                let _ = svc.end_untracked(&info.session_id).await;
                 return Err(DomainError::Internal(
                     "the app is shutting down".to_string(),
                 ));
