@@ -76,3 +76,15 @@ Async op. Values are clamped to 0 to 60000. Non-numbers reject.
 ## Required reading for implementation
 
 📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also `.claude/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md`.
+
+## Implementation notes (2026-10-08)
+
+The plans in `docs/superpowers/plans/rok-parity-b/` corrected these points after reading the code. The full rulings are in `00-plan-index.md`.
+
+- The script thread was a `spawn_blocking` thread on the caller's runtime with no event loop. It now builds its own current-thread Tokio runtime, because deno_core needs one for async ops.
+- No Tokio `Handle` crosses to the script thread. Host calls travel over a channel to the task that called the engine, which serves them with a borrowed `&dyn ScriptHost`.
+- No `Arc`/`Weak` handle was needed: `ExecutionScriptHost<'a>` borrows `RequestExecutionService`, and nested runs reuse the same stateless engine.
+- The budget counts busy time (time running code) rather than subtracting await time, so an unawaited request cannot hide a busy loop. The watchdog stops a waiting run with an abort flag and running code with `terminate_execution`.
+- Wrapping scripts as async functions makes top-level `var` and function declarations local, runs promise callbacks that used to be dropped, and turns an unhandled rejection into the script error. Error text keeps its `Uncaught` prefix.
+- `test()` awaits async bodies. 4xx and 5xx responses resolve. `runRequest` paths are request file paths relative to the collection root, without extension. GraphQL items run; WebSocket and gRPC items are skipped.
+- Known limits: env, collection and global writes a script makes before `runRequest` are not visible to the nested run, and later phases of the outer request do not see env values the nested run wrote (as with `setEnvVar` today).

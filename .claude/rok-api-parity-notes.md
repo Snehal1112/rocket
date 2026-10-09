@@ -9,7 +9,7 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 | Part | Scope | Status |
 |---|---|---|
 | A | Sync, state-only gaps | Spec and plans committed: `docs/superpowers/plans/rok-parity-a/` (index plus 2 plans). Implemented on branch worktree-rok-parity-a (plans 01 and 02, final review fixed). Follow-ups: OAuth2 credential APIs, per-folder `__dirname`, collection read-all op for the overlay, optional Developer gate for `getProcessEnv` (currently ungated in Safe mode), getSize after setBody, spec wording (null writes, empty-string misses). |
-| B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`. No plan yet. |
+| B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Implemented from `docs/superpowers/plans/rok-parity-b/` (index plus 5 plans). Follow-ups: History badge for script requests, scanner flags for `sendRequest`/`runRequest`, nested runs seeing the caller's unsaved env writes, refreshing `PhaseState.var_ctx.env` after env writes. |
 | C | Cookies: `rok.cookies.*`, `jar()` | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Depends on B's `ScriptHost`. No plan yet. |
 | D | `runner.iterationData`, `iterationIndex`, `totalIterations` | Deferred. Needs a runner CSV/JSON data-file feature first. |
 | E | `rok.grpc.*` | Deferred. Needs the gRPC protocol-parity plans merged. |
@@ -26,9 +26,10 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 
 ## Notes for B
 
-- The engine runs one synchronous script per dedicated thread, snapshot in, writes out. Async APIs need a bridge from the V8 thread back to `HttpExecutor` on the Tokio runtime, plus timeout handling (`SCRIPT_TIMEOUT` in `engine.rs`).
-- `runRequest` must avoid recursion from collection-level pre-request scripts.
-- `sendRequest` should reuse the TLS, proxy and client-certificate settings.
+- Engine model: scripts run as `(async function () { ... }).call(globalThis)` on a per-script current-thread Tokio runtime inside `spawn_blocking`. Host calls go over a channel to `run_script_bounded`, which serves them with the borrowed `&dyn ScriptHost`.
+- Budget: `ScriptLimits` (5 s busy time, 5 min ceiling, 60 s sleep cap) in `crates/rocket-infra/src/scripting/budget.rs`. `DenoScriptEngine::with_limits` injects short limits for tests.
+- `ScriptHost` (`crates/rocket-scripting/src/host.rs`) has defaulted methods, so part C adds cookie methods the same way `run_request` was added.
+- `ExecutionScriptHost` (`crates/rocket-app/src/execution_service/script_host.rs`) borrows the service. `runRequest` lookup and the recursion guard are in `execution_service/run_request.rs`.
 
 ## Notes for C
 
