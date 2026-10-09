@@ -533,6 +533,8 @@ declare const rok: {
   setNextRequest(name: string | null): void;
   /** Send an HTTP request from the script. Variables in the options are not resolved; use rok.interpolate. */
   sendRequest(options: RokSendRequestOptions): Promise<RokResponse>;
+  /** Wait ms milliseconds, clamped to 0..60000. Use with await. */
+  sleep(ms: number): Promise<void>;
   /**
    * Controls the Collection Runner's sequencing (see
    * docs/superpowers/specs/2026-09-16-collection-runner-design.md). Only
@@ -689,7 +691,7 @@ const TEST_DEFS = `
 ${CHAI_TYPE_DEFS}
 
 /** Register a named assertion block. Each block runs independently. */
-declare function test(name: string, fn: () => void): void;
+declare function test(name: string, fn: () => void | Promise<void>): void;
 
 /** Full Chai expect — chain assertions with .to.equal(), .to.have.property(), .to.match(), etc. */
 declare const expect: Chai.ExpectStatic;

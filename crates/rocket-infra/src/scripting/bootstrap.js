@@ -158,6 +158,9 @@
     getProcessEnv:       (key) => (__ops.op_rok_has_process_env(key) ? __ops.op_rok_get_process_env(key) : undefined),
     setNextRequest:      (name) => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
     sendRequest: async (options) => _hostResponse(JSON.parse(await __ops.op_rok_send_request(_sendOptions(options)))),
+    sleep: (ms) => ((typeof ms !== 'number' || Number.isNaN(ms))
+      ? Promise.reject(new TypeError('rok.sleep: ms must be a number'))
+      : __ops.op_rok_sleep(ms)),
     runner: {
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),
@@ -572,14 +575,24 @@
     return assertion;
   };
 
+  // An async body is recorded when its promise settles. The event loop keeps
+  // running until then, even when the script does not await the test.
   globalThis.test = function(name, fn) {
     __ops.op_test_run(name);
+    let out;
     try {
-      fn();
-      __ops.op_test_pass(name);
+      out = fn();
     } catch (e) {
       __ops.op_test_fail(name, String(e));
+      return;
     }
+    if (out && typeof out.then === 'function') {
+      return Promise.resolve(out).then(
+        () => { __ops.op_test_pass(name); },
+        (e) => { __ops.op_test_fail(name, String(e)); },
+      );
+    }
+    __ops.op_test_pass(name);
   };
 
   // rok.test / rok.expect aliases so both calling styles work.

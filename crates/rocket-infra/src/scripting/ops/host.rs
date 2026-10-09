@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use deno_core::{op2, OpState};
 use rocket_scripting::{HostError, HostRequest};
@@ -58,4 +59,15 @@ pub async fn op_rok_send_request(
             .map_err(|e| ScriptHostError(format!("{API}: {e}"))),
         Err(error) => Err(host_error(&state, API, error)),
     }
+}
+
+/// Longest single `rok.sleep`, in milliseconds.
+pub(crate) const MAX_SLEEP_MS: f64 = 60_000.0;
+
+/// rok.sleep(ms) — waits without blocking the event loop. The value is
+/// clamped to 0..=60000. The JS wrapper rejects non-numbers first.
+#[op2]
+pub async fn op_rok_sleep(ms: f64) {
+    let ms = if ms.is_nan() { 0.0 } else { ms.clamp(0.0, MAX_SLEEP_MS) };
+    tokio::time::sleep(Duration::from_millis(ms as u64)).await;
 }

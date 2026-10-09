@@ -232,6 +232,7 @@ extension!(
         rok::op_rok_get_process_env,
         // host ops
         host::op_rok_send_request,
+        host::op_rok_sleep,
         // req read ops
         req::op_req_get_url,
         req::op_req_get_host,
@@ -1020,6 +1021,73 @@ mod tests {
             .expect("execute");
         assert_eq!(result.runtime_vars.get("both").expect("both present"), 400);
         assert_eq!(host.sent().len(), 2);
+    }
+
+    // ── sleep and async tests ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sleep_waits_and_resolves() {
+        let ctx = minimal_ctx(
+            "const t = Date.now(); await rok.sleep(50); rok.setVar('waited', Date.now() - t >= 45)",
+        );
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.runtime_vars.get("waited").expect("waited present"), true);
+    }
+
+    #[tokio::test]
+    async fn sleep_clamps_a_negative_value_to_zero() {
+        let ctx = minimal_ctx("await rok.sleep(-100); rok.setVar('ok', true)");
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("ok").expect("ok present"), true);
+    }
+
+    #[tokio::test]
+    async fn sleep_rejects_non_numbers() {
+        let ctx = minimal_ctx(
+            "let n = 0; \
+             for (const v of ['5', NaN, undefined, null]) { \
+               try { await rok.sleep(v); } \
+               catch (e) { if (e instanceof TypeError && e.message === 'rok.sleep: ms must be a number') n++; } \
+             } \
+             rok.setVar('n', n)",
+        );
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("n").expect("n present"), 4);
+    }
+
+    #[tokio::test]
+    async fn async_test_bodies_are_recorded_when_they_settle() {
+        let ctx = minimal_ctx(
+            "test('slow pass', async () => { await rok.sleep(10); }); \
+             test('slow fail', async () => { await rok.sleep(10); throw new Error('late'); });",
+        );
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let pass = result
+            .test_results
+            .iter()
+            .find(|t| t.name == "slow pass")
+            .expect("slow pass recorded");
+        assert_eq!(pass.status, TestStatus::Passed);
+        let fail = result
+            .test_results
+            .iter()
+            .find(|t| t.name == "slow fail")
+            .expect("slow fail recorded");
+        assert_eq!(fail.status, TestStatus::Failed);
+        assert!(fail.error.as_deref().unwrap_or_default().contains("late"));
+    }
+
+    #[tokio::test]
+    async fn sync_test_bodies_still_record_in_order() {
+        let ctx = minimal_ctx(
+            "test('a', () => {}); test('b', () => { throw new Error('x'); }); test('c', () => {});",
+        );
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        let names: Vec<_> = result.test_results.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, vec!["a", "b", "c"]);
+        assert_eq!(result.test_results[1].status, TestStatus::Failed);
     }
 
     #[tokio::test]
