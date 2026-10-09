@@ -36,7 +36,6 @@ export interface PromptEditorProps {
   placeholder?: string;
   disabled?: boolean;
   history: string[];
-  onHistoryCommit(v: string): void;
   referenceSource: (query: string) => ReferenceItem[];
   commandSource: (query: string) => SlashCommandItem[];
   onReferencePicked(item: ReferenceItem): void;
@@ -69,7 +68,6 @@ export function PromptEditor({
   placeholder,
   disabled,
   history: promptHistory,
-  onHistoryCommit,
   referenceSource,
   commandSource,
   onReferencePicked,
@@ -88,14 +86,14 @@ export function PromptEditor({
   const editableCompartment = useRef(new Compartment());
 
   // The extensions are built once, so they read the latest props through refs.
-  const propsRef = useRef({ onChange, onSubmit, onStop, running, promptHistory, onHistoryCommit });
+  const propsRef = useRef({ onChange, onSubmit, onStop, running, promptHistory });
   const referenceSourceRef = useRef(referenceSource);
   const commandSourceRef = useRef(commandSource);
   const onReferencePickedRef = useRef(onReferencePicked);
   const variableContextRef = useRef(variableContext);
   // Refs update after render commits, so a discarded concurrent render never leaks in.
   useLayoutEffect(() => {
-    propsRef.current = { onChange, onSubmit, onStop, running, promptHistory, onHistoryCommit };
+    propsRef.current = { onChange, onSubmit, onStop, running, promptHistory };
     referenceSourceRef.current = referenceSource;
     commandSourceRef.current = commandSource;
     onReferencePickedRef.current = onReferencePicked;
@@ -113,7 +111,6 @@ export function PromptEditor({
       const text = view.state.doc.toString();
       if (text.trim() === '') return true;
       historyCursorRef.current = IDLE_HISTORY_CURSOR;
-      props.onHistoryCommit(text);
       props.onSubmit();
       return true;
     };

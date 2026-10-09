@@ -87,28 +87,32 @@ async function loadChip(chip: ReferenceItem): Promise<PromptResourceDto> {
   return buildAssistantChipResource(chip.kind, chip.collection, chip.path);
 }
 
+export type ChipLoad =
+  | { ok: true; resource: PromptResourceDto }
+  | { ok: false; chip: ReferenceItem };
+
+/** Loads a chip's resource. Never rejects: a failure is reported as `{ ok: false }`. */
+export async function tryChipResource(chip: ReferenceItem): Promise<ChipLoad> {
+  try {
+    const resource = await loadChip(chip);
+    return { ok: true, resource: { ...resource, text: capText(resource.text) } };
+  } catch {
+    // The error text can echo request content, so it is not passed on.
+    return { ok: false, chip };
+  }
+}
+
 /**
  * Turns a chip into an embedded text resource. The text is built and masked by the backend
  * from the same masked views the agent's read tools use. Never rejects: a chip that cannot
  * load becomes a short notice that does not echo the error.
  */
 export async function chipToResource(chip: ReferenceItem): Promise<PromptResourceDto> {
-  try {
-    const resource = await loadChip(chip);
-    return { ...resource, text: capText(resource.text) };
-  } catch {
-    // The error text can echo request content, so it is not passed on.
-    return {
-      uri: chipUri(chip),
-      mimeType: 'text/plain',
-      text: `${LOAD_FAILED_PREFIX} ${chip.kind}: ${chip.label}.`,
-    };
-  }
-}
-
-const LOAD_FAILED_PREFIX = 'Rocket could not load this';
-
-/** True for the placeholder `chipToResource` returns when a chip could not load. */
-export function isChipLoadFailure(resource: PromptResourceDto): boolean {
-  return resource.text.startsWith(LOAD_FAILED_PREFIX);
+  const loaded = await tryChipResource(chip);
+  if (loaded.ok) return loaded.resource;
+  return {
+    uri: chipUri(chip),
+    mimeType: 'text/plain',
+    text: `Rocket could not load this ${chip.kind}: ${chip.label}.`,
+  };
 }

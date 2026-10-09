@@ -157,6 +157,24 @@ describe('Composer', () => {
     expect(screen.getByText('list')).toBeInTheDocument();
   });
 
+  it('records the prompt in history when the Send button is used', async () => {
+    const { view, user } = renderComposer();
+    typeInto(view, 'via button');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(sendAgentPrompt).toHaveBeenCalled());
+    expect(loadPromptHistory('w1')).toEqual(['via button']);
+  });
+
+  it('does not record a prompt whose send was blocked by a failed chip', async () => {
+    vi.mocked(buildAssistantChipResource).mockRejectedValue(new Error('boom'));
+    const { content, view } = renderComposer();
+    typeInto(view, 'blocked');
+    pressEnter(content);
+    await waitFor(() => expect(buildAssistantChipResource).toHaveBeenCalled());
+    await act(async () => {});
+    expect(loadPromptHistory('w1')).toEqual([]);
+  });
+
   it('sends without resources when no chip is left', async () => {
     const { content, view, user } = renderComposer();
     await user.click(screen.getByRole('button', { name: 'Remove list' }));

@@ -199,12 +199,12 @@ describe('useAssistantEventBridge', () => {
     expect(lastMessage()).toMatchObject({ kind: 'notice', text: WORKSPACE_SWITCH_NOTICE });
   });
 
-  it('forgets the prompt history of the workspace it leaves', async () => {
+  it('keeps the prompt history of the workspace it leaves', async () => {
     useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
     savePromptHistory('ws-1', ['old prompt']);
     await mountBridge();
     useWorkspaceStore.getState().setActiveWorkspaceId('ws-2');
-    expect(loadPromptHistory('ws-1')).toEqual([]);
+    expect(loadPromptHistory('ws-1')).toEqual(['old prompt']);
   });
 
   it('keeps the session when the first workspace id is set at startup', async () => {

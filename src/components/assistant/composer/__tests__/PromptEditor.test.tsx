@@ -26,7 +26,6 @@ function setup(overrides: Partial<PromptEditorProps> = {}) {
     onStop: vi.fn(),
     running: false,
     history: [],
-    onHistoryCommit: vi.fn(),
     referenceSource: () => [],
     commandSource: () => [],
     onReferencePicked: vi.fn(),
@@ -42,10 +41,9 @@ function setup(overrides: Partial<PromptEditorProps> = {}) {
 }
 
 describe('PromptEditor keys', () => {
-  it('sends on Enter and commits the prompt to history', () => {
+  it('sends on Enter', () => {
     const { content, props, view } = setup({ value: 'hello' });
     press(content, 'Enter');
-    expect(props.onHistoryCommit).toHaveBeenCalledWith('hello');
     expect(props.onSubmit).toHaveBeenCalledTimes(1);
     expect(view.state.doc.toString()).toBe('hello');
   });
@@ -54,7 +52,6 @@ describe('PromptEditor keys', () => {
     const { content, props } = setup({ value: 'hello', running: true });
     press(content, 'Enter');
     expect(props.onSubmit).not.toHaveBeenCalled();
-    expect(props.onHistoryCommit).not.toHaveBeenCalled();
   });
 
   it('ignores Enter on a blank prompt', () => {

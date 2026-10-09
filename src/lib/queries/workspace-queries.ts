@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { clearPromptHistory } from '@/lib/assistant/prompt-history';
 import {
   closeWorkspace,
   createWorkspace,
@@ -93,7 +94,11 @@ export function useDeleteWorkspace() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteWorkspace(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: workspaceKeys.all }),
+    onSuccess: (_data, id) => {
+      // The assistant's prompts for a deleted workspace are not kept.
+      clearPromptHistory(id);
+      return qc.invalidateQueries({ queryKey: workspaceKeys.all });
+    },
   });
 }
 

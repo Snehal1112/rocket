@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { sendAssistantMessage, stopAssistantTurn } from '@/lib/assistant/assistant-session';
-import { chipToResource, isChipLoadFailure } from '@/lib/assistant/chip-resources';
+import { tryChipResource } from '@/lib/assistant/chip-resources';
 import { rememberModel } from '@/lib/assistant/model-memory';
 import {
   appendPromptHistory,
@@ -54,6 +54,8 @@ export function Composer() {
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // True while a mode or option change is being applied.
+  const [changing, setChanging] = useState(false);
   // A turn runs while this composer's send is in flight or the store's reply still streams.
   const running = sending || turnRunning;
   const [extraChips, setExtraChips] = useState<ComposerChip[]>([]);
@@ -130,18 +132,38 @@ export function Composer() {
   const handleSend = async () => {
     const prompt = textRef.current.trim();
     if (!sessionId || !sessionActive || runningRef.current || running || prompt === '') return;
+    // A chip is never dropped silently. The focus chip can push a full message over the limit.
+    if (chips.length > MAX_CHIPS) {
+      toast.warning(`A message can carry at most ${MAX_CHIPS} references. Remove one to send.`);
+      return;
+    }
     runningRef.current = true;
     setSending(true);
     try {
-      // chipToResource never rejects and caps each text at 8 KB.
-      const resources: PromptResourceDto[] = await Promise.all(
-        chips.slice(0, MAX_CHIPS).map((chip) => chipToResource(chip.item)),
-      );
-      if (resources.some(isChipLoadFailure)) {
+      // tryChipResource never rejects and caps each text at 8 KB.
+      const loads = await Promise.all(chips.map((chip) => tryChipResource(chip.item)));
+      const failed = loads.find((load) => !load.ok);
+      if (failed && !failed.ok) {
         // The prompt and chips stay, so nothing is sent without the context asked for.
-        toast.error('A reference could not be loaded, so the message was not sent. Try again.');
+        toast.error(
+          `Could not load "${failed.chip.label}", so the message was not sent. Try again.`,
+        );
         return;
       }
+      const resources: PromptResourceDto[] = loads.flatMap((load) =>
+        load.ok ? [load.resource] : [],
+      );
+      // The session can end or another turn can start while chips load.
+      const state = useAssistantStore.getState();
+      if (
+        state.session?.status !== 'active' ||
+        state.session.sessionId !== sessionId ||
+        selectTurnRunning(state)
+      ) {
+        toast.error('The message was not sent because the session changed. Try again.');
+        return;
+      }
+      handleHistoryCommit(prompt);
       textRef.current = '';
       setText('');
       setExtraChips([]);
@@ -163,17 +185,21 @@ export function Composer() {
   };
 
   const handleModeChange = async (next: AssistantModeValue) => {
-    if (!sessionId || next === mode) return;
+    if (!sessionId || next === mode || changing) return;
+    setChanging(true);
     try {
       await setAssistantMode(sessionId, next);
-      setMode(next);
+      setMode(sessionId, next);
     } catch (err) {
       toast.error(`Could not switch to ${next} mode: ${String(err)}`);
+    } finally {
+      setChanging(false);
     }
   };
 
   const handleConfigChange = async (configId: string, value: string) => {
-    if (!sessionId) return;
+    if (!sessionId || changing) return;
+    setChanging(true);
     try {
       // The reply is the full option list, so Effort appears or disappears with the model.
       const options = await setAgentConfigOption(sessionId, configId, value);
@@ -181,6 +207,8 @@ export function Composer() {
       if (configId === MODEL_OPTION_ID && agentConfigId) rememberModel(agentConfigId, value);
     } catch (err) {
       toast.error(`Could not change the ${configId}: ${String(err)}`);
+    } finally {
+      setChanging(false);
     }
   };
 
@@ -196,7 +224,6 @@ export function Composer() {
         placeholder='Ask about this workspace. Type # to add context or / for a template.'
         disabled={!sessionActive}
         history={history}
-        onHistoryCommit={handleHistoryCommit}
         referenceSource={referenceSource}
         commandSource={filterSlashCommands}
         onReferencePicked={handleReferencePicked}
@@ -211,6 +238,7 @@ export function Composer() {
         running={running}
         canSend={sessionActive && !running && text.trim() !== ''}
         disabled={!sessionActive}
+        changing={changing}
         onSend={() => void handleSend()}
         onStop={handleStop}
       />

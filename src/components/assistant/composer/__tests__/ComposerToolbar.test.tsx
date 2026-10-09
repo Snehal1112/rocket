@@ -86,6 +86,11 @@ describe('ComposerToolbar', () => {
     expect(mode).toHaveAttribute('title', 'Start a session to use this.');
   });
 
+  it('disables the pickers while a change is applied', () => {
+    setup({ changing: true });
+    expect(screen.getByRole('button', { name: 'Mode: Ask' })).toBeDisabled();
+  });
+
   it('shows the context used with tokens and cost for screen readers', () => {
     setup({ usage: { used: 12, size: 100, costUsd: 0.5 } });
     expect(screen.getByText('12%')).toBeInTheDocument();

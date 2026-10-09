@@ -3,8 +3,8 @@ import {
   capText,
   chipToResource,
   chipUri,
-  isChipLoadFailure,
   RESOURCE_LIMIT_BYTES,
+  tryChipResource,
 } from '@/lib/assistant/chip-resources';
 import type { ReferenceItem } from '@/lib/assistant/types';
 import { createDefaultLeaf, createDefaultRequest } from '@/lib/pane-utils';
@@ -192,11 +192,15 @@ describe('chipUri', () => {
   });
 });
 
-describe('isChipLoadFailure', () => {
-  it('tells the load-failure placeholder from a real resource', () => {
-    expect(
-      isChipLoadFailure({ uri: 'u', mimeType: 'text/plain', text: 'Rocket could not load this request: x.' }),
-    ).toBe(true);
-    expect(isChipLoadFailure({ uri: 'u', mimeType: 'text/plain', text: 'Request: x' })).toBe(false);
+describe('tryChipResource', () => {
+  it('reports a failed load with the chip and a good one with the resource', async () => {
+    vi.mocked(buildAssistantChipResource).mockRejectedValueOnce(new Error('boom'));
+    expect(await tryChipResource(REQUEST_CHIP)).toEqual({ ok: false, chip: REQUEST_CHIP });
+    vi.mocked(buildAssistantChipResource).mockResolvedValueOnce({
+      uri: 'u',
+      mimeType: 'text/plain',
+      text: 'Request: x',
+    });
+    expect(await tryChipResource(REQUEST_CHIP)).toMatchObject({ ok: true });
   });
 });

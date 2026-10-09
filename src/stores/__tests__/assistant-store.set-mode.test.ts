@@ -16,12 +16,26 @@ describe('assistant-store setMode', () => {
         mode: 'ask',
       },
     });
-    useAssistantStore.getState().setMode('agent');
+    useAssistantStore.getState().setMode('s1', 'agent');
     expect(useAssistantStore.getState().session?.mode).toBe('agent');
   });
 
+  it('ignores a session that is no longer current', () => {
+    useAssistantStore.setState({
+      session: {
+        sessionId: 's2',
+        agentConfigId: 'a1',
+        status: 'active',
+        configOptions: [],
+        mode: 'ask',
+      },
+    });
+    useAssistantStore.getState().setMode('s1', 'agent');
+    expect(useAssistantStore.getState().session?.mode).toBe('ask');
+  });
+
   it('does nothing without a session', () => {
-    useAssistantStore.getState().setMode('edit');
+    useAssistantStore.getState().setMode('s1', 'edit');
     expect(useAssistantStore.getState().session).toBeUndefined();
   });
 });
