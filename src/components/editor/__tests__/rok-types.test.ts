@@ -7,6 +7,8 @@ import {
   PRE_REQUEST_SNIPPETS,
   ROK_SNIPPETS,
   ROK_TYPE_DEFS_FOR_PHASE,
+  SCRIPT_TOP_LEVEL_DIAGNOSTIC_CODES,
+  withScriptTopLevelAllowed,
 } from '../rok-types';
 
 function rokItemLabels(groups: ScriptSnippetGroup[]): string[] {
@@ -159,5 +161,57 @@ describe('rok typings stay in sync with the runtime', () => {
     // Only 2-space indented lines are top-level members, so runner.* cannot satisfy this.
     const missing = names.filter((n) => !new RegExp(`^ {2}${n}\\(`, 'm').test(defs));
     expect(missing).toEqual([]);
+  });
+});
+
+describe('async host call snippets and typings', () => {
+  it.each([
+    ['tests', ROK_SNIPPETS],
+    ['pre-request', PRE_REQUEST_SNIPPETS],
+    ['post-response', POST_RESPONSE_SNIPPETS],
+  ] as const)('%s list offers sendRequest, runRequest and sleep', (_phase, groups) => {
+    const labels = rokItemLabels(groups);
+    expect(labels).toContain('await rok.sendRequest({ url })');
+    expect(labels).toContain('await rok.runRequest("folder/request")');
+    expect(labels).toContain('await rok.sleep(ms)');
+  });
+
+  it('pre-request common patterns include the token fetch template', () => {
+    const common = PRE_REQUEST_SNIPPETS.find((g) => g.id === 'common-patterns');
+    const item = common?.items?.find((i) => i.label === 'Fetch a token before the request');
+    expect(item?.kind).toBe('template');
+    expect(item?.code).toContain('await rok.sendRequest(');
+  });
+
+  it.each([
+    'pre-request',
+    'post-response',
+    'tests',
+  ] as const)('%s typings declare the async calls', (phase) => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
+    expect(defs).toContain('sendRequest(options: RokSendRequestOptions): Promise<RokResponse>;');
+    expect(defs).toContain('runRequest(path: string)');
+    expect(defs).toContain('sleep(ms: number): Promise<void>;');
+  });
+});
+
+describe('withScriptTopLevelAllowed', () => {
+  it('adds the top-level await and return codes', () => {
+    const out = withScriptTopLevelAllowed({
+      noSemanticValidation: false,
+      diagnosticCodesToIgnore: [] as number[],
+    });
+    for (const code of SCRIPT_TOP_LEVEL_DIAGNOSTIC_CODES) {
+      expect(out.diagnosticCodesToIgnore).toContain(code);
+    }
+    expect(out.noSemanticValidation).toBe(false);
+  });
+
+  it('keeps codes that were already ignored and adds no duplicates', () => {
+    const once = withScriptTopLevelAllowed({ diagnosticCodesToIgnore: [2304, 1108] });
+    const twice = withScriptTopLevelAllowed(once);
+    expect(twice.diagnosticCodesToIgnore).toContain(2304);
+    expect(twice.diagnosticCodesToIgnore?.filter((c) => c === 1108)).toHaveLength(1);
+    expect(twice.diagnosticCodesToIgnore).toHaveLength(once.diagnosticCodesToIgnore?.length ?? 0);
   });
 });

@@ -9,7 +9,7 @@ import { EditorSkeleton } from './EditorSkeleton';
 import { BASE_EDITOR_OPTIONS, detectLanguage, READONLY_OPTIONS } from './monaco-config';
 import { acquireJsWorker, releaseJsWorker } from './monaco-js-worker-lifecycle';
 import type { ScriptPhase } from './rok-types';
-import { ROK_TYPE_DEFS_FOR_PHASE } from './rok-types';
+import { ROK_TYPE_DEFS_FOR_PHASE, withScriptTopLevelAllowed } from './rok-types';
 import { useMonacoTheme } from './useMonacoTheme';
 
 interface MonacoWrapperProps {
@@ -112,6 +112,9 @@ export function MonacoWrapper({
   // Phase changes need fresh type stubs because rok/req/res availability differs per phase.
   useEffect(() => {
     if (!phase) return;
+    // Scripts run as async function bodies, so top-level await and return are valid.
+    const jsDefaults = monacoNs.typescript.javascriptDefaults;
+    jsDefaults.setDiagnosticsOptions(withScriptTopLevelAllowed(jsDefaults.getDiagnosticsOptions()));
     extraLibDisposableRef.current?.dispose();
     extraLibDisposableRef.current = monacoNs.typescript.javascriptDefaults.addExtraLib(
       ROK_TYPE_DEFS_FOR_PHASE(phase),

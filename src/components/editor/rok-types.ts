@@ -151,6 +151,17 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.runner.setNextRequest("name")',
           },
+          {
+            label: 'await rok.sendRequest({ url })',
+            kind: 'expression',
+            code: 'await rok.sendRequest({ method: "GET", url: "https://example.com" })',
+          },
+          {
+            label: 'await rok.runRequest("folder/request")',
+            kind: 'expression',
+            code: 'await rok.runRequest("folder/request")',
+          },
+          { label: 'await rok.sleep(ms)', kind: 'expression', code: 'await rok.sleep(1000)' },
         ],
       },
       {
@@ -322,6 +333,17 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.runner.setNextRequest("name")',
           },
+          {
+            label: 'await rok.sendRequest({ url })',
+            kind: 'expression',
+            code: 'await rok.sendRequest({ method: "GET", url: "https://example.com" })',
+          },
+          {
+            label: 'await rok.runRequest("folder/request")',
+            kind: 'expression',
+            code: 'await rok.runRequest("folder/request")',
+          },
+          { label: 'await rok.sleep(ms)', kind: 'expression', code: 'await rok.sleep(1000)' },
         ],
       },
     ],
@@ -357,6 +379,11 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
         label: 'Log request details',
         kind: 'template',
         code: `console.log(req.getMethod(), req.getUrl());`,
+      },
+      {
+        label: 'Fetch a token before the request',
+        kind: 'template',
+        code: `const res = await rok.sendRequest({\n  method: "POST",\n  url: rok.interpolate("{{baseUrl}}/auth/token"),\n  data: { clientId: rok.getEnvVar("clientId") },\n});\nrok.setVar("token", res.data.access_token);\nreq.setHeader("Authorization", "Bearer " + rok.getVar("token"));`,
       },
     ],
   },
@@ -433,6 +460,17 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
             kind: 'expression',
             code: 'rok.runner.skipRequest()',
           },
+          {
+            label: 'await rok.sendRequest({ url })',
+            kind: 'expression',
+            code: 'await rok.sendRequest({ method: "GET", url: "https://example.com" })',
+          },
+          {
+            label: 'await rok.runRequest("folder/request")',
+            kind: 'expression',
+            code: 'await rok.runRequest("folder/request")',
+          },
+          { label: 'await rok.sleep(ms)', kind: 'expression', code: 'await rok.sleep(1000)' },
         ],
       },
     ],
@@ -702,6 +740,24 @@ declare function test(name: string, fn: () => void | Promise<void>): void;
 /** Full Chai expect — chain assertions with .to.equal(), .to.have.property(), .to.match(), etc. */
 declare const expect: Chai.ExpectStatic;
 `;
+
+/**
+ * TypeScript diagnostics a script must not show. Scripts run as the body of an
+ * async function, so top-level `return` (1108) and `await` (1308, 1375, 1378)
+ * are valid there.
+ */
+export const SCRIPT_TOP_LEVEL_DIAGNOSTIC_CODES = [1108, 1308, 1375, 1378];
+
+/** Returns the diagnostics options with the script top-level codes also ignored. */
+export function withScriptTopLevelAllowed<T extends { diagnosticCodesToIgnore?: number[] }>(
+  options: T,
+): T {
+  const codes = new Set([
+    ...(options.diagnosticCodesToIgnore ?? []),
+    ...SCRIPT_TOP_LEVEL_DIAGNOSTIC_CODES,
+  ]);
+  return { ...options, diagnosticCodesToIgnore: [...codes] };
+}
 
 /** Returns the Monaco extra-lib `.d.ts` string for the given script phase. */
 export function ROK_TYPE_DEFS_FOR_PHASE(phase: ScriptPhase): string {

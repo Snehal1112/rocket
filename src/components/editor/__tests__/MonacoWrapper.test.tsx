@@ -43,6 +43,8 @@ vi.mock('monaco-editor', () => ({
       addExtraLib: vi.fn(),
       setCompilerOptions: vi.fn(),
       getCompilerOptions: vi.fn(() => ({})),
+      getDiagnosticsOptions: vi.fn(() => ({})),
+      setDiagnosticsOptions: vi.fn(),
     },
   },
 }));
