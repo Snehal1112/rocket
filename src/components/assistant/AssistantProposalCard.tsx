@@ -1,9 +1,9 @@
-import { Check, Loader2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   acceptProposal,
   hasDirtyAffectedTab,
@@ -33,6 +33,8 @@ const STATUS_BADGE: Record<AgentProposal['status'], { label: string; variant: Ba
   failed: { label: 'Failed', variant: 'destructive' },
 };
 
+const GENERIC_ACTION_ERROR = 'The action failed. Try again.';
+
 /** One proposed change with its preview and Accept and Reject. */
 export function AssistantProposalCard({ proposal }: { proposal: AgentProposal }) {
   const target = proposalTarget(proposal.change);
@@ -42,40 +44,58 @@ export function AssistantProposalCard({ proposal }: { proposal: AgentProposal })
   );
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [diff, setDiff] = useState<ProposalDiff | null>(null);
-  const [diffError, setDiffError] = useState<string | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffFailed, setDiffFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const pending = proposal.status === 'pending';
 
-  // Loads the diff while the proposal is pending. After Accept the stored
-  // version already holds the change, so the earlier diff is kept.
+  // Loads the diff only while the card is expanded and the proposal is
+  // pending. After Accept the stored version already holds the change, so a
+  // diff loaded earlier is kept and none is fetched later.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryCount re-runs the fetch on demand.
   useEffect(() => {
-    if (preview.kind !== 'diff' || proposal.status !== 'pending') return;
+    if (preview.kind !== 'diff' || !expanded || !pending || diff) return;
     let cancelled = false;
+    setDiffLoading(true);
+    setDiffFailed(false);
     loadProposalDiff(proposal)
       .then((loaded) => {
         if (!cancelled) setDiff(loaded);
       })
       .catch((err) => {
-        if (!cancelled) setDiffError(String(err));
+        console.error('[assistant] failed to load the proposal diff', err);
+        if (!cancelled) setDiffFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setDiffLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [proposal, preview.kind]);
+  }, [proposal, preview.kind, expanded, pending, diff, retryCount]);
 
-  const run = async (action: (p: AgentProposal) => Promise<void>) => {
+  const failure = proposalFailure(proposal);
+
+  const run = async (action: (p: AgentProposal) => Promise<string | undefined>) => {
     setBusy(true);
     setActionError(null);
+    setWarning(null);
     try {
-      await action(proposal);
+      const note = await action(proposal);
+      if (typeof note === 'string') setWarning(note);
     } catch (err) {
-      setActionError(String(err));
+      console.error('[assistant] proposal action failed', err);
+      setActionError(failure ? `${GENERIC_ACTION_ERROR} ${failure}` : GENERIC_ACTION_ERROR);
     } finally {
       setBusy(false);
     }
   };
 
   const badge = STATUS_BADGE[proposal.status];
-  const failure = proposalFailure(proposal);
+  const Chevron = expanded ? ChevronDown : ChevronRight;
 
   return (
     <article
@@ -92,24 +112,52 @@ export function AssistantProposalCard({ proposal }: { proposal: AgentProposal })
         <Badge variant={badge.variant}>{badge.label}</Badge>
       </div>
 
-      {preview.kind === 'diff' &&
-        (diffError ? (
-          <p className='text-xs text-destructive'>
-            Could not load the current version: {diffError}
-          </p>
-        ) : diff ? (
-          <Suspense fallback={<EditorSkeleton />}>
-            <ProposalDiffEditor
-              original={diff.before}
-              modified={diff.after}
-              language={diff.language}
-            />
-          </Suspense>
-        ) : (
-          <EditorSkeleton />
-        ))}
+      {preview.kind === 'diff' && (
+        <Collapsible open={expanded} onOpenChange={setExpanded}>
+          <CollapsibleTrigger asChild>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 gap-1 px-1 text-xs'
+              aria-expanded={expanded}
+            >
+              <Chevron className='h-3.5 w-3.5' aria-hidden='true' />
+              {expanded ? 'Hide changes' : 'Show changes'}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className='pt-1'>
+            {diff ? (
+              <Suspense fallback={<EditorSkeleton />}>
+                <ProposalDiffEditor
+                  original={diff.before}
+                  modified={diff.after}
+                  language={diff.language}
+                />
+              </Suspense>
+            ) : diffFailed ? (
+              <div className='flex items-center gap-2 text-xs text-destructive'>
+                <span>Could not load the current version.</span>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='h-6 text-xs'
+                  onClick={() => setRetryCount((n) => n + 1)}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : diffLoading ? (
+              <EditorSkeleton />
+            ) : (
+              !pending && <p className='text-xs text-muted-foreground'>Diff no longer available.</p>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
       {preview.kind === 'definition' && (
-        <MarkdownRenderer restricted>{`\`\`\`json\n${preview.text}\n\`\`\``}</MarkdownRenderer>
+        <pre className='max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs'>
+          {preview.text}
+        </pre>
       )}
       {preview.kind === 'line' && (
         <p className='whitespace-pre-wrap break-all font-mono text-xs'>{preview.text}</p>
@@ -130,8 +178,9 @@ export function AssistantProposalCard({ proposal }: { proposal: AgentProposal })
         </p>
       )}
       {actionError && <p className='text-xs text-destructive'>{actionError}</p>}
+      {warning && <p className='text-xs text-warning'>{warning}</p>}
 
-      {proposal.status === 'pending' && (
+      {pending && (
         <>
           {blockedByEdits && (
             <p className='text-xs text-muted-foreground'>

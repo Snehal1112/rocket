@@ -62,8 +62,40 @@ describe('AssistantProposalCard', () => {
     vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ tests: 'old();' }));
   });
 
+  it('does not fetch or mount the diff until expanded, and drops it on collapse', async () => {
+    showProposal(makeProposal());
+    expect(screen.getByRole('button', { name: 'Show changes' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(api.getRequest).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('proposal-diff')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    expect(await screen.findByTestId('proposal-diff')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Hide changes' }));
+    expect(screen.queryByTestId('proposal-diff')).not.toBeInTheDocument();
+  });
+
+  it('says the diff is gone for a resolved proposal instead of a skeleton', async () => {
+    showProposal(makeProposal({ status: 'stale' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    expect(screen.getByText('Diff no longer available.')).toBeInTheDocument();
+    expect(api.getRequest).not.toHaveBeenCalled();
+  });
+
+  it('offers a retry when the diff fails to load', async () => {
+    vi.mocked(api.getRequest).mockRejectedValueOnce('boom internal');
+    showProposal(makeProposal());
+    await userEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    expect(await screen.findByText('Could not load the current version.')).toBeInTheDocument();
+    expect(screen.queryByText(/boom internal/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId('proposal-diff')).toBeInTheDocument();
+  });
+
   it('shows a Monaco diff of the script edit', async () => {
     showProposal(makeProposal());
+    await userEvent.click(screen.getByRole('button', { name: 'Show changes' }));
     const diff = await screen.findByTestId('proposal-diff');
     expect(diff.dataset.original).toBe('old();');
     expect(diff.dataset.modified).toBe("rok.test('status', () => {});");
@@ -122,6 +154,26 @@ describe('AssistantProposalCard', () => {
     expect(screen.queryByTestId('proposal-diff')).not.toBeInTheDocument();
   });
 
+  it('keeps a triple backtick in a new request from breaking the preview', () => {
+    showProposal(
+      makeProposal({
+        change: {
+          op: 'createRequest',
+          collection: 'orders',
+          folderPath: '',
+          request: {
+            name: 'a ``` b',
+            method: 'GET',
+            url: 'https://api.test',
+            headers: [],
+            queryParams: [],
+          },
+        },
+      }),
+    );
+    expect(screen.getByText(/a ``` b/).tagName).toBe('PRE');
+  });
+
   it('disables Accept while the request has unsaved edits in an open tab', () => {
     usePaneStore.getState().openTab({
       id: 'tab-1',
@@ -142,6 +194,7 @@ describe('AssistantProposalCard', () => {
     vi.mocked(api.acceptAgentProposal).mockRejectedValue('session ended');
     showProposal(makeProposal());
     await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
-    expect(await screen.findByText('session ended')).toBeInTheDocument();
+    expect(await screen.findByText('The action failed. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('session ended')).not.toBeInTheDocument();
   });
 });

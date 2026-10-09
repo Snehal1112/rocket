@@ -42,43 +42,86 @@ export function hasDirtyAffectedTab(state: TabSource, change: Change): boolean {
   return findAffectedRequestTabs(state, change).some((tab) => tab.isDirty);
 }
 
-// Shows the accepted version in clean HTTP tabs of the changed request. Tabs
-// with edits are never touched, and Accept is disabled while one exists.
-async function refreshCleanOpenTabs(change: Change): Promise<void> {
-  if (change.op !== 'updateRequest' && change.op !== 'editScript') return;
-  const tabs = collectAllTabs(usePaneStore.getState().root).filter(
-    (tab): tab is RequestTab =>
-      isRequestTab(tab) &&
-      tab.tabType === 'request' &&
-      !tab.isDirty &&
-      tab.request.requestType === 'http' &&
-      tab.source?.collection === change.collection &&
-      tab.source.path === change.requestPath,
-  );
-  if (tabs.length === 0) return;
+function lastSegment(path: string): string {
+  return path.split('/').pop() ?? path;
+}
+
+function joinPath(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+function retarget(collection: string, oldPath: string, newPath: string, includeSelf = true): void {
+  const store = usePaneStore.getState();
+  store.retargetRequestTabs(collection, oldPath, newPath, includeSelf);
+  store.renameScriptTabs(collection, oldPath, newPath);
+  store.renameFolderTabs(collection, oldPath, newPath);
+}
+
+const DIRTY_WARNING =
+  'A tab of this request was edited while the change was applied. Its edits were kept, and saving them will overwrite the accepted change.';
+
+// Brings every open tab, live or parked, in line with an accepted change, so
+// no stale copy can later autosave over it. Returns a warning for the card
+// when a tab became dirty during the call and so kept its own edits.
+async function syncTabsAfterAccept(change: Change): Promise<string | undefined> {
+  const store = usePaneStore.getState();
   try {
-    const fresh = mapApiRequestToState(
-      await getRequest(change.collection, change.requestPath),
-      true,
-    );
-    for (const tab of tabs) {
-      usePaneStore.getState().updateRequest(tab.id, fresh);
-      usePaneStore.getState().markClean(tab.id);
+    switch (change.op) {
+      case 'updateRequest':
+      case 'editScript': {
+        const request = await getRequest(change.collection, change.requestPath);
+        const { skippedDirty } = store.applyAcceptedRequest(
+          change.collection,
+          change.requestPath,
+          mapApiRequestToState(request, true),
+        );
+        return skippedDirty > 0 ? DIRTY_WARNING : undefined;
+      }
+      case 'moveItem':
+        retarget(
+          change.collection,
+          change.fromPath,
+          joinPath(change.toFolder, lastSegment(change.fromPath)),
+        );
+        return undefined;
+      case 'renameItem': {
+        // A folder is renamed by moving it. A request keeps its file path and
+        // only changes its name.
+        const parent = change.path.includes('/')
+          ? change.path.slice(0, change.path.lastIndexOf('/'))
+          : '';
+        retarget(change.collection, change.path, joinPath(parent, change.newName), false);
+        const request = await getRequest(change.collection, change.path).catch(() => undefined);
+        if (request) {
+          store.applyAcceptedRequest(
+            change.collection,
+            change.path,
+            mapApiRequestToState(request, true),
+            request.name,
+          );
+        }
+        return undefined;
+      }
+      default:
+        return undefined;
     }
   } catch (err) {
-    console.error('[assistant] failed to refresh an open tab', err);
+    console.error('[assistant] failed to sync open tabs after accept', err);
+    return undefined;
   }
 }
 
-export async function acceptProposal(proposal: AgentProposal): Promise<void> {
+/** Accepts a proposal. Resolves with a warning for the card, if any. */
+export async function acceptProposal(proposal: AgentProposal): Promise<string | undefined> {
   const result = await acceptAgentProposal(proposal.sessionId, proposal.id);
   useAssistantStore.getState().upsertProposal(result);
-  if (result.status !== 'accepted') return;
+  if (result.status !== 'accepted') return undefined;
   void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
-  await refreshCleanOpenTabs(proposal.change);
+  return syncTabsAfterAccept(proposal.change);
 }
 
-export async function rejectProposal(proposal: AgentProposal): Promise<void> {
+export async function rejectProposal(proposal: AgentProposal): Promise<undefined> {
   const result = await rejectAgentProposal(proposal.sessionId, proposal.id);
   useAssistantStore.getState().upsertProposal(result);
+  return undefined;
 }

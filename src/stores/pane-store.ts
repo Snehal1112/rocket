@@ -289,6 +289,22 @@ export interface PaneState {
   updateScriptContent: (tabId: string, content: string) => void;
   markScriptSaved: (tabId: string, content: string) => void;
   renameScriptTabs: (collection: string, oldPath: string, newPath: string) => void;
+  /** Shows an accepted request in every clean HTTP tab of it, live or parked.
+   *  Tabs with edits keep them. Returns how many such tabs were skipped. */
+  applyAcceptedRequest: (
+    collection: string,
+    path: string,
+    fresh: RequestState,
+    title?: string,
+  ) => { skippedDirty: number };
+  /** Retargets request tabs, live or parked, of a moved or renamed item. Matches
+   *  the item itself and anything below it, by whole path segments. */
+  retargetRequestTabs: (
+    collection: string,
+    oldPath: string,
+    newPath: string,
+    includeSelf?: boolean,
+  ) => void;
   /** Retargets open (and parked) tabs of a renamed flow and clears the old flow's Auth tokens. */
   renameFlowTabs: (collection: string, oldName: string, newName: string) => void;
   /** Removes tabs of a deleted flow that are parked in collection snapshots. */
@@ -671,6 +687,64 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         return { ...tab, savedContent: content, isDirty: tab.content !== content };
       }),
     );
+  },
+
+  applyAcceptedRequest(collection, path, fresh, title) {
+    const state = get();
+    const isTarget = (tab: Tab): tab is RequestTab =>
+      isRequestTab(tab) &&
+      tab.tabType === 'request' &&
+      tab.request.requestType === 'http' &&
+      tab.source?.collection === collection &&
+      tab.source.path === path;
+    const ids = new Set<string>();
+    for (const tab of collectAllTabs(state.root)) if (isTarget(tab)) ids.add(tab.id);
+    for (const entry of Object.values(state.collectionTabState)) {
+      for (const tab of entry.tabs) if (isTarget(tab)) ids.add(tab.id);
+    }
+    const skipped = new Set<string>();
+    let next = state;
+    for (const id of ids) {
+      next = {
+        ...next,
+        ...updateTabEverywhere(next, id, (tab) => {
+          if (!isTarget(tab)) return tab;
+          if (tab.isDirty) {
+            skipped.add(id);
+            return tab;
+          }
+          return { ...tab, request: fresh, isDirty: false, title: title ?? tab.title };
+        }),
+      };
+    }
+    set({ root: next.root, collectionTabState: next.collectionTabState });
+    return { skippedDirty: skipped.size };
+  },
+
+  retargetRequestTabs(collection, oldPath, newPath, includeSelf = true) {
+    const state = get();
+    const isTarget = (tab: Tab): tab is RequestTab =>
+      isRequestTab(tab) &&
+      tab.source?.collection === collection &&
+      ((includeSelf && tab.source.path === oldPath) || tab.source.path.startsWith(`${oldPath}/`));
+    const ids = new Set<string>();
+    for (const tab of collectAllTabs(state.root)) if (isTarget(tab)) ids.add(tab.id);
+    for (const entry of Object.values(state.collectionTabState)) {
+      for (const tab of entry.tabs) if (isTarget(tab)) ids.add(tab.id);
+    }
+    if (ids.size === 0) return;
+    let next = state;
+    for (const id of ids) {
+      next = {
+        ...next,
+        ...updateTabEverywhere(next, id, (tab) => {
+          if (!isTarget(tab) || !tab.source) return tab;
+          const target = `${newPath}${tab.source.path.slice(oldPath.length)}`;
+          return { ...tab, source: { collection, path: target } };
+        }),
+      };
+    }
+    set({ root: next.root, collectionTabState: next.collectionTabState });
   },
 
   renameScriptTabs(collection, oldPath, newPath) {

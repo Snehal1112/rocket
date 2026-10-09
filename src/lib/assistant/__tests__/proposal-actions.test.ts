@@ -121,4 +121,85 @@ describe('proposal actions', () => {
     );
     expect(hasDirtyAffectedTab(usePaneStore.getState(), makeProposal().change)).toBe(false);
   });
+
+  it('refreshes a clean tab parked in another collection snapshot', async () => {
+    usePaneStore.setState({
+      collectionTabState: {
+        orders: { tabs: [requestTab('get.yml')], activeTabId: 'tab:get.yml' },
+      },
+    });
+    const proposal = makeProposal();
+    useAssistantStore.getState().upsertProposal(proposal);
+    vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...proposal, status: 'accepted' });
+    vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ tests: 'new();' }));
+
+    await acceptProposal(proposal);
+
+    const parked = usePaneStore.getState().collectionTabState.orders.tabs[0];
+    expect(parked && isRequestTab(parked) && parked.request.testsScript).toBe('new();');
+  });
+
+  it('keeps the edits of a tab dirtied during accept and warns', async () => {
+    usePaneStore.getState().openTab(requestTab('get.yml'));
+    const proposal = makeProposal();
+    useAssistantStore.getState().upsertProposal(proposal);
+    vi.mocked(api.acceptAgentProposal).mockImplementation(async () => {
+      usePaneStore.getState().markDirty('tab:get.yml');
+      return { ...proposal, status: 'accepted' };
+    });
+    vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ tests: 'new();' }));
+
+    const warning = await acceptProposal(proposal);
+
+    expect(warning).toMatch(/edited while the change was applied/);
+    expect(firstTab()?.request.testsScript).toBe('old();');
+    expect(firstTab()?.isDirty).toBe(true);
+  });
+
+  it('retargets live and parked tabs of a moved folder', async () => {
+    usePaneStore.getState().openTab(requestTab('users/get.yml'));
+    usePaneStore.setState({
+      collectionTabState: {
+        orders: { tabs: [requestTab('users/list.yml', { id: 'tab:list' })], activeTabId: 'tab:list' },
+      },
+    });
+    const change: AgentProposal['change'] = {
+      op: 'moveItem',
+      collection: 'orders',
+      fromPath: 'users',
+      toFolder: 'archive',
+    };
+    const proposal = makeProposal({ change });
+    useAssistantStore.getState().upsertProposal(proposal);
+    vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...proposal, status: 'accepted' });
+
+    await acceptProposal(proposal);
+
+    expect(firstTab()?.source?.path).toBe('archive/users/get.yml');
+    const parked = usePaneStore.getState().collectionTabState.orders.tabs[0];
+    expect(parked?.source?.path).toBe('archive/users/list.yml');
+  });
+
+  it('retargets tabs of a renamed folder and keeps the path of a renamed request', async () => {
+    usePaneStore.getState().openTab(requestTab('users/get.yml'));
+    const folder = makeProposal({
+      change: { op: 'renameItem', collection: 'orders', path: 'users', newName: 'people' },
+    });
+    useAssistantStore.getState().upsertProposal(folder);
+    vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...folder, status: 'accepted' });
+    vi.mocked(api.getRequest).mockRejectedValue(new Error('not a request'));
+    await acceptProposal(folder);
+    expect(firstTab()?.source?.path).toBe('people/get.yml');
+
+    const request = makeProposal({
+      id: 'p2',
+      change: { op: 'renameItem', collection: 'orders', path: 'people/get.yml', newName: 'Get one' },
+    });
+    useAssistantStore.getState().upsertProposal(request);
+    vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...request, status: 'accepted' });
+    vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ name: 'Get one' }));
+    await acceptProposal(request);
+    expect(firstTab()?.source?.path).toBe('people/get.yml');
+    expect(firstTab()?.title).toBe('Get one');
+  });
 });
