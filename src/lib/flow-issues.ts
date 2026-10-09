@@ -3,14 +3,7 @@ import {
   MAX_CALLBACK_TIMEOUT_MS,
   MIN_CALLBACK_TIMEOUT_MS,
 } from '@/lib/flow-callback';
-import {
-  caseHandle,
-  DEFAULT_HANDLE,
-  FALSE_HANDLE,
-  RESULT_HANDLE,
-  TRUE_HANDLE,
-  takesSingleInput,
-} from '@/lib/flow-handles';
+import { takesSingleInput } from '@/lib/flow-handles';
 import type { FlowEdge, FlowNode, FlowNodeKind, RepeatUntil } from '@/lib/tauri-api';
 
 export type IssueSeverity = 'error' | 'warning';
@@ -242,68 +235,6 @@ function waitIssues(node: FlowNode, nodes: FlowNode[]): FlowIssue[] {
   return out;
 }
 
-function exitIssues(node: FlowNode, edges: FlowEdge[]): FlowIssue[] {
-  const { kind } = node;
-  let exits: { handle: string; name: string }[];
-  if (kind.kind === 'If') {
-    exits = [
-      { handle: TRUE_HANDLE, name: 'true' },
-      { handle: FALSE_HANDLE, name: 'false' },
-    ];
-  } else if (kind.kind === 'Switch') {
-    exits = [
-      ...kind.cases.map((c, i) => ({
-        handle: caseHandle(c.id),
-        name: c.label.trim() || `Case ${i + 1}`,
-      })),
-      { handle: DEFAULT_HANDLE, name: 'default' },
-    ];
-  } else {
-    return [];
-  }
-  const unwired = exits
-    .filter(
-      (x) =>
-        !edges.some(
-          (e) => e.sourceNodeId === node.id && (e.sourceHandle ?? RESULT_HANDLE) === x.handle,
-        ),
-    )
-    .map((x) => x.name);
-  if (unwired.length === 0) return [];
-  return [
-    issue(
-      'exit-unwired',
-      'warning',
-      node,
-      `Nothing is wired to the ${unwired.join(', ')} exit${unwired.length > 1 ? 's' : ''}.`,
-      'A run that takes an unwired exit ends that branch.',
-    ),
-  ];
-}
-
-// Ids of every node with a path to an Output, or null when the flow has no Output.
-function nodesReachingOutput(nodes: FlowNode[], edges: FlowEdge[]): Set<string> | null {
-  const outputs = nodes.filter((n) => n.kind.kind === 'Output').map((n) => n.id);
-  if (outputs.length === 0) return null;
-  const sourcesOf = new Map<string, string[]>();
-  for (const e of edges) {
-    sourcesOf.set(e.targetNodeId, [...(sourcesOf.get(e.targetNodeId) ?? []), e.sourceNodeId]);
-  }
-  const reached = new Set(outputs);
-  const stack = [...outputs];
-  while (stack.length > 0) {
-    const id = stack.pop();
-    if (id === undefined) break;
-    for (const source of sourcesOf.get(id) ?? []) {
-      if (!reached.has(source)) {
-        reached.add(source);
-        stack.push(source);
-      }
-    }
-  }
-  return reached;
-}
-
 // Turns a save_flow error such as
 // "Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1"
 // into a sentence a person can read, without ids.
@@ -335,6 +266,8 @@ function saveIssues(save: SaveErrorInfo, nodeIds: Set<string>, edgeIds: Set<stri
   ];
 }
 
+// Rules in BACKEND_LINT_CODES (src/lib/flow-lint.ts) come from lint_flow only.
+// Do not add client copies of them.
 // Pure and I/O free. Issues never block a run. Errors come first, then
 // warnings, each group in node order.
 export function computeFlowIssues(
@@ -342,7 +275,6 @@ export function computeFlowIssues(
   edges: FlowEdge[],
   ctx: FlowIssueContext = {},
 ): FlowIssue[] {
-  const reaching = nodesReachingOutput(nodes, edges);
   const issues: FlowIssue[] = [];
   for (const node of nodes) {
     issues.push(
@@ -352,18 +284,7 @@ export function computeFlowIssues(
       ...switchIssues(node),
       ...waitIssues(node, nodes),
       ...outputIssues(node, edges),
-      ...exitIssues(node, edges),
     );
-    if (reaching && node.kind.kind !== 'Output' && !reaching.has(node.id)) {
-      issues.push(
-        issue(
-          'no-path-to-output',
-          'warning',
-          node,
-          'This node does not lead to any Output, so its result is never shown.',
-        ),
-      );
-    }
   }
   if (ctx.save) {
     issues.push(

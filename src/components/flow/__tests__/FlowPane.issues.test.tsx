@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
+import { lintFlow, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
@@ -93,15 +93,19 @@ describe('FlowPane issues', () => {
     vi.clearAllMocks();
     vi.mocked(listCollections).mockResolvedValue([]);
     vi.mocked(listFlows).mockResolvedValue([]);
+    // The exit and output warnings come from the backend lint feed now.
+    vi.mocked(lintFlow).mockResolvedValue([
+      { code: 'exit_without_edge', severity: 'warning', nodeId: 'if1', message: 'Nothing is wired to the true exit.' },
+      { code: 'no_path_to_output', severity: 'warning', nodeId: 'if1', message: "'Check' does not lead to an Output." },
+    ]);
     usePaneStore.getState().reset();
     usePaneStore.getState().openTab(baseTab);
   });
 
-  it('counts the problems of the flow next to Run and badges the node', () => {
+  it('counts the problems of the flow next to Run and badges the node', async () => {
     render(<Harness />);
-    // The If node has no input (error), both its exits are unwired and it leads to
-    // no Output (two warnings).
-    expect(screen.getByRole('button', { name: '1 error, 2 warnings' })).toBeInTheDocument();
+    // The If node has no input (a client error). The backend adds two warnings.
+    expect(await screen.findByRole('button', { name: '1 error, 2 warnings' })).toBeInTheDocument();
     const card = screen.getByTestId('if-node-card');
     expect(card.className).toContain('ring-red-500');
     expect(within(card).getByTestId('node-issue-badge')).toHaveAttribute('data-severity', 'error');
@@ -109,7 +113,7 @@ describe('FlowPane issues', () => {
 
   it('opens the node panel when an issue is chosen from the list', async () => {
     render(<Harness />);
-    await userEvent.click(screen.getByRole('button', { name: '1 error, 2 warnings' }));
+    await userEvent.click(await screen.findByRole('button', { name: '1 error, 2 warnings' }));
     const list = await screen.findByRole('list', { name: 'Flow issues' });
     await userEvent.click(within(list).getAllByRole('button')[0]);
     expect(await screen.findByTestId('node-properties-panel')).toHaveTextContent('Check');

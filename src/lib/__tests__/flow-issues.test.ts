@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BACKEND_LINT_CODES } from '@/lib/flow-lint';
 import type { FlowEdge, FlowNode, FlowNodeKind, RepeatUntil } from '@/lib/tauri-api';
 import {
   cleanSaveMessage,
@@ -167,64 +168,27 @@ describe('computeFlowIssues: Switch and Wait nodes', () => {
   });
 });
 
-describe('computeFlowIssues: warnings about the shape of the flow', () => {
-  const ifNode = node('if1', { kind: 'If', label: 'if1', condition: 'true' });
-  const base = [input('in1'), ifNode, output('out1'), output('out2')];
-
-  it('warns about unwired If exits, once per node', () => {
-    const edges = [
-      wire('e1', 'in1', 'if1', 'input'),
-      wire('e2', 'if1', 'out1', 'value', 'true'),
-      wire('e3', 'in1', 'out2', 'value'),
+describe('computeFlowIssues: rules the backend owns', () => {
+  it('leaves rules the backend owns to the lint feed', () => {
+    const nodes = [
+      input('in'),
+      node('chk', { kind: 'If', label: 'Check', condition: 'true' }),
+      node('sw', {
+        kind: 'Switch',
+        label: 'Route',
+        value: 'x',
+        cases: [{ id: 'c1', label: 'one', matches: '1' }],
+      }),
+      output('out'),
     ];
-    const unwired = only(computeFlowIssues(base, edges), 'exit-unwired');
-    expect(unwired).toHaveLength(1);
-    expect(unwired[0]).toMatchObject({ severity: 'warning', nodeId: 'if1' });
-    expect(unwired[0].message).toContain('false');
-    expect(unwired[0].message).not.toContain('true');
-  });
-
-  it('is silent when both If exits are wired', () => {
-    const edges = [
-      wire('e1', 'in1', 'if1', 'input'),
-      wire('e2', 'if1', 'out1', 'value', 'true'),
-      wire('e3', 'if1', 'out2', 'value', 'false'),
-    ];
-    expect(only(computeFlowIssues(base, edges), 'exit-unwired')).toEqual([]);
-  });
-
-  it('warns about an unwired Switch default and unwired cases', () => {
-    const sw = node('s1', {
-      kind: 'Switch',
-      label: 's1',
-      value: 'x',
-      cases: [{ id: 'c1', label: '', matches: 'a' }],
-    });
-    const edges = [wire('e1', 'in1', 's1', 'input')];
-    const unwired = only(computeFlowIssues([input('in1'), sw, output('out1')], edges), 'exit-unwired');
-    expect(unwired).toHaveLength(1);
-    expect(unwired[0].message).toContain('Case 1');
-    expect(unwired[0].message).toContain('default');
-  });
-
-  it('warns about a node that leads to no Output, but only when the flow has an Output', () => {
-    const lonely = [input('in1'), output('out1'), input('in2')];
-    const edges = [wire('e1', 'in1', 'out1', 'value')];
-    const warned = only(computeFlowIssues(lonely, edges), 'no-path-to-output');
-    expect(warned.map((i) => i.nodeId)).toEqual(['in2']);
-    expect(only(computeFlowIssues([input('in1'), input('in2')], []), 'no-path-to-output')).toEqual([]);
-  });
-
-  it('counts a path through an Auth node and a Request as reaching the Output', () => {
-    const auth = node('a1', {
-      kind: 'Auth',
-      label: 'a1',
-      auth: { authType: 'bearer', token: 't' },
-      applyToInherit: false,
-    });
-    const nodes = [auth, inlineRequest('r1', 'https://x.test'), output('out1')];
-    const edges = [wire('e1', 'a1', 'r1', 'auth'), wire('e2', 'r1', 'out1', 'value')];
-    expect(only(computeFlowIssues(nodes, edges), 'no-path-to-output')).toEqual([]);
+    const edges = [wire('e1', 'in', 'chk', 'input'), wire('e2', 'in', 'sw', 'input')];
+    const codes = computeFlowIssues(nodes, edges).map((i) => i.code);
+    for (const code of BACKEND_LINT_CODES) {
+      expect(codes).not.toContain(code);
+    }
+    // The old client codes are kebab case, so the loop above cannot catch them.
+    expect(codes).not.toContain('exit-unwired');
+    expect(codes).not.toContain('no-path-to-output');
   });
 });
 
