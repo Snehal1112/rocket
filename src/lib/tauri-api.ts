@@ -2567,6 +2567,12 @@ export const setAgentConfigOption = (sessionId: string, configId: string, value:
 export const endAgentSession = (sessionId: string) =>
   invoke<void>('end_agent_session', { sessionId });
 
+/** The workspace assistant's Rocket mode. Matches the backend `AssistantMode`. */
+export type AssistantMode = 'ask' | 'edit' | 'agent';
+
+export const setAssistantMode = (sessionId: string, mode: AssistantMode) =>
+  invoke<void>('set_assistant_mode', { sessionId, mode });
+
 /**
  * Ends every agent session the backend still tracks and resolves to how many
  * it ended. Call once per webview load, before starting a session (Plan 05's

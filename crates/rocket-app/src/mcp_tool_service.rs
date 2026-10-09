@@ -15,6 +15,12 @@
 //! collection"), re-checked on every call so a mid-session toggle takes
 //! effect at once. Every successful call publishes
 //! `DomainEvent::AcpToolInvoked` for the audit trail.
+//!
+//! Modes (spec section 3): each session has an `AssistantMode`. Read tools
+//! work in every mode, the direct-write tools need Edit, and `run_request`
+//! needs Agent. A tool outside the mode refuses with a clear message; the
+//! tool list itself never changes, which keeps the agent's prompt cache
+//! intact. A session with no recorded mode is in Ask.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -54,6 +60,50 @@ pub struct McpRunResult {
 /// are secret.
 const VARIABLE_NOT_ACCESSIBLE: &str = "variable not accessible";
 
+/// The workspace assistant's Rocket mode. Each mode allows everything the
+/// one before it allows, so the derived order (Ask < Edit < Agent) is what
+/// `check_mode` compares. Serialized as "ask", "edit" and "agent".
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum AssistantMode {
+    /// Read tools only. The mode of any session with no recorded mode.
+    #[default]
+    Ask,
+    /// Read tools and proposals (Plan 04). The direct-write tools also need
+    /// it until Plan 04 removes them.
+    Edit,
+    /// Everything, including `run_request` in collections whose run switch
+    /// is on.
+    Agent,
+}
+
+impl AssistantMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ask => "Ask",
+            Self::Edit => "Edit",
+            Self::Agent => "Agent",
+        }
+    }
+
+    /// One sentence for the agent about what this mode allows.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::Ask => {
+                "You can read the workspace. Proposing changes and running requests are not available."
+            }
+            Self::Edit => {
+                "You can read the workspace and propose changes. Running requests is not available."
+            }
+            Self::Agent => {
+                "You can read the workspace, propose changes, and run requests in collections whose run switch is on."
+            }
+        }
+    }
+}
+
 /// Orchestrates the workspace assistant's MCP tools. Holds no I/O of its
 /// own: every read and write goes through an injected repository or
 /// service. `test_result_cache` is the one piece of state it owns, keyed by
@@ -72,6 +122,9 @@ pub struct McpToolService {
     /// Read by `get_history`. The same store `RequestExecutionService`
     /// writes to, so an agent run shows up here.
     history_repo: Box<dyn rocket_history::HistoryRepository>,
+    /// Each session's mode, keyed by the real ACP session id (see
+    /// `McpSessionBinding` in `src-tauri`).
+    modes: Mutex<HashMap<String, AssistantMode>>,
     test_result_cache: Mutex<HashMap<TestResultKey, Vec<rocket_scripting::TestResult>>>,
 }
 
@@ -105,6 +158,7 @@ impl McpToolService {
             config_repo,
             active_workspace_path,
             history_repo,
+            modes: Mutex::new(HashMap::new()),
             test_result_cache: Mutex::new(HashMap::new()),
         }
     }
@@ -192,6 +246,53 @@ impl McpToolService {
             tool: tool.to_string(),
             summary,
         });
+    }
+
+    /// Records a session's starting mode. Called when a session starts.
+    pub fn open_session(&self, session_id: &str, mode: AssistantMode) {
+        self.modes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.to_string(), mode);
+    }
+
+    /// Changes the mode of a session started with `open_session`. Takes
+    /// effect on the next tool call; no restart is needed.
+    pub fn set_mode(&self, session_id: &str, mode: AssistantMode) -> DomainResult<()> {
+        let mut modes = self.modes.lock().unwrap_or_else(|e| e.into_inner());
+        match modes.get_mut(session_id) {
+            Some(current) => {
+                *current = mode;
+                Ok(())
+            }
+            None => Err(DomainError::NotFound(
+                "assistant session not found".to_string(),
+            )),
+        }
+    }
+
+    /// The session's mode, or Ask for a session with no recorded mode.
+    pub fn mode(&self, session_id: &str) -> AssistantMode {
+        self.modes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(session_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Refuses when the session's mode is below `required`.
+    pub fn check_mode(&self, session_id: &str, required: AssistantMode) -> DomainResult<()> {
+        let current = self.mode(session_id);
+        if current >= required {
+            Ok(())
+        } else {
+            Err(DomainError::InvalidInput(format!(
+                "Not available in {} mode. The user can switch the assistant to {} mode.",
+                current.label(),
+                required.label()
+            )))
+        }
     }
 
     /// The compact workspace index (spec section 6). With no `collection`,
@@ -397,6 +498,7 @@ impl McpToolService {
         request_path: &str,
         environment_name: Option<&str>,
     ) -> DomainResult<McpRunResult> {
+        self.check_mode(session_id, AssistantMode::Agent)?;
         self.check_in_workspace(collection)?;
         self.check_autonomy_enabled(collection)?;
         if let Some(name) = environment_name {
@@ -509,6 +611,7 @@ impl McpToolService {
         phase: rocket_collection::RequestScriptPhase,
         body: String,
     ) -> DomainResult<()> {
+        self.check_mode(session_id, AssistantMode::Edit)?;
         self.check_in_workspace(collection)?;
         self.check_autonomy_enabled(collection)?;
         let phase_name = match phase {
@@ -534,6 +637,7 @@ impl McpToolService {
         key: &str,
         value: String,
     ) -> DomainResult<()> {
+        self.check_mode(session_id, AssistantMode::Edit)?;
         self.check_in_workspace(collection)?;
         self.check_autonomy_enabled(collection)?;
         Self::validate_environment_name(environment_name)?;
@@ -597,6 +701,10 @@ impl McpToolService {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|(sid, _, _), _| sid != session_id);
+        self.modes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(session_id);
     }
 }
 
@@ -731,7 +839,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         ));
-        McpToolService::new(
+        let svc = McpToolService::new(
             collection_repo,
             env_factory,
             exec_svc,
@@ -739,7 +847,14 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(history)),
-        )
+        );
+        // The session ids most tests use run in Agent mode, so the older
+        // tests keep testing scope and the run switch. Mode tests use "s2"
+        // and other ids that start with no recorded mode.
+        for session in ["s1", "session-a", "session-b"] {
+            svc.open_session(session, AssistantMode::Agent);
+        }
+        svc
     }
 
     fn service_with(
@@ -1180,6 +1295,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
+        svc.open_session("s1", AssistantMode::Agent);
 
         let result = svc
             .run_request("s1", "my-api", "login.yml", None)
@@ -1257,6 +1373,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
+        svc.open_session("s1", AssistantMode::Agent);
 
         // First run succeeds and populates the cache.
         svc.run_request("s1", "my-api", "login.yml", None)
@@ -1320,6 +1437,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
+        svc.open_session("s1", AssistantMode::Agent);
 
         const SECRET: &str = "super-secret";
         executor.set_error(
@@ -1662,6 +1780,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
+        svc.open_session("s1", AssistantMode::Agent);
 
         let err = svc
             .run_request("s1", "my-api", "login.yml", None)
@@ -1738,6 +1857,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
         );
+        svc.open_session("s1", AssistantMode::Agent);
 
         let result = svc
             .run_request("s1", "my-api", "login.yml", None)
@@ -1781,6 +1901,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(history)),
         );
+        svc.open_session("s1", AssistantMode::Agent);
         svc.run_request("s1", "my-api", "login.yml", None)
             .await
             .expect("run_request")
@@ -1861,5 +1982,126 @@ mod tests {
         let result = run_with_echo(repo, &format!("Authorization: Basic {encoded}")).await;
         assert!(!result.body.contains(&encoded), "{}", result.body);
     }
-}
 
+    fn assert_refused_by_mode(tool: &str, result: DomainResult<()>, mode: &str) {
+        match result {
+            Err(DomainError::InvalidInput(msg)) => assert!(
+                msg.starts_with(&format!("Not available in {mode} mode")),
+                "{tool}: {msg}"
+            ),
+            other => panic!("{tool} must be refused by the mode gate, got {other:?}"),
+        }
+    }
+
+    fn mode_test_service(run_switch: bool) -> (McpToolService, Arc<ConfigurableCollectionRepo>) {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", run_switch);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(env_with_vars());
+        let svc = service_with(Arc::clone(&repo), env_factory, RecordingPublisher::new());
+        (svc, repo)
+    }
+
+    #[tokio::test]
+    async fn ask_mode_refuses_running_and_writing_but_allows_reading() {
+        let (svc, repo) = mode_test_service(true);
+        svc.open_session("s2", AssistantMode::Ask);
+
+        let run = svc
+            .run_request("s2", "my-api", "login.yml", None)
+            .await
+            .map(|_| ());
+        assert_refused_by_mode("run_request", run, "Ask");
+        assert_refused_by_mode(
+            "edit_script",
+            svc.edit_script("s2", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into()),
+            "Ask",
+        );
+        assert_refused_by_mode(
+            "set_env_var",
+            svc.set_env_var("s2", "my-api", "dev", "HOST", "x".into()),
+            "Ask",
+        );
+        svc.get_request("s2", "my-api", "login.yml")
+            .expect("reads are allowed in Ask mode");
+        assert!(repo.saved_scripts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn edit_mode_allows_writing_but_not_running() {
+        let (svc, _repo) = mode_test_service(true);
+        svc.open_session("s2", AssistantMode::Edit);
+
+        svc.edit_script("s2", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into())
+            .expect("Edit mode allows the direct write tools until Plan 04");
+        let run = svc
+            .run_request("s2", "my-api", "login.yml", None)
+            .await
+            .map(|_| ());
+        assert_refused_by_mode("run_request", run, "Edit");
+    }
+
+    #[tokio::test]
+    async fn agent_mode_still_needs_the_collection_run_switch() {
+        let (svc, _repo) = mode_test_service(false);
+        svc.open_session("s2", AssistantMode::Agent);
+
+        let run = svc
+            .run_request("s2", "my-api", "login.yml", None)
+            .await
+            .map(|_| ());
+        assert_refused_by_autonomy_gate("run_request", run);
+    }
+
+    #[tokio::test]
+    async fn a_session_with_no_recorded_mode_runs_in_ask_mode() {
+        let (svc, _repo) = mode_test_service(true);
+
+        assert_eq!(svc.mode("unbound-1"), AssistantMode::Ask);
+        let run = svc
+            .run_request("unbound-1", "my-api", "login.yml", None)
+            .await
+            .map(|_| ());
+        assert_refused_by_mode("run_request", run, "Ask");
+    }
+
+    #[tokio::test]
+    async fn set_mode_takes_effect_on_the_next_call_and_needs_a_known_session() {
+        let (svc, _repo) = mode_test_service(true);
+        svc.open_session("s2", AssistantMode::Ask);
+
+        svc.set_mode("s2", AssistantMode::Agent)
+            .expect("a known session");
+        svc.run_request("s2", "my-api", "login.yml", None)
+            .await
+            .expect("Agent mode with the switch on runs");
+
+        let err = svc
+            .set_mode("never-opened", AssistantMode::Agent)
+            .expect_err("an unknown session");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn forget_session_drops_the_mode() {
+        let (svc, _repo) = mode_test_service(true);
+        svc.open_session("s2", AssistantMode::Agent);
+
+        svc.forget_session("s2");
+
+        assert_eq!(svc.mode("s2"), AssistantMode::Ask);
+    }
+
+    #[test]
+    fn assistant_mode_uses_lowercase_names_and_is_ordered() {
+        assert_eq!(
+            serde_json::to_string(&AssistantMode::Agent).expect("serialize"),
+            "\"agent\""
+        );
+        let mode: AssistantMode = serde_json::from_str("\"edit\"").expect("deserialize");
+        assert_eq!(mode, AssistantMode::Edit);
+        assert!(AssistantMode::Ask < AssistantMode::Edit);
+        assert!(AssistantMode::Edit < AssistantMode::Agent);
+    }
+}

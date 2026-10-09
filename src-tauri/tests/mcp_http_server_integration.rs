@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use reqwest::Client;
-use rocket_app::McpToolService;
+use rocket_app::{AssistantMode, McpToolService};
 use rocket_collection::{
     request::Request as CollectionRequest, settings::CollectionSettings, CollectionRepository,
 };
@@ -359,7 +359,12 @@ fn first_text(result: &rmcp::model::CallToolResult) -> String {
 /// router, the JSON argument decoding, or the MCP session handshake.
 #[tokio::test]
 async fn real_mcp_client_lists_and_calls_tools_over_http() {
-    let (handle, _app_handle, _tmp) = spawn_test_server("session-http-9").await;
+    let (handle, app_handle, _tmp) = spawn_test_server("session-http-9").await;
+    // run_request needs Agent mode. This server is never bound to an ACP
+    // session, so its calls carry the id it was spawned with.
+    app_handle
+        .state::<Arc<McpToolService>>()
+        .open_session("session-http-9", AssistantMode::Agent);
     let client = connect_rmcp_client(&handle).await;
 
     let tools = client.list_all_tools().await.expect("tools/list");

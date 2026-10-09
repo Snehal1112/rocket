@@ -118,7 +118,7 @@ impl SessionCleanup for TauriSessionCleanup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::tool_server::McpHttpServerHandle;
+    use crate::mcp::tool_server::{McpHttpServerHandle, McpSessionBinding};
     use tempfile::TempDir;
     use tokio_util::sync::CancellationToken;
 
@@ -127,6 +127,7 @@ mod tests {
         let handle = McpHttpServerHandle {
             port: 4100,
             token: "token".to_string(),
+            binding: Arc::new(McpSessionBinding::new("mcp-pre-handshake".to_string())),
             shutdown: shutdown.clone(),
         };
         (handle, shutdown)

@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use rocket_acp::SessionInfo;
-use rocket_app::{AcpSessionService, CollectionService, McpHttpServerCredentials};
+use rocket_app::{
+    AcpSessionService, AssistantMode, CollectionService, McpHttpServerCredentials, McpToolService,
+};
 use rocket_shared::error::DomainError;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::agent_session::cleanup::{SessionResourceRegistry, SessionResources};
 use crate::agent_session::scratch::SessionScratch;
@@ -79,6 +81,9 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
     resources: &SessionResourceRegistry,
     svc: &AcpSessionService,
 ) -> Result<SessionInfo, DomainError> {
+    // Used after the handshake to record the session's mode;
+    // `app_handle` itself moves into `spawn_mcp_http_server`.
+    let mode_handle = app_handle.clone();
     let autonomy_enabled = collection_svc
         .get_settings(&collection)?
         .agent_autonomy_enabled;
@@ -122,6 +127,16 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
             // Registered under the real ACP session id, which every other
             // command addresses a session by.
             if let Some(handle) = handle {
+                // Tag later tool calls with the real session id, so the mode
+                // and the test-result cache share the key the session end
+                // clears.
+                handle.binding.bind(&info.session_id);
+                // The per-tab chat keeps its old reach until Plan 05 removes
+                // it: every tool is available, and the run switch still gates
+                // running and writing.
+                if let Some(mcp_tool_svc) = mode_handle.try_state::<Arc<McpToolService>>() {
+                    mcp_tool_svc.open_session(&info.session_id, AssistantMode::Agent);
+                }
                 registry.register(info.session_id.clone(), handle);
             }
             resources.register(
@@ -203,6 +218,17 @@ pub async fn end_agent_session(
     // AcpSessionService runs TauriSessionCleanup, which ends the MCP server,
     // forgets the tool caches and removes the scratch directories.
     svc.end_session(&session_id).await
+}
+
+/// Changes the workspace assistant's mode. Needs no restart: the tool list
+/// stays the same, and each tool checks the mode when it is called.
+#[tauri::command]
+pub async fn set_assistant_mode(
+    session_id: String,
+    mode: AssistantMode,
+    mcp_tool_svc: State<'_, Arc<McpToolService>>,
+) -> Result<(), DomainError> {
+    mcp_tool_svc.set_mode(&session_id, mode)
 }
 
 /// Ends every agent session the backend still tracks and returns how many.

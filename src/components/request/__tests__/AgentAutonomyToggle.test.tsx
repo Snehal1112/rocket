@@ -11,7 +11,7 @@ vi.mock('@/lib/tauri-api', () => ({
 
 import * as tauriApi from '@/lib/tauri-api';
 
-const LABEL = 'Allow this agent to run requests and edit files';
+const LABEL = 'Allow the agent to run requests in this collection';
 
 function settings(overrides: Partial<CollectionSettings> = {}): CollectionSettings {
   return {

@@ -113,15 +113,23 @@ use rocket_app::McpToolService;
 /// concrete `RocketMcpToolServer<Wry>`, not just compile generically.
 pub struct RocketMcpToolServer<R: tauri::Runtime = tauri::Wry> {
     app_handle: tauri::AppHandle<R>,
-    session_id: String,
+    binding: Arc<McpSessionBinding>,
     tool_router: ToolRouter<Self>,
 }
 
 impl<R: tauri::Runtime> RocketMcpToolServer<R> {
+    /// A server whose calls are tagged with `session_id` for good. Used by
+    /// tests; `spawn_mcp_http_server` uses `with_binding`.
     pub fn new(app_handle: tauri::AppHandle<R>, session_id: String) -> Self {
+        Self::with_binding(app_handle, Arc::new(McpSessionBinding::new(session_id)))
+    }
+
+    /// A server that tags its calls with whatever `binding` holds at call
+    /// time.
+    pub fn with_binding(app_handle: tauri::AppHandle<R>, binding: Arc<McpSessionBinding>) -> Self {
         Self {
             app_handle,
-            session_id,
+            binding,
             tool_router: Self::tool_router(),
         }
     }
@@ -131,9 +139,47 @@ impl<R: tauri::Runtime> Clone for RocketMcpToolServer<R> {
     fn clone(&self) -> Self {
         Self {
             app_handle: self.app_handle.clone(),
-            session_id: self.session_id.clone(),
+            binding: Arc::clone(&self.binding),
             tool_router: self.tool_router.clone(),
         }
+    }
+}
+
+/// Which session id a tool server tags its `McpToolService` calls with.
+///
+/// The server must run before the ACP handshake, because its port and
+/// token go into `session/new`, so it starts with a Rocket-minted
+/// provisional id. Once the handshake returns the real ACP session id, the
+/// command layer calls `bind`, and every later call uses the real id. That
+/// is the id `set_assistant_mode`, `end_agent_session` and the session
+/// cleanup address a session by, so the mode, the test-result cache and the
+/// pending outline all live under one key. A call that arrives before
+/// `bind` uses the provisional id, which has no mode, so it runs in Ask.
+#[derive(Debug)]
+pub struct McpSessionBinding {
+    provisional_id: String,
+    acp_session_id: std::sync::OnceLock<String>,
+}
+
+impl McpSessionBinding {
+    pub fn new(provisional_id: String) -> Self {
+        Self {
+            provisional_id,
+            acp_session_id: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Records the real ACP session id. The first call wins.
+    pub fn bind(&self, acp_session_id: &str) {
+        let _ = self.acp_session_id.set(acp_session_id.to_string());
+    }
+
+    /// The real ACP session id once bound, the provisional id before.
+    pub fn session_id(&self) -> &str {
+        self.acp_session_id
+            .get()
+            .map(String::as_str)
+            .unwrap_or(self.provisional_id.as_str())
     }
 }
 
@@ -281,7 +327,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc.get_workspace_outline(
-            &self.session_id,
+            self.binding.session_id(),
             params.collection.as_deref(),
             params.folder.as_deref(),
         );
@@ -293,7 +339,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     )]
     async fn list_collections(&self) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        Ok(to_tool_result(svc.list_collections(&self.session_id)))
+        Ok(to_tool_result(svc.list_collections(self.binding.session_id())))
     }
 
     #[tool(
@@ -304,7 +350,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         Parameters(params): Parameters<GetRequestParams>,
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.get_request(&self.session_id, &params.collection, &params.request_path);
+        let result = svc.get_request(self.binding.session_id(), &params.collection, &params.request_path);
         Ok(to_tool_result(result))
     }
 
@@ -316,7 +362,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         Parameters(params): Parameters<CollectionParams>,
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.get_collection_settings(&self.session_id, &params.collection);
+        let result = svc.get_collection_settings(self.binding.session_id(), &params.collection);
         Ok(to_tool_result(result))
     }
 
@@ -329,7 +375,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc.get_environment(
-            &self.session_id,
+            self.binding.session_id(),
             &params.collection,
             &params.environment_name,
         );
@@ -345,7 +391,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc.get_history(
-            &self.session_id,
+            self.binding.session_id(),
             &params.collection,
             &params.request_path,
             params.limit.unwrap_or(HISTORY_LIMIT_MAX),
@@ -363,7 +409,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc
             .run_request(
-                &self.session_id,
+                self.binding.session_id(),
                 &params.collection,
                 &params.request_path,
                 params.environment_name.as_deref(),
@@ -387,7 +433,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         };
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc.edit_script(
-            &self.session_id,
+            self.binding.session_id(),
             &params.collection,
             &params.request_path,
             phase,
@@ -403,7 +449,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
         let result = svc.set_env_var(
-            &self.session_id,
+            self.binding.session_id(),
             &params.collection,
             &params.environment_name,
             &params.key,
@@ -421,7 +467,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
         let result =
-            svc.get_test_results(&self.session_id, &params.collection, &params.request_path);
+            svc.get_test_results(self.binding.session_id(), &params.collection, &params.request_path);
         Ok(to_tool_result(result))
     }
 }
@@ -444,7 +490,8 @@ impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
                 "Rocket workspace tools for one assistant session: read the current \
                  workspace (outline, collections, requests, settings, environments, history, \
                  test results) with secrets masked, and run requests in collections where the \
-                 user allows it.",
+                 user allows it. The user picks a mode: Ask allows reading, Edit also allows \
+                 changes, Agent also allows running. A tool outside the mode refuses.",
             )
     }
 }
@@ -461,6 +508,9 @@ impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
 pub struct McpHttpServerHandle {
     pub port: u16,
     pub token: String,
+    /// Shared with the server's `RocketMcpToolServer`. The caller binds it
+    /// to the real ACP session id after the handshake.
+    pub binding: Arc<McpSessionBinding>,
     pub(crate) shutdown: CancellationToken,
 }
 
@@ -511,7 +561,8 @@ pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
     let token = uuid::Uuid::new_v4().to_string();
     let shutdown = CancellationToken::new();
 
-    let tool_server = RocketMcpToolServer::new(app_handle, session_id);
+    let binding = Arc::new(McpSessionBinding::new(session_id));
+    let tool_server = RocketMcpToolServer::with_binding(app_handle, Arc::clone(&binding));
     // The default config keeps `rmcp`'s loopback-only `Host` allowlist, which
     // guards against DNS rebinding. Only the cancellation token is replaced,
     // so `shutdown()` also ends live MCP sessions (see its doc comment).
@@ -531,6 +582,7 @@ pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
     let handle = McpHttpServerHandle {
         port,
         token,
+        binding,
         shutdown: shutdown.clone(),
     };
 
@@ -597,6 +649,8 @@ mod tests {
     use rocket_shared::events::NullEventPublisher;
     use rocket_shared::types::HttpMethod;
     use std::sync::Mutex as StdMutex;
+
+    use rocket_app::AssistantMode;
     use tempfile::TempDir;
 
     struct FakeHttpExecutor {
@@ -630,6 +684,7 @@ mod tests {
         // generic parameter" note at the end of Task 1.
         app_handle: tauri::AppHandle<tauri::test::MockRuntime>,
         session_id: String,
+        mcp_tool_svc: Arc<McpToolService>,
     }
 
     impl TestFixture {
@@ -704,17 +759,24 @@ mod tests {
             let app = tauri::test::mock_builder()
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .expect("build mock tauri app");
-            app.manage(mcp_tool_svc);
+            app.manage(Arc::clone(&mcp_tool_svc));
 
             Self {
                 app_handle: app.handle().clone(),
                 _tmp: tmp,
                 session_id: "session-1".to_string(),
+                mcp_tool_svc,
             }
         }
 
         fn server(&self) -> RocketMcpToolServer<tauri::test::MockRuntime> {
             RocketMcpToolServer::new(self.app_handle.clone(), self.session_id.clone())
+        }
+
+        /// A server whose session runs in `mode`.
+        fn server_in(&self, mode: AssistantMode) -> RocketMcpToolServer<tauri::test::MockRuntime> {
+            self.mcp_tool_svc.open_session(&self.session_id, mode);
+            self.server()
         }
     }
 
@@ -824,7 +886,7 @@ mod tests {
     #[tokio::test]
     async fn get_history_lists_a_run_made_through_run_request() {
         let fixture = TestFixture::new(true);
-        let server = fixture.server();
+        let server = fixture.server_in(AssistantMode::Agent);
         let run = server
             .run_request(Parameters(RunRequestParams {
                 collection: "demo".to_string(),
@@ -850,7 +912,7 @@ mod tests {
     #[tokio::test]
     async fn run_request_then_get_test_results_round_trips_through_the_session_cache() {
         let fixture = TestFixture::new(true);
-        let server = fixture.server();
+        let server = fixture.server_in(AssistantMode::Agent);
 
         let run_result = server
             .run_request(Parameters(RunRequestParams {
@@ -870,5 +932,96 @@ mod tests {
             .await
             .expect("tool call");
         assert!(!tool_is_error(&results));
+    }
+
+    #[test]
+    fn the_tool_list_is_the_same_in_every_mode() {
+        let fixture = TestFixture::new(true);
+        let expected = vec![
+            "edit_script",
+            "get_collection_settings",
+            "get_environment",
+            "get_history",
+            "get_request",
+            "get_test_results",
+            "get_workspace_outline",
+            "list_collections",
+            "run_request",
+            "set_env_var",
+        ];
+        for mode in [AssistantMode::Ask, AssistantMode::Edit, AssistantMode::Agent] {
+            let names: Vec<String> = fixture
+                .server_in(mode)
+                .tool_router
+                .list_all()
+                .into_iter()
+                .map(|tool| tool.name.to_string())
+                .collect();
+            assert_eq!(names, expected, "tool list in {mode:?} mode");
+        }
+    }
+
+    #[tokio::test]
+    async fn run_request_in_ask_mode_is_an_agent_visible_refusal() {
+        let fixture = TestFixture::new(true);
+        let result = fixture
+            .server_in(AssistantMode::Ask)
+            .run_request(Parameters(RunRequestParams {
+                collection: "demo".to_string(),
+                request_path: "ping.yml".to_string(),
+                environment_name: None,
+            }))
+            .await
+            .expect("tool call");
+
+        assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("Not available in Ask mode"));
+    }
+
+    #[test]
+    fn a_binding_reports_the_provisional_id_until_bound_and_the_first_bind_wins() {
+        let binding = McpSessionBinding::new("provisional".to_string());
+        assert_eq!(binding.session_id(), "provisional");
+        binding.bind("acp-1");
+        assert_eq!(binding.session_id(), "acp-1");
+        binding.bind("acp-2");
+        assert_eq!(binding.session_id(), "acp-1");
+    }
+
+    #[tokio::test]
+    async fn calls_before_bind_run_in_ask_mode_and_after_bind_use_the_real_session() {
+        let fixture = TestFixture::new(true);
+        let binding = Arc::new(McpSessionBinding::new("provisional-1".to_string()));
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::with_binding(fixture.app_handle.clone(), Arc::clone(&binding));
+        fixture
+            .mcp_tool_svc
+            .open_session("acp-real-1", AssistantMode::Agent);
+        let run_params = || {
+            Parameters(RunRequestParams {
+                collection: "demo".to_string(),
+                request_path: "ping.yml".to_string(),
+                environment_name: None,
+            })
+        };
+
+        let before = server.run_request(run_params()).await.expect("tool call");
+        assert!(tool_text(&before).contains("Not available in Ask mode"));
+
+        binding.bind("acp-real-1");
+        let after = server.run_request(run_params()).await.expect("tool call");
+        assert!(!tool_is_error(&after), "{}", tool_text(&after));
+
+        // The cached results live under the real id, so forgetting the real
+        // id (what the session cleanup does) clears them.
+        fixture.mcp_tool_svc.forget_session("acp-real-1");
+        let results = server
+            .get_test_results(Parameters(GetTestResultsParams {
+                collection: "demo".to_string(),
+                request_path: "ping.yml".to_string(),
+            }))
+            .await
+            .expect("tool call");
+        assert!(tool_is_error(&results));
     }
 }

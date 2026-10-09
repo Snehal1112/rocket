@@ -86,6 +86,8 @@ impl McpServerRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tool_server::McpSessionBinding;
+    use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
     fn test_handle(port: u16, token: &str) -> (McpHttpServerHandle, CancellationToken) {
@@ -93,6 +95,7 @@ mod tests {
         let handle = McpHttpServerHandle {
             port,
             token: token.to_string(),
+            binding: Arc::new(McpSessionBinding::new(token.to_string())),
             shutdown: shutdown.clone(),
         };
         (handle, shutdown)

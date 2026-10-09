@@ -86,7 +86,7 @@ export function AgentAutonomyToggle({ collectionName }: AgentAutonomyToggleProps
           onCheckedChange={handleCheckedChange}
         />
         <Label htmlFor='agent-autonomy-switch' className='text-xs leading-snug'>
-          Allow this agent to run requests and edit files
+          Allow the agent to run requests in this collection
         </Label>
       </div>
       <p className='text-xs text-muted-foreground'>

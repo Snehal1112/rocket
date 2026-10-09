@@ -77,14 +77,14 @@ describe('AgentChatPanel', () => {
   it('shows the agent access toggle before a session starts', async () => {
     render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
     expect(
-      await screen.findByLabelText('Allow this agent to run requests and edit files'),
+      await screen.findByLabelText('Allow the agent to run requests in this collection'),
     ).toBeInTheDocument();
   });
 
   it('shows no agent access toggle without a collection', () => {
     render(<AgentChatPanel tabId='tab-1' onInsertCode={vi.fn()} />);
     expect(
-      screen.queryByLabelText('Allow this agent to run requests and edit files'),
+      screen.queryByLabelText('Allow the agent to run requests in this collection'),
     ).not.toBeInTheDocument();
   });
 
