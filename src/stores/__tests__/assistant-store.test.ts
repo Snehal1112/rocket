@@ -130,6 +130,22 @@ describe('assistant-store', () => {
     });
   });
 
+  it('drops the proposals when a failure ends the session', () => {
+    activate();
+    store().upsertProposal(makeProposal());
+    store().appendUserMessage('hi');
+    store().failMessage('s1', 'agent crashed');
+    expect(store().proposals).toEqual([]);
+  });
+
+  it('keeps the proposals on a non-fatal failure', () => {
+    activate();
+    store().upsertProposal(makeProposal());
+    store().appendUserMessage('hi');
+    store().failMessage('s1', 'busy', false);
+    expect(store().proposals).toHaveLength(1);
+  });
+
   it('keeps the session active on a non-fatal failure', () => {
     activate();
     store().appendUserMessage('hi');

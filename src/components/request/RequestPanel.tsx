@@ -1188,7 +1188,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             <ScriptsTab
               tabId={tab.id}
               collectionName={tab.source?.collection}
-              agentSession={tab.agentSession}
+              requestPath={tab.source?.path}
               preRequestScript={request.preRequestScript ?? ''}
               postResponseScript={request.postResponseScript ?? ''}
               testsScript={request.testsScript ?? ''}

@@ -6,23 +6,6 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 describe('ACP chat session tauri-api bindings', () => {
-  it('startAgentSession invokes start_agent_session and returns the session info', async () => {
-    const started = { sessionId: 'session-1', configOptions: [] };
-    vi.mocked(invoke).mockResolvedValue(started);
-    const { startAgentSession } = await import('@/lib/tauri-api');
-    const result = await startAgentSession(
-      'agent-1',
-      '/collections/my-collection',
-      'my-collection',
-    );
-    expect(invoke).toHaveBeenCalledWith('start_agent_session', {
-      agentConfigId: 'agent-1',
-      cwd: '/collections/my-collection',
-      collection: 'my-collection',
-    });
-    expect(result).toEqual(started);
-  });
-
   it('sendAgentPrompt sends a null resource list when none is given', async () => {
     vi.mocked(invoke).mockResolvedValue('end_turn');
     const { sendAgentPrompt } = await import('@/lib/tauri-api');

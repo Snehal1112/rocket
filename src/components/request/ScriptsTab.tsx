@@ -1,4 +1,4 @@
-import { MessageSquare, PanelRight } from 'lucide-react';
+import { PanelRight, Sparkles } from 'lucide-react';
 import type * as monacoNs from 'monaco-editor';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
@@ -10,8 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import type { AgentChatSession } from '@/types/pane-types';
-import { AgentChatPanel } from './AgentChatPanel';
+import { useAssistantStore } from '@/stores/assistant-store';
 import { ScriptSnippetSidebar } from './ScriptSnippetSidebar';
 
 const MonacoWrapper = lazy(() =>
@@ -23,12 +22,14 @@ const MIN_EDITOR_WIDTH = 320;
 const ALL_PHASES: ScriptPhase[] = ['pre-request', 'post-response', 'tests'];
 
 interface ScriptsTabProps {
+  /** Identifies the owning tab or folder editor. Callers key editors by it. */
   tabId: string;
   collectionName?: string;
-  agentSession?: AgentChatSession;
+  /** Path of the saved request, so AI Assist can focus it. */
+  requestPath?: string;
   /** Phase tabs to show. Defaults to all three. */
   phases?: ScriptPhase[];
-  /** Shows the AI Assist button and panel. Defaults to true. */
+  /** Shows the AI Assist button, which opens the docked assistant. Defaults to true. */
   agentAssist?: boolean;
   preRequestScript: string;
   postResponseScript: string;
@@ -68,9 +69,8 @@ function insertSnippet(editor: monacoNs.editor.IStandaloneCodeEditor | undefined
 }
 
 export function ScriptsTab({
-  tabId,
   collectionName,
-  agentSession,
+  requestPath,
   phases = ALL_PHASES,
   agentAssist = true,
   preRequestScript,
@@ -97,7 +97,17 @@ export function ScriptsTab({
     'post-response': false,
     tests: false,
   });
-  const [showAgentChat, setShowAgentChat] = useState(false);
+  const openAssistantPanel = useAssistantStore((s) => s.openPanel);
+  const setAssistantFocus = useAssistantStore((s) => s.setFocus);
+
+  // Opens the docked assistant with this request in focus. An unsaved request
+  // has no path, so the focus is cleared rather than left on another request.
+  const openAssistant = () => {
+    setAssistantFocus(
+      collectionName && requestPath ? { collection: collectionName, path: requestPath } : undefined,
+    );
+    openAssistantPanel();
+  };
   const scriptsContainerRef = useRef<HTMLDivElement>(null);
   const [scriptsContainerWidth, setScriptsContainerWidth] = useState(0);
   const sidebarMaxWidth = Math.max(
@@ -167,12 +177,11 @@ export function ScriptsTab({
               variant='ghost'
               size='sm'
               className='ml-auto h-7 gap-1 text-xs'
-              onClick={() => setShowAgentChat((v) => !v)}
-              aria-pressed={showAgentChat}
-              aria-controls='agent-chat-panel'
-              title={showAgentChat ? 'Hide AI assist' : 'Show AI assist'}
+              onClick={openAssistant}
+              aria-controls='assistant-panel'
+              title='Open the AI Assistant with this request in focus'
             >
-              <MessageSquare className='h-3.5 w-3.5' />
+              <Sparkles className='h-3.5 w-3.5' />
               AI Assist
             </Button>
           )}
@@ -268,14 +277,6 @@ export function ScriptsTab({
           )}
         </TabsContent>
       </Tabs>
-      {agentAssist && showAgentChat && (
-        <AgentChatPanel
-          tabId={tabId}
-          collectionName={collectionName}
-          agentSession={agentSession}
-          onInsertCode={(code) => insertSnippet(editorRefs.current[activeTab], code)}
-        />
-      )}
     </div>
   );
 }

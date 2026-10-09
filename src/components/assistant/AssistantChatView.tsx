@@ -8,6 +8,7 @@ import {
   type ToolActivityStatus,
   useAssistantStore,
 } from '@/stores/assistant-store';
+import { AssistantProposalCard } from './AssistantProposalCard';
 
 const TOOL_STATUS_LABEL: Record<ToolActivityStatus, string> = {
   pending: 'waiting',
@@ -58,7 +59,7 @@ function ChatItem({
       return (
         <div className='text-sm'>
           <div className='mb-1 text-xs font-semibold text-muted-foreground'>Assistant</div>
-          {message.text && <MarkdownRenderer>{message.text}</MarkdownRenderer>}
+          {message.text && <MarkdownRenderer restricted>{message.text}</MarkdownRenderer>}
           {waiting && (
             <Loader2
               className='h-3 w-3 animate-spin text-muted-foreground'
@@ -76,11 +77,12 @@ function ChatItem({
   }
 }
 
-/** The conversation: messages, tool activity lines and notices. */
+/** The conversation: messages, tool activity lines, notices and proposals. */
 export function AssistantChatView() {
   const messages = useAssistantStore((s) => s.messages);
+  const proposals = useAssistantStore((s) => s.proposals);
   const endRef = useRef<HTMLDivElement>(null);
-  const itemCount = messages.length;
+  const itemCount = messages.length + proposals.length;
 
   // Keeps the newest item in view.
   useEffect(() => {
@@ -98,6 +100,13 @@ export function AssistantChatView() {
         {messages.map((m) => (
           <ChatItem key={m.id} message={m} isLastStreaming={m.id === lastStreamingId} />
         ))}
+        {proposals.length > 0 && (
+          <section aria-label='Proposals' className='flex flex-col gap-2'>
+            {proposals.map((p) => (
+              <AssistantProposalCard key={p.id} proposal={p} />
+            ))}
+          </section>
+        )}
         <div ref={endRef} />
       </div>
     </ScrollArea>

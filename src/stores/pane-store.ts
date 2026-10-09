@@ -31,7 +31,6 @@ import { executeRunnerEntry } from '@/lib/runner-execute';
 import { flattenRunnerEntries } from '@/lib/runner-flatten';
 import { releaseStreamingTab } from '@/lib/streaming-release';
 import {
-  endAgentSession,
   type Flow,
   type FlowEdge,
   type FlowLiveProgress,
@@ -45,7 +44,6 @@ import {
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type {
-  ChatMessage,
   CollectionSection,
   CollectionTab,
   ContractTab,
@@ -133,18 +131,9 @@ function removeParkedTabs(
   return changed ? next : state;
 }
 
-function findTabInSnapshots(state: CollectionTabState, tabId: string): Tab | undefined {
-  for (const entry of Object.values(state)) {
-    const tab = entry.tabs.find((t) => t.id === tabId);
-    if (tab) return tab;
-  }
-  return undefined;
-}
-
 // Applies an updater to one tab by id in the live pane tree and in every
-// collection snapshot. Agent session events can arrive while the owning tab
-// is parked in a snapshot after a collection switch, so the agent session
-// actions must reach it there too.
+// collection snapshot, so an update also reaches a tab that is parked after a
+// collection switch.
 function updateTabEverywhere(
   state: Pick<PaneState, 'root' | 'collectionTabState'>,
   tabId: string,
@@ -156,25 +145,12 @@ function updateTabEverywhere(
   };
 }
 
-// Best-effort backend cleanup for a tab that is about to be discarded.
-// Subproject B only sweeps sessions on whole-app exit. A session still
-// mid-handshake has no real session id yet, so there is nothing to end.
-function endSessionIfActive(tab: Tab): void {
-  releaseStreamingTab(tab);
-  if (isRequestTab(tab) && tab.agentSession?.status === 'active') {
-    Promise.resolve(endAgentSession(tab.agentSession.sessionId)).catch((err) => {
-      console.error('[pane-store] failed to end agent session', err);
-    });
-  }
-}
-
-// Ends every active agent session among tabs that are about to be discarded.
-// The same session can appear twice (a live tab plus a stale snapshot copy),
-// so each session id is ended only once.
-function endActiveSessions(tabs: Tab[]): void {
+// Releases the streaming connections of tabs that are about to be discarded.
+// The same tab can appear twice (a live tab plus a stale snapshot copy), so
+// each tab id is released once. Stream sessions are keyed by tab id.
+function releaseDroppedTabs(tabs: Tab[]): void {
   const seen = new Set<string>();
   for (const tab of tabs) {
-    // Stream sessions are keyed by tab id, so the same tab id is released once.
     if (
       isRequestTab(tab) &&
       (tab.request.requestType === 'websocket' ||
@@ -185,10 +161,6 @@ function endActiveSessions(tabs: Tab[]): void {
       seen.add(tab.id);
       releaseStreamingTab(tab);
     }
-    if (!isRequestTab(tab) || tab.agentSession?.status !== 'active') continue;
-    if (seen.has(tab.agentSession.sessionId)) continue;
-    seen.add(tab.agentSession.sessionId);
-    endSessionIfActive(tab);
   }
 }
 
@@ -301,19 +273,6 @@ export interface PaneState {
   markDirty: (tabId: string) => void;
   // For a flow, `saved` is the graph that was written, which may be older than the live one.
   markClean: (tabId: string, saved?: GraphSnap) => void;
-
-  // Agent chat session actions.
-  beginAgentSession: (tabId: string, agentConfigId: string) => void;
-  /** Moves a 'starting' session to 'active'. Returns false without changing
-   *  state when the tab is gone or its session is no longer 'starting', so the
-   *  caller knows it must end the backend session itself. */
-  activateAgentSession: (tabId: string, sessionId: string) => boolean;
-  appendAgentChatMessage: (tabId: string, message: ChatMessage) => void;
-  appendAgentChatChunk: (tabId: string, messageId: string, text: string) => void;
-  completeAgentChatMessage: (tabId: string, messageId: string) => void;
-  failAgentChatMessage: (tabId: string, messageId: string, error: string) => void;
-  markAgentSessionEnded: (tabId: string) => void;
-  clearAgentSession: (tabId: string) => void;
 
   // Collection-keyed tab state actions.
   setActiveCollection: (name: string) => void;
@@ -480,8 +439,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       );
     }
 
-    // Best-effort session cleanup for the tab being closed.
-    if (found) endSessionIfActive(found.tab);
+    // Best-effort release of the closed tab's streaming connection.
+    if (found) releaseStreamingTab(found.tab);
 
     const leaf = (() => {
       const result = findActiveLeaf(root, groupId);
@@ -653,123 +612,6 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           : { ...tab, isDirty: false },
       ),
     });
-  },
-
-  beginAgentSession(tabId, agentConfigId) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab)) return tab;
-        return {
-          ...tab,
-          agentSession: { agentConfigId, sessionId: '', status: 'starting', messages: [] },
-        };
-      }),
-    );
-  },
-
-  activateAgentSession(tabId, sessionId) {
-    const state = get();
-    const tab =
-      findTabInTree(state.root, tabId)?.tab ?? findTabInSnapshots(state.collectionTabState, tabId);
-    if (!tab || !isRequestTab(tab) || tab.agentSession?.status !== 'starting') return false;
-    set(
-      updateTabEverywhere(state, tabId, (t) => {
-        if (!isRequestTab(t) || t.agentSession?.status !== 'starting') return t;
-        return { ...t, agentSession: { ...t.agentSession, sessionId, status: 'active' } };
-      }),
-    );
-    return true;
-  },
-
-  appendAgentChatMessage(tabId, message) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab) || !tab.agentSession) return tab;
-        return {
-          ...tab,
-          agentSession: {
-            ...tab.agentSession,
-            messages: [...tab.agentSession.messages, message],
-          },
-        };
-      }),
-    );
-  },
-
-  appendAgentChatChunk(tabId, messageId, text) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab) || !tab.agentSession) return tab;
-        return {
-          ...tab,
-          agentSession: {
-            ...tab.agentSession,
-            messages: tab.agentSession.messages.map((m) =>
-              m.id === messageId ? { ...m, text: m.text + text } : m,
-            ),
-          },
-        };
-      }),
-    );
-  },
-
-  completeAgentChatMessage(tabId, messageId) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab) || !tab.agentSession) return tab;
-        return {
-          ...tab,
-          agentSession: {
-            ...tab.agentSession,
-            messages: tab.agentSession.messages.map((m) =>
-              m.id === messageId ? { ...m, streaming: false } : m,
-            ),
-          },
-        };
-      }),
-    );
-  },
-
-  failAgentChatMessage(tabId, messageId, error) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab) || !tab.agentSession) return tab;
-        // Ignore late failures for a session that already ended or a reply that already settled.
-        if (tab.agentSession.status !== 'active') return tab;
-        if (!tab.agentSession.messages.some((m) => m.id === messageId && m.streaming)) return tab;
-        return {
-          ...tab,
-          agentSession: {
-            ...tab.agentSession,
-            status: 'error',
-            error,
-            messages: tab.agentSession.messages.map((m) =>
-              m.id === messageId
-                ? { ...m, text: `${m.text}\n\nError: ${error}`, streaming: false }
-                : m,
-            ),
-          },
-        };
-      }),
-    );
-  },
-
-  markAgentSessionEnded(tabId) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab) || !tab.agentSession) return tab;
-        return { ...tab, agentSession: { ...tab.agentSession, status: 'ended' } };
-      }),
-    );
-  },
-
-  clearAgentSession(tabId) {
-    set(
-      updateTabEverywhere(get(), tabId, (tab) => {
-        if (!isRequestTab(tab)) return tab;
-        return { ...tab, agentSession: undefined };
-      }),
-    );
   },
 
   openContractTab(collectionName, collectionRoot) {
@@ -1329,8 +1171,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       };
     } else {
       // With no active collection there is no snapshot to keep the active
-      // leaf's tabs, so they are dropped. End their agent sessions first.
-      endActiveSessions(activeLeaf.tabs);
+      // leaf's tabs, so they are dropped. Release their streams first.
+      releaseDroppedTabs(activeLeaf.tabs);
       clearFlowAuthForDroppedTabs(activeLeaf.tabs);
     }
 
@@ -1341,8 +1183,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
     // The restored snapshot is now redundant: its tabs are about to become
     // live in `root`, so keeping it around would leave a stale duplicate
-    // that `updateTabEverywhere` could find and "activate" after the tab is
-    // closed, orphaning a credentialed backend process. Drop it.
+    // that `updateTabEverywhere` would keep updating after the tab is
+    // closed. Drop it.
     delete updatedState[name];
 
     const newRoot = updateLeaf(root, activeGroupId, (leaf) => ({
@@ -1389,10 +1231,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       for (const tab of activeLeaf.tabs) preservedTabIds.add(tab.id);
     }
 
-    // Every other tab in the pane tree is dropped below. End its agent
-    // session so no credentialed backend process is left orphaned.
+    // Every other tab in the pane tree is dropped below. Release its stream.
     const droppedTabs = collectAllTabs(root).filter((tab) => !preservedTabIds.has(tab.id));
-    endActiveSessions(droppedTabs);
+    releaseDroppedTabs(droppedTabs);
     clearFlowAuthForDroppedTabs(
       droppedTabs,
       collectAllTabs(root).filter((tab) => preservedTabIds.has(tab.id)),
@@ -1471,7 +1312,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const snapshotTabs = Object.entries(collectionTabState)
       .filter(([key]) => key !== activeCollection)
       .flatMap(([, entry]) => entry.tabs);
-    endActiveSessions([...collectAllTabs(root), ...snapshotTabs]);
+    releaseDroppedTabs([...collectAllTabs(root), ...snapshotTabs]);
     clearFlowAuthForDroppedTabs([...collectAllTabs(root), ...snapshotTabs]);
     set(buildInitialState());
   },

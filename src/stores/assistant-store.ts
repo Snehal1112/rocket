@@ -219,6 +219,8 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       return {
         session: fatal ? { ...state.session, status: 'error', error } : state.session,
         messages: settleStreaming(state.messages, error),
+        // A dead session cannot apply anything, so its proposals go too.
+        proposals: fatal ? [] : state.proposals,
       };
     });
   },

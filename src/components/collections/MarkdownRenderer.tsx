@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light';
@@ -12,7 +12,37 @@ interface MarkdownRendererProps {
   // When given, rendered over each fenced (language-tagged) code block —
   // e.g. an "Insert" button in the AI Assist chat panel.
   renderCodeActions?: (code: string, language?: string) => React.ReactNode;
+  // For text written by an agent. Images are never rendered, so nothing is
+  // fetched, and links are plain text that shows their URL, so nothing opens.
+  restricted?: boolean;
 }
+
+// Only these schemes are shown as a URL. javascript:, data:, file: and the
+// rest are blocked outright.
+const SHOWN_URL = /^(https?:|mailto:)/i;
+
+const RESTRICTED_COMPONENTS: Components = {
+  img({ alt }) {
+    return (
+      <span className='text-muted-foreground'>
+        {alt ? `[image omitted: ${alt}]` : '[image omitted]'}
+      </span>
+    );
+  },
+  a({ href, children: ch }) {
+    const url = href?.trim() ?? '';
+    return (
+      <span>
+        {ch}{' '}
+        {SHOWN_URL.test(url) ? (
+          <span className='break-all text-muted-foreground'>({url})</span>
+        ) : (
+          <span className='text-muted-foreground'>[link blocked]</span>
+        )}
+      </span>
+    );
+  },
+};
 
 function useIsDark() {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
@@ -30,6 +60,7 @@ export function MarkdownRenderer({
   children,
   className,
   renderCodeActions,
+  restricted = false,
 }: MarkdownRendererProps) {
   const isDark = useIsDark();
 
@@ -38,6 +69,7 @@ export function MarkdownRenderer({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          ...(restricted ? RESTRICTED_COMPONENTS : {}),
           code({ className: cls, children: ch, ...rest }) {
             // language-* className signals a fenced code block in react-markdown v10.
             const match = /language-(\w+)/.exec(cls ?? '');

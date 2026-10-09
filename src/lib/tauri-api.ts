@@ -2545,9 +2545,6 @@ export interface PromptResourceDto {
   text: string;
 }
 
-export const startAgentSession = (agentConfigId: string, cwd: string, collection: string) =>
-  invoke<AgentSessionStarted>('start_agent_session', { agentConfigId, cwd, collection });
-
 /** Resolves with the stop reason. A stopped turn resolves with `cancelled`. */
 export const sendAgentPrompt = (
   sessionId: string,

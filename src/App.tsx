@@ -13,7 +13,6 @@ import { TitleBar } from '@/components/title-bar';
 import { Toaster } from '@/components/ui/sonner';
 import { useBackendLogs } from '@/hooks/useBackendLogs';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { useAgentSessionEventBridge } from '@/lib/agent-session-event-bridge';
 import { useAssistantEventBridge } from '@/lib/assistant-event-bridge';
 import { useGraphQlSubscriptionEventBridge } from '@/lib/graphql-subscription-event-bridge';
 import { environmentKeys } from '@/lib/queries/environment-queries';
@@ -42,7 +41,6 @@ function App() {
   const setConsoleHeight = useLayoutStore((s) => s.setConsoleHeight);
 
   useKeyboardShortcuts();
-  useAgentSessionEventBridge();
   useAssistantEventBridge();
   useWebSocketEventBridge();
   useGraphQlSubscriptionEventBridge();
