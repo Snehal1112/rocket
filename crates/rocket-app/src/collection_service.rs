@@ -4,7 +4,7 @@ use rocket_audit::{
 };
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSummary, CollectionVariable, FolderSettings,
-    GraphQlRequest, GrpcRequest, Request, RequestKind, WebSocketRequest,
+    GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
@@ -355,6 +355,24 @@ impl CollectionService {
             src_path: src_path.to_string(),
             dst_collection: dst_collection.to_string(),
             dst_path: dst_path.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Overwrites one script phase of a request, then tells listeners the
+    /// request changed. The other phases and fields stay as they are.
+    pub fn save_request_script(
+        &self,
+        collection: &str,
+        request_path: &str,
+        phase: RequestScriptPhase,
+        body: String,
+    ) -> DomainResult<()> {
+        self.repo
+            .save_request_script(collection, request_path, phase, body)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: request_path.to_string(),
         });
         Ok(())
     }

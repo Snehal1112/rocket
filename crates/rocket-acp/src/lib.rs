@@ -1,11 +1,15 @@
 pub mod agent_config;
 pub mod mcp_server_spec;
 pub mod prompt;
+pub mod proposal;
 pub mod session;
 pub mod session_info;
 pub mod update;
 pub use agent_config::{AgentConfig, AgentConfigRepository};
 pub use mcp_server_spec::McpServerSpec;
+pub use proposal::{
+    AgentProposal, ProposalStatus, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+};
 pub use prompt::PromptPart;
 pub use session::AcpSessionClient;
 pub use session_info::{ConfigChoice, ConfigOption, PromptCapabilities, SessionInfo};

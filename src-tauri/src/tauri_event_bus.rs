@@ -47,6 +47,8 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
             DomainEvent::GraphQlSubscriptionStatus { .. } => "graphql:subscription-status",
             DomainEvent::AcpToolInvoked { .. } => "agent-tool-invoked",
+            DomainEvent::AcpProposalCreated { .. } => "agent-proposal-created",
+            DomainEvent::AcpProposalResolved { .. } => "agent-proposal-resolved",
             DomainEvent::AcpToolActivity { .. } => "agent-session-tool-activity",
             DomainEvent::AcpConfigOptionsChanged { .. } => "agent-session-config-options",
             DomainEvent::AcpUsage { .. } => "agent-session-usage",

@@ -35,6 +35,7 @@ cargo test -p rocket-acp -j4
 | `update.rs` | `AcpUpdate` (typed agent updates) and `ToolCallStatus` |
 | `prompt.rs` | `PromptPart` (text and embedded text resources) |
 | `mcp_server_spec.rs` | `McpServerSpec` |
+| `proposal.rs` | `AgentProposal`, `ProposalStatus`, `ProposedChange`, `ProposedRequest`, `RequestPatch`, `ScriptPhase`: pure proposal data, applied by `rocket-app`'s `ProposalService` |
 
 ### Key Design Points
 

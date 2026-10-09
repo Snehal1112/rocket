@@ -38,6 +38,7 @@ pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
+pub mod proposal_service;
 pub mod proxy_settings_service;
 pub(crate) mod redaction;
 pub mod request_guard;
@@ -97,6 +98,7 @@ pub use mcp_tool_service::{
     WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 pub use oauth2_service::OAuth2Service;
+pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};
 pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};
 pub use secret_manager_service::SecretManagerService;

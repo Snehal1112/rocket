@@ -554,6 +554,19 @@ pub enum DomainEvent {
         tool: String,
         summary: String,
     },
+    /// Emitted once per proposal the assistant queues. Nothing was written.
+    AcpProposalCreated {
+        session_id: String,
+        proposal_id: String,
+        summary: String,
+    },
+    /// Emitted when a proposal leaves `pending`. `status` is `accepted`,
+    /// `rejected`, `stale` or `failed`.
+    AcpProposalResolved {
+        session_id: String,
+        proposal_id: String,
+        status: String,
+    },
     /// Emitted for every tool call start or change during a prompt turn.
     /// `title` and `status` are the last known values, so the UI can upsert
     /// by `call_id`. `status` is `pending`, `in_progress`, `completed` or
@@ -1883,6 +1896,34 @@ mod tests {
         assert_eq!(
             json,
             r#"{"wait":{"ignored":2,"timeoutMs":60000,"lastRejected":{"method":"POST","url":"/cb/…?x=1","headers":[],"body":"{}","reason":"Accept when returned false."}}}"#
+        );
+    }
+
+    #[test]
+    fn acp_proposal_created_wire_shape() {
+        let event = DomainEvent::AcpProposalCreated {
+            session_id: "sess-1".into(),
+            proposal_id: "p-1".into(),
+            summary: "Create folder 'reports' in demo".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpProposalCreated","session_id":"sess-1","proposal_id":"p-1","summary":"Create folder 'reports' in demo"}"#
+        );
+    }
+
+    #[test]
+    fn acp_proposal_resolved_wire_shape() {
+        let event = DomainEvent::AcpProposalResolved {
+            session_id: "sess-1".into(),
+            proposal_id: "p-1".into(),
+            status: "stale".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpProposalResolved","session_id":"sess-1","proposal_id":"p-1","status":"stale"}"#
         );
     }
 
