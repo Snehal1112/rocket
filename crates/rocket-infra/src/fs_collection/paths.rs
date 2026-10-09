@@ -92,6 +92,48 @@ pub(super) fn reject_symlink(path: &Path) -> DomainResult<()> {
     }
 }
 
+/// True when anything sits at `path` inside the collection, found by listing
+/// each directory and comparing names case-folded. Hidden items, symlinks and
+/// script files count. A symlinked or non-directory parent is refused or
+/// reported as taken, never followed.
+pub(super) fn path_exists(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+) -> DomainResult<bool> {
+    use rocket_collection::CollectionRepository as _;
+    let mut dir = repo.collection_root_path(collection)?;
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    for (index, segment) in segments.iter().enumerate() {
+        let wanted = segment.to_lowercase();
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(DomainError::Io(e.to_string())),
+        };
+        let found = entries
+            .flatten()
+            .find(|entry| entry.file_name().to_string_lossy().to_lowercase() == wanted);
+        let Some(entry) = found else {
+            return Ok(false);
+        };
+        if index + 1 == segments.len() {
+            return Ok(true);
+        }
+        let meta = fs::symlink_metadata(entry.path()).map_err(|e| DomainError::Io(e.to_string()))?;
+        if meta.file_type().is_symlink() {
+            return Err(DomainError::InvalidInput(format!(
+                "'{segment}' is a symlink; paths through symlinks are refused"
+            )));
+        }
+        if !meta.is_dir() {
+            return Ok(true);
+        }
+        dir = entry.path();
+    }
+    Ok(true)
+}
+
 pub(super) fn count_request_files(dir: &Path) -> usize {
     let mut count = 0;
     if let Ok(entries) = fs::read_dir(dir) {

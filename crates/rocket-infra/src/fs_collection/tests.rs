@@ -3005,3 +3005,31 @@ fn settings_script_flow_back_to_sandwich_removes_the_bruno_stub() {
     assert!(!yaml.contains("bruno"), "bruno stub removed: {yaml}");
     assert!(yaml.contains("sandboxMode: safe"), "rocketapi kept: {yaml}");
 }
+
+#[test]
+fn path_exists_sees_hidden_items_and_ignores_case() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = dir.path().join("col");
+    fs::create_dir_all(root.join("environments")).expect("environments");
+    fs::create_dir_all(root.join("Reports")).expect("reports");
+    fs::write(root.join("Reports").join("get-users.yml"), "x").expect("file");
+    assert!(repo.path_exists("col", "opencollection.yml").expect("check"));
+    assert!(repo.path_exists("col", "environments").expect("check"));
+    assert!(repo.path_exists("col", "reports").expect("check"));
+    assert!(repo.path_exists("col", "REPORTS/Get-Users.yml").expect("check"));
+    assert!(!repo.path_exists("col", "reports/other.yml").expect("check"));
+    assert!(!repo.path_exists("col", "missing/other.yml").expect("check"));
+}
+
+#[cfg(unix)]
+#[test]
+fn path_exists_refuses_a_symlinked_parent() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let outside = dir.path().join("outside");
+    fs::create_dir_all(&outside).expect("outside");
+    std::os::unix::fs::symlink(&outside, dir.path().join("col").join("link")).expect("symlink");
+    assert!(repo.path_exists("col", "link/x.yml").is_err());
+    assert!(repo.path_exists("col", "link").expect("the link itself exists"));
+}

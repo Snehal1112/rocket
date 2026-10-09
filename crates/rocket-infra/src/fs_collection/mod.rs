@@ -236,6 +236,10 @@ impl CollectionRepository for FsCollectionRepo {
         requests::request_kind(self, collection, path)
     }
 
+    fn path_exists(&self, collection: &str, path: &str) -> DomainResult<bool> {
+        paths::path_exists(self, collection, path)
+    }
+
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
         folders::create_folder(self, collection, path)
     }

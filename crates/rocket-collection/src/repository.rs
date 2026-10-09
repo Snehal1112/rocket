@@ -166,6 +166,17 @@ pub trait CollectionRepository: Send + Sync {
         ))
     }
 
+    /// True when anything sits at the collection-relative `path`: a file,
+    /// folder, symlink or hidden item. Names are compared case-insensitively,
+    /// so a case variant counts as taken. A symlinked parent is an error.
+    /// The default body refuses, so a repository that cannot answer never
+    /// reads as "free".
+    fn path_exists(&self, _collection: &str, _path: &str) -> DomainResult<bool> {
+        Err(DomainError::Internal(
+            "path existence check is not available".into(),
+        ))
+    }
+
     /// Creates `name` (`.js` appended when missing) in `folder_path` with starter
     /// content. `folder_path` is relative to the collection root, `""` for the root.
     /// Returns the collection-relative path of the new file.

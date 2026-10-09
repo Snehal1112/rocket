@@ -51,6 +51,12 @@ impl CollectionService {
         self.repo.get_summaries(name)
     }
 
+    /// True when anything sits at `path` on disk, case-insensitively. See
+    /// `CollectionRepository::path_exists`.
+    pub fn path_exists(&self, name: &str, path: &str) -> DomainResult<bool> {
+        self.repo.path_exists(name, path)
+    }
+
     /// Get the full request at `path`, including body/headers/auth/scripts.
     /// Used by the frontend to fetch full data on demand for a sidebar item
     /// that was loaded via `get_summaries`.

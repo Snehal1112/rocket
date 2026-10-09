@@ -11,7 +11,7 @@ use rocket_acp::proposal::{
     AgentProposal, ProposalStatus, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
 };
 use rocket_collection::{request_filename_for, CollectionItem, Folder, Request};
-use rocket_environment::{EnvironmentRepositoryFactory, Variable};
+use rocket_environment::{Environment, EnvironmentRepositoryFactory, Variable};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 use crate::collection_service::CollectionService;
 use crate::environment_service::EnvironmentService;
 use crate::flow_run_cache::saved_request_text;
+use crate::redaction::REDACTED;
 use crate::runner_sequence::folder_dir_name;
 
 /// How many proposals may wait for the user in one session.
@@ -33,15 +34,49 @@ pub const MAX_RESOLVED_PER_SESSION: usize = 100;
 /// One error for a secret variable, matching the old MCP tool's wording.
 const VARIABLE_NOT_ACCESSIBLE: &str = "variable not accessible";
 
+/// Names the active workspace. The service does no I/O, so the app injects
+/// this. Two calls return the same text only while the workspace is the same.
+pub type WorkspaceIdentity = Arc<dyn Fn() -> String + Send + Sync>;
+
+/// File names the collection layout reserves, lowercase. A request must never
+/// be saved over one of them. Mirrors `rocket-infra` `is_request_file`.
+const RESERVED_FILE_NAMES: &[&str] = &[
+    "opencollection.yml",
+    "opencollection.yaml",
+    "folder.yml",
+    "folder.yaml",
+    "workspace.yml",
+    "workspace.yaml",
+    "collection.json",
+    "_order.json",
+    "_order.yml",
+    "_order.yaml",
+];
+
+/// Directory names the tree never shows, lowercase. Mirrors `rocket-infra`
+/// `is_hidden_entry`. `flows` is hidden at the collection root only.
+const RESERVED_DIR_NAMES: &[&str] = &["environments", "node_modules"];
+
 pub struct ProposalService {
     collections: CollectionService,
     environment_repo_factory: Arc<dyn EnvironmentRepositoryFactory>,
     events: Arc<dyn EventPublisher>,
+    workspace_identity: WorkspaceIdentity,
     store: Mutex<Store>,
+}
+
+/// What a pending proposal remembers besides the change itself.
+struct ProposalMeta {
+    /// The workspace that was active when the change was proposed.
+    workspace: String,
+    /// For `SetEnvVar`: the fingerprint of that one variable at propose time.
+    env_fingerprint: Option<String>,
 }
 
 #[derive(Default)]
 struct Store {
+    /// Extra data of pending proposals, by proposal id. Removed on answer.
+    meta: HashMap<String, ProposalMeta>,
     /// Sessions that ended. A late call must not recreate their entry.
     ended: HashSet<String>,
     /// Proposals per real ACP session id, oldest first. The MCP tool server
@@ -78,8 +113,16 @@ impl ProposalService {
             collections,
             environment_repo_factory,
             events,
+            workspace_identity: Arc::new(String::new),
             store: Mutex::new(Store::default()),
         }
+    }
+
+    /// Sets how the service learns which workspace is active. A proposal made
+    /// in one workspace is `Stale` once another is active.
+    pub fn with_workspace_identity(mut self, identity: WorkspaceIdentity) -> Self {
+        self.workspace_identity = identity;
+        self
     }
 
     fn lock(&self) -> MutexGuard<'_, Store> {
@@ -119,10 +162,11 @@ impl ProposalService {
             .into_iter()
             .map(|summary| summary.name)
             .collect();
+        let workspace_id = (self.workspace_identity)();
         let mut prepared = Vec::with_capacity(changes.len());
         for mut change in changes {
-            self.prepare(&mut change, &workspace)?;
-            prepared.push(change);
+            let env_fingerprint = self.prepare(&mut change, &workspace)?;
+            prepared.push((change, env_fingerprint));
         }
 
         let now = chrono::Utc::now().timestamp_millis();
@@ -145,13 +189,22 @@ impl ProposalService {
             )));
         }
         let mut created = Vec::with_capacity(prepared.len());
-        for change in prepared {
+        let mut metas = Vec::with_capacity(prepared.len());
+        for (change, env_fingerprint) in prepared {
             let proposal =
                 AgentProposal::new(ulid::Ulid::new().to_string(), session.clone(), change, now);
             created.push((proposal.id.clone(), proposal.summary.clone()));
+            metas.push((
+                proposal.id.clone(),
+                ProposalMeta {
+                    workspace: workspace_id.clone(),
+                    env_fingerprint,
+                },
+            ));
             list.push(proposal);
         }
         prune_resolved(list);
+        store.meta.extend(metas);
         drop(store);
 
         let mut ids = Vec::with_capacity(created.len());
@@ -184,11 +237,22 @@ impl ProposalService {
         let change = pending_mut(&mut store, &session, proposal_id)?
             .change
             .clone();
+        let meta = store.meta.get(proposal_id);
+        let env_fingerprint = meta.and_then(|m| m.env_fingerprint.clone());
+        // A proposal from another workspace must not touch this one, even if
+        // a collection of the same name exists here.
+        let same_workspace =
+            meta.is_some_and(|m| m.workspace == (self.workspace_identity)());
         // The lock stays held while the change is applied, so a second
         // accept of the same proposal waits and then finds it answered.
-        let status = match self.still_applies(&change) {
+        let applies = if same_workspace {
+            self.still_applies(&change)
+        } else {
+            Ok(false)
+        };
+        let status = match applies {
             Ok(false) => ProposalStatus::Stale,
-            Ok(true) => match self.apply(&change) {
+            Ok(true) => match self.apply(&change, env_fingerprint.as_deref()) {
                 Ok(true) => ProposalStatus::Accepted,
                 Ok(false) => ProposalStatus::Stale,
                 Err(e) => ProposalStatus::Failed {
@@ -221,10 +285,16 @@ impl ProposalService {
 
     /// Drops the session's proposals and refuses later proposals for it.
     /// Called from `TauriSessionCleanup` when the session ends. Safe to call
-    /// more than once.
+    /// more than once. No `AcpProposalResolved` event goes out for the
+    /// dropped proposals: the UI drops the session's list when the session
+    /// ends (see the plan index).
     pub fn clear_session(&self, session_id: &str) {
         let mut store = self.lock();
-        store.sessions.remove(session_id);
+        if let Some(dropped) = store.sessions.remove(session_id) {
+            for proposal in dropped {
+                store.meta.remove(&proposal.id);
+            }
+        }
         store.ended.insert(session_id.to_string());
     }
 
@@ -242,11 +312,18 @@ impl ProposalService {
 
     /// Checks one change against the workspace as it is now and fills in
     /// its base fingerprint. Nothing is written.
-    fn prepare(&self, change: &mut ProposedChange, workspace: &[String]) -> DomainResult<()> {
+    /// Returns the fingerprint of the one variable a `SetEnvVar` targets.
+    fn prepare(
+        &self,
+        change: &mut ProposedChange,
+        workspace: &[String],
+    ) -> DomainResult<Option<String>> {
         normalize_paths(change);
         for path in paths_of(change) {
             validate_relative_path(path)?;
         }
+        refuse_masked_values(change)?;
+        let mut env_fingerprint = None;
         let collection = change.collection().to_string();
         if !workspace.iter().any(|name| *name == collection) {
             return Err(DomainError::InvalidInput(format!(
@@ -258,6 +335,7 @@ impl ProposalService {
                 parent_path, name, ..
             } => {
                 validate_item_name(name)?;
+                check_reserved_name(parent_path, name, true)?;
                 self.check_free_target(&collection, parent_path, name)?;
                 None
             }
@@ -267,11 +345,9 @@ impl ProposalService {
                 ..
             } => {
                 validate_item_name(&request.name)?;
-                self.check_free_target(
-                    &collection,
-                    folder_path,
-                    &request_filename_for(&request.name),
-                )?;
+                let file_name = request_filename_for(&request.name);
+                check_reserved_name(folder_path, &file_name, false)?;
+                self.check_free_target(&collection, folder_path, &file_name)?;
                 None
             }
             ProposedChange::UpdateRequest {
@@ -303,7 +379,9 @@ impl ProposalService {
                         "folder '{to_folder}' in '{collection}'"
                     )));
                 }
-                if !is_free(&root, &destination) {
+                let moved_is_folder = is_folder(&root, from_path);
+                check_reserved_name(to_folder, last_segment(&destination), moved_is_folder)?;
+                if !self.target_free(&collection, &root, &destination)? {
                     return Err(DomainError::AlreadyExists(format!(
                         "'{destination}' in '{collection}'"
                     )));
@@ -315,7 +393,8 @@ impl ProposalService {
                 let root = self.tree(&collection)?;
                 if is_folder(&root, path) {
                     let destination = join_path(parent_of(path), new_name);
-                    if !is_free(&root, &destination) {
+                    check_reserved_name(parent_of(path), new_name, true)?;
+                    if !self.target_free(&collection, &root, &destination)? {
                         return Err(DomainError::AlreadyExists(format!(
                             "'{destination}' in '{collection}'"
                         )));
@@ -341,13 +420,25 @@ impl ProposalService {
                         VARIABLE_NOT_ACCESSIBLE.to_string(),
                     ));
                 }
+                env_fingerprint = Some(env_var_fingerprint(&env, key));
                 None
             }
         };
         if let Some(fingerprint) = fingerprint {
             change.set_base_fingerprint(fingerprint);
         }
-        Ok(())
+        Ok(env_fingerprint)
+    }
+
+    /// True when nothing is at `path`: not in the summaries tree (compared
+    /// case-folded) and not on disk either. The tree hides reserved
+    /// directories, symlinks and script files, so it alone says "free" too
+    /// often.
+    fn target_free(&self, collection: &str, root: &Folder, path: &str) -> DomainResult<bool> {
+        if !is_free(root, path) {
+            return Ok(false);
+        }
+        Ok(!self.collections.path_exists(collection, path)?)
     }
 
     /// The parent must be a folder and `parent/name` must be unused.
@@ -359,7 +450,7 @@ impl ProposalService {
             )));
         }
         let target = join_path(parent, name);
-        if !is_free(&root, &target) {
+        if !self.target_free(collection, &root, &target)? {
             return Err(DomainError::AlreadyExists(format!(
                 "'{target}' in '{collection}'"
             )));
@@ -414,7 +505,8 @@ impl ProposalService {
                 name,
             } => {
                 let root = self.tree(collection)?;
-                Ok(is_folder(&root, parent_path) && is_free(&root, &join_path(parent_path, name)))
+                Ok(is_folder(&root, parent_path)
+                    && self.target_free(collection, &root, &join_path(parent_path, name))?)
             }
             ProposedChange::CreateRequest {
                 collection,
@@ -423,7 +515,8 @@ impl ProposalService {
             } => {
                 let root = self.tree(collection)?;
                 let target = join_path(folder_path, &request_filename_for(&request.name));
-                Ok(is_folder(&root, folder_path) && is_free(&root, &target))
+                Ok(is_folder(&root, folder_path)
+                    && self.target_free(collection, &root, &target)?)
             }
             ProposedChange::UpdateRequest {
                 collection,
@@ -451,7 +544,9 @@ impl ProposalService {
             } => {
                 let root = self.tree(collection)?;
                 let destination = move_destination(from_path, to_folder)?;
-                if !is_folder(&root, to_folder) || !is_free(&root, &destination) {
+                if !is_folder(&root, to_folder)
+                    || !self.target_free(collection, &root, &destination)?
+                {
                     return Ok(false);
                 }
                 unchanged(
@@ -466,7 +561,8 @@ impl ProposalService {
                 base_fingerprint,
             } => {
                 let root = self.tree(collection)?;
-                if is_folder(&root, path) && !is_free(&root, &join_path(parent_of(path), new_name))
+                if is_folder(&root, path)
+                    && !self.target_free(collection, &root, &join_path(parent_of(path), new_name))?
                 {
                     return Ok(false);
                 }
@@ -475,8 +571,8 @@ impl ProposalService {
                     base_fingerprint,
                 )
             }
-            // Environment writes carry no fingerprint. `apply_env_var`
-            // re-checks the secret flag itself.
+            // `apply_env_var` compares the variable's fingerprint on the copy
+            // it saves.
             ProposedChange::SetEnvVar { .. } => Ok(true),
         }
     }
@@ -500,7 +596,7 @@ impl ProposalService {
 
     /// Applies one change through the manual-edit services. Returns `false`
     /// without writing when the target no longer matches the proposal.
-    fn apply(&self, change: &ProposedChange) -> DomainResult<bool> {
+    fn apply(&self, change: &ProposedChange, env_fingerprint: Option<&str>) -> DomainResult<bool> {
         let applied = |result: DomainResult<()>| result.map(|()| true);
         match change {
             ProposedChange::CreateFolder {
@@ -596,23 +692,29 @@ impl ProposalService {
                 environment,
                 key,
                 value,
-            } => applied(self.apply_env_var(collection, environment, key, value)),
+            } => self.apply_env_var(collection, environment, key, value, env_fingerprint),
         }
     }
 
     /// Writes one non-secret variable through `EnvironmentService`, so the
     /// usual validation and `EnvironmentSaved` event apply.
+    /// Returns `false` without writing when the variable changed since the
+    /// proposal. The fingerprint is checked on the very copy that is saved.
     fn apply_env_var(
         &self,
         collection: &str,
         environment: &str,
         key: &str,
         value: &str,
-    ) -> DomainResult<()> {
+        env_fingerprint: Option<&str>,
+    ) -> DomainResult<bool> {
         let mut env = self
             .environment_repo_factory
             .for_collection(collection)
             .get(environment)?;
+        if env_fingerprint != Some(env_var_fingerprint(&env, key).as_str()) {
+            return Ok(false);
+        }
         match env.variables.iter_mut().find(|v| v.key == key) {
             Some(variable) if variable.secret => {
                 return Err(DomainError::InvalidInput(
@@ -627,6 +729,7 @@ impl ProposalService {
             Box::new(ForwardEvents(Arc::clone(&self.events))),
         )
         .save(&env)
+        .map(|()| true)
     }
 }
 
@@ -660,6 +763,7 @@ fn finish(
     let proposal = pending_mut(store, session, proposal_id)?;
     proposal.status = status;
     let resolved = proposal.clone();
+    store.meta.remove(proposal_id);
     if let Some(list) = store.sessions.get_mut(session) {
         prune_resolved(list);
     }
@@ -729,39 +833,60 @@ fn folder_shape(folder: &Folder) -> String {
     lines.join("\n")
 }
 
-fn child_folder<'a>(folder: &'a Folder, name: &str) -> Option<&'a Folder> {
+/// Compares two names. With `fold`, case is ignored, so a case variant
+/// counts as the same name on every filesystem.
+fn same_name(fold: bool, a: &str, b: &str) -> bool {
+    if fold {
+        a.to_lowercase() == b.to_lowercase()
+    } else {
+        a == b
+    }
+}
+
+fn child_folder<'a>(folder: &'a Folder, name: &str, fold: bool) -> Option<&'a Folder> {
     folder.items.iter().find_map(|item| match item {
-        CollectionItem::Folder(sub) if folder_dir_name(sub) == name => Some(sub),
+        CollectionItem::Folder(sub) if same_name(fold, &folder_dir_name(sub), name) => Some(sub),
         _ => None,
     })
 }
 
 /// Finds what `path` points at. `""` is the collection root.
 fn locate(root: &Folder, path: &str) -> Target {
+    locate_with(root, path, false)
+}
+
+fn locate_with(root: &Folder, path: &str, fold: bool) -> Target {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     let Some((last, parents)) = segments.split_last() else {
         return Target::Folder(folder_shape(root));
     };
     let mut folder = root;
     for segment in parents {
-        match child_folder(folder, segment) {
+        match child_folder(folder, segment, fold) {
             Some(next) => folder = next,
             None => return Target::Missing,
         }
     }
-    if let Some(found) = child_folder(folder, last) {
+    if let Some(found) = child_folder(folder, last, fold) {
         return Target::Folder(folder_shape(found));
     }
     for item in &folder.items {
         match item {
-            CollectionItem::Summary(summary) if summary.file_name.as_deref() == Some(*last) => {
+            CollectionItem::Summary(summary)
+                if summary
+                    .file_name
+                    .as_deref()
+                    .is_some_and(|n| same_name(fold, n, last)) =>
+            {
                 return if summary.kind.is_http() {
                     Target::HttpRequest
                 } else {
                     Target::Other
                 };
             }
-            CollectionItem::ScriptFile(file) if file.file_name == *last => return Target::Other,
+            CollectionItem::ScriptFile(file) if same_name(fold, &file.file_name, last) => {
+                return Target::Other;
+            }
             _ => {}
         }
     }
@@ -772,8 +897,81 @@ fn is_folder(root: &Folder, path: &str) -> bool {
     matches!(locate(root, path), Target::Folder(_))
 }
 
+/// Free in the tree, with names compared case-folded.
 fn is_free(root: &Folder, path: &str) -> bool {
-    matches!(locate(root, path), Target::Missing)
+    matches!(locate_with(root, path, true), Target::Missing)
+}
+
+fn last_segment(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// Refuses names the collection layout reserves or the tree never shows, so
+/// an accepted change cannot overwrite settings or land where it is hidden.
+fn check_reserved_name(parent: &str, name: &str, is_dir: bool) -> DomainResult<()> {
+    let lower = name.to_lowercase();
+    let reserved = if is_dir {
+        RESERVED_DIR_NAMES.contains(&lower.as_str()) || (parent.is_empty() && lower == "flows")
+    } else {
+        RESERVED_FILE_NAMES.contains(&lower.as_str())
+    };
+    if reserved {
+        return Err(DomainError::InvalidInput(format!(
+            "'{name}' is a reserved name; choose another"
+        )));
+    }
+    Ok(())
+}
+
+/// Fingerprint of one variable: whether it exists, its value, enabled flag
+/// and secret flag.
+fn env_var_fingerprint(env: &Environment, key: &str) -> String {
+    let text = match env.variables.iter().find(|v| v.key == key) {
+        Some(v) => format!("1\n{}\n{}\n{}", v.value, v.enabled, v.secret),
+        None => "0".to_string(),
+    };
+    sha256_hex(&text)
+}
+
+/// Refuses a value that carries the placeholder the read tools show for a
+/// hidden credential. Saving it would overwrite the real value.
+fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
+    let masked = |text: &str| text.contains(REDACTED);
+    let pair_masked = |key: &str, value: &str| masked(key) || masked(value);
+    let body_masked = |body: &rocket_shared::types::Body| {
+        body.content.as_deref().is_some_and(masked)
+            || body.form_data.iter().flatten().any(|e| pair_masked(&e.key, &e.value))
+    };
+    let found = match change {
+        ProposedChange::CreateRequest { request, .. } => {
+            masked(&request.url)
+                || request.headers.iter().any(|h| pair_masked(&h.key, &h.value))
+                || request.query_params.iter().any(|q| pair_masked(&q.key, &q.value))
+                || request.body.as_ref().is_some_and(body_masked)
+        }
+        ProposedChange::UpdateRequest { patch, .. } => {
+            patch.url.as_deref().is_some_and(masked)
+                || patch
+                    .headers
+                    .iter()
+                    .flatten()
+                    .any(|h| pair_masked(&h.key, &h.value))
+                || patch
+                    .query_params
+                    .iter()
+                    .flatten()
+                    .any(|q| pair_masked(&q.key, &q.value))
+                || patch.body.as_ref().is_some_and(body_masked)
+        }
+        _ => false,
+    };
+    if found {
+        return Err(DomainError::InvalidInput(format!(
+            "a value contains the masked placeholder '{REDACTED}', which stands for a hidden \
+             credential; propose only the real values you know, or leave that field out"
+        )));
+    }
+    Ok(())
 }
 
 /// `parent/name`, or `name` at the root. Both inputs are normalized.
@@ -814,9 +1012,17 @@ fn move_destination(from_path: &str, to_folder: &str) -> DomainResult<String> {
     Ok(join_path(to_folder, name))
 }
 
-/// Strips leading and trailing slashes from every path in the change.
+/// Drops empty segments, so `a//b`, `/a/b` and `a/b/` all become `a/b`.
+fn normalize_path(path: &str) -> String {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Normalizes every path in the change.
 fn normalize_paths(change: &mut ProposedChange) {
-    let trim = |path: &mut String| *path = path.trim_matches('/').to_string();
+    let trim = |path: &mut String| *path = normalize_path(path);
     match change {
         ProposedChange::CreateFolder { parent_path, .. } => trim(parent_path),
         ProposedChange::CreateRequest { folder_path, .. } => trim(folder_path),
@@ -931,10 +1137,30 @@ fn apply_patch(request: &mut Request, patch: &RequestPatch) {
         request.url = url.clone();
     }
     if let Some(headers) = &patch.headers {
-        request.headers = headers.clone();
+        let mut merged = headers.clone();
+        for header in &mut merged {
+            if header.description.is_none() {
+                header.description = request
+                    .headers
+                    .iter()
+                    .find(|old| old.key.eq_ignore_ascii_case(&header.key))
+                    .and_then(|old| old.description.clone());
+            }
+        }
+        request.headers = merged;
     }
     if let Some(query_params) = &patch.query_params {
-        request.query_params = query_params.clone();
+        let mut merged = query_params.clone();
+        for param in &mut merged {
+            if param.description.is_none() {
+                param.description = request
+                    .query_params
+                    .iter()
+                    .find(|old| old.key == param.key)
+                    .and_then(|old| old.description.clone());
+            }
+        }
+        request.query_params = merged;
     }
     if let Some(body) = &patch.body {
         request.body = stored_body(body);
@@ -1586,6 +1812,322 @@ mod tests {
             .expect("other sessions are unaffected");
     }
 
+    fn create_request(name: &str) -> ProposedChange {
+        ProposedChange::CreateRequest {
+            collection: "demo".into(),
+            folder_path: String::new(),
+            request: ProposedRequest {
+                name: name.into(),
+                method: HttpMethod::Get,
+                url: "https://x.example.com".into(),
+                headers: vec![],
+                query_params: vec![],
+                body: None,
+                docs: None,
+                pre_request_script: None,
+                post_response_script: None,
+                tests: None,
+            },
+        }
+    }
+
+    #[test]
+    fn a_request_named_like_a_reserved_file_is_refused() {
+        let f = fixture();
+        for name in ["opencollection", "folder", "_order", "Folder", "OpenCollection"] {
+            let err = f
+                .svc
+                .propose("s1", vec![create_request(name)])
+                .expect_err("reserved name");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{name}");
+        }
+        let settings = f._dir.path().join("demo").join("opencollection.yml");
+        assert!(settings.is_file(), "collection settings stay in place");
+        assert!(f.svc.list("s1").is_empty());
+    }
+
+    #[test]
+    fn a_folder_named_like_a_hidden_directory_is_refused() {
+        let f = fixture();
+        for name in ["environments", "node_modules", "flows", "Environments"] {
+            let err = f
+                .svc
+                .propose("s1", vec![folder(name)])
+                .expect_err("reserved directory");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_target_that_exists_on_disk_but_not_in_the_tree_is_refused() {
+        let f = fixture();
+        std::fs::create_dir_all(f._dir.path().join("demo").join("extra-env")).expect("dir");
+        std::fs::write(f._dir.path().join("demo").join("helper.js"), "// x").expect("script");
+        // A script file shows in the tree, so use a path the tree never lists.
+        std::fs::write(f._dir.path().join("demo").join("notes.txt"), "x").expect("file");
+        let err = f
+            .svc
+            .propose("s1", vec![folder("notes.txt")])
+            .expect_err("a file already sits there");
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_is_never_a_free_target() {
+        let f = fixture();
+        let outside = tempfile::tempdir().expect("outside");
+        std::os::unix::fs::symlink(outside.path(), f._dir.path().join("demo").join("linked"))
+            .expect("symlink");
+        let err = f
+            .svc
+            .propose("s1", vec![folder("linked")])
+            .expect_err("the symlink occupies the name");
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+        let err = f
+            .svc
+            .propose(
+                "s1",
+                vec![ProposedChange::CreateFolder {
+                    collection: "demo".into(),
+                    parent_path: "linked".into(),
+                    name: "inner".into(),
+                }],
+            )
+            .expect_err("a symlink is no parent");
+        assert!(matches!(
+            err,
+            DomainError::NotFound(_) | DomainError::InvalidInput(_)
+        ));
+    }
+
+    #[test]
+    fn a_case_variant_of_an_existing_name_is_refused() {
+        let f = fixture();
+        let err = f
+            .svc
+            .propose("s1", vec![create_request("Get-Users")])
+            .expect_err("get-users.yml exists");
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+
+        f.repo
+            .create_folder("demo", "reports")
+            .expect("create folder");
+        let err = f
+            .svc
+            .propose("s1", vec![folder("Reports")])
+            .expect_err("reports exists");
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+
+        f.repo
+            .create_folder("demo", "archive")
+            .expect("create folder");
+        f.repo
+            .save_request(
+                "demo",
+                "archive/GET-USERS.yml",
+                &Request::new("Other", HttpMethod::Get, "https://other"),
+            )
+            .expect("save request");
+        let err = f
+            .svc
+            .propose(
+                "s1",
+                vec![ProposedChange::MoveItem {
+                    collection: "demo".into(),
+                    from_path: "get-users.yml".into(),
+                    to_folder: "archive".into(),
+                    base_fingerprint: String::new(),
+                }],
+            )
+            .expect_err("a case variant sits in the destination");
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+    }
+
+    #[test]
+    fn a_folder_cannot_be_renamed_onto_a_reserved_or_taken_name() {
+        let f = fixture();
+        f.repo
+            .create_folder("demo", "archive")
+            .expect("create folder");
+        f.repo
+            .create_folder("demo", "Taken")
+            .expect("create folder");
+        for new_name in ["environments", "taken"] {
+            let err = f
+                .svc
+                .propose(
+                    "s1",
+                    vec![ProposedChange::RenameItem {
+                        collection: "demo".into(),
+                        path: "archive".into(),
+                        new_name: new_name.into(),
+                        base_fingerprint: String::new(),
+                    }],
+                )
+                .expect_err("refused");
+            assert!(
+                matches!(
+                    err,
+                    DomainError::InvalidInput(_) | DomainError::AlreadyExists(_)
+                ),
+                "{new_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_masked_placeholder_in_a_proposed_value_is_refused() {
+        let f = fixture();
+        let masked = format!("Bearer {REDACTED}");
+        let mut with_header = url_patch("https://x");
+        if let ProposedChange::UpdateRequest { patch, .. } = &mut with_header {
+            patch.url = None;
+            patch.headers = Some(vec![Header::new("Authorization", masked.clone())]);
+        }
+        let mut with_query = url_patch("https://x");
+        if let ProposedChange::UpdateRequest { patch, .. } = &mut with_query {
+            patch.url = None;
+            patch.query_params = Some(vec![rocket_shared::types::QueryParam {
+                key: "api_key".into(),
+                value: REDACTED.into(),
+                enabled: true,
+                description: None,
+            }]);
+        }
+        let with_url = url_patch(&format!("https://{REDACTED}@host.example.com"));
+        let mut with_body = url_patch("https://x");
+        if let ProposedChange::UpdateRequest { patch, .. } = &mut with_body {
+            patch.url = None;
+            patch.body = Some(rocket_shared::types::Body {
+                mode: BodyMode::Json,
+                content: Some(format!("{{\"token\":\"{REDACTED}\"}}")),
+                form_data: None,
+                file_path: None,
+            });
+        }
+        let mut created = create_request("Fresh");
+        if let ProposedChange::CreateRequest { request, .. } = &mut created {
+            request.headers = vec![Header::new("X-Api-Key", REDACTED)];
+        }
+        for change in [with_header, with_query, with_url, with_body, created] {
+            let err = f
+                .svc
+                .propose("s1", vec![change])
+                .expect_err("masked value");
+            assert!(matches!(err, DomainError::InvalidInput(_)));
+            assert!(err.to_string().contains("masked placeholder"));
+        }
+        assert!(f.svc.list("s1").is_empty());
+    }
+
+    #[test]
+    fn patching_headers_keeps_the_descriptions_of_headers_with_the_same_key() {
+        let f = fixture();
+        let mut stored = f.repo.get_request("demo", "get-users.yml").expect("load");
+        let mut accept = Header::new("Accept", "text/plain");
+        accept.description = Some(rocket_shared::description::Description::text("what we take"));
+        stored.headers = vec![accept];
+        f.repo
+            .save_request("demo", "get-users.yml", &stored)
+            .expect("save");
+        let mut patch = url_patch("https://x");
+        if let ProposedChange::UpdateRequest { patch, .. } = &mut patch {
+            patch.url = None;
+            patch.headers = Some(vec![Header::new("accept", "application/json")]);
+        }
+        let ids = f.svc.propose("s1", vec![patch]).expect("propose");
+        f.svc.accept("s1", &ids[0]).expect("accept");
+        let saved = f.repo.get_request("demo", "get-users.yml").expect("load");
+        assert_eq!(saved.headers[0].value, "application/json");
+        assert!(saved.headers[0].description.is_some());
+    }
+
+    #[test]
+    fn a_proposal_is_stale_after_the_workspace_changed() {
+        let f = fixture();
+        let current = Arc::new(StdMutex::new("ws-a".to_string()));
+        let reader = Arc::clone(&current);
+        let svc = ProposalService::new(
+            CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    f._dir.path().to_path_buf(),
+                )),
+                Box::new(SharedPublisher(Arc::clone(&f.events))),
+            ),
+            Arc::new(MemoryEnvFactory(Arc::clone(&f.envs))),
+            f.events.clone(),
+        )
+        .with_workspace_identity(Arc::new(move || reader.lock().expect("lock").clone()));
+        let ids = svc.propose("s1", vec![folder("reports")]).expect("propose");
+        *current.lock().expect("lock") = "ws-b".to_string();
+        let resolved = svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
+        assert!(!f._dir.path().join("demo").join("reports").exists());
+    }
+
+    #[test]
+    fn set_env_var_is_stale_when_the_variable_changed_after_proposing() {
+        let f = fixture();
+        let ids = f
+            .svc
+            .propose("s1", vec![set_var("HOST", "api2.example.com")])
+            .expect("propose");
+        {
+            let mut envs = f.envs.envs.lock().expect("lock");
+            let dev = envs.get_mut("dev").expect("dev");
+            if let Some(host) = dev.variables.iter_mut().find(|v| v.key == "HOST") {
+                host.value = "changed.by.user".into();
+            }
+        }
+        let resolved = f.svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
+        let envs = f.envs.envs.lock().expect("lock");
+        assert_eq!(envs["dev"].get_value("HOST"), Some("changed.by.user"));
+    }
+
+    #[test]
+    fn set_env_var_is_stale_when_a_new_variable_appeared_meanwhile() {
+        let f = fixture();
+        let ids = f
+            .svc
+            .propose("s1", vec![set_var("REGION", "eu")])
+            .expect("propose");
+        f.envs
+            .envs
+            .lock()
+            .expect("lock")
+            .get_mut("dev")
+            .expect("dev")
+            .set_variable(Variable::new("REGION", "us"));
+        let resolved = f.svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
+    }
+
+    #[test]
+    fn paths_with_empty_segments_are_normalized() {
+        assert_eq!(normalize_path("a//b"), "a/b");
+        assert_eq!(normalize_path("/a/b/"), "a/b");
+        assert_eq!(normalize_path("///"), "");
+        let f = fixture();
+        f.repo
+            .create_folder("demo", "archive")
+            .expect("create folder");
+        let ids = f
+            .svc
+            .propose(
+                "s1",
+                vec![ProposedChange::CreateFolder {
+                    collection: "demo".into(),
+                    parent_path: "//archive//".into(),
+                    name: "inner".into(),
+                }],
+            )
+            .expect("propose");
+        f.svc.accept("s1", &ids[0]).expect("accept");
+        assert!(f._dir.path().join("demo/archive/inner").is_dir());
+    }
+
     /// Shared state of `RacyRepo`.
     struct RaceState {
         /// Reads that still return the real request. After that, reads return
@@ -1657,6 +2199,9 @@ mod tests {
         }
         fn reorder_items(&self, c: &str, folder: &str, names: &[String]) -> DomainResult<()> {
             self.inner.reorder_items(c, folder, names)
+        }
+        fn path_exists(&self, collection: &str, path: &str) -> DomainResult<bool> {
+            self.inner.path_exists(collection, path)
         }
         fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
             self.inner.get_settings(name)

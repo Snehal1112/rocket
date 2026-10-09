@@ -169,6 +169,10 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().collection_root_path(name)
     }
 
+    fn path_exists(&self, collection: &str, path: &str) -> DomainResult<bool> {
+        self.repo().path_exists(collection, path)
+    }
+
     fn create_script_file(
         &self,
         collection: &str,
