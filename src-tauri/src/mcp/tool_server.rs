@@ -85,7 +85,13 @@ use tokio_util::sync::CancellationToken;
 pub const MCP_HTTP_PATH: &str = "/mcp";
 
 use rocket_app::mcp_read_views::HISTORY_LIMIT_MAX;
+use rocket_acp::proposal::{
+    AgentProposal, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+};
+use rocket_app::AssistantMode;
 use rocket_app::McpToolService;
+use rocket_app::ProposalService;
+use rocket_shared::types::{Body, BodyMode, Header, HttpMethod, QueryParam};
 
 /// One `RocketMcpToolServer` instance backs exactly one ACP session's MCP
 /// HTTP endpoint. `session_id` is fixed at construction (see
@@ -199,6 +205,20 @@ fn mcp_tool_service<R: tauri::Runtime>(
     }
 }
 
+/// Looks up the `Arc<ProposalService>` this app manages. A missing
+/// registration is a wiring bug, so it is a protocol-level error.
+fn proposal_service<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<Arc<ProposalService>, McpError> {
+    match app_handle.try_state::<Arc<ProposalService>>() {
+        Some(state) => Ok(Arc::clone(state.inner())),
+        None => Err(McpError::internal_error(
+            "ProposalService is not managed on this AppHandle",
+            None,
+        )),
+    }
+}
+
 use rocket_shared::error::DomainResult;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -246,38 +266,337 @@ pub struct RunRequestParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct EditScriptParams {
-    pub collection: String,
-    pub request_path: String,
-    /// One of "pre_request", "post_response", "tests".
-    pub phase: String,
-    pub body: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct SetEnvVarParams {
-    pub collection: String,
-    pub environment_name: String,
-    pub key: String,
-    pub value: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct GetTestResultsParams {
     pub collection: String,
     pub request_path: String,
+}
+
+/// What `propose_changes` tells the agent.
+const PROPOSALS_QUEUED: &str = "queued; awaiting user approval";
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ProposeChangesParams {
+    /// Each change becomes its own proposal that the user accepts or rejects.
+    pub changes: Vec<ProposedChangeParams>,
+}
+
+/// One change. Paths are relative to the collection root; "" is the root.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum ProposedChangeParams {
+    /// Create an empty folder.
+    CreateFolder {
+        collection: String,
+        #[serde(default)]
+        parent_path: String,
+        name: String,
+    },
+    /// Create an HTTP request. It inherits auth from its folder or collection.
+    CreateRequest {
+        collection: String,
+        #[serde(default)]
+        folder_path: String,
+        request: ProposedRequestParams,
+    },
+    /// Change some fields of an HTTP request. Omitted fields stay as they are.
+    UpdateRequest {
+        collection: String,
+        request_path: String,
+        patch: RequestPatchParams,
+    },
+    /// Replace one script: "pre_request", "post_response" or "tests".
+    EditScript {
+        collection: String,
+        request_path: String,
+        phase: String,
+        body: String,
+    },
+    /// Move a request or folder into another folder of the same collection.
+    MoveItem {
+        collection: String,
+        from_path: String,
+        #[serde(default)]
+        to_folder: String,
+    },
+    /// Rename a request (its display name) or a folder.
+    RenameItem {
+        collection: String,
+        path: String,
+        new_name: String,
+    },
+    /// Set or add a non-secret environment variable.
+    SetEnvVar {
+        collection: String,
+        environment: String,
+        key: String,
+        value: String,
+    },
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct KeyValueParams {
+    pub key: String,
+    pub value: String,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct BodyParams {
+    /// One of "none", "json", "xml", "text", "sparql", "formurlencoded".
+    pub mode: String,
+    #[serde(default)]
+    pub content: Option<String>,
+}
+
+/// Unknown fields, such as `auth`, are refused rather than dropped.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProposedRequestParams {
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: Vec<KeyValueParams>,
+    #[serde(default)]
+    pub query_params: Vec<KeyValueParams>,
+    #[serde(default)]
+    pub body: Option<BodyParams>,
+    #[serde(default)]
+    pub docs: Option<String>,
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    #[serde(default)]
+    pub post_response_script: Option<String>,
+    #[serde(default)]
+    pub tests: Option<String>,
+}
+
+/// Unknown fields, such as `auth`, are refused rather than dropped.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequestPatchParams {
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: Option<Vec<KeyValueParams>>,
+    #[serde(default)]
+    pub query_params: Option<Vec<KeyValueParams>>,
+    #[serde(default)]
+    pub body: Option<BodyParams>,
+    #[serde(default)]
+    pub docs: Option<String>,
+}
+
+/// What `propose_changes` returns.
+#[derive(Debug, serde::Serialize)]
+pub struct ProposeChangesResult {
+    pub proposal_ids: Vec<String>,
+    pub status: &'static str,
+}
+
+/// One proposal as `list_proposals` shows it to the agent. It carries the
+/// value-free summary and the status only, never the change itself, so no
+/// secret header or variable value can come back through it.
+#[derive(Debug, serde::Serialize)]
+pub struct ProposalView {
+    pub id: String,
+    pub summary: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl From<AgentProposal> for ProposalView {
+    fn from(proposal: AgentProposal) -> Self {
+        Self {
+            message: proposal.status.message().map(str::to_string),
+            status: proposal.status.as_str(),
+            id: proposal.id,
+            summary: proposal.summary,
+        }
+    }
+}
+
+/// Parses the wire-format phase. The error is the message text only, so the
+/// caller can return it as an agent-visible tool error.
+fn parse_script_phase(phase: &str) -> Result<ScriptPhase, String> {
+    match phase {
+        "pre_request" => Ok(ScriptPhase::PreRequest),
+        "post_response" => Ok(ScriptPhase::PostResponse),
+        "tests" => Ok(ScriptPhase::Tests),
+        other => Err(format!(
+            "unknown script phase '{other}': expected pre_request, post_response or tests"
+        )),
+    }
+}
+
+fn parse_method(method: &str) -> Result<HttpMethod, String> {
+    method
+        .parse::<HttpMethod>()
+        .map_err(|_| format!("'{method}' is not a valid HTTP method"))
+}
+
+/// Only text-like bodies can be proposed. Form data and files need the user.
+fn to_body(body: BodyParams) -> Result<Body, String> {
+    let mode: BodyMode = serde_json::from_value(serde_json::Value::String(body.mode.clone()))
+        .map_err(|_| format!("unknown body mode '{}'", body.mode))?;
+    if matches!(mode, BodyMode::FormData | BodyMode::Binary | BodyMode::GraphQl) {
+        return Err(format!(
+            "body mode '{}' cannot be proposed; use none, json, xml, text, sparql or formurlencoded",
+            body.mode
+        ));
+    }
+    Ok(Body {
+        mode,
+        content: body.content,
+        form_data: None,
+        file_path: None,
+    })
+}
+
+fn to_headers(pairs: Vec<KeyValueParams>) -> Vec<Header> {
+    pairs
+        .into_iter()
+        .map(|pair| Header {
+            key: pair.key,
+            value: pair.value,
+            enabled: pair.enabled,
+            description: None,
+        })
+        .collect()
+}
+
+fn to_query_params(pairs: Vec<KeyValueParams>) -> Vec<QueryParam> {
+    pairs
+        .into_iter()
+        .map(|pair| QueryParam {
+            key: pair.key,
+            value: pair.value,
+            enabled: pair.enabled,
+            description: None,
+        })
+        .collect()
+}
+
+fn to_domain_request(request: ProposedRequestParams) -> Result<ProposedRequest, String> {
+    Ok(ProposedRequest {
+        method: parse_method(&request.method)?,
+        body: request.body.map(to_body).transpose()?,
+        name: request.name,
+        url: request.url,
+        headers: to_headers(request.headers),
+        query_params: to_query_params(request.query_params),
+        docs: request.docs,
+        pre_request_script: request.pre_request_script,
+        post_response_script: request.post_response_script,
+        tests: request.tests,
+    })
+}
+
+fn to_domain_patch(patch: RequestPatchParams) -> Result<RequestPatch, String> {
+    Ok(RequestPatch {
+        method: patch.method.as_deref().map(parse_method).transpose()?,
+        body: patch.body.map(to_body).transpose()?,
+        url: patch.url,
+        headers: patch.headers.map(to_headers),
+        query_params: patch.query_params.map(to_query_params),
+        docs: patch.docs,
+    })
+}
+
+/// Converts one tool-input change to the domain type. `ProposalService`
+/// fills in the base fingerprint, so the agent never supplies one.
+fn to_domain_change(params: ProposedChangeParams) -> Result<ProposedChange, String> {
+    Ok(match params {
+        ProposedChangeParams::CreateFolder {
+            collection,
+            parent_path,
+            name,
+        } => ProposedChange::CreateFolder {
+            collection,
+            parent_path,
+            name,
+        },
+        ProposedChangeParams::CreateRequest {
+            collection,
+            folder_path,
+            request,
+        } => ProposedChange::CreateRequest {
+            collection,
+            folder_path,
+            request: to_domain_request(request)?,
+        },
+        ProposedChangeParams::UpdateRequest {
+            collection,
+            request_path,
+            patch,
+        } => ProposedChange::UpdateRequest {
+            collection,
+            request_path,
+            patch: to_domain_patch(patch)?,
+            base_fingerprint: String::new(),
+        },
+        ProposedChangeParams::EditScript {
+            collection,
+            request_path,
+            phase,
+            body,
+        } => ProposedChange::EditScript {
+            collection,
+            request_path,
+            phase: parse_script_phase(&phase)?,
+            body,
+            base_fingerprint: String::new(),
+        },
+        ProposedChangeParams::MoveItem {
+            collection,
+            from_path,
+            to_folder,
+        } => ProposedChange::MoveItem {
+            collection,
+            from_path,
+            to_folder,
+            base_fingerprint: String::new(),
+        },
+        ProposedChangeParams::RenameItem {
+            collection,
+            path,
+            new_name,
+        } => ProposedChange::RenameItem {
+            collection,
+            path,
+            new_name,
+            base_fingerprint: String::new(),
+        },
+        ProposedChangeParams::SetEnvVar {
+            collection,
+            environment,
+            key,
+            value,
+        } => ProposedChange::SetEnvVar {
+            collection,
+            environment,
+            key,
+            value,
+        },
+    })
 }
 
 /// Maps a service call's outcome to an MCP tool result. `Ok` becomes a
 /// success result carrying the value as JSON text; `Err` becomes an
 /// *agent-visible* tool error (`CallToolResult::error`, `is_error: true`),
 /// never a protocol-level failure — per the spec, a refusal (autonomy
-/// disabled, secret variable, not found) must reach the agent as something
-/// it can explain to the user, not a generic transport failure. This is also
-/// why `set_env_var`'s "not found" and "is secret" errors stay
-/// indistinguishable through this layer: both are plain `DomainError`
-/// values, both go through this one `e.to_string()` call, so nothing here
-/// can accidentally format one differently from the other.
+/// disabled, not in the mode, not found) must reach the agent as something
+/// it can explain to the user, not a generic transport failure. All errors
+/// go through this one `e.to_string()` call, so nothing here can format one
+/// refusal differently from another.
 fn to_tool_result<T: serde::Serialize>(result: DomainResult<T>) -> CallToolResult {
     match result {
         Ok(value) => {
@@ -296,23 +615,6 @@ fn to_text_tool_result(result: DomainResult<String>) -> CallToolResult {
     match result {
         Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
         Err(e) => CallToolResult::error(vec![ContentBlock::text(e.to_string())]),
-    }
-}
-
-/// Parses the wire-format `phase` string into the domain enum. An unknown
-/// value is a malformed-input case, so it is handled the same way as any
-/// other tool-level refusal: an agent-visible `CallToolResult::error`, not a
-/// protocol failure and not a call into `McpToolService` at all.
-/// The error is the message text only, so `Result` stays small (clippy's
-/// `result_large_err`); the caller wraps it into the tool error.
-fn parse_phase(phase: &str) -> Result<rocket_collection::RequestScriptPhase, String> {
-    match phase {
-        "pre_request" => Ok(rocket_collection::RequestScriptPhase::PreRequest),
-        "post_response" => Ok(rocket_collection::RequestScriptPhase::PostResponse),
-        "tests" => Ok(rocket_collection::RequestScriptPhase::Tests),
-        other => Err(format!(
-            "unknown script phase '{other}': expected pre_request, post_response, or tests"
-        )),
     }
 }
 
@@ -419,43 +721,46 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 
     #[tool(
-        description = "Overwrite one script phase (pre_request, post_response, or tests) on a request."
+        description = "Propose workspace changes for the user to review: create_folder, create_request, update_request, edit_script, move_item, rename_item or set_env_var (non-secret only). Nothing is written until the user accepts each proposal. Returns the new proposal ids. Not available in Ask mode."
     )]
-    async fn edit_script(
+    async fn propose_changes(
         &self,
-        Parameters(params): Parameters<EditScriptParams>,
+        Parameters(params): Parameters<ProposeChangesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let phase = match parse_phase(&params.phase) {
-            Ok(phase) => phase,
-            Err(message) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+        let tools = mcp_tool_service(&self.app_handle)?;
+        if let Err(refusal) = tools.check_mode(self.binding.session_id(), AssistantMode::Edit) {
+            return Ok(to_tool_result::<()>(Err(refusal)));
+        }
+        let mut changes = Vec::with_capacity(params.changes.len());
+        for change in params.changes {
+            match to_domain_change(change) {
+                Ok(change) => changes.push(change),
+                Err(message) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+                }
             }
-        };
-        let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.edit_script(
-            self.binding.session_id(),
-            &params.collection,
-            &params.request_path,
-            phase,
-            params.body,
-        );
+        }
+        let proposals = proposal_service(&self.app_handle)?;
+        let result = proposals
+            .propose(self.binding.session_id(), changes)
+            .map(|proposal_ids| ProposeChangesResult {
+                proposal_ids,
+                status: PROPOSALS_QUEUED,
+            });
         Ok(to_tool_result(result))
     }
 
-    #[tool(description = "Write one non-secret environment variable's value.")]
-    async fn set_env_var(
-        &self,
-        Parameters(params): Parameters<SetEnvVarParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.set_env_var(
-            self.binding.session_id(),
-            &params.collection,
-            &params.environment_name,
-            &params.key,
-            params.value,
-        );
-        Ok(to_tool_result(result))
+    #[tool(
+        description = "List this session's proposals and their status: pending, accepted, rejected, stale (the item changed after it was proposed; read it again and propose again) or failed (with a message)."
+    )]
+    async fn list_proposals(&self) -> Result<CallToolResult, McpError> {
+        let proposals = proposal_service(&self.app_handle)?;
+        let views: Vec<ProposalView> = proposals
+            .list(self.binding.session_id())
+            .into_iter()
+            .map(ProposalView::from)
+            .collect();
+        Ok(to_tool_result(Ok(views)))
     }
 
     #[tool(
@@ -487,11 +792,8 @@ impl<R: tauri::Runtime> ServerHandler for RocketMcpToolServer<R> {
                 env!("CARGO_PKG_VERSION"),
             ))
             .with_instructions(
-                "Rocket workspace tools for one assistant session: read the current \
-                 workspace (outline, collections, requests, settings, environments, history, \
-                 test results) with secrets masked, and run requests in collections where the \
-                 user allows it. The user picks a mode: Ask allows reading, Edit also allows \
-                 changes, Agent also allows running. A tool outside the mode refuses.",
+                "Rocket workspace assistant tools: read the workspace, propose changes \
+                 for the user to accept, and run requests where the user allows it.",
             )
     }
 }
@@ -650,7 +952,6 @@ mod tests {
     use rocket_shared::types::HttpMethod;
     use std::sync::Mutex as StdMutex;
 
-    use rocket_app::AssistantMode;
     use tempfile::TempDir;
 
     struct FakeHttpExecutor {
@@ -847,24 +1148,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edit_script_rejects_an_unknown_phase_without_touching_the_service() {
-        let fixture = TestFixture::new(true);
-        let result = fixture
-            .server()
-            .edit_script(Parameters(EditScriptParams {
-                collection: "demo".to_string(),
-                request_path: "ping.yml".to_string(),
-                phase: "not-a-real-phase".to_string(),
-                body: "console.log('hi')".to_string(),
-            }))
-            .await
-            .expect("tool call");
-
-        assert!(tool_is_error(&result));
-        assert!(tool_text(&result).contains("unknown script phase"));
-    }
-
-    #[tokio::test]
     async fn get_environment_shows_the_plain_value_and_hides_the_secret_one() {
         let fixture = TestFixture::new(true);
         let result = fixture
@@ -938,7 +1221,6 @@ mod tests {
     fn the_tool_list_is_the_same_in_every_mode() {
         let fixture = TestFixture::new(true);
         let expected = vec![
-            "edit_script",
             "get_collection_settings",
             "get_environment",
             "get_history",
@@ -946,8 +1228,9 @@ mod tests {
             "get_test_results",
             "get_workspace_outline",
             "list_collections",
+            "list_proposals",
+            "propose_changes",
             "run_request",
-            "set_env_var",
         ];
         for mode in [AssistantMode::Ask, AssistantMode::Edit, AssistantMode::Agent] {
             let names: Vec<String> = fixture
@@ -1023,5 +1306,253 @@ mod tests {
             .await
             .expect("tool call");
         assert!(tool_is_error(&results));
+    }
+
+    #[test]
+    fn the_tool_list_has_the_propose_tools_and_no_direct_write_tools() {
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
+        assert!(server.tool_router.has_route("propose_changes"));
+        assert!(server.tool_router.has_route("list_proposals"));
+        assert!(!server.tool_router.has_route("edit_script"));
+        assert!(!server.tool_router.has_route("set_env_var"));
+    }
+
+    fn parse_one(change: serde_json::Value) -> ProposedChangeParams {
+        let params: ProposeChangesParams =
+            serde_json::from_value(serde_json::json!({ "changes": [change] })).expect("parse");
+        params.changes.into_iter().next().expect("one change")
+    }
+
+    #[test]
+    fn a_patch_or_new_request_with_an_auth_field_is_refused() {
+        let patch = serde_json::from_value::<ProposeChangesParams>(serde_json::json!({
+            "changes": [{
+                "op": "update_request", "collection": "demo", "request_path": "ping.yml",
+                "patch": { "url": "https://x", "auth": { "authType": "bearer", "token": "t" } }
+            }]
+        }));
+        assert!(patch.is_err(), "auth must not be dropped silently");
+        let create = serde_json::from_value::<ProposeChangesParams>(serde_json::json!({
+            "changes": [{
+                "op": "create_request", "collection": "demo",
+                "request": { "name": "A", "method": "GET", "url": "https://x",
+                             "auth": { "authType": "none" } }
+            }]
+        }));
+        assert!(create.is_err(), "auth must not be dropped silently");
+    }
+
+    #[test]
+    fn create_request_params_convert_to_the_domain_change() {
+        let change = to_domain_change(parse_one(serde_json::json!({
+            "op": "create_request", "collection": "demo",
+            "request": {
+                "name": "List Users", "method": "get", "url": "https://x/users",
+                "headers": [{ "key": "Accept", "value": "application/json" }],
+                "body": { "mode": "json", "content": "{}" }
+            }
+        })))
+        .expect("convert");
+        match change {
+            ProposedChange::CreateRequest {
+                collection,
+                folder_path,
+                request,
+            } => {
+                assert_eq!(collection, "demo");
+                assert_eq!(folder_path, "");
+                assert_eq!(request.method, HttpMethod::Get);
+                assert!(request.headers[0].enabled);
+                assert_eq!(request.body.map(|b| b.mode), Some(BodyMode::Json));
+            }
+            other => panic!("expected CreateRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bad_phase_method_or_body_mode_is_refused_with_a_message() {
+        let refuse = |change: serde_json::Value| {
+            to_domain_change(parse_one(change)).expect_err("must be refused")
+        };
+        assert!(refuse(serde_json::json!({
+            "op": "edit_script", "collection": "demo", "request_path": "a.yml",
+            "phase": "before", "body": ""
+        }))
+        .contains("script phase"));
+        assert!(refuse(serde_json::json!({
+            "op": "update_request", "collection": "demo", "request_path": "a.yml",
+            "patch": { "method": "GET POST" }
+        }))
+        .contains("HTTP method"));
+        assert!(refuse(serde_json::json!({
+            "op": "update_request", "collection": "demo", "request_path": "a.yml",
+            "patch": { "body": { "mode": "binary" } }
+        }))
+        .contains("body mode"));
+    }
+
+    #[tokio::test]
+    async fn list_proposals_returns_the_sessions_proposals_with_their_status() {
+        use rocket_collection::CollectionRepository;
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let collections_dir = tmp.path().join("collections");
+        rocket_infra::FsCollectionRepo::new_standalone(collections_dir.clone())
+            .create("demo")
+            .expect("create collection");
+        let ws_path = Arc::new(std::sync::Mutex::new(tmp.path().to_path_buf()));
+        let proposals = Arc::new(ProposalService::new(
+            rocket_app::CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(collections_dir)),
+                Box::new(rocket_shared::events::NullEventPublisher),
+            ),
+            Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(ws_path)),
+            Arc::new(rocket_shared::events::NullEventPublisher),
+        ));
+        let ids = proposals
+            .propose(
+                "session-1",
+                vec![ProposedChange::CreateFolder {
+                    collection: "demo".into(),
+                    parent_path: String::new(),
+                    name: "reports".into(),
+                }],
+            )
+            .expect("propose");
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock tauri app");
+        app.manage(proposals);
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(app.handle().clone(), "session-1".to_string());
+
+        let result = server.list_proposals().await.expect("tool call");
+        assert!(!result.is_error.unwrap_or(false));
+        let text = result
+            .content
+            .first()
+            .and_then(|c| c.as_text())
+            .map(|t| t.text.clone())
+            .unwrap_or_default();
+        assert!(text.contains(&ids[0]));
+        assert!(text.contains("pending"));
+    }
+
+    #[tokio::test]
+    async fn list_proposals_uses_the_bound_session_id() {
+        use rocket_collection::CollectionRepository;
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let collections_dir = tmp.path().join("collections");
+        rocket_infra::FsCollectionRepo::new_standalone(collections_dir.clone())
+            .create("demo")
+            .expect("create collection");
+        let ws_path = Arc::new(std::sync::Mutex::new(tmp.path().to_path_buf()));
+        let proposals = Arc::new(ProposalService::new(
+            rocket_app::CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(collections_dir)),
+                Box::new(rocket_shared::events::NullEventPublisher),
+            ),
+            Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(ws_path)),
+            Arc::new(rocket_shared::events::NullEventPublisher),
+        ));
+        let ids = proposals
+            .propose(
+                "acp-1",
+                vec![ProposedChange::CreateFolder {
+                    collection: "demo".into(),
+                    parent_path: String::new(),
+                    name: "reports".into(),
+                }],
+            )
+            .expect("propose");
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock tauri app");
+        app.manage(proposals);
+        // Plan 03's binding: provisional until the handshake returns the
+        // real ACP session id.
+        let binding = Arc::new(McpSessionBinding::new("provisional-1".to_string()));
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::with_binding(app.handle().clone(), Arc::clone(&binding));
+        let text_of = |result: &CallToolResult| {
+            result
+                .content
+                .first()
+                .and_then(|c| c.as_text())
+                .map(|t| t.text.clone())
+                .unwrap_or_default()
+        };
+
+        let before = server.list_proposals().await.expect("tool call");
+        assert!(!text_of(&before).contains(&ids[0]), "unbound: the provisional id has none");
+
+        binding.bind("acp-1");
+        let after = server.list_proposals().await.expect("tool call");
+        assert!(text_of(&after).contains(&ids[0]), "bound: the real session's proposals");
+    }
+
+    #[tokio::test]
+    async fn propose_changes_is_refused_in_ask_mode() {
+        let fixture = TestFixture::new(true);
+        let params: ProposeChangesParams = serde_json::from_value(serde_json::json!({
+            "changes": [{ "op": "create_folder", "collection": "demo", "name": "reports" }]
+        }))
+        .expect("parse");
+        let result = fixture
+            .server_in(AssistantMode::Ask)
+            .propose_changes(Parameters(params))
+            .await
+            .expect("tool call");
+        assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("Not available in Ask mode"));
+    }
+
+    #[tokio::test]
+    async fn list_proposals_never_shows_header_values_or_variable_values() {
+        use rocket_collection::CollectionRepository;
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let collections_dir = tmp.path().join("collections");
+        rocket_infra::FsCollectionRepo::new_standalone(collections_dir.clone())
+            .create("demo")
+            .expect("create collection");
+        let ws_path = Arc::new(std::sync::Mutex::new(tmp.path().to_path_buf()));
+        let proposals = Arc::new(ProposalService::new(
+            rocket_app::CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(collections_dir)),
+                Box::new(rocket_shared::events::NullEventPublisher),
+            ),
+            Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(ws_path)),
+            Arc::new(rocket_shared::events::NullEventPublisher),
+        ));
+        let change = to_domain_change(parse_one(serde_json::json!({
+            "op": "create_request", "collection": "demo",
+            "request": {
+                "name": "Login", "method": "POST", "url": "https://x/login",
+                "headers": [{ "key": "Authorization", "value": "Bearer sk-hidden-123" }],
+                "body": { "mode": "json", "content": "{\"pw\":\"hidden-body-456\"}" },
+                "pre_request_script": "const k = 'hidden-script-789';"
+            }
+        })))
+        .expect("convert");
+        proposals.propose("session-1", vec![change]).expect("propose");
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock tauri app");
+        app.manage(proposals);
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(app.handle().clone(), "session-1".to_string());
+
+        let result = server.list_proposals().await.expect("tool call");
+        let text = tool_text(&result);
+        assert!(text.contains("Login"));
+        for hidden in ["sk-hidden-123", "hidden-body-456", "hidden-script-789"] {
+            assert!(!text.contains(hidden), "leaked {hidden}: {text}");
+        }
     }
 }

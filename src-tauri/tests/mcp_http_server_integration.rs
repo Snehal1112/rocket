@@ -373,7 +373,6 @@ async fn real_mcp_client_lists_and_calls_tools_over_http() {
     assert_eq!(
         names,
         vec![
-            "edit_script",
             "get_collection_settings",
             "get_environment",
             "get_history",
@@ -381,8 +380,9 @@ async fn real_mcp_client_lists_and_calls_tools_over_http() {
             "get_test_results",
             "get_workspace_outline",
             "list_collections",
+            "list_proposals",
+            "propose_changes",
             "run_request",
-            "set_env_var",
         ]
     );
 
@@ -417,16 +417,19 @@ async fn real_mcp_client_lists_and_calls_tools_over_http() {
     // protocol failure, over the real transport too.
     let bad_phase = client
         .call_tool(call_params(
-            "edit_script",
+            "propose_changes",
             serde_json::json!({
-                "collection": "demo",
-                "request_path": "ping.yml",
-                "phase": "not-a-real-phase",
-                "body": "",
+                "changes": [{
+                    "op": "edit_script",
+                    "collection": "demo",
+                    "request_path": "ping.yml",
+                    "phase": "not-a-real-phase",
+                    "body": "",
+                }]
             }),
         ))
         .await
-        .expect("tools/call edit_script");
+        .expect("tools/call propose_changes");
     assert_eq!(bad_phase.is_error, Some(true));
 
     let _ = client.cancel().await;

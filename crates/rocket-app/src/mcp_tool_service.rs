@@ -1,5 +1,4 @@
-//! Lets the workspace assistant (an ACP agent) read and act on the active
-//! workspace through MCP tools.
+//! Lets an ACP agent read a Rocket workspace and run requests. Writes go through ProposalService instead.
 //!
 //! Scope: every method that takes a `collection` first checks that it is
 //! one of the active workspace's collections (`check_in_workspace`), so a
@@ -9,16 +8,15 @@
 //! Read tools (`get_workspace_outline`, `list_collections`, `get_request`,
 //! `get_collection_settings`, `get_environment`, `get_history`,
 //! `get_test_results`) are always allowed and return masked views from
-//! `mcp_read_views`. `run_request`, and the direct-write tools until Plan
-//! 04 removes them, also need the collection's run switch
+//! `mcp_read_views`. `run_request` also needs the collection's run switch
 //! (`agent_autonomy_enabled`, "Allow the agent to run requests in this
 //! collection"), re-checked on every call so a mid-session toggle takes
 //! effect at once. Every successful call publishes
 //! `DomainEvent::AcpToolInvoked` for the audit trail.
 //!
 //! Modes (spec section 3): each session has an `AssistantMode`. Read tools
-//! work in every mode, the direct-write tools need Edit, and `run_request`
-//! needs Agent. A tool outside the mode refuses with a clear message; the
+//! work in every mode, proposing changes needs Edit (checked by the tool
+//! server), and `run_request` needs Agent. A tool outside the mode refuses with a clear message; the
 //! tool list itself never changes, which keeps the agent's prompt cache
 //! intact. A session with no recorded mode is in Ask.
 
@@ -55,11 +53,6 @@ pub struct McpRunResult {
     pub body_truncated: bool,
 }
 
-/// The single generic error `set_env_var` returns for both "no such key"
-/// and "key is secret", so the tool cannot be used to find out which names
-/// are secret.
-const VARIABLE_NOT_ACCESSIBLE: &str = "variable not accessible";
-
 /// The workspace assistant's Rocket mode. Each mode allows everything the
 /// one before it allows, so the derived order (Ask < Edit < Agent) is what
 /// `check_mode` compares. Serialized as "ask", "edit" and "agent".
@@ -71,8 +64,7 @@ pub enum AssistantMode {
     /// Read tools only. The mode of any session with no recorded mode.
     #[default]
     Ask,
-    /// Read tools and proposals (Plan 04). The direct-write tools also need
-    /// it until Plan 04 removes them.
+    /// Read tools and proposals.
     Edit,
     /// Everything, including `run_request` in collections whose run switch
     /// is on.
@@ -194,8 +186,7 @@ impl McpToolService {
     }
 
     /// Re-checks the collection's run switch. `run_request` calls it on
-    /// every call; `edit_script` and `set_env_var` keep calling it until
-    /// Plan 04 replaces them with proposals. Read tools never call it.
+    /// every call. Read tools never call it.
     fn check_autonomy_enabled(&self, collection: &str) -> DomainResult<()> {
         let settings = self.collection_repo.get_settings(collection)?;
         if !settings.agent_autonomy_enabled {
@@ -714,66 +705,6 @@ impl McpToolService {
         })
     }
 
-    pub fn edit_script(
-        &self,
-        session_id: &str,
-        collection: &str,
-        request_path: &str,
-        phase: rocket_collection::RequestScriptPhase,
-        body: String,
-    ) -> DomainResult<()> {
-        self.check_mode(session_id, AssistantMode::Edit)?;
-        self.check_in_workspace(collection)?;
-        self.check_autonomy_enabled(collection)?;
-        let phase_name = match phase {
-            rocket_collection::RequestScriptPhase::PreRequest => "pre-request",
-            rocket_collection::RequestScriptPhase::PostResponse => "post-response",
-            rocket_collection::RequestScriptPhase::Tests => "tests",
-        };
-        self.collection_repo
-            .save_request_script(collection, request_path, phase, body)?;
-        self.publish_tool_invoked(
-            session_id,
-            "edit_script",
-            format!("updated the {phase_name} script on '{request_path}' in '{collection}'"),
-        );
-        Ok(())
-    }
-
-    pub fn set_env_var(
-        &self,
-        session_id: &str,
-        collection: &str,
-        environment_name: &str,
-        key: &str,
-        value: String,
-    ) -> DomainResult<()> {
-        self.check_mode(session_id, AssistantMode::Edit)?;
-        self.check_in_workspace(collection)?;
-        self.check_autonomy_enabled(collection)?;
-        Self::validate_environment_name(environment_name)?;
-        let repo = self.environment_repo_factory.for_collection(collection);
-        let mut env = repo.get(environment_name)?;
-        let variable = env
-            .variables
-            .iter_mut()
-            .find(|v| v.key == key)
-            .ok_or_else(|| DomainError::InvalidInput(VARIABLE_NOT_ACCESSIBLE.to_string()))?;
-        if variable.secret {
-            return Err(DomainError::InvalidInput(
-                VARIABLE_NOT_ACCESSIBLE.to_string(),
-            ));
-        }
-        variable.value = value;
-        repo.save(&env)?;
-        self.publish_tool_invoked(
-            session_id,
-            "set_env_var",
-            format!("wrote variable '{key}' in environment '{environment_name}'"),
-        );
-        Ok(())
-    }
-
     pub fn get_test_results(
         &self,
         session_id: &str,
@@ -832,7 +763,7 @@ mod tests {
 
     use rocket_collection::{
         Collection, CollectionRepository, CollectionSettings, CollectionVariable, Folder,
-        Request as CollectionRequest, RequestScriptPhase, RequestSummary,
+        Request as CollectionRequest, RequestSummary,
     };
     use rocket_environment::{
         Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Variable,
@@ -881,8 +812,8 @@ mod tests {
     }
 
     /// Environment repo factory double whose `for_collection` handles all
-    /// share one underlying map, so a `set_env_var` write is visible to a
-    /// later `get_env_var` call even though each call asks for a fresh
+    /// share one underlying map, so a write is visible to a
+    /// later `get_environment` call even though each call asks for a fresh
     /// `Box<dyn EnvironmentRepository>`.
     struct FakeEnvRepoFactory {
         envs: Arc<StdMutex<StdHashMap<String, Environment>>>,
@@ -984,41 +915,8 @@ mod tests {
         CollectionRequest::new(name, HttpMethod::Get, "https://api.test/ping")
     }
 
-    /// The run switch still gates the direct-write tools (until Plan 04
-    /// replaces them with proposals). `run_request` is checked in its own
-    /// async test below.
-    #[test]
-    fn write_tools_are_refused_when_the_run_switch_is_off() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", false);
-        repo.with_request("my-api", "login.yml", sample_request("Login"));
-        let env_factory = FakeEnvRepoFactory::new();
-        env_factory.with_env(env_with_vars());
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, Arc::clone(&publisher));
-
-        let results: Vec<(&str, DomainResult<()>)> = vec![
-            (
-                "edit_script",
-                svc.edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into()),
-            ),
-            ("set_env_var", svc.set_env_var("s1", "my-api", "dev", "HOST", "x".into())),
-        ];
-        for (tool, result) in results {
-            assert_refused_by_autonomy_gate(tool, result);
-        }
-        assert!(repo.saved_scripts().is_empty(), "a refused edit_script must not write");
-        assert!(
-            !publisher
-                .events()
-                .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
-            "a refused call must not publish an audit event"
-        );
-    }
-
     /// Spec decision 4: reading any collection in the workspace is always
-    /// allowed; the switch only gates running (and, until Plan 04, writing).
+    /// allowed; the switch only gates running.
     #[test]
     fn read_tools_work_with_the_run_switch_off() {
         let repo = ConfigurableCollectionRepo::new();
@@ -1126,11 +1024,6 @@ mod tests {
                     "get_test_results",
                     svc.get_test_results("s1", outside, "login.yml").map(|_| ()),
                 ),
-                (
-                    "edit_script",
-                    svc.edit_script("s1", outside, "login.yml", RequestScriptPhase::Tests, "// x".into()),
-                ),
-                ("set_env_var", svc.set_env_var("s1", outside, "dev", "HOST", "x".into())),
             ];
             for (tool, result) in results {
                 match result {
@@ -1142,7 +1035,6 @@ mod tests {
                 }
             }
         }
-        assert!(repo.saved_scripts().is_empty(), "a refused write must not write");
         assert!(
             !publisher
                 .events()
@@ -1575,38 +1467,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn edit_script_saves_via_the_repository_and_publishes_audit_event() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-        let env_factory = FakeEnvRepoFactory::new();
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, Arc::clone(&publisher));
-
-        svc.edit_script(
-            "s1",
-            "my-api",
-            "login.yml",
-            RequestScriptPhase::PostResponse,
-            "rok.setEnvVar('token', res.body.token);".into(),
-        )
-        .expect("edit_script");
-
-        let saved = repo.saved_scripts();
-        assert_eq!(saved.len(), 1);
-        assert_eq!(saved[0].0, "my-api");
-        assert_eq!(saved[0].1, "login.yml");
-        assert_eq!(saved[0].2, RequestScriptPhase::PostResponse);
-        assert!(saved[0].3.contains("setEnvVar"));
-
-        assert!(
-            publisher.events().iter().any(
-                |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "edit_script")
-            ),
-            "expected an AcpToolInvoked event for edit_script"
-        );
-    }
-
     fn env_with_vars() -> Environment {
         let mut env = Environment::new("dev");
         env.set_variable(Variable {
@@ -1664,59 +1524,6 @@ mod tests {
     }
 
     #[test]
-    fn set_env_var_writes_a_non_secret_variable_and_it_is_readable_back() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-        let env_factory = FakeEnvRepoFactory::new();
-        env_factory.with_env(env_with_vars());
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, Arc::clone(&publisher));
-
-        svc.set_env_var("s1", "my-api", "dev", "HOST", "api2.example.com".into())
-            .expect("set_env_var on a non-secret existing key");
-
-        let env = svc
-            .get_environment("s1", "my-api", "dev")
-            .expect("read back");
-        let host = env
-            .variables
-            .iter()
-            .find(|v| v.key == "HOST")
-            .expect("HOST is listed");
-        assert_eq!(host.value.as_deref(), Some("api2.example.com"));
-
-        assert!(
-            publisher.events().iter().any(
-                |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "set_env_var")
-            ),
-            "expected an AcpToolInvoked event for set_env_var"
-        );
-    }
-
-    #[test]
-    fn set_env_var_refuses_a_secret_variable_and_does_not_create_missing_keys() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-        let env_factory = FakeEnvRepoFactory::new();
-        env_factory.with_env(env_with_vars());
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
-
-        let secret_err = svc
-            .set_env_var("s1", "my-api", "dev", "API_KEY", "sk-new".into())
-            .expect_err("writing a secret variable must be refused");
-        let missing_err = svc
-            .set_env_var("s1", "my-api", "dev", "NO_SUCH_KEY", "x".into())
-            .expect_err("writing an unknown key must be refused, not create it");
-
-        assert_eq!(
-            secret_err.to_string(),
-            missing_err.to_string(),
-            "the two error messages must be indistinguishable"
-        );
-    }
-
-    #[test]
     fn get_test_results_errors_with_not_found_when_nothing_is_cached() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
@@ -1742,26 +1549,6 @@ mod tests {
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
-    #[test]
-    fn set_env_var_refuses_a_traversal_shaped_environment_name() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-        let env_factory = FakeEnvRepoFactory::new();
-        let publisher = RecordingPublisher::new();
-        let svc = service_with(Arc::clone(&repo), env_factory, publisher);
-
-        let err = svc
-            .set_env_var(
-                "s1",
-                "my-api",
-                "../../other-api/environments/prod",
-                "HOST",
-                "evil".into(),
-            )
-            .expect_err("a traversal-shaped environment name must be refused");
-        assert!(matches!(err, DomainError::InvalidInput(_)));
-    }
-
     #[tokio::test]
     async fn run_request_refuses_a_traversal_shaped_environment_name() {
         let repo = ConfigurableCollectionRepo::new();
@@ -1775,23 +1562,6 @@ mod tests {
             .run_request("s1", "my-api", "login.yml", Some("../evil"))
             .await
             .expect_err("a traversal-shaped environment name must be refused");
-        assert!(matches!(err, DomainError::InvalidInput(_)));
-    }
-
-    #[test]
-    fn disabling_the_run_switch_mid_session_blocks_the_very_next_write() {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.set_autonomy("my-api", true);
-        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
-
-        svc.edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// 1".into())
-            .expect("the first write succeeds while the switch is on");
-
-        repo.set_autonomy("my-api", false);
-
-        let err = svc
-            .edit_script("s1", "my-api", "login.yml", RequestScriptPhase::Tests, "// 2".into())
-            .expect_err("the very next write must be refused once the switch is off");
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
@@ -2167,8 +1937,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ask_mode_refuses_running_and_writing_but_allows_reading() {
-        let (svc, repo) = mode_test_service(true);
+    async fn ask_mode_refuses_running_but_allows_reading() {
+        let (svc, _repo) = mode_test_service(true);
         svc.open_session("s2", AssistantMode::Ask);
 
         let run = svc
@@ -2176,28 +1946,15 @@ mod tests {
             .await
             .map(|_| ());
         assert_refused_by_mode("run_request", run, "Ask");
-        assert_refused_by_mode(
-            "edit_script",
-            svc.edit_script("s2", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into()),
-            "Ask",
-        );
-        assert_refused_by_mode(
-            "set_env_var",
-            svc.set_env_var("s2", "my-api", "dev", "HOST", "x".into()),
-            "Ask",
-        );
         svc.get_request("s2", "my-api", "login.yml")
             .expect("reads are allowed in Ask mode");
-        assert!(repo.saved_scripts().is_empty());
     }
 
     #[tokio::test]
-    async fn edit_mode_allows_writing_but_not_running() {
+    async fn edit_mode_does_not_allow_running() {
         let (svc, _repo) = mode_test_service(true);
         svc.open_session("s2", AssistantMode::Edit);
 
-        svc.edit_script("s2", "my-api", "login.yml", RequestScriptPhase::Tests, "// x".into())
-            .expect("Edit mode allows the direct write tools until Plan 04");
         let run = svc
             .run_request("s2", "my-api", "login.yml", None)
             .await

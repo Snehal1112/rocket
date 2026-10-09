@@ -340,13 +340,6 @@ impl ConfigurableCollectionRepo {
             .expect("lock summaries")
             .insert(collection.to_string(), tree);
     }
-
-    pub fn saved_scripts(&self) -> Vec<(String, String, RequestScriptPhase, String)> {
-        self.saved_scripts
-            .lock()
-            .expect("lock saved_scripts")
-            .clone()
-    }
 }
 
 impl CollectionRepository for ConfigurableCollectionRepo {

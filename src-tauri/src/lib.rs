@@ -340,6 +340,25 @@ pub fn run() {
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
             );
+            // Holds the assistant's proposed changes until the user accepts
+            // them. It applies them through its own CollectionService, built
+            // like collection_svc above, so accepted changes follow workspace
+            // switches and publish the same events as manual edits. The
+            // environment factory keeps secret values on a write-back.
+            let proposal_svc = Arc::new(rocket_app::ProposalService::new(
+                CollectionService::new_with_audit(
+                    Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                        &active_workspace_path,
+                    ))),
+                    Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                    audit_publisher.clone(),
+                ),
+                Arc::new(SharedCollectionEnvironmentRepo::with_secret_store(
+                    Arc::clone(&active_workspace_path),
+                    env_secret_store(),
+                )),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            ));
             let history_svc = HistoryService::new(
                 Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
                     &active_workspace_path,
@@ -518,9 +537,9 @@ pub fn run() {
             // (same reasoning as acp_collection_repo's own doc comment); (2)
             // SharedCollectionEnvironmentRepo::with_secret_store (caveat (b))
             // for the per-collection env factory, never the secret-dropping
-            // `::new()` — McpToolService::set_env_var's read-modify-write
-            // would otherwise permanently erase any legacy plaintext secret
-            // sharing an environment file with the key being written.
+            // `::new()`, because a read-modify-write of an environment would
+            // otherwise permanently erase any legacy plaintext secret sharing
+            // the environment file.
             let mcp_exec_svc = Arc::new(
                 RequestExecutionService::new_with_audit(
                     Box::new(FsEnvironmentRepo::with_secret_store(
@@ -707,6 +726,7 @@ pub fn run() {
             app.manage(Arc::clone(&mcp_server_registry));
             app.manage(Arc::clone(&session_resources));
             app.manage(mcp_tool_svc);
+            app.manage(Arc::clone(&proposal_svc));
 
             // Agent processes run in their own process groups, so a signal
             // sent to Rocket alone never reaches them. Route those signals
