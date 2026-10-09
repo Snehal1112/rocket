@@ -3,6 +3,7 @@ mod callback_adapter;
 // `pub` so integration tests in `src-tauri/tests/` can drive command
 // orchestration directly (e.g. `commands::acp_sessions::
 // start_agent_session_inner`) — mirrors why `mcp` below is already `pub`.
+pub mod agent_session;
 pub mod commands;
 pub mod mcp;
 mod tauri_event_bus;
@@ -128,6 +129,12 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
                 app_handle.try_state::<Arc<mcp::registry::McpServerRegistry>>()
             {
                 mcp_registry.shutdown_all();
+            }
+            if let Some(resources) =
+                app_handle.try_state::<Arc<agent_session::cleanup::SessionResourceRegistry>>()
+            {
+                // Backstop for a session that started while end_all_sessions ran.
+                resources.clear_all();
             }
             app_handle.exit(0);
         }
@@ -425,14 +432,6 @@ pub fn run() {
                 SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path)),
             );
 
-            let acp_session_svc = rocket_app::AcpSessionService::new(
-                Box::new(rocket_infra::AcpAgentClient::new()),
-                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
-                Arc::new(rocket_app::NoopSessionCleanup),
-                acp_agent_config_svc,
-                Arc::clone(&acp_collection_repo),
-            );
-
             let websocket_svc = rocket_app::WebSocketService::new(
                 Arc::new(rocket_infra::TungsteniteWebSocketClient::new()),
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
@@ -640,13 +639,27 @@ pub fn run() {
             );
 
             // Tracks every live per-session MCP HTTP server so it can be
-            // swept on app exit and on individual session end. Bound as a
-            // local `Arc` before the managed-state block (rather than built
-            // inline in `app.manage(...)`) so the same `Arc` can also be
-            // cloned into Plan 05's `TauriMcpServerSweeper`, which holds it
-            // for the lifetime of `AcpSessionService` instead of fetching it
-            // per-call via `AppHandle`.
+            // swept on app exit and on individual session end. Shared with
+            // TauriSessionCleanup below, which ends one session's server.
             let mcp_server_registry = Arc::new(mcp::registry::McpServerRegistry::new());
+
+            // Per-session scratch directories and pre-handshake MCP ids.
+            let session_resources =
+                Arc::new(agent_session::cleanup::SessionResourceRegistry::new());
+
+            // Built here, after mcp_tool_svc and the registries exist, because
+            // its SessionCleanup needs all three.
+            let acp_session_svc = rocket_app::AcpSessionService::new(
+                Box::new(rocket_infra::AcpAgentClient::new()),
+                Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                Arc::new(agent_session::cleanup::TauriSessionCleanup::new(
+                    Arc::clone(&mcp_server_registry),
+                    Arc::clone(&mcp_tool_svc),
+                    Arc::clone(&session_resources),
+                )),
+                acp_agent_config_svc,
+                Arc::clone(&acp_collection_repo),
+            );
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
@@ -674,6 +687,7 @@ pub fn run() {
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
             app.manage(Arc::clone(&mcp_server_registry));
+            app.manage(Arc::clone(&session_resources));
             app.manage(mcp_tool_svc);
 
             // Agent processes run in their own process groups, so a signal
@@ -955,6 +969,12 @@ pub fn run() {
                     app_handle.try_state::<Arc<mcp::registry::McpServerRegistry>>()
                 {
                     mcp_registry.shutdown_all();
+                }
+                if let Some(resources) =
+                    app_handle.try_state::<Arc<agent_session::cleanup::SessionResourceRegistry>>()
+                {
+                    // Backstop for a session that started while end_all_sessions ran.
+                    resources.clear_all();
                 }
             }
         });

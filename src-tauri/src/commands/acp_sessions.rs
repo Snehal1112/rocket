@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use rocket_acp::SessionInfo;
-use rocket_app::{AcpSessionService, CollectionService, McpHttpServerCredentials, McpToolService};
+use rocket_app::{AcpSessionService, CollectionService, McpHttpServerCredentials};
 use rocket_shared::error::DomainError;
 use tauri::State;
 
+use crate::agent_session::cleanup::{SessionResourceRegistry, SessionResources};
+use crate::agent_session::scratch::SessionScratch;
 use crate::commands::acp_session_dto::{
     prompt_parts, AgentSessionStartedDto, ConfigOptionDto, PromptResourceDto,
 };
@@ -18,6 +20,7 @@ pub async fn start_agent_session(
     app_handle: tauri::AppHandle,
     collection_svc: State<'_, CollectionService>,
     registry: State<'_, Arc<McpServerRegistry>>,
+    resources: State<'_, Arc<SessionResourceRegistry>>,
     svc: State<'_, AcpSessionService>,
 ) -> Result<AgentSessionStartedDto, DomainError> {
     start_agent_session_inner(
@@ -27,6 +30,7 @@ pub async fn start_agent_session(
         app_handle,
         &collection_svc,
         &registry,
+        &resources,
         &svc,
     )
     .await
@@ -56,35 +60,47 @@ pub async fn start_agent_session(
 /// the *real* post-handshake session id — because that is the id
 /// `end_agent_session`/`send_agent_prompt` address a session by everywhere
 /// else in this codebase.
+///
+/// Every session starts isolated. A fresh `SessionScratch` provides an empty
+/// working directory and an empty `CLAUDE_CONFIG_DIR`, so the agent loads no
+/// user, project or local settings, and `SessionIsolation` adds the `_meta`
+/// options that switch off built-in tools. The frontend's requested cwd is
+/// ignored for that reason. The scratch and the pre-handshake MCP id are
+/// registered under the real session id, and `TauriSessionCleanup` releases
+/// them on every end path.
+#[allow(clippy::too_many_arguments)]
 pub async fn start_agent_session_inner<R: tauri::Runtime>(
     agent_config_id: String,
-    cwd: String,
+    _requested_cwd: String,
     collection: String,
     app_handle: tauri::AppHandle<R>,
     collection_svc: &CollectionService,
     registry: &McpServerRegistry,
+    resources: &SessionResourceRegistry,
     svc: &AcpSessionService,
 ) -> Result<SessionInfo, DomainError> {
     let autonomy_enabled = collection_svc
         .get_settings(&collection)?
         .agent_autonomy_enabled;
 
-    let mcp_handle = if autonomy_enabled {
-        // A Rocket-minted, pre-handshake-only identifier — see this
-        // function's doc comment. It is never surfaced to the frontend and
-        // never used as the session's real identity; it exists solely so
-        // RocketMcpToolServer has *something* stable to tag its own tool
-        // calls/audit events with for as long as this HTTP server runs.
-        let mcp_session_id = uuid::Uuid::new_v4().to_string();
-        Some(
-            crate::mcp::tool_server::spawn_mcp_http_server(app_handle, mcp_session_id)
+    // Created before the MCP server, so a failure here leaves nothing bound.
+    let scratch = SessionScratch::create().map_err(|e| {
+        DomainError::Internal(format!("failed to create the agent scratch directory: {e}"))
+    })?;
+    let (scratch_cwd, isolation) = scratch.isolation()?;
+
+    // A Rocket-minted, pre-handshake-only identifier. See this function's
+    // doc comment. It is kept so cleanup can forget the tool server's cache.
+    let mcp_session_id = autonomy_enabled.then(|| uuid::Uuid::new_v4().to_string());
+    let mcp_handle = match &mcp_session_id {
+        Some(id) => Some(
+            crate::mcp::tool_server::spawn_mcp_http_server(app_handle, id.clone())
                 .await
                 .map_err(|e| {
                     DomainError::Internal(format!("failed to start MCP tool server: {e}"))
                 })?,
-        )
-    } else {
-        None
+        ),
+        None => None,
     };
     let mcp_credentials = mcp_handle.as_ref().map(|h| McpHttpServerCredentials {
         port: h.port,
@@ -92,27 +108,42 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
     });
 
     let result = svc
-        .start_session(&agent_config_id, &cwd, &collection, mcp_credentials, None)
+        .start_session(
+            &agent_config_id,
+            &scratch_cwd,
+            &collection,
+            mcp_credentials,
+            Some(isolation),
+        )
         .await;
 
     match (result, mcp_handle) {
-        (Ok(info), Some(handle)) => {
-            // Registered under the *real* ACP session id, not the
-            // pre-handshake mcp_session_id minted above — this is the id
-            // end_agent_session/send_agent_prompt (and McpServerRegistry's
-            // other callers) all address a session by.
-            registry.register(info.session_id.clone(), handle);
+        (Ok(info), handle) => {
+            // Registered under the real ACP session id, which every other
+            // command addresses a session by.
+            if let Some(handle) = handle {
+                registry.register(info.session_id.clone(), handle);
+            }
+            resources.register(
+                info.session_id.clone(),
+                SessionResources {
+                    scratch,
+                    mcp_session_id,
+                },
+            );
+            // The `start_agent_session` command maps this to the DTO with
+            // `.map(AgentSessionStartedDto::from)`, as Plan 01 left it.
             Ok(info)
         }
-        (Ok(info), None) => Ok(info),
-        (Err(e), Some(handle)) => {
-            // start_session failed after the HTTP server was already bound —
-            // never leave an orphaned listener holding a live token. `shutdown`
-            // is synchronous (Plan 04) — no `.await` here.
-            handle.shutdown();
+        (Err(e), handle) => {
+            // Never leave a bound listener with a live token behind.
+            if let Some(handle) = handle {
+                handle.shutdown();
+            }
+            // Dropping the scratch removes its directories.
+            drop(scratch);
             Err(e)
         }
-        (Err(e), None) => Err(e),
     }
 }
 
@@ -158,19 +189,8 @@ pub async fn set_agent_config_option(
 pub async fn end_agent_session(
     session_id: String,
     svc: State<'_, AcpSessionService>,
-    mcp_registry: State<'_, Arc<McpServerRegistry>>,
-    mcp_tool_svc: State<'_, Arc<McpToolService>>,
 ) -> Result<(), DomainError> {
-    let result = svc.end_session(&session_id).await;
-    // Always sweep the MCP server, even if the ACP session was already gone
-    // (e.g. the agent process had already crashed) -- a no-op if this
-    // session never had one (agent autonomy was off).
-    mcp_registry.end_session(&session_id);
-    // Same teardown point sweeps McpToolService::test_result_cache (Post-
-    // Plan-03 review caveat (e)) -- that cache has no eviction of its own,
-    // and Plan 05 mints a fresh session_id per ACP session, so entries would
-    // otherwise accumulate in memory for the life of the process. A no-op
-    // for a session that never ran an MCP tool call.
-    mcp_tool_svc.forget_session(&session_id);
-    result
+    // AcpSessionService runs TauriSessionCleanup, which ends the MCP server,
+    // forgets the tool caches and removes the scratch directories.
+    svc.end_session(&session_id).await
 }

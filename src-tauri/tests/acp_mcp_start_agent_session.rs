@@ -12,18 +12,23 @@
 //! here) rather than the concretely-`AppHandle`-typed `#[tauri::command]`
 //! wrapper — see that function's own doc comment for why it exists.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_acp::{
     AcpSessionClient, AcpUpdate, AgentConfig, AgentConfigRepository, ConfigOption, McpServerSpec,
     PromptCapabilities, PromptPart, SessionInfo,
 };
-use rocket_app::{AcpSessionService, CollectionService};
+use rocket_app::{
+    isolation_meta, AcpSessionService, CollectionService, SessionCleanup,
+    ISOLATION_ENV_CONFIG_DIR, ROCKET_ASSISTANT_SYSTEM_PROMPT,
+};
 use rocket_collection::{CollectionRepository, CollectionSettings};
 use rocket_environment::external_secret::ExternalSecretRef;
 use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
 use rocket_environment::secret_store::SecretStore;
 use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
+use rocket_lib::agent_session::cleanup::{SessionResourceRegistry, TauriSessionCleanup};
 use rocket_lib::commands::acp_sessions::start_agent_session_inner;
 use rocket_lib::mcp::registry::McpServerRegistry;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -153,10 +158,18 @@ fn agent_config_service() -> Arc<rocket_app::AgentConfigService> {
 // it was handed so a test can assert on them.
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
+struct CapturedStart {
+    cwd: String,
+    env: Vec<(String, String)>,
+    meta: Option<serde_json::Value>,
+}
+
 struct FakeSessionClient {
     should_fail: bool,
     real_session_id: String,
     captured_servers: Arc<Mutex<Vec<McpServerSpec>>>,
+    captured_start: Arc<Mutex<Option<CapturedStart>>>,
 }
 #[async_trait::async_trait]
 impl AcpSessionClient for FakeSessionClient {
@@ -164,11 +177,16 @@ impl AcpSessionClient for FakeSessionClient {
         &self,
         _command: &str,
         _args: &[String],
-        _cwd: &str,
-        _env: &[(String, String)],
+        cwd: &str,
+        env: &[(String, String)],
         mcp_servers: &[McpServerSpec],
-        _meta: Option<serde_json::Value>,
+        meta: Option<serde_json::Value>,
     ) -> DomainResult<SessionInfo> {
+        *self.captured_start.lock().expect("lock") = Some(CapturedStart {
+            cwd: cwd.to_string(),
+            env: env.to_vec(),
+            meta,
+        });
         *self.captured_servers.lock().expect("lock") = mcp_servers.to_vec();
         if self.should_fail {
             Err(DomainError::Internal(
@@ -220,6 +238,7 @@ fn build_fixture(
 ) -> (
     CollectionService,
     Arc<McpServerRegistry>,
+    Arc<SessionResourceRegistry>,
     AcpSessionService,
     tauri::AppHandle<tauri::test::MockRuntime>,
     TempDir,
@@ -261,7 +280,8 @@ fn build_fixture(
         .expect("build mock tauri app");
     let app_handle = app.handle().clone();
 
-    (collection_svc, registry, acp_session_svc, app_handle, tmp)
+    let resources = Arc::new(SessionResourceRegistry::new());
+    (collection_svc, registry, resources, acp_session_svc, app_handle, tmp)
 }
 
 #[tokio::test]
@@ -271,8 +291,9 @@ async fn autonomy_enabled_session_spawns_and_registers_the_mcp_server_under_the_
         should_fail: false,
         real_session_id: "acp-real-session-1".to_string(),
         captured_servers: Arc::clone(&captured_servers),
+        captured_start: Arc::new(Mutex::new(None)),
     };
-    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) = build_fixture(true, client);
+    let (collection_svc, registry, resources, acp_session_svc, app_handle, _tmp) = build_fixture(true, client);
 
     let session_id = start_agent_session_inner(
         "agent-1".to_string(),
@@ -281,6 +302,7 @@ async fn autonomy_enabled_session_spawns_and_registers_the_mcp_server_under_the_
         app_handle,
         &collection_svc,
         &registry,
+        &resources,
         &acp_session_svc,
     )
     .await
@@ -314,8 +336,9 @@ async fn autonomy_disabled_session_spawns_no_mcp_server() {
         should_fail: false,
         real_session_id: "acp-real-session-2".to_string(),
         captured_servers: Arc::clone(&captured_servers),
+        captured_start: Arc::new(Mutex::new(None)),
     };
-    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) =
+    let (collection_svc, registry, resources, acp_session_svc, app_handle, _tmp) =
         build_fixture(false, client);
 
     let session_id = start_agent_session_inner(
@@ -325,6 +348,7 @@ async fn autonomy_disabled_session_spawns_no_mcp_server() {
         app_handle,
         &collection_svc,
         &registry,
+        &resources,
         &acp_session_svc,
     )
     .await
@@ -349,8 +373,9 @@ async fn session_start_failure_shuts_down_the_already_spawned_mcp_server() {
         should_fail: true,
         real_session_id: "unused".to_string(),
         captured_servers: Arc::clone(&captured_servers),
+        captured_start: Arc::new(Mutex::new(None)),
     };
-    let (collection_svc, registry, acp_session_svc, app_handle, _tmp) = build_fixture(true, client);
+    let (collection_svc, registry, resources, acp_session_svc, app_handle, _tmp) = build_fixture(true, client);
 
     let err = start_agent_session_inner(
         "agent-1".to_string(),
@@ -359,6 +384,7 @@ async fn session_start_failure_shuts_down_the_already_spawned_mcp_server() {
         app_handle,
         &collection_svc,
         &registry,
+        &resources,
         &acp_session_svc,
     )
     .await
@@ -369,4 +395,103 @@ async fn session_start_failure_shuts_down_the_already_spawned_mcp_server() {
     // function must have shut it down itself rather than leaking it (it was
     // never registered anywhere, since no real session id ever existed, so
     // there is nothing left in the registry to sweep it via).
+}
+
+#[tokio::test]
+async fn session_start_isolates_the_agent_in_fresh_scratch_directories() {
+    let captured_start = Arc::new(Mutex::new(None));
+    let client = FakeSessionClient {
+        should_fail: false,
+        real_session_id: "acp-real-session-4".to_string(),
+        captured_servers: Arc::new(Mutex::new(Vec::new())),
+        captured_start: Arc::clone(&captured_start),
+    };
+    let (collection_svc, registry, resources, acp_session_svc, app_handle, _tmp) =
+        build_fixture(true, client);
+
+    start_agent_session_inner(
+        "agent-1".to_string(),
+        "/tmp".to_string(),
+        "demo".to_string(),
+        app_handle,
+        &collection_svc,
+        &registry,
+        &resources,
+        &acp_session_svc,
+    )
+    .await
+    .expect("start_agent_session_inner should succeed");
+
+    let start = captured_start
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("the client's start_session must have been called");
+    assert_ne!(start.cwd, "/tmp", "the requested cwd must be replaced by a scratch directory");
+    let cwd = PathBuf::from(&start.cwd);
+    assert!(cwd.is_dir());
+    assert_eq!(std::fs::read_dir(&cwd).expect("read cwd").count(), 0);
+    let config_dir = start
+        .env
+        .iter()
+        .find(|(k, _)| k == ISOLATION_ENV_CONFIG_DIR)
+        .map(|(_, v)| PathBuf::from(v))
+        .expect("CLAUDE_CONFIG_DIR must be set");
+    assert!(config_dir.is_dir());
+    assert_ne!(config_dir, cwd);
+    assert!(start.env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
+    assert_eq!(start.meta, Some(isolation_meta(ROCKET_ASSISTANT_SYSTEM_PROMPT)));
+    assert_eq!(resources.len(), 1);
+
+    let cleanup = TauriSessionCleanup::with_cache_forgetter(
+        Arc::clone(&registry),
+        Arc::clone(&resources),
+        |_| {},
+    );
+    cleanup.on_session_ended("acp-real-session-4");
+
+    assert!(!cwd.exists());
+    assert!(!config_dir.exists());
+    assert!(resources.is_empty());
+}
+
+#[tokio::test]
+async fn session_start_failure_removes_the_scratch_directories() {
+    let captured_start = Arc::new(Mutex::new(None));
+    let client = FakeSessionClient {
+        should_fail: true,
+        real_session_id: "unused".to_string(),
+        captured_servers: Arc::new(Mutex::new(Vec::new())),
+        captured_start: Arc::clone(&captured_start),
+    };
+    let (collection_svc, registry, resources, acp_session_svc, app_handle, _tmp) =
+        build_fixture(true, client);
+
+    start_agent_session_inner(
+        "agent-1".to_string(),
+        "/tmp".to_string(),
+        "demo".to_string(),
+        app_handle,
+        &collection_svc,
+        &registry,
+        &resources,
+        &acp_session_svc,
+    )
+    .await
+    .expect_err("a session-start failure must propagate as an error");
+
+    let start = captured_start
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("the client's start_session must have been called");
+    assert!(!PathBuf::from(&start.cwd).exists(), "the scratch cwd must be removed");
+    let config_dir = start
+        .env
+        .iter()
+        .find(|(k, _)| k == ISOLATION_ENV_CONFIG_DIR)
+        .map(|(_, v)| PathBuf::from(v))
+        .expect("CLAUDE_CONFIG_DIR must be set");
+    assert!(!config_dir.exists(), "the scratch config dir must be removed");
+    assert!(resources.is_empty());
 }
