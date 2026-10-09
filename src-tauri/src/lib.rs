@@ -2,7 +2,7 @@ mod audit_bridge;
 mod callback_adapter;
 // `pub` so integration tests in `src-tauri/tests/` can drive command
 // orchestration directly (e.g. `commands::acp_sessions::
-// start_agent_session_inner`) — mirrors why `mcp` below is already `pub`.
+// start_workspace_assistant_inner`) — mirrors why `mcp` below is already `pub`.
 pub mod agent_session;
 pub mod commands;
 pub mod mcp;
@@ -981,7 +981,6 @@ pub fn run() {
             commands::agent_configs::save_agent_config,
             commands::agent_configs::delete_agent_config,
             commands::agent_configs::test_agent_config,
-            commands::acp_sessions::start_agent_session,
             commands::acp_sessions::send_agent_prompt,
             commands::acp_sessions::cancel_agent_prompt,
             commands::acp_sessions::set_agent_config_option,

@@ -30,7 +30,7 @@ pub struct ConfigOptionDto {
     pub choices: Vec<ConfigChoiceDto>,
 }
 
-/// What `start_agent_session` returns. Prompt capabilities stay in the backend.
+/// What `start_workspace_assistant` returns. Prompt capabilities stay in the backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionStartedDto {

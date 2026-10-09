@@ -33,8 +33,8 @@ impl McpServerRegistry {
     }
 
     /// Records a newly spawned server so it is reachable by `end_session`/
-    /// `shutdown_all`. Called by whoever spawned the server (Plan 05's
-    /// `start_agent_session`), keyed by the id it will end the session by.
+    /// `shutdown_all`. Called by whoever spawned the server
+    /// (`start_workspace_assistant`), keyed by the id it will end the session by.
     /// `spawn_mcp_http_server` does not register on its own.
     ///
     /// If a handle was already registered under `session_id`, that older

@@ -108,13 +108,13 @@ pub struct ConfigOptionDto { id: String, name: String, category: Option<String>,
 pub struct AgentSessionStartedDto { session_id: String, config_options: Vec<ConfigOptionDto> }
 pub struct PromptResourceDto { uri: String, mime_type: Option<String>, text: String }
 
-start_agent_session(agent_config_id, cwd, collection) -> AgentSessionStartedDto   // return type changes
+start_agent_session(agent_config_id, cwd, collection) -> AgentSessionStartedDto   // REMOVED in Plan 05 Task 3 (use start_workspace_assistant)
 send_agent_prompt(session_id, prompt: String, resources: Option<Vec<PromptResourceDto>>)
 cancel_agent_prompt(session_id)
 set_agent_config_option(session_id, config_id, value) -> Vec<ConfigOptionDto>
 ```
 
-TypeScript (`src/lib/tauri-api.ts`): `startAgentSession(...)` returns `AgentSessionStarted { sessionId, configOptions }`; `sendAgentPrompt(sessionId, prompt, resources?)`; `cancelAgentPrompt(sessionId)`; `setAgentConfigOption(sessionId, configId, value)`; listeners `onAgentToolActivity`, `onAgentConfigOptions`, `onAgentUsage`.
+TypeScript (`src/lib/tauri-api.ts`): `startAgentSession(...)` (removed in Plan 05 Task 3) returned `AgentSessionStarted { sessionId, configOptions }`; `sendAgentPrompt(sessionId, prompt, resources?)`; `cancelAgentPrompt(sessionId)`; `setAgentConfigOption(sessionId, configId, value)`; listeners `onAgentToolActivity`, `onAgentConfigOptions`, `onAgentUsage`.
 
 ### Plan 02 — isolation and lifecycle
 
