@@ -119,9 +119,11 @@ impl McpToolService {
     /// The status line, headers, URL and test errors are masked by name and shape. Then every
     /// secret that applies to the request is masked over the whole text: secret variables of
     /// the global environment, the collection, the folders, the request and every environment
-    /// of the collection, the RocketVault secrets of `environment_name` (best effort), and the
+    /// of the collection, the RocketVault secrets of `environment_name`, and the
     /// literal credentials of both the saved request and the tab's request, plus the `Basic`
     /// header values built from them. This is the masking `run_request` applies to a response.
+    /// Fails closed: if the environment has vault bindings that cannot be resolved (or take
+    /// longer than 8 s), the chip is refused.
     /// Values that only exist at run time in the frontend, such as a script's `setVar`, are
     /// not known here.
     pub async fn mask_response_chip(
@@ -151,15 +153,42 @@ impl McpToolService {
         });
         let requests: Vec<&Request> = saved.iter().chain(on_screen.iter()).collect();
         let mut secrets = self.chip_secrets(collection, Some(request_path), &requests);
-        // Vault values are fetched on demand, so a slow vault must not stall the chip.
-        let vault = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            self.execution_svc
-                .external_secret_values(collection, environment_name),
-        )
-        .await
-        .unwrap_or_default();
-        secrets.extend(vault);
+        // Vault values are fetched on demand. The named environment is not trusted to be the
+        // one that produced the response, so every environment of the collection is resolved.
+        // If a value cannot be had, the response cannot be masked safely, so the chip fails
+        // instead of going out with a secret in it.
+        let mut env_names: Vec<String> = self
+            .environment_repo_factory
+            .for_collection(collection)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|env| env.name)
+            .collect();
+        if let Some(name) = environment_name {
+            if !env_names.iter().any(|known| known == name) {
+                env_names.push(name.to_string());
+            }
+        }
+        let resolve_all = async {
+            let mut values = HashSet::new();
+            for name in &env_names {
+                values.extend(
+                    self.execution_svc
+                        .external_secret_values(collection, Some(name))
+                        .await?,
+                );
+            }
+            Ok::<_, DomainError>(values)
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(8), resolve_all).await {
+            Ok(Ok(values)) => secrets.extend(values),
+            _ => {
+                return Err(DomainError::InvalidInput(
+                    "could not resolve vault secrets to mask this response; try again".to_string(),
+                ))
+            }
+        }
         let text = mask_secret_text(&render_response(&title, input), &secrets);
         Ok(ChipResource {
             uri: chip_uri("last-response", collection, Some(request_path)),

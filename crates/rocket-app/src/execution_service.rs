@@ -744,17 +744,23 @@ impl RequestExecutionService {
         .secret_values
     }
 
-    /// The values of the environment's RocketVault secrets, for masking text. Best effort: a
-    /// binding that cannot be resolved is skipped and never fails the caller.
+    /// The values of the environment's RocketVault secrets, for masking text.
+    ///
+    /// Fails if a binding could not be resolved, because text masked without that binding's
+    /// values could leak them. A binding whose connection or secret no longer exists is not a
+    /// failure: it has no value to leak.
     pub(crate) async fn external_secret_values(
         &self,
         collection: &str,
         environment_name: Option<&str>,
-    ) -> std::collections::HashSet<String> {
-        let (resolved, _failures) = self
+    ) -> DomainResult<std::collections::HashSet<String>> {
+        let (resolved, failures) = self
             .resolve_external_secrets_partial(Some(collection), environment_name)
             .await;
-        resolved.into_values().collect()
+        match failures.into_iter().next() {
+            Some(failure) => Err(failure.error),
+            None => Ok(resolved.into_values().collect()),
+        }
     }
 
     /// Secret variable values of every scope that applies to one request: the global

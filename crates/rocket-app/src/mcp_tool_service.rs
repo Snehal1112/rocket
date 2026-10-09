@@ -33,7 +33,7 @@ mod chips;
 
 use crate::execution_service::RequestExecutionService;
 use crate::mcp_read_views::{
-    basic_header_values_from_secrets, filter_folder, history_limit, literal_credential_values, mask_response_body,
+    basic_header_values_from_secrets, filter_folder, history_limit, literal_credential_values, mask_response_body, mask_secret_text,
     normalize_folder, outline_entries, render_outline, CollectionBrief, HistoryBrief,
     MaskedEnvironment, MaskedRequest, MaskedSettings, OutlineCollection,
 };
@@ -400,7 +400,7 @@ impl McpToolService {
     /// The prompt part that carries the outline, once per session. It names
     /// the mode current at send time. An embedded resource when the agent
     /// accepts one, plain text otherwise. `None` after the first call, and
-    /// for sessions that never began (the per-tab chat).
+    /// for sessions that never began (no outline was stored).
     pub fn take_outline_preamble(&self, session_id: &str) -> Option<rocket_acp::PromptPart> {
         let part = self.peek_outline_preamble(session_id)?;
         self.discard_outline(session_id);
@@ -731,13 +731,27 @@ impl McpToolService {
             &output.run_secret_values,
         ));
         let (body, body_truncated) = mask_response_body(&output.response.body, &secrets);
+        // A failed assertion often quotes the values it compared, so the cached test results
+        // get the same masking as the body.
+        let masked_tests: Vec<rocket_scripting::TestResult> = output
+            .test_results
+            .iter()
+            .map(|test| rocket_scripting::TestResult {
+                name: mask_secret_text(&test.name, &secrets),
+                status: test.status.clone(),
+                error: test
+                    .error
+                    .as_deref()
+                    .map(|error| mask_secret_text(error, &secrets)),
+            })
+            .collect();
 
         self.test_result_cache
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(
                 test_result_key(session_id, collection, request_path),
-                output.test_results.clone(),
+                masked_tests,
             );
 
         self.publish_tool_invoked(
@@ -1685,6 +1699,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cached_test_results_are_masked_like_the_response_body() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                agent_autonomy_enabled: true,
+                variables: vec![CollectionVariable {
+                    key: "token".into(),
+                    value: "sk-live-collection-secret".into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: true,
+                }],
+                ..Default::default()
+            },
+        );
+        let mut request = sample_request("Login");
+        request.tests = Some("// tests".to_string());
+        repo.with_request("my-api", "login.yml", request);
+        let env_factory = FakeEnvRepoFactory::new();
+        let publisher = RecordingPublisher::new();
+        let engine = crate::test_doubles::ProgrammableEngine::new();
+        engine.on(
+            "Login",
+            "tests",
+            rocket_scripting::ScriptResult {
+                test_results: vec![rocket_scripting::TestResult {
+                    name: "token sk-live-collection-secret works".into(),
+                    status: rocket_scripting::TestStatus::Failed,
+                    error: Some(
+                        "expected 'abc' to equal 'sk-live-collection-secret'".into(),
+                    ),
+                }],
+                ..Default::default()
+            },
+        );
+        let executor: Arc<dyn rocket_http::HttpExecutor> = RecordingExecutor::new();
+        let history = InMemoryHistoryRepo::new();
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_script_engine(Box::new(crate::test_doubles::SharedEngine(engine))),
+        );
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            Arc::clone(&exec_svc),
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(Arc::clone(&history))),
+        );
+        svc.open_session("s1", AssistantMode::Agent);
+
+        let result = svc
+            .run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect("run_request");
+        assert_eq!(result.test_fail_count, 1);
+
+        let cached = svc
+            .get_test_results("s1", "my-api", "login.yml")
+            .expect("cached results");
+        let json = serde_json::to_string(&cached).expect("serialize");
+        assert!(!json.contains("sk-live-collection-secret"), "{json}");
+        assert!(json.contains(REDACTED));
+    }
+
+    #[tokio::test]
     async fn run_request_resolves_the_request_guard_policy_from_config_repo_at_call_time() {
         // Proof that `run_request` no longer hard-codes
         // `RequestGuardPolicy::default()` (Post-Plan-03 review caveat (d)):
@@ -2180,7 +2274,7 @@ mod tests {
     #[test]
     fn a_session_that_never_began_has_no_preamble() {
         let svc = outline_ready_service();
-        assert!(svc.take_outline_preamble("per-tab-session").is_none());
+        assert!(svc.take_outline_preamble("never-began-session").is_none());
     }
 
     #[test]
@@ -2475,5 +2569,112 @@ mod tests {
         assert!(!chip.text.contains("folder-secret-8888"), "{}", chip.text);
         assert!(chip.text.contains("rok.test('ok'"));
         assert!(chip.text.contains("Folder: orders"));
+    }
+
+    struct SharedEnvFactory(Arc<FakeEnvRepoFactory>);
+    impl EnvironmentRepositoryFactory for SharedEnvFactory {
+        fn for_collection(&self, collection: &str) -> Box<dyn EnvironmentRepository> {
+            self.0.for_collection(collection)
+        }
+    }
+
+    /// A service whose `dev` environment is bound to one vault secret.
+    fn vault_chip_service(
+        secret_store: Arc<dyn rocket_environment::SecretStore>,
+        fetcher: Arc<dyn rocket_environment::VaultSecretFetcher>,
+    ) -> McpToolService {
+        use rocket_environment::{ExternalSecretBinding, ExternalSecretRef};
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        let env_factory = FakeEnvRepoFactory::new();
+        let mut env = Environment::new("dev");
+        env.external_secrets.push(ExternalSecretBinding {
+            alias: "prod".into(),
+            connection_id: "c1".into(),
+            vault_name: "main".into(),
+            secret_names: vec![ExternalSecretRef {
+                name: "db".into(),
+                secret_id: "id1".into(),
+            }],
+        });
+        env_factory.with_env(env);
+        let connection = rocket_environment::SecretManagerConnection {
+            id: "c1".into(),
+            label: "Test".into(),
+            base_url: "https://vault.internal:8774".into(),
+            client_id: "rocketapi".into(),
+            verify_ssl: true,
+            allow_insecure_http: false,
+            provider: Default::default(),
+            config: None,
+        };
+        let publisher = RecordingPublisher::new();
+        let history = InMemoryHistoryRepo::new();
+        let executor: Arc<dyn rocket_http::HttpExecutor> = RecordingExecutor::new();
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                executor,
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(crate::test_doubles::FakeSecretManagerRepo(connection)),
+                secret_store,
+                fetcher,
+            )
+            .with_collection_env_repo_factory(Box::new(SharedEnvFactory(Arc::clone(
+                &env_factory,
+            )))),
+        );
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        McpToolService::new(
+            repo_dyn,
+            env_factory,
+            exec_svc,
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(history)),
+        )
+    }
+
+    #[tokio::test]
+    async fn response_chip_masks_a_resolved_vault_secret() {
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::new(
+            [("id1".to_string(), "vault-db-password-42".to_string())].into(),
+        );
+        let svc = vault_chip_service(
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher,
+        );
+        let chip = svc
+            .mask_response_chip(
+                "my-api",
+                "echo.yml",
+                Some("dev"),
+                &echo_response(r#"{"db":"vault-db-password-42"}"#),
+            )
+            .await
+            .expect("chip");
+        assert!(!chip.text.contains("vault-db-password-42"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_fails_closed_when_vault_secrets_cannot_be_resolved() {
+        // No client secret is stored, so the binding cannot be resolved.
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::new(Default::default());
+        let svc = vault_chip_service(Arc::new(rocket_environment::NullSecretStore), fetcher);
+        for env in [Some("dev"), None] {
+            let err = svc
+                .mask_response_chip("my-api", "echo.yml", env, &echo_response("body"))
+                .await
+                .expect_err("an unresolved binding must refuse the chip");
+            assert!(
+                err.to_string().contains("could not resolve vault secrets"),
+                "{err}"
+            );
+        }
     }
 }

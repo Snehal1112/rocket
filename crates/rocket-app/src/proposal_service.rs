@@ -255,8 +255,11 @@ impl ProposalService {
             Ok(true) => match self.apply(&change, env_fingerprint.as_deref()) {
                 Ok(true) => ProposalStatus::Accepted,
                 Ok(false) => ProposalStatus::Stale,
-                // The target appeared since the check: the workspace changed.
-                Err(DomainError::AlreadyExists(_)) => ProposalStatus::Stale,
+                // The target appeared, or the source or destination folder vanished, since
+                // the check: the workspace changed.
+                Err(DomainError::AlreadyExists(_) | DomainError::NotFound(_)) => {
+                    ProposalStatus::Stale
+                }
                 Err(e) => ProposalStatus::Failed {
                     message: e.to_string(),
                 },
