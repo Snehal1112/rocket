@@ -26,7 +26,7 @@ use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::execution_service::RequestExecutionService;
 use crate::mcp_read_views::{
-    filter_folder, history_limit, literal_credential_values, mask_response_body,
+    basic_header_values_from_secrets, filter_folder, history_limit, literal_credential_values, mask_response_body,
     normalize_folder, outline_entries, render_outline, CollectionBrief, HistoryBrief,
     MaskedEnvironment, MaskedRequest, MaskedSettings, OutlineCollection,
 };
@@ -179,7 +179,7 @@ impl McpToolService {
             ));
         }
         match self.collection_repo.get_request(collection, request_path) {
-            Err(DomainError::Internal(_)) => Err(DomainError::InvalidInput(format!(
+            Err(DomainError::Internal(_) | DomainError::Serialization(_) | DomainError::Io(_)) => Err(DomainError::InvalidInput(format!(
                 "request '{request_path}' could not be read"
             ))),
             other => other,
@@ -412,10 +412,14 @@ impl McpToolService {
         let request = self.read_request(collection, request_path)?;
         // The request's own literal credentials, which are not secret
         // variables, are masked in the returned body too.
-        let literal_credentials = literal_credential_values(
-            &request,
-            self.collection_repo.get_settings(collection).ok().as_ref(),
-        );
+        let settings = self.collection_repo.get_settings(collection).ok();
+        let folders = self
+            .collection_repo
+            .get_folder_chain_settings(collection, request_path)
+            .unwrap_or_default();
+        let literal_credentials =
+            literal_credential_values(&request, settings.as_ref(), &folders);
+        let request_for_masking = request.clone();
         let item = RunItem::http(request.name.clone(), request_path.to_string(), request);
         // Resolved fresh on every call against the current active workspace,
         // so a workspace switch or a `workspace.yml` edit takes effect at
@@ -462,6 +466,12 @@ impl McpToolService {
         // resolved (collection, environment, global, vault).
         let mut secrets = output.run_secret_values.clone();
         secrets.extend(literal_credentials);
+        secrets.extend(basic_header_values_from_secrets(
+            &request_for_masking,
+            settings.as_ref(),
+            &folders,
+            &output.run_secret_values,
+        ));
         let (body, body_truncated) = mask_response_body(&output.response.body, &secrets);
 
         self.test_result_cache
@@ -1834,6 +1844,22 @@ mod tests {
                 .expect_err("an environment file is not a request");
             assert!(matches!(err, DomainError::InvalidInput(_)), "{path}: {err:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_basic_authorization_value_is_masked_in_an_echoing_response() {
+        use base64::Engine;
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let request = sample_request("Login").with_auth(Auth::Basic {
+            username: "alice".into(),
+            password: "hunter2-literal".into(),
+        });
+        repo.with_request("my-api", "login.yml", request);
+        let encoded = base64::engine::general_purpose::STANDARD.encode("alice:hunter2-literal");
+
+        let result = run_with_echo(repo, &format!("Authorization: Basic {encoded}")).await;
+        assert!(!result.body.contains(&encoded), "{}", result.body);
     }
 }
 

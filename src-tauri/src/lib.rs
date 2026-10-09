@@ -21,7 +21,7 @@ use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_environment::secret_store::SecretStore;
 use rocket_infra::{
     scripting::DenoScriptEngine, CloneDestinationCapabilities, FsAuditLogRepo, FsCollectionRepo,
-    FsComplianceProfileRepo, FsContractRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo,
+    FsComplianceProfileRepo, FsContractRepo, FsCookieRepo, FsEnvironmentRepo,
     FsRepositoryPathResolver, FsTemplateRepo, FsWorkspaceConfigRepo, FsWorkspaceRepo,
     KeyringSecretStore, NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo,
     SharedPathCollectionRepo,
@@ -341,7 +341,9 @@ pub fn run() {
                 audit_publisher.clone(),
             );
             let history_svc = HistoryService::new(
-                Box::new(FsHistoryRepo::new(history_dir.clone())),
+                Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(NullEventPublisher),
             );
             let template_svc = TemplateService::new(
@@ -448,7 +450,9 @@ pub fn run() {
                     env_secret_store(),
                 )),
                 Arc::clone(&executor),
-                Box::new(FsHistoryRepo::new(history_dir.clone())),
+                Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 // Sends read the folder chain, so the repo must follow workspace switches.
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(
                     &active_workspace_path,
@@ -524,7 +528,9 @@ pub fn run() {
                         env_secret_store(),
                     )),
                     Arc::clone(&executor),
-                    Box::new(FsHistoryRepo::new(history_dir.clone())),
+                    Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                     Box::new(SharedPathCollectionRepo::new(Arc::clone(
                         &active_workspace_path,
                     ))),

@@ -149,7 +149,7 @@ impl<'a> EnvironmentRepository for RefEnvRepo<'a> {
 }
 
 /// Extended response from `execute()` that includes HTTP response plus script outputs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ExecuteRequestOutput {
     pub response: HttpResponse,
     pub test_results: Vec<TestResult>,
@@ -160,6 +160,20 @@ pub struct ExecuteRequestOutput {
     /// Every secret value the run resolved: secret variables of each scope
     /// and RocketVault values. Callers use it to mask text they hand on.
     pub run_secret_values: std::collections::HashSet<String>,
+}
+
+// Written by hand so the secret values are never printed, only counted.
+impl std::fmt::Debug for ExecuteRequestOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecuteRequestOutput")
+            .field("response", &self.response)
+            .field("test_results", &self.test_results)
+            .field("console_entries", &self.console_entries)
+            .field("script_error", &self.script_error)
+            .field("deferred_history", &self.deferred_history)
+            .field("run_secret_values", &self.run_secret_values.len())
+            .finish()
+    }
 }
 
 /// What `apply_script_side_effects` needs to keep vault secrets off disk.

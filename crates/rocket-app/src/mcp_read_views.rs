@@ -14,7 +14,9 @@
 
 use std::collections::HashSet;
 
-use rocket_collection::{CollectionItem, CollectionSettings, CollectionVariable, Folder, Request};
+use rocket_collection::{
+    CollectionItem, CollectionSettings, CollectionVariable, Folder, FolderSettings, Request,
+};
 use rocket_environment::{Environment, Variable};
 use rocket_history::HistoryEntry;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -570,27 +572,67 @@ fn add_url_credentials(url: &str, out: &mut HashSet<String>) {
     }
 }
 
+/// Adds the credentials inside the URL-valued fields of an auth block.
+fn collect_auth_url_credentials(value: &Value, out: &mut HashSet<String>) {
+    if let Value::Object(map) = value {
+        for (key, item) in map {
+            match item {
+                Value::String(url) if AUTH_URL_FIELDS.contains(&key.as_str()) => {
+                    add_url_credentials(url, out);
+                }
+                other => collect_auth_url_credentials(other, out),
+            }
+        }
+    }
+}
+
+/// The `Authorization: Basic ...` value the executor sends for a login.
+fn basic_header_forms(username: &str, password: &str, out: &mut HashSet<String>) {
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+    out.insert(format!("Basic {encoded}"));
+    out.insert(encoded);
+}
+
+/// Every auth block that applies to a request: its own, the folder chain's
+/// and the collection's.
+fn applicable_auths<'a>(
+    request: &'a Request,
+    settings: Option<&'a CollectionSettings>,
+    folders: &'a [FolderSettings],
+) -> Vec<&'a Auth> {
+    let mut auths = vec![&request.auth];
+    auths.extend(folders.iter().filter_map(|f| f.auth.as_ref()));
+    auths.extend(settings.and_then(|s| s.auth.as_ref()));
+    auths
+}
+
 /// The literal credentials `mask_auth` and `mask_named_value` would mask in
-/// a request, and in the collection settings that apply to it. A response
-/// that echoes the request (an `/anything` endpoint) must not return them
-/// either.
+/// a request, in the collection settings and in the folder chain that apply
+/// to it, plus the `Basic` header values built from a literal login. A
+/// response that echoes the request (an `/anything` endpoint) must not
+/// return them either.
 pub(crate) fn literal_credential_values(
     request: &Request,
     settings: Option<&CollectionSettings>,
+    folders: &[FolderSettings],
 ) -> HashSet<String> {
     let mut out = HashSet::new();
-    let add_auth = |auth: &Auth, out: &mut HashSet<String>| {
+    for auth in applicable_auths(request, settings, folders) {
         if let Ok(original) = serde_json::to_value(auth) {
             let masked = mask_auth(auth);
-            collect_masked_auth(&original, &masked, out);
+            collect_masked_auth(&original, &masked, &mut out);
+            collect_auth_url_credentials(&original, &mut out);
         }
-    };
-    add_auth(&request.auth, &mut out);
+        if let Auth::Basic { username, password } = auth {
+            if !password.is_empty() && !is_reference_only(password) && !username.contains("{{") {
+                basic_header_forms(username, password, &mut out);
+            }
+        }
+    }
     let mut headers: Vec<&Header> = request.headers.iter().collect();
+    headers.extend(folders.iter().flat_map(|f| f.headers.iter()));
     if let Some(settings) = settings {
-        if let Some(auth) = settings.auth.as_ref() {
-            add_auth(auth, &mut out);
-        }
         headers.extend(settings.headers.iter());
     }
     for header in headers {
@@ -613,6 +655,29 @@ pub(crate) fn literal_credential_values(
         if matches!(body.mode, BodyMode::FormUrlEncoded) {
             if let Some(content) = body.content.as_deref() {
                 add_credential_pairs(content, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// `Basic` header values for a login whose password is a `{{variable}}`
+/// holding a secret: the username is paired with each secret the run
+/// resolved. Over-inclusive on purpose, since the variable is not resolved
+/// here.
+pub(crate) fn basic_header_values_from_secrets(
+    request: &Request,
+    settings: Option<&CollectionSettings>,
+    folders: &[FolderSettings],
+    run_secrets: &HashSet<String>,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for auth in applicable_auths(request, settings, folders) {
+        if let Auth::Basic { username, password } = auth {
+            if is_reference_only(password) && !username.contains("{{") {
+                for secret in run_secrets {
+                    basic_header_forms(username, secret, &mut out);
+                }
             }
         }
     }
@@ -1160,7 +1225,7 @@ mod tests {
             enabled: true,
             description: None,
         });
-        let found = literal_credential_values(&request, None);
+        let found = literal_credential_values(&request, None, &[]);
         for secret in [
             "pw-literal-1",
             "tk-literal-2",
@@ -1172,6 +1237,52 @@ mod tests {
             assert!(found.contains(secret), "{secret} missing from {found:?}");
         }
         assert!(!found.contains("alice"));
+    }
+
+    #[test]
+    fn basic_auth_header_values_and_folder_credentials_are_collected() {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode("alice:hunter2-literal");
+        let request = Request::new("R", HttpMethod::Get, "https://api.test/x").with_auth(Auth::Basic {
+            username: "alice".into(),
+            password: "hunter2-literal".into(),
+        });
+        let folder = FolderSettings {
+            auth: Some(Auth::Bearer {
+                token: "folder-bearer-1".into(),
+            }),
+            headers: vec![Header::new("X-Api-Key", "folder-key-22")],
+            ..Default::default()
+        };
+        let found = literal_credential_values(&request, None, &[folder]);
+        assert!(found.contains(&encoded));
+        assert!(found.contains(&format!("Basic {encoded}")));
+        assert!(found.contains("folder-bearer-1"));
+        assert!(found.contains("folder-key-22"));
+    }
+
+    #[test]
+    fn basic_auth_with_a_secret_variable_password_pairs_the_username_with_run_secrets() {
+        use base64::Engine;
+        let request = Request::new("R", HttpMethod::Get, "https://api.test/x").with_auth(Auth::Basic {
+            username: "alice".into(),
+            password: "{{pw}}".into(),
+        });
+        let secrets: HashSet<String> = ["s3cret-value".to_string()].into_iter().collect();
+        let found = basic_header_values_from_secrets(&request, None, &[], &secrets);
+        let encoded = base64::engine::general_purpose::STANDARD.encode("alice:s3cret-value");
+        assert!(found.contains(&encoded));
+    }
+
+    #[test]
+    fn credentials_in_auth_url_fields_are_collected() {
+        let mut out = HashSet::new();
+        let value = serde_json::json!({
+            "authType": "oauth2",
+            "accessTokenUrl": "https://idp.test/token?client_secret=cs-12345678",
+        });
+        collect_auth_url_credentials(&value, &mut out);
+        assert!(out.contains("cs-12345678"));
     }
 }
 
