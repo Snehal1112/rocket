@@ -35,6 +35,7 @@ mod folder_chain_e2e_tests;
 #[cfg(test)]
 mod folder_var_script_tests;
 pub(crate) mod script_chain;
+pub(crate) mod run_request;
 pub(crate) mod script_host;
 #[cfg(test)]
 mod script_host_tests;
