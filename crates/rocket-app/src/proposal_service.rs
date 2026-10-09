@@ -98,6 +98,21 @@ impl ProposalService {
                 "propose at least one change".to_string(),
             ));
         }
+        // Refuse an oversized batch before any filesystem read in prepare.
+        {
+            let store = self.lock();
+            let pending = store.sessions.get(session_id).map_or(0, |list| {
+                list.iter()
+                    .filter(|p| p.status == ProposalStatus::Pending)
+                    .count()
+            });
+            if pending + changes.len() > MAX_PENDING_PER_SESSION {
+                return Err(DomainError::InvalidInput(format!(
+                    "too many pending proposals: at most {MAX_PENDING_PER_SESSION} can wait for \
+                     the user; ask the user to accept or reject some first"
+                )));
+            }
+        }
         let workspace: Vec<String> = self
             .collections
             .list()?
@@ -1306,6 +1321,25 @@ mod tests {
         f.svc
             .propose("s1", vec![folder("one-more")])
             .expect("a rejected proposal frees a slot");
+    }
+
+    #[test]
+    fn an_oversized_batch_is_refused_before_any_target_is_read() {
+        let f = fixture();
+        // Each change names a missing collection, so reaching prepare would
+        // give a different error than the cap message.
+        let changes: Vec<ProposedChange> = (0..=MAX_PENDING_PER_SESSION)
+            .map(|i| ProposedChange::CreateFolder {
+                collection: "elsewhere".into(),
+                parent_path: String::new(),
+                name: format!("f{i}"),
+            })
+            .collect();
+        let err = f
+            .svc
+            .propose("s1", changes)
+            .expect_err("over the cap");
+        assert!(err.to_string().contains("too many pending proposals"));
     }
 
     #[test]

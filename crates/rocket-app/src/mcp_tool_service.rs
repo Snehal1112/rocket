@@ -1,4 +1,5 @@
-//! Lets an ACP agent read a Rocket workspace and run requests. Writes go through ProposalService instead.
+//! Lets an ACP agent read a Rocket workspace and run requests. Writes go
+//! through ProposalService instead.
 //!
 //! Scope: every method that takes a `collection` first checks that it is
 //! one of the active workspace's collections (`check_in_workspace`), so a
@@ -812,9 +813,9 @@ mod tests {
     }
 
     /// Environment repo factory double whose `for_collection` handles all
-    /// share one underlying map, so a write is visible to a
-    /// later `get_environment` call even though each call asks for a fresh
-    /// `Box<dyn EnvironmentRepository>`.
+    /// share one underlying map, so an environment saved
+    /// through one handle is visible to a later `get_environment` call even
+    /// though each call asks for a fresh `Box<dyn EnvironmentRepository>`.
     struct FakeEnvRepoFactory {
         envs: Arc<StdMutex<StdHashMap<String, Environment>>>,
     }

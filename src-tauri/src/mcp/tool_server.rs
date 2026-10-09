@@ -271,6 +271,17 @@ pub struct GetTestResultsParams {
     pub request_path: String,
 }
 
+/// What the agent sees for a failed proposal. The detailed error stays in
+/// the app, because an error text can quote a value.
+const FAILED_MESSAGE_FOR_AGENT: &str = "the change could not be applied; see the app for details";
+
+/// Most changes one `propose_changes` call may carry.
+const MAX_CHANGES_PER_CALL: usize = 20;
+/// Longest script body or request body text, in bytes.
+const MAX_TEXT_BYTES: usize = 64 * 1024;
+/// Longest single field of any other kind, in bytes.
+const MAX_FIELD_BYTES: usize = 8 * 1024;
+
 /// What `propose_changes` tells the agent.
 const PROPOSALS_QUEUED: &str = "queued; awaiting user approval";
 
@@ -282,7 +293,7 @@ pub struct ProposeChangesParams {
 
 /// One change. Paths are relative to the collection root; "" is the root.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProposedChangeParams {
     /// Create an empty folder.
     CreateFolder {
@@ -334,6 +345,7 @@ pub enum ProposedChangeParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct KeyValueParams {
     pub key: String,
     pub value: String,
@@ -346,6 +358,7 @@ fn enabled_by_default() -> bool {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BodyParams {
     /// One of "none", "json", "xml", "text", "sparql", "formurlencoded".
     pub mode: String,
@@ -416,7 +429,10 @@ pub struct ProposalView {
 impl From<AgentProposal> for ProposalView {
     fn from(proposal: AgentProposal) -> Self {
         Self {
-            message: proposal.status.message().map(str::to_string),
+            message: proposal
+                .status
+                .message()
+                .map(|_| FAILED_MESSAGE_FOR_AGENT.to_string()),
             status: proposal.status.as_str(),
             id: proposal.id,
             summary: proposal.summary,
@@ -509,6 +525,132 @@ fn to_domain_patch(patch: RequestPatchParams) -> Result<RequestPatch, String> {
         query_params: patch.query_params.map(to_query_params),
         docs: patch.docs,
     })
+}
+
+fn check_len(label: &str, value: &str, max: usize) -> Result<(), String> {
+    if value.len() > max {
+        return Err(format!(
+            "{label} is too long: {} bytes, at most {max} are allowed",
+            value.len()
+        ));
+    }
+    Ok(())
+}
+
+fn check_opt(label: &str, value: &Option<String>, max: usize) -> Result<(), String> {
+    value.as_deref().map_or(Ok(()), |v| check_len(label, v, max))
+}
+
+fn check_pairs(label: &str, pairs: &[KeyValueParams]) -> Result<(), String> {
+    for pair in pairs {
+        check_len(&format!("{label} key"), &pair.key, MAX_FIELD_BYTES)?;
+        check_len(&format!("{label} value"), &pair.value, MAX_FIELD_BYTES)?;
+    }
+    Ok(())
+}
+
+fn check_body(body: &BodyParams) -> Result<(), String> {
+    check_len("body mode", &body.mode, MAX_FIELD_BYTES)?;
+    check_opt("body content", &body.content, MAX_TEXT_BYTES)
+}
+
+/// Refuses oversized fields before any conversion or filesystem read.
+fn check_change_sizes(change: &ProposedChangeParams) -> Result<(), String> {
+    match change {
+        ProposedChangeParams::CreateFolder {
+            collection,
+            parent_path,
+            name,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("parent_path", parent_path, MAX_FIELD_BYTES)?;
+            check_len("name", name, MAX_FIELD_BYTES)
+        }
+        ProposedChangeParams::CreateRequest {
+            collection,
+            folder_path,
+            request,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("folder_path", folder_path, MAX_FIELD_BYTES)?;
+            check_len("name", &request.name, MAX_FIELD_BYTES)?;
+            check_len("method", &request.method, MAX_FIELD_BYTES)?;
+            check_len("url", &request.url, MAX_FIELD_BYTES)?;
+            check_pairs("header", &request.headers)?;
+            check_pairs("query param", &request.query_params)?;
+            if let Some(body) = &request.body {
+                check_body(body)?;
+            }
+            check_opt("docs", &request.docs, MAX_TEXT_BYTES)?;
+            check_opt("pre_request_script", &request.pre_request_script, MAX_TEXT_BYTES)?;
+            check_opt(
+                "post_response_script",
+                &request.post_response_script,
+                MAX_TEXT_BYTES,
+            )?;
+            check_opt("tests", &request.tests, MAX_TEXT_BYTES)
+        }
+        ProposedChangeParams::UpdateRequest {
+            collection,
+            request_path,
+            patch,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("request_path", request_path, MAX_FIELD_BYTES)?;
+            check_opt("method", &patch.method, MAX_FIELD_BYTES)?;
+            check_opt("url", &patch.url, MAX_FIELD_BYTES)?;
+            if let Some(headers) = &patch.headers {
+                check_pairs("header", headers)?;
+            }
+            if let Some(params) = &patch.query_params {
+                check_pairs("query param", params)?;
+            }
+            if let Some(body) = &patch.body {
+                check_body(body)?;
+            }
+            check_opt("docs", &patch.docs, MAX_TEXT_BYTES)
+        }
+        ProposedChangeParams::EditScript {
+            collection,
+            request_path,
+            phase,
+            body,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("request_path", request_path, MAX_FIELD_BYTES)?;
+            check_len("phase", phase, MAX_FIELD_BYTES)?;
+            check_len("script body", body, MAX_TEXT_BYTES)
+        }
+        ProposedChangeParams::MoveItem {
+            collection,
+            from_path,
+            to_folder,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("from_path", from_path, MAX_FIELD_BYTES)?;
+            check_len("to_folder", to_folder, MAX_FIELD_BYTES)
+        }
+        ProposedChangeParams::RenameItem {
+            collection,
+            path,
+            new_name,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("path", path, MAX_FIELD_BYTES)?;
+            check_len("new_name", new_name, MAX_FIELD_BYTES)
+        }
+        ProposedChangeParams::SetEnvVar {
+            collection,
+            environment,
+            key,
+            value,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("environment", environment, MAX_FIELD_BYTES)?;
+            check_len("key", key, MAX_FIELD_BYTES)?;
+            check_len("value", value, MAX_FIELD_BYTES)
+        }
+    }
 }
 
 /// Converts one tool-input change to the domain type. `ProposalService`
@@ -731,8 +873,17 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         if let Err(refusal) = tools.check_mode(self.binding.session_id(), AssistantMode::Edit) {
             return Ok(to_tool_result::<()>(Err(refusal)));
         }
+        if params.changes.len() > MAX_CHANGES_PER_CALL {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "too many changes in one call: {}, at most {MAX_CHANGES_PER_CALL} are allowed",
+                params.changes.len()
+            ))]));
+        }
         let mut changes = Vec::with_capacity(params.changes.len());
         for change in params.changes {
+            if let Err(message) = check_change_sizes(&change) {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+            }
             match to_domain_change(change) {
                 Ok(change) => changes.push(change),
                 Err(message) => {
@@ -1554,5 +1705,96 @@ mod tests {
         for hidden in ["sk-hidden-123", "hidden-body-456", "hidden-script-789"] {
             assert!(!text.contains(hidden), "leaked {hidden}: {text}");
         }
+    }
+
+    async fn propose_json(
+        fixture: &TestFixture,
+        changes: serde_json::Value,
+    ) -> CallToolResult {
+        let params: ProposeChangesParams =
+            serde_json::from_value(serde_json::json!({ "changes": changes })).expect("parse");
+        fixture
+            .server_in(AssistantMode::Edit)
+            .propose_changes(Parameters(params))
+            .await
+            .expect("tool call")
+    }
+
+    #[tokio::test]
+    async fn propose_changes_refuses_more_changes_than_the_per_call_cap() {
+        let fixture = TestFixture::new(true);
+        let changes: Vec<serde_json::Value> = (0..=MAX_CHANGES_PER_CALL)
+            .map(|i| serde_json::json!({ "op": "create_folder", "collection": "demo", "name": format!("f{i}") }))
+            .collect();
+        let result = propose_json(&fixture, serde_json::Value::Array(changes)).await;
+        assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("too many changes"));
+    }
+
+    #[tokio::test]
+    async fn propose_changes_refuses_oversized_fields() {
+        let fixture = TestFixture::new(true);
+        let long_script = "x".repeat(MAX_TEXT_BYTES + 1);
+        let long_field = "x".repeat(MAX_FIELD_BYTES + 1);
+        let cases = [
+            serde_json::json!({ "op": "edit_script", "collection": "demo",
+                "request_path": "ping.yml", "phase": "tests", "body": long_script }),
+            serde_json::json!({ "op": "create_request", "collection": "demo",
+                "request": { "name": "A", "method": "GET", "url": long_field } }),
+            serde_json::json!({ "op": "create_request", "collection": "demo",
+                "request": { "name": "A", "method": "GET", "url": "https://x",
+                    "headers": [{ "key": "K", "value": long_field }] } }),
+            serde_json::json!({ "op": "update_request", "collection": "demo",
+                "request_path": "ping.yml",
+                "patch": { "body": { "mode": "text", "content": long_script } } }),
+            serde_json::json!({ "op": "set_env_var", "collection": "demo",
+                "environment": "dev", "key": "K", "value": long_field }),
+        ];
+        for case in cases {
+            let result = propose_json(&fixture, serde_json::json!([case])).await;
+            assert!(tool_is_error(&result));
+            assert!(tool_text(&result).contains("too long"), "{}", tool_text(&result));
+        }
+    }
+
+    #[test]
+    fn unknown_fields_on_changes_pairs_and_bodies_are_refused() {
+        let bad = [
+            serde_json::json!({ "op": "create_folder", "collection": "demo", "name": "a", "extra": 1 }),
+            serde_json::json!({ "op": "create_request", "collection": "demo",
+                "request": { "name": "A", "method": "GET", "url": "u",
+                    "headers": [{ "key": "K", "value": "v", "extra": 1 }] } }),
+            serde_json::json!({ "op": "create_request", "collection": "demo",
+                "request": { "name": "A", "method": "GET", "url": "u",
+                    "body": { "mode": "text", "extra": 1 } } }),
+        ];
+        for change in bad {
+            let parsed = serde_json::from_value::<ProposeChangesParams>(
+                serde_json::json!({ "changes": [change] }),
+            );
+            assert!(parsed.is_err(), "unknown field must be refused");
+        }
+    }
+
+    #[test]
+    fn a_failed_proposal_shows_the_agent_only_a_generic_message() {
+        use rocket_acp::proposal::ProposalStatus;
+
+        let mut proposal = AgentProposal::new(
+            "p1".into(),
+            "s1".into(),
+            ProposedChange::CreateFolder {
+                collection: "demo".into(),
+                parent_path: String::new(),
+                name: "a".into(),
+            },
+            0,
+        );
+        proposal.status = ProposalStatus::Failed {
+            message: "yaml error near 'sk-hidden-123'".into(),
+        };
+        let view = ProposalView::from(proposal);
+        assert_eq!(view.status, "failed");
+        assert_eq!(view.message.as_deref(), Some(FAILED_MESSAGE_FOR_AGENT));
     }
 }
