@@ -141,7 +141,25 @@ describe('FlowPane backend lint feed', () => {
     vi.mocked(lintFlow).mockRejectedValue('lint crashed');
     render(<Harness />);
     await waitFor(() => expect(lintFlow).toHaveBeenCalled());
+    await waitFor(() => expect(warn).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /warning|error/ })).not.toBeInTheDocument();
     warn.mockRestore();
+  });
+
+  it('still lints and shows backend issues while a past run is viewed', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([
+      {
+        code: 'no_path_to_output',
+        severity: 'warning',
+        nodeId: 'req1',
+        message: "'Login' does not lead to an Output.",
+      },
+    ]);
+    usePaneStore.getState().reset();
+    usePaneStore.getState().openTab({ ...baseTab, viewedRunId: 'run-old' });
+    render(<Harness />);
+    await waitFor(() => expect(lintFlow).toHaveBeenCalled());
+    expect(await screen.findByRole('button', { name: '1 warning' })).toBeInTheDocument();
   });
 });

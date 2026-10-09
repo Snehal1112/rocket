@@ -94,7 +94,14 @@ describe('FlowPane issues', () => {
     vi.mocked(listCollections).mockResolvedValue([]);
     vi.mocked(listFlows).mockResolvedValue([]);
     // The exit and output warnings come from the backend lint feed now.
+    // The backend also reports the unwired input as its first graph error.
     vi.mocked(lintFlow).mockResolvedValue([
+      {
+        code: 'invalid_graph',
+        severity: 'error',
+        nodeId: 'if1',
+        message: "'Check': needs an input wire",
+      },
       { code: 'exit_without_edge', severity: 'warning', nodeId: 'if1', message: 'Nothing is wired to the true exit.' },
       { code: 'no_path_to_output', severity: 'warning', nodeId: 'if1', message: "'Check' does not lead to an Output." },
     ]);

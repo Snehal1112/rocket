@@ -9,6 +9,16 @@ vi.mock('@/lib/tauri-api', async () => {
 });
 
 const flowNamed = (name: string): Flow => ({ name, nodes: [], edges: [] });
+// An edit that keeps the flow name, as typing in a node does.
+const outputs = (count: number, x = 0): Flow => ({
+  name: 'a',
+  nodes: Array.from({ length: count }, (_, i) => ({
+    id: `o${i}`,
+    position: { x, y: 0 },
+    kind: { kind: 'Output' as const, label: 'Out' },
+  })),
+  edges: [],
+});
 const lint = (code: string): FlowLint => ({ code, severity: 'warning', message: code });
 
 describe('useBackendFlowLints', () => {
@@ -37,16 +47,18 @@ describe('useBackendFlowLints', () => {
   it('lints once after a pause in editing', async () => {
     vi.mocked(lintFlow).mockResolvedValue([]);
     const { rerender } = renderHook(({ flow }) => useBackendFlowLints('demo', flow), {
-      initialProps: { flow: flowNamed('a') },
+      initialProps: { flow: outputs(0) },
     });
-    rerender({ flow: flowNamed('ab') });
+    await flush();
+    vi.mocked(lintFlow).mockClear();
+    rerender({ flow: outputs(1) });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
     });
-    rerender({ flow: flowNamed('abc') });
+    rerender({ flow: outputs(2) });
     await flush();
     expect(lintFlow).toHaveBeenCalledTimes(1);
-    expect(lintFlow).toHaveBeenCalledWith('demo', flowNamed('abc'));
+    expect(lintFlow).toHaveBeenCalledWith('demo', outputs(2));
   });
 
   it('does not lint again when a render brings an equal graph', async () => {
@@ -71,10 +83,10 @@ describe('useBackendFlowLints', () => {
       )
       .mockResolvedValueOnce([lint('new')]);
     const { result, rerender } = renderHook(({ flow }) => useBackendFlowLints('demo', flow), {
-      initialProps: { flow: flowNamed('a') },
+      initialProps: { flow: outputs(0) },
     });
     await flush();
-    rerender({ flow: flowNamed('b') });
+    rerender({ flow: outputs(1) });
     await flush();
     expect(result.current.map((i) => i.code)).toEqual(['new']);
     await act(async () => answerOld([lint('old')]));
@@ -85,10 +97,10 @@ describe('useBackendFlowLints', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.mocked(lintFlow).mockResolvedValueOnce([lint('first')]).mockRejectedValueOnce('boom');
     const { result, rerender } = renderHook(({ flow }) => useBackendFlowLints('demo', flow), {
-      initialProps: { flow: flowNamed('a') },
+      initialProps: { flow: outputs(0) },
     });
     await flush();
-    rerender({ flow: flowNamed('b') });
+    rerender({ flow: outputs(1) });
     await flush();
     expect(result.current).toEqual([]);
     expect(warn).toHaveBeenCalled();
@@ -108,5 +120,77 @@ describe('useBackendFlowLints', () => {
     unmount();
     await flush();
     expect(lintFlow).not.toHaveBeenCalled();
+  });
+
+  it('runs the first lint without the debounce delay', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    renderHook(() => useBackendFlowLints('demo', outputs(0)));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(lintFlow).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the first lint of another flow without the delay', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    const { rerender } = renderHook(({ flow }) => useBackendFlowLints('demo', flow), {
+      initialProps: { flow: flowNamed('a') },
+    });
+    await flush();
+    rerender({ flow: flowNamed('b') });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(lintFlow).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits the full delay after a later edit', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    const { rerender } = renderHook(({ flow }) => useBackendFlowLints('demo', flow), {
+      initialProps: { flow: outputs(0) },
+    });
+    await flush();
+    rerender({ flow: outputs(1) });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(499);
+    });
+    expect(lintFlow).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(lintFlow).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not lint when only node positions change', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    const { rerender } = renderHook(({ flow }) => useBackendFlowLints('demo', flow), {
+      initialProps: { flow: outputs(1, 0) },
+    });
+    await flush();
+    rerender({ flow: outputs(1, 40) });
+    await flush();
+    expect(lintFlow).toHaveBeenCalledTimes(1);
+    rerender({ flow: outputs(2, 40) });
+    await flush();
+    expect(lintFlow).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a response that arrives after unmount', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let answer: (lints: FlowLint[]) => void = () => undefined;
+    vi.mocked(lintFlow).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { unmount } = renderHook(() => useBackendFlowLints('demo', outputs(0)));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    unmount();
+    await act(async () => answer([lint('late')]));
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 });

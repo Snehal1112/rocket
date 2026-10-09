@@ -4,8 +4,8 @@ import { LINT_DEBOUNCE_MS, toFlowIssue } from '@/lib/flow-lint';
 import { type Flow, lintFlow } from '@/lib/tauri-api';
 
 /**
- * Backend lint issues for the graph the canvas holds now. Lints when the
- * flow opens and after each pause in editing. A failed call shows no
+ * Backend lint issues for the graph the canvas holds now. Lints at once
+ * when a flow opens and after each pause in editing. A failed call shows no
  * backend issues; lints never block Run or Save.
  */
 export function useBackendFlowLints(
@@ -19,7 +19,17 @@ export function useBackendFlowLints(
   // Read when the timer fires, so the effect depends on the graph's content only.
   const flowRef = useRef(flow);
   flowRef.current = flow;
-  const key = collection && flow ? JSON.stringify(flow) : null;
+  // Node positions stay out of the key, so dragging a node does not lint.
+  const key =
+    collection && flow
+      ? JSON.stringify({
+          ...flow,
+          nodes: flow.nodes.map((node) => ({ id: node.id, kind: node.kind })),
+        })
+      : null;
+  // The flow whose lint ran last, so the first lint of a newly opened flow skips the delay.
+  const lintedFlowRef = useRef<string | null>(null);
+  const openKey = collection && flow ? `${collection}|${flow.name}` : null;
 
   useEffect(() => {
     const generation = generationRef.current;
@@ -27,6 +37,8 @@ export function useBackendFlowLints(
       setIssues([]);
       return;
     }
+    const wait = lintedFlowRef.current === openKey ? delayMs : 0;
+    lintedFlowRef.current = openKey;
     const timer = setTimeout(() => {
       const current = flowRef.current;
       if (!current) return;
@@ -39,12 +51,12 @@ export function useBackendFlowLints(
           console.warn('[flow-lint] lint_flow failed', err);
           setIssues([]);
         });
-    }, delayMs);
+    }, wait);
     return () => {
       clearTimeout(timer);
       generationRef.current += 1;
     };
-  }, [collection, key, delayMs]);
+  }, [collection, key, openKey, delayMs]);
 
   return issues;
 }

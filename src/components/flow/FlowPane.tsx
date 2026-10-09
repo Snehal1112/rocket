@@ -144,17 +144,25 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       }),
     [tab.nodes, tab.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage, errorFromRun],
   );
-  // The backend lints the unsaved graph, so its issues follow every edit. A
-  // viewed past run shows its own snapshot, so nothing is linted then.
+  // The backend lints the unsaved graph, so its issues follow every edit. The
+  // memo keys on the graph parts, so run-progress patches do not rebuild it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only these tab parts feed the payload.
   const lintTarget = useMemo(
-    () => (tab.viewedRunId ? null : (flowPayloadFromTab(tab)?.flow ?? null)),
-    [tab],
+    () => flowPayloadFromTab(tab)?.flow ?? null,
+    [tab.collectionName, tab.flowName, tab.nodes, tab.edges, tab.callbackHost],
   );
   const backendIssues = useBackendFlowLints(tab.collectionName ?? null, lintTarget);
+  const graphIds = useMemo(
+    () => ({
+      nodeIds: new Set(tab.nodes.map((n) => n.id)),
+      edgeIds: new Set(tab.edges.map((e) => e.id)),
+    }),
+    [tab.nodes, tab.edges],
+  );
   // The popover count and the node badges read this one list.
   const issues = useMemo(
-    () => mergeFlowIssues(clientIssues, backendIssues),
-    [clientIssues, backendIssues],
+    () => mergeFlowIssues(clientIssues, backendIssues, graphIds),
+    [clientIssues, backendIssues, graphIds],
   );
   // A deleted node closes its panel.
   useEffect(() => {

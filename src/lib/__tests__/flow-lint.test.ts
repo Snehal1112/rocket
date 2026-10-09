@@ -58,6 +58,45 @@ describe('mergeFlowIssues', () => {
     expect(mergeFlowIssues([onEdge], [onNode])).toEqual([onEdge, onNode]);
   });
 
+  it('drops a backend invalid_graph on a node the client already flags as an error', () => {
+    const client = [issue({ code: 'input-missing', severity: 'error', nodeId: 'n1' })];
+    const backend = [issue({ code: 'invalid_graph', severity: 'error', nodeId: 'n1' })];
+    expect(mergeFlowIssues(client, backend)).toEqual(client);
+  });
+
+  it('drops a backend invalid_graph on an edge the client already flags as an error', () => {
+    const client = [issue({ code: 'expr-blank', severity: 'error', edgeId: 'e1' })];
+    const backend = [issue({ code: 'invalid_graph', severity: 'error', edgeId: 'e1' })];
+    expect(mergeFlowIssues(client, backend)).toEqual(client);
+  });
+
+  it('keeps an invalid_graph on a node without a client error, such as a cycle', () => {
+    const warning = issue({ code: 'exit_without_edge', nodeId: 'n1' });
+    const backend = [issue({ code: 'invalid_graph', severity: 'error', nodeId: 'n1' })];
+    expect(mergeFlowIssues([warning], backend)).toEqual([...backend, warning]);
+  });
+
+  it('lists errors first, keeping the order inside a severity', () => {
+    const cw = issue({ code: 'cw', nodeId: 'a' });
+    const ce = issue({ code: 'ce', severity: 'error', nodeId: 'b' });
+    const bw = issue({ code: 'exit_without_edge', nodeId: 'c' });
+    const be = issue({ code: 'unknown_variable', severity: 'error', nodeId: 'd' });
+    expect(mergeFlowIssues([cw, ce], [bw, be]).map((i) => i.code)).toEqual([
+      'ce',
+      'unknown_variable',
+      'cw',
+      'exit_without_edge',
+    ]);
+  });
+
+  it('drops backend issues on nodes and edges that are gone', () => {
+    const live = issue({ code: 'exit_without_edge', nodeId: 'n1' });
+    const ghostNode = issue({ code: 'exit_without_edge', nodeId: 'gone' });
+    const ghostEdge = issue({ code: 'invalid_graph', severity: 'error', edgeId: 'gone' });
+    const present = { nodeIds: new Set(['n1']), edgeIds: new Set(['e1']) };
+    expect(mergeFlowIssues([], [live, ghostNode, ghostEdge], present)).toEqual([live]);
+  });
+
   it('lists the codes the backend owns', () => {
     expect(BACKEND_LINT_CODES).toEqual(
       expect.arrayContaining(['exit_without_edge', 'switch_without_default', 'no_path_to_output']),

@@ -35,11 +35,44 @@ export function toFlowIssue(lint: FlowLint): FlowIssue {
   };
 }
 
+/** The ids the current graph holds, so lints on deleted items can be dropped. */
+export interface GraphIds {
+  nodeIds: ReadonlySet<string>;
+  edgeIds: ReadonlySet<string>;
+}
+
 /**
- * Client issues first, then backend issues. A client issue the backend also
- * reports, by code, node and edge, is dropped in favour of the backend one.
+ * Errors first, then warnings; inside one severity the client issues come
+ * before the backend ones. A client issue the backend also reports, by code,
+ * node and edge, is dropped in favour of the backend one. A backend
+ * invalid_graph on an item the client already flags as an error is dropped,
+ * because the client copy of the rule is more specific. Backend issues on
+ * items missing from `present` are dropped.
  */
-export function mergeFlowIssues(client: FlowIssue[], backend: FlowIssue[]): FlowIssue[] {
-  const backendKeys = new Set(backend.map(issueKey));
-  return [...client.filter((issue) => !backendKeys.has(issueKey(issue))), ...backend];
+export function mergeFlowIssues(
+  client: FlowIssue[],
+  backend: FlowIssue[],
+  present?: GraphIds,
+): FlowIssue[] {
+  const live = present
+    ? backend.filter(
+        (i) =>
+          (!i.nodeId || present.nodeIds.has(i.nodeId)) &&
+          (!i.edgeId || present.edgeIds.has(i.edgeId)),
+      )
+    : backend;
+  // A rejected save is not a client rule, so it does not hide the backend lint.
+  const clientErrorSpots = new Set(
+    client
+      .filter((i) => i.severity === 'error' && i.code !== 'save')
+      .map((i) => `${i.nodeId ?? ''}|${i.edgeId ?? ''}`),
+  );
+  const kept = live.filter(
+    (i) =>
+      i.code !== 'invalid_graph' || !clientErrorSpots.has(`${i.nodeId ?? ''}|${i.edgeId ?? ''}`),
+  );
+  const keptKeys = new Set(kept.map(issueKey));
+  const merged = [...client.filter((i) => !keptKeys.has(issueKey(i))), ...kept];
+  const rank = (i: FlowIssue) => (i.severity === 'error' ? 0 : 1);
+  return merged.sort((a, b) => rank(a) - rank(b));
 }

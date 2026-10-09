@@ -6,7 +6,8 @@ import fixture from './fixtures/flow-lint.json';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 const flow: Flow = { name: 'f', nodes: [], edges: [] };
-// Typing the fixture makes tsc check its keys against the FlowLint type.
+// The cast is only checked for comparability, so it does not catch drift. The
+// explicit field assertions below and the Rust fixture round trip do.
 const lints: FlowLint[] = fixture as FlowLint[];
 
 describe('lintFlow', () => {
