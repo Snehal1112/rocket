@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use deno_core::{extension, op2, v8, JsRuntime, OpState, RuntimeOptions};
+use deno_core::{extension, op2, v8, JsRuntime, OpState, PollEventLoopOptions, RuntimeOptions};
 use rocket_scripting::{SandboxMode, ScriptContext, ScriptEngine, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
 use std::time::Duration;
@@ -258,7 +258,61 @@ extension!(
     ],
 );
 
+/// Runs one script on the calling blocking thread.
+///
+/// deno_core spawns async op futures on the current Tokio runtime and expects
+/// that runtime to be single-threaded, so this thread builds its own
+/// current-thread runtime and drives the script on it.
 fn run_script(
+    ctx: ScriptContext,
+    handle_tx: oneshot::Sender<v8::IsolateHandle>,
+) -> DomainResult<ScriptResult> {
+    let tokio_rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| DomainError::Internal(format!("script runtime could not start: {e}")))?;
+    tokio_rt.block_on(run_script_async(ctx, handle_tx))
+}
+
+/// Wraps user code as the body of an async function, so top-level `await` and
+/// `return` work. The opening stays on the first line, so error line numbers
+/// do not move. The newline before the closing brace ends a trailing comment.
+fn wrap_user_code(code: &str) -> String {
+    format!("(async function () {{ {code}\n}}).call(globalThis)")
+}
+
+/// Runs the wrapped user code and the event loop, and returns the script error.
+///
+/// The loop runs until the script's promise settles and then until no work is
+/// left, so callback-style work the script did not await still finishes.
+async fn run_user_code(runtime: &mut JsRuntime, code: &str) -> Option<String> {
+    let promise = match runtime.execute_script("<user>", wrap_user_code(code)) {
+        Ok(promise) => promise,
+        Err(e) => return Some(script_error_message(e.to_string())),
+    };
+    let resolve = runtime.resolve(promise);
+    if let Err(e) = runtime
+        .with_event_loop_promise(resolve, PollEventLoopOptions::default())
+        .await
+    {
+        return Some(script_error_message(e.to_string()));
+    }
+    runtime
+        .run_event_loop(PollEventLoopOptions::default())
+        .await
+        .err()
+        .map(|e| script_error_message(e.to_string()))
+}
+
+/// Keeps script errors in the shape they had before scripts ran as async functions.
+fn script_error_message(raw: String) -> String {
+    if raw.contains("Promise resolution is still pending") {
+        return "the script awaited a promise that never settles".to_string();
+    }
+    raw.replacen("Uncaught (in promise) ", "Uncaught ", 1)
+}
+
+async fn run_script_async(
     ctx: ScriptContext,
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
 ) -> DomainResult<ScriptResult> {
@@ -337,10 +391,7 @@ fn run_script(
         .map_err(|e| DomainError::Internal(format!("bootstrap error: {e}")))?;
 
     // Capture script-level exceptions rather than propagating them as errors.
-    let script_error = match runtime.execute_script("<user>", code) {
-        Ok(_) => None,
-        Err(e) => Some(e.to_string()),
-    };
+    let script_error = run_user_code(&mut runtime, &code).await;
 
     let out = {
         let op_state = runtime.op_state();
@@ -620,6 +671,134 @@ mod tests {
         assert!(result.error.is_some());
         let err = result.error.expect("error present");
         assert!(err.contains("deliberate"));
+    }
+
+    // ── async engine model ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn async_model_top_level_await_and_return_work() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "const v = await Promise.resolve(41); rok.setVar('v', v + 1); \
+             if (v) { return; } rok.setVar('after', 1);",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.runtime_vars.get("v").expect("v present"), 42);
+        assert!(!result.runtime_vars.contains_key("after"));
+    }
+
+    #[tokio::test]
+    async fn async_model_this_is_still_the_global_object() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('same', this === globalThis)");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("same").expect("same present"), true);
+    }
+
+    #[tokio::test]
+    async fn async_model_promise_callbacks_now_run() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("Promise.resolve().then(() => rok.setVar('late', 'yes'))");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(result.runtime_vars.get("late").expect("late present"), "yes");
+    }
+
+    #[tokio::test]
+    async fn async_model_a_sync_throw_keeps_its_old_message_shape() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("throw new Error('deliberate')");
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("Error: deliberate"), "{err}");
+        assert!(!err.contains("in promise"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn async_model_a_rejected_await_is_the_script_error() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("await Promise.reject(new Error('nope'))");
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("Error: nope"), "{err}");
+        assert!(!err.contains("in promise"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn async_model_an_unhandled_rejection_is_the_script_error() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "Promise.resolve().then(() => { throw new Error('stray'); }); rok.setVar('ran', 1)",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("stray"), "{err}");
+        assert_eq!(result.runtime_vars.get("ran").expect("ran present"), 1);
+    }
+
+    #[tokio::test]
+    async fn async_model_a_promise_that_never_settles_ends_with_an_error() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("await new Promise(() => {}); rok.setVar('after', 1)");
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("never settles"), "{err}");
+        assert!(!result.runtime_vars.contains_key("after"));
+    }
+
+    #[tokio::test]
+    async fn async_model_a_syntax_error_is_still_reported() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("const = ;");
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("SyntaxError"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn async_model_top_level_declarations_are_function_scoped() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "var a = 1; function f() {} \
+             rok.setVar('t', typeof globalThis.a + ',' + typeof globalThis.f + ',' + typeof f)",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("t").expect("t present"),
+            "undefined,undefined,function"
+        );
+    }
+
+    #[tokio::test]
+    async fn async_model_require_and_hidden_globals_are_unchanged() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx(
+            "const { v4 } = require('uuid'); \
+             rok.setVar('n', v4().length + ',' + typeof Deno + ',' + typeof __ops + ',' + typeof __bootstrap)",
+        );
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("n").expect("n present"),
+            "36,undefined,undefined,undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn async_model_a_trailing_line_comment_does_not_break_the_wrapper() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("rok.setVar('ok', true) // done");
+        let result = engine.execute(ctx).await.expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(result.runtime_vars.get("ok").expect("ok present"), true);
+    }
+
+    #[tokio::test]
+    async fn async_model_use_strict_still_applies() {
+        let engine = DenoScriptEngine::new();
+        let ctx = minimal_ctx("\"use strict\"; undeclaredName = 1;");
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("ReferenceError"), "{err}");
     }
 
     #[tokio::test]
