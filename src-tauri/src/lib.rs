@@ -358,7 +358,17 @@ pub fn run() {
                     env_secret_store(),
                 )),
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
-            ));
+            )
+            .with_workspace_identity({
+                // A proposal is stale once another workspace is active.
+                let active = Arc::clone(&active_workspace_path);
+                Arc::new(move || {
+                    active
+                        .lock()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default()
+                })
+            }));
             let history_svc = HistoryService::new(
                 Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
                     &active_workspace_path,

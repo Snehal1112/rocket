@@ -223,6 +223,8 @@ impl ProposalService {
 
 Events: `AcpProposalCreated { session_id, proposal_id, summary }` → `agent-proposal-created`; `AcpProposalResolved { session_id, proposal_id, status: String }` → `agent-proposal-resolved` (snake_case fields on the wire). IPC: `list_agent_proposals(session_id)`, `accept_agent_proposal(session_id, proposal_id)`, `reject_agent_proposal(session_id, proposal_id)`; DTO `AgentProposalDto { id, sessionId, change, summary, status, statusMessage?, createdAtMs }` (camelCase). `change` is tagged by `op` with camelCase values (`createFolder`, `createRequest`, `updateRequest`, `editScript`, `moveItem`, `renameItem`, `setEnvVar`), its fields are camelCase, `editScript.phase` is `preRequest`, `postResponse` or `tests`, and it carries no `baseFingerprint` and no "before" text (the panel fetches the current request with `getRequest`). Cap: 50 pending per session. The direct-write tools `edit_script` and `set_env_var` are removed from the MCP server in this plan.
 
+Plan 04 review fixes (2026-10-10): `ProposalService::with_workspace_identity` records the active workspace on each proposal and `accept` marks it `Stale` after a switch; `CollectionRepository::path_exists` (case-insensitive, on disk) backs the free-target checks, with reserved file and directory names refused; `SetEnvVar` carries a hidden per-variable fingerprint; proposed values holding the read tools' mask placeholder are refused. `clear_session` publishes no `AcpProposalResolved` for the proposals it drops, so the panel must drop a session's proposal list itself when the session ends (Plan 05). Sessions are not ended on workspace switch yet: the old session's pending proposals just turn `Stale`.
+
 ### Plan 05 — panel UI (TypeScript)
 
 ```ts

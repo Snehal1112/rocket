@@ -219,7 +219,7 @@ fn proposal_service<R: tauri::Runtime>(
     }
 }
 
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceOutlineParams {
@@ -281,18 +281,22 @@ const MAX_CHANGES_PER_CALL: usize = 20;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// Longest single field of any other kind, in bytes.
 const MAX_FIELD_BYTES: usize = 8 * 1024;
+/// Most header or query pairs one change may carry.
+const MAX_PAIRS_PER_CHANGE: usize = 100;
+/// Most bytes of text one `propose_changes` call may carry in total.
+const MAX_BYTES_PER_CALL: usize = 512 * 1024;
 
 /// What `propose_changes` tells the agent.
 const PROPOSALS_QUEUED: &str = "queued; awaiting user approval";
 
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProposeChangesParams {
     /// Each change becomes its own proposal that the user accepts or rejects.
     pub changes: Vec<ProposedChangeParams>,
 }
 
 /// One change. Paths are relative to the collection root; "" is the root.
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProposedChangeParams {
     /// Create an empty folder.
@@ -344,7 +348,7 @@ pub enum ProposedChangeParams {
     },
 }
 
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeyValueParams {
     pub key: String,
@@ -357,7 +361,7 @@ fn enabled_by_default() -> bool {
     true
 }
 
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BodyParams {
     /// One of "none", "json", "xml", "text", "sparql", "formurlencoded".
@@ -367,7 +371,7 @@ pub struct BodyParams {
 }
 
 /// Unknown fields, such as `auth`, are refused rather than dropped.
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposedRequestParams {
     pub name: String,
@@ -390,7 +394,7 @@ pub struct ProposedRequestParams {
 }
 
 /// Unknown fields, such as `auth`, are refused rather than dropped.
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RequestPatchParams {
     #[serde(default)]
@@ -542,6 +546,12 @@ fn check_opt(label: &str, value: &Option<String>, max: usize) -> Result<(), Stri
 }
 
 fn check_pairs(label: &str, pairs: &[KeyValueParams]) -> Result<(), String> {
+    if pairs.len() > MAX_PAIRS_PER_CHANGE {
+        return Err(format!(
+            "too many {label} entries: {}, at most {MAX_PAIRS_PER_CHANGE} are allowed",
+            pairs.len()
+        ));
+    }
     for pair in pairs {
         check_len(&format!("{label} key"), &pair.key, MAX_FIELD_BYTES)?;
         check_len(&format!("{label} value"), &pair.value, MAX_FIELD_BYTES)?;
@@ -552,6 +562,23 @@ fn check_pairs(label: &str, pairs: &[KeyValueParams]) -> Result<(), String> {
 fn check_body(body: &BodyParams) -> Result<(), String> {
     check_len("body mode", &body.mode, MAX_FIELD_BYTES)?;
     check_opt("body content", &body.content, MAX_TEXT_BYTES)
+}
+
+/// Refuses a call whose changes together exceed `MAX_BYTES_PER_CALL`.
+fn check_call_bytes(changes: &[ProposedChangeParams]) -> Result<(), String> {
+    let total = changes_json_len(changes);
+    if total > MAX_BYTES_PER_CALL {
+        return Err(format!(
+            "the call is too large: {total} bytes, at most {MAX_BYTES_PER_CALL} are allowed"
+        ));
+    }
+    Ok(())
+}
+
+/// Serialized size of the changes. A change that cannot be serialized counts
+/// as too large.
+fn changes_json_len(changes: &[ProposedChangeParams]) -> usize {
+    serde_json::to_vec(changes).map_or(usize::MAX, |bytes| bytes.len())
 }
 
 /// Refuses oversized fields before any conversion or filesystem read.
@@ -751,6 +778,23 @@ fn to_tool_result<T: serde::Serialize>(result: DomainResult<T>) -> CallToolResul
     }
 }
 
+/// What the agent sees for an internal failure while proposing. The detail
+/// stays in the app, because an I/O or serialization error can quote a path
+/// or a value.
+const INTERNAL_MESSAGE_FOR_AGENT: &str = "the proposal could not be checked; try again later";
+
+/// Maps an internal error to a generic one. Validation errors (invalid input,
+/// not found, already exists) stay as they are, because the agent needs them
+/// to fix its proposal.
+fn for_agent(error: DomainError) -> DomainError {
+    match error {
+        DomainError::Io(_) | DomainError::Internal(_) | DomainError::Serialization(_) => {
+            DomainError::Internal(INTERNAL_MESSAGE_FOR_AGENT.to_string())
+        }
+        other => other,
+    }
+}
+
 /// Like `to_tool_result`, for tools whose result is already prose (the
 /// outline): the text goes out as it is, not as a quoted JSON string.
 fn to_text_tool_result(result: DomainResult<String>) -> CallToolResult {
@@ -879,6 +923,10 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
                 params.changes.len()
             ))]));
         }
+        // The whole call is bounded before any conversion, by its JSON size.
+        if let Err(message) = check_call_bytes(&params.changes) {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(message)]));
+        }
         let mut changes = Vec::with_capacity(params.changes.len());
         for change in params.changes {
             if let Err(message) = check_change_sizes(&change) {
@@ -897,12 +945,13 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
             .map(|proposal_ids| ProposeChangesResult {
                 proposal_ids,
                 status: PROPOSALS_QUEUED,
-            });
+            })
+            .map_err(for_agent);
         Ok(to_tool_result(result))
     }
 
     #[tool(
-        description = "List this session's proposals and their status: pending, accepted, rejected, stale (the item changed after it was proposed; read it again and propose again) or failed (with a message)."
+        description = "List this session's proposals and their status: pending, accepted, rejected, stale (the item changed after it was proposed; read it again and propose again) or failed (the change could not be applied; the user sees the details in the app)."
     )]
     async fn list_proposals(&self) -> Result<CallToolResult, McpError> {
         let proposals = proposal_service(&self.app_handle)?;
@@ -1755,6 +1804,54 @@ mod tests {
             assert!(tool_is_error(&result));
             assert!(tool_text(&result).contains("too long"), "{}", tool_text(&result));
         }
+    }
+
+    #[tokio::test]
+    async fn propose_changes_refuses_too_many_header_or_query_pairs() {
+        let fixture = TestFixture::new(true);
+        let pairs: Vec<serde_json::Value> = (0..=MAX_PAIRS_PER_CHANGE)
+            .map(|i| serde_json::json!({ "key": format!("K{i}"), "value": "v" }))
+            .collect();
+        let cases = [
+            serde_json::json!({ "op": "update_request", "collection": "demo",
+                "request_path": "ping.yml", "patch": { "headers": pairs.clone() } }),
+            serde_json::json!({ "op": "update_request", "collection": "demo",
+                "request_path": "ping.yml", "patch": { "query_params": pairs } }),
+        ];
+        for case in cases {
+            let result = propose_json(&fixture, serde_json::json!([case])).await;
+            assert!(tool_is_error(&result));
+            assert!(tool_text(&result).contains("too many"), "{}", tool_text(&result));
+        }
+    }
+
+    #[tokio::test]
+    async fn propose_changes_refuses_a_call_over_the_total_byte_cap() {
+        let fixture = TestFixture::new(true);
+        // Each script is under its own cap; together they pass the call cap.
+        let body = "x".repeat(MAX_TEXT_BYTES - 1);
+        let changes: Vec<serde_json::Value> = (0..MAX_CHANGES_PER_CALL)
+            .map(|_| serde_json::json!({ "op": "edit_script", "collection": "demo",
+                "request_path": "ping.yml", "phase": "tests", "body": body }))
+            .collect();
+        let result = propose_json(&fixture, serde_json::Value::Array(changes)).await;
+        assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("too large"), "{}", tool_text(&result));
+    }
+
+    #[test]
+    fn internal_errors_reach_the_agent_as_a_generic_message() {
+        for error in [
+            DomainError::Io("open /home/me/.rocket-api/secret.yml".into()),
+            DomainError::Internal("lock poisoned".into()),
+            DomainError::Serialization("bad token sk-hidden".into()),
+        ] {
+            let text = for_agent(error).to_string();
+            assert!(text.contains(INTERNAL_MESSAGE_FOR_AGENT), "{text}");
+            assert!(!text.contains("sk-hidden") && !text.contains("secret.yml"));
+        }
+        let kept = for_agent(DomainError::AlreadyExists("'a' in 'demo'".into())).to_string();
+        assert!(kept.contains("'a' in 'demo'"));
     }
 
     #[test]
