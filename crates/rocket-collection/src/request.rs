@@ -83,6 +83,14 @@ pub fn request_filename_for(path: &str) -> String {
     }
 }
 
+/// A name in the form used to compare names: Unicode NFC, then lowercase.
+/// Two names with the same folded form can be one entry on a case-insensitive
+/// or normalizing filesystem, so they must never be treated as different.
+pub fn fold_name(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().collect::<String>().to_lowercase()
+}
+
 /// Build a collision-disambiguating candidate filename `"{stem} {n}.yml"`.
 ///
 /// `counter` is the disambiguation index (caller advances on `AlreadyExists`).

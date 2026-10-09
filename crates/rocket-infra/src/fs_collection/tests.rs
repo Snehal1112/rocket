@@ -3033,3 +3033,68 @@ fn path_exists_refuses_a_symlinked_parent() {
     assert!(repo.path_exists("col", "link/x.yml").is_err());
     assert!(repo.path_exists("col", "link").expect("the link itself exists"));
 }
+
+#[test]
+fn create_folder_exclusive_refuses_an_existing_folder_and_keeps_its_metadata() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_folder_exclusive("col", "reports")
+        .expect("first create");
+    let folder_yml = dir.path().join("col/reports/folder.yml");
+    let before = fs::read_to_string(&folder_yml).expect("folder.yml");
+    let err = repo
+        .create_folder_exclusive("col", "reports")
+        .expect_err("exists");
+    assert!(matches!(err, DomainError::AlreadyExists(_)));
+    assert_eq!(fs::read_to_string(&folder_yml).expect("folder.yml"), before);
+    assert!(repo.create_folder_exclusive("col", "missing/child").is_err());
+}
+
+#[test]
+fn create_request_exclusive_never_replaces_a_file() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let request = Request::new("One", HttpMethod::Get, "https://one.example.com");
+    let path = repo
+        .create_request_exclusive("col", "one.yml", &request)
+        .expect("first create");
+    assert_eq!(path, "one.yml");
+    let file = dir.path().join("col/one.yml");
+    let before = fs::read_to_string(&file).expect("file");
+    let other = Request::new("Two", HttpMethod::Post, "https://two.example.com");
+    let err = repo
+        .create_request_exclusive("col", "one.yml", &other)
+        .expect_err("exists");
+    assert!(matches!(err, DomainError::AlreadyExists(_)));
+    assert_eq!(fs::read_to_string(&file).expect("file"), before);
+}
+
+#[test]
+fn move_item_no_replace_keeps_the_destination() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    repo.create_folder("col", "a").expect("a");
+    repo.create_folder("col", "b").expect("b");
+    fs::write(dir.path().join("col/a/x.yml"), "from a").expect("x in a");
+    fs::write(dir.path().join("col/b/x.yml"), "from b").expect("x in b");
+    let err = repo
+        .move_item_no_replace("col", "a/x.yml", "col", "b/x.yml")
+        .expect_err("destination exists");
+    assert!(matches!(err, DomainError::AlreadyExists(_)));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("col/b/x.yml")).expect("read"),
+        "from b"
+    );
+    assert!(dir.path().join("col/a/x.yml").is_file());
+    repo.move_item_no_replace("col", "a/x.yml", "col", "b/y.yml")
+        .expect("free destination");
+    assert!(dir.path().join("col/b/y.yml").is_file());
+}
+
+#[test]
+fn path_exists_treats_unicode_variants_as_the_same_name() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    fs::create_dir_all(dir.path().join("col").join("caf\u{e9}")).expect("dir");
+    assert!(repo.path_exists("col", "cafe\u{301}").expect("check"));
+}

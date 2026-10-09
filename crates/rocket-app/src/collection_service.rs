@@ -302,6 +302,53 @@ impl CollectionService {
         Ok(())
     }
 
+    /// Creates a folder that must not exist yet. See
+    /// `CollectionRepository::create_folder_exclusive`.
+    pub fn create_folder_exclusive(&self, collection: &str, path: &str) -> DomainResult<()> {
+        self.repo.create_folder_exclusive(collection, path)?;
+        self.events.publish(DomainEvent::FolderCreated {
+            collection: collection.to_string(),
+            path: path.to_string(),
+        });
+        Ok(())
+    }
+
+    /// Saves a request that must not exist yet. See
+    /// `CollectionRepository::create_request_exclusive`.
+    pub fn create_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<Request> {
+        let actual_path = self.repo.create_request_exclusive(collection, path, request)?;
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: actual_path.clone(),
+        });
+        self.repo.get_request(collection, &actual_path)
+    }
+
+    /// Moves an item without replacing the destination. See
+    /// `CollectionRepository::move_item_no_replace`.
+    pub fn move_item_no_replace(
+        &self,
+        src_collection: &str,
+        src_path: &str,
+        dst_collection: &str,
+        dst_path: &str,
+    ) -> DomainResult<()> {
+        self.repo
+            .move_item_no_replace(src_collection, src_path, dst_collection, dst_path)?;
+        self.events.publish(DomainEvent::ItemMoved {
+            src_collection: src_collection.to_string(),
+            src_path: src_path.to_string(),
+            dst_collection: dst_collection.to_string(),
+            dst_path: dst_path.to_string(),
+        });
+        Ok(())
+    }
+
     pub fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.repo.delete_folder(collection, path)?;
         self.events.publish(DomainEvent::FolderDeleted {

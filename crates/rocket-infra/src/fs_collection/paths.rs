@@ -105,15 +105,21 @@ pub(super) fn path_exists(
     let mut dir = repo.collection_root_path(collection)?;
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     for (index, segment) in segments.iter().enumerate() {
-        let wanted = segment.to_lowercase();
+        let wanted = rocket_collection::fold_name(segment);
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(DomainError::Io(e.to_string())),
         };
-        let found = entries
-            .flatten()
-            .find(|entry| entry.file_name().to_string_lossy().to_lowercase() == wanted);
+        // A listing error is not "free": it is returned.
+        let mut found = None;
+        for entry in entries {
+            let entry = entry.map_err(|e| DomainError::Io(e.to_string()))?;
+            if rocket_collection::fold_name(&entry.file_name().to_string_lossy()) == wanted {
+                found = Some(entry);
+                break;
+            }
+        }
         let Some(entry) = found else {
             return Ok(false);
         };

@@ -201,6 +201,36 @@ pub(super) fn create_folder(
     Ok(())
 }
 
+/// Creates one new folder with its `folder.yml`. Fails with `AlreadyExists`
+/// when anything sits at the path, so it never rewrites an existing folder.
+pub(super) fn create_folder_exclusive(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+) -> DomainResult<()> {
+    Collection::validate_name(collection)?;
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    let collection_dir = repo.collection_path(collection);
+    let dir_path = repo.validate_path(&collection_dir, Path::new(path))?;
+    match fs::create_dir(&dir_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(DomainError::AlreadyExists(format!("{collection}/{path}")));
+        }
+        Err(e) => return Err(DomainError::Io(e.to_string())),
+    }
+    let folder_name = Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    write_folder_yml(
+        &dir_path.join("folder.yml"),
+        &new_folder(folder_name, generate_uid()),
+    )?;
+    Ok(())
+}
+
 pub(super) fn delete_folder(
     repo: &FsCollectionRepo,
     collection: &str,
@@ -223,6 +253,44 @@ pub(super) fn move_item(
     src_path: &str,
     dst_collection: &str,
     dst_path: &str,
+) -> DomainResult<()> {
+    move_item_impl(repo, src_collection, src_path, dst_collection, dst_path, false)
+}
+
+/// Renames `src` to `dst` and fails with `AlreadyExists` when `dst` exists.
+/// On Linux the kernel does the check (`RENAME_NOREPLACE`), so a destination
+/// created after any earlier check is still not replaced. Elsewhere, or on a
+/// filesystem without that flag, an existence check right before the rename
+/// is the best available.
+fn rename_no_replace(src: &Path, dst: &Path) -> DomainResult<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::fs::{renameat_with, RenameFlags, CWD};
+        use rustix::io::Errno;
+        match renameat_with(CWD, src, CWD, dst, RenameFlags::NOREPLACE) {
+            Ok(()) => return Ok(()),
+            Err(Errno::EXIST) => {
+                return Err(DomainError::AlreadyExists(dst.display().to_string()));
+            }
+            // The filesystem or kernel lacks the flag; use the fallback.
+            Err(Errno::INVAL) | Err(Errno::NOSYS) => {}
+            Err(e) => return Err(DomainError::Io(e.to_string())),
+        }
+    }
+    if fs::symlink_metadata(dst).is_ok() {
+        return Err(DomainError::AlreadyExists(dst.display().to_string()));
+    }
+    fs::rename(src, dst)?;
+    Ok(())
+}
+
+pub(super) fn move_item_impl(
+    repo: &FsCollectionRepo,
+    src_collection: &str,
+    src_path: &str,
+    dst_collection: &str,
+    dst_path: &str,
+    no_replace: bool,
 ) -> DomainResult<()> {
     Collection::validate_name(src_collection)?;
     Collection::validate_name(dst_collection)?;
@@ -254,7 +322,11 @@ pub(super) fn move_item(
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::rename(&src, &dst)?;
+    if no_replace {
+        rename_no_replace(&src, &dst)?;
+    } else {
+        fs::rename(&src, &dst)?;
+    }
 
     // When a folder (directory) is moved or renamed, update the name field
     // inside folder.yml so it matches the new directory name. Without this,

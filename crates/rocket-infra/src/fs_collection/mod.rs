@@ -240,6 +240,29 @@ impl CollectionRepository for FsCollectionRepo {
         paths::path_exists(self, collection, path)
     }
 
+    fn create_folder_exclusive(&self, collection: &str, path: &str) -> DomainResult<()> {
+        folders::create_folder_exclusive(self, collection, path)
+    }
+
+    fn create_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<String> {
+        requests::create_request_exclusive(self, collection, path, request)
+    }
+
+    fn move_item_no_replace(
+        &self,
+        src_collection: &str,
+        src_path: &str,
+        dst_collection: &str,
+        dst_path: &str,
+    ) -> DomainResult<()> {
+        folders::move_item_impl(self, src_collection, src_path, dst_collection, dst_path, true)
+    }
+
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
         folders::create_folder(self, collection, path)
     }

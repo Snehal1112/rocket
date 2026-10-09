@@ -123,6 +123,57 @@ pub(super) fn save_request(
     Ok(actual)
 }
 
+/// Saves a brand-new request. The file is opened with `create_new`, so it
+/// fails with `AlreadyExists` instead of replacing a file that appeared
+/// after the caller's check. The parent folder must exist.
+pub(super) fn create_request_exclusive(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    request: &Request,
+) -> DomainResult<String> {
+    use std::io::Write;
+
+    Collection::validate_name(collection)?;
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    if request.uid.is_empty() {
+        return Err(DomainError::Internal(format!(
+            "create_request_exclusive: empty uid on request for '{path}' in collection '{collection}'"
+        )));
+    }
+    let collection_dir = repo.collection_path(collection);
+    let normalized = request_filename_for(path);
+    let file_path = repo.validate_path(&collection_dir, Path::new(&normalized))?;
+    let yaml = serde_yaml::to_string(&request_to_oc_http_request(request))
+        .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
+
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&file_path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(DomainError::AlreadyExists(format!("{collection}/{path}")));
+        }
+        Err(e) => return Err(DomainError::Io(e.to_string())),
+    };
+    let written = file
+        .write_all(yaml.as_bytes())
+        .and_then(|()| file.sync_all());
+    if let Err(e) = written {
+        drop(file);
+        let _ = fs::remove_file(&file_path);
+        return Err(DomainError::Io(e.to_string()));
+    }
+    Ok(file_path
+        .strip_prefix(&collection_dir)
+        .unwrap_or(&file_path)
+        .to_string_lossy()
+        .to_string())
+}
+
 pub(super) fn rename_request(
     repo: &FsCollectionRepo,
     collection: &str,

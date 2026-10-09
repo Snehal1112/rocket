@@ -605,7 +605,7 @@ impl ProposalService {
                 name,
             } => applied(
                 self.collections
-                    .create_folder(collection, &join_path(parent_path, name)),
+                    .create_folder_exclusive(collection, &join_path(parent_path, name)),
             ),
             ProposedChange::CreateRequest {
                 collection,
@@ -615,7 +615,7 @@ impl ProposalService {
                 let path = join_path(folder_path, &request_filename_for(&request.name));
                 applied(
                     self.collections
-                        .save_request(collection, &path, &build_request(request))
+                        .create_request_exclusive(collection, &path, &build_request(request))
                         .map(|_| ()),
                 )
             }
@@ -663,10 +663,12 @@ impl ProposalService {
                 ..
             } => {
                 let destination = move_destination(from_path, to_folder)?;
-                applied(
-                    self.collections
-                        .move_item(collection, from_path, collection, &destination),
-                )
+                applied(self.collections.move_item_no_replace(
+                    collection,
+                    from_path,
+                    collection,
+                    &destination,
+                ))
             }
             ProposedChange::RenameItem {
                 collection,
@@ -677,7 +679,7 @@ impl ProposalService {
                 let root = self.tree(collection)?;
                 if is_folder(&root, path) {
                     // A folder is renamed by moving it, like the sidebar does.
-                    applied(self.collections.move_item(
+                    applied(self.collections.move_item_no_replace(
                         collection,
                         path,
                         collection,
@@ -837,7 +839,7 @@ fn folder_shape(folder: &Folder) -> String {
 /// counts as the same name on every filesystem.
 fn same_name(fold: bool, a: &str, b: &str) -> bool {
     if fold {
-        a.to_lowercase() == b.to_lowercase()
+        rocket_collection::fold_name(a) == rocket_collection::fold_name(b)
     } else {
         a == b
     }
@@ -909,11 +911,16 @@ fn last_segment(path: &str) -> &str {
 /// Refuses names the collection layout reserves or the tree never shows, so
 /// an accepted change cannot overwrite settings or land where it is hidden.
 fn check_reserved_name(parent: &str, name: &str, is_dir: bool) -> DomainResult<()> {
-    let lower = name.to_lowercase();
+    let lower = rocket_collection::fold_name(name);
+    // A directory must not take a reserved file name either: it would sit
+    // where the layout expects settings or an order file.
+    let reserved_file = RESERVED_FILE_NAMES.contains(&lower.as_str());
     let reserved = if is_dir {
-        RESERVED_DIR_NAMES.contains(&lower.as_str()) || (parent.is_empty() && lower == "flows")
+        reserved_file
+            || RESERVED_DIR_NAMES.contains(&lower.as_str())
+            || (parent.is_empty() && lower == "flows")
     } else {
-        RESERVED_FILE_NAMES.contains(&lower.as_str())
+        reserved_file
     };
     if reserved {
         return Err(DomainError::InvalidInput(format!(
@@ -943,6 +950,8 @@ fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
             || body.form_data.iter().flatten().any(|e| pair_masked(&e.key, &e.value))
     };
     let found = match change {
+        ProposedChange::SetEnvVar { value, .. } => masked(value),
+        ProposedChange::EditScript { body, .. } => masked(body),
         ProposedChange::CreateRequest { request, .. } => {
             masked(&request.url)
                 || request.headers.iter().any(|h| pair_masked(&h.key, &h.value))
@@ -968,7 +977,9 @@ fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
     if found {
         return Err(DomainError::InvalidInput(format!(
             "a value contains the masked placeholder '{REDACTED}', which stands for a hidden \
-             credential; propose only the real values you know, or leave that field out"
+             credential, so it cannot be saved. If you did not read the real values, omit the \
+             whole headers, query_params, url or body field from the proposal instead of \
+             echoing masked entries; a list replaces the whole field"
         )));
     }
     Ok(())
@@ -1070,7 +1081,13 @@ fn validate_relative_path(path: &str) -> DomainResult<()> {
 
 /// A folder or request name must be one path segment.
 fn validate_item_name(name: &str) -> DomainResult<()> {
-    if name.trim().is_empty() || name.contains(['/', '\\', '\0']) || name.starts_with('.') {
+    // Windows drops a trailing dot or space and may read a `~` name as a short
+    // alias of another entry, so those names can land on an existing item.
+    if name.trim().is_empty()
+        || name.contains(['/', '\\', '\0', '~'])
+        || name.starts_with('.')
+        || name.ends_with(['.', ' '])
+    {
         return Err(DomainError::InvalidInput(format!(
             "'{name}' is not a valid name"
         )));
@@ -1861,9 +1878,7 @@ mod tests {
     #[test]
     fn a_target_that_exists_on_disk_but_not_in_the_tree_is_refused() {
         let f = fixture();
-        std::fs::create_dir_all(f._dir.path().join("demo").join("extra-env")).expect("dir");
-        std::fs::write(f._dir.path().join("demo").join("helper.js"), "// x").expect("script");
-        // A script file shows in the tree, so use a path the tree never lists.
+        // A plain text file never shows in the tree.
         std::fs::write(f._dir.path().join("demo").join("notes.txt"), "x").expect("file");
         let err = f
             .svc
@@ -2105,6 +2120,118 @@ mod tests {
     }
 
     #[test]
+    fn names_with_a_trailing_dot_or_space_or_a_tilde_are_refused() {
+        let f = fixture();
+        for name in ["reports.", "reports ", "REPORT~1", "a~"] {
+            let err = f
+                .svc
+                .propose("s1", vec![folder(name)])
+                .expect_err("unsafe folder name");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{name:?}");
+            let err = f
+                .svc
+                .propose("s1", vec![create_request(name)])
+                .expect_err("unsafe request name");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn names_that_differ_only_in_unicode_normalization_count_as_the_same() {
+        assert!(same_name(true, "caf\u{e9}", "cafe\u{301}"));
+        assert!(same_name(true, "CAF\u{c9}", "cafe\u{301}"));
+        assert!(!same_name(false, "caf\u{e9}", "cafe\u{301}"));
+        let f = fixture();
+        f.repo
+            .create_folder("demo", "caf\u{e9}")
+            .expect("create folder");
+        let err = f
+            .svc
+            .propose("s1", vec![folder("cafe\u{301}")])
+            .expect_err("the decomposed form is the same name");
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+    }
+
+    #[test]
+    fn a_folder_cannot_take_a_reserved_file_name() {
+        let f = fixture();
+        f.repo
+            .create_folder("demo", "archive")
+            .expect("create folder");
+        for name in ["_order.yml", "folder.yml", "opencollection.yml", "Folder.YML"] {
+            let err = f
+                .svc
+                .propose("s1", vec![folder(name)])
+                .expect_err("reserved file name");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{name}");
+            let err = f
+                .svc
+                .propose(
+                    "s1",
+                    vec![ProposedChange::RenameItem {
+                        collection: "demo".into(),
+                        path: "archive".into(),
+                        new_name: name.into(),
+                        base_fingerprint: String::new(),
+                    }],
+                )
+                .expect_err("reserved file name");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_masked_placeholder_in_an_env_value_or_script_is_refused() {
+        let f = fixture();
+        let err = f
+            .svc
+            .propose("s1", vec![set_var("HOST", REDACTED)])
+            .expect_err("masked env value");
+        assert!(err.to_string().contains("omit the whole"));
+        let err = f
+            .svc
+            .propose(
+                "s1",
+                vec![ProposedChange::EditScript {
+                    collection: "demo".into(),
+                    request_path: "get-users.yml".into(),
+                    phase: ScriptPhase::Tests,
+                    body: format!("const k = '{REDACTED}';"),
+                    base_fingerprint: String::new(),
+                }],
+            )
+            .expect_err("masked script body");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn accepting_a_create_never_overwrites_what_appeared_after_the_check() {
+        let f = fixture();
+        let ids = f
+            .svc
+            .propose("s1", vec![folder("reports"), create_request("Fresh")])
+            .expect("propose");
+        // Both targets appear after the propose-time check. The accept-time
+        // check is skipped here by writing straight through the repo.
+        let change = ProposedChange::CreateFolder {
+            collection: "demo".into(),
+            parent_path: String::new(),
+            name: "reports".into(),
+        };
+        f.repo
+            .create_folder("demo", "reports")
+            .expect("create folder");
+        let marker = f._dir.path().join("demo/reports/marker.txt");
+        std::fs::write(&marker, "keep").expect("marker");
+        let svc = &f.svc;
+        assert!(svc.apply(&change, None).is_err());
+        assert!(marker.is_file(), "the existing folder is untouched");
+        let resolved = svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
+        assert!(marker.is_file());
+    }
+
+    #[test]
     fn paths_with_empty_segments_are_normalized() {
         assert_eq!(normalize_path("a//b"), "a/b");
         assert_eq!(normalize_path("/a/b/"), "a/b");
@@ -2202,6 +2329,20 @@ mod tests {
         }
         fn path_exists(&self, collection: &str, path: &str) -> DomainResult<bool> {
             self.inner.path_exists(collection, path)
+        }
+        fn create_folder_exclusive(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.inner.create_folder_exclusive(collection, path)
+        }
+        fn create_request_exclusive(
+            &self,
+            collection: &str,
+            path: &str,
+            request: &Request,
+        ) -> DomainResult<String> {
+            self.inner.create_request_exclusive(collection, path, request)
+        }
+        fn move_item_no_replace(&self, sc: &str, sp: &str, dc: &str, dp: &str) -> DomainResult<()> {
+            self.inner.move_item_no_replace(sc, sp, dc, dp)
         }
         fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
             self.inner.get_settings(name)

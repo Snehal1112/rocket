@@ -173,6 +173,30 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().path_exists(collection, path)
     }
 
+    fn create_folder_exclusive(&self, collection: &str, path: &str) -> DomainResult<()> {
+        self.repo().create_folder_exclusive(collection, path)
+    }
+
+    fn create_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<String> {
+        self.repo().create_request_exclusive(collection, path, request)
+    }
+
+    fn move_item_no_replace(
+        &self,
+        src_collection: &str,
+        src_path: &str,
+        dst_collection: &str,
+        dst_path: &str,
+    ) -> DomainResult<()> {
+        self.repo()
+            .move_item_no_replace(src_collection, src_path, dst_collection, dst_path)
+    }
+
     fn create_script_file(
         &self,
         collection: &str,

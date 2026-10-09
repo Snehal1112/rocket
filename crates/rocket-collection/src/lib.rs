@@ -28,7 +28,7 @@ pub use grpc_request::{
 pub use repository::{CollectionRepository, RequestScriptPhase};
 pub use request_kind::RequestKind;
 pub use request::{
-    candidate_filename, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES,
+    candidate_filename, fold_name, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES,
 };
 pub use request_summary::RequestSummary;
 pub use script_file::{normalize_script_name, ScriptFileItem, SCRIPT_TEMPLATE};

@@ -177,6 +177,42 @@ pub trait CollectionRepository: Send + Sync {
         ))
     }
 
+    /// Creates one new folder and fails with `AlreadyExists` when anything
+    /// is there already, so a check made earlier cannot be raced. The parent
+    /// must exist. Never rewrites an existing folder's metadata.
+    fn create_folder_exclusive(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "exclusive folder creation is not available".into(),
+        ))
+    }
+
+    /// Saves a new request and fails with `AlreadyExists` when the file is
+    /// there already. Returns the collection-relative path of the new file.
+    fn create_request_exclusive(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &Request,
+    ) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "exclusive request creation is not available".into(),
+        ))
+    }
+
+    /// Like `move_item`, but fails with `AlreadyExists` instead of replacing
+    /// whatever sits at the destination.
+    fn move_item_no_replace(
+        &self,
+        _src_collection: &str,
+        _src_path: &str,
+        _dst_collection: &str,
+        _dst_path: &str,
+    ) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "no-replace move is not available".into(),
+        ))
+    }
+
     /// Creates `name` (`.js` appended when missing) in `folder_path` with starter
     /// content. `folder_path` is relative to the collection root, `""` for the root.
     /// Returns the collection-relative path of the new file.
