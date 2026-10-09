@@ -965,6 +965,51 @@ async fn acp_agent_client_cancel_ends_the_turn_as_cancelled_and_keeps_the_sessio
 }
 
 #[tokio::test]
+async fn acp_agent_client_second_prompt_during_a_running_turn_is_invalid_input() {
+    let client = std::sync::Arc::new(AcpAgentClient::new());
+    let session_id = client
+        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .await
+        .expect("start_session")
+        .session_id;
+
+    let prompt_client = std::sync::Arc::clone(&client);
+    let prompt_session = session_id.clone();
+    let pending = tokio::spawn(async move {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        prompt_client
+            .send_prompt(
+                &prompt_session,
+                vec![PromptPart::Text("__WAIT_FOR_CANCEL__".to_string())],
+                tx,
+            )
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // The queued prompt must fail at once instead of waiting for the turn.
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let err = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        client.send_prompt(&session_id, vec![PromptPart::Text("hi".to_string())], tx),
+    )
+    .await
+    .expect("a queued prompt must not wait for the running turn")
+    .expect_err("a second prompt must be refused");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+
+    // The first turn is unaffected and still ends through cancel.
+    assert!(!pending.is_finished());
+    client.cancel(&session_id).await.expect("cancel");
+    let stop_reason = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("the cancelled turn must end")
+        .expect("prompt task must not panic")
+        .expect("a cancelled turn is a normal finish");
+    assert_eq!(stop_reason, "cancelled");
+}
+
+#[tokio::test]
 async fn acp_agent_client_cancel_on_unknown_session_id_errors() {
     let client = AcpAgentClient::new();
     let err = client

@@ -471,7 +471,13 @@ impl AcpSessionClient for AcpAgentClient {
         let running = self.running(session_id).await?;
         let prompt = prompt_parts_to_wire(parts, running.prompt_capabilities.embedded_context);
 
-        let _turn = running.prompt_lock.lock().await;
+        // A queued prompt must not wait behind a running turn, because the
+        // service's idle clock would kill the healthy session.
+        let Ok(_turn) = running.prompt_lock.try_lock() else {
+            return Err(DomainError::InvalidInput(
+                "a turn is already running".to_string(),
+            ));
+        };
         set_update_sender(&running.current_update_tx, Some(update_tx));
 
         // `connection.send_request(...)` takes `&self` and `ConnectionTo` is

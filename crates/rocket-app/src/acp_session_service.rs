@@ -269,6 +269,12 @@ impl AcpSessionService {
                 },
                 result = &mut send, if outcome.is_none() => outcome = Some(result),
                 () = tokio::time::sleep(self.prompt_idle_timeout) => {
+                    // The client already finished, but another sender clone
+                    // keeps the channel open. The turn is done, so finish
+                    // with its outcome instead of killing the session.
+                    if outcome.is_some() {
+                        break;
+                    }
                     // Drop the pending prompt first, so the client releases
                     // the turn before the session is killed.
                     drop(send);
@@ -634,6 +640,8 @@ mod tests {
         options_after_set: Vec<ConfigOption>,
         prompt_invalid_input: bool,
         start_ids: Arc<Mutex<VecDeque<String>>>,
+        /// When set, each prompt parks a clone of its update sender here.
+        held_update_tx: Option<Arc<Mutex<Vec<UnboundedSender<AcpUpdate>>>>>,
     }
     impl Default for FakeSessionClient {
         fn default() -> Self {
@@ -653,6 +661,7 @@ mod tests {
                 options_after_set: Vec::new(),
                 prompt_invalid_input: false,
                 start_ids: Arc::new(Mutex::new(VecDeque::new())),
+                held_update_tx: None,
             }
         }
     }
@@ -701,6 +710,11 @@ mod tests {
                 return Err(DomainError::InvalidInput(
                     "unsupported prompt part".to_string(),
                 ));
+            }
+            if let Some(held) = &self.held_update_tx {
+                held.lock()
+                    .expect("lock held_update_tx")
+                    .push(update_tx.clone());
             }
             tokio::time::sleep(self.prompt_delay).await;
             for update in &self.prompt_updates {
@@ -1478,6 +1492,44 @@ mod tests {
         assert_eq!(stop_reason, "end_turn");
         assert!(!end_session_called.load(Ordering::SeqCst));
         let events = publisher.events.lock().expect("lock");
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_lingering_sender_clone_after_the_client_finished_does_not_kill_the_session() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let held = Arc::new(Mutex::new(Vec::new()));
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let client = FakeSessionClient {
+            end_session_called: Arc::clone(&end_session_called),
+            held_update_tx: Some(Arc::clone(&held)),
+            ..Default::default()
+        };
+        let service = AcpSessionService::with_prompt_idle_timeout(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            cleanup.clone(),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+            Duration::from_millis(50),
+        );
+        start(&service).await;
+
+        let stop_reason = send_hi(&service, "session-1")
+            .await
+            .expect("a finished turn must succeed despite the open channel");
+        assert_eq!(stop_reason, "end_turn");
+        assert_eq!(held.lock().expect("lock held").len(), 1);
+        assert!(!end_session_called.load(Ordering::SeqCst));
+        assert!(cleanup.ended().is_empty());
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpSessionFinished { .. })));
         assert!(!events
             .iter()
             .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
