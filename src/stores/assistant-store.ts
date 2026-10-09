@@ -95,6 +95,8 @@ export interface AssistantState {
   failMessage: (sessionId: string, error: string, fatal?: boolean) => void;
   upsertToolActivity: (sessionId: string, activity: ToolActivity) => void;
   setConfigOptions: (sessionId: string, options: ConfigOption[]) => void;
+  /** Records the mode the backend switched the current session to. */
+  setMode: (mode: AssistantMode) => void;
   setUsage: (sessionId: string, usage: AssistantUsage) => void;
   upsertProposal: (proposal: AgentProposal) => void;
   resolveProposal: (sessionId: string, proposalId: string, status: ProposalStatus) => void;
@@ -255,6 +257,10 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         ? { session: { ...state.session, configOptions: options } }
         : state,
     );
+  },
+
+  setMode(mode) {
+    set((state) => (state.session ? { session: { ...state.session, mode } } : state));
   },
 
   setUsage(sessionId, usage) {

@@ -3,6 +3,7 @@ import {
   capText,
   chipToResource,
   chipUri,
+  isChipLoadFailure,
   RESOURCE_LIMIT_BYTES,
 } from '@/lib/assistant/chip-resources';
 import type { ReferenceItem } from '@/lib/assistant/types';
@@ -188,5 +189,14 @@ describe('chipUri', () => {
     expect(chipUri({ kind: 'collection', collection: 'shop', label: 'shop' })).toBe(
       'rocket://collection/shop',
     );
+  });
+});
+
+describe('isChipLoadFailure', () => {
+  it('tells the load-failure placeholder from a real resource', () => {
+    expect(
+      isChipLoadFailure({ uri: 'u', mimeType: 'text/plain', text: 'Rocket could not load this request: x.' }),
+    ).toBe(true);
+    expect(isChipLoadFailure({ uri: 'u', mimeType: 'text/plain', text: 'Request: x' })).toBe(false);
   });
 });

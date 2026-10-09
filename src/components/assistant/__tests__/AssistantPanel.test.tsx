@@ -1,4 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render as rtlRender, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStaleSweepForTests } from '@/lib/assistant/assistant-session';
@@ -39,6 +41,12 @@ vi.mock('@/components/collections/MarkdownRenderer', () => ({
   MarkdownRenderer: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
+// The composer reads workspace references through React Query.
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 const store = () => useAssistantStore.getState();
 
 function activate(sessionId = 's1'): void {
@@ -62,10 +70,10 @@ describe('AssistantPanel', () => {
     render(<AssistantPanel />);
     await userEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() =>
-      expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit'),
+      expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined),
     );
     expect(
-      await screen.findByRole('textbox', { name: 'Message the assistant' }),
+      await screen.findByRole('textbox', { name: 'Message the AI assistant' }),
     ).toBeInTheDocument();
   });
 
@@ -92,26 +100,6 @@ describe('AssistantPanel', () => {
     expect(screen.getByText('Reading GET /orders')).toBeInTheDocument();
     expect(screen.getByText('running')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
-  });
-
-  it('sends the typed message and clears the box', async () => {
-    activate();
-    vi.mocked(api.sendAgentPrompt).mockReturnValue(new Promise<string>(() => undefined));
-    render(<AssistantPanel />);
-    const box = screen.getByRole('textbox', { name: 'Message the assistant' });
-    await userEvent.type(box, '  hello  ');
-    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(api.sendAgentPrompt).toHaveBeenCalledWith('s1', 'hello');
-    expect(box).toHaveValue('');
-  });
-
-  it('sends on Enter and keeps Shift+Enter for a new line', async () => {
-    activate();
-    vi.mocked(api.sendAgentPrompt).mockReturnValue(new Promise<string>(() => undefined));
-    render(<AssistantPanel />);
-    const box = screen.getByRole('textbox', { name: 'Message the assistant' });
-    await userEvent.type(box, 'line one{Shift>}{Enter}{/Shift}line two{Enter}');
-    expect(api.sendAgentPrompt).toHaveBeenCalledWith('s1', 'line one\nline two');
   });
 
   it('stops a running turn', async () => {

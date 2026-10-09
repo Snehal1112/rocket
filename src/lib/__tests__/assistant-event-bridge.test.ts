@@ -4,6 +4,7 @@ import {
   resetStaleSweepForTests,
   WORKSPACE_SWITCH_NOTICE,
 } from '@/lib/assistant/assistant-session';
+import { loadPromptHistory, savePromptHistory } from '@/lib/assistant/prompt-history';
 import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -196,6 +197,14 @@ describe('useAssistantEventBridge', () => {
     expect(store().session?.status).toBe('ended');
     expect(store().focus).toBeUndefined();
     expect(lastMessage()).toMatchObject({ kind: 'notice', text: WORKSPACE_SWITCH_NOTICE });
+  });
+
+  it('forgets the prompt history of the workspace it leaves', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+    savePromptHistory('ws-1', ['old prompt']);
+    await mountBridge();
+    useWorkspaceStore.getState().setActiveWorkspaceId('ws-2');
+    expect(loadPromptHistory('ws-1')).toEqual([]);
   });
 
   it('keeps the session when the first workspace id is set at startup', async () => {

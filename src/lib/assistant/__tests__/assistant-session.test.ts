@@ -45,7 +45,7 @@ describe('assistant session flows', () => {
       ],
     });
     await startAssistant('agent-1');
-    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit');
+    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined);
     expect(store().session).toMatchObject({ status: 'active', sessionId: 's1', mode: 'edit' });
     expect(store().session?.configOptions[0].currentValue).toBe('opus');
   });
@@ -115,7 +115,7 @@ describe('assistant session flows', () => {
     void sendAssistantMessage('again');
     await Promise.resolve();
     expect(api.sendAgentPrompt).toHaveBeenCalledTimes(1);
-    expect(api.sendAgentPrompt).toHaveBeenCalledWith('s1', 'hi');
+    expect(api.sendAgentPrompt).toHaveBeenCalledWith('s1', 'hi', undefined);
   });
 
   it('ignores an empty message', async () => {

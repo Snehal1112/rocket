@@ -1,13 +1,15 @@
+import { loadRememberedModel } from '@/lib/assistant/model-memory';
 import {
   cancelAgentPrompt,
   endAgentSession,
   endStaleAssistantSessions,
+  type PromptResourceDto,
   sendAgentPrompt,
   startWorkspaceAssistant,
 } from '@/lib/tauri-api';
 import { type AssistantMode, selectTurnRunning, useAssistantStore } from '@/stores/assistant-store';
 
-/** Mode for a new session until the composer (Plan 06) adds the picker. */
+/** Mode for a new session. The composer's mode picker changes it afterwards. */
 export const DEFAULT_ASSISTANT_MODE: AssistantMode = 'edit';
 
 export const WORKSPACE_SWITCH_NOTICE =
@@ -57,7 +59,11 @@ export async function startAssistant(
   try {
     // A sweep still in flight would end the session started below.
     await sweepStaleAssistantSessions();
-    const started = await startWorkspaceAssistant(agentConfigId, mode);
+    const started = await startWorkspaceAssistant(
+      agentConfigId,
+      mode,
+      loadRememberedModel(agentConfigId),
+    );
     const applied = useAssistantStore
       .getState()
       .activateSession(token, started.sessionId, started.configOptions);
@@ -69,7 +75,10 @@ export async function startAssistant(
   }
 }
 
-export async function sendAssistantMessage(text: string): Promise<void> {
+export async function sendAssistantMessage(
+  text: string,
+  resources?: PromptResourceDto[],
+): Promise<void> {
   const trimmed = text.trim();
   const store = useAssistantStore.getState();
   const session = store.session;
@@ -77,7 +86,7 @@ export async function sendAssistantMessage(text: string): Promise<void> {
   // The store refuses a second turn while one runs, so a double send stops here.
   if (!store.appendUserMessage(trimmed)) return;
   try {
-    await sendAgentPrompt(session.sessionId, trimmed);
+    await sendAgentPrompt(session.sessionId, trimmed, resources);
   } catch (err) {
     // A rejected prompt fails the turn only. A dead session arrives as its own event.
     useAssistantStore.getState().failMessage(session.sessionId, String(err), false);

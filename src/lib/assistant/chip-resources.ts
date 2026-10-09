@@ -101,7 +101,14 @@ export async function chipToResource(chip: ReferenceItem): Promise<PromptResourc
     return {
       uri: chipUri(chip),
       mimeType: 'text/plain',
-      text: `Rocket could not load this ${chip.kind}: ${chip.label}.`,
+      text: `${LOAD_FAILED_PREFIX} ${chip.kind}: ${chip.label}.`,
     };
   }
+}
+
+const LOAD_FAILED_PREFIX = 'Rocket could not load this';
+
+/** True for the placeholder `chipToResource` returns when a chip could not load. */
+export function isChipLoadFailure(resource: PromptResourceDto): boolean {
+  return resource.text.startsWith(LOAD_FAILED_PREFIX);
 }

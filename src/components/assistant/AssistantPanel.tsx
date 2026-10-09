@@ -5,9 +5,9 @@ import { endAssistantSession } from '@/lib/assistant/assistant-session';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { AssistantChatView } from './AssistantChatView';
-import { AssistantInputStub } from './AssistantInputStub';
 import { AssistantPermissionsPopover } from './AssistantPermissionsPopover';
 import { AssistantStartView } from './AssistantStartView';
+import { Composer } from './composer/Composer';
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 720;
@@ -97,7 +97,7 @@ export function AssistantPanel() {
       ) : status === 'active' ? (
         <>
           <AssistantChatView />
-          <AssistantInputStub />
+          <Composer />
         </>
       ) : (
         <>

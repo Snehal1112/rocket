@@ -4,6 +4,7 @@ import {
   sweepStaleAssistantSessions,
   WORKSPACE_SWITCH_NOTICE,
 } from '@/lib/assistant/assistant-session';
+import { clearPromptHistory } from '@/lib/assistant/prompt-history';
 import {
   configOptionsFromEvent,
   listAgentProposals,
@@ -101,6 +102,8 @@ export function useAssistantEventBridge(): void {
     const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
       if (!prev.activeWorkspaceId || state.activeWorkspaceId === prev.activeWorkspaceId) return;
       store().setFocus(undefined);
+      // Prompts typed in the old workspace must not outlive the switch.
+      clearPromptHistory(prev.activeWorkspaceId);
       void endAssistantSession(WORKSPACE_SWITCH_NOTICE);
     });
 
