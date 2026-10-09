@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use rocket_acp::{
@@ -9,17 +9,37 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::agent_config_service::AgentConfigService;
+use crate::agent_isolation::{SessionIsolation, ROCKET_MCP_SERVER_NAME};
+
+/// Releases per-session resources that live outside this crate, such as the
+/// MCP tool server, its caches and the session's scratch directories.
+pub trait SessionCleanup: Send + Sync {
+    /// Called exactly once per session on EVERY end path: end_session, idle
+    /// timeout, failed prompt, end_all_sessions. Idempotent.
+    fn on_session_ended(&self, session_id: &str);
+}
+
+/// A cleanup that does nothing. Used by tests and by callers that own no
+/// per-session resources.
+pub struct NoopSessionCleanup;
+
+impl SessionCleanup for NoopSessionCleanup {
+    fn on_session_ended(&self, _session_id: &str) {}
+}
 
 /// Orchestrates ACP agent sessions. It resolves an agent's command and
 /// credential through `AgentConfigService`, then drives the injected
 /// `AcpSessionClient`. It publishes `AcpSession*`, `AcpToolActivity`,
 /// `AcpConfigOptionsChanged` and `AcpUsage` domain events for the UI.
 ///
-/// This service keeps no session map of its own. The session client owns
+/// This service keeps only the set of live session ids, so it can run
+/// `SessionCleanup` exactly once per session. The session client still owns
 /// session state and process lifecycle.
 pub struct AcpSessionService {
     session_client: Box<dyn AcpSessionClient>,
     event_publisher: Box<dyn EventPublisher>,
+    cleanup: Arc<dyn SessionCleanup>,
+    live_sessions: Mutex<HashSet<String>>,
     agent_config_service: Arc<AgentConfigService>,
     collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     prompt_idle_timeout: Duration,
@@ -51,12 +71,14 @@ impl AcpSessionService {
     pub fn new(
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
+        cleanup: Arc<dyn SessionCleanup>,
         agent_config_service: Arc<AgentConfigService>,
         collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     ) -> Self {
         Self::with_prompt_idle_timeout(
             session_client,
             event_publisher,
+            cleanup,
             agent_config_service,
             collection_repo,
             DEFAULT_PROMPT_IDLE_TIMEOUT,
@@ -68,6 +90,7 @@ impl AcpSessionService {
     pub fn with_prompt_idle_timeout(
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
+        cleanup: Arc<dyn SessionCleanup>,
         agent_config_service: Arc<AgentConfigService>,
         collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
         prompt_idle_timeout: Duration,
@@ -75,9 +98,31 @@ impl AcpSessionService {
         Self {
             session_client,
             event_publisher,
+            cleanup,
+            live_sessions: Mutex::new(HashSet::new()),
             agent_config_service,
             collection_repo,
             prompt_idle_timeout,
+        }
+    }
+
+    fn track(&self, session_id: &str) {
+        self.live_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(session_id.to_string());
+    }
+
+    /// Forgets a tracked session and runs its cleanup. Only the first caller
+    /// for an id finds it tracked, so cleanup runs exactly once per session.
+    fn release(&self, session_id: &str) {
+        let was_tracked = self
+            .live_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(session_id);
+        if was_tracked {
+            self.cleanup.on_session_ended(session_id);
         }
     }
 
@@ -88,6 +133,11 @@ impl AcpSessionService {
     /// propagate unchanged. No event is published on failure, because no
     /// session id exists yet. On success, `AcpSessionStarted` is published
     /// and the session info is returned.
+    ///
+    /// `isolation`, when present, starts the agent isolated: its `_meta`
+    /// comes from `SessionIsolation::meta`, and `CLAUDE_CONFIG_DIR` points at
+    /// the caller's empty scratch directory. `cwd` should then be an empty
+    /// scratch directory too.
     ///
     /// `collection` gates whether any MCP servers are attached at all: a
     /// collection that has not opted into agent autonomy gets none —
@@ -113,13 +163,18 @@ impl AcpSessionService {
         cwd: &str,
         collection: &str,
         mcp_http: Option<McpHttpServerCredentials>,
+        isolation: Option<SessionIsolation>,
     ) -> DomainResult<SessionInfo> {
         let config = self.agent_config_service.get(agent_config_id)?;
         let credential = self
             .agent_config_service
             .resolve_credential(agent_config_id)
             .await?;
-        let env = vec![(config.credential_env_var.clone(), credential)];
+        let mut env = vec![(config.credential_env_var.clone(), credential)];
+        let meta = isolation.as_ref().map(|isolation| {
+            env.push(isolation.env_entry());
+            isolation.meta()
+        });
 
         let autonomy_enabled = self
             .collection_repo
@@ -132,7 +187,7 @@ impl AcpSessionService {
                 })?;
                 vec![
                     rocket_acp::McpServerSpec::Http {
-                        name: "rocket".to_string(),
+                        name: ROCKET_MCP_SERVER_NAME.to_string(),
                         // The path literal ("/mcp") must match
                         // `src_tauri::mcp::tool_server::MCP_HTTP_PATH`
                         // exactly — the bare origin 404s (Plan 04's Final
@@ -146,7 +201,7 @@ impl AcpSessionService {
                         token: creds.token.clone(),
                     },
                     rocket_acp::McpServerSpec::Stdio {
-                        name: "rocket".to_string(),
+                        name: ROCKET_MCP_SERVER_NAME.to_string(),
                         command: exe.to_string_lossy().into_owned(),
                         args: vec!["--acp-mcp-stdio-bridge".to_string()],
                         env: vec![
@@ -162,11 +217,11 @@ impl AcpSessionService {
             _ => Vec::new(),
         };
 
-        // Plan 02 passes the isolation `_meta` here.
         let info = self
             .session_client
-            .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, None)
+            .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, meta)
             .await?;
+        self.track(&info.session_id);
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
@@ -192,6 +247,8 @@ impl AcpSessionService {
     /// Idle timeout: the limit restarts after every update. When it runs out,
     /// the pending prompt is dropped and the session is force-killed via
     /// `end_session`, because a hung agent process is still running.
+    ///
+    /// A failed prompt also ends the session, unless the error is InvalidInput.
     pub async fn send_prompt(
         &self,
         session_id: &str,
@@ -230,6 +287,13 @@ impl AcpSessionService {
                 Ok(stop_reason)
             }
             Some(Err(e)) => {
+                // A prompt the agent could not take (InvalidInput) leaves the
+                // session usable. Any other failure means the session is gone
+                // or broken, so end it and release its resources.
+                if !matches!(e, DomainError::InvalidInput(_)) {
+                    let _ = self.session_client.end_session(session_id).await;
+                    self.release(session_id);
+                }
                 self.event_publisher.publish(DomainEvent::AcpSessionFailed {
                     session_id: session_id.to_string(),
                     error: e.to_string(),
@@ -336,6 +400,7 @@ impl AcpSessionService {
     /// see, and a session that already crashed changes nothing.
     async fn end_idle_session(&self, session_id: &str) -> DomainError {
         let _ = self.session_client.end_session(session_id).await;
+        self.release(session_id);
         let message = format!(
             "agent sent no update for {}s",
             self.prompt_idle_timeout.as_secs()
@@ -347,24 +412,37 @@ impl AcpSessionService {
         DomainError::Internal(message)
     }
 
-    /// Ends the session and kills its agent process. No event is published.
-    /// An unknown or already-ended session id returns the client's error.
+    /// Ends the session and kills its agent process, then releases its
+    /// resources once. No event is published. An unknown or already-ended
+    /// session id returns the client's error and runs no cleanup.
     pub async fn end_session(&self, session_id: &str) -> DomainResult<()> {
-        self.session_client.end_session(session_id).await
+        let result = self.session_client.end_session(session_id).await;
+        self.release(session_id);
+        result
     }
 
-    /// Kills every currently-tracked agent session's process. Intended for
-    /// app-exit cleanup — the caller does not know individual session ids at
-    /// that point, so this delegates straight to the session client, which
-    /// owns the session map. No event is published.
+    /// Kills every agent session's process for app exit, then releases each
+    /// tracked session's resources. The client refuses new sessions
+    /// afterwards. No event is published.
     pub async fn end_all_sessions(&self) -> DomainResult<()> {
-        self.session_client.end_all_sessions().await
+        let ended: Vec<String> = self
+            .live_sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain()
+            .collect();
+        let result = self.session_client.end_all_sessions().await;
+        for session_id in &ended {
+            self.cleanup.on_session_ended(session_id);
+        }
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
@@ -374,8 +452,12 @@ mod tests {
     use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
     use rocket_environment::secret_store::SecretStore;
     use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
+    use rocket_shared::events::NullEventPublisher;
     use tokio::sync::mpsc::UnboundedSender;
 
+    use crate::agent_isolation::{
+        isolation_meta, SessionIsolation, ROCKET_ASSISTANT_SYSTEM_PROMPT,
+    };
     use crate::test_doubles::ConfigurableCollectionRepo;
 
     struct FakeAgentConfigRepo(Mutex<Vec<AgentConfig>>);
@@ -550,6 +632,8 @@ mod tests {
         end_all_sessions_called: Arc<AtomicBool>,
         cancel_called: Arc<AtomicBool>,
         options_after_set: Vec<ConfigOption>,
+        prompt_invalid_input: bool,
+        start_ids: Arc<Mutex<VecDeque<String>>>,
     }
     impl Default for FakeSessionClient {
         fn default() -> Self {
@@ -567,7 +651,20 @@ mod tests {
                 end_all_sessions_called: Arc::new(AtomicBool::new(false)),
                 cancel_called: Arc::new(AtomicBool::new(false)),
                 options_after_set: Vec::new(),
+                prompt_invalid_input: false,
+                start_ids: Arc::new(Mutex::new(VecDeque::new())),
             }
+        }
+    }
+
+    impl FakeSessionClient {
+        /// Returns the next queued session id, or "session-1" when none is queued.
+        fn next_session_id(&self) -> String {
+            self.start_ids
+                .lock()
+                .expect("lock start_ids")
+                .pop_front()
+                .unwrap_or_else(|| "session-1".to_string())
         }
     }
     #[async_trait::async_trait]
@@ -585,7 +682,7 @@ mod tests {
                 Err(DomainError::InvalidInput("command not found".to_string()))
             } else {
                 Ok(SessionInfo {
-                    session_id: "session-1".to_string(),
+                    session_id: self.next_session_id(),
                     config_options: self.start_config_options.clone(),
                     prompt_capabilities: PromptCapabilities {
                         embedded_context: true,
@@ -600,6 +697,11 @@ mod tests {
             _parts: Vec<PromptPart>,
             update_tx: UnboundedSender<AcpUpdate>,
         ) -> DomainResult<String> {
+            if self.prompt_invalid_input {
+                return Err(DomainError::InvalidInput(
+                    "unsupported prompt part".to_string(),
+                ));
+            }
             tokio::time::sleep(self.prompt_delay).await;
             for update in &self.prompt_updates {
                 tokio::time::sleep(self.update_interval).await;
@@ -664,18 +766,67 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingCleanup {
+        ended: Mutex<Vec<String>>,
+    }
+    impl RecordingCleanup {
+        fn ended(&self) -> Vec<String> {
+            self.ended.lock().expect("lock RecordingCleanup").clone()
+        }
+    }
+    impl SessionCleanup for RecordingCleanup {
+        fn on_session_ended(&self, session_id: &str) {
+            self.ended
+                .lock()
+                .expect("lock RecordingCleanup")
+                .push(session_id.to_string());
+        }
+    }
+
+    fn noop_cleanup() -> Arc<dyn SessionCleanup> {
+        Arc::new(NoopSessionCleanup)
+    }
+
+    fn service_with_cleanup(
+        client: FakeSessionClient,
+        cleanup: Arc<dyn SessionCleanup>,
+    ) -> AcpSessionService {
+        AcpSessionService::new(
+            Box::new(client),
+            Box::new(NullEventPublisher),
+            cleanup,
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+        )
+    }
+
+    async fn start(service: &AcpSessionService) {
+        service
+            .start_session("agent-1", "/tmp", "demo", None, None)
+            .await
+            .expect("start_session should succeed");
+    }
+
+    /// Sends one text prompt. Keep the argument form identical to the
+    /// existing send_prompt tests in this module.
+    async fn send_hi(service: &AcpSessionService, session_id: &str) -> DomainResult<String> {
+        service.send_prompt(session_id, hi()).await
+    }
+
     #[tokio::test]
     async fn start_session_resolves_config_and_credential_and_publishes_started() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", "demo", None)
+            .start_session("agent-1", "/tmp", "demo", None, None)
             .await
             .expect("start_session should succeed");
         assert_eq!(session_id.session_id, "session-1");
@@ -702,6 +853,7 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
@@ -743,6 +895,7 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
@@ -760,12 +913,13 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
 
         let err = service
-            .start_session("no-such-agent", "/tmp", "demo", None)
+            .start_session("no-such-agent", "/tmp", "demo", None, None)
             .await
             .expect_err("unknown agent_config_id must error");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -785,12 +939,13 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
 
         let err = service
-            .start_session("agent-1", "/tmp", "demo", None)
+            .start_session("agent-1", "/tmp", "demo", None, None)
             .await
             .expect_err("spawn failure must propagate");
         assert!(matches!(err, DomainError::InvalidInput(_)));
@@ -806,6 +961,7 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service_with(FakeVaultFetcher {
                 secret_value_result: Ok(None),
             }),
@@ -813,7 +969,7 @@ mod tests {
         );
 
         let err = service
-            .start_session("agent-1", "/tmp", "demo", None)
+            .start_session("agent-1", "/tmp", "demo", None, None)
             .await
             .expect_err("a stale vault secret must fail start_session, not silently proceed");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -833,6 +989,7 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
@@ -864,6 +1021,7 @@ mod tests {
         let service = AcpSessionService::with_prompt_idle_timeout(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
             Duration::from_millis(20),
@@ -899,6 +1057,7 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
@@ -920,12 +1079,13 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", "unconfigured-collection", None)
+            .start_session("agent-1", "/tmp", "unconfigured-collection", None, None)
             .await
             .expect("an unconfigured collection must still start a chat-only session");
         assert_eq!(session_id.session_id, "session-1");
@@ -938,12 +1098,14 @@ mod tests {
             Arc::new(Mutex::new(Vec::new()));
         let client = CapturingSessionClient {
             captured_servers: Arc::clone(&captured_servers),
+            ..Default::default()
         };
         let collection_repo = ConfigurableCollectionRepo::new();
         collection_repo.set_autonomy("my-api", false);
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             collection_repo,
         );
@@ -957,6 +1119,7 @@ mod tests {
                     port: 1234,
                     token: "unused-token".to_string(),
                 }),
+                None,
             )
             .await
             .expect("a disabled collection must still be able to start a chat-only session");
@@ -978,17 +1141,19 @@ mod tests {
             Arc::new(Mutex::new(Vec::new()));
         let client = CapturingSessionClient {
             captured_servers: Arc::clone(&captured_servers),
+            ..Default::default()
         };
         let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("my-api", true);
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             collection_repo,
         );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", "my-api", None)
+            .start_session("agent-1", "/tmp", "my-api", None, None)
             .await
             .expect("a missing MCP HTTP server must fail open to a chat-only session");
         assert_eq!(session_id.session_id, "session-1");
@@ -1006,12 +1171,13 @@ mod tests {
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             collection_repo,
         );
 
         let err = service
-            .start_session("agent-1", "/tmp", "broken-collection", None)
+            .start_session("agent-1", "/tmp", "broken-collection", None, None)
             .await
             .expect_err(
                 "a broken collection settings read must fail start_session, not silently degrade to chat-only",
@@ -1023,8 +1189,11 @@ mod tests {
         );
     }
 
+    #[derive(Default)]
     struct CapturingSessionClient {
         captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>>,
+        captured_env: Arc<Mutex<Vec<(String, String)>>>,
+        captured_meta: Arc<Mutex<Option<serde_json::Value>>>,
     }
     #[async_trait::async_trait]
     impl AcpSessionClient for CapturingSessionClient {
@@ -1033,10 +1202,12 @@ mod tests {
             _command: &str,
             _args: &[String],
             _cwd: &str,
-            _env: &[(String, String)],
+            env: &[(String, String)],
             mcp_servers: &[rocket_acp::McpServerSpec],
-            _meta: Option<serde_json::Value>,
+            meta: Option<serde_json::Value>,
         ) -> DomainResult<SessionInfo> {
+            *self.captured_env.lock().expect("lock") = env.to_vec();
+            *self.captured_meta.lock().expect("lock") = meta;
             *self.captured_servers.lock().expect("lock") = mcp_servers.to_vec();
             Ok(SessionInfo {
                 session_id: "session-1".to_string(),
@@ -1079,11 +1250,13 @@ mod tests {
             Arc::new(Mutex::new(Vec::new()));
         let client = CapturingSessionClient {
             captured_servers: Arc::clone(&captured_servers),
+            ..Default::default()
         };
         let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("demo", true);
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
             agent_config_service(),
             collection_repo,
         );
@@ -1097,6 +1270,7 @@ mod tests {
                     port: 54321,
                     token: "s3cr3t-token".to_string(),
                 }),
+                None,
             )
             .await
             .expect("start_session should succeed");
@@ -1148,6 +1322,7 @@ mod tests {
         AcpSessionService::with_prompt_idle_timeout(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(publisher))),
+            noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
             idle,
@@ -1164,7 +1339,7 @@ mod tests {
         let service = service_with(client, &publisher, Duration::from_secs(5));
 
         let info = service
-            .start_session("agent-1", "/tmp", "demo", None)
+            .start_session("agent-1", "/tmp", "demo", None, None)
             .await
             .expect("start_session should succeed");
         assert_eq!(info.session_id, "session-1");
@@ -1379,5 +1554,207 @@ mod tests {
             DomainEvent::AcpConfigOptionsChanged { session_id, options }
                 if session_id == "session-1" && options.len() == 2
         ));
+    }
+
+    #[tokio::test]
+    async fn start_session_with_isolation_passes_meta_and_the_config_dir_env() {
+        let client = CapturingSessionClient::default();
+        let captured_env = Arc::clone(&client.captured_env);
+        let captured_meta = Arc::clone(&client.captured_meta);
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(NullEventPublisher),
+            noop_cleanup(),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+        );
+
+        service
+            .start_session(
+                "agent-1",
+                "/scratch/cwd",
+                "demo",
+                None,
+                Some(SessionIsolation::new("/scratch/config")),
+            )
+            .await
+            .expect("start_session should succeed");
+
+        let env = captured_env.lock().expect("lock").clone();
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v == "/scratch/config"),
+            "CLAUDE_CONFIG_DIR must point at the scratch config dir, got {env:?}"
+        );
+        assert!(
+            env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"),
+            "the credential env var must still be passed, got {env:?}"
+        );
+        assert_eq!(
+            *captured_meta.lock().expect("lock"),
+            Some(isolation_meta(ROCKET_ASSISTANT_SYSTEM_PROMPT))
+        );
+    }
+
+    #[tokio::test]
+    async fn start_session_without_isolation_passes_no_meta_and_no_config_dir() {
+        let client = CapturingSessionClient::default();
+        let captured_env = Arc::clone(&client.captured_env);
+        let captured_meta = Arc::clone(&client.captured_meta);
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(NullEventPublisher),
+            noop_cleanup(),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+        );
+
+        service
+            .start_session("agent-1", "/tmp", "demo", None, None)
+            .await
+            .expect("start_session should succeed");
+
+        assert!(captured_meta.lock().expect("lock").is_none());
+        assert!(!captured_env
+            .lock()
+            .expect("lock")
+            .iter()
+            .any(|(k, _)| k == "CLAUDE_CONFIG_DIR"));
+    }
+
+    #[tokio::test]
+    async fn end_session_runs_cleanup_once_for_a_started_session() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let service = service_with_cleanup(FakeSessionClient::default(), cleanup.clone());
+        start(&service).await;
+
+        service.end_session("session-1").await.expect("first end");
+        let _ = service.end_session("session-1").await;
+
+        assert_eq!(cleanup.ended(), vec!["session-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn end_session_on_an_untracked_id_still_calls_the_client_but_runs_no_cleanup() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+
+        let _ = service.end_session("never-started").await;
+
+        assert!(end_session_called.load(Ordering::SeqCst));
+        assert!(cleanup.ended().is_empty());
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_runs_cleanup_once() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let client = FakeSessionClient {
+            prompt_delay: Duration::from_millis(200),
+            ..Default::default()
+        };
+        let service = AcpSessionService::with_prompt_idle_timeout(
+            Box::new(client),
+            Box::new(NullEventPublisher),
+            cleanup.clone(),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+            Duration::from_millis(20),
+        );
+        start(&service).await;
+
+        send_hi(&service, "session-1")
+            .await
+            .expect_err("a hung prompt must time out");
+        let _ = service.end_session("session-1").await;
+
+        assert_eq!(cleanup.ended(), vec!["session-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn failed_prompt_runs_cleanup_once_and_kills_the_session() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_should_fail: true,
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+        start(&service).await;
+
+        send_hi(&service, "session-1")
+            .await
+            .expect_err("a crashed prompt must fail");
+        let _ = send_hi(&service, "session-1").await;
+        let _ = service.end_session("session-1").await;
+
+        assert!(end_session_called.load(Ordering::SeqCst));
+        assert_eq!(cleanup.ended(), vec!["session-1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn invalid_input_prompt_error_keeps_the_session_and_runs_no_cleanup() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_invalid_input: true,
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+        start(&service).await;
+
+        let err = send_hi(&service, "session-1")
+            .await
+            .expect_err("an invalid prompt must fail");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+
+        assert!(!end_session_called.load(Ordering::SeqCst));
+        assert!(cleanup.ended().is_empty());
+    }
+
+    #[tokio::test]
+    async fn end_all_sessions_runs_cleanup_for_every_tracked_session() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let client = FakeSessionClient {
+            start_ids: Arc::new(Mutex::new(VecDeque::from(vec![
+                "s-a".to_string(),
+                "s-b".to_string(),
+            ]))),
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+        start(&service).await;
+        start(&service).await;
+
+        service.end_all_sessions().await.expect("end_all_sessions");
+        let _ = service.end_session("s-a").await;
+
+        let mut ended = cleanup.ended();
+        ended.sort();
+        assert_eq!(ended, vec!["s-a".to_string(), "s-b".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_tracks_nothing() {
+        let cleanup = Arc::new(RecordingCleanup::default());
+        let client = FakeSessionClient {
+            start_should_fail: true,
+            ..Default::default()
+        };
+        let service = service_with_cleanup(client, cleanup.clone());
+
+        service
+            .start_session("agent-1", "/tmp", "demo", None, None)
+            .await
+            .expect_err("spawn failure must propagate");
+        service.end_all_sessions().await.expect("end_all_sessions");
+
+        assert!(cleanup.ended().is_empty());
     }
 }

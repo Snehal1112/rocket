@@ -251,6 +251,7 @@ fn build_fixture(
     let acp_session_svc = AcpSessionService::new(
         Box::new(client),
         Box::new(NullEventPublisher),
+        Arc::new(rocket_app::NoopSessionCleanup),
         agent_config_service(),
         collection_repo,
     );

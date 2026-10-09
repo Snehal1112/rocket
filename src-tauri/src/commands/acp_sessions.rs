@@ -92,7 +92,7 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
     });
 
     let result = svc
-        .start_session(&agent_config_id, &cwd, &collection, mcp_credentials)
+        .start_session(&agent_config_id, &cwd, &collection, mcp_credentials, None)
         .await;
 
     match (result, mcp_handle) {

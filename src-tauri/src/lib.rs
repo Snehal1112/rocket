@@ -428,6 +428,7 @@ pub fn run() {
             let acp_session_svc = rocket_app::AcpSessionService::new(
                 Box::new(rocket_infra::AcpAgentClient::new()),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                Arc::new(rocket_app::NoopSessionCleanup),
                 acp_agent_config_svc,
                 Arc::clone(&acp_collection_repo),
             );

@@ -2,6 +2,7 @@
 
 pub mod acp_session_service;
 pub mod agent_config_service;
+pub mod agent_isolation;
 pub mod assertion_evaluator;
 pub mod callback_listener;
 pub(crate) mod client_certificates;
@@ -50,8 +51,13 @@ pub mod vault_secret_resolution;
 pub mod websocket_service;
 pub mod workspace_service;
 
-pub use acp_session_service::{AcpSessionService, McpHttpServerCredentials};
+pub use acp_session_service::{
+    AcpSessionService, McpHttpServerCredentials, NoopSessionCleanup, SessionCleanup,
+};
 pub use agent_config_service::AgentConfigService;
+pub use agent_isolation::{
+    isolation_meta, SessionIsolation, ISOLATION_ENV_CONFIG_DIR, ROCKET_ASSISTANT_SYSTEM_PROMPT,
+};
 pub use callback_listener::{CallbackEndpoint, CallbackListener, NoCallbackListener, ReceivedCall};
 pub use collection_runner_service::{
     CollectionRunnerService, RunCollectionInput, RunStepResult, RunStepStatus, RunSummary,
