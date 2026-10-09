@@ -4,15 +4,13 @@
 //! `EnvironmentService`, the same paths as a manual edit, so name checks
 //! and events stay the same. Proposals live in memory only.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rocket_acp::proposal::{
     AgentProposal, ProposalStatus, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
 };
-use rocket_collection::{
-    request_filename_for, CollectionItem, Folder, Request, RequestScriptPhase,
-};
+use rocket_collection::{request_filename_for, CollectionItem, Folder, Request};
 use rocket_environment::{EnvironmentRepositoryFactory, Variable};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -44,6 +42,8 @@ pub struct ProposalService {
 
 #[derive(Default)]
 struct Store {
+    /// Sessions that ended. A late call must not recreate their entry.
+    ended: HashSet<String>,
     /// Proposals per real ACP session id, oldest first. The MCP tool server
     /// reports that id through Plan 03's `McpSessionBinding`.
     sessions: HashMap<String, Vec<AgentProposal>>,
@@ -112,6 +112,11 @@ impl ProposalService {
 
         let now = chrono::Utc::now().timestamp_millis();
         let mut store = self.lock();
+        if store.ended.contains(session_id) {
+            return Err(DomainError::InvalidInput(
+                "this assistant session has ended; start a new one to propose changes".to_string(),
+            ));
+        }
         let session = session_id.to_string();
         let list = store.sessions.entry(session.clone()).or_default();
         let pending = list
@@ -156,8 +161,8 @@ impl ProposalService {
     }
 
     /// Re-checks the target and applies the change. A changed target makes
-    /// the proposal `Stale`; a failed write makes it `Failed`. Either way
-    /// nothing is written.
+    /// the proposal `Stale` and nothing is written. A failed write makes it
+    /// `Failed`.
     pub fn accept(&self, session_id: &str, proposal_id: &str) -> DomainResult<AgentProposal> {
         let mut store = self.lock();
         let session = session_id.to_string();
@@ -169,7 +174,8 @@ impl ProposalService {
         let status = match self.still_applies(&change) {
             Ok(false) => ProposalStatus::Stale,
             Ok(true) => match self.apply(&change) {
-                Ok(()) => ProposalStatus::Accepted,
+                Ok(true) => ProposalStatus::Accepted,
+                Ok(false) => ProposalStatus::Stale,
                 Err(e) => ProposalStatus::Failed {
                     message: e.to_string(),
                 },
@@ -198,10 +204,13 @@ impl ProposalService {
         Ok(resolved)
     }
 
-    /// Drops the session's proposals. Called from `TauriSessionCleanup` when
-    /// the session ends. Safe to call more than once.
+    /// Drops the session's proposals and refuses later proposals for it.
+    /// Called from `TauriSessionCleanup` when the session ends. Safe to call
+    /// more than once.
     pub fn clear_session(&self, session_id: &str) {
-        self.lock().sessions.remove(session_id);
+        let mut store = self.lock();
+        store.sessions.remove(session_id);
+        store.ended.insert(session_id.to_string());
     }
 
     fn publish_resolved(&self, proposal: &AgentProposal) {
@@ -457,50 +466,85 @@ impl ProposalService {
         }
     }
 
-    /// Applies one change with one write through the manual-edit services.
-    fn apply(&self, change: &ProposedChange) -> DomainResult<()> {
+    /// Reads the request and returns that exact copy only if it still matches
+    /// the proposal's fingerprint. The caller patches and writes this copy, so
+    /// no second unchecked read sits between the check and the write.
+    fn checked_request(
+        &self,
+        collection: &str,
+        request_path: &str,
+        base_fingerprint: &str,
+    ) -> DomainResult<Option<Request>> {
+        let request = self.collections.get_request(collection, request_path)?;
+        if request_fingerprint(&request) == base_fingerprint {
+            Ok(Some(request))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Applies one change through the manual-edit services. Returns `false`
+    /// without writing when the target no longer matches the proposal.
+    fn apply(&self, change: &ProposedChange) -> DomainResult<bool> {
+        let applied = |result: DomainResult<()>| result.map(|()| true);
         match change {
             ProposedChange::CreateFolder {
                 collection,
                 parent_path,
                 name,
-            } => self
-                .collections
-                .create_folder(collection, &join_path(parent_path, name)),
+            } => applied(
+                self.collections
+                    .create_folder(collection, &join_path(parent_path, name)),
+            ),
             ProposedChange::CreateRequest {
                 collection,
                 folder_path,
                 request,
             } => {
                 let path = join_path(folder_path, &request_filename_for(&request.name));
-                self.collections
-                    .save_request(collection, &path, &build_request(request))
-                    .map(|_| ())
+                applied(
+                    self.collections
+                        .save_request(collection, &path, &build_request(request))
+                        .map(|_| ()),
+                )
             }
             ProposedChange::UpdateRequest {
                 collection,
                 request_path,
                 patch,
-                ..
+                base_fingerprint,
             } => {
-                let mut request = self.collections.get_request(collection, request_path)?;
+                let Some(mut request) =
+                    self.checked_request(collection, request_path, base_fingerprint)?
+                else {
+                    return Ok(false);
+                };
                 apply_patch(&mut request, patch);
-                self.collections
-                    .save_request(collection, request_path, &request)
-                    .map(|_| ())
+                applied(
+                    self.collections
+                        .save_request(collection, request_path, &request)
+                        .map(|_| ()),
+                )
             }
             ProposedChange::EditScript {
                 collection,
                 request_path,
                 phase,
                 body,
-                ..
-            } => self.collections.save_request_script(
-                collection,
-                request_path,
-                collection_phase(*phase),
-                body.clone(),
-            ),
+                base_fingerprint,
+            } => {
+                let Some(mut request) =
+                    self.checked_request(collection, request_path, base_fingerprint)?
+                else {
+                    return Ok(false);
+                };
+                set_script(&mut request, *phase, body.clone());
+                applied(
+                    self.collections
+                        .save_request(collection, request_path, &request)
+                        .map(|_| ()),
+                )
+            }
             ProposedChange::MoveItem {
                 collection,
                 from_path,
@@ -508,8 +552,10 @@ impl ProposalService {
                 ..
             } => {
                 let destination = move_destination(from_path, to_folder)?;
-                self.collections
-                    .move_item(collection, from_path, collection, &destination)
+                applied(
+                    self.collections
+                        .move_item(collection, from_path, collection, &destination),
+                )
             }
             ProposedChange::RenameItem {
                 collection,
@@ -520,14 +566,14 @@ impl ProposalService {
                 let root = self.tree(collection)?;
                 if is_folder(&root, path) {
                     // A folder is renamed by moving it, like the sidebar does.
-                    self.collections.move_item(
+                    applied(self.collections.move_item(
                         collection,
                         path,
                         collection,
                         &join_path(parent_of(path), new_name),
-                    )
+                    ))
                 } else {
-                    self.collections.rename_request(collection, path, new_name)
+                    applied(self.collections.rename_request(collection, path, new_name))
                 }
             }
             ProposedChange::SetEnvVar {
@@ -535,7 +581,7 @@ impl ProposalService {
                 environment,
                 key,
                 value,
-            } => self.apply_env_var(collection, environment, key, value),
+            } => applied(self.apply_env_var(collection, environment, key, value)),
         }
     }
 
@@ -829,11 +875,11 @@ fn validate_environment_name(name: &str) -> DomainResult<()> {
     Ok(())
 }
 
-fn collection_phase(phase: ScriptPhase) -> RequestScriptPhase {
+fn set_script(request: &mut Request, phase: ScriptPhase, body: String) {
     match phase {
-        ScriptPhase::PreRequest => RequestScriptPhase::PreRequest,
-        ScriptPhase::PostResponse => RequestScriptPhase::PostResponse,
-        ScriptPhase::Tests => RequestScriptPhase::Tests,
+        ScriptPhase::PreRequest => request.pre_request_script = Some(body),
+        ScriptPhase::PostResponse => request.post_response_script = Some(body),
+        ScriptPhase::Tests => request.tests = Some(body),
     }
 }
 
@@ -889,7 +935,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex as StdMutex;
 
-    use rocket_collection::CollectionRepository;
+    use rocket_collection::{CollectionRepository, RequestScriptPhase};
     use rocket_environment::{Environment, EnvironmentRepository};
     use rocket_shared::types::{Header, HttpMethod};
 
@@ -1410,5 +1456,220 @@ mod tests {
         f.svc.clear_session("acp-1");
         assert!(f.svc.list("acp-1").is_empty());
         assert_eq!(f.svc.list("acp-2").len(), 1);
+    }
+
+    #[test]
+    fn propose_is_refused_after_the_session_was_cleared() {
+        let f = fixture();
+        f.svc
+            .propose("s1", vec![folder("reports")])
+            .expect("propose");
+        f.svc.clear_session("s1");
+        let err = f
+            .svc
+            .propose("s1", vec![folder("late")])
+            .expect_err("the session ended");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(f.svc.list("s1").is_empty(), "no entry is recreated");
+        f.svc
+            .propose("s2", vec![folder("other")])
+            .expect("other sessions are unaffected");
+    }
+
+    /// Shared state of `RacyRepo`.
+    struct RaceState {
+        /// Reads that still return the real request. After that, reads return
+        /// a copy with a different url, as if the user saved in between.
+        normal_reads_left: std::sync::atomic::AtomicUsize,
+        writes: std::sync::atomic::AtomicUsize,
+    }
+
+    /// Wraps a real repo and drifts `get_request` after a set number of reads.
+    struct RacyRepo {
+        inner: rocket_infra::FsCollectionRepo,
+        state: Arc<RaceState>,
+    }
+
+    impl CollectionRepository for RacyRepo {
+        fn list(&self) -> DomainResult<Vec<rocket_collection::CollectionSummary>> {
+            self.inner.list()
+        }
+        fn get(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
+            self.inner.get(name)
+        }
+        fn get_summaries(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
+            self.inner.get_summaries(name)
+        }
+        fn create(&self, name: &str) -> DomainResult<rocket_collection::Collection> {
+            self.inner.create(name)
+        }
+        fn delete(&self, name: &str) -> DomainResult<()> {
+            self.inner.delete(name)
+        }
+        fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
+            self.inner.rename(old_name, new_name)
+        }
+        fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
+            let mut request = self.inner.get_request(collection, path)?;
+            let normal = self
+                .state
+                .normal_reads_left
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok();
+            if !normal {
+                request.url = "https://changed.example.com".to_string();
+            }
+            Ok(request)
+        }
+        fn save_request(
+            &self,
+            collection: &str,
+            path: &str,
+            request: &Request,
+        ) -> DomainResult<String> {
+            self.state.writes.fetch_add(1, Ordering::SeqCst);
+            self.inner.save_request(collection, path, request)
+        }
+        fn rename_request(&self, c: &str, old: &str, new: &str) -> DomainResult<()> {
+            self.inner.rename_request(c, old, new)
+        }
+        fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.inner.delete_request(collection, path)
+        }
+        fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.inner.create_folder(collection, path)
+        }
+        fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
+            self.inner.delete_folder(collection, path)
+        }
+        fn move_item(&self, sc: &str, sp: &str, dc: &str, dp: &str) -> DomainResult<()> {
+            self.inner.move_item(sc, sp, dc, dp)
+        }
+        fn reorder_items(&self, c: &str, folder: &str, names: &[String]) -> DomainResult<()> {
+            self.inner.reorder_items(c, folder, names)
+        }
+        fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
+            self.inner.get_settings(name)
+        }
+        fn save_settings(
+            &self,
+            name: &str,
+            settings: &rocket_collection::CollectionSettings,
+        ) -> DomainResult<()> {
+            self.inner.save_settings(name, settings)
+        }
+        fn get_folder_chain_variables(
+            &self,
+            collection: &str,
+            request_path: &str,
+        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
+            self.inner
+                .get_folder_chain_variables(collection, request_path)
+        }
+        fn get_folder_variables(
+            &self,
+            collection: &str,
+            folder_path: &str,
+        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
+            self.inner.get_folder_variables(collection, folder_path)
+        }
+        fn save_folder_variables(
+            &self,
+            collection: &str,
+            folder_path: &str,
+            vars: Vec<rocket_collection::CollectionVariable>,
+        ) -> DomainResult<()> {
+            self.inner
+                .save_folder_variables(collection, folder_path, vars)
+        }
+        fn get_request_variables(
+            &self,
+            collection: &str,
+            request_path: &str,
+        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
+            self.inner.get_request_variables(collection, request_path)
+        }
+        fn save_request_variables(
+            &self,
+            collection: &str,
+            request_path: &str,
+            vars: Vec<rocket_collection::CollectionVariable>,
+        ) -> DomainResult<()> {
+            self.inner
+                .save_request_variables(collection, request_path, vars)
+        }
+        fn save_request_script(
+            &self,
+            collection: &str,
+            request_path: &str,
+            phase: RequestScriptPhase,
+            body: String,
+        ) -> DomainResult<()> {
+            self.state.writes.fetch_add(1, Ordering::SeqCst);
+            self.inner
+                .save_request_script(collection, request_path, phase, body)
+        }
+    }
+
+    /// A service whose request drifts after the check but before the write:
+    /// the propose step and the accept check read normally, the apply read
+    /// returns a different copy.
+    fn racy_service() -> (tempfile::TempDir, Arc<RaceState>, ProposalService) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let seed = rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        seed.create("demo").expect("create collection");
+        seed.save_request(
+            "demo",
+            "get-users.yml",
+            &Request::new(
+                "Get Users",
+                HttpMethod::Get,
+                "https://api.example.com/users",
+            ),
+        )
+        .expect("save request");
+        let state = Arc::new(RaceState {
+            normal_reads_left: std::sync::atomic::AtomicUsize::new(usize::MAX),
+            writes: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let events = RecordingPublisher::new();
+        let svc = ProposalService::new(
+            CollectionService::new(
+                Box::new(RacyRepo {
+                    inner: rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf()),
+                    state: Arc::clone(&state),
+                }),
+                Box::new(SharedPublisher(Arc::clone(&events))),
+            ),
+            Arc::new(MemoryEnvFactory(Arc::new(MemoryEnvs::default()))),
+            events,
+        );
+        (dir, state, svc)
+    }
+
+    fn assert_stale_when_the_request_drifts_before_the_write(change: ProposedChange) {
+        let (_dir, state, svc) = racy_service();
+        let ids = svc.propose("s1", vec![change]).expect("propose");
+        // The accept check reads once (normal), the apply read then drifts.
+        state.normal_reads_left.store(1, Ordering::SeqCst);
+        let resolved = svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
+        assert_eq!(state.writes.load(Ordering::SeqCst), 0, "nothing is written");
+    }
+
+    #[test]
+    fn an_update_is_stale_when_the_request_changes_between_check_and_write() {
+        assert_stale_when_the_request_drifts_before_the_write(url_patch("https://x.example.com"));
+    }
+
+    #[test]
+    fn an_edit_script_is_stale_when_the_request_changes_between_check_and_write() {
+        assert_stale_when_the_request_drifts_before_the_write(ProposedChange::EditScript {
+            collection: "demo".into(),
+            request_path: "get-users.yml".into(),
+            phase: ScriptPhase::Tests,
+            body: "rok.test('ok', () => {});".into(),
+            base_fingerprint: String::new(),
+        });
     }
 }

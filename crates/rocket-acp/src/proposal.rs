@@ -273,7 +273,8 @@ pub enum ProposalStatus {
     Rejected,
     /// The target changed after the proposal was made. Nothing was written.
     Stale,
-    /// Applying failed. Nothing was written.
+    /// Applying failed. The change may be partly applied, for example when a
+    /// move or rename fails midway.
     Failed {
         message: String,
     },
