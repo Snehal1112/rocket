@@ -16,6 +16,7 @@ import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import { endAgentSession, sendAgentPrompt, startAgentSession } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { AgentChatSession } from '@/types/pane-types';
+import { AgentAutonomyToggle } from './AgentAutonomyToggle';
 
 interface AgentChatPanelProps {
   tabId: string;
@@ -124,6 +125,7 @@ export function AgentChatPanel({
             ))}
           </SelectContent>
         </Select>
+        {collectionName && <AgentAutonomyToggle collectionName={collectionName} />}
         {startError && <p className='text-xs text-destructive'>{startError}</p>}
         <Button
           size='sm'

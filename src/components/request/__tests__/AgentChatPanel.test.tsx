@@ -46,6 +46,9 @@ vi.mock('@/lib/tauri-api', () => ({
   startAgentSession: vi.fn(),
   sendAgentPrompt: vi.fn(),
   endAgentSession: vi.fn(),
+  // The autonomy toggle in the pre-session view loads these.
+  getCollectionSettings: vi.fn(),
+  saveCollectionSettings: vi.fn(),
 }));
 
 import * as tauriApi from '@/lib/tauri-api';
@@ -64,6 +67,25 @@ describe('AgentChatPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActions.activateAgentSession.mockReturnValue(true);
+    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue({
+      headers: [],
+      variables: [],
+      sandboxMode: 'safe',
+    });
+  });
+
+  it('shows the agent access toggle before a session starts', async () => {
+    render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
+    expect(
+      await screen.findByLabelText('Allow this agent to run requests and edit files'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no agent access toggle without a collection', () => {
+    render(<AgentChatPanel tabId='tab-1' onInsertCode={vi.fn()} />);
+    expect(
+      screen.queryByLabelText('Allow this agent to run requests and edit files'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows the agent picker and a disabled Start button with no session', () => {
