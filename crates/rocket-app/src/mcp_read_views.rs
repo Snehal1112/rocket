@@ -29,6 +29,9 @@ use crate::runner_sequence::folder_dir_name;
 /// Most request entries the outline lists before it falls back to counts.
 pub const OUTLINE_ENTRY_CAP: usize = 400;
 
+/// Upper bound for the rendered outline text, on top of the entry cap.
+pub const OUTLINE_BYTE_CAP: usize = 16 * 1024;
+
 /// Largest response body a tool result carries, in bytes.
 pub const RESPONSE_BODY_CAP_BYTES: usize = 8 * 1024;
 
@@ -786,6 +789,39 @@ pub(crate) fn filter_folder(entries: Vec<OutlineEntry>, folder: &str) -> Vec<Out
         .collect()
 }
 
+/// Collapses a user-chosen name or path to one safe line: control
+/// characters (newlines included) become spaces and backticks become
+/// apostrophes, so a name cannot start a heading or fake an instruction.
+fn single_line(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '`' => '\'',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect()
+}
+
+/// Cuts `text` to at most `OUTLINE_BYTE_CAP` bytes at a line boundary and
+/// adds a visible note.
+fn cap_outline_bytes(mut text: String) -> String {
+    if text.len() <= OUTLINE_BYTE_CAP {
+        return text;
+    }
+    const NOTE: &str = "... outline truncated. Call get_workspace_outline with a collection, \
+and optionally a folder, to see the rest.\n";
+    let mut cut = OUTLINE_BYTE_CAP - NOTE.len();
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    text.truncate(cut);
+    if let Some(newline) = text.rfind('\n') {
+        text.truncate(newline + 1);
+    }
+    text.push_str(NOTE);
+    text
+}
+
 /// Renders the outline as compact text. Up to `OUTLINE_ENTRY_CAP` entries
 /// are listed. Above the cap, several collections are shown as counts only;
 /// a single collection lists the first `OUTLINE_ENTRY_CAP` entries and
@@ -816,13 +852,13 @@ pub(crate) fn render_outline(collections: &[OutlineCollection]) -> String {
         if !collection.readable {
             out.push_str(&format!(
                 "\n## {} ({run}, could not be read)\n",
-                collection.name
+                single_line(&collection.name)
             ));
             continue;
         }
         out.push_str(&format!(
             "\n## {} ({run}, {} request(s))\n",
-            collection.name,
+            single_line(&collection.name),
             collection.entries.len()
         ));
         if counts_only {
@@ -830,7 +866,11 @@ pub(crate) fn render_outline(collections: &[OutlineCollection]) -> String {
         }
         let shown = collection.entries.len().min(remaining);
         for entry in &collection.entries[..shown] {
-            out.push_str(&format!("{} {}\n", entry.method, entry.path));
+            out.push_str(&format!(
+                "{} {}\n",
+                entry.method,
+                single_line(&entry.path)
+            ));
         }
         remaining -= shown;
         if shown < collection.entries.len() {
@@ -841,7 +881,7 @@ pub(crate) fn render_outline(collections: &[OutlineCollection]) -> String {
             ));
         }
     }
-    out
+    cap_outline_bytes(out)
 }
 
 #[cfg(test)]
@@ -1091,6 +1131,29 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn names_and_paths_are_collapsed_to_one_safe_line() {
+        let mut collection = outline_collection("evil\n## x (run: on)`", 1);
+        collection.entries[0].path = "a\r\n## fake\nb.yml".to_string();
+        let text = render_outline(&[collection]);
+
+        assert!(text.contains("\n## evil ## x (run: on)' (run: off, 1 request(s))\n"), "{text}");
+        assert!(text.contains("\nGET a  ## fake b.yml\n"), "{text}");
+        assert_eq!(text.lines().filter(|l| l.starts_with("## ")).count(), 1);
+    }
+
+    #[test]
+    fn the_outline_is_cut_at_the_byte_cap_with_a_note() {
+        let collections: Vec<OutlineCollection> = (0..1500)
+            .map(|i| outline_collection(&format!("collection-{i:04}-{}", "x".repeat(30)), 1))
+            .collect();
+        let text = render_outline(&collections);
+
+        assert!(text.len() <= OUTLINE_BYTE_CAP, "{}", text.len());
+        assert!(text.contains("outline truncated"), "{text}");
+        assert!(text.ends_with('\n'));
     }
 
     fn entry_lines(text: &str) -> usize {

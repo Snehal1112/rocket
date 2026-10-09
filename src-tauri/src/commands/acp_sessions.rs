@@ -187,12 +187,21 @@ pub async fn send_agent_prompt(
     let mut parts = prompt_parts(prompt, resources)?;
     // The workspace outline goes with the first prompt of a workspace
     // assistant session only. Per-tab sessions never stored one, so this
-    // adds nothing for them. It is taken only after the user's parts
-    // passed their checks, so a refused prompt keeps it for the next one.
-    if let Some(preamble) = mcp_tool_svc.take_outline_preamble(&session_id) {
-        parts.insert(0, preamble);
+    // adds nothing for them. It is only peeked here and discarded once the
+    // agent accepted the prompt, so a refused or failed prompt keeps it for
+    // the next one.
+    let has_outline = match mcp_tool_svc.peek_outline_preamble(&session_id) {
+        Some(preamble) => {
+            parts.insert(0, preamble);
+            true
+        }
+        None => false,
+    };
+    let stop_reason = svc.send_prompt(&session_id, parts).await?;
+    if has_outline {
+        mcp_tool_svc.discard_outline(&session_id);
     }
-    svc.send_prompt(&session_id, parts).await
+    Ok(stop_reason)
 }
 
 /// Asks the agent to stop the running turn. The session stays open.
