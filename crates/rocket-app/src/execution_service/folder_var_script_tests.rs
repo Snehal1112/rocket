@@ -80,6 +80,7 @@ fn service(base: &std::path::Path) -> RequestExecutionService {
 
 fn input(pre_request_script: Option<&str>) -> ExecuteRequestInput {
     ExecuteRequestInput {
+        run_source: rocket_shared::RunSource::Manual,
         skip_folder_scripts: false,
         skip_history: false,
         flow_vars: std::collections::HashMap::new(),

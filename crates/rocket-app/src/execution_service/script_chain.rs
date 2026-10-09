@@ -592,6 +592,7 @@ mod service_tests {
             skip_history: false,
             flow_vars: HashMap::new(),
             skip_folder_scripts: false,
+            run_source: rocket_shared::RunSource::Manual,
         }
     }
 

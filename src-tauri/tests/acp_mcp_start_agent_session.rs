@@ -118,6 +118,8 @@ fn agent_config_service() -> Arc<rocket_app::AgentConfigService> {
         client_id: "rocketapi".to_string(),
         verify_ssl: true,
         allow_insecure_http: false,
+        provider: Default::default(),
+        config: None,
     };
     let secret_manager = Arc::new(rocket_app::SecretManagerService::new(
         Box::new(FakeSecretManagerRepo(connection)),

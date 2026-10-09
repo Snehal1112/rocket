@@ -365,7 +365,14 @@ fn send_input(collection: &Collection, path: &str) -> ExecuteRequestInput {
         .into_iter()
         .find(|item| item.request_path == path)
         .expect("request in the collection");
-    crate::runner_sequence::build_step_input(&item, "api", Some("dev"), None, Default::default())
+    crate::runner_sequence::build_step_input(
+        &item,
+        "api",
+        Some("dev"),
+        None,
+        Default::default(),
+        rocket_shared::RunSource::Manual,
+    )
 }
 
 fn console(out: &ExecuteRequestOutput) -> Vec<String> {

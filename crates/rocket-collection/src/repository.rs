@@ -298,13 +298,20 @@ pub trait CollectionRepository: Send + Sync {
     /// read-modify-write of the whole `Request` from a caller-supplied copy —
     /// that risks clobbering a concurrent manual edit to unrelated fields,
     /// and `Request` has no optimistic-concurrency mechanism to detect that.
+    ///
+    /// Has a default body so repositories that cannot edit scripts keep
+    /// compiling, like the other optional methods on this trait.
     fn save_request_script(
         &self,
-        collection: &str,
-        request_path: &str,
-        phase: RequestScriptPhase,
-        body: String,
-    ) -> DomainResult<()>;
+        _collection: &str,
+        _request_path: &str,
+        _phase: RequestScriptPhase,
+        _body: String,
+    ) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "saving request scripts is not supported by this repository".into(),
+        ))
+    }
 }
 
 #[cfg(test)]

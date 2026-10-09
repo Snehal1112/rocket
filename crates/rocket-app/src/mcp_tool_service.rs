@@ -192,11 +192,7 @@ impl McpToolService {
             .unwrap_or_else(|e| e.into_inner())
             .remove(&test_result_key(session_id, collection, request_path));
         let request = self.collection_repo.get_request(collection, request_path)?;
-        let item = RunItem {
-            name: request.name.clone(),
-            request_path: request_path.to_string(),
-            request,
-        };
+        let item = RunItem::http(request.name.clone(), request_path.to_string(), request);
         // Resolved fresh on every call against the *current* active
         // workspace path — never cached from construction time — mirroring
         // `SharedPathCollectionRepo::repo()`'s own "resolve against the live
@@ -417,6 +413,12 @@ fn collect_request_entries(
     for item in &folder.items {
         match item {
             rocket_collection::CollectionItem::Summary(summary) => {
+                // Only plain HTTP requests are agent tools. GraphQL, WebSocket
+                // and gRPC files were opaque items before they got typed
+                // variants, and opaque items were never listed.
+                if !summary.kind.is_http() {
+                    continue;
+                }
                 let Some(file_name) = summary.file_name.as_ref() else {
                     continue;
                 };
@@ -432,7 +434,11 @@ fn collect_request_entries(
                 collect_request_entries(sub, &sub_prefix, out);
             }
             rocket_collection::CollectionItem::Request(_)
-            | rocket_collection::CollectionItem::OpaqueItem(_) => {}
+            | rocket_collection::CollectionItem::OpaqueItem(_)
+            | rocket_collection::CollectionItem::GraphQl(_)
+            | rocket_collection::CollectionItem::WebSocket(_)
+            | rocket_collection::CollectionItem::Grpc(_)
+            | rocket_collection::CollectionItem::ScriptFile(_) => {}
         }
     }
 }
@@ -685,6 +691,7 @@ mod tests {
             method: "POST".into(),
             url: "https://api.test/login".into(),
             file_name: Some("login.yml".into()),
+            kind: Default::default(),
         });
         let mut auth = Folder::new("auth");
         auth.dir_name = Some("auth".into());
@@ -694,6 +701,7 @@ mod tests {
             method: "POST".into(),
             url: "https://api.test/refresh".into(),
             file_name: Some("refresh.yml".into()),
+            kind: Default::default(),
         });
         collection.root.add_subfolder(auth);
         repo.with_summaries("my-api", collection);

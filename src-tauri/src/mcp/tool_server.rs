@@ -522,6 +522,7 @@ mod tests {
                 duration_ms: 1,
                 ttfb_ms: 1,
                 size_bytes: 2,
+                ..Default::default()
             })
         }
     }

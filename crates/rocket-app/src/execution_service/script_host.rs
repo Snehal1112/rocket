@@ -137,6 +137,9 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             self.input.environment_name.as_deref(),
             self.input.global_env_name.as_deref(),
             self.input.request_guard_policy.clone(),
+            // A nested run belongs to whoever started the calling run, so an
+            // agent-driven run stays tagged as one.
+            self.input.run_source,
         );
         let mut chain = self.chain.clone();
         chain.push(target);

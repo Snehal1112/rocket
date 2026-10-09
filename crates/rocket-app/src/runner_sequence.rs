@@ -384,6 +384,7 @@ mod tests {
             None,
             None,
             rocket_workspace::RequestGuardPolicy::default(),
+            rocket_shared::RunSource::Runner,
         );
 
         assert_eq!(input.auth, Auth::Inherit);
