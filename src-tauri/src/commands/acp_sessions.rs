@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use rocket_acp::{PromptPart, SessionInfo};
 use rocket_app::{AcpSessionService, CollectionService, McpHttpServerCredentials, McpToolService};
 use rocket_shared::error::DomainError;
 use tauri::State;
@@ -26,6 +27,7 @@ pub async fn start_agent_session(
         &svc,
     )
     .await
+    .map(|info| info.session_id)
 }
 
 /// The real orchestration behind `start_agent_session`, generic over
@@ -59,7 +61,7 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
     collection_svc: &CollectionService,
     registry: &McpServerRegistry,
     svc: &AcpSessionService,
-) -> Result<String, DomainError> {
+) -> Result<SessionInfo, DomainError> {
     let autonomy_enabled = collection_svc
         .get_settings(&collection)?
         .agent_autonomy_enabled;
@@ -91,15 +93,15 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
         .await;
 
     match (result, mcp_handle) {
-        (Ok(session_id), Some(handle)) => {
+        (Ok(info), Some(handle)) => {
             // Registered under the *real* ACP session id, not the
             // pre-handshake mcp_session_id minted above — this is the id
             // end_agent_session/send_agent_prompt (and McpServerRegistry's
             // other callers) all address a session by.
-            registry.register(session_id.clone(), handle);
-            Ok(session_id)
+            registry.register(info.session_id.clone(), handle);
+            Ok(info)
         }
-        (Ok(session_id), None) => Ok(session_id),
+        (Ok(info), None) => Ok(info),
         (Err(e), Some(handle)) => {
             // start_session failed after the HTTP server was already bound —
             // never leave an orphaned listener holding a live token. `shutdown`
@@ -117,7 +119,8 @@ pub async fn send_agent_prompt(
     prompt: String,
     svc: State<'_, AcpSessionService>,
 ) -> Result<String, DomainError> {
-    svc.send_prompt(&session_id, prompt).await
+    svc.send_prompt(&session_id, vec![PromptPart::Text(prompt)])
+        .await
 }
 
 #[tauri::command]

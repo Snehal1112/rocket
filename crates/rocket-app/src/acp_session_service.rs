@@ -1,7 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rocket_acp::{AcpSessionClient, AcpUpdate, PromptPart};
+use rocket_acp::{
+    AcpSessionClient, AcpUpdate, ConfigOption, PromptPart, SessionInfo, ToolCallStatus,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
@@ -9,7 +12,8 @@ use crate::agent_config_service::AgentConfigService;
 
 /// Orchestrates ACP agent sessions. It resolves an agent's command and
 /// credential through `AgentConfigService`, then drives the injected
-/// `AcpSessionClient`. It publishes `AcpSession*` domain events for the UI.
+/// `AcpSessionClient`. It publishes `AcpSession*`, `AcpToolActivity`,
+/// `AcpConfigOptionsChanged` and `AcpUsage` domain events for the UI.
 ///
 /// This service keeps no session map of its own. The session client owns
 /// session state and process lifecycle.
@@ -18,11 +22,17 @@ pub struct AcpSessionService {
     event_publisher: Box<dyn EventPublisher>,
     agent_config_service: Arc<AgentConfigService>,
     collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
-    prompt_timeout: Duration,
+    prompt_idle_timeout: Duration,
 }
 
-/// Fixed per-prompt timeout from the spec. It is not user-configurable.
-const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Fixed idle limit for one prompt turn, from the spec. Every update from the
+/// agent restarts it, so a long turn that keeps making progress is never cut
+/// off. It is not user-configurable.
+const DEFAULT_PROMPT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Last known title and status of each tool call in one prompt turn. A tool
+/// call update may leave either out, and the event always carries both.
+type ToolCallStates = HashMap<String, (String, ToolCallStatus)>;
 
 /// Plain-data credentials for the per-session MCP HTTP tool server, built by
 /// the Tauri command layer (which owns the `AppHandle` needed to spawn the
@@ -37,38 +47,37 @@ pub struct McpHttpServerCredentials {
 }
 
 impl AcpSessionService {
-    /// Production constructor. Uses the fixed 120-second prompt timeout.
+    /// Production constructor. Uses the fixed 120-second idle limit.
     pub fn new(
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
         agent_config_service: Arc<AgentConfigService>,
         collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     ) -> Self {
-        Self::with_prompt_timeout(
+        Self::with_prompt_idle_timeout(
             session_client,
             event_publisher,
             agent_config_service,
             collection_repo,
-            DEFAULT_PROMPT_TIMEOUT,
+            DEFAULT_PROMPT_IDLE_TIMEOUT,
         )
     }
 
-    /// Test seam only — production wiring (Plan 05) always uses `new`, which
-    /// fixes this at the spec's 120-second constant. This constructor does
-    /// not add end-user configurability.
-    pub fn with_prompt_timeout(
+    /// Test seam only. Production wiring always uses `new`, which fixes the
+    /// idle limit at the spec's 120-second constant.
+    pub fn with_prompt_idle_timeout(
         session_client: Box<dyn AcpSessionClient>,
         event_publisher: Box<dyn EventPublisher>,
         agent_config_service: Arc<AgentConfigService>,
         collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
-        prompt_timeout: Duration,
+        prompt_idle_timeout: Duration,
     ) -> Self {
         Self {
             session_client,
             event_publisher,
             agent_config_service,
             collection_repo,
-            prompt_timeout,
+            prompt_idle_timeout,
         }
     }
 
@@ -78,7 +87,7 @@ impl AcpSessionService {
     /// the spec requires. Config lookup and credential resolution errors
     /// propagate unchanged. No event is published on failure, because no
     /// session id exists yet. On success, `AcpSessionStarted` is published
-    /// and the new session id is returned.
+    /// and the session info is returned.
     ///
     /// `collection` gates whether any MCP servers are attached at all: a
     /// collection that has not opted into agent autonomy gets none —
@@ -104,7 +113,7 @@ impl AcpSessionService {
         cwd: &str,
         collection: &str,
         mcp_http: Option<McpHttpServerCredentials>,
-    ) -> DomainResult<String> {
+    ) -> DomainResult<SessionInfo> {
         let config = self.agent_config_service.get(agent_config_id)?;
         let credential = self
             .agent_config_service
@@ -153,64 +162,66 @@ impl AcpSessionService {
             _ => Vec::new(),
         };
 
-        let session_id = self
+        // Plan 02 passes the isolation `_meta` here.
+        let info = self
             .session_client
             .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, None)
-            .await?
-            .session_id;
+            .await?;
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
-                session_id: session_id.clone(),
+                session_id: info.session_id.clone(),
             });
-        Ok(session_id)
+        Ok(info)
     }
 
     /// Sends one prompt turn and returns the agent's stop reason string.
     ///
-    /// Each streamed chunk is published as `AcpSessionChunk`. Then exactly one
-    /// terminal event follows: `AcpSessionFinished` on success, or
-    /// `AcpSessionFailed` on error or timeout. The error is still returned to
-    /// the caller in both failure cases.
+    /// Each update is published as it arrives: text as `AcpSessionChunk`, tool
+    /// calls as `AcpToolActivity`, options as `AcpConfigOptionsChanged`, usage
+    /// as `AcpUsage`. Then exactly one terminal event follows:
+    /// `AcpSessionFinished` on success (including the `cancelled` stop reason,
+    /// which is a normal finish), or `AcpSessionFailed` on error or idle
+    /// timeout. The error is still returned to the caller.
     ///
-    /// Ordering: every `AcpSessionChunk` is published before the terminal
-    /// event. `tokio::join!` only completes once the chunk channel closes,
-    /// and it closes only when the client's `send_prompt` future has resolved
-    /// and dropped its sender. This holds for any client implementation.
+    /// Ordering: the loop ends only once the client's future has resolved
+    /// and the update channel has closed, so every update event is published
+    /// before the terminal event. The client must forward a turn's updates
+    /// before its `send_prompt` resolves; a later update is dropped, never
+    /// reordered.
     ///
-    /// Completeness is a separate client-side contract: the client must
-    /// forward all of a turn's chunks before its `send_prompt` resolves.
-    /// `AcpAgentClient` relies on the ACP connection dispatching a turn's
-    /// `session/update` notifications before its `PromptResponse`. A chunk
-    /// arriving later would be dropped, never reordered.
-    ///
-    /// On timeout, the session is force-killed via `end_session`, because a
-    /// hung agent process is still running.
-    pub async fn send_prompt(&self, session_id: &str, prompt: String) -> DomainResult<String> {
+    /// Idle timeout: the limit restarts after every update. When it runs out,
+    /// the pending prompt is dropped and the session is force-killed via
+    /// `end_session`, because a hung agent process is still running.
+    pub async fn send_prompt(
+        &self,
+        session_id: &str,
+        parts: Vec<PromptPart>,
+    ) -> DomainResult<String> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpUpdate>();
-        let session_id_owned = session_id.to_string();
+        let mut send = self.session_client.send_prompt(session_id, parts, tx);
+        let mut outcome: Option<DomainResult<String>> = None;
+        let mut channel_open = true;
+        let mut tool_calls = ToolCallStates::new();
 
-        let drain_chunks = async {
-            while let Some(update) = rx.recv().await {
-                // Task 2 of the ACP client upgrade publishes the other update kinds.
-                if let AcpUpdate::Text { text } = update {
-                    self.event_publisher.publish(DomainEvent::AcpSessionChunk {
-                        session_id: session_id_owned.clone(),
-                        text,
-                    });
+        while outcome.is_none() || channel_open {
+            tokio::select! {
+                biased;
+                update = rx.recv(), if channel_open => match update {
+                    Some(update) => self.publish_update(session_id, update, &mut tool_calls),
+                    None => channel_open = false,
+                },
+                result = &mut send, if outcome.is_none() => outcome = Some(result),
+                () = tokio::time::sleep(self.prompt_idle_timeout) => {
+                    // Drop the pending prompt first, so the client releases
+                    // the turn before the session is killed.
+                    drop(send);
+                    return Err(self.end_idle_session(session_id).await);
                 }
             }
-        };
-        let send = self
-            .session_client
-            .send_prompt(session_id, vec![PromptPart::Text(prompt)], tx);
+        }
 
-        let joined = tokio::time::timeout(self.prompt_timeout, async {
-            tokio::join!(drain_chunks, send)
-        })
-        .await;
-
-        match joined {
-            Ok((_, Ok(stop_reason))) => {
+        match outcome {
+            Some(Ok(stop_reason)) => {
                 self.event_publisher
                     .publish(DomainEvent::AcpSessionFinished {
                         session_id: session_id.to_string(),
@@ -218,29 +229,122 @@ impl AcpSessionService {
                     });
                 Ok(stop_reason)
             }
-            Ok((_, Err(e))) => {
+            Some(Err(e)) => {
                 self.event_publisher.publish(DomainEvent::AcpSessionFailed {
                     session_id: session_id.to_string(),
                     error: e.to_string(),
                 });
                 Err(e)
             }
-            Err(_elapsed) => {
-                // The kill result is ignored on purpose. The timeout is the
-                // error the caller must see. A kill failure, for example when
-                // the session already crashed and was removed, changes nothing.
-                let _ = self.session_client.end_session(session_id).await;
-                let message = format!(
-                    "agent did not respond within {}s",
-                    self.prompt_timeout.as_secs()
-                );
-                self.event_publisher.publish(DomainEvent::AcpSessionFailed {
-                    session_id: session_id.to_string(),
-                    error: message.clone(),
-                });
-                Err(DomainError::Internal(message))
-            }
+            None => Err(DomainError::Internal(
+                "agent prompt ended without a result".to_string(),
+            )),
         }
+    }
+
+    /// Asks the agent to stop the running turn and returns at once. The
+    /// pending `send_prompt` then finishes with the `cancelled` stop reason,
+    /// and the session stays open. No event is published here.
+    pub async fn cancel(&self, session_id: &str) -> DomainResult<()> {
+        self.session_client.cancel(session_id).await
+    }
+
+    /// Changes one session option, such as the model, and returns the
+    /// agent's new option list. The list is also published as
+    /// `AcpConfigOptionsChanged`, because a model change can add or remove
+    /// the effort option.
+    pub async fn set_config_option(
+        &self,
+        session_id: &str,
+        config_id: &str,
+        value: &str,
+    ) -> DomainResult<Vec<ConfigOption>> {
+        let options = self
+            .session_client
+            .set_config_option(session_id, config_id, value)
+            .await?;
+        self.event_publisher
+            .publish(DomainEvent::AcpConfigOptionsChanged {
+                session_id: session_id.to_string(),
+                options: options.clone(),
+            });
+        Ok(options)
+    }
+
+    /// Publishes one update as its domain event. Tool call updates are merged
+    /// with the last known title and status of the same call.
+    fn publish_update(&self, session_id: &str, update: AcpUpdate, tool_calls: &mut ToolCallStates) {
+        let session_id = session_id.to_string();
+        let event = match update {
+            AcpUpdate::Text { text } => DomainEvent::AcpSessionChunk { session_id, text },
+            AcpUpdate::ToolCall {
+                call_id,
+                title,
+                kind: _,
+                status,
+            } => {
+                tool_calls.insert(call_id.clone(), (title.clone(), status));
+                DomainEvent::AcpToolActivity {
+                    session_id,
+                    call_id,
+                    title,
+                    status: status.as_str().to_string(),
+                }
+            }
+            AcpUpdate::ToolCallUpdate {
+                call_id,
+                title,
+                status,
+            } => {
+                let entry = tool_calls
+                    .entry(call_id.clone())
+                    .or_insert_with(|| (String::new(), ToolCallStatus::Pending));
+                if let Some(title) = title {
+                    entry.0 = title;
+                }
+                if let Some(status) = status {
+                    entry.1 = status;
+                }
+                DomainEvent::AcpToolActivity {
+                    session_id,
+                    call_id,
+                    title: entry.0.clone(),
+                    status: entry.1.as_str().to_string(),
+                }
+            }
+            AcpUpdate::ConfigOptions { options } => DomainEvent::AcpConfigOptionsChanged {
+                session_id,
+                options,
+            },
+            AcpUpdate::Usage {
+                used,
+                size,
+                cost_usd,
+            } => DomainEvent::AcpUsage {
+                session_id,
+                used,
+                size,
+                cost_usd,
+            },
+        };
+        self.event_publisher.publish(event);
+    }
+
+    /// Kills a session whose turn sent nothing for the idle limit, publishes
+    /// `AcpSessionFailed`, and returns the error for the caller. The kill
+    /// result is ignored on purpose: the timeout is the error the caller must
+    /// see, and a session that already crashed changes nothing.
+    async fn end_idle_session(&self, session_id: &str) -> DomainError {
+        let _ = self.session_client.end_session(session_id).await;
+        let message = format!(
+            "agent sent no update for {}s",
+            self.prompt_idle_timeout.as_secs()
+        );
+        self.event_publisher.publish(DomainEvent::AcpSessionFailed {
+            session_id: session_id.to_string(),
+            error: message.clone(),
+        });
+        DomainError::Internal(message)
     }
 
     /// Ends the session and kills its agent process. No event is published.
@@ -265,7 +369,7 @@ mod tests {
     use std::sync::Mutex;
 
     use rocket_acp::{AgentConfig, AgentConfigRepository};
-    use rocket_acp::{ConfigOption, PromptCapabilities, SessionInfo};
+    use rocket_acp::{ConfigChoice, ConfigOption, PromptCapabilities, SessionInfo, ToolCallStatus};
     use rocket_environment::external_secret::ExternalSecretRef;
     use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
     use rocket_environment::secret_store::SecretStore;
@@ -574,7 +678,7 @@ mod tests {
             .start_session("agent-1", "/tmp", "demo", None)
             .await
             .expect("start_session should succeed");
-        assert_eq!(session_id, "session-1");
+        assert_eq!(session_id.session_id, "session-1");
 
         let events = publisher.events.lock().expect("lock");
         assert_eq!(events.len(), 1);
@@ -603,7 +707,7 @@ mod tests {
         );
 
         let stop_reason = service
-            .send_prompt("session-1", "hi".to_string())
+            .send_prompt("session-1", hi())
             .await
             .expect("send_prompt should succeed");
         assert_eq!(stop_reason, "end_turn");
@@ -734,7 +838,7 @@ mod tests {
         );
 
         let err = service
-            .send_prompt("session-1", "hi".to_string())
+            .send_prompt("session-1", hi())
             .await
             .expect_err("a crashed/errored prompt must return an error");
         assert!(matches!(err, DomainError::Internal(_)));
@@ -757,7 +861,7 @@ mod tests {
             end_session_called: Arc::clone(&end_session_called),
             ..Default::default()
         };
-        let service = AcpSessionService::with_prompt_timeout(
+        let service = AcpSessionService::with_prompt_idle_timeout(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             agent_config_service(),
@@ -766,7 +870,7 @@ mod tests {
         );
 
         let err = service
-            .send_prompt("session-1", "hi".to_string())
+            .send_prompt("session-1", hi())
             .await
             .expect_err("a hung prompt must time out as an error");
         assert!(matches!(err, DomainError::Internal(_)));
@@ -824,7 +928,7 @@ mod tests {
             .start_session("agent-1", "/tmp", "unconfigured-collection", None)
             .await
             .expect("an unconfigured collection must still start a chat-only session");
-        assert_eq!(session_id, "session-1");
+        assert_eq!(session_id.session_id, "session-1");
     }
 
     #[tokio::test]
@@ -856,7 +960,7 @@ mod tests {
             )
             .await
             .expect("a disabled collection must still be able to start a chat-only session");
-        assert_eq!(session_id, "session-1");
+        assert_eq!(session_id.session_id, "session-1");
         assert!(
             captured_servers.lock().expect("lock").is_empty(),
             "a disabled collection must get no MCP servers even when credentials were provided"
@@ -887,7 +991,7 @@ mod tests {
             .start_session("agent-1", "/tmp", "my-api", None)
             .await
             .expect("a missing MCP HTTP server must fail open to a chat-only session");
-        assert_eq!(session_id, "session-1");
+        assert_eq!(session_id.session_id, "session-1");
         assert!(
             captured_servers.lock().expect("lock").is_empty(),
             "no MCP servers should be attached without credentials, even with autonomy enabled"
@@ -1016,5 +1120,264 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn hi() -> Vec<PromptPart> {
+        vec![PromptPart::Text("hi".to_string())]
+    }
+
+    fn sample_option(id: &str, current: &str) -> ConfigOption {
+        ConfigOption {
+            id: id.to_string(),
+            name: id.to_string(),
+            category: None,
+            current_value: current.to_string(),
+            choices: vec![ConfigChoice {
+                value: current.to_string(),
+                name: current.to_string(),
+                description: None,
+            }],
+        }
+    }
+
+    fn service_with(
+        client: FakeSessionClient,
+        publisher: &Arc<FakeEventPublisher>,
+        idle: Duration,
+    ) -> AcpSessionService {
+        AcpSessionService::with_prompt_idle_timeout(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::clone(publisher))),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+            idle,
+        )
+    }
+
+    #[tokio::test]
+    async fn start_session_returns_the_client_session_info() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            start_config_options: vec![sample_option("model", "default")],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        let info = service
+            .start_session("agent-1", "/tmp", "demo", None)
+            .await
+            .expect("start_session should succeed");
+        assert_eq!(info.session_id, "session-1");
+        assert_eq!(info.config_options, vec![sample_option("model", "default")]);
+        assert!(info.prompt_capabilities.embedded_context);
+    }
+
+    #[tokio::test]
+    async fn send_prompt_publishes_every_update_kind_in_order_before_finished() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![
+                AcpUpdate::Text {
+                    text: "Reading".to_string(),
+                },
+                AcpUpdate::ToolCall {
+                    call_id: "call-1".to_string(),
+                    title: "Read GET /orders".to_string(),
+                    kind: "read".to_string(),
+                    status: ToolCallStatus::Pending,
+                },
+                AcpUpdate::ToolCallUpdate {
+                    call_id: "call-1".to_string(),
+                    title: None,
+                    status: Some(ToolCallStatus::Completed),
+                },
+                AcpUpdate::ConfigOptions {
+                    options: vec![sample_option("model", "opus")],
+                },
+                AcpUpdate::Usage {
+                    used: 1_200,
+                    size: 200_000,
+                    cost_usd: Some(0.01),
+                },
+            ],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        let stop_reason = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("send_prompt should succeed");
+        assert_eq!(stop_reason, "end_turn");
+
+        let events = publisher.events.lock().expect("lock");
+        assert_eq!(events.len(), 6, "got {events:?}");
+        assert!(
+            matches!(&events[0], DomainEvent::AcpSessionChunk { text, .. } if text == "Reading")
+        );
+        assert!(matches!(
+            &events[1],
+            DomainEvent::AcpToolActivity { call_id, title, status, .. }
+                if call_id == "call-1" && title == "Read GET /orders" && status == "pending"
+        ));
+        assert!(
+            matches!(
+                &events[2],
+                DomainEvent::AcpToolActivity { title, status, .. }
+                    if title == "Read GET /orders" && status == "completed"
+            ),
+            "an update without a title keeps the last known title, got {:?}",
+            events[2]
+        );
+        assert!(matches!(
+            &events[3],
+            DomainEvent::AcpConfigOptionsChanged { options, .. }
+                if options.len() == 1 && options[0].current_value == "opus"
+        ));
+        assert!(matches!(
+            &events[4],
+            DomainEvent::AcpUsage {
+                used: 1_200,
+                size: 200_000,
+                cost_usd: Some(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            &events[5],
+            DomainEvent::AcpSessionFinished { stop_reason, .. } if stop_reason == "end_turn"
+        ));
+    }
+
+    #[tokio::test]
+    async fn tool_call_update_for_an_unknown_call_publishes_an_empty_title_and_pending() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![AcpUpdate::ToolCallUpdate {
+                call_id: "call-9".to_string(),
+                title: None,
+                status: None,
+            }],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("send_prompt should succeed");
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(
+            matches!(
+                &events[0],
+                DomainEvent::AcpToolActivity { call_id, title, status, .. }
+                    if call_id == "call-9" && title.is_empty() && status == "pending"
+            ),
+            "got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_restarts_on_every_update() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_updates: (0..5)
+                .map(|i| AcpUpdate::Text {
+                    text: format!("chunk {i}"),
+                })
+                .collect(),
+            update_interval: Duration::from_millis(40),
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        // Five updates 40 ms apart take about 200 ms, longer than the 150 ms
+        // idle limit, but no single gap reaches it.
+        let service = service_with(client, &publisher, Duration::from_millis(150));
+
+        let stop_reason = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("a turn that keeps sending updates must not time out");
+        assert_eq!(stop_reason, "end_turn");
+        assert!(!end_session_called.load(Ordering::SeqCst));
+        let events = publisher.events.lock().expect("lock");
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn cancelled_stop_reason_is_a_normal_finish_and_keeps_the_session() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_stop_reason: "cancelled".to_string(),
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        let stop_reason = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("a cancelled turn is a normal finish");
+        assert_eq!(stop_reason, "cancelled");
+        assert!(!end_session_called.load(Ordering::SeqCst));
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(matches!(
+            events.last(),
+            Some(DomainEvent::AcpSessionFinished { stop_reason, .. }) if stop_reason == "cancelled"
+        ));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn cancel_delegates_to_the_session_client_without_events() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let cancel_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            cancel_called: Arc::clone(&cancel_called),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        service
+            .cancel("session-1")
+            .await
+            .expect("cancel should succeed");
+        assert!(cancel_called.load(Ordering::SeqCst));
+        assert!(publisher.events.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_config_option_returns_the_new_options_and_publishes_them() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            options_after_set: vec![
+                sample_option("model", "opus"),
+                sample_option("effort", "high"),
+            ],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        let options = service
+            .set_config_option("session-1", "model", "opus")
+            .await
+            .expect("set_config_option should succeed");
+        assert_eq!(options.len(), 2);
+
+        let events = publisher.events.lock().expect("lock");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            DomainEvent::AcpConfigOptionsChanged { session_id, options }
+                if session_id == "session-1" && options.len() == 2
+        ));
     }
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::acp::ConfigOption;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowNodeStatus {
@@ -551,6 +553,30 @@ pub enum DomainEvent {
         session_id: String,
         tool: String,
         summary: String,
+    },
+    /// Emitted for every tool call start or change during a prompt turn.
+    /// `title` and `status` are the last known values, so the UI can upsert
+    /// by `call_id`. `status` is `pending`, `in_progress`, `completed` or
+    /// `failed`.
+    AcpToolActivity {
+        session_id: String,
+        call_id: String,
+        title: String,
+        status: String,
+    },
+    /// Emitted with the agent's full option list whenever it changes, during
+    /// a turn or after `set_config_option`.
+    AcpConfigOptionsChanged {
+        session_id: String,
+        options: Vec<ConfigOption>,
+    },
+    /// Emitted when the agent reports context window use. `cost_usd` is the
+    /// cumulative session cost, present only when reported in US dollars.
+    AcpUsage {
+        session_id: String,
+        used: u64,
+        size: u64,
+        cost_usd: Option<f64>,
     },
 
     // gRPC session events
@@ -1871,6 +1897,69 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"acpToolInvoked","session_id":"sess-1","tool":"run_request","summary":"Ran GET /users"}"#
+        );
+    }
+
+    #[test]
+    fn acp_tool_activity_wire_shape() {
+        let event = DomainEvent::AcpToolActivity {
+            session_id: "sess-1".into(),
+            call_id: "call-1".into(),
+            title: "Read file".into(),
+            status: "in_progress".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpToolActivity","session_id":"sess-1","call_id":"call-1","title":"Read file","status":"in_progress"}"#
+        );
+    }
+
+    #[test]
+    fn acp_config_options_changed_wire_shape() {
+        use crate::acp::ConfigChoice;
+        let event = DomainEvent::AcpConfigOptionsChanged {
+            session_id: "sess-1".into(),
+            options: vec![ConfigOption {
+                id: "model".into(),
+                name: "Model".into(),
+                category: Some("model".into()),
+                current_value: "opus".into(),
+                choices: vec![ConfigChoice {
+                    value: "opus".into(),
+                    name: "Opus".into(),
+                    description: None,
+                }],
+            }],
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpConfigOptionsChanged","session_id":"sess-1","options":[{"id":"model","name":"Model","category":"model","current_value":"opus","choices":[{"value":"opus","name":"Opus","description":null}]}]}"#
+        );
+    }
+
+    #[test]
+    fn acp_usage_wire_shape_with_and_without_cost() {
+        let with_cost = DomainEvent::AcpUsage {
+            session_id: "sess-1".into(),
+            used: 53_000,
+            size: 200_000,
+            cost_usd: Some(0.045),
+        };
+        assert_eq!(
+            serde_json::to_string(&with_cost).expect("serialize"),
+            r#"{"type":"acpUsage","session_id":"sess-1","used":53000,"size":200000,"cost_usd":0.045}"#
+        );
+        let without_cost = DomainEvent::AcpUsage {
+            session_id: "sess-1".into(),
+            used: 1,
+            size: 2,
+            cost_usd: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&without_cost).expect("serialize"),
+            r#"{"type":"acpUsage","session_id":"sess-1","used":1,"size":2,"cost_usd":null}"#
         );
     }
 }

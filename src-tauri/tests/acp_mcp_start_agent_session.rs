@@ -283,7 +283,8 @@ async fn autonomy_enabled_session_spawns_and_registers_the_mcp_server_under_the_
         &acp_session_svc,
     )
     .await
-    .expect("start_agent_session_inner should succeed");
+    .expect("start_agent_session_inner should succeed")
+    .session_id;
 
     assert_eq!(session_id, "acp-real-session-1");
 
@@ -326,7 +327,8 @@ async fn autonomy_disabled_session_spawns_no_mcp_server() {
         &acp_session_svc,
     )
     .await
-    .expect("start_agent_session_inner should succeed");
+    .expect("start_agent_session_inner should succeed")
+    .session_id;
 
     assert_eq!(session_id, "acp-real-session-2");
     assert!(
