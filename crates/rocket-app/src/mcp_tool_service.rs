@@ -336,8 +336,10 @@ impl McpToolService {
         embedded_context: bool,
     ) {
         self.open_session(session_id, mode);
+        // Built without a tool event: the agent has not called the tool.
         let text = self
-            .get_workspace_outline(session_id, None, None)
+            .build_workspace_outline(None, None)
+            .map(|(text, _)| text)
             .unwrap_or_else(|_| OUTLINE_UNAVAILABLE.to_string());
         self.pending_outlines
             .lock()
@@ -402,6 +404,22 @@ impl McpToolService {
         collection: Option<&str>,
         folder: Option<&str>,
     ) -> DomainResult<String> {
+        let (text, count) = self.build_workspace_outline(collection, folder)?;
+        self.publish_tool_invoked(
+            session_id,
+            "get_workspace_outline",
+            format!("read the outline of {count} collection(s)"),
+        );
+        Ok(text)
+    }
+
+    /// Renders the outline and returns it with the number of collections.
+    /// Publishes no event.
+    fn build_workspace_outline(
+        &self,
+        collection: Option<&str>,
+        folder: Option<&str>,
+    ) -> DomainResult<(String, usize)> {
         let folder = match folder {
             Some(raw) => normalize_folder(raw)?,
             None => None,
@@ -428,13 +446,7 @@ impl McpToolService {
             .into_iter()
             .map(|name| self.outline_collection(name, folder.as_deref()))
             .collect();
-        let text = render_outline(&collections);
-        self.publish_tool_invoked(
-            session_id,
-            "get_workspace_outline",
-            format!("read the outline of {} collection(s)", collections.len()),
-        );
-        Ok(text)
+        Ok((render_outline(&collections), collections.len()))
     }
 
     /// One collection's outline section. A collection whose tree cannot be
