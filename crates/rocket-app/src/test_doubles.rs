@@ -280,6 +280,7 @@ pub struct ConfigurableCollectionRepo {
     requests: Mutex<HashMap<(String, String), CollectionRequest>>,
     summaries: Mutex<HashMap<String, Collection>>,
     saved_scripts: Mutex<Vec<(String, String, RequestScriptPhase, String)>>,
+    folder_settings: Mutex<HashMap<(String, String), rocket_collection::FolderSettings>>,
 }
 
 impl ConfigurableCollectionRepo {
@@ -325,6 +326,18 @@ impl ConfigurableCollectionRepo {
             .settings_error_for
             .lock()
             .expect("lock settings_error_for") = Some(collection.to_string());
+    }
+
+    pub fn with_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+        settings: rocket_collection::FolderSettings,
+    ) {
+        self.folder_settings
+            .lock()
+            .expect("lock folder_settings")
+            .insert((collection.to_string(), folder_path.to_string()), settings);
     }
 
     pub fn with_request(&self, collection: &str, path: &str, request: CollectionRequest) {
@@ -450,6 +463,18 @@ impl CollectionRepository for ConfigurableCollectionRepo {
     }
     fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
         Ok(self.request_vars.lock().expect("lock request_vars").clone())
+    }
+    fn get_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<rocket_collection::FolderSettings> {
+        self.folder_settings
+            .lock()
+            .expect("lock folder_settings")
+            .get(&(collection.to_string(), folder_path.to_string()))
+            .cloned()
+            .ok_or_else(|| DomainError::NotFound(folder_path.to_string()))
     }
     fn save_request_variables(
         &self,

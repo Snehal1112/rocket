@@ -20,14 +20,27 @@ use crate::mcp_read_views::{
     MaskedEnvironment, MaskedFolderSettings, MaskedRequest, MaskedSettings,
 };
 
+/// Whether `path` is absolute, has a drive prefix or leaves its base directory. Backslashes are
+/// treated as separators, so a Windows-style path is refused on every platform.
+pub(super) fn is_unsafe_relative_path(path: &str) -> bool {
+    use std::path::{Component, Path};
+    let normalized = path.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    let drive_prefix = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    path.is_empty()
+        || path.contains('\0')
+        || drive_prefix
+        || Path::new(&normalized).components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir
+            )
+        })
+}
+
 /// Rejects a path that is absolute or leaves the collection.
 fn check_relative_path(path: &str) -> DomainResult<()> {
-    let bad = path.is_empty()
-        || path.contains('\0')
-        || path.starts_with('/')
-        || path.starts_with('\\')
-        || path.split(['/', '\\']).any(|segment| segment == "..");
-    if bad {
+    if is_unsafe_relative_path(path) {
         Err(DomainError::InvalidInput("invalid path".to_string()))
     } else {
         Ok(())
@@ -55,7 +68,7 @@ impl McpToolService {
                     &MaskedSettings::from_settings(&settings),
                     settings.docs.as_deref(),
                 );
-                (text, self.chip_secrets(collection, None, None))
+                (text, self.chip_secrets(collection, None, &[]))
             }
             ChipKind::Folder => {
                 let path = path.ok_or_else(|| DomainError::InvalidInput("missing path".into()))?;
@@ -66,7 +79,7 @@ impl McpToolService {
                     path,
                     &MaskedFolderSettings::from_settings(&settings),
                 );
-                (text, self.chip_secrets(collection, None, None))
+                (text, self.chip_secrets(collection, None, &[]))
             }
             ChipKind::Environment => {
                 let name = path.ok_or_else(|| DomainError::InvalidInput("missing path".into()))?;
@@ -77,7 +90,7 @@ impl McpToolService {
                     .get(name)?;
                 let text =
                     render_environment(collection, &MaskedEnvironment::from_environment(&env));
-                (text, self.chip_secrets(collection, None, None))
+                (text, self.chip_secrets(collection, None, &[]))
             }
             ChipKind::Request => {
                 let path = path.ok_or_else(|| DomainError::InvalidInput("missing path".into()))?;
@@ -89,10 +102,7 @@ impl McpToolService {
                     &MaskedRequest::from_request(path, &request),
                     docs,
                 );
-                (
-                    text,
-                    self.chip_secrets(collection, Some(path), Some(&request)),
-                )
+                (text, self.chip_secrets(collection, Some(path), &[&request]))
             }
         };
         // The views mask by name and shape. This pass also covers a known secret that sits in
@@ -109,22 +119,47 @@ impl McpToolService {
     /// The status line, headers, URL and test errors are masked by name and shape. Then every
     /// secret that applies to the request is masked over the whole text: secret variables of
     /// the global environment, the collection, the folders, the request and every environment
-    /// of the collection, plus the request's literal credentials and the `Basic` header values
-    /// built from them. This is the masking `run_request` applies to a response body.
-    /// Secrets that only RocketVault holds are not known here.
-    pub fn mask_response_chip(
+    /// of the collection, the RocketVault secrets of `environment_name` (best effort), and the
+    /// literal credentials of both the saved request and the tab's request, plus the `Basic`
+    /// header values built from them. This is the masking `run_request` applies to a response.
+    /// Values that only exist at run time in the frontend, such as a script's `setVar`, are
+    /// not known here.
+    pub async fn mask_response_chip(
         &self,
         collection: &str,
         request_path: &str,
+        environment_name: Option<&str>,
         input: &ResponseChipInput,
     ) -> DomainResult<ChipResource> {
         self.check_collection_listed(collection)?;
         check_relative_path(request_path)?;
-        let request = self.read_request(collection, request_path).ok();
-        let title = request
+        if let Some(name) = environment_name {
+            Self::validate_environment_name(name)?;
+        }
+        let saved = self.read_request(collection, request_path).ok();
+        let title = saved
             .as_ref()
             .map_or_else(|| request_path.to_string(), |r| r.name.clone());
-        let secrets = self.chip_secrets(collection, Some(request_path), request.as_ref());
+        // The request as the tab shows it, which may hold unsaved credentials.
+        let on_screen = input.request.as_ref().map(|tab| {
+            let mut request = Request::new("", HttpMethod::Get, input.url.as_str());
+            request.headers = tab.headers.clone();
+            request.query_params = tab.query_params.clone();
+            request.body = tab.body.clone();
+            request.auth = tab.auth.clone();
+            request
+        });
+        let requests: Vec<&Request> = saved.iter().chain(on_screen.iter()).collect();
+        let mut secrets = self.chip_secrets(collection, Some(request_path), &requests);
+        // Vault values are fetched on demand, so a slow vault must not stall the chip.
+        let vault = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.execution_svc
+                .external_secret_values(collection, environment_name),
+        )
+        .await
+        .unwrap_or_default();
+        secrets.extend(vault);
         let text = mask_secret_text(&render_response(&title, input), &secrets);
         Ok(ChipResource {
             uri: chip_uri("last-response", collection, Some(request_path)),
@@ -138,7 +173,7 @@ impl McpToolService {
         &self,
         collection: &str,
         request_path: Option<&str>,
-        request: Option<&Request>,
+        requests: &[&Request],
     ) -> HashSet<String> {
         let workspace_path = self
             .active_workspace_path
@@ -171,32 +206,33 @@ impl McpToolService {
             );
         }
         let mut secrets = variable_secrets.clone();
-        let fallback;
-        let request = match (request, request_path) {
-            (Some(request), _) => Some(request),
-            (None, Some(_)) => {
-                fallback = Request::new("", HttpMethod::Get, "");
-                Some(&fallback)
-            }
-            (None, None) => None,
-        };
-        if let (Some(request), Some(path)) = (request, request_path) {
+        if let Some(path) = request_path {
             let settings = self.collection_repo.get_settings(collection).ok();
             let folders = self
                 .collection_repo
                 .get_folder_chain_settings(collection, path)
                 .unwrap_or_default();
-            secrets.extend(literal_credential_values(
-                request,
-                settings.as_ref(),
-                &folders,
-            ));
-            secrets.extend(basic_header_values_from_secrets(
-                request,
-                settings.as_ref(),
-                &folders,
-                &variable_secrets,
-            ));
+            // The collection's and folders' own credentials count even with no request.
+            let placeholder;
+            let requests: &[&Request] = if requests.is_empty() {
+                placeholder = Request::new("", HttpMethod::Get, "");
+                &[&placeholder]
+            } else {
+                requests
+            };
+            for request in requests {
+                secrets.extend(literal_credential_values(
+                    request,
+                    settings.as_ref(),
+                    &folders,
+                ));
+                secrets.extend(basic_header_values_from_secrets(
+                    request,
+                    settings.as_ref(),
+                    &folders,
+                    &variable_secrets,
+                ));
+            }
         }
         secrets
     }

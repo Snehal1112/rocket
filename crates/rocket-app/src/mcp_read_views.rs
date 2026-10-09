@@ -411,10 +411,16 @@ pub(crate) fn mask_body(body: &Body) -> MaskedBody {
     }
 }
 
+/// The value to show for a variable: none for a secret, and masked for a plain variable whose
+/// name holds a credential (`API_KEY=sk_live_...`), like any other credential-named field.
+fn visible_variable_value(key: &str, value: &str, secret: bool) -> Option<String> {
+    (!secret).then(|| mask_named_value(key, value))
+}
+
 pub(crate) fn mask_collection_variable(variable: &CollectionVariable) -> MaskedVariable {
     MaskedVariable {
         key: variable.key.clone(),
-        value: (!variable.secret).then(|| variable.value.clone()),
+        value: visible_variable_value(&variable.key, &variable.value, variable.secret),
         enabled: variable.enabled,
         secret: variable.secret,
     }
@@ -423,7 +429,7 @@ pub(crate) fn mask_collection_variable(variable: &CollectionVariable) -> MaskedV
 fn mask_env_variable(variable: &Variable) -> MaskedVariable {
     MaskedVariable {
         key: variable.key.clone(),
-        value: (!variable.secret).then(|| variable.value.clone()),
+        value: visible_variable_value(&variable.key, &variable.value, variable.secret),
         enabled: variable.enabled,
         secret: variable.secret,
     }
@@ -1097,6 +1103,46 @@ mod tests {
         let json = serde_json::to_string(&masked).expect("serialize");
         assert!(!json.contains("cs-live-999"));
         assert!(!json.contains("cs-initial-999"));
+    }
+
+    #[test]
+    fn a_plain_variable_with_a_credential_name_is_masked_like_a_secret() {
+        let plain = |key: &str, value: &str| CollectionVariable {
+            key: key.into(),
+            value: value.into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        };
+        assert_eq!(
+            mask_collection_variable(&plain("API_KEY", "sk_live_abc123")).value,
+            Some(REDACTED.to_string())
+        );
+        assert_eq!(
+            mask_collection_variable(&plain("client%5Fsecret", "abc123")).value,
+            Some(REDACTED.to_string())
+        );
+        // References, empty values and ordinary names stay readable.
+        assert_eq!(
+            mask_collection_variable(&plain("API_KEY", "{{vault.key}}")).value,
+            Some("{{vault.key}}".to_string())
+        );
+        assert_eq!(
+            mask_collection_variable(&plain("API_KEY", "")).value,
+            Some(String::new())
+        );
+        assert_eq!(
+            mask_collection_variable(&plain("HOST", "api.example.com")).value,
+            Some("api.example.com".to_string())
+        );
+
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("HOST", "api.example.com"));
+        env.set_variable(Variable::new("AccessToken", "tok-live-777"));
+        let view = MaskedEnvironment::from_environment(&env);
+        let json = serde_json::to_string(&view).expect("serialize");
+        assert!(!json.contains("tok-live-777"));
+        assert!(json.contains("api.example.com"));
     }
 
     #[test]

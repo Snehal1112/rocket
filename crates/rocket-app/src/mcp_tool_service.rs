@@ -239,9 +239,7 @@ impl McpToolService {
             || name.starts_with('/')
             || name.starts_with('\\')
             || name.starts_with('.')
-            || std::path::Path::new(name)
-                .components()
-                .any(|c| c == std::path::Component::ParentDir)
+            || chips::is_unsafe_relative_path(name)
         {
             return Err(DomainError::InvalidInput(
                 "invalid environment name".to_string(),
@@ -2260,11 +2258,12 @@ mod tests {
                 passed: false,
                 error: Some("expected env-secret-value-77".into()),
             }],
+            request: None,
         }
     }
 
-    #[test]
-    fn response_chip_masks_credentials_whatever_field_they_sit_in() {
+    #[tokio::test]
+    async fn response_chip_masks_credentials_whatever_field_they_sit_in() {
         use base64::Engine;
         let (svc, _repo) = chip_service();
         let basic = base64::engine::general_purpose::STANDARD.encode("alice:basic-pass-9999");
@@ -2272,7 +2271,8 @@ mod tests {
             r#"{{"echo":"echo-literal-key-1","vendor":"env-secret-value-77","auth":"Basic {basic}","plain":"keep-me"}}"#
         );
         let chip = svc
-            .mask_response_chip("my-api", "echo.yml", &echo_response(&body))
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response(&body))
+            .await
             .expect("chip");
 
         assert_eq!(chip.uri, "rocket://last-response/my-api/echo.yml");
@@ -2292,11 +2292,12 @@ mod tests {
         assert!(chip.text.contains("failed: vendor"));
     }
 
-    #[test]
-    fn response_chip_text_is_capped_with_a_marker() {
+    #[tokio::test]
+    async fn response_chip_text_is_capped_with_a_marker() {
         let (svc, _repo) = chip_service();
         let chip = svc
-            .mask_response_chip("my-api", "echo.yml", &echo_response(&"é".repeat(20_000)))
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response(&"é".repeat(20_000)))
+            .await
             .expect("chip");
         assert!(chip.text.len() <= crate::assistant_chip_text::CHIP_TEXT_LIMIT_BYTES);
         assert!(chip.text.contains("[truncated:"));
@@ -2342,8 +2343,8 @@ mod tests {
         assert!(!chip.text.contains("env-secret-value-77"));
     }
 
-    #[test]
-    fn chips_refuse_a_collection_outside_the_workspace_and_bad_paths() {
+    #[tokio::test]
+    async fn chips_refuse_a_collection_outside_the_workspace_and_bad_paths() {
         let (svc, _repo) = chip_service();
         assert!(matches!(
             svc.build_chip_resource(ChipKind::Collection, "other-api", None),
@@ -2353,7 +2354,126 @@ mod tests {
             .build_chip_resource(ChipKind::Request, "my-api", Some("../x.yml"))
             .is_err());
         assert!(svc
-            .mask_response_chip("other-api", "echo.yml", &echo_response(""))
+            .mask_response_chip("other-api", "echo.yml", None, &echo_response(""))
+            .await
             .is_err());
+        for bad in ["C:\\secrets.yml", "c:/x.yml", "..\\x.yml", "/etc/passwd"] {
+            assert!(
+                svc.build_chip_resource(ChipKind::Request, "my-api", Some(bad)).is_err(),
+                "{bad} must be refused"
+            );
+        }
+        assert!(svc
+            .build_chip_resource(ChipKind::Environment, "my-api", Some("C:\\dev"))
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn response_chip_masks_a_credential_that_only_the_tab_holds() {
+        use rocket_shared::types::QueryParam;
+        let (svc, _repo) = chip_service();
+        let mut input = echo_response(
+            r#"{"headers":{"Authorization":"Bearer unsaved-bearer-5555"},"q":"unsaved-query-secret"}"#,
+        );
+        input.request = Some(crate::assistant_chip_text::ResponseChipRequest {
+            headers: vec![Header::new("Authorization", "Bearer unsaved-bearer-5555")],
+            query_params: vec![QueryParam {
+                key: "token".into(),
+                value: "unsaved-query-secret".into(),
+                enabled: true,
+                description: None,
+            }],
+            body: None,
+            auth: Auth::None,
+        });
+        let chip = svc
+            .mask_response_chip("my-api", "echo.yml", Some("dev"), &input)
+            .await
+            .expect("chip");
+        assert!(!chip.text.contains("unsaved-bearer-5555"), "{}", chip.text);
+        assert!(!chip.text.contains("unsaved-query-secret"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_fences_the_body_and_closes_it_when_capped() {
+        let (svc, _repo) = chip_service();
+        let body = format!("```\n{}", "line\n".repeat(5_000));
+        let chip = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response(&body))
+            .await
+            .expect("chip");
+        assert!(chip.text.contains("Body:\n````"));
+        assert!(chip.text.len() <= crate::assistant_chip_text::CHIP_TEXT_LIMIT_BYTES);
+        let marker = chip.text.find("\n[truncated:").expect("marker");
+        assert!(chip.text[..marker].ends_with("\n````"), "{}", &chip.text[marker - 20..]);
+    }
+
+    #[test]
+    fn collection_chip_masks_credential_named_variables_and_auth() {
+        let (svc, repo) = chip_service();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                auth: Some(Auth::Bearer {
+                    token: "coll-bearer-9999".into(),
+                }),
+                headers: vec![Header::new("Ocp-Apim-Subscription-Key", "coll-sub-key-1")],
+                variables: vec![
+                    CollectionVariable {
+                        key: "API_KEY".into(),
+                        value: "sk_live_coll_777".into(),
+                        initial_value: String::new(),
+                        enabled: true,
+                        secret: false,
+                    },
+                    CollectionVariable {
+                        key: "HOST".into(),
+                        value: "api.example.com".into(),
+                        initial_value: String::new(),
+                        enabled: true,
+                        secret: false,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        let chip = svc
+            .build_chip_resource(ChipKind::Collection, "my-api", None)
+            .expect("chip");
+        for leaked in ["coll-bearer-9999", "coll-sub-key-1", "sk_live_coll_777"] {
+            assert!(!chip.text.contains(leaked), "{leaked} leaked: {}", chip.text);
+        }
+        assert!(chip.text.contains("Collection: my-api"));
+        assert!(chip.text.contains("Auth: bearer"));
+        assert!(chip.text.contains("HOST: api.example.com"));
+    }
+
+    #[test]
+    fn folder_chip_masks_headers_variables_and_scripts_stay_readable() {
+        let (svc, repo) = chip_service();
+        repo.with_folder_settings(
+            "my-api",
+            "orders",
+            rocket_collection::FolderSettings {
+                headers: vec![Header::new("X-Signature", "folder-sig-4242")],
+                variables: vec![CollectionVariable {
+                    key: "clientSecret".into(),
+                    value: "folder-secret-8888".into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: false,
+                }],
+                tests_script: Some("rok.test('ok', () => {});".into()),
+                ..Default::default()
+            },
+        );
+        let chip = svc
+            .build_chip_resource(ChipKind::Folder, "my-api", Some("orders"))
+            .expect("chip");
+        assert_eq!(chip.uri, "rocket://folder/my-api/orders");
+        assert!(!chip.text.contains("folder-sig-4242"), "{}", chip.text);
+        assert!(!chip.text.contains("folder-secret-8888"), "{}", chip.text);
+        assert!(chip.text.contains("rok.test('ok'"));
+        assert!(chip.text.contains("Folder: orders"));
     }
 }

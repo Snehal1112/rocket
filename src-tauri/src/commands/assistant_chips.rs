@@ -6,9 +6,11 @@
 use std::sync::Arc;
 
 use rocket_app::{
-    ChipKind, McpToolService, ResponseChipHeader, ResponseChipInput, ResponseChipTest,
+    ChipKind, McpToolService, ResponseChipHeader, ResponseChipInput, ResponseChipRequest,
+    ResponseChipTest,
 };
 use rocket_shared::error::DomainError;
+use rocket_shared::types::{Auth, Body, Header, QueryParam};
 use serde::Deserialize;
 use tauri::State;
 
@@ -49,6 +51,25 @@ pub struct ResponseChipTestDto {
     pub error: Option<String>,
 }
 
+/// The request of the tab that holds the response, as it is on screen.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseChipRequestDto {
+    pub headers: Vec<Header>,
+    pub query_params: Vec<QueryParam>,
+    pub body: Option<Body>,
+    pub auth: Auth,
+}
+
+/// A JavaScript number can arrive as a float, so the counters are read as `f64`.
+fn counter(value: f64) -> u64 {
+    if value.is_finite() && value > 0.0 {
+        value as u64
+    } else {
+        0
+    }
+}
+
 /// The last response of a request tab, as the frontend holds it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,12 +78,13 @@ pub struct ResponseChipDto {
     pub url: String,
     pub status: u16,
     pub status_text: String,
-    pub duration_ms: u64,
-    pub size_bytes: u64,
+    pub duration_ms: f64,
+    pub size_bytes: f64,
     pub headers: Vec<ResponseChipHeaderDto>,
     pub body: String,
     pub is_binary: bool,
     pub tests: Vec<ResponseChipTestDto>,
+    pub request: Option<ResponseChipRequestDto>,
 }
 
 impl From<ResponseChipDto> for ResponseChipInput {
@@ -72,8 +94,8 @@ impl From<ResponseChipDto> for ResponseChipInput {
             url: dto.url,
             status: dto.status,
             status_text: dto.status_text,
-            duration_ms: dto.duration_ms,
-            size_bytes: dto.size_bytes,
+            duration_ms: counter(dto.duration_ms),
+            size_bytes: counter(dto.size_bytes),
             headers: dto
                 .headers
                 .into_iter()
@@ -93,6 +115,12 @@ impl From<ResponseChipDto> for ResponseChipInput {
                     error: t.error,
                 })
                 .collect(),
+            request: dto.request.map(|r| ResponseChipRequest {
+                headers: r.headers,
+                query_params: r.query_params,
+                body: r.body,
+                auth: r.auth,
+            }),
         }
     }
 }
@@ -120,14 +148,22 @@ pub fn build_assistant_chip_resource(
 }
 
 /// Masks the last response of a request tab and returns it as a text resource.
+/// `environment_name` is the tab's active environment, whose vault secrets are masked too.
 #[tauri::command]
-pub fn mask_assistant_response(
+pub async fn mask_assistant_response(
     collection: String,
     request_path: String,
+    environment_name: Option<String>,
     response: ResponseChipDto,
     mcp_tool_svc: State<'_, Arc<McpToolService>>,
 ) -> Result<PromptResourceDto, DomainError> {
     mcp_tool_svc
-        .mask_response_chip(&collection, &request_path, &response.into())
+        .mask_response_chip(
+            &collection,
+            &request_path,
+            environment_name.as_deref(),
+            &response.into(),
+        )
+        .await
         .map(resource)
 }

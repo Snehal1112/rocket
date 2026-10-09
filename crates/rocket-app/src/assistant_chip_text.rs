@@ -5,6 +5,7 @@
 //! the whole text with the known secret values and then caps it with `cap_text`.
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use rocket_shared::types::{Auth, Body, Header, QueryParam};
 use serde_json::Value;
 
 use crate::mcp_read_views::{
@@ -58,9 +59,19 @@ pub struct ResponseChipTest {
     pub error: Option<String>,
 }
 
+/// The request of the tab that holds the response, as it is on screen. It can differ from the
+/// saved request, so its literal credentials are masked too.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponseChipRequest {
+    pub headers: Vec<Header>,
+    pub query_params: Vec<QueryParam>,
+    pub body: Option<Body>,
+    pub auth: Auth,
+}
+
 /// The last response of a request tab. The data lives in the frontend, so it is passed in and
 /// masked by `McpToolService::mask_response_chip`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResponseChipInput {
     pub method: String,
     pub url: String,
@@ -72,6 +83,8 @@ pub struct ResponseChipInput {
     pub body: String,
     pub is_binary: bool,
     pub tests: Vec<ResponseChipTest>,
+    /// The tab's request, when it is known.
+    pub request: Option<ResponseChipRequest>,
 }
 
 // The characters `encodeURIComponent` leaves alone.
@@ -101,15 +114,40 @@ pub(crate) fn chip_uri(kind: &str, collection: &str, path: Option<&str>) -> Stri
     out
 }
 
-/// Cuts `text` to `limit` UTF-8 bytes, marker included, on a character boundary.
+/// The fence still open at the end of `text`, if a code block was cut short.
+fn open_fence(text: &str) -> Option<String> {
+    let mut open: Option<String> = None;
+    for line in text.lines() {
+        let ticks = line.chars().take_while(|c| *c == '`').count();
+        match &open {
+            None if ticks >= 3 => open = Some("`".repeat(ticks)),
+            Some(fence) if ticks >= fence.len() && line.trim_end().len() == ticks => open = None,
+            _ => {}
+        }
+    }
+    open
+}
+
+/// Cuts `text` to `limit` UTF-8 bytes, marker included, on a character boundary. A code block
+/// that the cut leaves open is closed before the marker.
 pub(crate) fn cap_text(text: &str, limit: usize) -> String {
     if text.len() <= limit {
         return text.to_string();
     }
     let marker = format!("\n[truncated: {} bytes cut to {limit}]", text.len());
-    let keep = limit.saturating_sub(marker.len());
+    // Room for the newline and a closing fence, which is never longer than a run in the text.
+    let longest_run = text
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0)
+        .max(3);
+    let keep = limit.saturating_sub(marker.len() + longest_run + 1);
     let (head, _) = truncate_utf8(text, keep);
-    format!("{head}{marker}")
+    match open_fence(&head) {
+        Some(fence) => format!("{head}\n{fence}{marker}"),
+        None => format!("{head}{marker}"),
+    }
 }
 
 /// A code fence longer than any run of backticks in `content`, so the content cannot close it.
@@ -222,10 +260,7 @@ pub(crate) fn render_request(collection: &str, view: &MaskedRequest, docs: Optio
                 } else {
                     form.join("\n")
                 };
-                if !text.is_empty() {
-                    lines.push(format!("Body ({mode}):"));
-                    lines.push(text);
-                }
+                lines.extend(code_section(&format!("Body ({mode})"), Some(&text), ""));
             }
         }
     }
@@ -299,10 +334,47 @@ pub(crate) fn render_environment(collection: &str, view: &MaskedEnvironment) -> 
 }
 
 /// Header names whose value is a URL that can carry a credential.
-const URL_HEADERS: &[&str] = &["location", "content-location", "referer", "refresh", "link"];
+const URL_HEADERS: &[&str] = &["location", "content-location", "referer", "refresh"];
+
+/// Masks each entry of a `Link` header (`<url>; rel="next", <url>; rel="last"`) on its own.
+/// Commas inside `<...>` do not split entries.
+fn mask_link_header(value: &str) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_url = false;
+    for ch in value.chars() {
+        match ch {
+            '<' => in_url = true,
+            '>' => in_url = false,
+            ',' if !in_url => {
+                entries.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+    }
+    entries.push(current);
+    entries
+        .iter()
+        .map(|entry| match (entry.find('<'), entry.find('>')) {
+            (Some(start), Some(end)) if start < end => format!(
+                "{}<{}>{}",
+                &entry[..start],
+                mask_url(&entry[start + 1..end]),
+                &entry[end + 1..]
+            ),
+            _ => mask_url(entry),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
 
 fn mask_response_header(header: &ResponseChipHeader) -> MaskedPair {
-    let value = if URL_HEADERS.contains(&header.key.to_ascii_lowercase().as_str()) {
+    let name = header.key.to_ascii_lowercase();
+    let value = if name == "link" {
+        mask_link_header(&header.value)
+    } else if URL_HEADERS.contains(&name.as_str()) {
         mask_url(&header.value)
     } else {
         mask_named_value(&header.key, &header.value)
@@ -342,11 +414,10 @@ pub(crate) fn render_response(title: &str, input: &ResponseChipInput) -> String 
             }
         }
     }
-    lines.push("Body:".to_string());
     if input.is_binary {
-        lines.push("(binary body, not shared)".to_string());
+        lines.push("Body: (binary body, not shared)".to_string());
     } else {
-        lines.push(input.body.clone());
+        lines.extend(code_section("Body", Some(&input.body), ""));
     }
     lines.join("\n")
 }
@@ -387,5 +458,29 @@ mod tests {
         assert_eq!(lines[1], "````javascript");
         assert_eq!(lines[2], "x\n```\ninjected");
         assert_eq!(lines[3], "````");
+    }
+
+    #[test]
+    fn cap_text_closes_a_fence_it_leaves_open() {
+        let text = format!(
+            "head\n{}",
+            code_section("Body", Some(&"x\n".repeat(6_000)), "").join("\n")
+        );
+        let capped = cap_text(&text, 1_000);
+        assert!(capped.len() <= 1_000);
+        assert!(capped.contains("\n```\n[truncated:"), "{capped}");
+        assert_eq!(open_fence(&capped), None);
+    }
+
+    #[test]
+    fn link_headers_are_masked_entry_by_entry() {
+        let masked = mask_link_header(
+            "<https://a.test/p?page=2&access_token=tok-1>; rel=\"next\", <https://b.test/x?a=1,2&sig=s-2>; rel=\"last\"",
+        );
+        assert!(!masked.contains("tok-1"));
+        assert!(!masked.contains("s-2"));
+        assert!(masked.contains("rel=\"next\""));
+        assert!(masked.contains("rel=\"last\""));
+        assert!(masked.contains("page=2"));
     }
 }

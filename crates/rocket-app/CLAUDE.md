@@ -199,3 +199,11 @@ until F-21 and F-22 add a context built from the collection. `save` and the
 run path do not call it, so lints never block either. The `lint_flow` IPC
 command is plan P21. `lint` runs `validate` first, which is super-linear on very
 large flows (about 3.5 s at 20k If nodes), so it is fine at drawn sizes.
+
+## Assistant chips (`McpToolService::build_chip_resource`, `mask_response_chip`)
+
+The composer's context chips are built here, never in the frontend. The text comes from the same masked views as the MCP read tools (`assistant_chip_text.rs` lays it out), gets a last pass with the known secret values, and is capped at 8 KB with any open code fence closed before the marker. Plain variables with a credential-like name are masked in the views themselves.
+
+A response chip masks the tab's status line, URL, headers (`Link` entry by entry), test errors and body with: secret variables of every scope and environment of the collection, the RocketVault secrets of the tab's environment (best effort, 5 s limit), and the literal credentials of the saved request and of the tab's request.
+
+Values that exist only at run time in the frontend are not known to the backend, so they are not masked: a script's `setVar` or `setEnvVar` results, and OAuth tokens that the tab does not send as its auth. A secret that is not held in a variable, a literal credential or the vault, and is echoed under a neutral field, cannot be recognised either.

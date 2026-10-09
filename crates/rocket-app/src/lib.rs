@@ -84,7 +84,8 @@ pub use flow_execution_service::{
     RunFlowInput,
 };
 pub use assistant_chip_text::{
-    ChipKind, ChipResource, ResponseChipHeader, ResponseChipInput, ResponseChipTest,
+    ChipKind, ChipResource, ResponseChipHeader, ResponseChipInput, ResponseChipRequest,
+    ResponseChipTest,
     CHIP_TEXT_LIMIT_BYTES,
 };
 pub use flow_partial::PartialRun;
