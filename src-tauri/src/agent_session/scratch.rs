@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use rocket_app::SessionIsolation;
 use rocket_shared::error::DomainError;
 
-
-/// The directory under the system temp dir that holds every session's scratch.
+/// The directory name that holds every session's scratch, inside a per-user
+/// location (see `scratch_parent`).
 pub const SCRATCH_PARENT_DIR: &str = "rocket-agent-sessions";
 
 /// One session's private scratch: `<root>/cwd` is the agent's working
@@ -18,14 +18,14 @@ pub struct SessionScratch {
 }
 
 impl SessionScratch {
-    /// Creates a scratch under the system temp dir.
+    /// Creates a scratch under the per-user scratch parent.
     pub fn create() -> std::io::Result<Self> {
-        Self::create_in(&std::env::temp_dir().join(SCRATCH_PARENT_DIR))
+        Self::create_in(&scratch_parent())
     }
 
     /// Creates a scratch under `parent`, which is created when missing.
     pub fn create_in(parent: &Path) -> std::io::Result<Self> {
-        std::fs::create_dir_all(parent)?;
+        ensure_private_parent(parent)?;
         let root = parent.join(uuid::Uuid::new_v4().to_string());
         create_private_dir(&root)?;
         // From here on, an early return drops `scratch` and removes the root.
@@ -66,6 +66,75 @@ impl Drop for SessionScratch {
         // API key reaches the agent through its environment only.
         let _ = std::fs::remove_dir_all(&self.root);
     }
+}
+
+/// Picks a per-user parent: the runtime dir when set, else the Rocket data
+/// dir, else the system temp dir. Every choice is verified on use.
+fn scratch_parent() -> PathBuf {
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
+        return PathBuf::from(runtime).join(SCRATCH_PARENT_DIR);
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".rocket-api").join(SCRATCH_PARENT_DIR);
+    }
+    std::env::temp_dir().join(SCRATCH_PARENT_DIR)
+}
+
+/// Creates `parent` with mode 0700 when missing. On Unix an existing parent
+/// must be a real directory (not a symlink), owned by the current user, with
+/// no group or other access. Anything else is refused.
+fn ensure_private_parent(parent: &Path) -> std::io::Result<()> {
+    if let Some(grandparent) = parent.parent() {
+        std::fs::create_dir_all(grandparent)?;
+    }
+    match create_private_dir(parent) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    verify_private_parent(parent)
+}
+
+#[cfg(unix)]
+fn verify_private_parent(parent: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let refuse = |why: &str| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("unsafe agent scratch parent {}: {why}", parent.display()),
+        )
+    };
+    let meta = std::fs::symlink_metadata(parent)?;
+    if !meta.file_type().is_dir() {
+        return Err(refuse("not a real directory"));
+    }
+    if meta.uid() != current_uid()? {
+        return Err(refuse("not owned by the current user"));
+    }
+    if meta.permissions().mode() & 0o077 != 0 {
+        return Err(refuse("group or other access is set"));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn verify_private_parent(_parent: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Reads the current uid from a file this process creates, since the owner of
+/// a new file is the current user.
+#[cfg(unix)]
+fn current_uid() -> std::io::Result<u32> {
+    use std::os::unix::fs::MetadataExt;
+    let probe = std::env::temp_dir().join(format!(".rocket-uid-{}", uuid::Uuid::new_v4()));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)?;
+    let uid = std::fs::metadata(&probe).map(|m| m.uid());
+    let _ = std::fs::remove_file(&probe);
+    uid
 }
 
 fn create_private_dir(path: &Path) -> std::io::Result<()> {
@@ -120,7 +189,8 @@ mod tests {
         let root = scratch.root().to_path_buf();
         std::fs::create_dir_all(scratch.config_dir().join("projects"))
             .expect("agent-written subdir");
-        std::fs::write(scratch.config_dir().join(".claude.json"), "{}").expect("agent-written file");
+        std::fs::write(scratch.config_dir().join(".claude.json"), "{}")
+            .expect("agent-written file");
 
         drop(scratch);
 
@@ -137,6 +207,33 @@ mod tests {
             let mode = std::fs::metadata(dir).expect("metadata").permissions().mode() & 0o777;
             assert_eq!(mode, 0o700, "{} must be 0700", dir.display());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pre_existing_open_parent_is_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = TempDir::new().expect("tempdir");
+        let parent = base.path().join("open-parent");
+        std::fs::create_dir(&parent).expect("create parent");
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777))
+            .expect("chmod parent");
+
+        let err = SessionScratch::create_in(&parent).err().expect("must be rejected");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_parent_is_rejected() {
+        let base = TempDir::new().expect("tempdir");
+        let target = base.path().join("target");
+        std::fs::create_dir(&target).expect("create target");
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        let err = SessionScratch::create_in(&link).err().expect("must be rejected");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]

@@ -6,7 +6,6 @@ use rocket_app::{McpToolService, SessionCleanup};
 use crate::agent_session::scratch::SessionScratch;
 use crate::mcp::registry::McpServerRegistry;
 
-
 /// What one live agent session owns outside `AcpSessionService`, apart from
 /// its MCP server handle, which stays in `McpServerRegistry`.
 pub struct SessionResources {
@@ -51,7 +50,9 @@ impl SessionResourceRegistry {
     /// Drops every entry, which removes every scratch directory. The app-exit
     /// paths call this as a backstop after `end_all_sessions`.
     pub fn clear_all(&self) {
-        let drained = std::mem::take(&mut *self.entries.lock().unwrap_or_else(PoisonError::into_inner));
+        let drained = std::mem::take(
+            &mut *self.entries.lock().unwrap_or_else(PoisonError::into_inner),
+        );
         drop(drained);
     }
 
@@ -159,7 +160,8 @@ mod tests {
                 mcp_session_id: Some("mcp-pre-handshake".to_string()),
             },
         );
-        let (cleanup, forgotten) = recording_cleanup(Arc::clone(&mcp_registry), Arc::clone(&resources));
+        let (cleanup, forgotten) =
+            recording_cleanup(Arc::clone(&mcp_registry), Arc::clone(&resources));
 
         cleanup.on_session_ended("acp-1");
 
