@@ -1,3 +1,4 @@
+pub mod acp_session_dto;
 pub mod acp_sessions;
 pub mod agent_configs;
 pub mod app;

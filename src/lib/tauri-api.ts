@@ -2516,11 +2516,53 @@ export const onFlowRunFinished = (
   listen<FlowRunFinishedEvent>('flow-run-finished', (e) => handler(e.payload));
 
 // ==== AI Assist (ACP chat sessions) ====
-export const startAgentSession = (agentConfigId: string, cwd: string, collection: string) =>
-  invoke<string>('start_agent_session', { agentConfigId, cwd, collection });
 
-export const sendAgentPrompt = (sessionId: string, prompt: string) =>
-  invoke<string>('send_agent_prompt', { sessionId, prompt });
+/** One choice of a session option. */
+export interface ConfigChoice {
+  value: string;
+  name: string;
+  description: string | null;
+}
+
+/** A session option the agent reports, such as the model or the effort level. */
+export interface ConfigOption {
+  id: string;
+  name: string;
+  /** `model`, `thought_level`, `mode`, `model_config`, or another agent value. */
+  category: string | null;
+  currentValue: string;
+  choices: ConfigChoice[];
+}
+
+export interface AgentSessionStarted {
+  sessionId: string;
+  configOptions: ConfigOption[];
+}
+
+/** A text resource sent with a prompt, such as a request definition. */
+export interface PromptResourceDto {
+  uri: string;
+  mimeType: string | null;
+  text: string;
+}
+
+export const startAgentSession = (agentConfigId: string, cwd: string, collection: string) =>
+  invoke<AgentSessionStarted>('start_agent_session', { agentConfigId, cwd, collection });
+
+/** Resolves with the stop reason. A stopped turn resolves with `cancelled`. */
+export const sendAgentPrompt = (
+  sessionId: string,
+  prompt: string,
+  resources?: PromptResourceDto[],
+) => invoke<string>('send_agent_prompt', { sessionId, prompt, resources: resources ?? null });
+
+/** Asks the agent to stop the running turn. The session stays open. */
+export const cancelAgentPrompt = (sessionId: string) =>
+  invoke<void>('cancel_agent_prompt', { sessionId });
+
+/** Changes one session option and resolves with the agent's new option list. */
+export const setAgentConfigOption = (sessionId: string, configId: string, value: string) =>
+  invoke<ConfigOption[]>('set_agent_config_option', { sessionId, configId, value });
 
 export const endAgentSession = (sessionId: string) =>
   invoke<void>('end_agent_session', { sessionId });
@@ -2634,6 +2676,64 @@ export const onAgentSessionFailed = (
   handler: (event: AgentSessionFailedEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<AgentSessionFailedEvent>('agent-session-failed', (e) => handler(e.payload));
+
+export type AgentToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface AgentToolActivityEvent {
+  type: 'acpToolActivity';
+  session_id: string;
+  call_id: string;
+  title: string;
+  status: AgentToolCallStatus;
+}
+
+export const onAgentToolActivity = (
+  handler: (event: AgentToolActivityEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentToolActivityEvent>('agent-session-tool-activity', (e) => handler(e.payload));
+
+/** A config option as the event carries it. Keys are snake_case, like every event field. */
+export interface AgentConfigOptionPayload {
+  id: string;
+  name: string;
+  category: string | null;
+  current_value: string;
+  choices: ConfigChoice[];
+}
+
+export interface AgentConfigOptionsEvent {
+  type: 'acpConfigOptionsChanged';
+  session_id: string;
+  options: AgentConfigOptionPayload[];
+}
+
+export const onAgentConfigOptions = (
+  handler: (event: AgentConfigOptionsEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentConfigOptionsEvent>('agent-session-config-options', (e) => handler(e.payload));
+
+export interface AgentUsageEvent {
+  type: 'acpUsage';
+  session_id: string;
+  used: number;
+  size: number;
+  /** Cumulative session cost in US dollars, or null when not reported in dollars. */
+  cost_usd: number | null;
+}
+
+export const onAgentUsage = (handler: (event: AgentUsageEvent) => void): Promise<UnlistenFn> =>
+  listen<AgentUsageEvent>('agent-session-usage', (e) => handler(e.payload));
+
+/** Converts the event's options to the camelCase shape the commands return. */
+export function configOptionsFromEvent(options: AgentConfigOptionPayload[]): ConfigOption[] {
+  return options.map((option) => ({
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    currentValue: option.current_value,
+    choices: option.choices,
+  }));
+}
 
 // ============================================================
 // Proxy

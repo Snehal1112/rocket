@@ -95,7 +95,7 @@ describe('AgentChatPanel', () => {
   });
 
   it('starting a session calls startAgentSession with the resolved cwd, then begins and activates it', async () => {
-    vi.mocked(tauriApi.startAgentSession).mockResolvedValue('session-1');
+    vi.mocked(tauriApi.startAgentSession).mockResolvedValue({ sessionId: 'session-1', configOptions: [] });
     render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
 
     await userEvent.click(screen.getByRole('combobox'));
@@ -116,7 +116,7 @@ describe('AgentChatPanel', () => {
   });
 
   it('ends the new session when the store refuses to activate it (tab was removed)', async () => {
-    vi.mocked(tauriApi.startAgentSession).mockResolvedValue('session-orphan');
+    vi.mocked(tauriApi.startAgentSession).mockResolvedValue({ sessionId: 'session-orphan', configOptions: [] });
     vi.mocked(tauriApi.endAgentSession).mockResolvedValue(undefined);
     mockActions.activateAgentSession.mockReturnValue(false);
     render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
@@ -131,7 +131,7 @@ describe('AgentChatPanel', () => {
   });
 
   it('does not end the new session when the store activates it', async () => {
-    vi.mocked(tauriApi.startAgentSession).mockResolvedValue('session-1');
+    vi.mocked(tauriApi.startAgentSession).mockResolvedValue({ sessionId: 'session-1', configOptions: [] });
     mockActions.activateAgentSession.mockReturnValue(true);
     render(<AgentChatPanel tabId='tab-1' collectionName='my-collection' onInsertCode={vi.fn()} />);
 

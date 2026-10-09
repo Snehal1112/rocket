@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
-use rocket_acp::{PromptPart, SessionInfo};
+use rocket_acp::SessionInfo;
 use rocket_app::{AcpSessionService, CollectionService, McpHttpServerCredentials, McpToolService};
 use rocket_shared::error::DomainError;
 use tauri::State;
 
+use crate::commands::acp_session_dto::{
+    prompt_parts, AgentSessionStartedDto, ConfigOptionDto, PromptResourceDto,
+};
 use crate::mcp::registry::McpServerRegistry;
 
 #[tauri::command]
@@ -16,7 +19,7 @@ pub async fn start_agent_session(
     collection_svc: State<'_, CollectionService>,
     registry: State<'_, Arc<McpServerRegistry>>,
     svc: State<'_, AcpSessionService>,
-) -> Result<String, DomainError> {
+) -> Result<AgentSessionStartedDto, DomainError> {
     start_agent_session_inner(
         agent_config_id,
         cwd,
@@ -27,7 +30,7 @@ pub async fn start_agent_session(
         &svc,
     )
     .await
-    .map(|info| info.session_id)
+    .map(AgentSessionStartedDto::from)
 }
 
 /// The real orchestration behind `start_agent_session`, generic over
@@ -113,14 +116,42 @@ pub async fn start_agent_session_inner<R: tauri::Runtime>(
     }
 }
 
+/// Sends one prompt turn. `resources` become embedded text resources ahead
+/// of the prompt text. Resolves with the stop reason; a stopped turn
+/// resolves with `cancelled`.
 #[tauri::command]
 pub async fn send_agent_prompt(
     session_id: String,
     prompt: String,
+    resources: Option<Vec<PromptResourceDto>>,
     svc: State<'_, AcpSessionService>,
 ) -> Result<String, DomainError> {
-    svc.send_prompt(&session_id, vec![PromptPart::Text(prompt)])
-        .await
+    let parts = prompt_parts(prompt, resources)?;
+    svc.send_prompt(&session_id, parts).await
+}
+
+/// Asks the agent to stop the running turn. The session stays open.
+#[tauri::command]
+pub async fn cancel_agent_prompt(
+    session_id: String,
+    svc: State<'_, AcpSessionService>,
+) -> Result<(), DomainError> {
+    svc.cancel(&session_id).await
+}
+
+/// Changes one session option, such as the model or the effort level, and
+/// returns the agent's new option list.
+#[tauri::command]
+pub async fn set_agent_config_option(
+    session_id: String,
+    config_id: String,
+    value: String,
+    svc: State<'_, AcpSessionService>,
+) -> Result<Vec<ConfigOptionDto>, DomainError> {
+    let options = svc
+        .set_config_option(&session_id, &config_id, &value)
+        .await?;
+    Ok(options.into_iter().map(ConfigOptionDto::from).collect())
 }
 
 #[tauri::command]

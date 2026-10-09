@@ -6,8 +6,9 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 describe('ACP chat session tauri-api bindings', () => {
-  it('startAgentSession invokes start_agent_session with camelCase args', async () => {
-    vi.mocked(invoke).mockResolvedValue('session-1');
+  it('startAgentSession invokes start_agent_session and returns the session info', async () => {
+    const started = { sessionId: 'session-1', configOptions: [] };
+    vi.mocked(invoke).mockResolvedValue(started);
     const { startAgentSession } = await import('@/lib/tauri-api');
     const result = await startAgentSession(
       'agent-1',
@@ -19,18 +20,53 @@ describe('ACP chat session tauri-api bindings', () => {
       cwd: '/collections/my-collection',
       collection: 'my-collection',
     });
-    expect(result).toBe('session-1');
+    expect(result).toEqual(started);
   });
 
-  it('sendAgentPrompt invokes send_agent_prompt with camelCase args', async () => {
+  it('sendAgentPrompt sends a null resource list when none is given', async () => {
     vi.mocked(invoke).mockResolvedValue('end_turn');
     const { sendAgentPrompt } = await import('@/lib/tauri-api');
     const result = await sendAgentPrompt('session-1', 'hello');
     expect(invoke).toHaveBeenCalledWith('send_agent_prompt', {
       sessionId: 'session-1',
       prompt: 'hello',
+      resources: null,
     });
     expect(result).toBe('end_turn');
+  });
+
+  it('sendAgentPrompt passes resources through', async () => {
+    vi.mocked(invoke).mockResolvedValue('end_turn');
+    const { sendAgentPrompt } = await import('@/lib/tauri-api');
+    const resources = [{ uri: 'rocket://request/a', mimeType: 'text/plain', text: 'GET /a' }];
+    await sendAgentPrompt('session-1', 'explain', resources);
+    expect(invoke).toHaveBeenCalledWith('send_agent_prompt', {
+      sessionId: 'session-1',
+      prompt: 'explain',
+      resources,
+    });
+  });
+
+  it('cancelAgentPrompt invokes cancel_agent_prompt with the session id', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const { cancelAgentPrompt } = await import('@/lib/tauri-api');
+    await cancelAgentPrompt('session-1');
+    expect(invoke).toHaveBeenCalledWith('cancel_agent_prompt', { sessionId: 'session-1' });
+  });
+
+  it('setAgentConfigOption invokes set_agent_config_option and returns the options', async () => {
+    const options = [
+      { id: 'model', name: 'Model', category: 'model', currentValue: 'opus', choices: [] },
+    ];
+    vi.mocked(invoke).mockResolvedValue(options);
+    const { setAgentConfigOption } = await import('@/lib/tauri-api');
+    const result = await setAgentConfigOption('session-1', 'model', 'opus');
+    expect(invoke).toHaveBeenCalledWith('set_agent_config_option', {
+      sessionId: 'session-1',
+      configId: 'model',
+      value: 'opus',
+    });
+    expect(result).toEqual(options);
   });
 
   it('endAgentSession invokes end_agent_session with the session id', async () => {
@@ -106,5 +142,65 @@ describe('ACP chat session tauri-api bindings', () => {
     await onAgentSessionFailed(handler);
     expect(listen).toHaveBeenCalledWith('agent-session-failed', expect.any(Function));
     expect(handler).toHaveBeenCalledWith(payload);
+  });
+
+  it.each([
+    [
+      'onAgentToolActivity',
+      'agent-session-tool-activity',
+      {
+        type: 'acpToolActivity',
+        session_id: 'session-1',
+        call_id: 'call-1',
+        title: 'Read GET /orders',
+        status: 'in_progress',
+      },
+    ],
+    [
+      'onAgentConfigOptions',
+      'agent-session-config-options',
+      { type: 'acpConfigOptionsChanged', session_id: 'session-1', options: [] },
+    ],
+    [
+      'onAgentUsage',
+      'agent-session-usage',
+      { type: 'acpUsage', session_id: 'session-1', used: 10, size: 100, cost_usd: null },
+    ],
+  ] as const)('%s subscribes to %s and unwraps the payload', async (name, channel, payload) => {
+    vi.mocked(listen).mockImplementation(((
+      _event: string,
+      cb: (e: { payload: unknown }) => void,
+    ) => {
+      cb({ payload });
+      return Promise.resolve(() => undefined);
+    }) as typeof listen);
+    const api = await import('@/lib/tauri-api');
+    const handler = vi.fn();
+    await api[name](handler);
+    expect(listen).toHaveBeenCalledWith(channel, expect.any(Function));
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
+
+  it('configOptionsFromEvent converts snake_case options to the camelCase shape', async () => {
+    const { configOptionsFromEvent } = await import('@/lib/tauri-api');
+    expect(
+      configOptionsFromEvent([
+        {
+          id: 'effort',
+          name: 'Effort',
+          category: 'thought_level',
+          current_value: 'high',
+          choices: [{ value: 'high', name: 'High', description: null }],
+        },
+      ]),
+    ).toEqual([
+      {
+        id: 'effort',
+        name: 'Effort',
+        category: 'thought_level',
+        currentValue: 'high',
+        choices: [{ value: 'high', name: 'High', description: null }],
+      },
+    ]);
   });
 });
