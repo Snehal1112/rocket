@@ -92,7 +92,10 @@ pub use mcp_read_views::{
     CollectionBrief, HistoryBrief, MaskedBody, MaskedEnvironment, MaskedPair, MaskedRequest,
     MaskedSettings, MaskedVariable,
 };
-pub use mcp_tool_service::{AssistantMode, McpRunResult, McpToolService};
+pub use mcp_tool_service::{
+    AssistantMode, McpRunResult, McpToolService, OUTLINE_RESOURCE_URI,
+    WORKSPACE_ASSISTANT_INSTRUCTIONS,
+};
 pub use oauth2_service::OAuth2Service;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};
 pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};

@@ -2573,6 +2573,17 @@ export type AssistantMode = 'ask' | 'edit' | 'agent';
 export const setAssistantMode = (sessionId: string, mode: AssistantMode) =>
   invoke<void>('set_assistant_mode', { sessionId, mode });
 
+export const startWorkspaceAssistant = (
+  agentConfigId: string,
+  mode: AssistantMode,
+  model?: string,
+) =>
+  invoke<AgentSessionStarted>('start_workspace_assistant', {
+    agentConfigId,
+    mode,
+    model: model ?? null,
+  });
+
 /**
  * Ends every agent session the backend still tracks and resolves to how many
  * it ended. Call once per webview load, before starting a session (Plan 05's

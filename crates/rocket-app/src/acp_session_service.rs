@@ -201,36 +201,7 @@ impl AcpSessionService {
             .get_settings(collection)?
             .agent_autonomy_enabled;
         let mcp_servers: Vec<rocket_acp::McpServerSpec> = match (autonomy_enabled, mcp_http) {
-            (true, Some(creds)) => {
-                let exe = std::env::current_exe().map_err(|e| {
-                    DomainError::Internal(format!("could not resolve current executable: {e}"))
-                })?;
-                vec![
-                    rocket_acp::McpServerSpec::Http {
-                        name: ROCKET_MCP_SERVER_NAME.to_string(),
-                        // The path literal ("/mcp") must match
-                        // `src_tauri::mcp::tool_server::MCP_HTTP_PATH`
-                        // exactly — the bare origin 404s (Plan 04's Final
-                        // Review). This crate cannot import that constant
-                        // (`rocket-app` never depends on `src-tauri` — this
-                        // repo's DDD boundary runs the other way), so it is
-                        // duplicated here as a literal; if that constant's
-                        // value ever changes, this literal must change with
-                        // it.
-                        url: format!("http://127.0.0.1:{}/mcp", creds.port),
-                        token: creds.token.clone(),
-                    },
-                    rocket_acp::McpServerSpec::Stdio {
-                        name: ROCKET_MCP_SERVER_NAME.to_string(),
-                        command: exe.to_string_lossy().into_owned(),
-                        args: vec!["--acp-mcp-stdio-bridge".to_string()],
-                        env: vec![
-                            ("ROCKET_MCP_PORT".to_string(), creds.port.to_string()),
-                            ("ROCKET_MCP_TOKEN".to_string(), creds.token),
-                        ],
-                    },
-                ]
-            }
+            (true, Some(creds)) => mcp_server_specs(creds)?,
             // Autonomy is off, or the caller couldn't spawn the HTTP server
             // (fails open to chat-only mode rather than failing the whole
             // session start over a tool-server hiccup) — no MCP servers.
@@ -240,6 +211,49 @@ impl AcpSessionService {
         let info = self
             .session_client
             .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, meta)
+            .await?;
+        self.event_publisher
+            .publish(DomainEvent::AcpSessionStarted {
+                session_id: info.session_id.clone(),
+            });
+        Ok(info)
+    }
+
+    /// Starts a workspace assistant session. Unlike `start_session`, the
+    /// tool server is always attached: the workspace assistant's tools
+    /// check the workspace scope, the mode and the run switch on every
+    /// call. `isolation` adds `CLAUDE_CONFIG_DIR` to the environment and
+    /// supplies the `_meta`. Like `start_session`, the session is not
+    /// tracked yet: the command layer registers the session's resources
+    /// and then calls `track`.
+    /// Publishes `AcpSessionStarted` on success, nothing on failure.
+    pub async fn start_workspace_session(
+        &self,
+        agent_config_id: &str,
+        cwd: &str,
+        mcp_http: McpHttpServerCredentials,
+        isolation: SessionIsolation,
+    ) -> DomainResult<SessionInfo> {
+        let config = self.agent_config_service.get(agent_config_id)?;
+        let credential = self
+            .agent_config_service
+            .resolve_credential(agent_config_id)
+            .await?;
+        let env = vec![
+            (config.credential_env_var.clone(), credential),
+            isolation.env_entry(),
+        ];
+        let mcp_servers = mcp_server_specs(mcp_http)?;
+        let info = self
+            .session_client
+            .start_session(
+                &config.command,
+                &config.args,
+                cwd,
+                &env,
+                &mcp_servers,
+                Some(isolation.meta()),
+            )
             .await?;
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
@@ -491,6 +505,36 @@ impl AcpSessionService {
         }
         tracked.len()
     }
+}
+
+/// The two MCP server specs offered for one session's tool server: `Http`
+/// for agents that speak MCP over HTTP, and `Stdio`, which points back at
+/// the same server through the hidden `--acp-mcp-stdio-bridge` mode. The
+/// token travels only in the stdio spec's environment, never in argv.
+fn mcp_server_specs(
+    creds: McpHttpServerCredentials,
+) -> DomainResult<Vec<rocket_acp::McpServerSpec>> {
+    let exe = std::env::current_exe()
+        .map_err(|e| DomainError::Internal(format!("could not resolve current executable: {e}")))?;
+    Ok(vec![
+        rocket_acp::McpServerSpec::Http {
+            name: ROCKET_MCP_SERVER_NAME.to_string(),
+            // Must match `src_tauri::mcp::tool_server::MCP_HTTP_PATH`
+            // ("/mcp"); this crate cannot import it, because `rocket-app`
+            // never depends on `src-tauri`.
+            url: format!("http://127.0.0.1:{}/mcp", creds.port),
+            token: creds.token.clone(),
+        },
+        rocket_acp::McpServerSpec::Stdio {
+            name: ROCKET_MCP_SERVER_NAME.to_string(),
+            command: exe.to_string_lossy().into_owned(),
+            args: vec!["--acp-mcp-stdio-bridge".to_string()],
+            env: vec![
+                ("ROCKET_MCP_PORT".to_string(), creds.port.to_string()),
+                ("ROCKET_MCP_TOKEN".to_string(), creds.token),
+            ],
+        },
+    ])
 }
 
 #[cfg(test)]
@@ -1969,5 +2013,130 @@ mod tests {
 
         assert!(end_session_called.load(Ordering::SeqCst));
         assert_eq!(cleanup.ended(), vec!["session-1".to_string()]);
+    }
+
+    #[derive(Default)]
+    struct WorkspaceStartCapture {
+        env: Vec<(String, String)>,
+        servers: Vec<rocket_acp::McpServerSpec>,
+        meta: Option<serde_json::Value>,
+    }
+
+    struct WorkspaceCapturingClient {
+        capture: Arc<Mutex<WorkspaceStartCapture>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AcpSessionClient for WorkspaceCapturingClient {
+        async fn start_session(
+            &self,
+            _command: &str,
+            _args: &[String],
+            _cwd: &str,
+            env: &[(String, String)],
+            mcp_servers: &[rocket_acp::McpServerSpec],
+            meta: Option<serde_json::Value>,
+        ) -> DomainResult<rocket_acp::SessionInfo> {
+            let mut capture = self.capture.lock().expect("lock capture");
+            capture.env = env.to_vec();
+            capture.servers = mcp_servers.to_vec();
+            capture.meta = meta;
+            Ok(rocket_acp::SessionInfo {
+                session_id: "assistant-1".to_string(),
+                config_options: Vec::new(),
+                prompt_capabilities: rocket_acp::PromptCapabilities {
+                    embedded_context: true,
+                    image: false,
+                },
+            })
+        }
+        async fn send_prompt(
+            &self,
+            _session_id: &str,
+            _parts: Vec<rocket_acp::PromptPart>,
+            _update_tx: UnboundedSender<rocket_acp::AcpUpdate>,
+        ) -> DomainResult<String> {
+            unreachable!("not exercised by this test")
+        }
+        async fn cancel(&self, _session_id: &str) -> DomainResult<()> {
+            unreachable!("not exercised by this test")
+        }
+        async fn set_config_option(
+            &self,
+            _session_id: &str,
+            _config_id: &str,
+            _value: &str,
+        ) -> DomainResult<Vec<rocket_acp::ConfigOption>> {
+            unreachable!("not exercised by this test")
+        }
+        async fn end_session(&self, _session_id: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        async fn end_all_sessions(&self) -> DomainResult<()> {
+            unreachable!("not exercised by this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn start_workspace_session_always_attaches_the_tool_server_and_passes_isolation_settings()
+    {
+        let capture = Arc::new(Mutex::new(WorkspaceStartCapture::default()));
+        let publisher = Arc::new(FakeEventPublisher::new());
+        // Plan 02's recording double: proves the session is tracked, so
+        // SessionCleanup runs when it ends.
+        let cleanup = Arc::new(RecordingCleanup::default());
+        // The run switch is off for every collection: the workspace
+        // assistant attaches its tools anyway, because each tool checks
+        // scope, mode and the switch on every call.
+        let service = AcpSessionService::new(
+            Box::new(WorkspaceCapturingClient {
+                capture: Arc::clone(&capture),
+            }),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            cleanup.clone(),
+            agent_config_service(),
+            ConfigurableCollectionRepo::new(),
+        );
+        let isolation = SessionIsolation {
+            config_dir: "/tmp/scratch-config".to_string(),
+            system_prompt_append: "rocket".to_string(),
+        };
+
+        let info = service
+            .start_workspace_session(
+                "agent-1",
+                "/tmp/scratch-cwd",
+                McpHttpServerCredentials {
+                    port: 4321,
+                    token: "tok-123".to_string(),
+                },
+                isolation.clone(),
+            )
+            .await
+            .expect("start_workspace_session");
+
+        assert_eq!(info.session_id, "assistant-1");
+        {
+            let capture = capture.lock().expect("lock capture");
+            assert_eq!(capture.servers.len(), 2, "Http and Stdio specs");
+            assert!(capture
+                .env
+                .iter()
+                .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v == "/tmp/scratch-config"));
+            assert!(capture.env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
+            assert_eq!(capture.meta, Some(isolation.meta()));
+        }
+        {
+            let events = publisher.events.lock().expect("lock");
+            assert!(matches!(
+                events.as_slice(),
+                [DomainEvent::AcpSessionStarted { .. }]
+            ));
+        }
+
+        // The command layer tracks the session once its resources exist.
+        assert!(service.track("assistant-1"));
+        service.end_session("assistant-1").await.expect("end_session");
+        assert_eq!(cleanup.ended(), vec!["assistant-1".to_string()]);
     }
 }
