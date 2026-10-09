@@ -1441,6 +1441,82 @@ mod tests {
         assert_eq!(host.value, "api.example.com");
     }
 
+    /// In-memory secret store, so the test never touches a real keychain.
+    #[derive(Default)]
+    struct MemorySecrets {
+        values: StdMutex<HashMap<(String, String), String>>,
+    }
+
+    impl rocket_environment::SecretStore for MemorySecrets {
+        fn get(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>> {
+            Ok(self
+                .values
+                .lock()
+                .expect("lock")
+                .get(&(scope_id.to_string(), key.to_string()))
+                .cloned())
+        }
+        fn set(&self, scope_id: &str, key: &str, value: &str) -> DomainResult<()> {
+            self.values
+                .lock()
+                .expect("lock")
+                .insert((scope_id.to_string(), key.to_string()), value.to_string());
+            Ok(())
+        }
+        fn delete(&self, scope_id: &str, key: &str) -> DomainResult<()> {
+            self.values
+                .lock()
+                .expect("lock")
+                .remove(&(scope_id.to_string(), key.to_string()));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn accepting_a_plain_set_env_var_keeps_a_secret_variable_value() {
+        let f = fixture();
+        let ws = tempfile::tempdir().expect("workspace dir");
+        let factory = Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::with_secret_store(
+            Arc::new(StdMutex::new(ws.path().to_path_buf())),
+            Arc::new(MemorySecrets::default()),
+        ));
+        let mut dev = Environment::new("dev");
+        dev.set_variable(Variable::new("HOST", "api.example.com"));
+        let mut token = Variable::new("TOKEN", "s3cr3t");
+        token.secret = true;
+        dev.set_variable(token);
+        factory
+            .for_collection("demo")
+            .save(&dev)
+            .expect("save environment");
+
+        let svc = ProposalService::new(
+            CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    f._dir.path().to_path_buf(),
+                )),
+                Box::new(SharedPublisher(Arc::clone(&f.events))),
+            ),
+            factory.clone(),
+            f.events.clone(),
+        );
+        let ids = svc
+            .propose("s1", vec![set_var("HOST", "api2.example.com")])
+            .expect("propose");
+        let resolved = svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Accepted);
+
+        let saved = factory.for_collection("demo").get("dev").expect("get");
+        assert_eq!(saved.get_value("HOST"), Some("api2.example.com"));
+        let token = saved
+            .variables
+            .iter()
+            .find(|v| v.key == "TOKEN")
+            .expect("token");
+        assert!(token.secret);
+        assert_eq!(token.value, "s3cr3t", "the secret value must survive");
+    }
+
     #[test]
     fn a_failed_write_marks_the_proposal_failed() {
         let f = fixture();

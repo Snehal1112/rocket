@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use rocket_app::{McpToolService, SessionCleanup};
+use rocket_app::{McpToolService, ProposalService, SessionCleanup};
 
 use crate::agent_session::scratch::SessionScratch;
 use crate::mcp::registry::McpServerRegistry;
@@ -80,9 +80,12 @@ impl TauriSessionCleanup {
         mcp_registry: Arc<McpServerRegistry>,
         mcp_tool_svc: Arc<McpToolService>,
         resources: Arc<SessionResourceRegistry>,
+        proposals: Arc<ProposalService>,
     ) -> Self {
         Self::with_cache_forgetter(mcp_registry, resources, move |id| {
-            mcp_tool_svc.forget_session(id)
+            mcp_tool_svc.forget_session(id);
+            // Pending proposals die with their session. Nothing was written.
+            proposals.clear_session(id);
         })
     }
 

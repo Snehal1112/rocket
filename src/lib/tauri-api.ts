@@ -2702,6 +2702,94 @@ export const onAgentSessionFailed = (
 ): Promise<UnlistenFn> =>
   listen<AgentSessionFailedEvent>('agent-session-failed', (e) => handler(e.payload));
 
+// ==== AI Assistant proposals ====
+// Proposals are DTOs, so their fields are camelCase. The two events below
+// are DomainEvent JSON, so their fields stay snake_case.
+
+export type AgentProposalStatus = 'pending' | 'accepted' | 'rejected' | 'stale' | 'failed';
+
+export interface AgentProposedRequest {
+  name: string;
+  method: HttpMethod;
+  url: string;
+  headers: Header[];
+  queryParams: QueryParam[];
+  body?: Body;
+  docs?: string;
+  preRequestScript?: string;
+  postResponseScript?: string;
+  tests?: string;
+}
+
+/** Only the fields the patch sets are present. */
+export interface AgentRequestPatch {
+  method?: HttpMethod;
+  url?: string;
+  headers?: Header[];
+  queryParams?: QueryParam[];
+  body?: Body;
+  docs?: string;
+}
+
+export type AgentProposedChange =
+  | { op: 'createFolder'; collection: string; parentPath: string; name: string }
+  | { op: 'createRequest'; collection: string; folderPath: string; request: AgentProposedRequest }
+  | { op: 'updateRequest'; collection: string; requestPath: string; patch: AgentRequestPatch }
+  | {
+      op: 'editScript';
+      collection: string;
+      requestPath: string;
+      phase: 'preRequest' | 'postResponse' | 'tests';
+      body: string;
+    }
+  | { op: 'moveItem'; collection: string; fromPath: string; toFolder: string }
+  | { op: 'renameItem'; collection: string; path: string; newName: string }
+  | { op: 'setEnvVar'; collection: string; environment: string; key: string; value: string };
+
+export interface AgentProposal {
+  id: string;
+  sessionId: string;
+  change: AgentProposedChange;
+  summary: string;
+  status: AgentProposalStatus;
+  /** Why a proposal failed. Present only when `status` is `failed`. */
+  statusMessage?: string;
+  createdAtMs: number;
+}
+
+export const listAgentProposals = (sessionId: string) =>
+  invoke<AgentProposal[]>('list_agent_proposals', { sessionId });
+
+export const acceptAgentProposal = (sessionId: string, proposalId: string) =>
+  invoke<AgentProposal>('accept_agent_proposal', { sessionId, proposalId });
+
+export const rejectAgentProposal = (sessionId: string, proposalId: string) =>
+  invoke<AgentProposal>('reject_agent_proposal', { sessionId, proposalId });
+
+export interface AgentProposalCreatedEvent {
+  type: 'acpProposalCreated';
+  session_id: string;
+  proposal_id: string;
+  summary: string;
+}
+
+export interface AgentProposalResolvedEvent {
+  type: 'acpProposalResolved';
+  session_id: string;
+  proposal_id: string;
+  status: Exclude<AgentProposalStatus, 'pending'>;
+}
+
+export const onAgentProposalCreated = (
+  handler: (event: AgentProposalCreatedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentProposalCreatedEvent>('agent-proposal-created', (e) => handler(e.payload));
+
+export const onAgentProposalResolved = (
+  handler: (event: AgentProposalResolvedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentProposalResolvedEvent>('agent-proposal-resolved', (e) => handler(e.payload));
+
 export type AgentToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
 export interface AgentToolActivityEvent {

@@ -1,6 +1,7 @@
 pub mod acp_session_dto;
 pub mod acp_sessions;
 pub mod agent_configs;
+pub mod agent_proposals;
 pub mod app;
 pub mod audit;
 pub mod collections;
