@@ -283,12 +283,16 @@ impl McpToolService {
 
     /// Records a session's starting mode. Called when a session starts.
     pub fn open_session(&self, session_id: &str, mode: AssistantMode) {
-        if let Ok(path) = self.active_workspace_path.lock() {
-            self.workspace_pins
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(session_id.to_string(), path.clone());
-        }
+        // A poisoned lock still holds the path; pin it so this cannot fail open.
+        let path = self
+            .active_workspace_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        self.workspace_pins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.to_string(), path);
         self.modes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -320,7 +324,6 @@ impl McpToolService {
             .unwrap_or_default()
     }
 
-    /// Refuses when the session's mode is below `required`.
     /// Refuses a session that was opened in another workspace than the
     /// active one. A session with no pin is not checked. An unreadable
     /// active path counts as a mismatch.
@@ -350,6 +353,8 @@ impl McpToolService {
         }
     }
 
+    /// Refuses when the session's mode is below `required`, or when the
+    /// session's workspace is no longer the active one.
     pub fn check_mode(&self, session_id: &str, required: AssistantMode) -> DomainResult<()> {
         self.check_session_workspace(session_id)?;
         let current = self.mode(session_id);

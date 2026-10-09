@@ -186,12 +186,14 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
         }
     };
 
-    handle.binding.bind(&info.session_id);
+    // Mode and workspace pin come first, so no tool call can run under the
+    // real id without them.
     mcp_tool_svc.begin_assistant_session(
         &info.session_id,
         mode,
         info.prompt_capabilities.embedded_context,
     );
+    handle.binding.bind(&info.session_id);
     registry.register(info.session_id.clone(), handle);
     // Cleanup removes the scratch and forgets both ids when the session
     // ends on any path.

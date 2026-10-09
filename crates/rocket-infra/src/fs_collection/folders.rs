@@ -224,10 +224,14 @@ pub(super) fn create_folder_exclusive(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
-    write_folder_yml(
+    if let Err(e) = write_folder_yml(
         &dir_path.join("folder.yml"),
         &new_folder(folder_name, generate_uid()),
-    )?;
+    ) {
+        // Do not leave the bare directory we just made.
+        let _ = fs::remove_dir_all(&dir_path);
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -320,7 +324,18 @@ pub(super) fn move_item_impl(
         return Err(DomainError::InvalidInput("Cannot move into itself".into()));
     }
     if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent)?;
+        if no_replace {
+            // A destination folder that vanished must not come back bare.
+            if !parent.is_dir() {
+                return Err(DomainError::NotFound(format!(
+                    "{}/{}",
+                    dst_collection,
+                    dst_path.rsplit_once('/').map_or("", |(dir, _)| dir)
+                )));
+            }
+        } else {
+            fs::create_dir_all(parent)?;
+        }
     }
     if no_replace {
         rename_no_replace(&src, &dst)?;

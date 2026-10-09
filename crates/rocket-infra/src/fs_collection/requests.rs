@@ -123,9 +123,9 @@ pub(super) fn save_request(
     Ok(actual)
 }
 
-/// Saves a brand-new request. The file is opened with `create_new`, so it
-/// fails with `AlreadyExists` instead of replacing a file that appeared
-/// after the caller's check. The parent folder must exist.
+/// Saves a brand-new request. The file is linked into place without
+/// replacing, so it fails with `AlreadyExists` instead of replacing a file
+/// that appeared after the caller's check. The parent folder must exist.
 pub(super) fn create_request_exclusive(
     repo: &FsCollectionRepo,
     collection: &str,
@@ -148,24 +148,35 @@ pub(super) fn create_request_exclusive(
     let yaml = serde_yaml::to_string(&request_to_oc_http_request(request))
         .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
 
-    let mut file = match fs::OpenOptions::new()
+    // The content goes to a hidden temp file first. A hard link then gives it
+    // its final name, and fails if that name exists, so a reader never sees a
+    // partial file and a crash leaves no truncated request behind.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    let tmp_name = format!(".new-request.tmp.{}_{nanos:08x}", std::process::id());
+    let tmp_path = file_path.with_file_name(tmp_name);
+    let written = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&file_path)
-    {
-        Ok(file) => file,
+        .open(&tmp_path)
+        .and_then(|mut file| {
+            file.write_all(yaml.as_bytes())?;
+            file.sync_all()
+        });
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(DomainError::Io(e.to_string()));
+    }
+    let linked = fs::hard_link(&tmp_path, &file_path);
+    let _ = fs::remove_file(&tmp_path);
+    match linked {
+        Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(DomainError::AlreadyExists(format!("{collection}/{path}")));
         }
         Err(e) => return Err(DomainError::Io(e.to_string())),
-    };
-    let written = file
-        .write_all(yaml.as_bytes())
-        .and_then(|()| file.sync_all());
-    if let Err(e) = written {
-        drop(file);
-        let _ = fs::remove_file(&file_path);
-        return Err(DomainError::Io(e.to_string()));
     }
     Ok(file_path
         .strip_prefix(&collection_dir)

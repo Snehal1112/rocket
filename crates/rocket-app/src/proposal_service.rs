@@ -255,6 +255,8 @@ impl ProposalService {
             Ok(true) => match self.apply(&change, env_fingerprint.as_deref()) {
                 Ok(true) => ProposalStatus::Accepted,
                 Ok(false) => ProposalStatus::Stale,
+                // The target appeared since the check: the workspace changed.
+                Err(DomainError::AlreadyExists(_)) => ProposalStatus::Stale,
                 Err(e) => ProposalStatus::Failed {
                     message: e.to_string(),
                 },
@@ -2229,6 +2231,23 @@ mod tests {
         let resolved = svc.accept("s1", &ids[0]).expect("accept");
         assert_eq!(resolved.status, ProposalStatus::Stale);
         assert!(marker.is_file());
+    }
+
+    #[test]
+    fn an_apply_time_collision_marks_the_proposal_stale() {
+        let f = fixture();
+        let ids = f
+            .svc
+            .propose("s1", vec![folder("reports")])
+            .expect("propose");
+        // Same outcome as a target that appears between check and write.
+        let err = {
+            f.repo.create_folder("demo", "reports").expect("folder");
+            f.svc.apply(&folder("reports"), None).expect_err("exists")
+        };
+        assert!(matches!(err, DomainError::AlreadyExists(_)));
+        let resolved = f.svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
     }
 
     #[test]
