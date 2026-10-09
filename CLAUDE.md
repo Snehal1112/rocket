@@ -92,7 +92,7 @@ This applies to every affected task in the plan — not just the first one.
 - All UI components use **shadcn/ui primitives only** — no raw `<button>`, `<input>`, `<dialog>`, `<select>`, `<form>`
 - Icons: `lucide-react` only — no inline SVGs
 - Single-line variable-aware fields: `SingleLineEditor` (CodeMirror 6) — never Monaco
-- Multi-line editors: Monaco only
+- Multi-line editors: Monaco only. One approved exception: the AI Assistant prompt editor (`PromptEditor`, CodeMirror 6) — see `.claude/rules/frontend-component-guardrails.md`
 - Zustand: never fully destructure store state at component top level
 - Rust: never `unwrap()` in production paths, never shell out to `git` CLI (use `git2` crate)
 - Commits: conventional commits format (`feat:`, `fix:`, `chore:`, etc.)
