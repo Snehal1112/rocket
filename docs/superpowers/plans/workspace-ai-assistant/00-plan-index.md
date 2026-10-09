@@ -143,7 +143,9 @@ pub struct SessionIsolation { pub config_dir: String, pub system_prompt_append: 
 pub fn new(session_client, event_publisher, cleanup: Arc<dyn SessionCleanup>, agent_config_service, collection_repo) -> Self;
 pub fn with_prompt_idle_timeout(/* same five */, prompt_idle_timeout: Duration) -> Self;
 pub async fn start_session(&self, agent_config_id, cwd, collection, mcp_http: Option<McpHttpServerCredentials>,
-    isolation: Option<SessionIsolation>) -> DomainResult<SessionInfo>;   // tracks the id for SessionCleanup
+    isolation: Option<SessionIsolation>) -> DomainResult<SessionInfo>;   // does NOT track; the caller registers its resources, then calls track()
+pub fn track(&self, session_id: &str) -> bool;          // false when the session was refused (shutdown); caller then calls end_untracked()
+pub async fn end_untracked(&self, session_id: &str);
 pub async fn end_tracked_sessions(&self) -> usize;
 // src-tauri/src/agent_session/scratch.rs
 pub struct SessionScratch;   // create() -> std::io::Result<Self>; isolation() -> Result<(String, SessionIsolation), DomainError>
@@ -172,10 +174,13 @@ fn check_mode(&self, session_id: &str, required: AssistantMode) -> DomainResult<
 // McpToolService::new gains a seventh parameter, history_repo: Box<dyn rocket_history::HistoryRepository>
 // (Plan 03 Task 1 updates every call site). HistoryBrief carries no response body; run_request's
 // McpRunResult gains body (masked, cut to 8 KB) and body_truncated.
+// McpToolService::peek_outline_preamble(session_id) -> Option<PromptPart> keeps the stored outline;
+// McpToolService::discard_outline(session_id) drops it. send_agent_prompt peeks, then discards once the
+// prompt was accepted (take_outline_preamble = peek + discard).
 
 // crates/rocket-app/src/acp_session_service.rs
 pub async fn start_workspace_session(&self, agent_config_id: &str, cwd: &str,
-    mcp_http: McpHttpServerCredentials, isolation: SessionIsolation) -> DomainResult<SessionInfo>;  // tracked like start_session
+    mcp_http: McpHttpServerCredentials, isolation: SessionIsolation) -> DomainResult<SessionInfo>;  // not tracked, like start_session: the caller registers the MCP handle and SessionResources, calls svc.track(id), and on false calls svc.end_untracked(id)
 
 // src-tauri/src/mcp/tool_server.rs
 pub struct McpSessionBinding;   // new(provisional_id), bind(&self, acp_id) (first bind wins), session_id(&self) -> &str
@@ -274,7 +279,7 @@ Cross-plan review of 2026-10-09. Each item names the one shape every plan now us
 2. **Idle-timeout test seam.** `AcpSessionService::with_prompt_timeout` is renamed `with_prompt_idle_timeout` (field `prompt_idle_timeout`) in Plan 01. Plans 02 and 03 use the new name. Plan 02's own test helper is `service_with_cleanup`, because Plan 01's test module already has `service_with`.
 3. **`ConfigOption` / `ConfigChoice` location.** Defined in `rocket_shared::acp` (because `DomainEvent` carries them), re-exported as `rocket_acp::{ConfigOption, ConfigChoice}`. DTOs live in `src-tauri/src/commands/acp_session_dto.rs`.
 4. **`start_agent_session_inner` return type.** Stays `Result<SessionInfo, DomainError>` after Plans 01 and 02; the command maps with `AgentSessionStartedDto::from`.
-5. **Workspace assistant start.** `start_workspace_session(agent_config_id, cwd, mcp_http, isolation: SessionIsolation)` uses Plan 02's `SessionIsolation` and tracks the session, so `SessionCleanup` runs for it. `start_workspace_assistant` creates `SessionScratch`, uses `scratch.isolation()` with `system_prompt_append = WORKSPACE_ASSISTANT_INSTRUCTIONS`, and registers `SessionResources` in the managed `SessionResourceRegistry` (no `adopt_scratch`, no `session_lifecycle` module).
+5. **Workspace assistant start.** `start_workspace_session(agent_config_id, cwd, mcp_http, isolation: SessionIsolation)` uses Plan 02's `SessionIsolation`. Neither `start_session` nor `start_workspace_session` tracks the id: the caller registers the MCP handle and `SessionResources`, then calls `svc.track(id)`, and on `false` calls `svc.end_untracked(id)`. `AcpSessionService::{track, end_untracked}` are part of the Plan 02 contract. Once tracked, `SessionCleanup` runs for the session. `start_workspace_assistant` creates `SessionScratch`, uses `scratch.isolation()` with `system_prompt_append = WORKSPACE_ASSISTANT_INSTRUCTIONS`, and registers `SessionResources` in the managed `SessionResourceRegistry` (no `adopt_scratch`, no `session_lifecycle` module).
 6. **Outline preamble and prompt limits.** `send_agent_prompt` keeps Plan 01's `prompt_parts` (8 resources of 8 KB, user parts only) and inserts the outline in front afterwards.
 7. **`McpHttpServerHandle.binding`.** Plan 03 adds the field and updates every literal, including Plan 02's test helper in `src-tauri/src/agent_session/cleanup.rs`.
 8. **Proposal cleanup.** `TauriSessionCleanup::new(mcp_registry, mcp_tool_svc, resources, proposals)` clears proposals in its cache-forgetter closure (Plan 04 Task 3). Plan 04 also updates Plan 03's tool-list tests and mode tests when it removes `edit_script` and `set_env_var`.
