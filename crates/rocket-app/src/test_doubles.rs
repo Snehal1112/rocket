@@ -276,6 +276,7 @@ impl<T: CollectionRepository> CollectionRepository for SharedCollectionRepo<T> {
 pub struct ConfigurableCollectionRepo {
     settings: Mutex<HashMap<String, CollectionSettings>>,
     settings_error_for: Mutex<Option<String>>,
+    request_vars: Mutex<Vec<CollectionVariable>>,
     requests: Mutex<HashMap<(String, String), CollectionRequest>>,
     summaries: Mutex<HashMap<String, Collection>>,
     saved_scripts: Mutex<Vec<(String, String, RequestScriptPhase, String)>>,
@@ -306,6 +307,11 @@ impl ConfigurableCollectionRepo {
 
     /// Replaces one collection's whole settings, for tests that need auth,
     /// headers or variables and not only the run switch.
+    /// Sets the request-level variables every request of this repo returns.
+    pub fn set_request_variables(&self, vars: Vec<CollectionVariable>) {
+        *self.request_vars.lock().expect("lock request_vars") = vars;
+    }
+
     pub fn set_settings(&self, collection: &str, settings: CollectionSettings) {
         self.settings
             .lock()
@@ -450,7 +456,7 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(())
     }
     fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-        Ok(vec![])
+        Ok(self.request_vars.lock().expect("lock request_vars").clone())
     }
     fn save_request_variables(
         &self,

@@ -160,6 +160,10 @@ pub struct ExecuteRequestOutput {
     /// Every secret value the run resolved: secret variables of each scope
     /// and RocketVault values. Callers use it to mask text they hand on.
     pub run_secret_values: std::collections::HashSet<String>,
+    /// The credentials the run actually sent, after variable resolution: the
+    /// Basic login forms, bearer token and Authorization header values. Never
+    /// serialized to IPC. Callers use it to mask text they hand on.
+    pub run_sent_credentials: std::collections::HashSet<String>,
 }
 
 // Written by hand so the secret values are never printed, only counted.
@@ -172,8 +176,33 @@ impl std::fmt::Debug for ExecuteRequestOutput {
             .field("script_error", &self.script_error)
             .field("deferred_history", &self.deferred_history)
             .field("run_secret_values", &self.run_secret_values.len())
+            .field("run_sent_credentials", &self.run_sent_credentials.len())
             .finish()
     }
+}
+
+/// The credentials a resolved request carries: Basic login forms, a bearer
+/// token and the values of Authorization headers.
+fn sent_credentials(request: &HttpRequest) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    match &request.auth {
+        Auth::Basic { username, password } if !password.is_empty() => {
+            crate::mcp_read_views::basic_header_forms(username, password, &mut out);
+        }
+        Auth::Bearer { token } if !token.is_empty() => {
+            out.insert(token.clone());
+        }
+        _ => {}
+    }
+    for header in &request.headers {
+        let name = header.key.to_ascii_lowercase();
+        if header.value.is_empty() || (name != "authorization" && name != "proxy-authorization") {
+            continue;
+        }
+        out.insert(header.value.clone());
+        out.extend(header.value.split_whitespace().skip(1).map(str::to_string));
+    }
+    out
 }
 
 /// What `apply_script_side_effects` needs to keep vault secrets off disk.
@@ -666,7 +695,11 @@ impl RequestExecutionService {
         if let (Some(col), Some(path)) = (collection, request_path) {
             if let Ok(folder_vars) = self.collection_repo.get_folder_chain_variables(col, path) {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
-                    ctx.folder.insert(cv.key.clone(), effective_val(cv));
+                    let val = effective_val(cv);
+                    ctx.folder.insert(cv.key.clone(), val.clone());
+                    if cv.secret && val.len() >= MIN_REDACTION_LEN {
+                        ctx.secret_values.insert(val);
+                    }
                 }
             }
         }
@@ -674,7 +707,11 @@ impl RequestExecutionService {
         if let (Some(col), Some(path)) = (collection, request_path) {
             if let Ok(request_vars) = self.collection_repo.get_request_variables(col, path) {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
-                    ctx.request.insert(cv.key.clone(), effective_val(cv));
+                    let val = effective_val(cv);
+                    ctx.request.insert(cv.key.clone(), val.clone());
+                    if cv.secret && val.len() >= MIN_REDACTION_LEN {
+                        ctx.secret_values.insert(val);
+                    }
                 }
             }
         }
@@ -2082,6 +2119,7 @@ impl RequestExecutionService {
             script_error: state.script_error.clone(),
             deferred_history,
             run_secret_values: state.var_ctx.secret_values.clone(),
+            run_sent_credentials: sent_credentials(&state.http_request),
         }
     }
 

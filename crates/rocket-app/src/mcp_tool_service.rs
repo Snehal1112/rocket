@@ -666,6 +666,7 @@ impl McpToolService {
         // resolved (collection, environment, global, vault).
         let mut secrets = output.run_secret_values.clone();
         secrets.extend(literal_credentials);
+        secrets.extend(output.run_sent_credentials.iter().cloned());
         secrets.extend(basic_header_values_from_secrets(
             &request_for_masking,
             settings.as_ref(),
@@ -2076,6 +2077,54 @@ mod tests {
         repo.set_autonomy("my-api", true);
         let request = sample_request("Login").with_auth(Auth::Basic {
             username: "alice".into(),
+            password: "hunter2-literal".into(),
+        });
+        repo.with_request("my-api", "login.yml", request);
+        let encoded = base64::engine::general_purpose::STANDARD.encode("alice:hunter2-literal");
+
+        let result = run_with_echo(repo, &format!("Authorization: Basic {encoded}")).await;
+        assert!(!result.body.contains(&encoded), "{}", result.body);
+    }
+
+    #[tokio::test]
+    async fn a_secret_request_variable_in_a_header_is_masked_in_an_echoing_response() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.set_request_variables(vec![CollectionVariable {
+            key: "reqsecret".into(),
+            value: "req-secret-value-77".into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: true,
+        }]);
+        let request = sample_request("Login").with_header("X-Custom", "{{reqsecret}}");
+        repo.with_request("my-api", "login.yml", request);
+
+        let result = run_with_echo(repo, "X-Custom: req-secret-value-77").await;
+        assert!(!result.body.contains("req-secret-value-77"), "{}", result.body);
+        assert!(result.body.contains(REDACTED));
+    }
+
+    #[tokio::test]
+    async fn a_basic_login_with_a_variable_username_is_masked_in_an_echoing_response() {
+        use base64::Engine;
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                agent_autonomy_enabled: true,
+                variables: vec![CollectionVariable {
+                    key: "user".into(),
+                    value: "alice".into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: false,
+                }],
+                ..Default::default()
+            },
+        );
+        let request = sample_request("Login").with_auth(Auth::Basic {
+            username: "{{user}}".into(),
             password: "hunter2-literal".into(),
         });
         repo.with_request("my-api", "login.yml", request);

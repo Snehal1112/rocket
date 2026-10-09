@@ -590,7 +590,7 @@ fn collect_auth_url_credentials(value: &Value, out: &mut HashSet<String>) {
 }
 
 /// The `Authorization: Basic ...` value the executor sends for a login.
-fn basic_header_forms(username: &str, password: &str, out: &mut HashSet<String>) {
+pub(crate) fn basic_header_forms(username: &str, password: &str, out: &mut HashSet<String>) {
     use base64::Engine;
     let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
     out.insert(format!("Basic {encoded}"));

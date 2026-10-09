@@ -927,6 +927,7 @@ mod tests {
                 rocket_history::HistoryEntry::new("GET", "https://api.example.com/aaaa", 200, 1, 1)
             }),
             run_secret_values: Default::default(),
+            run_sent_credentials: Default::default(),
         }
     }
 
