@@ -7,6 +7,13 @@ use rocket_shared::error::DomainError;
 /// location (see `scratch_parent`).
 pub const SCRATCH_PARENT_DIR: &str = "rocket-agent-sessions";
 
+/// The file in each scratch root that records the owning process id.
+const OWNER_MARKER: &str = ".owner-pid";
+
+/// How long a root of unknown liveness is kept, where pid liveness cannot be
+/// checked (Unix without `/proc`).
+const UNCERTAIN_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 /// One session's private scratch: `<root>/cwd` is the agent's working
 /// directory and `<root>/config` its `CLAUDE_CONFIG_DIR`. Both start empty.
 /// Dropping the value removes the whole root, including anything the agent
@@ -34,6 +41,7 @@ impl SessionScratch {
             config_dir: root.join("config"),
             root,
         };
+        std::fs::write(scratch.root.join(OWNER_MARKER), std::process::id().to_string())?;
         create_private_dir(&scratch.cwd)?;
         create_private_dir(&scratch.config_dir)?;
         Ok(scratch)
@@ -80,8 +88,47 @@ fn scratch_parent() -> PathBuf {
     std::env::temp_dir().join(SCRATCH_PARENT_DIR)
 }
 
-/// Removes every `<uuid>/` directory under the scratch parent, left behind
-/// by a crashed run. Run once at startup, before any session can start.
+/// Whether the process `pid` is running. `None` means it cannot be told.
+fn pid_alive(pid: u32) -> Option<bool> {
+    if pid == std::process::id() {
+        return Some(true);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(Path::new("/proc").join(pid.to_string()).exists())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Whether a scratch root belongs to a running Rocket instance and must be
+/// kept. A root is stale when its owner pid is dead, or its marker is missing
+/// or unparseable (a crash before the marker was written, or foreign data).
+/// When liveness cannot be determined, the root is kept only while it is
+/// younger than 24 hours, so a stray root is eventually cleaned up.
+fn is_live_root(root: &Path) -> bool {
+    let pid = std::fs::read_to_string(root.join(OWNER_MARKER))
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok());
+    let Some(pid) = pid else {
+        return false;
+    };
+    match pid_alive(pid) {
+        Some(alive) => alive,
+        None => std::fs::metadata(root)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age < UNCERTAIN_KEEP),
+    }
+}
+
+/// Removes every stale `<uuid>/` directory under the scratch parent, left
+/// behind by a crashed run. Roots owned by a running process, such as a
+/// second Rocket instance, are kept (see `is_live_root`). Run once at
+/// startup, before any session can start.
 /// Only real directories whose names parse as UUIDs are removed. Symlinks
 /// and other files are never followed or touched. Returns how many were
 /// removed. A missing parent is not an error.
@@ -114,7 +161,7 @@ pub fn sweep_stale_scratch_in(parent: &Path) -> usize {
             .is_some_and(|name| uuid::Uuid::parse_str(name).is_ok());
         // `DirEntry::file_type` does not follow symlinks.
         let is_real_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-        if !is_uuid || !is_real_dir {
+        if !is_uuid || !is_real_dir || is_live_root(&entry.path()) {
             continue;
         }
         match std::fs::remove_dir_all(entry.path()) {
@@ -291,6 +338,50 @@ mod tests {
         let (cwd, isolation) = scratch.isolation().expect("utf-8 paths");
         assert_eq!(Path::new(&cwd), scratch.cwd());
         assert_eq!(Path::new(&isolation.config_dir), scratch.config_dir());
+    }
+
+    fn root_with_owner(parent: &Path, owner: Option<&str>) -> PathBuf {
+        let root = parent.join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(root.join("cwd")).expect("root");
+        if let Some(owner) = owner {
+            std::fs::write(root.join(OWNER_MARKER), owner).expect("marker");
+        }
+        root
+    }
+
+    #[test]
+    fn create_in_writes_the_owner_marker() {
+        let parent = TempDir::new().expect("tempdir");
+        let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
+        let text = std::fs::read_to_string(scratch.root().join(OWNER_MARKER)).expect("marker");
+        assert_eq!(text, std::process::id().to_string());
+    }
+
+    #[test]
+    fn sweep_keeps_a_root_owned_by_a_live_process() {
+        let parent = TempDir::new().expect("tempdir");
+        let live = root_with_owner(parent.path(), Some(&std::process::id().to_string()));
+        assert_eq!(sweep_stale_scratch_in(parent.path()), 0);
+        assert!(live.is_dir());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sweep_removes_a_root_owned_by_a_dead_process() {
+        let parent = TempDir::new().expect("tempdir");
+        let dead = root_with_owner(parent.path(), Some("4294967294"));
+        assert_eq!(sweep_stale_scratch_in(parent.path()), 1);
+        assert!(!dead.exists());
+    }
+
+    #[test]
+    fn sweep_removes_a_root_without_a_usable_marker() {
+        let parent = TempDir::new().expect("tempdir");
+        let none = root_with_owner(parent.path(), None);
+        let bad = root_with_owner(parent.path(), Some("not-a-pid"));
+        assert_eq!(sweep_stale_scratch_in(parent.path()), 2);
+        assert!(!none.exists());
+        assert!(!bad.exists());
     }
 
     #[test]
