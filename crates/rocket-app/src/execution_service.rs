@@ -271,6 +271,11 @@ pub(crate) struct PhaseState {
     pub scripts: PhaseScripts,
     /// Body set by an after-response `res.setBody`, shown to the tests script only.
     pub response_body_override: Option<String>,
+    /// RocketVault values of this run, shared with the script host for nested runs.
+    pub external_secrets: Arc<std::collections::HashMap<String, String>>,
+    /// Request paths of this run and the runs that started it, outermost first.
+    /// `rok.runRequest` uses it to stop recursion.
+    pub run_chain: Vec<String>,
 }
 
 impl PhaseState {
@@ -1167,11 +1172,19 @@ impl RequestExecutionService {
     }
 
     /// The host for one script run of a request. Script requests reuse the
-    /// request's TLS, redirect, cookie and client-certificate options.
-    fn script_host(&self, state: &PhaseState) -> script_host::ExecutionScriptHost<'_> {
+    /// request's TLS, redirect, cookie and client-certificate options, and
+    /// nested runs reuse its collection, environments and RocketVault values.
+    fn script_host<'a>(
+        &'a self,
+        input: &'a ExecuteRequestInput,
+        state: &PhaseState,
+    ) -> script_host::ExecutionScriptHost<'a> {
         script_host::ExecutionScriptHost {
             svc: self,
+            input,
+            external_secrets: Arc::clone(&state.external_secrets),
             options: state.http_request.options.clone(),
+            chain: state.run_chain.clone(),
         }
     }
 
@@ -1559,6 +1572,13 @@ impl RequestExecutionService {
             file_scope,
             scripts,
             response_body_override: None,
+            external_secrets: Arc::new(external_secrets.clone()),
+            run_chain: input
+                .request_path
+                .as_deref()
+                .map(run_request::normalize_run_path)
+                .into_iter()
+                .collect(),
         })
     }
 
@@ -1596,7 +1616,7 @@ impl RequestExecutionService {
             .with_file_scope(state.file_scope.clone())
             .with_collection_name(input.collection.clone());
             let had_error = state.script_error.is_some();
-            let host = self.script_host(state);
+            let host = self.script_host(input, state);
             let result = self
                 .run_script_phase(
                     script,
@@ -1817,7 +1837,7 @@ impl RequestExecutionService {
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
             .with_collection_name(input.collection.clone());
-            let host = self.script_host(state);
+            let host = self.script_host(input, state);
             let result = self
                 .run_script_phase(
                     script,
@@ -1888,7 +1908,7 @@ impl RequestExecutionService {
                 &input.assertions,
                 response,
             ));
-            let host = self.script_host(state);
+            let host = self.script_host(input, state);
             let result = self
                 .run_script_phase(script, ctx, &host, &request_name, "tests", &mut state.console)
                 .await;
@@ -2117,6 +2137,33 @@ impl RequestExecutionService {
         self.run_tests_phase(&input, ExecutionMode::Standalone, &response, &mut state)
             .await;
         Ok(self.finish_phases(&input, response, &mut state).await)
+    }
+
+    /// Runs a saved request for `rok.runRequest` with every phase, as a single send does.
+    ///
+    /// `chain` is the call chain the nested run belongs to, its own path last, and
+    /// `runtime` seeds its runtime variables. Returns the output and the runtime
+    /// variables the run ended with.
+    pub(crate) async fn execute_nested(
+        &self,
+        input: ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+        chain: Vec<String>,
+        runtime: &std::collections::HashMap<String, String>,
+    ) -> DomainResult<(ExecuteRequestOutput, std::collections::HashMap<String, String>)> {
+        let mut state = self.begin_phases(&input, external_secrets)?;
+        state.run_chain = chain;
+        state.seed_runtime(runtime);
+        self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
+            .await?;
+        let response = self.send_request(&state).await?;
+        self.run_after_response_phase(&input, ExecutionMode::Standalone, &response, &mut state)
+            .await;
+        self.run_tests_phase(&input, ExecutionMode::Standalone, &response, &mut state)
+            .await;
+        // Read after `finish_phases`, whose declarative actions can set variables too.
+        let output = self.finish_phases(&input, response, &mut state).await;
+        Ok((output, state.var_ctx.runtime.clone()))
     }
 
     pub async fn run_load_test(

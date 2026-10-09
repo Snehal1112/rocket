@@ -1,23 +1,38 @@
-//! The `ScriptHost` a request's scripts get. It serves `rok.sendRequest`.
+//! The `ScriptHost` a request's scripts get. It serves `rok.sendRequest` and
+//! `rok.runRequest`.
 //!
 //! It borrows the service, so a call back into the service needs no shared
 //! handle and no second script engine.
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use rocket_http::{HttpRequest, HttpResponse, RequestOptions};
-use rocket_scripting::{HostError, HostRequest, HostResponse, ScriptHost};
+use rocket_scripting::{
+    HostError, HostRequest, HostResponse, HostRunOutcome, HostRunRequest, HostScopes, ScriptHost,
+};
 use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 
-use super::{body_mode_from_content_type, RequestExecutionService};
+use super::run_request::{
+    check_run_chain, find_run_target, normalize_run_path, runtime_changes, RunTarget,
+};
+use super::{body_mode_from_content_type, ExecuteRequestInput, RequestExecutionService};
+use crate::runner_sequence::build_step_input;
 
 /// Serves the host calls of one script run.
 pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) svc: &'a RequestExecutionService,
+    /// The request the script belongs to. Nested runs take its collection and environments.
+    pub(crate) input: &'a ExecuteRequestInput,
+    /// RocketVault values of this run, passed on to nested runs.
+    pub(crate) external_secrets: Arc<HashMap<String, String>>,
     /// TLS, redirect, cookie and client-certificate options of the request the
     /// script belongs to. Script requests reuse them.
     pub(crate) options: RequestOptions,
+    /// Request paths of this run and the runs that started it, outermost first.
+    pub(crate) chain: Vec<String>,
 }
 
 /// Turns an executor response into what a script sees.
@@ -91,6 +106,69 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             Ok(Err(e)) => Err(HostError::Failed(format!("rok.sendRequest: {e}"))),
             Ok(Ok(response)) => Ok(host_response(&response)),
         }
+    }
+
+    async fn run_request(&self, request: HostRunRequest) -> Result<HostRunOutcome, HostError> {
+        let target = normalize_run_path(&request.path);
+        check_run_chain(&self.chain, &target).map_err(HostError::Failed)?;
+        let invalid = || {
+            HostError::Failed(format!(
+                "rok.runRequest: invalid request path - {}",
+                request.path
+            ))
+        };
+        let collection = self.input.collection.as_deref().ok_or_else(invalid)?;
+        let tree = self
+            .svc
+            .collection_repo
+            .get(collection)
+            .map_err(|_| invalid())?;
+        let item = match find_run_target(&tree, &target) {
+            RunTarget::Http(item) => item,
+            RunTarget::Skipped => return Ok(HostRunOutcome::default()),
+            RunTarget::NotFound => return Err(invalid()),
+        };
+        if let Some(message) = &item.prepare_error {
+            return Err(HostError::Failed(format!("rok.runRequest: {message}")));
+        }
+        let nested = build_step_input(
+            &item,
+            collection,
+            self.input.environment_name.as_deref(),
+            self.input.global_env_name.as_deref(),
+            self.input.request_guard_policy.clone(),
+        );
+        let mut chain = self.chain.clone();
+        chain.push(target);
+        // Boxed, because this future holds another run of the same pipeline.
+        let (output, runtime) = Box::pin(self.svc.execute_nested(
+            nested,
+            &self.external_secrets,
+            chain,
+            &request.runtime_vars,
+        ))
+        .await
+        .map_err(|e| HostError::Failed(format!("rok.runRequest: {e}")))?;
+        // The nested run saved its writes, so the scopes are read back from storage.
+        let scopes = self.svc.build_variable_scopes(
+            self.input.global_env_name.as_deref(),
+            Some(collection),
+            self.input.environment_name.as_deref(),
+            None,
+            &self.external_secrets,
+        );
+        let (runtime_set, runtime_removed) = runtime_changes(&request.runtime_vars, &runtime);
+        Ok(HostRunOutcome {
+            response: Some(host_response(&output.response)),
+            runtime_set,
+            runtime_removed,
+            scopes: Some(HostScopes {
+                env: scopes.env,
+                global_env: scopes.global_env,
+                collection: scopes.collection,
+                secret_values: scopes.secret_values.into_iter().collect(),
+            }),
+        })
     }
 }
 

@@ -301,3 +301,266 @@ async fn real_server_echo_of_a_secret_is_masked_in_the_console() {
     assert!(lines.iter().all(|l| !l.contains(SECRET)), "{lines:?}");
     assert!(lines.iter().any(|l| l.contains("••••••")), "{lines:?}");
 }
+
+// ── rok.runRequest ───────────────────────────────────────────────────────────
+
+use rocket_collection::{CollectionItem, Folder, Request, WebSocketRequest};
+use rocket_environment::EnvironmentRepository;
+
+use super::{ExecuteRequestInput, ExecuteRequestOutput};
+
+/// Environment repo that keeps one environment in memory and saves into it.
+struct MemoryEnvRepo(Arc<Mutex<Environment>>);
+
+impl EnvironmentRepository for MemoryEnvRepo {
+    fn list(&self) -> DomainResult<Vec<Environment>> {
+        Ok(vec![self.0.lock().expect("lock").clone()])
+    }
+    fn get(&self, _name: &str) -> DomainResult<Environment> {
+        Ok(self.0.lock().expect("lock").clone())
+    }
+    fn save(&self, env: &Environment) -> DomainResult<()> {
+        *self.0.lock().expect("lock") = env.clone();
+        Ok(())
+    }
+    fn delete(&self, _name: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// A saved GET request whose URL ends in its file name.
+fn saved(name: &str, file: &str, pre_request: &str) -> Request {
+    let mut request = Request::new(name, HttpMethod::Get, format!("https://api.test/{file}"));
+    request.file_name = Some(file.to_string());
+    if !pre_request.is_empty() {
+        request.pre_request_script = Some(pre_request.to_string());
+    }
+    request
+}
+
+/// A service over `collection` with the real engine and environment `dev` (`E` = `old`).
+fn run_service(collection: Collection) -> (RequestExecutionService, Arc<KeepingExecutor>) {
+    let executor = Arc::new(KeepingExecutor::default());
+    let mut env = Environment::new("dev");
+    env.set_variable(Variable::new("E", "old"));
+    let svc = RequestExecutionService::new(
+        Box::new(MemoryEnvRepo(Arc::new(Mutex::new(env)))),
+        Arc::new(SharedKeeping(Arc::clone(&executor))),
+        Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(collection))),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(EmptySecretManagerRepo),
+        Arc::new(rocket_environment::NullSecretStore),
+        Arc::new(rocket_environment::NullVaultSecretFetcher),
+    )
+    .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
+    (svc, executor)
+}
+
+/// The input a single send of the request at `path` gets, in environment `dev`.
+fn send_input(collection: &Collection, path: &str) -> ExecuteRequestInput {
+    let item = crate::runner_sequence::flatten_run_set(collection, None)
+        .expect("run set")
+        .into_iter()
+        .find(|item| item.request_path == path)
+        .expect("request in the collection");
+    crate::runner_sequence::build_step_input(&item, "api", Some("dev"), None, Default::default())
+}
+
+fn console(out: &ExecuteRequestOutput) -> Vec<String> {
+    out.console_entries.iter().map(|e| e.message.clone()).collect()
+}
+
+fn urls(executor: &KeepingExecutor) -> Vec<String> {
+    executor.seen().into_iter().map(|r| r.url).collect()
+}
+
+/// root: [main.yml with `main_script`], auth/ [login.yml with `login_pre`, `login_post`]
+fn main_and_login(main_script: &str, login_pre: &str, login_post: &str) -> Collection {
+    let mut collection = Collection::new("api");
+    collection.root.add_request(saved("Main", "main.yml", main_script));
+    let mut login = saved("Login", "login.yml", login_pre);
+    if !login_post.is_empty() {
+        login.post_response_script = Some(login_post.to_string());
+    }
+    let mut auth = Folder::new("auth");
+    auth.add_request(login);
+    collection.root.add_subfolder(auth);
+    collection
+}
+
+#[tokio::test]
+async fn run_request_e2e_runs_the_saved_request() {
+    let collection = main_and_login(
+        "const r = await rok.runRequest('auth/login'); console.log('login', r.status, r.data.ok);",
+        "",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(
+        urls(&executor),
+        vec![
+            "https://api.test/login.yml".to_string(),
+            "https://api.test/main.yml".to_string()
+        ]
+    );
+    let lines = console(&out);
+    assert!(lines.contains(&"login 200 true".to_string()), "{lines:?}");
+    assert!(
+        lines.contains(&"rok.runRequest auth/login -> 200".to_string()),
+        "{lines:?}"
+    );
+}
+
+#[tokio::test]
+async fn run_request_e2e_nested_runtime_writes_reach_the_caller_and_later_phases() {
+    let mut collection = main_and_login(
+        "rok.setVar('token', 'old'); await rok.runRequest('auth/login'); \
+         console.log('now', rok.getVar('token'));",
+        "",
+        "rok.setVar('token', 'from-login');",
+    );
+    if let Some(CollectionItem::Request(main)) = collection.root.items.first_mut() {
+        main.tests = Some("console.log('later', rok.getVar('token'));".into());
+    }
+    let input = send_input(&collection, "main.yml");
+    let (svc, _executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    let lines = console(&out);
+    assert!(lines.contains(&"now from-login".to_string()), "{lines:?}");
+    assert!(lines.contains(&"later from-login".to_string()), "{lines:?}");
+}
+
+#[tokio::test]
+async fn run_request_e2e_the_nested_run_sees_the_callers_runtime_vars() {
+    let collection = main_and_login(
+        "rok.setVar('who', 'main'); await rok.runRequest('auth/login'); \
+         console.log('seen', rok.getVar('seen'));",
+        "rok.setVar('seen', rok.getVar('who'));",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, _executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(console(&out).contains(&"seen main".to_string()), "{:?}", console(&out));
+}
+
+#[tokio::test]
+async fn run_request_e2e_nested_env_writes_are_visible_after_the_call() {
+    let collection = main_and_login(
+        "await rok.runRequest('auth/login'); console.log('E', rok.getEnvVar('E'));",
+        "rok.setEnvVar('E', 'new');",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, _executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(console(&out).contains(&"E new".to_string()), "{:?}", console(&out));
+}
+
+#[tokio::test]
+async fn run_request_e2e_other_protocols_are_skipped() {
+    let mut collection = main_and_login(
+        "const r = await rok.runRequest('socket'); console.log('ws', r.status);",
+        "",
+        "",
+    );
+    let mut socket = WebSocketRequest::new("Socket", "wss://api.test/ws");
+    socket.file_name = Some("socket.yml".into());
+    collection
+        .root
+        .items
+        .push(CollectionItem::WebSocket(Box::new(socket)));
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(console(&out).contains(&"ws skipped".to_string()), "{:?}", console(&out));
+    assert_eq!(urls(&executor), vec!["https://api.test/main.yml".to_string()]);
+}
+
+#[tokio::test]
+async fn run_request_e2e_an_unknown_path_rejects() {
+    let collection = main_and_login(
+        "try { await rok.runRequest('nope/missing'); } catch (e) { console.log('err', e.message); }",
+        "",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, _executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(
+        console(&out).contains(&"err rok.runRequest: invalid request path - nope/missing".to_string()),
+        "{:?}",
+        console(&out)
+    );
+}
+
+#[tokio::test]
+async fn run_request_e2e_a_self_call_rejects() {
+    let collection = main_and_login(
+        "try { await rok.runRequest('main'); } catch (e) { console.log('err', e.message); }",
+        "",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(
+        console(&out).contains(&"err rok.runRequest: recursive call to main".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    assert_eq!(urls(&executor), vec!["https://api.test/main.yml".to_string()]);
+}
+
+#[tokio::test]
+async fn run_request_e2e_a_cycle_rejects_inside_the_nested_run() {
+    let mut collection = Collection::new("api");
+    collection.root.add_request(saved(
+        "A",
+        "a.yml",
+        "await rok.runRequest('b'); console.log('cycle', rok.getVar('cycle'));",
+    ));
+    collection.root.add_request(saved(
+        "B",
+        "b.yml",
+        "try { await rok.runRequest('a'); } catch (e) { rok.setVar('cycle', e.message); }",
+    ));
+    let input = send_input(&collection, "a.yml");
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(
+        console(&out).contains(&"cycle rok.runRequest: recursive call to a".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    assert_eq!(
+        urls(&executor),
+        vec!["https://api.test/b.yml".to_string(), "https://api.test/a.yml".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn run_request_e2e_nesting_stops_after_five_levels() {
+    let mut collection = Collection::new("api");
+    for i in 1..=7 {
+        let script = if i < 7 {
+            format!("await rok.runRequest('r{}');", i + 1)
+        } else {
+            String::new()
+        };
+        collection
+            .root
+            .add_request(saved(&format!("R{i}"), &format!("r{i}.yml"), &script));
+    }
+    let input = send_input(&collection, "r1.yml");
+    let (svc, executor) = run_service(collection);
+    svc.execute(input).await.expect("execute");
+    let sent = urls(&executor);
+    assert_eq!(sent.len(), 6, "{sent:?}");
+    assert!(sent.iter().all(|url| !url.ends_with("r7.yml")), "{sent:?}");
+}
