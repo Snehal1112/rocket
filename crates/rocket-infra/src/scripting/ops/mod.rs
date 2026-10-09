@@ -3,6 +3,7 @@ use deno_core::OpState;
 
 pub mod console;
 pub mod fs;
+pub mod host;
 pub mod modules;
 pub mod process;
 pub mod req;
@@ -14,6 +15,13 @@ pub mod rok;
 #[class(type)]
 #[error("{0}")]
 pub struct ScriptOpError(pub String);
+
+/// JS-visible error for a failed host call such as `rok.sendRequest`.
+/// It surfaces as a plain `Error`, not a `TypeError`.
+#[derive(Debug, thiserror::Error, deno_error::JsError)]
+#[class(generic)]
+#[error("{0}")]
+pub struct ScriptHostError(pub String);
 
 /// Redacts every known secret value out of `msg`, replacing each occurrence
 /// with `"••••••"`. Matching is content-based (against the actual variable

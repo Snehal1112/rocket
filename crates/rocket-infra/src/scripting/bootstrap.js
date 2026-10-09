@@ -51,6 +51,48 @@
     for (const k of Object.keys(_ovAll(scope, base))) _ov[scope].set(k, _GONE);
   }
 
+  // ── host calls ──────────────────────────────────────────────────────────────
+  // Async calls such as rok.sendRequest reach the app through async ops. The ops
+  // take and return JSON with snake_case keys (HostRequest and HostResponse).
+  function _hostResponse(r) {
+    const headers = {};
+    for (const [k, v] of r.headers) headers[String(k).toLowerCase()] = v;
+    let data = r.body;
+    try { data = JSON.parse(r.body); } catch (_e) { /* Not JSON, keep the text. */ }
+    return { status: r.status, statusText: r.status_text, headers, data, responseTime: r.response_time_ms };
+  }
+
+  function _sendOptions(options) {
+    if (!options || typeof options !== 'object') {
+      throw new TypeError('rok.sendRequest: options must be an object');
+    }
+    if (typeof options.url !== 'string' || options.url === '') {
+      throw new TypeError('rok.sendRequest: url is required');
+    }
+    const headers = Object.entries(options.headers || {}).map(([k, v]) => [String(k), String(v)]);
+    let body = null;
+    let bodyIsJson = false;
+    if (options.data !== undefined && options.data !== null) {
+      if (typeof options.data === 'string') {
+        body = options.data;
+      } else {
+        body = JSON.stringify(options.data);
+        bodyIsJson = true;
+      }
+    }
+    const timeout = typeof options.timeout === 'number' && options.timeout > 0
+      ? Math.min(Math.floor(options.timeout), 300000)
+      : 30000;
+    return JSON.stringify({
+      method: String(options.method || 'GET').toUpperCase(),
+      url: options.url,
+      headers,
+      body,
+      body_is_json: bodyIsJson,
+      timeout_ms: timeout,
+    });
+  }
+
   // ── rok ─────────────────────────────────────────────────────────────────────
   globalThis.rok = {
     getVar:     (key) => _ovRead('runtime', key, (k) => __ops.op_rok_get_var(k)),
@@ -115,6 +157,7 @@
     getRequestVar:       (key) => __ops.op_rok_get_request_var(key),
     getProcessEnv:       (key) => (__ops.op_rok_has_process_env(key) ? __ops.op_rok_get_process_env(key) : undefined),
     setNextRequest:      (name) => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
+    sendRequest: async (options) => _hostResponse(JSON.parse(await __ops.op_rok_send_request(_sendOptions(options)))),
     runner: {
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),

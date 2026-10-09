@@ -1,12 +1,14 @@
 use async_trait::async_trait;
 use deno_core::{extension, op2, v8, JsRuntime, OpState, PollEventLoopOptions, RuntimeOptions};
-use rocket_scripting::{SandboxMode, ScriptContext, ScriptEngine, ScriptResult};
+use futures_util::stream::{FuturesUnordered, StreamExt};
+use rocket_scripting::{SandboxMode, ScriptContext, ScriptEngine, ScriptHost, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
+use crate::scripting::host_bridge::{serve_host_call, HostCall, HostChannel};
 use crate::scripting::local_modules::build_roots;
-use crate::scripting::ops::{console, fs, modules, process, redact, req, res, rok};
+use crate::scripting::ops::{console, fs, host, modules, process, redact, req, res, rok};
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 
 /// JS scripting engine backed by `deno_core` (V8).
@@ -53,57 +55,92 @@ const SCRIPT_HEAP_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 #[async_trait]
 impl ScriptEngine for DenoScriptEngine {
     async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
-        run_script_with_timeout(ctx, SCRIPT_TIMEOUT).await
+        run_script_bounded(ctx, None, SCRIPT_TIMEOUT).await
+    }
+
+    async fn execute_with_host(
+        &self,
+        ctx: ScriptContext,
+        host: &dyn ScriptHost,
+    ) -> DomainResult<ScriptResult> {
+        run_script_bounded(ctx, Some(host), SCRIPT_TIMEOUT).await
     }
 }
 
-/// Runs a script on a blocking thread and aborts it if `timeout` elapses.
+/// Runs a script on a blocking thread, serves its host calls, and aborts it if
+/// `timeout` elapses.
 ///
+/// Host calls arrive over a channel and are served here, on the caller's task,
+/// because the host may borrow data that cannot move to the script thread.
 /// Cancelling the async future alone would not stop the OS thread running V8,
 /// so on timeout we ask V8 itself to abort the script through the isolate
-/// handle the thread published on start. Tests call this directly with a short
-/// timeout so the suite never waits the full `SCRIPT_TIMEOUT`.
-async fn run_script_with_timeout(
+/// handle the thread published on start.
+async fn run_script_bounded(
     ctx: ScriptContext,
+    host: Option<&dyn ScriptHost>,
     timeout: Duration,
 ) -> DomainResult<ScriptResult> {
     // JsRuntime is !Send, so all V8 work must stay on one thread.
     let (handle_tx, handle_rx) = oneshot::channel();
-    let join = tokio::task::spawn_blocking(move || run_script(ctx, handle_tx));
+    let (call_tx, mut call_rx) = mpsc::unbounded_channel::<HostCall>();
+    // Without a host the sender is dropped, so host ops find no channel and reject.
+    let call_tx = host.map(|_| call_tx);
+    let mut join = tokio::task::spawn_blocking(move || run_script(ctx, handle_tx, call_tx));
+    let mut serving = FuturesUnordered::new();
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
 
-    match tokio::time::timeout(timeout, join).await {
-        Ok(join_result) => {
-            join_result.map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?
-        }
-        Err(_elapsed) => {
-            // Terminate whenever the handle arrives, however late. Bounding
-            // this wait would abandon a script that had not started yet: it
-            // would then run unterminated and pin a blocking thread forever,
-            // since dropping a spawn_blocking JoinHandle detaches rather than
-            // cancels it.
-            //
-            // This must be a plain OS thread, not a `tokio::spawn`ed task: a
-            // detached async task is tied to this call's Tokio runtime, and
-            // on a short-lived runtime (every #[tokio::test] creates and
-            // drops one per test) it can be cancelled before it ever gets
-            // polled, deadlocking against the `spawn_blocking` thread that
-            // Runtime::Drop waits on. A `std::thread` keeps running
-            // regardless of what happens to the runtime that spawned it.
-            //
-            // Terminating makes the blocking thread's execute_script return
-            // an "execution terminated" error; it then tears the runtime
-            // down on its own and its result is discarded, so we do not wait
-            // for it here.
-            std::thread::spawn(move || {
-                if let Ok(isolate_handle) = handle_rx.blocking_recv() {
-                    isolate_handle.terminate_execution();
+    loop {
+        tokio::select! {
+            joined = &mut join => {
+                return joined
+                    .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?;
+            }
+            Some(call) = call_rx.recv(), if host.is_some() => {
+                if let Some(host) = host {
+                    serving.push(serve_host_call(host, call));
                 }
-            });
-            Err(DomainError::Internal(format!(
-                "script execution timed out after {timeout:?}"
-            )))
+            }
+            Some(()) = serving.next(), if !serving.is_empty() => {}
+            () = &mut deadline => break,
         }
     }
+
+    // Terminate whenever the handle arrives, however late. Bounding
+    // this wait would abandon a script that had not started yet: it
+    // would then run unterminated and pin a blocking thread forever,
+    // since dropping a spawn_blocking JoinHandle detaches rather than
+    // cancels it.
+    //
+    // This must be a plain OS thread, not a `tokio::spawn`ed task: a
+    // detached async task is tied to this call's Tokio runtime, and
+    // on a short-lived runtime (every #[tokio::test] creates and
+    // drops one per test) it can be cancelled before it ever gets
+    // polled, deadlocking against the `spawn_blocking` thread that
+    // Runtime::Drop waits on. A `std::thread` keeps running
+    // regardless of what happens to the runtime that spawned it.
+    //
+    // Terminating makes the blocking thread's execute_script return
+    // an "execution terminated" error; it then tears the runtime
+    // down on its own and its result is discarded, so we do not wait
+    // for it here.
+    std::thread::spawn(move || {
+        if let Ok(isolate_handle) = handle_rx.blocking_recv() {
+            isolate_handle.terminate_execution();
+        }
+    });
+    Err(DomainError::Internal(format!(
+        "script execution timed out after {timeout:?}"
+    )))
+}
+
+/// Runs a script with no host and a plain time limit. The timeout tests use it.
+#[cfg(test)]
+async fn run_script_with_timeout(
+    ctx: ScriptContext,
+    timeout: Duration,
+) -> DomainResult<ScriptResult> {
+    run_script_bounded(ctx, None, timeout).await
 }
 
 // ── test runner ops ──────────────────────────────────────────────────────────
@@ -193,6 +230,8 @@ extension!(
         rok::op_rok_get_request_var,
         rok::op_rok_has_process_env,
         rok::op_rok_get_process_env,
+        // host ops
+        host::op_rok_send_request,
         // req read ops
         req::op_req_get_url,
         req::op_req_get_host,
@@ -266,12 +305,13 @@ extension!(
 fn run_script(
     ctx: ScriptContext,
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
+    calls: Option<mpsc::UnboundedSender<HostCall>>,
 ) -> DomainResult<ScriptResult> {
     let tokio_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| DomainError::Internal(format!("script runtime could not start: {e}")))?;
-    tokio_rt.block_on(run_script_async(ctx, handle_tx))
+    tokio_rt.block_on(run_script_async(ctx, handle_tx, calls))
 }
 
 /// Wraps user code as the body of an async function, so top-level `await` and
@@ -315,6 +355,7 @@ fn script_error_message(raw: String) -> String {
 async fn run_script_async(
     ctx: ScriptContext,
     handle_tx: oneshot::Sender<v8::IsolateHandle>,
+    calls: Option<mpsc::UnboundedSender<HostCall>>,
 ) -> DomainResult<ScriptResult> {
     let code = ctx.code;
     let sandbox_mode = ctx.sandbox_mode;
@@ -383,6 +424,7 @@ async fn run_script_async(
             assertion_results: ctx.assertion_results,
         });
         state.put(ScriptOutputState::default());
+        state.put(HostChannel(calls));
     }
 
     const BOOTSTRAP: &str = include_str!("bootstrap.js");
@@ -799,6 +841,185 @@ mod tests {
         let result = engine.execute(ctx).await.expect("execute");
         let err = result.error.expect("script error");
         assert!(err.contains("ReferenceError"), "{err}");
+    }
+
+    // ── host calls ───────────────────────────────────────────────────────────
+
+    use rocket_scripting::{HostError, HostRequest, HostResponse, ScriptHost};
+    use std::sync::Mutex as StdMutex;
+
+    /// Host that records each request and answers with a fixed result.
+    struct FakeHost {
+        sent: StdMutex<Vec<HostRequest>>,
+        answer: Result<HostResponse, HostError>,
+    }
+
+    impl FakeHost {
+        fn ok(status: u16, body: &str) -> Self {
+            Self {
+                sent: StdMutex::new(Vec::new()),
+                answer: Ok(HostResponse {
+                    status,
+                    status_text: "OK".into(),
+                    headers: vec![("Content-Type".into(), "application/json".into())],
+                    body: body.into(),
+                    response_time_ms: 7,
+                }),
+            }
+        }
+
+        fn failing(message: &str) -> Self {
+            Self {
+                sent: StdMutex::new(Vec::new()),
+                answer: Err(HostError::Failed(message.into())),
+            }
+        }
+
+        fn sent(&self) -> Vec<HostRequest> {
+            self.sent.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl ScriptHost for FakeHost {
+        async fn send_request(&self, request: HostRequest) -> Result<HostResponse, HostError> {
+            self.sent.lock().expect("lock").push(request);
+            self.answer.clone()
+        }
+    }
+
+    /// Host that implements nothing, so every call reports `Unavailable`.
+    struct BareHost;
+
+    #[async_trait]
+    impl ScriptHost for BareHost {}
+
+    #[tokio::test]
+    async fn host_send_request_resolves_with_the_host_response() {
+        let host = FakeHost::ok(201, "{\"id\":7}");
+        let ctx = minimal_ctx(
+            "const r = await rok.sendRequest({ method: 'post', url: 'https://x.test/a', \
+             headers: { 'X-A': 1 }, data: { n: 1 }, timeout: 1500 }); \
+             rok.setVar('out', [r.status, r.statusText, r.headers['content-type'], r.data.id, r.responseTime].join('|'))",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "201|OK|application/json|7|7"
+        );
+        let sent = host.sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].method, "POST");
+        assert_eq!(sent[0].url, "https://x.test/a");
+        assert_eq!(sent[0].headers[0], ("X-A".to_string(), "1".to_string()));
+        assert_eq!(sent[0].body.as_deref(), Some("{\"n\":1}"));
+        assert!(sent[0].body_is_json);
+        assert_eq!(sent[0].timeout_ms, 1500);
+    }
+
+    #[tokio::test]
+    async fn host_send_request_defaults_method_and_timeout_and_keeps_text_bodies() {
+        let host = FakeHost::ok(200, "plain text");
+        let ctx = minimal_ctx(
+            "const r = await rok.sendRequest({ url: 'https://x.test', data: 'hello' }); \
+             rok.setVar('d', r.data)",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("d").expect("d present"), "plain text");
+        let sent = host.sent();
+        assert_eq!(sent[0].method, "GET");
+        assert_eq!(sent[0].body.as_deref(), Some("hello"));
+        assert!(!sent[0].body_is_json);
+        assert_eq!(sent[0].timeout_ms, 30_000);
+    }
+
+    #[tokio::test]
+    async fn host_send_request_without_a_host_rejects_as_not_available() {
+        let ctx = minimal_ctx(
+            "try { await rok.sendRequest({ url: 'https://x.test' }); } \
+             catch (e) { rok.setVar('e', e.message); }",
+        );
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("e").expect("e present"),
+            "rok.sendRequest is not available here"
+        );
+    }
+
+    #[tokio::test]
+    async fn host_send_request_with_a_host_that_lacks_it_rejects_as_not_available() {
+        let ctx = minimal_ctx(
+            "try { await rok.sendRequest({ url: 'https://x.test' }); } \
+             catch (e) { rok.setVar('e', e.message); }",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &BareHost)
+            .await
+            .expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("e").expect("e present"),
+            "rok.sendRequest is not available here"
+        );
+    }
+
+    #[tokio::test]
+    async fn host_send_request_failure_rejects_with_a_plain_error() {
+        let host = FakeHost::failing("rok.sendRequest: connection refused");
+        let ctx = minimal_ctx(
+            "try { await rok.sendRequest({ url: 'https://x.test' }); } \
+             catch (e) { rok.setVar('e', e.message); rok.setVar('plain', e instanceof Error && !(e instanceof TypeError)); }",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("e").expect("e present"),
+            "rok.sendRequest: connection refused"
+        );
+        assert_eq!(result.runtime_vars.get("plain").expect("plain present"), true);
+    }
+
+    #[tokio::test]
+    async fn host_send_request_without_a_url_rejects_before_the_host() {
+        let host = FakeHost::ok(200, "");
+        let ctx = minimal_ctx(
+            "try { await rok.sendRequest({ method: 'GET' }); } \
+             catch (e) { rok.setVar('e', e.message); }",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("e").expect("e present"),
+            "rok.sendRequest: url is required"
+        );
+        assert!(host.sent().is_empty());
+    }
+
+    #[tokio::test]
+    async fn host_promise_all_serves_two_requests() {
+        let host = FakeHost::ok(200, "{}");
+        let ctx = minimal_ctx(
+            "const [a, b] = await Promise.all([\
+               rok.sendRequest({ url: 'https://x.test/1' }), \
+               rok.sendRequest({ url: 'https://x.test/2' })]); \
+             rok.setVar('both', a.status + b.status)",
+        );
+        let result = DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("both").expect("both present"), 400);
+        assert_eq!(host.sent().len(), 2);
     }
 
     #[tokio::test]

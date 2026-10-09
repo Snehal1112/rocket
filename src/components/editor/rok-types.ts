@@ -440,6 +440,26 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
 ];
 
 const ROK_DEFS = `
+interface RokSendRequestOptions {
+  /** HTTP method. Defaults to GET. */
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  /** An object or array is sent as JSON. A string is sent as is. */
+  data?: unknown;
+  /** Time limit in milliseconds. Defaults to 30000. */
+  timeout?: number;
+}
+interface RokResponse {
+  status: number;
+  statusText: string;
+  /** Header names are lowercased. */
+  headers: Record<string, string>;
+  /** The body, parsed as JSON when possible, otherwise the text. */
+  data: any;
+  /** Time taken in milliseconds. */
+  responseTime: number;
+}
 declare const rok: {
   /** Read a runtime variable set in a previous script. */
   getVar(key: string): unknown;
@@ -511,6 +531,8 @@ declare const rok: {
   getProcessEnv(key: string): string | undefined;
   /** Same as rok.runner.setNextRequest. Pass null to stop the run. */
   setNextRequest(name: string | null): void;
+  /** Send an HTTP request from the script. Variables in the options are not resolved; use rok.interpolate. */
+  sendRequest(options: RokSendRequestOptions): Promise<RokResponse>;
   /**
    * Controls the Collection Runner's sequencing (see
    * docs/superpowers/specs/2026-09-16-collection-runner-design.md). Only
