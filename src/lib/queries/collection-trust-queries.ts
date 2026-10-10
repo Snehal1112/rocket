@@ -8,6 +8,7 @@ import {
   grantRequestedCapabilities,
   onCollectionChanged,
   onCollectionTrustChanged,
+  onGitChanged,
   type RequestedCapability,
   revokeCollectionTrust,
   setCollectionCapability,
@@ -51,7 +52,11 @@ export function useCollectionTrustEvents(): void {
       // The host environment a collection may use depends on its trust.
       void queryClient.invalidateQueries({ queryKey: environmentKeys.processAll });
     };
-    const unsubs = [onCollectionTrustChanged(refresh), onCollectionChanged(refresh)];
+    const unsubs = [
+      onCollectionTrustChanged(refresh),
+      onCollectionChanged(refresh),
+      onGitChanged(refresh),
+    ];
     return () => {
       for (const unsub of unsubs) void unsub.then((fn) => fn()).catch(() => undefined);
     };

@@ -32,6 +32,17 @@ describe('process env scope', () => {
     expect(ctx['process.env.HOME']).toBe('/home/u');
   });
 
+  it('asks the backend on every send, so a withdrawn permission applies at once', async () => {
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValueOnce({ HOME: '/home/u' });
+    expect((await buildOAuth2VarContext('mine'))['process.env.HOME']).toBe('/home/u');
+
+    // The backend now returns nothing for the collection.
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue({});
+    const ctx = await buildOAuth2VarContext('mine');
+    expect(ctx['process.env.HOME']).toBeUndefined();
+    expect(tauriApi.getProcessEnvVars).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps full access for a scratch request and never throws on a failed read', async () => {
     vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValueOnce({ HOME: '/h' });
     expect((await buildOAuth2VarContext(undefined))['process.env.HOME']).toBe('/h');

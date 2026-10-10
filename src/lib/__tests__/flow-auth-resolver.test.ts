@@ -16,6 +16,7 @@ const collectionVars: CollectionVariable[] = [
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
+  getProcessEnvVars: vi.fn(async () => ({ HOME: '/home/u' })),
   getCollectionSettings: vi.fn(async () => ({
     headers: [],
     variables: [
@@ -55,7 +56,6 @@ describe('flowAuthResolver (editor) and buildOAuth2VarContext (pre-run step)', (
       name: 'global',
       variables: [{ key: 'tenant', value: 'acme', enabled: true, secret: false }],
     });
-    qc.setQueryData(environmentKeys.process('api'), { HOME: '/home/u' });
     setQueryClient(qc);
     useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'api' });
   });

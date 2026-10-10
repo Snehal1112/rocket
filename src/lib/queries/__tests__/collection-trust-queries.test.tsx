@@ -13,6 +13,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getCollectionTrust: vi.fn(),
     onCollectionTrustChanged: vi.fn(),
     onCollectionChanged: vi.fn(),
+    onGitChanged: vi.fn(),
   };
 });
 
@@ -28,6 +29,7 @@ describe('collection trust queries', () => {
     vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(makeTrust());
     vi.mocked(tauriApi.onCollectionTrustChanged).mockResolvedValue(() => undefined);
     vi.mocked(tauriApi.onCollectionChanged).mockResolvedValue(() => undefined);
+    vi.mocked(tauriApi.onGitChanged).mockResolvedValue(() => undefined);
   });
 
   it('does not query without a collection', () => {
@@ -52,5 +54,7 @@ describe('collection trust queries', () => {
     await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledTimes(2));
     onFile?.({ type: 'x' });
     await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledTimes(3));
+    vi.mocked(tauriApi.onGitChanged).mock.calls[0]?.[0]();
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledTimes(4));
   });
 });

@@ -76,7 +76,8 @@ async function getProcessEnvVars(collection?: string | null): Promise<Record<str
     return await getQueryClient().fetchQuery({
       queryKey: environmentKeys.process(scope),
       queryFn: () => fetchProcessEnvVars(scope),
-      staleTime: Number.POSITIVE_INFINITY,
+      // Always ask: a trust change or a pull may have withdrawn the access since the last send.
+      staleTime: 0,
     });
   } catch {
     return {};

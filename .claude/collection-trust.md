@@ -43,3 +43,11 @@ First start after the upgrade grandfathers every existing collection once. `Trus
 - Host environment count in the migration notice.
 - Static script scanner and request guard from git (separate specs).
 - If `config.proxy` or `config.clientCertificates` in `opencollection.yml` are ever honoured, they must join this gate.
+
+## Known limits
+
+- Backend-executed HTTP (flows, `rok.runRequest`, the assistant's `run_request`) never resolves `{{process.env}}`. Only the frontend send and the three backend protocols above do.
+- Resending a request from History carries no collection, so it is treated as scratch and keeps host environment access. Accepted residual.
+- External folders linked into a workspace are not watched, so a pull there shows in the banner only after the next trust refresh (reopen the tab or grant/revoke).
+- The migration notice has no host environment count, and Review opens the first listed collection by its directory name.
+- The HTTP send asks the backend for the process env map on every send (one IPC), and the process env queries are invalidated on trust, collection and git changes.

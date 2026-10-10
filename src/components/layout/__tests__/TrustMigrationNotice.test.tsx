@@ -46,7 +46,7 @@ describe('TrustMigrationNotice', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
 
-  it('Review opens the first collection and keeps the notice', async () => {
+  it('Review opens the first collection, closes the dialog and does not dismiss', async () => {
     vi.mocked(tauriApi.getTrustMigrationNotice).mockResolvedValue(notice);
     const open = vi.spyOn(usePaneStore.getState(), 'openCollectionTab').mockReturnValue(true);
     render(<TrustMigrationNotice />);
