@@ -6,7 +6,7 @@ This page lists the decisions and follow-ups left after implementing the six wor
 
 - Per-tab AI Assist was removed (Plan 05 Task 3), together with the old `start_agent_session` command, its TS wrapper and the per-tab session code. Why: the workspace assistant replaces it. Cost if wrong: the per-tab Scripts AI Assist cannot come back without reverting that commit.
 - The UI takes the session id from the start command's return value, not from the `AcpSessionStarted` event. Why: the event is published before `track()`. Cost if wrong: a dead session can stay tracked until the next sweep when the UI races it.
-- `AcpSessionFailed` alone is not treated as session death, because a queued prompt (`InvalidInput`) also publishes it for a healthy session. Cost if wrong: the UI would tear down working sessions.
+- A queued prompt (`InvalidInput`) no longer publishes `AcpSessionFailed`: the backend returns the error and keeps the session. The UI treats any `agent-session-failed` event as fatal, and a rejected send is handled as a non-fatal turn failure. Cost if wrong: a real failure that arrives as a rejected send would leave a dead session looking alive.
 - Assistant copy must say that only environment-supplied credentials are used (an empty `CLAUDE_CONFIG_DIR`). Why: the assistant does not read a stored Claude login. Cost if wrong: users expect a login that is not used.
 - Chip-resource text is built by a backend IPC that reuses the masked read views, so masking lives in one place. The frontend only selects, dedupes and caps chips. Why: the frontend-only masking was weaker than the backend. Cost if wrong: the leak surface stays in the frontend.
 - The scratch-dir owner check uses a `current_uid()` probe, not libc (libc is not a dependency). Cost: a small race in a hostile `TMPDIR`.
@@ -17,13 +17,12 @@ This page lists the decisions and follow-ups left after implementing the six wor
 
 ### Sessions and cleanup
 
-- `start_session` racing `end_all_sessions` can track a session after the drain. The client refuses new sessions after shutdown, so the session is orphaned until the next sweep.
 - `current_uid()` reads the uid by path from a probe file. Use `file.metadata()` on the open handle instead (`scratch.rs`).
 - The idle sleep restarts when the client reports a result during the drain phase. The message text now says "no update for Ns".
 - `tool_status_from_wire` falls back to `InProgress`, while `category_to_wire` returns `None`. Make them consistent (Plan 01 Task 1).
 - The startup sweep treats a scratch root with no pid marker as stale. A concurrent instance could be creating that root. Fix: treat an unmarked root younger than 60 s as live.
 - The outline goes stale between session start and the first prompt.
-- `start_workspace_session` duplicates the credential and env setup. There is no MockRuntime failure-path test for `start_workspace_assistant_inner`.
+- `start_workspace_session` duplicates the credential and env setup.
 - The start path does not warn when `try_state` for `McpToolService` is `None`.
 - No test checks that session start publishes no `AcpToolInvoked`.
 - rustfmt width drift in `src-tauri/tests/acp_mcp_start_agent_session.rs` and `tool_server.rs`.
@@ -73,10 +72,7 @@ This page lists the decisions and follow-ups left after implementing the six wor
 
 ### Composer and chips
 
-- Prompt history stores typed secrets in localStorage per workspace. Cap the entry length and clear it on workspace delete.
-- Chip keys are ambiguous when a name contains `:`.
-- The reference-tree query is not invalidated after changes.
-- A triple-backtick fence in the composer is not handled.
+- Prompt history stores typed secrets in localStorage per workspace. Entries are capped at 4000 characters and cleared on workspace delete, but a secret typed into a prompt is still kept locally.
 - `variableContext` presence toggle recreates the view. The tooltip parent body needs a visual check, and `fontSize` is a literal.
 
 ## Known limitations
