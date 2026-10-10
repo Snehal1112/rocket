@@ -235,7 +235,7 @@ mod tests {
             value: "general".into(),
             initial_value: "general".into(),
             enabled: true,
-            secret: false,
+            secret: true,
         }];
         ws.scripts = vec![WebSocketScript {
             script_type: "before-request".into(),

@@ -559,6 +559,8 @@ pkcs12Secret: string          # reference to a secret holding the base64 text of
 
 Each piece has exactly one source: a non-empty file path or a reference. With a reference the file path field is empty and is not written. A value that starts with `-----BEGIN` in a path or reference field is rejected on save, so key text never reaches the environment file. References are validated on save against the environment's `externalSecrets` bindings. The schema requires the file paths, so another OpenCollection tool may reject or drop an entry that uses a reference, the same trade-off as `externalSecrets`. Fetched values are never persisted. An unresolved reference fails a request or token request only when that certificate is the one selected for the URL.
 
+**Rocket extension key `secret` on scoped Variables (not in the OpenCollection schema).** A collection, folder or request Variable may carry `secret: true` next to its `value`. It is written only when true and read as false when absent. The value itself stays in plain YAML. A strict validator may read a value-bearing entry with `secret: true` as a SecretVariable (which has no value). Environments do not use this form; they write a value-less SecretVariable.
+
 **Rocket extension entry type `vault` (not in the OpenCollection schema).** An entry may name a certificate that RocketVault exports at send time, instead of naming material:
 
 ```yaml

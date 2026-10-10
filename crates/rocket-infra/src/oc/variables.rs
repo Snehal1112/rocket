@@ -21,6 +21,7 @@ pub struct OcVariable {
     pub disabled: Option<bool>,
     /// Rocket extension for collection, folder and request variables. Omitted when false.
     /// Environments use `OcSecretVariable` instead, which carries no value.
+    /// The value of a scoped variable is still stored as plain YAML.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret: Option<bool>,
 }

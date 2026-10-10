@@ -3365,11 +3365,20 @@ fn variable_without_secret_field_loads_as_non_secret_and_is_not_rewritten_with_i
     repo.create("my-api").unwrap();
     repo.create_folder("my-api", "auth").unwrap();
     let path = dir.path().join("my-api/auth/folder.yml");
-    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let existing = fs::read_to_string(&path).expect("folder.yml exists after create_folder");
     assert!(!existing.contains("secret"));
     repo.save_folder_variables("my-api", "auth", vec![secret_var("a", false)])
         .unwrap();
     let yaml = fs::read_to_string(&path).unwrap();
     assert!(!yaml.contains("secret"), "{yaml}");
     assert!(!repo.get_folder_variables("my-api", "auth").unwrap()[0].secret);
+}
+
+#[test]
+fn oc_variable_yaml_without_secret_is_non_secret_and_with_secret_is_secret() {
+    use crate::oc::OcVariable;
+    let plain: OcVariable = serde_yaml::from_str("name: a\nvalue: x\n").unwrap();
+    assert!(!CollectionVariable::from(plain).secret);
+    let secret: OcVariable = serde_yaml::from_str("name: a\nvalue: x\nsecret: true\n").unwrap();
+    assert!(CollectionVariable::from(secret).secret);
 }
