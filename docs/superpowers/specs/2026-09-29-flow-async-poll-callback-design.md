@@ -261,8 +261,8 @@ pub struct ReceivedCall {
 The `rocket-infra` implementation:
 - Binds `0.0.0.0:0` (a free port) per endpoint using `hyper` 1.x, which is already in `Cargo.lock`. The plan confirms the server features needed.
 - Serves only `/cb/<token>`, where `<token>` is 32 random URL-safe characters per run. Any other path gets `404`.
-- Answers each call at once with `200` and body `{"received":true}`, then sends the call to a bounded channel that holds up to 100 calls. When the channel is full, the call gets `503` and is not delivered.
-- Caps the request body at 1 MB. Larger calls get `413` and are not delivered.
+- Answers each call at once with `200` and body `{"received":true}`, then sends the call to a bounded channel that holds up to 16 calls. When the channel is full, the call gets `503` and is not delivered.
+- Caps the request body at 256 KiB. Larger calls get `413` and are not delivered.
 - Shuts down when `guard` is dropped. Later calls cannot connect.
 
 The URL is `http://<host>:<port>/cb/<token>`. `<host>` is `Flow.callback_host`, or this machine's first non-loopback IPv4 address, or `127.0.0.1` if there is none.
@@ -317,7 +317,7 @@ A skipped or failed WaitForCallback node keeps its endpoint open only until the 
 
 **P1 (Rust):** succeeds on attempt N; gives up at max attempts; gives up at the deadline; a 404 is retried until a 200; a condition script error fails at once; a send error fails at once; cancel between attempts; History has exactly one entry per poll; a flow without `repeat_until` round-trips byte-identically; validation rejects each bad value. **(TS):** the card row renders; the properties section edits and saves; the palette entry adds a configured node.
 
-**P2 (Rust):** a call before the node's turn is accepted; a call during the wait is accepted; `accept_when` ignores non-matching calls; timeout fails with the ignored count; cancel during the wait; endpoints close on success, failure, cancel and skip; a wrong token gets 404; a body over 1 MB gets 413; `{{callback.name}}` resolves in URL, header, body and scripts; validation rejects bad names and duplicates. The listener implementation gets an integration test in `rocket-infra` against a real local socket. **(TS):** the node renders; the editor edits and saves; wiring rules accept Run when in and result out; the callback host setting saves.
+**P2 (Rust):** a call before the node's turn is accepted; a call during the wait is accepted; `accept_when` ignores non-matching calls; timeout fails with the ignored count; cancel during the wait; endpoints close on success, failure, cancel and skip; a wrong token gets 404; a body over 256 KiB gets 413; `{{callback.name}}` resolves in URL, header, body and scripts; validation rejects bad names and duplicates. The listener implementation gets an integration test in `rocket-infra` against a real local socket. **(TS):** the node renders; the editor edits and saves; wiring rules accept Run when in and result out; the callback host setting saves.
 
 **Manual (per part):** P1 with a local endpoint that returns `pending` twice, then `done`. P2 with a local script that posts to the callback URL after a delay.
 

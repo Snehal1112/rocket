@@ -20,8 +20,10 @@ use rocket_shared::error::{DomainError, DomainResult};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 
-pub const MAX_BODY_BYTES: usize = 1_048_576;
-pub const CHANNEL_CAPACITY: usize = 100;
+/// A callback body larger than this gets 413. Webhook payloads rarely come close.
+pub const MAX_BODY_BYTES: usize = 262_144;
+/// Calls queued for the Wait node. A full queue answers 503 and the sender retries.
+pub const CHANNEL_CAPACITY: usize = 16;
 pub const TOKEN_LEN: usize = 32;
 /// At most this many connections are served at once.
 pub const MAX_CONNECTIONS: usize = 64;
@@ -374,6 +376,34 @@ mod tests {
             .expect("send small");
         assert_eq!(response.status().as_u16(), 200);
         assert_eq!(endpoint.calls.recv().await.expect("call").body, "small");
+    }
+
+    /// A deliberate memory budget. If you raise a limit, raise this knowingly.
+    #[test]
+    fn queued_callback_bytes_stay_within_the_memory_budget() {
+        assert!(
+            CHANNEL_CAPACITY * MAX_BODY_BYTES <= 8 * 1024 * 1024,
+            "queued callbacks may hold at most 8 MiB per endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn body_of_exactly_the_limit_is_accepted() {
+        let mut endpoint = open_local().await;
+
+        let body = vec![b'x'; MAX_BODY_BYTES];
+        let response = reqwest::Client::new()
+            .post(&endpoint.url)
+            .body(body)
+            .send()
+            .await
+            .expect("send");
+
+        assert_eq!(response.status().as_u16(), 200);
+        assert_eq!(
+            endpoint.calls.recv().await.expect("call").body.len(),
+            MAX_BODY_BYTES
+        );
     }
 
     #[tokio::test]
