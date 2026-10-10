@@ -108,6 +108,8 @@ impl FlowExecutionService {
 
         // The last turned-down call not yet shown live; the ticker shows it.
         let mut held: Option<FlowRejectedCall> = None;
+        // When a live event last went out, so a flood cannot starve the countdown.
+        let mut last_live = Instant::now();
 
         loop {
             let call = tokio::select! {
@@ -116,13 +118,19 @@ impl FlowExecutionService {
                     return Err(DomainError::Internal("cancelled".into()));
                 }
                 _ = sleep_until(deadline) => {
-                    // A call queued before the deadline still counts.
-                    while let Ok(call) = endpoint.calls.try_recv() {
+                    // A call queued before the deadline still counts. Only the
+                    // calls already queued are judged, so a steady stream
+                    // cannot hold the wait open.
+                    let queued = endpoint.calls.len();
+                    for _ in 0..queued {
+                        let Ok(call) = endpoint.calls.try_recv() else {
+                            break;
+                        };
                         if let Some(done) = self
                             .judge_call(
                                 exec, input, node, &call, accept_when, secret_values,
                                 trace_masks, logs, trace, ctx, started, deadline,
-                                &mut ignored, &mut held, exchange,
+                                &mut ignored, &mut held, &mut last_live, exchange,
                             )
                             .await?
                         {
@@ -146,6 +154,7 @@ impl FlowExecutionService {
                 _ = ticker.tick() => {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     // The held turned-down call, if any, goes out with the counts.
+                    last_live = Instant::now();
                     self.publish_live_progress(
                         ctx,
                         None,
@@ -180,6 +189,7 @@ impl FlowExecutionService {
                     deadline,
                     &mut ignored,
                     &mut held,
+                    &mut last_live,
                     exchange,
                 )
                 .await?
@@ -209,6 +219,7 @@ impl FlowExecutionService {
         deadline: Instant,
         ignored: &mut u32,
         held: &mut Option<FlowRejectedCall>,
+        last_live: &mut Instant,
         exchange: &mut Option<FlowDebugRequest>,
     ) -> DomainResult<Option<ExecutedNode>> {
         if let Some(source) = accept_when {
@@ -239,7 +250,11 @@ impl FlowExecutionService {
                         wait.ignored = *ignored;
                         wait.last_rejected = Some(record);
                     }
-                    if *ignored == 1 {
+                    // Under a flood the ticker never runs, so a second has to
+                    // pass before the next live event.
+                    if *ignored == 1 || last_live.elapsed() >= Duration::from_secs(1) {
+                        *last_live = Instant::now();
+                        *held = None;
                         let remaining = deadline.saturating_duration_since(Instant::now());
                         self.publish_live_progress(
                             ctx,

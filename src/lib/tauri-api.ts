@@ -2550,7 +2550,7 @@ export interface FlowStepCompletedEvent {
   branch?: string;
   /** Script console output from this step. Omitted when empty. */
   logs?: FlowLogEntry[];
-  /** Sent request of a debug node. */
+  /** Always omitted from the event. The record is on the run summary step. */
   debug_request?: FlowDebugRequest;
   /** Masked request and response of a step that sent. */
   exchange?: FlowDebugRequest;

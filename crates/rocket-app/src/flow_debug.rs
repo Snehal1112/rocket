@@ -213,7 +213,7 @@ fn mask_call_headers(
 }
 
 /// The first `MAX_REJECTED_HEADERS` headers of a received call, masked, with
-/// each value cut to 1 KiB.
+/// each value cut to `MAX_REJECTED_HEADER_VALUE_BYTES`.
 fn capped_headers(
     headers: &[(String, String)],
     secret_values: &HashSet<String>,
@@ -221,7 +221,7 @@ fn capped_headers(
     let kept = &headers[..headers.len().min(MAX_REJECTED_HEADERS)];
     let mut masked = mask_call_headers(kept, secret_values);
     for header in &mut masked {
-        cap_text(&mut header.value, 1024);
+        cap_text(&mut header.value, MAX_REJECTED_HEADER_VALUE_BYTES);
     }
     masked
 }
@@ -255,6 +255,9 @@ pub(crate) fn callback_exchange(
 
 /// The most headers a turned-down call record keeps.
 pub(crate) const MAX_REJECTED_HEADERS: usize = 32;
+
+/// The most bytes of one header value a turned-down call record keeps.
+pub(crate) const MAX_REJECTED_HEADER_VALUE_BYTES: usize = 1024;
 
 /// The largest turned-down call body a live progress event carries, in bytes.
 pub(crate) const LIVE_REJECTED_BODY_LIMIT: usize = 2_048;
@@ -764,7 +767,18 @@ mod tests {
         let mut big = turned_down("{}");
         big.headers = vec![("X-Big".into(), "b".repeat(100_000))];
         let record = rejected_call(&big, &secrets(&[]), EXCHANGE_BODY_LIMIT, "no match");
-        assert_eq!(record.headers[0].value.len(), 1024);
+        assert_eq!(
+            record.headers[0].value.len(),
+            MAX_REJECTED_HEADER_VALUE_BYTES
+        );
+
+        // A two-byte character must be cut at a boundary, never inside.
+        let mut wide = turned_down("{}");
+        wide.headers = vec![("X-Wide".into(), "é".repeat(2000))];
+        let record = rejected_call(&wide, &secrets(&[]), EXCHANGE_BODY_LIMIT, "no match");
+        let value = &record.headers[0].value;
+        assert!(value.len() <= MAX_REJECTED_HEADER_VALUE_BYTES);
+        assert!(value.chars().all(|c| c == 'é'));
     }
 
     #[test]

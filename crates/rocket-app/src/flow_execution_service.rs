@@ -8373,6 +8373,100 @@ mod tests {
         assert_eq!(wait.ignored, 50, "the trace still counts every call");
     }
 
+    /// Script engine whose accept_when check takes a while and turns the call down.
+    struct SlowRejectEngine {
+        delay_ms: u64,
+    }
+    #[async_trait]
+    impl ScriptEngine for SlowRejectEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            let mut vars = HashMap::new();
+            if ctx.code.contains("const request") {
+                tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+                vars.insert("__jsonq_result__".to_string(), serde_json::json!(false));
+            } else {
+                vars.insert("__jsonq_result__".to_string(), serde_json::json!("x"));
+            }
+            Ok(ScriptResult {
+                runtime_vars: vars,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_steady_stream_of_calls_does_not_hold_the_wait_open_past_its_timeout() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, Box::new(SlowRejectEngine { delay_ms: 30 }));
+        let service = service_with_listener(
+            register_then_wait(wait_node_with("w", 1000, Some("request.body.ok"))),
+            &fake,
+        );
+
+        let started = std::time::Instant::now();
+        let (summary, ()) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            // A call every 20 ms for 6 s, faster than the 30 ms judge.
+            for _ in 0..300 {
+                if fake
+                    .sender(0)
+                    .send(event_call("payment.pending"))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        });
+        let summary = summary.expect("run");
+
+        let step = step_of(&summary, "w");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert!(
+            step.error
+                .as_deref()
+                .is_some_and(|e| e.contains("no matching callback")),
+            "got {:?}",
+            step.error
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flood_of_calls_keeps_the_live_countdown_moving() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        for _ in 0..80 {
+            fake.queue_on_open(event_call("payment.pending"));
+        }
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, Box::new(SlowRejectEngine { delay_ms: 30 }));
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 3000, Some("request.body.ok"))),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+
+        service.run(&exec, run_input("cb")).await.expect("run");
+
+        let with_call = publisher
+            .events()
+            .into_iter()
+            .filter(|e| {
+                matches!(e, DomainEvent::FlowStepProgress { node_id, live: Some(l), .. }
+                    if node_id == "w" && l.last_rejected.is_some())
+            })
+            .count();
+        // The backlog takes about 2.4 s, so one live event per second shows.
+        assert!(with_call >= 3, "got {with_call} live events with a call");
+    }
+
     fn echoing_call(url: &str) -> crate::callback_listener::ReceivedCall {
         crate::callback_listener::ReceivedCall {
             method: "POST".to_string(),

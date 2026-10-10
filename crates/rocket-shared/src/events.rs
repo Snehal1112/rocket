@@ -493,8 +493,8 @@ pub enum DomainEvent {
         /// Script console output from this step, oldest first.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         logs: Vec<FlowLogEntry>,
-        /// The request as sent and its response, masked. Only for Request nodes in debug mode.
-        /// The nested `FlowDebugRequest` fields are camelCase inside this snake_case event.
+        /// Always omitted from this event. The masked sent record of a debug-mode
+        /// Request node is on the step of the run summary. Kept for old payloads.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         debug_request: Option<Box<FlowDebugRequest>>,
         /// How many times a repeat-until Request node sent its request.
