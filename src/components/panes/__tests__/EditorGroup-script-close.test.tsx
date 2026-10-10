@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { toast } from 'sonner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findScriptTab } from '@/lib/pane-utils';
 import { saveScriptFile } from '@/lib/tauri-api';
@@ -57,6 +58,14 @@ describe('EditorGroup unsaved script close dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save and close' }));
     await waitFor(() => expect(saveScriptFile).toHaveBeenCalled());
     expect(findScriptTab(usePaneStore.getState().root, 'col', 'a.js')).not.toBeNull();
+  });
+
+  it('keeps the dialog open when saving fails', async () => {
+    await setup();
+    vi.mocked(saveScriptFile).mockRejectedValue('disk full');
+    fireEvent.click(screen.getByRole('button', { name: 'Save and close' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Save and close' })).toBeInTheDocument();
   });
 });
 

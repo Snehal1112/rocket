@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -29,9 +30,10 @@ import {
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
 import { collectLeafGroupIds } from '@/lib/pane-utils';
+import { saveFlowTab, saveScriptTab } from '@/lib/save-tab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isFolderTab, isScriptTab, isWorkspaceTab } from '@/types/pane-types';
+import { isFlowTab, isFolderTab, isScriptTab, isWorkspaceTab } from '@/types/pane-types';
 import { TabItem } from './TabItem';
 
 // Request tab bar matching legacy RequestTabs styling.
@@ -132,26 +134,45 @@ export function TabBar({
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            <ContextMenuItem
-              disabled={!tab.isDirty && !!tab.source}
-              onClick={() => {
-                window.dispatchEvent(
-                  new CustomEvent('rocket:save-draft', {
-                    detail: { tabId: tab.id },
-                  }),
-                );
-              }}
-            >
-              {tab.source ? (
-                <>
-                  <Save className='h-3.5 w-3.5 mr-2' /> Save
-                </>
-              ) : (
-                <>
-                  <BookmarkPlus className='h-3.5 w-3.5 mr-2' /> Save to collection...
-                </>
-              )}
-            </ContextMenuItem>
+            {(() => {
+              // Script, flow and folder tabs save in place. Only requests can be unsaved drafts.
+              const savesInPlace = isScriptTab(tab) || isFlowTab(tab) || isFolderTab(tab);
+              const isActive = tab.id === node.activeTabId;
+              const showSave = !!tab.source || savesInPlace;
+              // A folder tab saves through its mounted pane, so only the active one can.
+              const folderNotActive = isFolderTab(tab) && !isActive;
+              return (
+                <ContextMenuItem
+                  disabled={(!tab.isDirty && showSave) || folderNotActive}
+                  onClick={() => {
+                    // Only the active tab has a mounted pane listening for the event.
+                    if (!isActive && isScriptTab(tab)) {
+                      void saveScriptTab(tab);
+                      return;
+                    }
+                    if (!isActive && isFlowTab(tab)) {
+                      void saveFlowTab(tab).then((saved) => {
+                        if (saved) toast.success('Flow saved.');
+                      });
+                      return;
+                    }
+                    window.dispatchEvent(
+                      new CustomEvent('rocket:save-draft', { detail: { tabId: tab.id } }),
+                    );
+                  }}
+                >
+                  {showSave ? (
+                    <>
+                      <Save className='h-3.5 w-3.5 mr-2' /> Save
+                    </>
+                  ) : (
+                    <>
+                      <BookmarkPlus className='h-3.5 w-3.5 mr-2' /> Save to collection...
+                    </>
+                  )}
+                </ContextMenuItem>
+              );
+            })()}
             <ContextMenuItem
               disabled={isScriptTab(tab) || isFolderTab(tab)}
               onClick={() => {

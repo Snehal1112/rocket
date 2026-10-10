@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { FolderSettingsTab } from '@/components/collections/FolderSettingsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
@@ -60,8 +59,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { WorkspaceOverviewTab } from '@/components/workspace/WorkspaceOverviewTab';
-import { flowPayloadFromTab } from '@/lib/flow-save';
-import { saveFlow, saveScriptFile } from '@/lib/tauri-api';
+import { saveFlowTab, saveScriptTab } from '@/lib/save-tab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab, LeafNode, ScriptTab } from '@/types/pane-types';
 import {
@@ -184,40 +182,22 @@ export function EditorGroup({ node }: { node: LeafNode }) {
       : 'default';
 
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(null);
-  const markScriptSaved = usePaneStore((s) => s.markScriptSaved);
   const pendingTab = pendingCloseTabId ? node.tabs.find((t) => t.id === pendingCloseTabId) : null;
   const pendingScript = pendingTab && isScriptTab(pendingTab) ? pendingTab : null;
   const pendingFlow = pendingTab && isFlowTab(pendingTab) ? pendingTab : null;
 
-  const saveScriptAndClose = async (tab: ScriptTab) => {
-    try {
-      await saveScriptFile(tab.collectionName, tab.scriptPath, tab.content);
-      markScriptSaved(tab.id, tab.content);
-      closeTab(tab.id, node.groupId);
-    } catch (err) {
-      toast.error(
-        `Could not save "${tab.title}": ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  // Returns true when the script was saved and its tab closed.
+  const saveScriptAndClose = async (tab: ScriptTab): Promise<boolean> => {
+    const saved = await saveScriptTab(tab);
+    if (saved) closeTab(tab.id, node.groupId);
+    return saved;
   };
 
   // Returns true when the flow was saved and its tab closed.
   const saveFlowAndClose = async (tab: FlowTab): Promise<boolean> => {
-    const payload = flowPayloadFromTab(tab);
-    if (!payload) {
-      toast.error(`Could not save "${tab.title}": no flow is open in this tab.`);
-      return false;
-    }
-    try {
-      await saveFlow(payload.collection, payload.flow);
-      closeTab(tab.id, node.groupId);
-      return true;
-    } catch (err) {
-      toast.error(
-        `Could not save "${tab.title}": ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
-    }
+    const saved = await saveFlowTab(tab);
+    if (saved) closeTab(tab.id, node.groupId);
+    return saved;
   };
 
   const handleCloseTab = (tabId: string) => {
@@ -375,7 +355,9 @@ export function EditorGroup({ node }: { node: LeafNode }) {
                 onClick={(e) => {
                   // Keep the dialog open until the save finishes.
                   e.preventDefault();
-                  void saveScriptAndClose(pendingScript).then(() => setPendingCloseTabId(null));
+                  void saveScriptAndClose(pendingScript).then((saved) => {
+                    if (saved) setPendingCloseTabId(null);
+                  });
                 }}
               >
                 Save and close
