@@ -35,6 +35,7 @@ pub(super) fn folder_chain_variables(
     Collection::validate_name(collection)?;
     let collection_dir = repo.collection_path(collection);
     let path = std::path::Path::new(request_path);
+    super::reject_unsafe_components(path)?;
     let dir_components: Vec<&str> = path
         .parent()
         .unwrap_or(std::path::Path::new(""))

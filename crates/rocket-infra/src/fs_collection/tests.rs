@@ -3146,3 +3146,66 @@ fn path_exists_treats_unicode_variants_as_the_same_name() {
     fs::create_dir_all(dir.path().join("col").join("caf\u{e9}")).expect("dir");
     assert!(repo.path_exists("col", "cafe\u{301}").expect("check"));
 }
+
+#[test]
+fn validate_path_rejects_parent_dir_components_anywhere() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let base = dir.path().join("my-api");
+    for bad in ["missing/../../x", "a/../../x", "./../x", "../x", "a/b/.."] {
+        let err = repo
+            .validate_path(&base, Path::new(bad))
+            .expect_err("parent dir component must be rejected");
+        assert!(
+            matches!(err, DomainError::InvalidInput(_)),
+            "expected InvalidInput for {bad}, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn validate_path_rejects_absolute_paths() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let base = dir.path().join("my-api");
+    let err = repo
+        .validate_path(&base, Path::new("/etc/passwd"))
+        .expect_err("absolute path must be rejected");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+}
+
+#[test]
+fn validate_path_accepts_normal_and_current_dir_paths() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let base = dir.path().join("my-api");
+    let canonical_base = base.canonicalize().expect("canonical base");
+    let plain = repo
+        .validate_path(&base, Path::new("a/b/c.yml"))
+        .expect("plain path");
+    assert!(plain.starts_with(&canonical_base));
+    let dotted = repo
+        .validate_path(&base, Path::new("a/./b.yml"))
+        .expect("dot path");
+    assert!(dotted.starts_with(&canonical_base));
+
+    fs::create_dir_all(base.join("existing/sub")).expect("mkdir");
+    let new_file = repo
+        .validate_path(&base, Path::new("existing/sub/new.yml"))
+        .expect("new file in existing dir");
+    assert_eq!(
+        new_file,
+        canonical_base.join("existing/sub/new.yml"),
+        "new file path should resolve under the existing directory"
+    );
+}
+
+#[test]
+fn create_folder_with_hidden_parent_dir_does_not_write_outside() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let result = repo.create_folder("my-api", "missing/../../escaped");
+    assert!(matches!(result, Err(DomainError::InvalidInput(_))));
+    assert!(!dir.path().join("escaped").exists());
+    assert!(!dir.path().join("my-api/missing").exists());
+}

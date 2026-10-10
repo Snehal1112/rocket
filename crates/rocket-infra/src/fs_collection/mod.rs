@@ -65,6 +65,7 @@ impl FsCollectionRepo {
     /// Works for paths that do not exist yet by canonicalizing the nearest
     /// existing ancestor and then appending the remaining components.
     pub(super) fn validate_path(&self, base: &Path, path: &Path) -> Result<PathBuf, DomainError> {
+        reject_unsafe_components(path)?;
         let full = base.join(path);
 
         let canonical_base = base
@@ -100,6 +101,23 @@ impl FsCollectionRepo {
 
         Ok(canonical_full)
     }
+}
+
+/// Rejects `..`, root and prefix components before any filesystem access.
+/// A lone `.` is harmless and allowed. Joining an absolute path would also
+/// replace the base, so those are refused too.
+pub(super) fn reject_unsafe_components(path: &Path) -> Result<(), DomainError> {
+    use std::path::Component;
+    let unsafe_component = path.components().any(|c| {
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    });
+    if unsafe_component {
+        return Err(DomainError::InvalidInput("Path traversal detected".into()));
+    }
+    Ok(())
 }
 
 impl CollectionRepository for FsCollectionRepo {

@@ -28,8 +28,22 @@ impl FsEnvironmentRepo {
         Self { dir, secret_store }
     }
 
-    fn file_path(&self, name: &str) -> PathBuf {
-        self.dir.join(format!("{}.yml", name))
+    /// An environment name must be one plain file name segment.
+    fn validate_name(name: &str) -> DomainResult<()> {
+        if name.trim().is_empty()
+            || name.contains(['/', '\\', '\0'])
+            || name.starts_with('.')
+        {
+            return Err(DomainError::InvalidInput(format!(
+                "'{name}' is not a valid environment name"
+            )));
+        }
+        Ok(())
+    }
+
+    fn file_path(&self, name: &str) -> DomainResult<PathBuf> {
+        Self::validate_name(name)?;
+        Ok(self.dir.join(format!("{}.yml", name)))
     }
 
     /// Stable keychain namespace for one environment file.
@@ -60,7 +74,10 @@ impl FsEnvironmentRepo {
     /// Keys stored as SecretVariable entries in the file as it exists on disk
     /// right now. Empty when the file is missing or unparseable.
     fn persisted_secret_keys(&self, name: &str) -> Vec<String> {
-        let Ok(content) = fs::read_to_string(self.file_path(name)) else {
+        let Ok(path) = self.file_path(name) else {
+            return Vec::new();
+        };
+        let Ok(content) = fs::read_to_string(path) else {
             return Vec::new();
         };
         let Ok(oc) = serde_yaml::from_str::<OcEnvironment>(&content) else {
@@ -132,7 +149,7 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     }
 
     fn get(&self, name: &str) -> DomainResult<Environment> {
-        let path = self.file_path(name);
+        let path = self.file_path(name)?;
         if !path.exists() {
             return Err(DomainError::NotFound(format!("Environment '{}'", name)));
         }
@@ -151,6 +168,7 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     fn save(&self, env: &Environment) -> DomainResult<()> {
         // Create the directory up front so scope_id() canonicalizes the same
         // path on a first save as on every later read.
+        let file_path = self.file_path(&env.name)?;
         fs::create_dir_all(&self.dir)?;
         let scope = Self::scope_id(&self.dir, &env.name);
 
@@ -170,7 +188,7 @@ impl EnvironmentRepository for FsEnvironmentRepo {
         let oc: OcEnvironment = env.clone().into();
         let yaml = serde_yaml::to_string(&oc)
             .map_err(|e| DomainError::Internal(format!("Failed to serialize environment: {e}")))?;
-        atomic_write(&self.file_path(&env.name), yaml.as_bytes())?;
+        atomic_write(&file_path, yaml.as_bytes())?;
 
         // Best-effort cleanup. A stale entry leaks nothing new, so a failure
         // here must not fail the save the user just asked for.
@@ -187,11 +205,12 @@ impl EnvironmentRepository for FsEnvironmentRepo {
     }
 
     fn delete(&self, name: &str) -> DomainResult<()> {
+        let file_path = self.file_path(name)?;
         // Read the secret key list while the file still exists.
         let scope = Self::scope_id(&self.dir, name);
         let secret_keys = self.persisted_secret_keys(name);
 
-        delete_if_exists(&self.file_path(name), &format!("Environment '{}'", name))?;
+        delete_if_exists(&file_path, &format!("Environment '{}'", name))?;
 
         // Best-effort: the environment is already gone, so a store failure here
         // must not surface as a failed delete.
@@ -287,6 +306,30 @@ mod tests {
         let store = Arc::new(InMemorySecretStore::default());
         let repo = FsEnvironmentRepo::with_secret_store(dir.path().to_path_buf(), store.clone());
         (dir, repo, store)
+    }
+
+    #[test]
+    fn unsafe_environment_names_are_rejected() {
+        let (dir, repo) = setup();
+        for name in ["../evil", "sub/dev", "a\\b", "", "  ", ".hidden", ".."] {
+            assert!(
+                matches!(
+                    repo.save(&Environment::new(name)),
+                    Err(DomainError::InvalidInput(_))
+                ),
+                "save should reject {name:?}"
+            );
+            assert!(
+                matches!(repo.get(name), Err(DomainError::InvalidInput(_))),
+                "get should reject {name:?}"
+            );
+            assert!(
+                matches!(repo.delete(name), Err(DomainError::InvalidInput(_))),
+                "delete should reject {name:?}"
+            );
+        }
+        assert!(!dir.path().join("sub").exists());
+        assert!(!dir.path().parent().expect("parent").join("evil.yml").exists());
     }
 
     #[test]
