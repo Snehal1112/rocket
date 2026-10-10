@@ -75,7 +75,7 @@ fn is_binary_type(content_type: &str) -> bool {
         "application/wasm",
         "application/x-protobuf",
     ];
-    PREFIXES.iter().any(|p| content_type.starts_with(p)) || EXACT.iter().any(|e| content_type == *e)
+    PREFIXES.iter().any(|p| content_type.starts_with(p)) || EXACT.contains(&content_type)
 }
 
 /// Splits response bytes into text or a base64 payload.
@@ -96,9 +96,7 @@ pub fn body_from_bytes(
         .and_then(|c| c.split(';').next())
         .map(|c| c.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    let binary = if bytes.is_empty() {
-        false
-    } else if is_textual_type(&essence) {
+    let binary = if bytes.is_empty() || is_textual_type(&essence) {
         false
     } else if is_binary_type(&essence) {
         true

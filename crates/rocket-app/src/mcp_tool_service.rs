@@ -3000,7 +3000,7 @@ mod tests {
     fn shared_binding_envs(count: usize) -> Vec<Environment> {
         (0..count)
             .map(|n| {
-                let mut env = Environment::new(&format!("env{n}"));
+                let mut env = Environment::new(format!("env{n}"));
                 env.external_secrets.push(vault_binding("shared", "id-shared"));
                 env.external_secrets
                     .push(vault_binding("own", &format!("id-own-{n}")));

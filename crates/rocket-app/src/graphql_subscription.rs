@@ -120,9 +120,11 @@ async fn resolved_json(
         match after.find("}}") {
             Some(end) if !after[..end].contains('}') => {
                 let placeholder = format!("{{{{{}}}}}", &after[..end]);
-                if !values.contains_key(&placeholder) {
+                if let std::collections::hash_map::Entry::Vacant(slot) =
+                    values.entry(placeholder.clone())
+                {
                     let value = resolved_text(exec, scope, &placeholder).await?;
-                    values.insert(placeholder, value);
+                    slot.insert(value);
                 }
                 rest = &after[end + 2..];
             }
@@ -548,10 +550,10 @@ impl GraphQlSubscriptionService {
             }
         };
         // A stop while resolving removed the slot: do not open a socket nobody wants.
-        if !self
+        if self
             .lock()
             .get(session_id)
-            .is_some_and(|slot| slot.generation() == generation)
+            .is_none_or(|slot| slot.generation() != generation)
         {
             return Err(DomainError::Conflict("subscription was cancelled".into()));
         }
@@ -875,6 +877,8 @@ mod session_tests {
         tokio::spawn(async move {
             let Ok((tcp, _)) = listener.accept().await else { return };
             let chosen = if offer == Offer::Legacy { "graphql-ws" } else { "graphql-transport-ws" };
+            // The error type is fixed by the tungstenite callback signature.
+            #[allow(clippy::result_large_err)]
             let callback = move |_: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
                 if let Ok(value) = chosen.parse() {
                     resp.headers_mut().insert("sec-websocket-protocol", value);

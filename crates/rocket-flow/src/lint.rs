@@ -708,7 +708,6 @@ mod tests {
         assert!(exits[0].message.contains("'First'"));
     }
 
-    use crate::graph::FlowGraphError;
     use crate::validate::validate;
 
     fn auth(id: &str, apply_to_inherit: bool) -> FlowNode {

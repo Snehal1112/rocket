@@ -204,16 +204,18 @@ mod tests {
 
     #[test]
     fn http_request_for_copies_the_calling_request_options() {
-        let mut options = RequestOptions::default();
-        options.verify_ssl = false;
-        options.follow_redirects = false;
-        options.max_redirects = Some(2);
-        options.client_certificates = vec![ResolvedClientCertificate::pem(
-            "side.test",
-            CertificateSource::File("/certs/c.pem".into()),
-            CertificateSource::File("/certs/k.pem".into()),
-            None,
-        )];
+        let options = RequestOptions {
+            verify_ssl: false,
+            follow_redirects: false,
+            max_redirects: Some(2),
+            client_certificates: vec![ResolvedClientCertificate::pem(
+                "side.test",
+                CertificateSource::File("/certs/c.pem".into()),
+                CertificateSource::File("/certs/k.pem".into()),
+                None,
+            )],
+            ..RequestOptions::default()
+        };
         let http = http_request_for(&host_request("PUT", None, false), &options).expect("valid");
         assert_eq!(http.method, HttpMethod::Put);
         assert!(!http.options.verify_ssl);

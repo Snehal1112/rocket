@@ -328,6 +328,8 @@ mod tests {
                 let state = Arc::clone(&shared);
                 tokio::spawn(async move {
                     let for_callback = Arc::clone(&state);
+                    // The error type is fixed by the tungstenite callback signature.
+                    #[allow(clippy::result_large_err)]
                     let callback = move |req: &Request,
                                          mut resp: Response|
                           -> Result<Response, ErrorResponse> {

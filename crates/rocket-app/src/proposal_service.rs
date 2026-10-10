@@ -330,7 +330,7 @@ impl ProposalService {
         refuse_masked_values(change)?;
         let mut env_fingerprint = None;
         let collection = change.collection().to_string();
-        if !workspace.iter().any(|name| *name == collection) {
+        if !workspace.contains(&collection) {
             return Err(DomainError::InvalidInput(format!(
                 "collection '{collection}' is not in this workspace"
             )));
@@ -852,7 +852,7 @@ fn same_name(fold: bool, a: &str, b: &str) -> bool {
 
 fn child_folder<'a>(folder: &'a Folder, name: &str, fold: bool) -> Option<&'a Folder> {
     folder.items.iter().find_map(|item| match item {
-        CollectionItem::Folder(sub) if same_name(fold, &folder_dir_name(sub), name) => Some(sub),
+        CollectionItem::Folder(sub) if same_name(fold, folder_dir_name(sub), name) => Some(sub),
         _ => None,
     })
 }

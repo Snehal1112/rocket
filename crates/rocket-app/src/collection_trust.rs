@@ -516,8 +516,8 @@ mod tests {
                         }
                         j += 1;
                     }
-                    for k in i..j.min(c.len()) {
-                        out.push(blank(c[k]));
+                    for &ch in &c[i..j.min(c.len())] {
+                        out.push(blank(ch));
                     }
                     i = j;
                     continue;

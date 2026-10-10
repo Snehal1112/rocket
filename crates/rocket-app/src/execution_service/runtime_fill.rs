@@ -185,7 +185,7 @@ pub(crate) fn swap_path_values(url: &str, swaps: &[(String, String)]) -> String 
         .map(|segment| {
             for (old, new) in &ordered {
                 if let Some(rest) = segment.strip_prefix(old.as_str()) {
-                    let ends_value = rest.chars().next().map_or(true, |c| {
+                    let ends_value = rest.chars().next().is_none_or(|c| {
                         !(c.is_ascii_alphanumeric() || c == '_' || c == '%' || c == '-')
                     });
                     if ends_value {

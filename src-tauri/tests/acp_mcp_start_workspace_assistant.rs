@@ -311,14 +311,13 @@ fn build_fixture(client: FakeSessionClient) -> Fixture {
     }
 }
 
-fn client(
-    should_fail: bool,
-    session_id: &str,
-) -> (
+type ClientParts = (
     FakeSessionClient,
     Arc<Mutex<Vec<McpServerSpec>>>,
     Arc<Mutex<Option<CapturedStart>>>,
-) {
+);
+
+fn client(should_fail: bool, session_id: &str) -> ClientParts {
     let servers = Arc::new(Mutex::new(Vec::new()));
     let start = Arc::new(Mutex::new(None));
     let client = FakeSessionClient {
