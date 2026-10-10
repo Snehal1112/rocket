@@ -273,7 +273,9 @@ export function AssistantProposalCard({
         <>
           {blockedByEdits && (
             <p className='text-xs text-muted-foreground'>
-              This request has unsaved edits in an open tab. Save or discard them before accepting.
+              {dirtyPlace?.startsWith('parked:')
+                ? `This request has unsaved edits in a parked tab of collection ${dirtyPlace.slice('parked:'.length)}. Save or discard them before accepting.`
+                : 'This request has unsaved edits in an open tab. Save or discard them before accepting.'}
             </p>
           )}
           <div className='flex justify-end gap-2'>
