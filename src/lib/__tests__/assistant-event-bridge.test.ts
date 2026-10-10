@@ -7,6 +7,7 @@ import {
 import { loadPromptHistory, savePromptHistory } from '@/lib/assistant/prompt-history';
 import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
+import { useConsoleStore } from '@/stores/console-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { makeProposal } from '@/test/assistant-fixtures';
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => {
       onAgentSessionFinished: listener('finished'),
       onAgentSessionFailed: listener('failed'),
       onAgentToolActivity: listener('toolActivity'),
+      onAgentToolInvoked: listener('toolInvoked'),
       onAgentConfigOptions: listener('configOptions'),
       onAgentUsage: listener('usage'),
       onAgentProposalCreated: listener('proposalCreated'),
@@ -72,6 +74,7 @@ describe('useAssistantEventBridge', () => {
     for (const key of Object.keys(mocks.handlers)) delete mocks.handlers[key];
     resetStaleSweepForTests();
     store().reset();
+    useConsoleStore.setState({ entries: [], logEntries: [] });
     useAssistantStore.setState({ panelOpen: false, focus: undefined });
     useWorkspaceStore.setState({ activeWorkspaceId: '' });
     mocks.api.endStaleAssistantSessions.mockResolvedValue(0);
@@ -85,6 +88,34 @@ describe('useAssistantEventBridge', () => {
     emit('chunk', { session_id: 's1', text: 'Hello' });
     emit('finished', { session_id: 's1', stop_reason: 'end_turn' });
     expect(lastMessage()).toMatchObject({ kind: 'agent', text: 'Hello', streaming: false });
+  });
+
+  it('adds a Console info line for each agent tool call', async () => {
+    await mountBridge();
+    emit('toolInvoked', {
+      type: 'acpToolInvoked',
+      session_id: 's1',
+      tool: 'get_request',
+      summary: 'Read request users.yml',
+    });
+    expect(useConsoleStore.getState().logEntries[0]).toMatchObject({
+      level: 'INFO',
+      message: 'Agent: get_request - Read request users.yml',
+    });
+  });
+
+  it('removes the tool-invoked subscription when unmounted', async () => {
+    const unlisten = vi.fn();
+    mocks.api.onAgentToolInvoked.mockImplementationOnce((handler: (p: unknown) => void) => {
+      mocks.handlers.toolInvoked = handler;
+      return Promise.resolve(unlisten);
+    });
+    const view = renderHook(() => useAssistantEventBridge());
+    await waitFor(() => expect(mocks.handlers.toolInvoked).toBeDefined());
+    view.unmount();
+    await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1));
+    emit('toolInvoked', { session_id: 's1', tool: 't', summary: 'late' });
+    expect(useConsoleStore.getState().logEntries).toHaveLength(0);
   });
 
   it('does not apply events after the bridge is unmounted', async () => {

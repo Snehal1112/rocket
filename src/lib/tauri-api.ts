@@ -2937,6 +2937,18 @@ export const onAgentProposalResolved = (
 ): Promise<UnlistenFn> =>
   listen<AgentProposalResolvedEvent>('agent-proposal-resolved', (e) => handler(e.payload));
 
+export interface AgentToolInvokedEvent {
+  type: 'acpToolInvoked';
+  session_id: string;
+  tool: string;
+  summary: string;
+}
+
+export const onAgentToolInvoked = (
+  handler: (event: AgentToolInvokedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentToolInvokedEvent>('agent-tool-invoked', (e) => handler(e.payload));
+
 export type AgentToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
 export interface AgentToolActivityEvent {

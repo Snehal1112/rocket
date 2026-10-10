@@ -15,9 +15,11 @@ import {
   onAgentSessionFailed,
   onAgentSessionFinished,
   onAgentToolActivity,
+  onAgentToolInvoked,
   onAgentUsage,
 } from '@/lib/tauri-api';
 import { type AssistantFocus, useAssistantStore } from '@/stores/assistant-store';
+import { useConsoleStore } from '@/stores/console-store';
 import { type PaneState, usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { isRequestTab } from '@/types/pane-types';
@@ -76,6 +78,19 @@ export function useAssistantEventBridge(): void {
             callId: e.call_id,
             title: e.title,
             status: e.status,
+          }),
+        ),
+      ),
+      // The backend already masked the summary. It goes to the Console as an info line.
+      onAgentToolInvoked(
+        guard((e) =>
+          useConsoleStore.getState().addLogEntry({
+            timestamp: new Date().toISOString(),
+            level: 'INFO',
+            target: 'agent',
+            message: `Agent: ${e.tool} - ${e.summary}`,
+            fields: { sessionId: e.session_id, tool: e.tool },
+            spanFields: {},
           }),
         ),
       ),

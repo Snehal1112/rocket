@@ -7,6 +7,7 @@ import {
   listAgentProposals,
   onAgentProposalCreated,
   onAgentProposalResolved,
+  onAgentToolInvoked,
   rejectAgentProposal,
 } from '../tauri-api';
 
@@ -71,5 +72,21 @@ describe('agent proposal commands', () => {
 
     await onAgentProposalResolved(vi.fn());
     expect(listen).toHaveBeenCalledWith('agent-proposal-resolved', expect.any(Function));
+  });
+
+  it('maps onAgentToolInvoked to the agent-tool-invoked channel', async () => {
+    vi.mocked(listen).mockResolvedValue(vi.fn());
+    const invoked = vi.fn();
+    await onAgentToolInvoked(invoked);
+    expect(listen).toHaveBeenCalledWith('agent-tool-invoked', expect.any(Function));
+    const payload = {
+      type: 'acpToolInvoked' as const,
+      session_id: 's1',
+      tool: 'get_request',
+      summary: 'Read request',
+    };
+    const handler = vi.mocked(listen).mock.calls[0][1];
+    handler({ event: 'agent-tool-invoked', id: 1, payload });
+    expect(invoked).toHaveBeenCalledWith(payload);
   });
 });
