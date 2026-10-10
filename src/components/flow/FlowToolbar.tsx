@@ -354,6 +354,8 @@ export function FlowToolbar({
     let startedAt = performance.now();
     // Set once run_flow settles. Events that arrive after it change nothing.
     let ended = false;
+    // Set once a result was handed to onRunResult, so the catch block never sends a second one.
+    let resultSent = false;
     // A function, because TypeScript keeps `started` narrowed to false in the
     // catch block below, while the event handler sets it later.
     const hasStarted = (): boolean => started;
@@ -422,6 +424,7 @@ export function FlowToolbar({
         if (step.logs?.length) onStepLogs?.(step.nodeId, step.logs);
         if (step.debugRequest) onStepDebug?.(step.nodeId, step.debugRequest);
       }
+      resultSent = true;
       onRunResult?.({
         ...summarizeRun(summary, Math.round(performance.now() - startedAt)),
         environmentName: runEnvironment,
@@ -434,7 +437,9 @@ export function FlowToolbar({
       toast.error(`Could not run flow: ${message}`);
       onRunError?.(message);
       // A run that had started leaves a result, so its partial results stay viewable.
-      if (hasStarted()) {
+      // Not when one was already sent and a later step threw.
+      if (hasStarted() && !resultSent) {
+        resultSent = true;
         onRunResult?.({
           runId,
           stoppedReason: 'error',

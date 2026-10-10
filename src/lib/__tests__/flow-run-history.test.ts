@@ -4,9 +4,11 @@ import { flowPayloadFromTab } from '../flow-save';
 import {
   appendRunRecord,
   buildRunRecord,
+  FULL_DETAIL_RUNS,
   formatClock,
   MAX_RUN_HISTORY,
   runRecordLabel,
+  stripRecordDetail,
 } from '../flow-run-history';
 
 const result = (over: Partial<FlowLastRun> = {}): FlowLastRun => ({
@@ -28,6 +30,19 @@ const record = (runId: string, over: Partial<FlowRunRecord> = {}): FlowRunRecord
   ...over,
 });
 
+const heavy = (runId: string): FlowRunRecord =>
+  record(runId, {
+    nodeDetail: {
+      a: {
+        durationMs: 3,
+        error: 'boom',
+        exchange: { method: 'GET', url: 'http://x.test', headers: [] },
+        logs: [{ level: 'log', message: 'hello' }],
+      },
+      b: { durationMs: 1 },
+    },
+  });
+
 const tab = (over: Partial<FlowTab> = {}): FlowTab => ({
   id: 't1',
   title: 'Flow: my-flow',
@@ -45,7 +60,52 @@ const tab = (over: Partial<FlowTab> = {}): FlowTab => ({
   ...over,
 });
 
+describe('stripRecordDetail', () => {
+  it('returns the same record when nothing needs stripping', () => {
+    const plain = record('r1', { nodeDetail: { a: { durationMs: 2 } } });
+    expect(stripRecordDetail(plain)).toBe(plain);
+    const empty = record('r2');
+    expect(stripRecordDetail(empty)).toBe(empty);
+  });
+
+  it('drops exchange and logs without touching the input', () => {
+    const full = heavy('r1');
+    const stripped = stripRecordDetail(full);
+    expect(stripped).not.toBe(full);
+    expect(stripped.nodeDetail.a).toEqual({ durationMs: 3, error: 'boom' });
+    expect(full.nodeDetail.a.exchange).toBeDefined();
+    expect(full.nodeDetail.a.logs).toHaveLength(1);
+  });
+});
+
 describe('appendRunRecord', () => {
+  it('keeps exchange and logs only on the two newest runs and keeps the other detail', () => {
+    expect(FULL_DETAIL_RUNS).toBe(2);
+    let history: FlowRunRecord[] | undefined;
+    for (const id of ['r1', 'r2', 'r3', 'r4']) history = appendRunRecord(history, heavy(id));
+    expect(history?.map((r) => r.runId)).toEqual(['r4', 'r3', 'r2', 'r1']);
+    expect(history?.[0].nodeDetail.a.exchange).toBeDefined();
+    expect(history?.[1].nodeDetail.a.logs).toHaveLength(1);
+    for (const old of history?.slice(2) ?? []) {
+      expect(old.nodeDetail.a.exchange).toBeUndefined();
+      expect(old.nodeDetail.a.logs).toBeUndefined();
+      expect(old.nodeDetail.a.durationMs).toBe(3);
+      expect(old.nodeDetail.a.error).toBe('boom');
+      expect(old.nodeDetail.b).toEqual({ durationMs: 1 });
+    }
+  });
+
+  it('keeps the first finish time when a run is recorded again', () => {
+    const first = record('r1', { finishedAt: 1000 });
+    const next = appendRunRecord(
+      [first],
+      record('r1', { finishedAt: 2000, environmentName: 'prod' }),
+    );
+    expect(next).toHaveLength(1);
+    expect(next[0].finishedAt).toBe(1000);
+    expect(next[0].environmentName).toBe('prod');
+  });
+
   it('puts the newest run first and starts from no history', () => {
     expect(appendRunRecord(undefined, record('r1')).map((r) => r.runId)).toEqual(['r1']);
     const next = appendRunRecord([record('r1')], record('r2'));

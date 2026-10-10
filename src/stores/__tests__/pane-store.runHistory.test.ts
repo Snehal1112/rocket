@@ -59,11 +59,11 @@ describe('pane-store flow run history', () => {
     expect(stored().runHistory).toHaveLength(MAX_RUN_HISTORY);
   });
 
-  it('recording the same run twice keeps one entry', () => {
+  it('recording the same run twice keeps one entry and its first finish time', () => {
     usePaneStore.getState().recordFlowRun(tabId, record('r1'));
     usePaneStore.getState().recordFlowRun(tabId, { ...record('r1'), finishedAt: 2000 });
     expect(stored().runHistory).toHaveLength(1);
-    expect(stored().runHistory?.[0].finishedAt).toBe(2000);
+    expect(stored().runHistory?.[0].finishedAt).toBe(1000);
   });
 
   it('recording does not mark the tab dirty', () => {

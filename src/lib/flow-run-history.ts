@@ -1,18 +1,43 @@
-import type { FlowRunRecord, FlowTab } from '@/types/pane-types';
+import type { FlowNodeDetail, FlowRunRecord, FlowTab } from '@/types/pane-types';
 
 export const MAX_RUN_HISTORY = 5;
 
+// The newest runs keep the masked request, response and script logs of each
+// node. Older records keep the rest of the detail only, so the history stays small.
+export const FULL_DETAIL_RUNS = 2;
+
+// Drops `exchange` and `logs` from every node detail of a record. Returns the
+// same record when no detail has either, and never changes the input.
+export function stripRecordDetail(record: FlowRunRecord): FlowRunRecord {
+  let changed = false;
+  const nodeDetail: Record<string, FlowNodeDetail> = {};
+  for (const [nodeId, detail] of Object.entries(record.nodeDetail)) {
+    if (detail.exchange === undefined && detail.logs === undefined) {
+      nodeDetail[nodeId] = detail;
+      continue;
+    }
+    const { exchange: _exchange, logs: _logs, ...rest } = detail;
+    nodeDetail[nodeId] = rest;
+    changed = true;
+  }
+  return changed ? { ...record, nodeDetail } : record;
+}
+
 // Adds a record, newest first. A record of a run that is already in the list
-// replaces it in place, because the finished event and the final summary can
-// both report the same run.
+// replaces it in place and keeps the time the run first finished, because the
+// finished event and the final summary can both report the same run. Records
+// past the newest FULL_DETAIL_RUNS lose their exchange and logs.
 export function appendRunRecord(
   history: FlowRunRecord[] | undefined,
   record: FlowRunRecord,
 ): FlowRunRecord[] {
   const current = history ?? [];
   const index = current.findIndex((r) => r.runId === record.runId);
-  if (index >= 0) return current.map((r, i) => (i === index ? record : r));
-  return [record, ...current].slice(0, MAX_RUN_HISTORY);
+  const next =
+    index >= 0
+      ? current.map((r, i) => (i === index ? { ...record, finishedAt: r.finishedAt } : r))
+      : [record, ...current].slice(0, MAX_RUN_HISTORY);
+  return next.map((r, i) => (i >= FULL_DETAIL_RUNS ? stripRecordDetail(r) : r));
 }
 
 // Snapshots the tab's results for one finished run. The store never mutates

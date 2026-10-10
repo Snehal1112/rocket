@@ -1139,6 +1139,25 @@ describe('FlowToolbar', () => {
       expect(toast.error).toHaveBeenCalled();
     });
 
+    it('sends one result when onRunResult throws after the run resolved', async () => {
+      const onRunResult = vi.fn(() => {
+        throw new Error('store write failed');
+      });
+      const onRunError = vi.fn();
+      renderToolbar({ onRunResult, onRunError });
+      await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+      await waitFor(() => expect(startedHandler).toBeDefined());
+      started('run-1');
+      resolveRun({ runId: 'run-1', stoppedReason: 'completed', steps: [] });
+      await waitFor(() => expect(onRunError).toHaveBeenCalled());
+      // No second result with stoppedReason 'error' follows the first one.
+      expect(onRunResult).toHaveBeenCalledTimes(1);
+      expect(onRunResult).toHaveBeenCalledWith(
+        expect.objectContaining({ stoppedReason: 'completed' }),
+      );
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('store write failed'));
+    });
+
     it('reports the result after the final summary and before the run is marked done', async () => {
       const onRunResult = vi.fn();
       renderToolbar({ onRunResult });
