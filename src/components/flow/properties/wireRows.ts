@@ -3,6 +3,7 @@ import {
   AUTH_HANDLE,
   caseIdFromHandle,
   DEFAULT_HANDLE,
+  INPUT_HANDLE,
   RESULT_HANDLE,
   TRIGGER_HANDLE,
 } from '@/lib/flow-handles';
@@ -134,7 +135,9 @@ function row(
       credential: recorded.credential ?? false,
       error: recorded.error,
       // A run saved without a hash cannot say, so it is never stale.
+      // An input wire's script is never run, so it is never stale either.
       stale:
+        edge.targetField !== INPUT_HANDLE &&
         recorded.expressionHash !== undefined &&
         recorded.expressionHash !== expressionHash(edge.expression),
     },

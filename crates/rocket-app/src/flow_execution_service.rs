@@ -1984,6 +1984,10 @@ fn record_input_wire(
 ) {
     if let [edge] = data_edges {
         trace.record_wire(edge, captured_text(source), masks);
+        // The input wire's script is never run, so its value cannot go stale.
+        if let Some(wire) = trace.step.wires.last_mut() {
+            wire.expression_hash = None;
+        }
     }
 }
 
@@ -10213,6 +10217,10 @@ mod tests {
         assert_eq!(recorded.source_node_id, "in");
         assert_eq!(recorded.target_field, "value");
         assert_eq!(recorded.value.as_deref(), Some(crate::redaction::REDACTED));
+        assert!(
+            recorded.expression_hash.is_some(),
+            "an ordinary data wire keeps its hash"
+        );
         let event_trace = publisher.events().iter().find_map(|e| match e {
             DomainEvent::FlowStepCompleted { node_id, trace, .. } if node_id == "out" => {
                 trace.clone()
@@ -10360,6 +10368,10 @@ mod tests {
         assert_eq!(trace.wires.len(), 1, "the input wire is recorded once");
         assert_eq!(trace.wires[0].edge_id, "e1");
         assert!(trace.wires[0].value.is_some());
+        assert_eq!(
+            trace.wires[0].expression_hash, None,
+            "an input wire's script is never run, so it has no hash"
+        );
     }
 
     #[tokio::test]

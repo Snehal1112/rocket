@@ -442,6 +442,12 @@ describe('last run values', () => {
       expect(row.resolved?.stale).toBe(false);
     });
 
+    it('is false on an input handle wire even when the hash differs', () => {
+      const input = { ...into, targetField: 'input' };
+      const [row] = incomingRows(users, [login, users], [input], {}, wireWith('00000000'));
+      expect(row.resolved?.stale).toBe(false);
+    });
+
     it('is false for a run saved without a hash', () => {
       const [row] = incomingRows(users, [login, users], [into], {}, wireWith());
       expect(row.resolved?.stale).toBe(false);
