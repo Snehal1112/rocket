@@ -68,7 +68,7 @@ impl McpToolService {
                     &MaskedSettings::from_settings(&settings),
                     settings.docs.as_deref(),
                 );
-                (text, self.chip_secrets(collection, None, &[]))
+                (text, self.chip_secrets(collection, None, &[])?)
             }
             ChipKind::Folder => {
                 let path = path.ok_or_else(|| DomainError::InvalidInput("missing path".into()))?;
@@ -79,7 +79,7 @@ impl McpToolService {
                     path,
                     &MaskedFolderSettings::from_settings(&settings),
                 );
-                (text, self.chip_secrets(collection, None, &[]))
+                (text, self.chip_secrets(collection, None, &[])?)
             }
             ChipKind::Environment => {
                 let name = path.ok_or_else(|| DomainError::InvalidInput("missing path".into()))?;
@@ -90,7 +90,7 @@ impl McpToolService {
                     .get(name)?;
                 let text =
                     render_environment(collection, &MaskedEnvironment::from_environment(&env));
-                (text, self.chip_secrets(collection, None, &[]))
+                (text, self.chip_secrets(collection, None, &[])?)
             }
             ChipKind::Request => {
                 let path = path.ok_or_else(|| DomainError::InvalidInput("missing path".into()))?;
@@ -102,7 +102,7 @@ impl McpToolService {
                     &MaskedRequest::from_request(path, &request),
                     docs,
                 );
-                (text, self.chip_secrets(collection, Some(path), &[&request]))
+                (text, self.chip_secrets(collection, Some(path), &[&request])?)
             }
         };
         // The views mask by name and shape. This pass also covers a known secret that sits in
@@ -152,7 +152,7 @@ impl McpToolService {
             request
         });
         let requests: Vec<&Request> = saved.iter().chain(on_screen.iter()).collect();
-        let mut secrets = self.chip_secrets(collection, Some(request_path), &requests);
+        let mut secrets = self.chip_secrets(collection, Some(request_path), &requests)?;
         // Vault values are fetched on demand. The named environment is not trusted to be the
         // one that produced the response, so every environment of the collection is resolved.
         // If a value cannot be had, the response cannot be masked safely, so the chip fails
@@ -161,7 +161,11 @@ impl McpToolService {
             .environment_repo_factory
             .for_collection(collection)
             .list()
-            .unwrap_or_default()
+            .map_err(|_| {
+                DomainError::InvalidInput(
+                    "could not list environments to mask this response; try again".to_string(),
+                )
+            })?
             .into_iter()
             .map(|env| env.name)
             .collect();
@@ -198,12 +202,20 @@ impl McpToolService {
 
     /// The secret values to mask in a chip of `collection`. With a request path the request's
     /// own scopes and literal credentials are included.
+    ///
+    /// Fails closed: a lookup that errors would leave its secrets unmasked, so the chip is
+    /// refused instead. A missing file is not an error, the repositories return defaults then.
     fn chip_secrets(
         &self,
         collection: &str,
         request_path: Option<&str>,
         requests: &[&Request],
-    ) -> HashSet<String> {
+    ) -> DomainResult<HashSet<String>> {
+        let refuse = |what: &str| {
+            DomainError::InvalidInput(format!(
+                "could not read {what} to mask this chip; try again"
+            ))
+        };
         let workspace_path = self
             .active_workspace_path
             .lock()
@@ -212,8 +224,8 @@ impl McpToolService {
         let global = self
             .config_repo
             .load(&workspace_path)
-            .ok()
-            .and_then(|config| config.global_environment);
+            .map_err(|_| refuse("the workspace config"))?
+            .global_environment;
         // A response can echo a secret of any environment, not only the selected one.
         let mut variable_secrets: HashSet<String> = self.execution_svc.secret_values_for_request(
             global.as_deref(),
@@ -225,7 +237,7 @@ impl McpToolService {
             .environment_repo_factory
             .for_collection(collection)
             .list()
-            .unwrap_or_default();
+            .map_err(|_| refuse("the environments"))?;
         for env in &environments {
             variable_secrets.extend(
                 env.variables
@@ -236,11 +248,15 @@ impl McpToolService {
         }
         let mut secrets = variable_secrets.clone();
         if let Some(path) = request_path {
-            let settings = self.collection_repo.get_settings(collection).ok();
+            let settings = Some(
+                self.collection_repo
+                    .get_settings(collection)
+                    .map_err(|_| refuse("the collection settings"))?,
+            );
             let folders = self
                 .collection_repo
                 .get_folder_chain_settings(collection, path)
-                .unwrap_or_default();
+                .map_err(|_| refuse("the folder settings"))?;
             // The collection's and folders' own credentials count even with no request.
             let placeholder;
             let requests: &[&Request] = if requests.is_empty() {
@@ -263,6 +279,6 @@ impl McpToolService {
                 ));
             }
         }
-        secrets
+        Ok(secrets)
     }
 }

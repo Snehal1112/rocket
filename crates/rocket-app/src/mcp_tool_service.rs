@@ -890,12 +890,19 @@ mod tests {
     /// though each call asks for a fresh `Box<dyn EnvironmentRepository>`.
     struct FakeEnvRepoFactory {
         envs: Arc<StdMutex<StdHashMap<String, Environment>>>,
+        /// When set, `list` on every handle fails.
+        fail_list: Arc<std::sync::atomic::AtomicBool>,
     }
     impl FakeEnvRepoFactory {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 envs: Arc::new(StdMutex::new(StdHashMap::new())),
+                fail_list: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             })
+        }
+        fn fail_list(&self) {
+            self.fail_list
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
         fn with_env(&self, env: Environment) {
             self.envs
@@ -906,12 +913,21 @@ mod tests {
     }
     impl EnvironmentRepositoryFactory for FakeEnvRepoFactory {
         fn for_collection(&self, _collection: &str) -> Box<dyn EnvironmentRepository> {
-            Box::new(FakeEnvRepoHandle(Arc::clone(&self.envs)))
+            Box::new(FakeEnvRepoHandle(
+                Arc::clone(&self.envs),
+                Arc::clone(&self.fail_list),
+            ))
         }
     }
-    struct FakeEnvRepoHandle(Arc<StdMutex<StdHashMap<String, Environment>>>);
+    struct FakeEnvRepoHandle(
+        Arc<StdMutex<StdHashMap<String, Environment>>>,
+        Arc<std::sync::atomic::AtomicBool>,
+    );
     impl EnvironmentRepository for FakeEnvRepoHandle {
         fn list(&self) -> DomainResult<Vec<Environment>> {
+            if self.1.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(DomainError::Internal("environment listing failed".into()));
+            }
             Ok(self.0.lock().expect("lock").values().cloned().collect())
         }
         fn get(&self, name: &str) -> DomainResult<Environment> {
@@ -2659,6 +2675,48 @@ mod tests {
             .await
             .expect("chip");
         assert!(!chip.text.contains("vault-db-password-42"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_environments_cannot_be_listed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(secret_env("dev", "VENDOR_ID", "env-secret-value-77"));
+        env_factory.fail_list();
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+        for env in [Some("dev"), None] {
+            let err = svc
+                .mask_response_chip("my-api", "echo.yml", env, &echo_response("body"))
+                .await
+                .expect_err("a failed environment listing must refuse the chip");
+            assert!(err.to_string().contains("environments"), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn request_chip_is_refused_when_environments_cannot_be_listed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.fail_list();
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+        let err = svc
+            .build_chip_resource(ChipKind::Request, "my-api", Some("echo.yml"))
+            .expect_err("a failed environment listing must refuse the chip");
+        assert!(err.to_string().contains("environments"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn response_chip_works_with_no_environments_and_no_vault_bindings() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
+        let chip = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response("plain body"))
+            .await
+            .expect("chip");
+        assert!(chip.text.contains("plain body"), "{}", chip.text);
     }
 
     #[tokio::test]
