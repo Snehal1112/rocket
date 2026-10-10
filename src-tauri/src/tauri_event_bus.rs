@@ -67,6 +67,7 @@ impl EventPublisher for TauriEventBus {
             | DomainEvent::FolderSettingsSaved { .. }
             | DomainEvent::RequestVariablesSaved { .. } => "collection-changed",
             DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
+            DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
             DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {
                 "environment-changed"
             }

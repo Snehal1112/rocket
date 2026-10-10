@@ -21,8 +21,8 @@ pub struct CollectionVariable {
 }
 
 /// JS sandbox capability level for scripts in a collection. Defaults to `Safe`
-/// (no filesystem/process access) so an imported collection never silently
-/// inherits an elevated capability from wherever it was authored.
+/// (no filesystem/process access). A collection file only requests a mode. The
+/// trust store decides what is granted on this computer (see `trust.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SandboxMode {
@@ -55,6 +55,7 @@ pub struct CollectionSettings {
     #[serde(default)]
     pub sandbox_mode: SandboxMode,
 
+    /// Requested value only. The trust store decides which roots are approved.
     /// Extra directories scripts may `require()` from, in Developer sandbox mode only.
     /// Relative entries resolve against the collection directory.
     /// Persisted at `extensions.rocketapi.scripts.additionalContextRoots`.
@@ -68,10 +69,10 @@ pub struct CollectionSettings {
 
     /// Whether the ACP AI-assist agent may run requests, edit scripts, and
     /// write non-secret env vars against this collection without further
-    /// per-action confirmation. Defaults to `false` so a newly created
-    /// collection does not grant agent write access. This field is
-    /// git-shared like `sandbox_mode`, so a collection cloned or pulled with
-    /// it already set to `true` does inherit that access.
+    /// per-action confirmation. Defaults to `false`. This field is
+    /// git-shared like `sandbox_mode`, so it is only a request: a collection
+    /// cloned or pulled with it set to `true` gets no access until the user
+    /// allows it on this computer (see `trust.rs`).
     #[serde(default)]
     pub agent_autonomy_enabled: bool,
 }

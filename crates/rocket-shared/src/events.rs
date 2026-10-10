@@ -322,6 +322,10 @@ pub enum DomainEvent {
     CollectionSettingsSaved {
         collection: String,
     },
+    /// A collection's trust grants changed on this computer (not a collection file edit).
+    CollectionTrustChanged {
+        collection: String,
+    },
     FolderVariablesSaved {
         collection: String,
         folder_path: String,
@@ -1020,6 +1024,18 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"collectionSettingsSaved","collection":"my-api"}"#
+        );
+    }
+
+    #[test]
+    fn collection_trust_changed_wire_shape() {
+        let event = DomainEvent::CollectionTrustChanged {
+            collection: "my-api".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"collectionTrustChanged","collection":"my-api"}"#
         );
     }
 

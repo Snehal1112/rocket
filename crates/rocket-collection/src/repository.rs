@@ -166,6 +166,14 @@ pub trait CollectionRepository: Send + Sync {
         ))
     }
 
+    /// Identity used to look up a collection's grants: canonical folder plus file uid.
+    /// The default body refuses, so a repository that cannot answer reads as untrusted.
+    fn collection_identity(&self, name: &str) -> DomainResult<crate::trust::CollectionIdentity> {
+        Err(DomainError::NotFound(format!(
+            "collection '{name}' has no trust identity"
+        )))
+    }
+
     /// True when anything sits at the collection-relative `path`: a file,
     /// folder, symlink or hidden item. Names are compared case-insensitively,
     /// so a case variant counts as taken. A symlinked parent is an error.

@@ -11,6 +11,7 @@ pub mod request_summary;
 mod script_file;
 pub mod settings;
 pub mod summary;
+pub mod trust;
 pub mod websocket;
 pub(crate) mod uid;
 
@@ -34,6 +35,11 @@ pub use request_summary::RequestSummary;
 pub use script_file::{normalize_script_name, ScriptFileItem, SCRIPT_TEMPLATE};
 pub use settings::{CollectionSettings, CollectionVariable};
 pub use summary::CollectionSummary;
+pub use trust::{
+    normalize_root, request_fingerprint, resolve_effective, CollectionGrant, CollectionIdentity,
+    CollectionTrustStore, DenyAllTrustStore, EffectiveCapabilities, GrantSource,
+    LegacyCollection, MigrationNoticeEntry, RequestedElevation,
+};
 pub use websocket::{
     WebSocketMessage, WebSocketMessageKind, WebSocketRequest, WebSocketScript, WebSocketSettings,
 };
