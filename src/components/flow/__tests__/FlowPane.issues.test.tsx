@@ -1,6 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { computeFlowIssues } from '@/lib/flow-issues';
 import { lintFlow, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
@@ -12,6 +13,11 @@ vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
   return { ...actual,
     lintFlow: vi.fn().mockResolvedValue([]), listCollections: vi.fn(), listFlows: vi.fn(), saveFlow: vi.fn() };
+});
+// Wraps the real function, so a test can count how often the pane recomputes issues.
+vi.mock('@/lib/flow-issues', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/flow-issues')>();
+  return { ...actual, computeFlowIssues: vi.fn(actual.computeFlowIssues) };
 });
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 vi.mock('@/components/editor', () => ({
@@ -88,6 +94,17 @@ function Harness() {
   return <FlowPane tab={tab} groupId={usePaneStore.getState().activeGroupId} />;
 }
 
+function storedNodes() {
+  const { root } = usePaneStore.getState();
+  if (root.type !== 'leaf') throw new Error('Expected a leaf');
+  const tab = root.tabs.find((t) => t.id === tabId);
+  if (!tab || !isFlowTab(tab)) throw new Error('Expected the flow tab');
+  return tab.nodes;
+}
+
+const movedBy = (dx: number) => () =>
+  storedNodes().map((n) => ({ ...n, position: { x: n.position.x + dx, y: n.position.y } }));
+
 describe('FlowPane issues', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,5 +161,61 @@ describe('FlowPane issues', () => {
     await screen.findByRole('button', { name: '2 errors, 2 warnings' });
     expect(screen.getByTestId('output-node-card').className).toContain('ring-red-500');
     expect(screen.getByTestId('input-node-card').className).not.toContain('ring-red-500');
+  });
+
+  const REJECTED_SAVE =
+    'Invalid input: flow is invalid: the Output has a problem — node(s): out1; edge(s): ';
+
+  it('clears the failed-save highlight when a wire is removed', async () => {
+    vi.mocked(saveFlow).mockRejectedValue(REJECTED_SAVE);
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('button', { name: '2 errors, 2 warnings' });
+    expect(screen.getByTestId('output-node-card').className).toContain('ring-red-500');
+
+    act(() => {
+      usePaneStore.getState().updateFlowEdges(tabId, []);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('output-node-card').className).not.toContain('ring-red-500'),
+    );
+    // Only the If node's own error is left.
+    expect(screen.getByRole('button', { name: /^1 error,/ })).toBeInTheDocument();
+  });
+
+  it('keeps the failed-save highlight when only a node position changes', async () => {
+    vi.mocked(saveFlow).mockRejectedValue(REJECTED_SAVE);
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('button', { name: '2 errors, 2 warnings' });
+
+    act(() => {
+      usePaneStore.getState().updateFlowNodes(tabId, movedBy(40)());
+    });
+    expect(screen.getByTestId('output-node-card').className).toContain('ring-red-500');
+    expect(screen.getByRole('button', { name: '2 errors, 2 warnings' })).toBeInTheDocument();
+  });
+
+  it('does not recompute client issues for a position-only change, but does for a kind change', async () => {
+    render(<Harness />);
+    await screen.findByRole('button', { name: '1 error, 2 warnings' });
+    const calls = () => vi.mocked(computeFlowIssues).mock.calls.length;
+    const settled = calls();
+    expect(settled).toBeGreaterThan(0);
+
+    act(() => {
+      usePaneStore.getState().updateFlowNodes(tabId, movedBy(25)());
+    });
+    expect(calls()).toBe(settled);
+
+    act(() => {
+      usePaneStore.getState().updateFlowNodes(
+        tabId,
+        storedNodes().map((n) =>
+          n.id === 'if1' ? { ...n, kind: { kind: 'If', label: 'Check', condition: '' } } : n,
+        ),
+      );
+    });
+    expect(calls()).toBeGreaterThan(settled);
   });
 });

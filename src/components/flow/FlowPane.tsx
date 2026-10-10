@@ -37,6 +37,7 @@ import {
   type FlowPartialMode,
   saveFlow,
 } from '@/lib/tauri-api';
+import { useStableGraph } from '@/lib/use-stable-graph';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -108,14 +109,25 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // Set when a node's menu button opens the panel, so the panel takes focus.
   const [panelFocusRequest, setPanelFocusRequest] = useState<{ nodeId: string } | null>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
-  // FlowPane is reused across flow tabs, so drop the selection when the tab changes.
+  // Maps a wire to the id its undo step is keyed by. A wire that preempts another
+  // one joins the step of the wire it replaced, so one Undo removes them both.
+  const wireStepRef = useRef(new Map<string, string>());
+  // The failed-save highlight describes one graph. Clearing it also drops the saved message.
+  const clearSaveHighlight = useCallback(() => {
+    // Keep the same empty array when it is already empty, so memos do not re-run.
+    setCycleNodeIds((cur) => (cur.length === 0 ? cur : []));
+    setCycleEdgeIds((cur) => (cur.length === 0 ? cur : []));
+    setSaveErrorMessage(null);
+    setErrorFromRun(false);
+  }, []);
+  // FlowPane is reused across flow tabs, so drop the selection and the save highlight when the tab changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tab.id is the trigger.
   useEffect(() => {
     setSelectedNodeIds(new Set());
     setPanelNodeId(null);
     setLabelFocusNodeId(null);
     setPanelFocusRequest(null);
-    setSaveErrorMessage(null);
+    clearSaveHighlight();
   }, [tab.id]);
   // Any selection other than exactly the panel's node closes the panel.
   const handleSelectedNodeIdsChange = useCallback((ids: ReadonlySet<string>) => {
@@ -132,10 +144,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // A removed Auth node's in-memory token goes with it.
   useClearRemovedAuthTokens(tab.collectionName, tab.flowName, tab.nodes);
 
+  // Issues read ids, kinds and wire ends, so a drag must not rebuild them.
+  const stable = useStableGraph(tab.nodes, tab.edges);
   // Client-side checks plus whatever the last rejected save named.
   const clientIssues = useMemo(
     () =>
-      computeFlowIssues(tab.nodes, tab.edges, {
+      computeFlowIssues(stable.nodes, stable.edges, {
         save:
           cycleNodeIds.length > 0 || cycleEdgeIds.length > 0
             ? {
@@ -146,7 +160,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               }
             : undefined,
       }),
-    [tab.nodes, tab.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage, errorFromRun],
+    [stable.nodes, stable.edges, cycleNodeIds, cycleEdgeIds, saveErrorMessage, errorFromRun],
   );
   // The backend lints the unsaved graph, so its issues follow every edit. The
   // memo keys on the graph parts, so run-progress patches do not rebuild it.
@@ -158,11 +172,28 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const backendIssues = useBackendFlowLints(tab.collectionName ?? null, lintTarget);
   const graphIds = useMemo(
     () => ({
-      nodeIds: new Set(tab.nodes.map((n) => n.id)),
-      edgeIds: new Set(tab.edges.map((e) => e.id)),
+      nodeIds: new Set(stable.nodes.map((n) => n.id)),
+      edgeIds: new Set(stable.edges.map((e) => e.id)),
     }),
-    [tab.nodes, tab.edges],
+    [stable.nodes, stable.edges],
   );
+  // A failed-save highlight names ids of one graph. When a node or a wire is
+  // added, removed or rewired it may be wrong, so clear it. Moves and edits
+  // that keep the wiring do not change the key. The first run only records it.
+  const topologyKey = useMemo(
+    () =>
+      JSON.stringify([
+        stable.nodes.map((n) => n.id),
+        stable.edges.map((e) => `${e.id}:${e.sourceNodeId}:${e.targetNodeId}`),
+      ]),
+    [stable.nodes, stable.edges],
+  );
+  const lastTopologyKey = useRef(topologyKey);
+  useEffect(() => {
+    if (lastTopologyKey.current === topologyKey) return;
+    lastTopologyKey.current = topologyKey;
+    clearSaveHighlight();
+  }, [topologyKey, clearSaveHighlight]);
   // The popover count and the node badges read this one list.
   const issues = useMemo(
     () => mergeFlowIssues(clientIssues, backendIssues, graphIds),
@@ -241,16 +272,12 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // Undo and redo can leave a failed-save highlight pointing at a changed graph, so clear it.
   const handleUndo = useCallback(() => {
     undoFlow(tabId);
-    setCycleNodeIds([]);
-    setCycleEdgeIds([]);
-    setSaveErrorMessage(null);
-  }, [undoFlow, tabId]);
+    clearSaveHighlight();
+  }, [undoFlow, tabId, clearSaveHighlight]);
   const handleRedo = useCallback(() => {
     redoFlow(tabId);
-    setCycleNodeIds([]);
-    setCycleEdgeIds([]);
-    setSaveErrorMessage(null);
-  }, [redoFlow, tabId]);
+    clearSaveHighlight();
+  }, [redoFlow, tabId, clearSaveHighlight]);
   const handleGestureStart = useCallback(() => beginFlowGesture(tabId), [beginFlowGesture, tabId]);
   const handleGestureEnd = useCallback(() => endFlowGesture(tabId), [endFlowGesture, tabId]);
 
@@ -405,9 +432,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
       // The graph being written, so an edit made during the save stays unsaved.
       const written = snapOf(tab);
       await saveFlow(payload.collection, payload.flow);
-      setCycleNodeIds([]);
-      setCycleEdgeIds([]);
-      setSaveErrorMessage(null);
+      clearSaveHighlight();
       markClean(tab.id, written);
       if (!quiet) toast.success('Flow saved.');
       return true;
@@ -452,12 +477,14 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     // was committed or dismissed) preempts it here — React never runs the
     // popover's onOpenChange in that case, so drop its uncommitted pending
     // edge in this same update rather than leaving it dangling.
-    const base =
-      pendingEdge && isUncommittedHeadersEdge(pendingEdge)
-        ? tab.edges.filter((e) => e.id !== pendingEdge.id)
-        : tab.edges;
-    // The connect and the dialog's commit or dismissal share one undo step.
-    updateFlowEdges(tab.id, [...base, edge], WIRE_STEP(edge.id));
+    const preemptedId =
+      pendingEdge && isUncommittedHeadersEdge(pendingEdge) ? pendingEdge.id : null;
+    const base = preemptedId ? tab.edges.filter((e) => e.id !== preemptedId) : tab.edges;
+    // The connect and the dialog's commit or dismissal share one undo step. A
+    // wire that preempts another joins that wire's step, so one Undo removes both.
+    const stepId = preemptedId ? (wireStepRef.current.get(preemptedId) ?? preemptedId) : edge.id;
+    wireStepRef.current.set(edge.id, stepId);
+    updateFlowEdges(tab.id, [...base, edge], WIRE_STEP(stepId));
     // Input and trigger wires carry no value, so there is nothing to edit.
     // Clearing the pending edge also closes a preempted popover.
     setPendingEdge(shouldPromptForExpression(edge) ? edge : null);
@@ -539,9 +566,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               onRunStateChange={(state, runId, partial) => {
                 if (state === 'running') {
                   // A new run replaces the highlight of an earlier refusal.
-                  setCycleNodeIds([]);
-                  setCycleEdgeIds([]);
-                  setSaveErrorMessage(null);
+                  clearSaveHighlight();
                 }
                 if (state === 'running' && partial && runId) {
                   startPartialFlowRun(tab.id, runId, partial.nodeIds);
@@ -691,7 +716,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                 updateFlowEdges(
                   tab.id,
                   tab.edges.map((e) => (e.id === updated.id ? updated : e)),
-                  WIRE_STEP(updated.id),
+                  WIRE_STEP(wireStepRef.current.get(updated.id) ?? updated.id),
                 );
               }}
             />

@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findTabInTree } from '@/lib/pane-utils';
@@ -15,6 +16,7 @@ import {
   onFlowStepProgress,
   onFlowStepStarted,
   runFlow,
+  saveFlow,
 } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
@@ -29,6 +31,7 @@ vi.mock('@/lib/tauri-api', async () => {
     listCollections: vi.fn(),
     listFlows: vi.fn(),
     runFlow: vi.fn(),
+    saveFlow: vi.fn(),
     cancelFlowRun: vi.fn(),
     onFlowRunStarted: vi.fn(),
     onFlowRunFinished: vi.fn(),
@@ -103,6 +106,19 @@ function renderBoth() {
         <Pane id='flow-b' />
       </div>
     </>,
+  );
+}
+
+// One FlowPane instance that shows tab A, then tab B, like the tab strip does.
+function Switcher() {
+  const [id, setId] = useState('flow-a');
+  return (
+    <>
+      <button type='button' onClick={() => setId((cur) => (cur === 'flow-a' ? 'flow-b' : 'flow-a'))}>
+        switch-tab
+      </button>
+      <Pane id={id} />
+    </>
   );
 }
 
@@ -293,5 +309,22 @@ describe('two tabs running the same flow', () => {
     expect(b).toBeDefined();
     expect(a).not.toBe(b);
     expect([sentRunId(0), sentRunId(1)].sort()).toEqual([a, b].sort());
+  });
+
+  it('does not carry a failed-save highlight to another tab with the same node ids', async () => {
+    vi.mocked(saveFlow).mockRejectedValue(
+      'Invalid input: flow is invalid: the Output has a problem — node(s): out1; edge(s): ',
+    );
+    render(<Switcher />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('button', { name: /^1 error/ });
+
+    await userEvent.click(screen.getByRole('button', { name: 'switch-tab' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /error/ })).not.toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'switch-tab' }));
+    expect(screen.queryByRole('button', { name: /error/ })).not.toBeInTheDocument();
   });
 });

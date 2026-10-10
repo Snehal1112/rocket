@@ -124,6 +124,30 @@ describe('FlowPane wire undo and save', () => {
     expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
   });
 
+  it('undoes a headers wire that a second connection preempted, in one step', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    render(<Harness />);
+    // fireEvent sends only the click. A real pointer-down would dismiss the modal dialog first.
+    fireEvent.click(screen.getByText('connect-headers'));
+    await screen.findByRole('dialog');
+    const firstId = getTab().edges[0].id;
+
+    // The second connection arrives while the first dialog is still open.
+    fireEvent.click(screen.getByText('connect-headers'));
+    await waitFor(() => expect(getTab().edges[0].id).not.toBe(firstId));
+    expect(getTab().edges).toHaveLength(1);
+
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1));
+    await user.type(await screen.findByLabelText('Header name'), 'X-Token');
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(getTab().edges[0].targetField).toBe('headers[X-Token].value'));
+
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(getTab().edges.filter((e) => e.targetField === 'headers')).toEqual([]);
+    expect(getTab().edges).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  });
+
   it('keeps the tab dirty when an edit lands while a save is in flight', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     let resolveSave: () => void = () => undefined;
