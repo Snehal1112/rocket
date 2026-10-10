@@ -75,6 +75,39 @@ function request(overrides: Partial<RequestState> = {}): RequestState {
 const values = (headers: { key: string; value: string }[], key: string) =>
   headers.filter((h) => h.key.toLowerCase() === key.toLowerCase()).map((h) => h.value);
 
+describe('resolveRequestFieldsForPath with a pre-request rok.setVar', () => {
+  beforeEach(() => {
+    state.folders.clear();
+    state.collectionAuth = undefined;
+  });
+
+  it('leaves a name the script sets as a placeholder for the backend', async () => {
+    const resolved = await resolveRequestFieldsForPath(
+      'api',
+      PATH,
+      request({
+        url: 'https://api.example.com/{{token}}',
+        headers: [{ id: '1', key: 'X-T', value: '{{token}}', enabled: true }],
+        preRequestScript: "rok.setVar('token', 'fresh');",
+      }),
+    );
+    expect(resolved.url).toBe('https://api.example.com/{{token}}');
+    expect(values(resolved.headers, 'X-T')).toEqual(['{{token}}']);
+  });
+
+  it('resolves the name as before when no script sets it', async () => {
+    const resolved = await resolveRequestFieldsForPath(
+      'api',
+      PATH,
+      request({
+        url: 'https://api.example.com/{{token}}',
+        preRequestScript: "rok.setVar('other', 'x');",
+      }),
+    );
+    expect(resolved.url).toBe('https://api.example.com/tok-123');
+  });
+});
+
 describe('resolveRequestFieldsForPath with folder settings', () => {
   beforeEach(() => {
     state.folders.clear();

@@ -25,7 +25,11 @@ import {
   type RequestGuardPolicy,
 } from '@/lib/tauri-api';
 import { applyPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
-import { buildVariableContext, resolveWithContext } from '@/lib/variable-context';
+import {
+  buildVariableContext,
+  resolveWithContext,
+  withoutScriptRuntimeVars,
+} from '@/lib/variable-context';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
@@ -299,7 +303,11 @@ export async function resolveRequestFieldsForPath(
     folderVars,
     requestVars,
   });
-  const resolve = (text: string) => resolveWithContext(text, ctx);
+  // A name the pre-request script sets with rok.setVar stays a placeholder in the request
+  // fields, so the backend fills it with the script's value (runtime wins) after the script.
+  const runsScript = request.requestType === 'http' || request.requestType === 'graphql';
+  const fieldCtx = runsScript ? withoutScriptRuntimeVars(ctx, request.preRequestScript) : ctx;
+  const resolve = (text: string) => resolveWithContext(text, fieldCtx);
 
   // The url bar is the source of the query: the params table re-parses it only after a
   // debounce, so it can be stale at the moment of sending. Disabled table rows are never in
@@ -367,7 +375,7 @@ export async function resolveRequestFieldsForPath(
 
   const resolvedAssertions: AssertionEntry[] = request.assertions.map((a) => ({
     ...a,
-    value: a.value !== undefined ? resolve(a.value) : a.value,
+    value: a.value !== undefined ? resolveWithContext(a.value, ctx) : a.value,
   }));
 
   const resolvedGraphql: ResolvedGraphQl | undefined =
