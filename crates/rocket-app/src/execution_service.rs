@@ -386,6 +386,9 @@ pub struct RequestExecutionService {
     /// `executor: Arc<dyn HttpExecutor>` serves every request regardless of
     /// target host.
     vault_fetcher: Arc<dyn VaultSecretFetcher>,
+    /// What the user allowed per collection on this computer. The default store allows
+    /// nothing, so an unwired service runs every collection in Safe mode.
+    trust_store: Arc<dyn rocket_collection::CollectionTrustStore>,
 }
 
 impl RequestExecutionService {
@@ -414,6 +417,7 @@ impl RequestExecutionService {
             secret_manager_repo,
             vault_connection_secret_store,
             vault_fetcher,
+            trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
         }
     }
 
@@ -443,7 +447,30 @@ impl RequestExecutionService {
             secret_manager_repo,
             vault_connection_secret_store,
             vault_fetcher,
+            trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
         }
+    }
+
+    /// Attach the trust store that decides which requested capabilities are granted.
+    pub fn with_trust_store(
+        mut self,
+        store: Arc<dyn rocket_collection::CollectionTrustStore>,
+    ) -> Self {
+        self.trust_store = store;
+        self
+    }
+
+    /// The capabilities that apply to `collection` right now. Unknown or unreadable
+    /// collections get the untrusted set.
+    pub(crate) fn effective_capabilities(
+        &self,
+        collection: &str,
+    ) -> rocket_collection::EffectiveCapabilities {
+        crate::collection_trust::effective_capabilities(
+            self.collection_repo.as_ref(),
+            self.trust_store.as_ref(),
+            collection,
+        )
     }
 
     /// Attach a factory that resolves the REGULAR (per-collection) environment
@@ -1694,9 +1721,6 @@ impl RequestExecutionService {
             input.request_path.as_deref(),
             external_secrets,
         );
-        // Scripts read the host environment through rok.getProcessEnv. The script
-        // engine empties it again in Safe mode.
-        var_ctx.process_env = std::env::vars().collect();
         // Flow run variables (e.g. `callback.<name>`) behave like runtime
         // variables. A script that sets the same key later still wins.
         var_ctx.runtime.extend(input.flow_vars.clone());
@@ -1704,10 +1728,17 @@ impl RequestExecutionService {
         let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {
             Some(col) => {
                 let settings = self.collection_repo.get_settings(col).unwrap_or_default();
-                let mode = match settings.sandbox_mode {
+                // The collection file only requests a mode. The trust store decides.
+                let effective = self.effective_capabilities(col);
+                let mode = match effective.sandbox_mode {
                     CollectionSandboxMode::Safe => SandboxMode::Safe,
                     CollectionSandboxMode::Developer => SandboxMode::Developer,
                 };
+                // Scripts read the host environment through rok.getProcessEnv. Only a
+                // Developer-mode script gets it.
+                if mode == SandboxMode::Developer {
+                    var_ctx.process_env = std::env::vars().collect();
+                }
                 // A collection whose directory cannot be resolved just gets no scope.
                 let scope = self
                     .collection_repo
@@ -1715,8 +1746,8 @@ impl RequestExecutionService {
                     .ok()
                     .map(|root| ScriptFileScope {
                         collection_root: root,
-                        additional_roots: settings
-                            .script_context_roots
+                        additional_roots: effective
+                            .context_roots
                             .iter()
                             .map(std::path::PathBuf::from)
                             .collect(),
@@ -3016,6 +3047,9 @@ mod tests {
         }
         fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
             Ok(())
+        }
+        fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+            Ok(crate::test_doubles::test_identity(n))
         }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.clone())
@@ -5938,6 +5972,9 @@ mod tests {
         fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
             Ok(())
         }
+        fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+            Ok(crate::test_doubles::test_identity(n))
+        }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.lock().expect("lock").clone())
         }
@@ -6039,6 +6076,9 @@ mod tests {
         }
         fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> {
             self.0.reorder_items(a, b, c)
+        }
+        fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+            self.0.collection_identity(n)
         }
         fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> {
             self.0.get_settings(n)
@@ -6171,6 +6211,7 @@ mod tests {
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
         .with_script_engine(engine)
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
 
     #[tokio::test]
@@ -6196,16 +6237,25 @@ mod tests {
             .all(|c| c.collection_name.as_deref() == Some("Payments")));
     }
 
+    fn developer_settings() -> CollectionSettings {
+        CollectionSettings {
+            sandbox_mode: rocket_collection::settings::SandboxMode::Developer,
+            script_context_roots: vec!["../shared".into()],
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
-    async fn user_scripts_receive_the_host_process_env() {
+    async fn developer_scripts_receive_the_host_process_env() {
         let capture = CapturingScriptEngine::new();
         let svc = build_svc_with_script(
             Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
-            Box::new(StubCollectionRepo::empty()),
+            Box::new(StubCollectionRepo::with_settings(developer_settings())),
             Box::new(SharedCapture(Arc::clone(&capture))),
         );
 
         let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
         input.pre_request_script = Some("// pre".into());
         svc.execute(input).await.expect("execute failed");
 
@@ -6216,6 +6266,94 @@ mod tests {
         assert_eq!(
             contexts[0].variables.process_env.get("PATH"),
             Some(&expected)
+        );
+    }
+
+    #[tokio::test]
+    async fn requested_developer_mode_without_a_grant_runs_safe_with_no_host_env() {
+        let capture = CapturingScriptEngine::new();
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(StubCollectionRepo::with_settings(developer_settings()).with_root("/work/my-api")),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let contexts = capture.contexts();
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(
+            contexts[0].sandbox_mode,
+            rocket_scripting::context::SandboxMode::Safe
+        );
+        assert!(contexts[0].variables.process_env.is_empty());
+        let scope = contexts[0].file_scope.clone().expect("scope");
+        assert!(scope.additional_roots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn granted_developer_mode_keeps_the_approved_roots_only() {
+        let store = crate::test_doubles::InMemoryTrustStore::new();
+        store.grant(
+            "my-api",
+            rocket_collection::CollectionGrant {
+                developer_mode: true,
+                context_roots: vec!["../shared".into()],
+                ..Default::default()
+            },
+        );
+        let capture = CapturingScriptEngine::new();
+        let mut settings = developer_settings();
+        settings.script_context_roots.push("../new".into());
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(StubCollectionRepo::with_settings(settings).with_root("/work/my-api")),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        )
+        .with_trust_store(store);
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let contexts = capture.contexts();
+        assert_eq!(
+            contexts[0].sandbox_mode,
+            rocket_scripting::context::SandboxMode::Developer
+        );
+        let scope = contexts[0].file_scope.clone().expect("scope");
+        assert_eq!(scope.additional_roots, vec![std::path::PathBuf::from("../shared")]);
+    }
+
+    #[tokio::test]
+    async fn a_service_without_a_trust_store_denies_developer_mode() {
+        let capture = CapturingScriptEngine::new();
+        let svc = RequestExecutionService::new(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::with_settings(developer_settings())),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(SharedCapture(Arc::clone(&capture))));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.collection = Some("my-api".into());
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute failed");
+
+        assert_eq!(
+            capture.contexts()[0].sandbox_mode,
+            rocket_scripting::context::SandboxMode::Safe
         );
     }
 
@@ -9323,6 +9461,7 @@ mod tests {
             seen: Mutex::new(vec![]),
         });
         let repo = StubCollectionRepo::with_settings(CollectionSettings {
+            sandbox_mode: rocket_collection::settings::SandboxMode::Developer,
             script_context_roots: vec!["../shared".into()],
             ..Default::default()
         })

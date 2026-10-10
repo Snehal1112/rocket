@@ -47,6 +47,8 @@ pub struct AcpSessionService {
     agent_config_service: Arc<AgentConfigService>,
     collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     prompt_idle_timeout: Duration,
+    /// What the user allowed per collection. The default allows nothing.
+    trust_store: Arc<dyn rocket_collection::CollectionTrustStore>,
 }
 
 /// Fixed idle limit for one prompt turn, from the spec. Every update from the
@@ -108,7 +110,17 @@ impl AcpSessionService {
             agent_config_service,
             collection_repo,
             prompt_idle_timeout,
+            trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
         }
+    }
+
+    /// Attach the trust store that decides whether the run switch is granted.
+    pub fn with_trust_store(
+        mut self,
+        store: Arc<dyn rocket_collection::CollectionTrustStore>,
+    ) -> Self {
+        self.trust_store = store;
+        self
     }
 
     /// Starts owning a started session, so every end path runs its cleanup.
@@ -196,10 +208,15 @@ impl AcpSessionService {
             isolation.meta()
         });
 
-        let autonomy_enabled = self
-            .collection_repo
-            .get_settings(collection)?
-            .agent_autonomy_enabled;
+        // Surface an unreadable collection as an error, like before. The file only
+        // requests the switch, so the trust store decides.
+        self.collection_repo.get_settings(collection)?;
+        let autonomy_enabled = crate::collection_trust::effective_capabilities(
+            self.collection_repo.as_ref(),
+            self.trust_store.as_ref(),
+            collection,
+        )
+        .agent_run;
         let mcp_servers: Vec<rocket_acp::McpServerSpec> = match (autonomy_enabled, mcp_http) {
             (true, Some(creds)) => mcp_server_specs(creds)?,
             // Autonomy is off, or the caller couldn't spawn the HTTP server
@@ -907,6 +924,7 @@ mod tests {
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
         )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
 
     /// Starts a session and tracks it, as the command layer does once its
@@ -934,7 +952,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let session_id = service
             .start_session("agent-1", "/tmp", "demo", None, None)
@@ -967,7 +986,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let stop_reason = service
             .send_prompt("session-1", hi())
@@ -1009,7 +1029,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         service
             .end_session("session-1")
@@ -1027,7 +1048,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .start_session("no-such-agent", "/tmp", "demo", None, None)
@@ -1053,7 +1075,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .start_session("agent-1", "/tmp", "demo", None, None)
@@ -1077,7 +1100,8 @@ mod tests {
                 secret_value_result: Ok(None),
             }),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .start_session("agent-1", "/tmp", "demo", None, None)
@@ -1103,7 +1127,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .send_prompt("session-1", hi())
@@ -1136,7 +1161,8 @@ mod tests {
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
             Duration::from_millis(20),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .send_prompt("session-1", hi())
@@ -1171,7 +1197,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         service
             .end_all_sessions()
@@ -1193,7 +1220,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let session_id = service
             .start_session("agent-1", "/tmp", "unconfigured-collection", None, None)
@@ -1219,7 +1247,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             collection_repo,
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let session_id = service
             .start_session(
@@ -1261,7 +1290,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             collection_repo,
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let session_id = service
             .start_session("agent-1", "/tmp", "my-api", None, None)
@@ -1285,7 +1315,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             collection_repo,
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .start_session("agent-1", "/tmp", "broken-collection", None, None)
@@ -1370,7 +1401,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             collection_repo,
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         service
             .start_session(
@@ -1407,6 +1439,41 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn start_session_attaches_no_mcp_servers_when_agent_run_is_not_granted() {
+        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let client = CapturingSessionClient {
+            captured_servers: Arc::clone(&captured_servers),
+            ..Default::default()
+        };
+        // The file asks for agent run, but nothing is granted on this computer.
+        let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("demo", true);
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(NullEventPublisher),
+            noop_cleanup(),
+            agent_config_service(),
+            collection_repo,
+        );
+
+        service
+            .start_session(
+                "agent-1",
+                "/tmp",
+                "demo",
+                Some(McpHttpServerCredentials {
+                    port: 54321,
+                    token: "s3cr3t-token".to_string(),
+                }),
+                None,
+            )
+            .await
+            .expect("start_session should succeed");
+
+        assert!(captured_servers.lock().expect("lock").is_empty());
+    }
+
     fn hi() -> Vec<PromptPart> {
         vec![PromptPart::Text("hi".to_string())]
     }
@@ -1438,6 +1505,7 @@ mod tests {
             ConfigurableCollectionRepo::new(),
             idle,
         )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
 
     #[tokio::test]
@@ -1612,7 +1680,8 @@ mod tests {
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
             Duration::from_millis(50),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         start(&service).await;
 
         let stop_reason = send_hi(&service, "session-1")
@@ -1716,7 +1785,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         service
             .start_session(
@@ -1756,7 +1826,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         service
             .start_session("agent-1", "/tmp", "demo", None, None)
@@ -1813,7 +1884,8 @@ mod tests {
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
             Duration::from_millis(20),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         start(&service).await;
 
         send_hi(&service, "session-1")
@@ -1880,7 +1952,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
         let err = service
             .send_prompt("session-1", hi())
@@ -2128,7 +2201,8 @@ mod tests {
             cleanup.clone(),
             agent_config_service(),
             ConfigurableCollectionRepo::new(),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let isolation = SessionIsolation {
             config_dir: "/tmp/scratch-config".to_string(),
             system_prompt_append: "rocket".to_string(),

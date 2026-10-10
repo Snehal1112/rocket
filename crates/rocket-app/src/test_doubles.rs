@@ -27,6 +27,131 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use zeroize::Zeroizing;
 
+/// Identity of a fake collection: a fixed path under `/test` and no uid.
+pub fn test_identity(name: &str) -> rocket_collection::CollectionIdentity {
+    rocket_collection::CollectionIdentity {
+        canonical_root: std::path::PathBuf::from("/test").join(name),
+        uid: None,
+    }
+}
+
+/// In-memory trust store. `allow_all` grants every capability to every collection,
+/// which lets older tests keep their Developer-mode and agent-run setups.
+#[derive(Default)]
+pub struct InMemoryTrustStore {
+    allow_all: bool,
+    grants: Mutex<HashMap<std::path::PathBuf, rocket_collection::CollectionGrant>>,
+    migrated: AtomicBool,
+    notice: Mutex<Vec<rocket_collection::MigrationNoticeEntry>>,
+}
+
+impl InMemoryTrustStore {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn allow_all() -> Arc<Self> {
+        Arc::new(Self {
+            allow_all: true,
+            ..Default::default()
+        })
+    }
+
+    pub fn grant(&self, name: &str, grant: rocket_collection::CollectionGrant) {
+        self.grants
+            .lock()
+            .expect("lock grants")
+            .insert(test_identity(name).canonical_root, grant);
+    }
+
+    pub fn grant_of(&self, name: &str) -> Option<rocket_collection::CollectionGrant> {
+        self.grants
+            .lock()
+            .expect("lock grants")
+            .get(&test_identity(name).canonical_root)
+            .cloned()
+    }
+}
+
+impl rocket_collection::CollectionTrustStore for InMemoryTrustStore {
+    fn grant_for(
+        &self,
+        id: &rocket_collection::CollectionIdentity,
+    ) -> DomainResult<Option<rocket_collection::CollectionGrant>> {
+        if self.allow_all {
+            return Ok(Some(rocket_collection::CollectionGrant {
+                developer_mode: true,
+                // Roots are approved by listing them, so allow-all echoes nothing here.
+                context_roots: vec!["../shared".into()],
+                agent_run: true,
+                process_env: true,
+                source: rocket_collection::GrantSource::User,
+            }));
+        }
+        Ok(self
+            .grants
+            .lock()
+            .expect("lock grants")
+            .get(&id.canonical_root)
+            .cloned())
+    }
+    fn put(
+        &self,
+        id: &rocket_collection::CollectionIdentity,
+        grant: rocket_collection::CollectionGrant,
+    ) -> DomainResult<()> {
+        self.grants
+            .lock()
+            .expect("lock grants")
+            .insert(id.canonical_root.clone(), grant);
+        Ok(())
+    }
+    fn remove(&self, id: &rocket_collection::CollectionIdentity) -> DomainResult<()> {
+        self.grants
+            .lock()
+            .expect("lock grants")
+            .remove(&id.canonical_root);
+        Ok(())
+    }
+    fn rekey(
+        &self,
+        old: &rocket_collection::CollectionIdentity,
+        new: &rocket_collection::CollectionIdentity,
+    ) -> DomainResult<()> {
+        let mut grants = self.grants.lock().expect("lock grants");
+        if let Some(grant) = grants.remove(&old.canonical_root) {
+            grants.insert(new.canonical_root.clone(), grant);
+        }
+        Ok(())
+    }
+    fn migrated(&self) -> DomainResult<bool> {
+        Ok(self.migrated.load(Ordering::SeqCst))
+    }
+    fn complete_migration(
+        &self,
+        grants: Vec<(
+            rocket_collection::CollectionIdentity,
+            rocket_collection::CollectionGrant,
+        )>,
+        notice: Vec<rocket_collection::MigrationNoticeEntry>,
+    ) -> DomainResult<()> {
+        let mut map = self.grants.lock().expect("lock grants");
+        for (id, grant) in grants {
+            map.insert(id.canonical_root, grant);
+        }
+        *self.notice.lock().expect("lock notice") = notice;
+        self.migrated.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+    fn migration_notice(&self) -> DomainResult<Vec<rocket_collection::MigrationNoticeEntry>> {
+        Ok(self.notice.lock().expect("lock notice").clone())
+    }
+    fn dismiss_migration_notice(&self) -> DomainResult<()> {
+        self.notice.lock().expect("lock notice").clear();
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Collection repo
 // ---------------------------------------------------------------------------
@@ -111,6 +236,9 @@ impl CollectionRepository for InMemoryCollectionRepo {
     }
     fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
         Ok(())
+    }
+    fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+        Ok(crate::test_doubles::test_identity(n))
     }
     fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
         Ok(self.collection.settings.clone())
@@ -213,6 +341,9 @@ impl<T: CollectionRepository> CollectionRepository for SharedCollectionRepo<T> {
     }
     fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> {
         self.0.reorder_items(a, b, c)
+    }
+    fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+        self.0.collection_identity(n)
     }
     fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> {
         self.0.get_settings(n)
@@ -453,6 +584,9 @@ impl CollectionRepository for ConfigurableCollectionRepo {
     fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
         Ok(())
     }
+    fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+        Ok(crate::test_doubles::test_identity(n))
+    }
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
         let failing = self
             .settings_error_for
@@ -471,7 +605,11 @@ impl CollectionRepository for ConfigurableCollectionRepo {
             .cloned()
             .unwrap_or_default())
     }
-    fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+    fn save_settings(&self, name: &str, settings: &CollectionSettings) -> DomainResult<()> {
+        self.settings
+            .lock()
+            .expect("lock settings")
+            .insert(name.to_string(), settings.clone());
         Ok(())
     }
     fn get_folder_chain_variables(

@@ -509,6 +509,20 @@ mod service_tests {
         chain: Vec<FolderSettings>,
         root: Option<PathBuf>,
     ) -> Harness {
+        harness_with_trust(
+            settings,
+            chain,
+            root,
+            crate::test_doubles::InMemoryTrustStore::allow_all(),
+        )
+    }
+
+    fn harness_with_trust(
+        settings: CollectionSettings,
+        chain: Vec<FolderSettings>,
+        root: Option<PathBuf>,
+        trust: Arc<crate::test_doubles::InMemoryTrustStore>,
+    ) -> Harness {
         let mut collection = Collection::new("col");
         collection.settings = settings;
         let repo = InMemoryCollectionRepo::with_folder_chain(collection, chain, root);
@@ -527,7 +541,8 @@ mod service_tests {
             Arc::new(FakeSecretStore("client-secret".into())),
             FakeVaultSecretFetcher::new(HashMap::new()),
         )
-        .with_script_engine(Box::new(SharedCodeEngine(Arc::clone(&engine))));
+        .with_script_engine(Box::new(SharedCodeEngine(Arc::clone(&engine))))
+        .with_trust_store(trust);
         Harness {
             svc,
             repo,
@@ -842,6 +857,27 @@ mod service_tests {
         for call in &seen {
             assert_eq!(call.sandbox, SandboxMode::Developer, "{}", call.call);
             assert_eq!(call.file_scope, expected_scope, "{}", call.call);
+        }
+    }
+
+    #[tokio::test]
+    async fn folder_scripts_run_safe_when_developer_mode_is_not_granted() {
+        let mut developer = settings(ScriptFlow::Sandwich);
+        developer.sandbox_mode = CollectionSandboxMode::Developer;
+        let h = harness_with_trust(
+            developer,
+            chain(),
+            Some(PathBuf::from("/tmp/rocket-folder-chain-test")),
+            crate::test_doubles::InMemoryTrustStore::new(),
+        );
+        h.svc
+            .execute(input(Some("r-pre"), None, None))
+            .await
+            .expect("execute");
+        let seen = h.engine.seen();
+        assert!(!seen.is_empty());
+        for call in &seen {
+            assert_eq!(call.sandbox, SandboxMode::Safe, "{}", call.call);
         }
     }
 

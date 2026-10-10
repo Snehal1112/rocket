@@ -69,7 +69,7 @@ impl McpToolService {
                 let settings = self.collection_repo.get_settings(collection)?;
                 let text = render_collection(
                     collection,
-                    &MaskedSettings::from_settings(&settings),
+                    &MaskedSettings::from_settings(&settings, self.run_allowed(collection)),
                     settings.docs.as_deref(),
                 );
                 (text, self.chip_secrets(collection, None, &[])?.0)

@@ -8,6 +8,7 @@ pub mod callback_listener;
 pub(crate) mod client_certificates;
 pub mod collection_runner_service;
 pub mod collection_service;
+pub mod collection_trust;
 pub mod contract_service;
 pub mod cookie_service;
 pub mod env_audit;
@@ -67,6 +68,7 @@ pub use collection_runner_service::{
     StoppedReason,
 };
 pub use collection_service::CollectionService;
+pub use collection_trust::{effective_capabilities, Capability, CollectionTrustService, TrustStatus};
 pub use contract_service::ContractService;
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;

@@ -10,9 +10,10 @@
 //! `get_collection_settings`, `get_environment`, `get_history`,
 //! `get_test_results`) are always allowed and return masked views from
 //! `mcp_read_views`. `run_request` also needs the collection's run switch
-//! (`agent_autonomy_enabled`, "Allow the agent to run requests in this
-//! collection"), re-checked on every call so a mid-session toggle takes
-//! effect at once. Every successful call publishes
+//! ("Allow the agent to run requests in this collection"). The collection file
+//! only requests it. The trust store decides whether it is granted on this
+//! computer. The effective value is re-checked on every call so a mid-session
+//! toggle takes effect at once. Every successful call publishes
 //! `DomainEvent::AcpToolInvoked` for the audit trail.
 //!
 //! Modes (spec section 3): each session has an `AssistantMode`. Read tools
@@ -154,6 +155,8 @@ pub struct McpToolService {
     /// Outlines waiting for each assistant session's first prompt.
     pending_outlines: Mutex<HashMap<String, PendingOutline>>,
     test_result_cache: Mutex<HashMap<TestResultKey, Vec<rocket_scripting::TestResult>>>,
+    /// What the user allowed per collection. The default allows nothing.
+    trust_store: Arc<dyn rocket_collection::CollectionTrustStore>,
 }
 
 /// `(session_id, collection, request_path)`.
@@ -190,20 +193,48 @@ impl McpToolService {
             workspace_pins: Mutex::new(HashMap::new()),
             pending_outlines: Mutex::new(HashMap::new()),
             test_result_cache: Mutex::new(HashMap::new()),
+            trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
         }
+    }
+
+    /// Attach the trust store that decides whether the run switch is granted.
+    pub fn with_trust_store(
+        mut self,
+        store: Arc<dyn rocket_collection::CollectionTrustStore>,
+    ) -> Self {
+        self.trust_store = store;
+        self
+    }
+
+    /// Whether the agent may run requests in `collection` on this computer.
+    fn run_allowed(&self, collection: &str) -> bool {
+        crate::collection_trust::effective_capabilities(
+            self.collection_repo.as_ref(),
+            self.trust_store.as_ref(),
+            collection,
+        )
+        .agent_run
     }
 
     /// Re-checks the collection's run switch. `run_request` calls it on
     /// every call. Read tools never call it.
     fn check_autonomy_enabled(&self, collection: &str) -> DomainResult<()> {
         let settings = self.collection_repo.get_settings(collection)?;
-        if !settings.agent_autonomy_enabled {
-            return Err(DomainError::InvalidInput(format!(
+        if self.run_allowed(collection) {
+            return Ok(());
+        }
+        let requested = rocket_collection::RequestedElevation::from_settings(&settings).agent_run;
+        Err(DomainError::InvalidInput(if requested {
+            format!(
+                "running requests in collection '{collection}' is allowed in the collection \
+                 file but not confirmed on this computer. Confirm it in Agent permissions"
+            )
+        } else {
+            format!(
                 "the agent is not allowed to run requests in collection '{collection}'. \
                  Turn on \"Allow the agent to run requests in this collection\" first"
-            )));
-        }
-        Ok(())
+            )
+        }))
     }
 
     /// Refuses a collection that is not one of the active workspace's
@@ -490,11 +521,7 @@ impl McpToolService {
     /// One collection's outline section. A collection whose tree cannot be
     /// read is listed as unreadable instead of failing the whole outline.
     fn outline_collection(&self, name: String, folder: Option<&str>) -> OutlineCollection {
-        let run_allowed = self
-            .collection_repo
-            .get_settings(&name)
-            .map(|settings| settings.agent_autonomy_enabled)
-            .unwrap_or(false);
+        let run_allowed = self.run_allowed(&name);
         match self.collection_repo.get_summaries(&name) {
             Ok(tree) => {
                 let entries = outline_entries(&tree.root);
@@ -525,11 +552,7 @@ impl McpToolService {
             .list()?
             .into_iter()
             .map(|summary| {
-                let run_allowed = self
-                    .collection_repo
-                    .get_settings(&summary.name)
-                    .map(|settings| settings.agent_autonomy_enabled)
-                    .unwrap_or(false);
+                let run_allowed = self.run_allowed(&summary.name);
                 let mut environments: Vec<String> = self
                     .environment_repo_factory
                     .for_collection(&summary.name)
@@ -577,7 +600,7 @@ impl McpToolService {
     ) -> DomainResult<MaskedSettings> {
         self.check_in_workspace(session_id, collection)?;
         let settings = self.collection_repo.get_settings(collection)?;
-        let view = MaskedSettings::from_settings(&settings);
+        let view = MaskedSettings::from_settings(&settings, self.run_allowed(collection));
         self.publish_tool_invoked(
             session_id,
             "get_collection_settings",
@@ -988,7 +1011,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(history)),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         // The session ids most tests use run in Agent mode, so the older
         // tests keep testing scope and the run switch. Mode tests use "s2"
         // and other ids that start with no recorded mode.
@@ -1046,6 +1070,65 @@ mod tests {
             ),
             other => panic!("{tool} must be refused by the run switch, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn run_request_is_refused_when_requested_but_not_confirmed_on_this_computer() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
+
+        let err = svc
+            .run_request("s1", "my-api", "login.yml", None)
+            .await
+            .expect_err("not granted");
+        match err {
+            DomainError::InvalidInput(msg) => {
+                assert!(msg.contains("not confirmed on this computer"), "{msg}")
+            }
+            other => panic!("unexpected error {other:?}"),
+        }
+    }
+
+    #[test]
+    fn views_report_the_effective_run_switch_not_the_request() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        repo.with_summaries("my-api", two_level_tree());
+        let store = crate::test_doubles::InMemoryTrustStore::new();
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+        )
+        .with_trust_store(store.clone());
+
+        let settings = svc.get_collection_settings("s1", "my-api").expect("settings");
+        assert!(!settings.run_allowed);
+        let briefs = svc.list_collections("s1").expect("list");
+        assert!(briefs.iter().all(|b| !b.run_allowed));
+        let outline = svc
+            .get_workspace_outline("s1", None, None)
+            .expect("outline");
+        assert!(outline.contains("## my-api (run: off"), "{outline}");
+
+        store.grant(
+            "my-api",
+            rocket_collection::CollectionGrant {
+                agent_run: true,
+                ..Default::default()
+            },
+        );
+        assert!(svc
+            .get_collection_settings("s1", "my-api")
+            .expect("settings")
+            .run_allowed);
     }
 
     #[tokio::test]
@@ -1396,7 +1479,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
 
         let result = svc
@@ -1474,7 +1558,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
 
         // First run succeeds and populates the cache.
@@ -1538,7 +1623,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
 
         const SECRET: &str = "super-secret";
@@ -1856,7 +1942,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
 
         let result = svc
@@ -1934,7 +2021,8 @@ mod tests {
             guarded_config_repo,
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
 
         let err = svc
@@ -2011,7 +2099,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
 
         let result = svc
@@ -2055,7 +2144,8 @@ mod tests {
             FixedPolicyConfigRepo::permissive(),
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(history)),
-        );
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         svc.open_session("s1", AssistantMode::Agent);
         svc.run_request("s1", "my-api", "login.yml", None)
             .await
@@ -2757,6 +2847,7 @@ mod tests {
             dummy_workspace_path(),
             Box::new(SharedHistoryRepo(history)),
         )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
 
     #[tokio::test]

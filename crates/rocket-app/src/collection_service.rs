@@ -3,7 +3,7 @@ use rocket_audit::{
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_collection::{
-    Collection, CollectionRepository, CollectionSummary, CollectionVariable, FolderSettings,
+    Collection, CollectionGrant, CollectionRepository, CollectionTrustStore, GrantSource, CollectionSummary, CollectionVariable, FolderSettings,
     GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
@@ -15,6 +15,8 @@ pub struct CollectionService {
     repo: Box<dyn CollectionRepository>,
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
+    /// Grants follow create, rename and delete when a store is attached.
+    trust: Option<Arc<dyn CollectionTrustStore>>,
 }
 
 impl CollectionService {
@@ -23,7 +25,15 @@ impl CollectionService {
             repo,
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
+            trust: None,
         }
+    }
+
+    /// Attaches the trust store, so a rename moves the grants, a delete removes them and a
+    /// new collection gets host environment access.
+    pub fn with_trust_store(mut self, store: Arc<dyn CollectionTrustStore>) -> Self {
+        self.trust = Some(store);
+        self
     }
 
     pub fn new_with_audit(
@@ -35,6 +45,7 @@ impl CollectionService {
             repo,
             events,
             audit,
+            trust: None,
         }
     }
 
@@ -137,6 +148,18 @@ impl CollectionService {
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
         Collection::validate_name(name)?;
         let collection = self.repo.create(name)?;
+        // A collection made in Rocket requests nothing elevated, so it only gets host
+        // environment access. A failure here leaves the collection untrusted, which is safe.
+        if let (Some(trust), Ok(identity)) = (&self.trust, self.repo.collection_identity(name)) {
+            let grant = CollectionGrant {
+                process_env: true,
+                source: GrantSource::Created,
+                ..Default::default()
+            };
+            if let Err(e) = trust.put(&identity, grant) {
+                tracing::warn!(error = %e, "could not record the grant of a new collection");
+            }
+        }
         self.events.publish(DomainEvent::CollectionCreated {
             name: name.to_string(),
         });
@@ -144,7 +167,13 @@ impl CollectionService {
     }
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
+        let identity = self.repo.collection_identity(name).ok();
         self.repo.delete(name)?;
+        if let (Some(trust), Some(identity)) = (&self.trust, identity) {
+            if let Err(e) = trust.remove(&identity) {
+                tracing::warn!(error = %e, "could not remove the grants of a deleted collection");
+            }
+        }
         self.audit.publish(
             "system".into(),
             None,
@@ -160,7 +189,17 @@ impl CollectionService {
 
     pub fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
         Collection::validate_name(new_name)?;
+        let old_identity = self.repo.collection_identity(old_name).ok();
         self.repo.rename(old_name, new_name)?;
+        // The user renamed it in the app, so the grants follow. If the new identity cannot
+        // be read the grants stay behind and the collection is untrusted, which is safe.
+        if let (Some(trust), Some(old)) = (&self.trust, old_identity) {
+            if let Ok(new) = self.repo.collection_identity(new_name) {
+                if let Err(e) = trust.rekey(&old, &new) {
+                    tracing::warn!(error = %e, "could not move the grants of a renamed collection");
+                }
+            }
+        }
         self.events.publish(DomainEvent::CollectionRenamed {
             old_name: old_name.to_string(),
             new_name: new_name.to_string(),
@@ -454,7 +493,15 @@ impl CollectionService {
         name: &str,
         settings: &rocket_collection::CollectionSettings,
     ) -> DomainResult<()> {
-        self.repo.save_settings(name, settings)?;
+        // The capability fields are requests that only the trust service may change. Keep
+        // what the file has and ignore the incoming values, so an ordinary settings save
+        // can neither approve nor drop a request.
+        let on_disk = self.repo.get_settings(name)?;
+        let mut merged = settings.clone();
+        merged.sandbox_mode = on_disk.sandbox_mode;
+        merged.script_context_roots = on_disk.script_context_roots;
+        merged.agent_autonomy_enabled = on_disk.agent_autonomy_enabled;
+        self.repo.save_settings(name, &merged)?;
         self.events.publish(DomainEvent::CollectionSettingsSaved {
             collection: name.to_string(),
         });
@@ -1469,5 +1516,106 @@ mod folder_settings_tests {
             recorder.0.lock().expect("lock").is_empty(),
             "a failed save must not publish an event"
         );
+    }
+}
+
+#[cfg(test)]
+mod trust_tests {
+    use super::*;
+    use rocket_collection::settings::SandboxMode;
+    use rocket_collection::CollectionSettings;
+    use rocket_infra::{FsCollectionRepo, FsCollectionTrustStore};
+    use rocket_shared::events::NullEventPublisher;
+
+    fn setup() -> (tempfile::TempDir, CollectionService, Arc<FsCollectionTrustStore>) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(FsCollectionTrustStore::new(dir.path().join("trust.yml")));
+        let svc = CollectionService::new(
+            Box::new(FsCollectionRepo::new_standalone(dir.path().join("collections"))),
+            Box::new(NullEventPublisher),
+        )
+        .with_trust_store(Arc::clone(&store) as Arc<dyn CollectionTrustStore>);
+        (dir, svc, store)
+    }
+
+    fn identity(dir: &tempfile::TempDir, name: &str) -> rocket_collection::CollectionIdentity {
+        FsCollectionRepo::new_standalone(dir.path().join("collections"))
+            .collection_identity(name)
+            .expect("identity")
+    }
+
+    #[test]
+    fn create_grants_process_env_only() {
+        let (dir, svc, store) = setup();
+        svc.create("api").expect("create");
+        let grant = store
+            .grant_for(&identity(&dir, "api"))
+            .expect("read")
+            .expect("grant");
+        assert!(grant.process_env);
+        assert!(!grant.developer_mode && !grant.agent_run);
+        assert!(grant.context_roots.is_empty());
+        assert_eq!(grant.source, GrantSource::Created);
+    }
+
+    #[test]
+    fn rename_moves_the_grant_and_delete_removes_it() {
+        let (dir, svc, store) = setup();
+        svc.create("api").expect("create");
+        svc.rename("api", "api2").expect("rename");
+        let grant = store
+            .grant_for(&identity(&dir, "api2"))
+            .expect("read")
+            .expect("grant follows the rename");
+        assert!(grant.process_env);
+
+        let id = identity(&dir, "api2");
+        svc.delete("api2").expect("delete");
+        assert_eq!(store.grant_for(&id).expect("read"), None);
+    }
+
+    #[test]
+    fn save_settings_keeps_the_capability_fields_from_disk() {
+        let (dir, svc, _store) = setup();
+        svc.create("api").expect("create");
+        // A pull put the requests in the file.
+        let repo = FsCollectionRepo::new_standalone(dir.path().join("collections"));
+        repo.save_settings(
+            "api",
+            &CollectionSettings {
+                sandbox_mode: SandboxMode::Developer,
+                script_context_roots: vec!["../shared".into()],
+                agent_autonomy_enabled: true,
+                ..Default::default()
+            },
+        )
+        .expect("seed");
+
+        // An ordinary save that tries to change them, and one that drops them.
+        let mut incoming = svc.get_settings("api").expect("get");
+        incoming.docs = Some("hello".into());
+        incoming.sandbox_mode = SandboxMode::Safe;
+        incoming.script_context_roots.clear();
+        incoming.agent_autonomy_enabled = false;
+        svc.save_settings("api", &incoming).expect("save");
+
+        let saved = svc.get_settings("api").expect("get");
+        assert_eq!(saved.docs.as_deref(), Some("hello"));
+        assert_eq!(saved.sandbox_mode, SandboxMode::Developer);
+        assert_eq!(saved.script_context_roots, vec!["../shared"]);
+        assert!(saved.agent_autonomy_enabled);
+
+        // And it cannot turn them on.
+        let (dir2, svc2, _s) = setup();
+        svc2.create("api").expect("create");
+        let mut incoming = svc2.get_settings("api").expect("get");
+        incoming.sandbox_mode = SandboxMode::Developer;
+        incoming.agent_autonomy_enabled = true;
+        svc2.save_settings("api", &incoming).expect("save");
+        let saved = svc2.get_settings("api").expect("get");
+        assert_eq!(saved.sandbox_mode, SandboxMode::Safe);
+        assert!(!saved.agent_autonomy_enabled);
+        drop(dir2);
+        drop(dir);
     }
 }

@@ -194,7 +194,8 @@ pub struct MaskedSettings {
 }
 
 impl MaskedSettings {
-    pub fn from_settings(settings: &CollectionSettings) -> Self {
+    /// `run_allowed` is the effective value from the trust gate, not the file's request.
+    pub fn from_settings(settings: &CollectionSettings, run_allowed: bool) -> Self {
         let auth = settings.auth.as_ref().map(mask_auth).unwrap_or(Value::Null);
         Self {
             auth_type: auth_type_name(&auth),
@@ -205,7 +206,7 @@ impl MaskedSettings {
                 .iter()
                 .map(mask_collection_variable)
                 .collect(),
-            run_allowed: settings.agent_autonomy_enabled,
+            run_allowed,
         }
     }
 }
