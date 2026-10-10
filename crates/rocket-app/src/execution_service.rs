@@ -21,7 +21,7 @@ use rocket_scripting::{
     context::SandboxMode, ConsoleEntry, ConsoleLevel, ExecutionMode, NextRequest, ScriptContext,
     ScriptEngine, ScriptFileScope, ScriptHost, ScriptResult, TestResult, TestStatus,
 };
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
@@ -183,6 +183,17 @@ impl std::fmt::Debug for ExecuteRequestOutput {
 
 /// The credentials a resolved request carries: Basic login forms, a bearer
 /// token and the values of Authorization headers.
+/// One scope read for the variable builders. A missing source gives `None`. Any other error
+/// gives `None` too unless `strict`, where it is returned.
+fn read_scope<T>(strict: bool, result: DomainResult<T>) -> DomainResult<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(DomainError::NotFound(_)) => Ok(None),
+        Err(_) if !strict => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 fn sent_credentials(request: &HttpRequest) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     match &request.auth {
@@ -648,11 +659,34 @@ impl RequestExecutionService {
         request_path: Option<&str>,
         external_secrets: &std::collections::HashMap<String, String>,
     ) -> VariableContext {
+        // Lenient mode never returns an error, so the fallback is unreachable.
+        self.scopes_inner(
+            false,
+            global_env_name,
+            collection,
+            environment_name,
+            request_path,
+            external_secrets,
+        )
+        .unwrap_or_default()
+    }
+
+    /// The scope builder behind both modes. With `strict` off a failed read skips its scope.
+    /// With `strict` on a real read or parse error is returned; a missing source is still skipped.
+    fn scopes_inner(
+        &self,
+        strict: bool,
+        global_env_name: Option<&str>,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
+    ) -> DomainResult<VariableContext> {
         // Precedence (lowest → highest): global_env < collection < env < folder < request.
         let mut ctx = VariableContext::default();
 
         if let Some(name) = global_env_name {
-            if let Ok(global_env) = self.env_repo.get(name) {
+            if let Some(global_env) = read_scope(strict, self.env_repo.get(name))? {
                 for var in global_env.variables.iter().filter(|v| v.enabled) {
                     ctx.global_env.insert(var.key.clone(), var.value.clone());
                     if var.secret && var.value.len() >= MIN_REDACTION_LEN {
@@ -671,7 +705,8 @@ impl RequestExecutionService {
         };
 
         if let Some(col) = collection {
-            let settings = self.collection_repo.get_settings(col).unwrap_or_default();
+            let settings =
+                read_scope(strict, self.collection_repo.get_settings(col))?.unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
                 let val = effective_val(cv);
                 ctx.collection.insert(cv.key.clone(), val.clone());
@@ -682,7 +717,7 @@ impl RequestExecutionService {
         }
 
         if let Some(name) = environment_name {
-            if let Ok(env) = self.regular_env_repo(collection).get(name) {
+            if let Some(env) = read_scope(strict, self.regular_env_repo(collection).get(name))? {
                 for var in env.variables.iter().filter(|v| v.enabled) {
                     ctx.env.insert(var.key.clone(), var.value.clone());
                     if var.secret && var.value.len() >= MIN_REDACTION_LEN {
@@ -693,7 +728,9 @@ impl RequestExecutionService {
         }
 
         if let (Some(col), Some(path)) = (collection, request_path) {
-            if let Ok(folder_vars) = self.collection_repo.get_folder_chain_variables(col, path) {
+            if let Some(folder_vars) =
+                read_scope(strict, self.collection_repo.get_folder_chain_variables(col, path))?
+            {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
                     ctx.folder.insert(cv.key.clone(), val.clone());
@@ -705,7 +742,9 @@ impl RequestExecutionService {
         }
 
         if let (Some(col), Some(path)) = (collection, request_path) {
-            if let Ok(request_vars) = self.collection_repo.get_request_variables(col, path) {
+            if let Some(request_vars) =
+                read_scope(strict, self.collection_repo.get_request_variables(col, path))?
+            {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
                     ctx.request.insert(cv.key.clone(), val.clone());
@@ -722,7 +761,7 @@ impl RequestExecutionService {
                 .extend(crate::redaction::redaction_forms(value));
         }
 
-        ctx
+        Ok(ctx)
     }
 
     /// Collects the values a run must never print: secret variables from the
@@ -763,23 +802,26 @@ impl RequestExecutionService {
         }
     }
 
-    /// Secret variable values of every scope that applies to one request: the global
-    /// environment, the collection, the folder chain, the request and the named environment.
-    pub(crate) fn secret_values_for_request(
+    /// Secret variable values of every scope that applies to one request. A real read or parse error is
+    /// returned instead of skipping that scope. A missing source still gives no values. For masking text that is
+    /// sent out, where a dropped scope would leave its secrets unmasked.
+    pub(crate) fn try_secret_values_for_request(
         &self,
         global_env_name: Option<&str>,
         collection: &str,
         environment_name: Option<&str>,
         request_path: Option<&str>,
-    ) -> std::collections::HashSet<String> {
-        self.build_variable_scopes(
-            global_env_name,
-            Some(collection),
-            environment_name,
-            request_path,
-            &std::collections::HashMap::new(),
-        )
-        .secret_values
+    ) -> DomainResult<std::collections::HashSet<String>> {
+        Ok(self
+            .scopes_inner(
+                true,
+                global_env_name,
+                Some(collection),
+                environment_name,
+                request_path,
+                &std::collections::HashMap::new(),
+            )?
+            .secret_values)
     }
 
     /// Builds a flattened variable map from all backend-accessible scopes

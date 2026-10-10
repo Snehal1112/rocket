@@ -276,6 +276,8 @@ impl<T: CollectionRepository> CollectionRepository for SharedCollectionRepo<T> {
 pub struct ConfigurableCollectionRepo {
     settings: Mutex<HashMap<String, CollectionSettings>>,
     settings_error_for: Mutex<Option<String>>,
+    fail_request_vars: Mutex<bool>,
+    fail_request_read: Mutex<bool>,
     request_vars: Mutex<Vec<CollectionVariable>>,
     requests: Mutex<HashMap<(String, String), CollectionRequest>>,
     summaries: Mutex<HashMap<String, Collection>>,
@@ -326,6 +328,16 @@ impl ConfigurableCollectionRepo {
             .settings_error_for
             .lock()
             .expect("lock settings_error_for") = Some(collection.to_string());
+    }
+
+    /// Makes `get_request_variables` fail with `DomainError::Internal`.
+    pub fn fail_request_variables(&self) {
+        *self.fail_request_vars.lock().expect("lock fail_request_vars") = true;
+    }
+
+    /// Makes `get_request` fail with `DomainError::Internal` instead of `NotFound`.
+    pub fn fail_request_reads(&self) {
+        *self.fail_request_read.lock().expect("lock fail_request_read") = true;
     }
 
     pub fn with_folder_settings(
@@ -394,6 +406,9 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(())
     }
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<CollectionRequest> {
+        if *self.fail_request_read.lock().expect("lock fail_request_read") {
+            return Err(DomainError::Internal("request read failed".into()));
+        }
         self.requests
             .lock()
             .expect("lock requests")
@@ -462,6 +477,9 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(())
     }
     fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+        if *self.fail_request_vars.lock().expect("lock fail_request_vars") {
+            return Err(DomainError::Internal("request variables read failed".into()));
+        }
         Ok(self.request_vars.lock().expect("lock request_vars").clone())
     }
     fn get_folder_settings(

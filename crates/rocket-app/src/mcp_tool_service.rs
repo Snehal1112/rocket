@@ -2690,7 +2690,11 @@ mod tests {
                 .mask_response_chip("my-api", "echo.yml", env, &echo_response("body"))
                 .await
                 .expect_err("a failed environment listing must refuse the chip");
-            assert!(err.to_string().contains("environments"), "{err}");
+            assert!(
+                err.to_string()
+                    .contains("could not read the environments to mask this chip"),
+                "{err}"
+            );
         }
     }
 
@@ -2705,6 +2709,43 @@ mod tests {
             .build_chip_resource(ChipKind::Request, "my-api", Some("echo.yml"))
             .expect_err("a failed environment listing must refuse the chip");
         assert!(err.to_string().contains("environments"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_request_variables_cannot_be_read() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        repo.fail_request_variables();
+        let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
+        let err = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response("body"))
+            .await
+            .expect_err("a failed variable read must refuse the chip");
+        assert!(err.to_string().contains("variable scopes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_the_saved_request_cannot_be_read() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        repo.fail_request_reads();
+        let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
+        let err = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response("body"))
+            .await
+            .expect_err("an unreadable saved request must refuse the chip");
+        assert!(err.to_string().contains("saved request"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn response_chip_works_for_a_request_that_is_not_saved() {
+        let repo = ConfigurableCollectionRepo::new();
+        let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
+        let chip = svc
+            .mask_response_chip("my-api", "unsaved.yml", None, &echo_response("plain body"))
+            .await
+            .expect("chip");
+        assert!(chip.text.contains("plain body"), "{}", chip.text);
     }
 
     #[tokio::test]
