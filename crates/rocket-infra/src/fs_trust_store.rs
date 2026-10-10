@@ -163,7 +163,9 @@ impl FsCollectionTrustStore {
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut file = match self.load()? {
             Loaded::Ok(file) => file,
-            Loaded::Missing => TrustFile::empty(false),
+            // Startup has passed the migration step before any write happens, so a new file
+            // counts as migrated. Otherwise a later start could grandfather new clones.
+            Loaded::Missing => TrustFile::empty(true),
             Loaded::Corrupt => {
                 self.quarantine(&self.path)?;
                 TrustFile::empty(true)
@@ -213,7 +215,9 @@ impl CollectionTrustStore for FsCollectionTrustStore {
             Loaded::Corrupt => return Err(Self::unreadable()),
             Loaded::Ok(_) => {}
         }
-        self.update(|file| file.collections.retain(|r| !r.matches(id)))
+        // Match by folder alone, so a changed uid cannot leave a stale grant behind.
+        let root = root_text(id);
+        self.update(|file| file.collections.retain(|r| r.root != root))
     }
 
     fn rekey(&self, old: &CollectionIdentity, new: &CollectionIdentity) -> DomainResult<()> {
@@ -223,7 +227,8 @@ impl CollectionTrustStore for FsCollectionTrustStore {
             Loaded::Ok(_) => {}
         }
         self.update(|file| {
-            let Some(index) = file.collections.iter().position(|r| r.matches(old)) else {
+            let old_root = root_text(old);
+            let Some(index) = file.collections.iter().position(|r| r.root == old_root) else {
                 return;
             };
             let mut record = file.collections.remove(index);
@@ -451,18 +456,40 @@ mod tests {
     }
 
     #[test]
-    fn migration_keeps_a_grant_made_before_it_ran() {
+    fn a_write_to_a_missing_file_counts_as_migrated() {
         let (_dir, store) = store();
         store
             .put(&id("/a", None), CollectionGrant::default())
             .expect("put");
-        assert!(!store.migrated().expect("migrated"));
+        assert!(store.migrated().expect("migrated"));
+        // A later migration attempt must not grandfather anything.
         store
-            .complete_migration(vec![(id("/a", None), dev_grant())], Vec::new())
+            .complete_migration(vec![(id("/b", None), dev_grant())], Vec::new())
             .expect("migrate");
-        assert_eq!(
-            store.grant_for(&id("/a", None)).expect("read"),
-            Some(CollectionGrant::default())
-        );
+        assert_eq!(store.grant_for(&id("/b", None)).expect("read"), None);
+    }
+
+    #[test]
+    fn an_empty_migration_marks_the_store_migrated() {
+        let (_dir, store) = store();
+        store.complete_migration(Vec::new(), Vec::new()).expect("migrate");
+        assert!(store.migrated().expect("migrated"));
+        store.put(&id("/a", None), dev_grant()).expect("put");
+        assert!(store.migrated().expect("migrated"));
+    }
+
+    #[test]
+    fn remove_and_rekey_ignore_a_changed_uid() {
+        let (_dir, store) = store();
+        store.put(&id("/a", Some("u1")), dev_grant()).expect("put");
+        store.remove(&id("/a", Some("changed"))).expect("remove");
+        assert_eq!(store.grant_for(&id("/a", Some("u1"))).expect("read"), None);
+
+        store.put(&id("/a", Some("u1")), dev_grant()).expect("put");
+        store
+            .rekey(&id("/a", Some("changed")), &id("/b", Some("u1")))
+            .expect("rekey");
+        assert_eq!(store.grant_for(&id("/a", Some("u1"))).expect("read"), None);
+        assert!(store.grant_for(&id("/b", Some("u1"))).expect("read").is_some());
     }
 }
