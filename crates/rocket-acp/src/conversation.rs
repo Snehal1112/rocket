@@ -56,11 +56,23 @@ pub enum StoredProposalStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StoredMessage {
-    User { text: String },
-    Agent { text: String },
-    Tool { title: String, status: StoredToolStatus },
-    Notice { text: String },
-    Proposal { summary: String, status: StoredProposalStatus },
+    User {
+        text: String,
+    },
+    Agent {
+        text: String,
+    },
+    Tool {
+        title: String,
+        status: StoredToolStatus,
+    },
+    Notice {
+        text: String,
+    },
+    Proposal {
+        summary: String,
+        status: StoredProposalStatus,
+    },
 }
 
 impl StoredMessage {
@@ -69,7 +81,10 @@ impl StoredMessage {
         match self {
             Self::User { text } => Self::User { text: f(&text) },
             Self::Agent { text } => Self::Agent { text: f(&text) },
-            Self::Tool { title, status } => Self::Tool { title: f(&title), status },
+            Self::Tool { title, status } => Self::Tool {
+                title: f(&title),
+                status,
+            },
             Self::Notice { text } => Self::Notice { text: f(&text) },
             Self::Proposal { summary, status } => Self::Proposal {
                 summary: f(&summary),
@@ -237,11 +252,15 @@ mod tests {
     const ID: &str = "0b6f3f4e-0000-4000-8000-000000000001";
 
     fn user(text: &str) -> StoredMessage {
-        StoredMessage::User { text: text.to_string() }
+        StoredMessage::User {
+            text: text.to_string(),
+        }
     }
 
     fn agent(text: &str) -> StoredMessage {
-        StoredMessage::Agent { text: text.to_string() }
+        StoredMessage::Agent {
+            text: text.to_string(),
+        }
     }
 
     fn record(messages: Vec<StoredMessage>) -> ConversationRecord {
@@ -308,7 +327,10 @@ mod tests {
             "0b6f3f4e-0000-4000-8000-000000000001.yml",
         ] {
             assert!(
-                matches!(validate_conversation_id(bad), Err(DomainError::InvalidInput(_))),
+                matches!(
+                    validate_conversation_id(bad),
+                    Err(DomainError::InvalidInput(_))
+                ),
                 "{bad} must be refused"
             );
         }
@@ -326,8 +348,9 @@ mod tests {
 
     #[test]
     fn apply_caps_keeps_the_newest_messages_and_cuts_every_text_field() {
-        let mut messages: Vec<StoredMessage> =
-            (0..MAX_MESSAGES + 3).map(|i| user(&format!("m{i}"))).collect();
+        let mut messages: Vec<StoredMessage> = (0..MAX_MESSAGES + 3)
+            .map(|i| user(&format!("m{i}")))
+            .collect();
         messages.push(StoredMessage::Tool {
             title: "t".repeat(MAX_MESSAGE_TEXT_BYTES + 1),
             status: StoredToolStatus::Completed,
@@ -344,7 +367,11 @@ mod tests {
 
     #[test]
     fn the_title_is_the_first_user_message_on_one_line_and_at_most_80_chars() {
-        let messages = vec![agent("hello"), user("  Why does\nlogin   return 401?  "), user("second")];
+        let messages = vec![
+            agent("hello"),
+            user("  Why does\nlogin   return 401?  "),
+            user("second"),
+        ];
         assert_eq!(conversation_title(&messages), "Why does login return 401?");
         let long = vec![user(&"x".repeat(200))];
         assert_eq!(conversation_title(&long).chars().count(), MAX_TITLE_CHARS);
@@ -361,15 +388,27 @@ mod tests {
     fn map_text_reaches_every_text_field() {
         let upper = |t: &str| t.to_uppercase();
         assert_eq!(user("a").map_text(upper), user("A"));
-        let tool = StoredMessage::Tool { title: "t".into(), status: StoredToolStatus::Failed };
+        let tool = StoredMessage::Tool {
+            title: "t".into(),
+            status: StoredToolStatus::Failed,
+        };
         assert_eq!(
             tool.map_text(upper),
-            StoredMessage::Tool { title: "T".into(), status: StoredToolStatus::Failed }
+            StoredMessage::Tool {
+                title: "T".into(),
+                status: StoredToolStatus::Failed
+            }
         );
-        let proposal = StoredMessage::Proposal { summary: "s".into(), status: StoredProposalStatus::Stale };
+        let proposal = StoredMessage::Proposal {
+            summary: "s".into(),
+            status: StoredProposalStatus::Stale,
+        };
         assert_eq!(
             proposal.map_text(upper),
-            StoredMessage::Proposal { summary: "S".into(), status: StoredProposalStatus::Stale }
+            StoredMessage::Proposal {
+                summary: "S".into(),
+                status: StoredProposalStatus::Stale
+            }
         );
     }
 
