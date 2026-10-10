@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   deleteEnvironment,
   deleteGlobalEnvironment,
@@ -15,8 +15,11 @@ import {
 
 export const environmentKeys = {
   collection: (collectionName: string) => ['environments', collectionName] as const,
+  /** Prefix of every global environment query, to invalidate them all. */
+  globalAll: ['environments', 'global'] as const,
   globalName: ['environments', 'global', 'name'] as const,
-  global: (name: string) => ['environments', 'global', name] as const,
+  // The extra segment keeps an environment named "name" or "list" off the other keys.
+  global: (name: string) => ['environments', 'global', 'env', name] as const,
   globalList: ['environments', 'global', 'list'] as const,
   /** Prefix of every process env query, to invalidate them all. */
   processAll: ['environments', 'process'] as const,
@@ -87,12 +90,26 @@ export function useDeleteEnvironment(collectionName: string | null) {
   });
 }
 
+// Brings every global environment cache entry up to date. The send paths read the
+// cache synchronously, so the entry for the active name is awaited here.
+async function refreshGlobalEnvironments(qc: QueryClient, activeName: string | null) {
+  await qc.invalidateQueries({ queryKey: environmentKeys.globalAll });
+  if (activeName) {
+    await qc.fetchQuery({
+      queryKey: environmentKeys.global(activeName),
+      queryFn: () => getGlobalEnvironment(activeName),
+      staleTime: 0,
+    });
+  }
+}
+
 export function useSetGlobalEnvironment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string | null) => setGlobalEnvironment(name),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: environmentKeys.globalName });
+    onSuccess: async (_data, name) => {
+      qc.setQueryData(environmentKeys.globalName, name);
+      await refreshGlobalEnvironments(qc, name);
     },
   });
 }
@@ -101,9 +118,13 @@ export function useSaveGlobalEnvironment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (env: Environment) => saveGlobalEnvironment(env),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: environmentKeys.globalList });
-      qc.invalidateQueries({ queryKey: environmentKeys.globalName });
+    onSuccess: async (_data, env) => {
+      // Write the saved value first so a send right after the save never sees the old one.
+      qc.setQueryData(environmentKeys.global(env.name), env);
+      await refreshGlobalEnvironments(
+        qc,
+        qc.getQueryData<string | null>(environmentKeys.globalName) ?? null,
+      );
     },
   });
 }
@@ -112,8 +133,12 @@ export function useDeleteGlobalEnvironment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => deleteGlobalEnvironment(name),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: environmentKeys.globalList });
+    onSuccess: async (_data, name) => {
+      qc.removeQueries({ queryKey: environmentKeys.global(name) });
+      // The backend may have cleared the active name, so read it again.
+      await qc.invalidateQueries({ queryKey: environmentKeys.globalName });
+      const active = qc.getQueryData<string | null>(environmentKeys.globalName) ?? null;
+      await refreshGlobalEnvironments(qc, active === name ? null : active);
     },
   });
 }

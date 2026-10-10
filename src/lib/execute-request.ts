@@ -58,7 +58,7 @@ function getActiveVariables(collection?: string): Record<string, string> {
 }
 
 // Reads the active global environment's variables from the query cache.
-function getGlobalVariables(): Record<string, string> {
+export function getGlobalVariables(): Record<string, string> {
   const globalEnvName =
     getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
   if (!globalEnvName) return {};
