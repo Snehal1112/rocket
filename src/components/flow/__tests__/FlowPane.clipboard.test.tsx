@@ -6,6 +6,7 @@ import { clearFlowClipboard, getFlowClipboard, PASTE_OFFSET } from '@/lib/flow-c
 import { caseHandle } from '@/lib/flow-handles';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { FlowPane } from '../FlowPane';
 
@@ -103,6 +104,7 @@ describe('FlowPane copy, paste and duplicate', () => {
     vi.clearAllMocks();
     usePaneStore.getState().reset();
     clearFlowClipboard();
+    useWorkspaceStore.setState({ activeWorkspaceId: '' });
     canvas = {};
   });
 
@@ -197,6 +199,24 @@ describe('FlowPane copy, paste and duplicate', () => {
     act(() => canvas.onPaste?.());
     expect(current().nodes).toHaveLength(1);
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('one'));
+  });
+
+  it('refuses saved requests copied in another workspace', () => {
+    const saved = node('s', {
+      kind: 'Request',
+      label: 'S',
+      source: { type: 'Saved', requestPath: 'a.yml' },
+    });
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
+    seed([saved, output('z')]);
+    render(<Harness />);
+    select('s');
+    act(() => canvas.onCopy?.());
+    expect(getFlowClipboard()?.workspaceId).toBe('ws1');
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws2' });
+    act(() => canvas.onPaste?.());
+    expect(current().nodes).toHaveLength(2);
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/workspace/i));
   });
 
   it('duplicates the selection without touching the clipboard', () => {

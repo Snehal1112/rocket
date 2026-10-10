@@ -602,6 +602,8 @@ function FlowCanvasInner({
       return;
     }
     if (key === 'c' && onCopy && selectedNodeIds.size > 0) {
+      // Highlighted text copies as text. Only copy nodes when no text is selected.
+      if ((window.getSelection()?.toString() ?? '') !== '') return;
       e.preventDefault();
       onCopy();
       return;

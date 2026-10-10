@@ -1,4 +1,4 @@
-import { caseHandle, caseIdFromHandle } from '@/lib/flow-handles';
+import { caseHandle, caseIdFromHandle, INPUT_HANDLE, takesSingleInput } from '@/lib/flow-handles';
 import { newEntityId } from '@/lib/flow-ids';
 import type { FlowEdge, FlowNode, FlowNodeKind } from '@/lib/tauri-api';
 
@@ -8,6 +8,8 @@ export const PASTE_OFFSET = 40;
 export interface FlowClip {
   // The collection the nodes came from. Saved requests only resolve inside it.
   collection: string | null;
+  // The workspace the nodes came from. Two workspaces can hold collections with the same name.
+  workspaceId: string;
   nodes: FlowNode[];
   edges: FlowEdge[];
 }
@@ -29,12 +31,14 @@ export function copySelection(
   edges: FlowEdge[],
   ids: ReadonlySet<string>,
   collection: string | null,
+  workspaceId: string,
 ): FlowClip | null {
   const picked = nodes.filter((n) => ids.has(n.id));
   if (picked.length === 0) return null;
   const kept = new Set(picked.map((n) => n.id));
   return structuredClone({
     collection,
+    workspaceId,
     nodes: picked,
     edges: edges.filter((e) => kept.has(e.sourceNodeId) && kept.has(e.targetNodeId)),
   });
@@ -48,12 +52,20 @@ export function uniqueCallbackName(name: string, taken: ReadonlySet<string>): st
   return `${name}_${i}`;
 }
 
-/** A reason the clip cannot go into this collection, or null when it can. */
-export function canPasteInto(clip: FlowClip, collection: string | null): string | null {
+/** A reason the clip cannot go into this collection and workspace, or null when it can. */
+export function canPasteInto(
+  clip: FlowClip,
+  collection: string | null,
+  workspaceId: string,
+): string | null {
   const hasSaved = clip.nodes.some(
     (n) => n.kind.kind === 'Request' && n.kind.source.type === 'Saved',
   );
-  if (hasSaved && clip.collection !== collection) {
+  if (!hasSaved) return null;
+  if (clip.workspaceId !== workspaceId) {
+    return 'Cannot paste saved requests copied in another workspace.';
+  }
+  if (clip.collection !== collection) {
     return `Cannot paste saved requests from "${clip.collection ?? 'another collection'}" into this flow's collection.`;
   }
   return null;
@@ -64,6 +76,7 @@ export function canPasteInto(clip: FlowClip, collection: string | null): string 
  * `PASTE_OFFSET * step`, and the per-kind rules apply: an Auth node stops
  * applying to inherited auth (V13), a Switch gets new case ids and its wires
  * follow them, and a Wait for callback gets a free name (V10). Inputs are never changed.
+ * A pasted If, Switch or Transform without an input wire adds a notice.
  */
 export function instantiatePaste(clip: FlowClip, existingNodes: FlowNode[], step = 1): PasteResult {
   const fresh = structuredClone({ nodes: clip.nodes, edges: clip.edges });
@@ -102,6 +115,19 @@ export function instantiatePaste(clip: FlowClip, existingNodes: FlowNode[], step
     }
     return [pasted];
   });
+
+  // The backend wants exactly one `input` wire on these nodes. Wires to nodes
+  // that were not copied are gone, so say which pasted nodes now lack one.
+  const wired = new Set(
+    edges.filter((e) => e.targetField === INPUT_HANDLE).map((e) => e.targetNodeId),
+  );
+  for (const node of nodes) {
+    if (takesSingleInput(node.kind) && !wired.has(node.id)) {
+      notices.push(
+        `Pasted ${node.kind.kind} "${node.kind.label || node.id}" has no input wire. Connect it before saving.`,
+      );
+    }
+  }
 
   return { nodes, edges, notices };
 }

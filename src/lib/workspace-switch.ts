@@ -5,6 +5,7 @@ import {
   suspendAutoSaves,
   waitForAutoSaves,
 } from '@/lib/auto-save';
+import { clearFlowClipboard } from '@/lib/flow-clipboard';
 import { flowKeys } from '@/lib/queries/flow-queries';
 import { clearSavedRequestPreviewCache } from '@/lib/saved-request-preview';
 import {
@@ -57,6 +58,8 @@ async function changeActiveWorkspace(
   try {
     const activeId = await change();
     useWorkspaceStore.getState().setActiveWorkspaceId(activeId);
+    // Copied nodes belong to the workspace that was just left.
+    clearFlowClipboard();
   } finally {
     resumeAutoSaves();
   }

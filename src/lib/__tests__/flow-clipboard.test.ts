@@ -5,7 +5,7 @@ import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import {
   canPasteInto,
   clearFlowClipboard,
-  copySelection,
+  copySelection as copySelectionIn,
   getFlowClipboard,
   instantiatePaste,
   nextPasteStep,
@@ -13,6 +13,14 @@ import {
   setFlowClipboard,
   uniqueCallbackName,
 } from '../flow-clipboard';
+
+const copySelection = (
+  nodes: FlowNode[],
+  edges: FlowEdge[],
+  ids: ReadonlySet<string>,
+  collection: string | null,
+  workspaceId = 'ws1',
+) => copySelectionIn(nodes, edges, ids, collection, workspaceId);
 
 const at = (id: string, kind: FlowNode['kind'], x = 0, y = 0): FlowNode => ({
   id,
@@ -34,6 +42,11 @@ const input = (id: string, x = 0, y = 0) =>
 const output = (id: string, x = 0, y = 0) => at(id, { kind: 'Output', label: id }, x, y);
 
 describe('copySelection', () => {
+  it('stamps the clip with the workspace it was copied in', () => {
+    const clip = copySelection([input('a')], [], new Set(['a']), 'demo', 'ws9');
+    expect(clip?.workspaceId).toBe('ws9');
+  });
+
   it('returns null for an empty selection', () => {
     expect(copySelection([input('a')], [], new Set(), 'demo')).toBeNull();
     expect(copySelection([input('a')], [], new Set(['missing']), 'demo')).toBeNull();
@@ -74,6 +87,47 @@ describe('copySelection', () => {
 });
 
 describe('instantiatePaste', () => {
+  it('warns about a pasted If, Switch and Transform that have no input wire', () => {
+    const iff = at('if', { kind: 'If', label: 'Check', condition: 'true' });
+    const sw = at('sw', { kind: 'Switch', label: 'Route', value: 'x', cases: [] });
+    const tf = at('tf', { kind: 'Transform', label: 'Shape', script: 'return 1;' });
+    const nodes = [iff, sw, tf];
+    const clip = copySelection(nodes, [], new Set(['if', 'sw', 'tf']), 'demo');
+    if (!clip) throw new Error('Expected a clip');
+    expect(instantiatePaste(clip, nodes).notices).toEqual([
+      'Pasted If "Check" has no input wire. Connect it before saving.',
+      'Pasted Switch "Route" has no input wire. Connect it before saving.',
+      'Pasted Transform "Shape" has no input wire. Connect it before saving.',
+    ]);
+  });
+
+  it('gives no notice when the input wire is pasted with the node', () => {
+    const iff = at('if', { kind: 'If', label: 'Check', condition: 'true' });
+    const nodes = [input('a'), iff];
+    const edges = [wire('e1', 'a', 'if', { targetField: 'input' })];
+    const clip = copySelection(nodes, edges, new Set(['a', 'if']), 'demo');
+    if (!clip) throw new Error('Expected a clip');
+    expect(instantiatePaste(clip, nodes).notices).toEqual([]);
+  });
+
+  it('does not count a trigger wire as an input wire', () => {
+    const iff = at('if', { kind: 'If', label: 'Check', condition: 'true' });
+    const nodes = [input('a'), iff];
+    const edges = [wire('e1', 'a', 'if', { targetField: 'trigger' })];
+    const clip = copySelection(nodes, edges, new Set(['a', 'if']), 'demo');
+    if (!clip) throw new Error('Expected a clip');
+    expect(instantiatePaste(clip, nodes).notices).toHaveLength(1);
+  });
+
+  it('falls back to the node id when the label is empty', () => {
+    const iff = at('if1', { kind: 'If', label: '', condition: 'true' });
+    const clip = copySelection([iff], [], new Set(['if1']), 'demo');
+    if (!clip) throw new Error('Expected a clip');
+    // The pasted node has a fresh id, so the notice names that one.
+    const pasted = instantiatePaste(clip, [iff]);
+    expect(pasted.notices[0]).toContain(`"${pasted.nodes[0].id}"`);
+  });
+
   it('gives every node and wire a fresh id and remaps the wire ends', () => {
     const clip = copySelection(
       [input('a', 10, 20), output('b', 110, 20)],
@@ -317,14 +371,20 @@ describe('canPasteInto', () => {
   it('refuses saved requests from another collection', () => {
     const clip = copySelection([savedNode], [], new Set(['s']), 'one');
     if (!clip) throw new Error('Expected a clip');
-    expect(canPasteInto(clip, 'two')).toMatch(/one/);
-    expect(canPasteInto(clip, 'one')).toBeNull();
+    expect(canPasteInto(clip, 'two', 'ws1')).toMatch(/one/);
+    expect(canPasteInto(clip, 'one', 'ws1')).toBeNull();
+  });
+
+  it('refuses saved requests copied in another workspace, even for the same collection name', () => {
+    const clip = copySelection([savedNode], [], new Set(['s']), 'one', 'ws1');
+    if (!clip) throw new Error('Expected a clip');
+    expect(canPasteInto(clip, 'one', 'ws2')).toMatch(/workspace/i);
   });
 
   it('allows other nodes anywhere', () => {
-    const clip = copySelection([input('a')], [], new Set(['a']), 'one');
+    const clip = copySelection([input('a')], [], new Set(['a']), 'one', 'ws1');
     if (!clip) throw new Error('Expected a clip');
-    expect(canPasteInto(clip, 'two')).toBeNull();
+    expect(canPasteInto(clip, 'two', 'ws2')).toBeNull();
   });
 });
 

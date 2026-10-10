@@ -40,6 +40,7 @@ import {
 import { useConsoleStore } from '@/stores/console-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import { type FlowTab, isFlowTab } from '@/types/pane-types';
 import { CallbackHostSetting } from './CallbackHostSetting';
 import { FlowCanvas } from './FlowCanvas';
@@ -59,6 +60,9 @@ import { ViewedRunBanner } from './ViewedRunBanner';
 import { WireScriptDialog } from './WireScriptDialog';
 
 // A new wire and the dialog that finishes it are one undo step, however long the dialog stays open.
+// Read at call time, so a copy or paste always sees the workspace that is active now.
+const currentWorkspaceId = (): string => useWorkspaceStore.getState().activeWorkspaceId;
+
 const WIRE_STEP = (edgeId: string): FlowWriteOptions => ({
   coalesceKey: `wire:${edgeId}`,
   coalesceMs: Number.POSITIVE_INFINITY,
@@ -255,7 +259,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     (clip: FlowClip, step: number) => {
       const latest = latestFlowTab();
       if (!latest) return;
-      const blocked = canPasteInto(clip, latest.collectionName);
+      const blocked = canPasteInto(clip, latest.collectionName, currentWorkspaceId());
       if (blocked) {
         toast.error(blocked);
         return;
@@ -276,7 +280,13 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const handleCopy = useCallback(() => {
     const latest = latestFlowTab();
     if (!latest) return;
-    const clip = copySelection(latest.nodes, latest.edges, selectedNodeIds, latest.collectionName);
+    const clip = copySelection(
+      latest.nodes,
+      latest.edges,
+      selectedNodeIds,
+      latest.collectionName,
+      currentWorkspaceId(),
+    );
     if (!clip) return;
     setFlowClipboard(clip);
     toast.info(clip.nodes.length === 1 ? 'Copied 1 node.' : `Copied ${clip.nodes.length} nodes.`);
@@ -292,7 +302,13 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     (ids: ReadonlySet<string>) => {
       const latest = latestFlowTab();
       if (!latest) return;
-      const clip = copySelection(latest.nodes, latest.edges, ids, latest.collectionName);
+      const clip = copySelection(
+        latest.nodes,
+        latest.edges,
+        ids,
+        latest.collectionName,
+        currentWorkspaceId(),
+      );
       if (clip) pasteClip(clip, 1);
     },
     [latestFlowTab, pasteClip],

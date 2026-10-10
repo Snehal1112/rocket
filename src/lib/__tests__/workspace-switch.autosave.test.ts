@@ -35,6 +35,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
 }));
 
 import { scheduleAutoSave } from '@/lib/auto-save';
+import { clearFlowClipboard, getFlowClipboard, setFlowClipboard } from '@/lib/flow-clipboard';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import {
   closeWorkspaceSafely,
@@ -80,6 +81,21 @@ describe('workspace switch and autosave', () => {
     expect(backend.savedIn).toEqual(['A']);
     expect(backend.active).toBe('B');
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe('B');
+  });
+
+  it('clears the flow clipboard once the workspace changed', async () => {
+    setFlowClipboard({ collection: 'api', workspaceId: 'A', nodes: [], edges: [] });
+    await switchWorkspaceSafely('B');
+    expect(getFlowClipboard()).toBeNull();
+  });
+
+  it('keeps the flow clipboard when the switch is stopped by a failed save', async () => {
+    setFlowClipboard({ collection: 'api', workspaceId: 'A', nodes: [], edges: [] });
+    withDirtyTabs([dirtyTab]);
+    backend.failSave = true;
+    await expect(switchWorkspaceSafely('B')).rejects.toThrow();
+    expect(getFlowClipboard()).not.toBeNull();
+    clearFlowClipboard();
   });
 
   it('runs a pending autosave into the old workspace and never fires it later', async () => {

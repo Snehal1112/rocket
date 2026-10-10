@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FlowNode } from '@/lib/tauri-api';
 import { FlowCanvas } from '../FlowCanvas';
 
@@ -25,6 +25,38 @@ function renderCanvas(selected: string[], handlers: Record<string, () => void>) 
 }
 
 describe('FlowCanvas copy, paste and duplicate keys', () => {
+  describe('with highlighted text', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('leaves Ctrl+C to the browser', () => {
+      vi.spyOn(window, 'getSelection').mockReturnValue({
+        toString: () => 'abc',
+      } as unknown as Selection);
+      const onCopy = vi.fn();
+      renderCanvas(['a'], { onCopy });
+      const notPrevented = fireEvent.keyDown(screen.getByTestId('flow-canvas'), {
+        key: 'c',
+        ctrlKey: true,
+      });
+      expect(onCopy).not.toHaveBeenCalled();
+      expect(notPrevented).toBe(true);
+    });
+
+    it('still copies nodes when the selection is empty', () => {
+      vi.spyOn(window, 'getSelection').mockReturnValue({
+        toString: () => '',
+      } as unknown as Selection);
+      const onCopy = vi.fn();
+      renderCanvas(['a'], { onCopy });
+      const notPrevented = fireEvent.keyDown(screen.getByTestId('flow-canvas'), {
+        key: 'c',
+        ctrlKey: true,
+      });
+      expect(onCopy).toHaveBeenCalledTimes(1);
+      expect(notPrevented).toBe(false);
+    });
+  });
+
   it('copies and duplicates only with a selection', () => {
     const onCopy = vi.fn();
     const onDuplicate = vi.fn();
