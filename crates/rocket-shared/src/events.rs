@@ -552,9 +552,11 @@ pub enum DomainEvent {
         session_id: String,
         error: String,
     },
-    /// Emitted by the MCP tool dispatcher for every tool call it handles
-    /// (list/run/edit/get/set), regardless of outcome kind, so agent-driven
-    /// actions are auditable and distinguishable from manual ones. No
+    /// Emitted by `McpToolService` after a successful call of a read tool or
+    /// `run_request`, so agent-driven actions are auditable and
+    /// distinguishable from manual ones. Refused or failed calls publish
+    /// nothing. `propose_changes` and `list_proposals` do not publish it;
+    /// proposals have `AcpProposalCreated` and `AcpProposalResolved`. No
     /// timestamp field, matching every other `DomainEvent` variant —
     /// ordering comes from emission order, not a payload timestamp.
     AcpToolInvoked {
