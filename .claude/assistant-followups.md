@@ -1,6 +1,6 @@
 # Workspace AI assistant: decisions and follow-ups
 
-This page lists the decisions and follow-ups left after implementing the six workspace-assistant plans on branch `worktree-acp-mcp-tool-server`. The design is in `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md` and the plans are in `docs/superpowers/plans/workspace-ai-assistant/`. Items marked as fixed in the review ledgers are left out. Anything the ledgers do not clearly confirm as fixed is listed under "Verify before relying on".
+This page lists the decisions and follow-ups left after implementing the six workspace-assistant plans on branch `worktree-acp-mcp-tool-server`. The design is in `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md` and the plans are in `docs/superpowers/plans/workspace-ai-assistant/`. Items marked as fixed in the review ledgers are left out. Everything listed as open was still open at the end of the final review; items that the reviews confirmed as fixed are left out.
 
 ## Decisions (rulings)
 
@@ -45,7 +45,23 @@ This page lists the decisions and follow-ups left after implementing the six wor
 - `CreateFolder` resets `folder.yml` if someone creates that folder by hand in a short window.
 - A duplicate `CreateFolder` in one batch is not rejected.
 - `run_request` scripts can persist env vars. This is a deferred spec threat-model note.
-- Locking note: the lock and async interaction is deferred (Plan 04 M2).
+- The list, accept and reject IPC commands are sync, so they run on the main thread and do disk I/O under the proposal mutex. Make them async (`agent_proposals.rs`).
+- `ProposalService.ended` grows by one id per session with no limit.
+- `create_request_exclusive` uses `hard_link`, which fails on filesystems without hard links (exFAT, FAT, some SMB mounts), so Accept ends Failed there. Fall back to `create_new`. A crash between write and unlink leaves a hidden `.new-request.tmp.*` file.
+
+### Dead code and small items
+
+- `AcpSessionService::start_session` has no non-test callers (about 17 tests use it). Remove it with its autonomy gating and its `collection_repo` field once the tests are ported.
+- Any JSON-RPC prompt error from the agent (for example a transient model overload) ends the session (`acp_agent_client.rs`). Plan 01 behaviour; the user restarts.
+- A session with no workspace pin is not checked by `check_session_workspace`, which fails open for reads only. Fail closed.
+- The no-replace move maps a vanished destination folder to Failed in some paths. Prefer Stale.
+
+### Chips and vault masking
+
+- `chips.rs` resolves vault secrets one environment after another under a single 8 s budget, so a collection with several vault-bound environments can time out every time. The chip is then refused, which is safe but unusable. Resolve in parallel or dedupe the bindings.
+- `chips.rs` replaces a failed environment `list()` with an empty list, so only the named environment's vault secrets are resolved. A list error should refuse the chip.
+- The keyring read in the vault path is synchronous, so the 8 s timeout cannot interrupt a hung keyring call.
+- The composer shows a generic "Could not load" message, not the backend's vault message.
 
 ### Panel UI
 
@@ -69,17 +85,3 @@ This page lists the decisions and follow-ups left after implementing the six wor
 - A start that is still in flight across a webview reload can orphan a session until the app exits or reloads.
 - Exclusive creates only catch exact-name collisions on case-sensitive Linux. Case and Unicode variants rely on the `path_exists` checks at propose and accept time.
 - The assistant uses only environment-supplied credentials. It does not use a stored Claude login.
-
-## Verify before relying on
-
-- Plan 05 MUST FIX: agent markdown rendered remote images and links by default. Confirm that `AssistantChatView` now overrides the `MarkdownRenderer` for `img`, links and `javascript:` or `data:` URLs.
-- Plan 05 Task 2: Enter during IME composition may still send. Confirm the `isComposing` check.
-- Plan 05 Task 1: streaming segments must hide when empty, and the spinner must show only on the last streaming segment. Confirm this.
-- Plan 05 stale tabs overwriting accepted changes, and the skeleton that stayed forever. The fix round says they are addressed, but there was no re-review.
-- Plan 06 Task 2 Critical: frontend-only masking in `chip-resources.ts`. Confirm that masking now runs only through the backend IPC.
-- Plan 06 Task 3: the picker-open state passed to `useReferenceItems(active)`. Confirm this.
-- Plan 04 I2: the secret-preserving env factory (`SharedCollectionEnvironmentRepo::with_secret_store`) is wired in production, with a test.
-- Plan 04 round 2 (N1, N2, N3, N4, N5, N7b, N7c, M1, M4) and the round 3 minors in commit `62f7a828`. The ledger says the round 3 minors were not re-reviewed separately.
-- Plan 04 M4: the `list_proposals` tool description still says "failed (with a message)". Confirm whether this was changed.
-- Plan 03 Task 1 finding: a Basic header with a `{{var}}` username or a mixed password is not masked. Plan 03 final fix F1 may cover this.
-- Named in the brief, not found in the six ledgers: `chips.rs` resolves vault secrets per environment one after another under one 8 s budget. `chips.rs` `list()` failure returns an empty list, which should refuse the chip. `ProposalService` IPC commands are sync. `AcpSessionService::start_session` is dead code kept for tests. `set_assistant_mode` is a Tauri command (`src-tauri/src/commands/acp_sessions.rs`), but no ledger mentions a problem with it.
