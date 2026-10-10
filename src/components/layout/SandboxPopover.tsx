@@ -16,16 +16,14 @@ import {
   type CollectionSettings,
   getCollectionSettings,
   type SandboxMode,
-  saveCollectionSettings,
+  setCollectionCapability,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
 
 export function SandboxPopover() {
   const activeCollection = usePaneStore((s) => s.activeCollection);
-  // Holds the FULL loaded settings, not just the mode — saveCollectionSettings is a
-  // full replace on the backend (see this plan's Global Constraints), so every save
-  // below must spread this object rather than send a bare `{ sandboxMode }` literal.
+  // The loaded settings. The sandbox mode here is what the collection file requests.
   const [settings, setSettings] = useState<CollectionSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mode: SandboxMode = settings?.sandboxMode ?? 'safe';
@@ -62,16 +60,14 @@ export function SandboxPopover() {
 
   const [showDevConfirm, setShowDevConfirm] = useState(false);
 
-  // Shared read-modify-write helper for both modes. Re-fetches settings immediately
-  // before saving instead of reusing the `settings` state above, which may be stale
-  // relative to edits made through another surface (e.g. CollectionOverviewTab) since
-  // this component last loaded.
+  // Developer mode is a capability the user allows on this computer. The backend records
+  // the grant and updates the collection file, so a plain settings save is not used.
+  // Settings are re-fetched afterwards so the state matches what is on disk.
   async function setMode(nextMode: SandboxMode) {
     if (!activeCollection) return;
     try {
-      const current = await getCollectionSettings(activeCollection);
-      const next: CollectionSettings = { ...current, sandboxMode: nextMode };
-      await saveCollectionSettings(activeCollection, next);
+      await setCollectionCapability(activeCollection, 'developerMode', nextMode === 'developer');
+      const next: CollectionSettings = await getCollectionSettings(activeCollection);
       setSettings(next);
       setError(null);
       if (nextMode === 'developer') setShowDevConfirm(false);

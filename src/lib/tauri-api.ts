@@ -954,6 +954,19 @@ export const getCollectionSettings = (name: string) =>
 export const saveCollectionSettings = (collection: string, settings: Partial<CollectionSettings>) =>
   invoke<void>('save_collection_settings', { collection, settings });
 
+/** Capabilities a user can switch for a collection on this computer. */
+export type CollectionCapability = 'developerMode' | 'agentRun' | 'processEnv';
+
+/**
+ * The only way to change a capability. The collection file value is just a request, and
+ * `saveCollectionSettings` ignores it. This records the grant and updates the file.
+ */
+export const setCollectionCapability = (
+  collection: string,
+  capability: CollectionCapability,
+  enabled: boolean,
+) => invoke<void>('set_collection_capability', { collection, capability, enabled });
+
 // ============================================================
 // Environments
 // ============================================================

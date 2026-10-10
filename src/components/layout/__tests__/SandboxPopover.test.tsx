@@ -10,7 +10,7 @@ vi.mock('@/lib/tauri-api', async () => {
   return {
     ...actual,
     getCollectionSettings: vi.fn(),
-    saveCollectionSettings: vi.fn(),
+    setCollectionCapability: vi.fn(),
   };
 });
 
@@ -24,7 +24,7 @@ describe('SandboxPopover', () => {
   beforeEach(() => {
     usePaneStore.getState().reset();
     vi.mocked(tauriApi.getCollectionSettings).mockReset();
-    vi.mocked(tauriApi.saveCollectionSettings).mockReset();
+    vi.mocked(tauriApi.setCollectionCapability).mockReset();
   });
 
   it('is disabled with no active collection', () => {
@@ -53,12 +53,12 @@ describe('SandboxPopover', () => {
     ).toBeInTheDocument();
   });
 
-  it('saves immediately when switching to Safe Mode, preserving the rest of the loaded settings', async () => {
+  it('records the capability immediately when switching to Safe Mode', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
     vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
       baseSettings({ sandboxMode: 'developer', docs: 'hello' }),
     );
-    vi.mocked(tauriApi.saveCollectionSettings).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(undefined);
 
     render(<SandboxPopover />);
     await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
@@ -67,14 +67,8 @@ describe('SandboxPopover', () => {
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
     await user.click(await screen.findByText('Safe Mode'));
 
-    // Must send the whole settings object back, not a bare `{ sandboxMode }` literal —
-    // saveCollectionSettings is a full replace on the backend (see this plan's Global
-    // Constraints), so a partial payload would silently wipe `docs`/`headers`/etc.
     await waitFor(() =>
-      expect(tauriApi.saveCollectionSettings).toHaveBeenCalledWith(
-        'my-api',
-        baseSettings({ sandboxMode: 'safe', docs: 'hello' }),
-      ),
+      expect(tauriApi.setCollectionCapability).toHaveBeenCalledWith('my-api', 'developerMode', false),
     );
   });
 
@@ -92,18 +86,18 @@ describe('SandboxPopover', () => {
     await user.click(await screen.findByText('Developer Mode'));
 
     expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
-    expect(tauriApi.saveCollectionSettings).not.toHaveBeenCalled();
+    expect(tauriApi.setCollectionCapability).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: /Cancel/i }));
-    expect(tauriApi.saveCollectionSettings).not.toHaveBeenCalled();
+    expect(tauriApi.setCollectionCapability).not.toHaveBeenCalled();
   });
 
-  it('saves Developer Mode only after the confirmation dialog is accepted, preserving the rest of the loaded settings', async () => {
+  it('records Developer Mode only after the confirmation dialog is accepted', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
     vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
       baseSettings({ sandboxMode: 'safe', docs: 'hello' }),
     );
-    vi.mocked(tauriApi.saveCollectionSettings).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(undefined);
 
     render(<SandboxPopover />);
     await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
@@ -115,13 +109,8 @@ describe('SandboxPopover', () => {
     const dialog = await screen.findByRole('alertdialog');
     await user.click(within(dialog).getByRole('button', { name: /Enable/i }));
 
-    // Same full-replace concern as Safe Mode's save above — must send the complete
-    // settings object, not a bare `{ sandboxMode }` literal.
     await waitFor(() =>
-      expect(tauriApi.saveCollectionSettings).toHaveBeenCalledWith(
-        'my-api',
-        baseSettings({ sandboxMode: 'developer', docs: 'hello' }),
-      ),
+      expect(tauriApi.setCollectionCapability).toHaveBeenCalledWith('my-api', 'developerMode', true),
     );
   });
 
@@ -144,7 +133,7 @@ describe('SandboxPopover', () => {
     vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
       baseSettings({ sandboxMode: 'safe' }),
     );
-    vi.mocked(tauriApi.saveCollectionSettings).mockRejectedValue(new Error('boom'));
+    vi.mocked(tauriApi.setCollectionCapability).mockRejectedValue(new Error('boom'));
 
     render(<SandboxPopover />);
     await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
@@ -156,7 +145,7 @@ describe('SandboxPopover', () => {
     const dialog = await screen.findByRole('alertdialog');
     await user.click(within(dialog).getByRole('button', { name: /Enable/i }));
 
-    await waitFor(() => expect(tauriApi.saveCollectionSettings).toHaveBeenCalled());
+    await waitFor(() => expect(tauriApi.setCollectionCapability).toHaveBeenCalled());
     // A failed save must not silently dismiss the dialog as if it succeeded.
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });

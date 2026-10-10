@@ -6,7 +6,7 @@ import { AgentAutonomyToggle } from '../AgentAutonomyToggle';
 
 vi.mock('@/lib/tauri-api', () => ({
   getCollectionSettings: vi.fn(),
-  saveCollectionSettings: vi.fn(),
+  setCollectionCapability: vi.fn(),
 }));
 
 import * as tauriApi from '@/lib/tauri-api';
@@ -26,7 +26,7 @@ describe('AgentAutonomyToggle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(settings());
-    vi.mocked(tauriApi.saveCollectionSettings).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(undefined);
   });
 
   it('is off when the collection has never opted in', async () => {
@@ -57,11 +57,11 @@ describe('AgentAutonomyToggle', () => {
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    expect(tauriApi.saveCollectionSettings).not.toHaveBeenCalled();
+    expect(tauriApi.setCollectionCapability).not.toHaveBeenCalled();
     expect(toggle).not.toBeChecked();
   });
 
-  it('saves the whole settings object with the flag on once confirmed', async () => {
+  it('records the agent run capability once confirmed', async () => {
     render(<AgentAutonomyToggle collectionName='my-api' />);
     const toggle = await screen.findByLabelText(LABEL);
     await waitFor(() => expect(toggle).toBeEnabled());
@@ -69,12 +69,8 @@ describe('AgentAutonomyToggle', () => {
     await userEvent.click(toggle);
     await userEvent.click(await screen.findByRole('button', { name: 'Allow' }));
 
-    // The backend replaces the whole object, so the other fields must survive.
     await waitFor(() =>
-      expect(tauriApi.saveCollectionSettings).toHaveBeenCalledWith(
-        'my-api',
-        settings({ agentAutonomyEnabled: true }),
-      ),
+      expect(tauriApi.setCollectionCapability).toHaveBeenCalledWith('my-api', 'agentRun', true),
     );
     await waitFor(() => expect(toggle).toBeChecked());
   });
@@ -90,16 +86,13 @@ describe('AgentAutonomyToggle', () => {
     await userEvent.click(toggle);
 
     await waitFor(() =>
-      expect(tauriApi.saveCollectionSettings).toHaveBeenCalledWith(
-        'my-api',
-        settings({ agentAutonomyEnabled: false }),
-      ),
+      expect(tauriApi.setCollectionCapability).toHaveBeenCalledWith('my-api', 'agentRun', false),
     );
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
 
   it('shows an error and stays off when the save fails', async () => {
-    vi.mocked(tauriApi.saveCollectionSettings).mockRejectedValue(new Error('disk full'));
+    vi.mocked(tauriApi.setCollectionCapability).mockRejectedValue(new Error('disk full'));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     render(<AgentAutonomyToggle collectionName='my-api' />);
     const toggle = await screen.findByLabelText(LABEL);

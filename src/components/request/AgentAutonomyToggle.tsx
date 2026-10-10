@@ -12,11 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import {
-  type CollectionSettings,
-  getCollectionSettings,
-  saveCollectionSettings,
-} from '@/lib/tauri-api';
+import { getCollectionSettings, setCollectionCapability } from '@/lib/tauri-api';
 
 interface AgentAutonomyToggleProps {
   collectionName: string;
@@ -54,14 +50,12 @@ export function AgentAutonomyToggle({ collectionName, showHint = true }: AgentAu
     };
   }, [collectionName]);
 
-  // saveCollectionSettings replaces the whole settings object on the backend,
-  // so read the current settings right before writing and change one field.
+  // Running requests is a capability the user allows on this computer. The backend records
+  // the grant and updates the collection file, so a plain settings save is not used.
   const save = async (next: boolean) => {
     setSaving(true);
     try {
-      const current = await getCollectionSettings(collectionName);
-      const updated: CollectionSettings = { ...current, agentAutonomyEnabled: next };
-      await saveCollectionSettings(collectionName, updated);
+      await setCollectionCapability(collectionName, 'agentRun', next);
       setEnabled(next);
       setError(null);
       setConfirming(false);

@@ -25,7 +25,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   cancelAgentPrompt: vi.fn(),
   endAgentSession: vi.fn(),
   getCollectionSettings: vi.fn(),
-  saveCollectionSettings: vi.fn(),
+  setCollectionCapability: vi.fn(),
 }));
 
 vi.mock('@/lib/queries/agent-config-queries', () => ({

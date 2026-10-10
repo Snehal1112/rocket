@@ -14,7 +14,7 @@ vi.mock('@/lib/queries/collection-queries', () => ({
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
   getCollectionSettings: vi.fn(),
-  saveCollectionSettings: vi.fn(),
+  setCollectionCapability: vi.fn(),
 }));
 
 const LABEL = 'Allow the agent to run requests in this collection';
@@ -32,7 +32,7 @@ describe('AssistantPermissionsPopover', () => {
       variables: [],
       sandboxMode: 'safe',
     });
-    vi.mocked(api.saveCollectionSettings).mockResolvedValue(undefined);
+    vi.mocked(api.setCollectionCapability).mockResolvedValue(undefined);
   });
 
   it('lists every collection with its own run switch', async () => {
@@ -54,10 +54,7 @@ describe('AssistantPermissionsPopover', () => {
     await userEvent.click(toggle);
     await userEvent.click(await screen.findByRole('button', { name: 'Allow' }));
     await waitFor(() =>
-      expect(api.saveCollectionSettings).toHaveBeenCalledWith(
-        'billing',
-        expect.objectContaining({ agentAutonomyEnabled: true }),
-      ),
+      expect(api.setCollectionCapability).toHaveBeenCalledWith('billing', 'agentRun', true),
     );
     // The confirm dialog must not have closed the popover.
     await waitFor(() =>
