@@ -11,9 +11,9 @@ import { useWorkspaceStore } from '@/stores/workspace-store';
 /** Wait after a turn ends, so a burst of late updates makes one save. */
 export const CONVERSATION_SAVE_DEBOUNCE_MS = 500;
 
-/** Saving is paused when the backend cannot read the secrets it must hide. */
+/** One quiet notice per conversation, whatever made the save fail. */
 export const SAVE_FAILED_NOTICE =
-  'Could not save this conversation: Rocket could not read the workspace secrets it needs to hide them, for example when the keychain is locked or unavailable. The chat still works.';
+  'Could not save this conversation. The chat still works. This can happen when Rocket cannot read the workspace files or the keychain it needs to hide secrets, or when the disk is full.';
 
 type SaveSource = Pick<
   AssistantState,

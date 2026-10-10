@@ -168,9 +168,9 @@ describe('startConversationSaver', () => {
     expect(store().session?.status).toBe('active');
   });
 
-  it('says in plain words that saving is paused when secrets cannot be read', () => {
+  it('words the notice for any cause, not only the keychain', () => {
     expect(SAVE_FAILED_NOTICE).toBe(
-      'Could not save this conversation: Rocket could not read the workspace secrets it needs to hide them, for example when the keychain is locked or unavailable. The chat still works.',
+      'Could not save this conversation. The chat still works. This can happen when Rocket cannot read the workspace files or the keychain it needs to hide secrets, or when the disk is full.',
     );
   });
 
