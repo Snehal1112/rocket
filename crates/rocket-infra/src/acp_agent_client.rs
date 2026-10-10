@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, Weak};
+use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, ClientCapabilities, ContentBlock, EmbeddedResource,
@@ -24,6 +25,7 @@ use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent as AgentRole, ByteStreams, Client, ConnectionTo, Responder,
 };
 use async_process::Child;
+use futures_lite::io::AsyncReadExt;
 use rocket_acp::{
     AcpSessionClient, AcpUpdate, ConfigChoice, ConfigOption, McpServerSpec, PromptCapabilities,
     PromptPart, SessionInfo, ToolCallStatus,
@@ -31,6 +33,11 @@ use rocket_acp::{
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
 use tokio::task::JoinHandle;
+
+use crate::acp_stderr_tail::{with_agent_output, StderrTail};
+
+/// How long the startup handshake (`initialize` and `session/new`) may take.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A running ACP agent process plus the connection handle used to talk to
 /// it. Stored in the session map keyed by the ACP-provided session id.
@@ -173,6 +180,7 @@ pub struct AcpAgentClient {
     /// Set once by `end_all_sessions`. After that, no new session may be
     /// stored, because the app is exiting and nothing would kill it.
     shutting_down: AtomicBool,
+    handshake_timeout: Duration,
 }
 
 impl Default for AcpAgentClient {
@@ -193,7 +201,13 @@ impl AcpAgentClient {
     }
 
     pub fn new() -> Self {
+        Self::with_handshake_timeout(HANDSHAKE_TIMEOUT)
+    }
+
+    /// Like `new`, with another handshake limit. Used by tests.
+    pub fn with_handshake_timeout(handshake_timeout: Duration) -> Self {
         Self {
+            handshake_timeout,
             sessions: Mutex::new(HashMap::new()),
             in_flight: std::sync::Mutex::new(HashMap::new()),
             next_in_flight_id: AtomicU64::new(0),
@@ -253,6 +267,20 @@ impl AcpSessionClient for AcpAgentClient {
 
         let transport = ByteStreams::new(child_stdin, child_stdout);
 
+        // Every value handed to the process, plus the MCP server secrets. The
+        // stderr tail is masked with these before it joins a start error.
+        let mut secret_values: Vec<String> = env.iter().map(|(_, v)| v.clone()).collect();
+        for server in mcp_servers {
+            match server {
+                McpServerSpec::Http { token, .. } => secret_values.push(token.clone()),
+                McpServerSpec::Stdio { env, .. } => {
+                    secret_values.extend(env.iter().map(|(_, v)| v.clone()));
+                }
+            }
+        }
+        let stderr_tail = Arc::new(StderrTail::new());
+        let drain_tail = Arc::clone(&stderr_tail);
+
         let current_update_tx: UpdateSlot = Arc::new(std::sync::Mutex::new(None));
         let notif_update_tx = Arc::clone(&current_update_tx);
 
@@ -274,10 +302,20 @@ impl AcpSessionClient for AcpAgentClient {
         let dispatch_task = tokio::spawn(async move {
             // The agent's stderr must be drained. Dropping the pipe would make
             // the agent's next stderr write fail with EPIPE/SIGPIPE, which
-            // kills or breaks many real agents. The output is discarded, not
-            // logged, because an agent may echo its environment (credentials).
+            // kills or breaks many real agents. A bounded tail is kept only
+            // while the session starts, to explain a failed start. It is
+            // masked first and is never logged, because an agent may echo
+            // its environment (credentials).
             let drain_stderr = async move {
-                let _ = futures_lite::io::copy(child_stderr, futures_lite::io::sink()).await;
+                let mut child_stderr = child_stderr;
+                let mut chunk = [0u8; 1024];
+                loop {
+                    match child_stderr.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => drain_tail.push(&chunk[..n]),
+                    }
+                }
+                drain_tail.mark_eof();
             };
             let connect = Client
                 .builder()
@@ -422,20 +460,32 @@ impl AcpSessionClient for AcpAgentClient {
             return Err(shutting_down_error());
         }
 
-        let handshake = match ready_rx.await {
-            Ok(Ok(ready)) => Ok(ready),
-            Ok(Err(e)) => Err(DomainError::Internal(format!("ACP handshake failed: {e}"))),
-            Err(_) => Err(DomainError::Internal(format!(
+        let waited = tokio::time::timeout(self.handshake_timeout, ready_rx).await;
+        let handshake = match waited {
+            Ok(Ok(Ok(ready))) => Ok(ready),
+            Ok(Ok(Err(e))) => Err(format!("ACP handshake failed: {e}")),
+            Ok(Err(_)) => Err(format!(
                 "agent command '{command_owned}': ACP handshake task ended without a result"
-            ))),
+            )),
+            Err(_) => Err(format!(
+                "agent did not finish starting within {}",
+                describe_duration(self.handshake_timeout)
+            )),
         };
         let (info, connection) = match handshake {
             Ok(ready) => ready,
-            Err(e) => {
+            Err(message) => {
+                // Let a process that just exited finish its last words, then
+                // kill it and add the masked tail to the error.
+                stderr_tail.wait_for_eof().await;
                 let _ = terminate_process(&process);
-                return Err(e);
+                let secrets: Vec<&str> = secret_values.iter().map(String::as_str).collect();
+                let tail = stderr_tail.take_masked(&secrets);
+                return Err(DomainError::Internal(with_agent_output(message, &tail)));
             }
         };
+        // The start worked. Free the tail; the drain task keeps reading.
+        stderr_tail.discard();
 
         let running = Arc::new(RunningSession {
             connection,
@@ -585,6 +635,15 @@ impl AcpAgentClient {
         if let Some(running) = removed {
             let _ = terminate_session(&running);
         }
+    }
+}
+
+/// Formats a limit as "30 s", or in milliseconds when under a second.
+fn describe_duration(d: Duration) -> String {
+    if d.as_secs() >= 1 {
+        format!("{} s", d.as_secs())
+    } else {
+        format!("{} ms", d.as_millis())
     }
 }
 

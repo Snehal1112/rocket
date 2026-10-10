@@ -1161,3 +1161,119 @@ async fn acp_agent_client_send_prompt_with_no_parts_is_rejected() {
         .expect_err("an empty prompt must be refused");
     assert!(matches!(err, DomainError::InvalidInput(_)));
 }
+
+// F3: a failed start explains itself with the agent's masked stderr tail.
+
+fn sh(script: &str) -> Vec<String> {
+    vec!["-c".to_string(), script.to_string()]
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn acp_agent_client_failed_start_appends_the_masked_stderr_tail() {
+    let client = AcpAgentClient::new();
+    let script = "printf 'boom key=sk-cred-value-1234 proxy=http://p:3128 \\007bell\\033[0m short=ab\\n' >&2; exit 1";
+    let err = client
+        .start_session(
+            "sh",
+            &sh(script),
+            "/tmp",
+            &[
+                (
+                    "ANTHROPIC_API_KEY".to_string(),
+                    "sk-cred-value-1234".to_string(),
+                ),
+                ("HTTPS_PROXY".to_string(), "http://p:3128".to_string()),
+                ("SHORT".to_string(), "ab".to_string()),
+            ],
+            &[],
+            None,
+        )
+        .await
+        .expect_err("an agent that exits must fail the start");
+    let message = err.to_string();
+    assert!(message.contains("agent output:"), "got: {message}");
+    assert!(message.contains("boom key=*** proxy=***"), "got: {message}");
+    assert!(!message.contains("sk-cred-value-1234"), "got: {message}");
+    assert!(!message.contains("http://p:3128"), "got: {message}");
+    // Values under four characters are not masked.
+    assert!(message.contains("short=ab"), "got: {message}");
+    assert!(!message.contains('\u{7}') && !message.contains('\u{1b}'));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn acp_agent_client_failed_start_caps_the_stderr_tail() {
+    let client = AcpAgentClient::new();
+    let script = "head -c 20000 /dev/zero | tr '\\0' 'a' >&2; echo THE-END >&2; exit 1";
+    let err = client
+        .start_session("sh", &sh(script), "/tmp", &[], &[], None)
+        .await
+        .expect_err("must fail");
+    let message = err.to_string();
+    let section = message
+        .split("agent output:\n")
+        .nth(1)
+        .expect("has an agent output section");
+    assert!(section.len() <= 2048, "section was {} bytes", section.len());
+    assert!(section.ends_with("THE-END"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn acp_agent_client_silent_failed_start_has_no_agent_output_section() {
+    let client = AcpAgentClient::new();
+    let err = client
+        .start_session("true", &[], "/tmp", &[], &[], None)
+        .await
+        .expect_err("must fail");
+    assert!(!err.to_string().contains("agent output"));
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn acp_agent_client_handshake_timeout_kills_the_agent_and_reports_the_tail() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pid_file = dir.path().join("agent.pid");
+    let script = format!(
+        "echo $$ > '{}'; echo waiting-for-nothing token=sk-timeout-secret-99 >&2; sleep 60",
+        pid_file.display()
+    );
+    let client = AcpAgentClient::with_handshake_timeout(std::time::Duration::from_millis(400));
+    let err = client
+        .start_session(
+            "sh",
+            &sh(&script),
+            "/tmp",
+            &[("TOKEN".to_string(), "sk-timeout-secret-99".to_string())],
+            &[],
+            None,
+        )
+        .await
+        .expect_err("an agent that never answers must time out");
+    let message = err.to_string();
+    assert!(
+        message.contains("agent did not finish starting within 400 ms"),
+        "got: {message}"
+    );
+    assert!(
+        message.contains("waiting-for-nothing token=***"),
+        "got: {message}"
+    );
+    assert!(!message.contains("sk-timeout-secret-99"), "got: {message}");
+
+    let pid = std::fs::read_to_string(&pid_file).expect("read pid");
+    assert!(
+        wait_for_process_exit(pid.trim()).await,
+        "agent process {} survived the handshake timeout",
+        pid.trim()
+    );
+}
+
+#[tokio::test]
+async fn acp_agent_client_default_handshake_timeout_is_thirty_seconds() {
+    assert_eq!(
+        rocket_infra::acp_agent_client::HANDSHAKE_TIMEOUT,
+        std::time::Duration::from_secs(30)
+    );
+}
