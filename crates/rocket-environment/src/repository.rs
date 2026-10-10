@@ -33,6 +33,12 @@ pub trait EnvironmentRepositoryFactory: Send + Sync {
     fn collection_dir(&self, _collection: &str) -> Option<std::path::PathBuf> {
         None
     }
+
+    /// A factory fixed to the workspace this one points at right now, or `None` for a
+    /// factory with a fixed location. Used to keep one send in one workspace.
+    fn pinned(&self) -> Option<Box<dyn EnvironmentRepositoryFactory>> {
+        None
+    }
 }
 
 #[cfg(test)]

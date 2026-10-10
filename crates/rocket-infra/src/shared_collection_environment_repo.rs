@@ -78,6 +78,19 @@ impl EnvironmentRepositoryFactory for SharedCollectionEnvironmentRepo {
                 .join(collection),
         )
     }
+
+    fn pinned(&self) -> Option<Box<dyn EnvironmentRepositoryFactory>> {
+        let path = self
+            .active_workspace_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        Some(Box::new(Self {
+            // A private handle that no switch changes.
+            active_workspace_path: Arc::new(Mutex::new(path)),
+            secret_store: self.secret_store.clone(),
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -90,6 +103,29 @@ mod tests {
         assert_eq!(
             repo.collection_dir("api"),
             Some(PathBuf::from("/ws/collections/api"))
+        );
+    }
+
+    #[test]
+    fn a_pinned_factory_keeps_its_workspace_after_a_switch() {
+        let a = TempDir::new().expect("tempdir");
+        let b = TempDir::new().expect("tempdir");
+        let path = Arc::new(Mutex::new(a.path().to_path_buf()));
+        let factory = SharedCollectionEnvironmentRepo::new(Arc::clone(&path));
+        let pinned = factory.pinned().expect("a shared factory pins");
+        *path.lock().expect("lock") = b.path().to_path_buf();
+        pinned
+            .for_collection("api")
+            .save(&Environment::new("dev"))
+            .expect("save");
+        assert!(a
+            .path()
+            .join("collections/api/environments/dev.yml")
+            .exists());
+        assert!(!b.path().join("collections").exists());
+        assert_eq!(
+            pinned.collection_dir("api"),
+            Some(a.path().join("collections/api"))
         );
     }
 
@@ -143,7 +179,8 @@ mod tests {
         let tmp = TempDir::new()?;
         let ws_path = Arc::new(Mutex::new(tmp.path().to_path_buf()));
         let store: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::default());
-        let factory = SharedCollectionEnvironmentRepo::with_secret_store(ws_path, Arc::clone(&store));
+        let factory =
+            SharedCollectionEnvironmentRepo::with_secret_store(ws_path, Arc::clone(&store));
 
         let mut env = Environment::new("dev");
         let mut secret_var = Variable::new("API_KEY", "sk-live-abc");

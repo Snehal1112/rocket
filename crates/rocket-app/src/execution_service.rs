@@ -42,6 +42,7 @@ mod folder_var_script_tests;
 pub(crate) mod script_chain;
 pub(crate) mod run_request;
 pub(crate) mod script_host;
+mod send_pins;
 #[cfg(test)]
 mod script_host_tests;
 use self::script_chain::{
@@ -528,9 +529,10 @@ impl RequestExecutionService {
         &'a self,
         collection: Option<&str>,
     ) -> Box<dyn EnvironmentRepository + 'a> {
-        match (&self.collection_env_repo_factory, collection) {
-            (Some(factory), Some(col)) => factory.for_collection(col),
-            _ => Box::new(RefEnvRepo(self.env_repo.as_ref())),
+        // Inside a send these are the send's pinned repositories (see `send_pins`).
+        match collection.and_then(|col| self.pinned_collection_env_repo(col)) {
+            Some(repo) => repo,
+            None => self.global_env_repo(),
         }
     }
 
@@ -748,7 +750,7 @@ impl RequestExecutionService {
         let mut ctx = VariableContext::default();
 
         if let Some(name) = global_env_name {
-            if let Some(global_env) = read_scope(strict, self.env_repo.get(name))? {
+            if let Some(global_env) = read_scope(strict, self.global_env_repo().get(name))? {
                 for var in global_env.variables.iter().filter(|v| v.enabled) {
                     ctx.global_env.insert(var.key.clone(), var.value.clone());
                     if var.secret {
@@ -1215,7 +1217,7 @@ impl RequestExecutionService {
 
     /// Returns the folder of `collection`, when the wiring knows where collections live.
     fn collection_folder(&self, collection: Option<&str>) -> Option<std::path::PathBuf> {
-        collection.and_then(|c| self.collection_env_repo_factory.as_ref()?.collection_dir(c))
+        collection.and_then(|c| self.pinned_collection_dir(c))
     }
 
     /// Returns the selected environment's client certificates, with `{{placeholders}}`, relative
@@ -1294,7 +1296,7 @@ impl RequestExecutionService {
                     var_ctx,
                     console,
                 );
-                self.apply_env_writes(self.env_repo.as_ref(), name, &writes, true);
+                self.apply_env_writes(self.global_env_repo().as_ref(), name, &writes, true);
             } else {
                 tracing::warn!(
                     "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
@@ -2537,6 +2539,11 @@ impl RequestExecutionService {
     }
 
     pub async fn execute(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
+        // One send reads and writes one workspace, even if the user switches meanwhile.
+        self.with_send_pins(self.execute_unpinned(input)).await
+    }
+
+    async fn execute_unpinned(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
         // A configured external secret that fails to resolve live is a hard
         // stop, not a silent empty-string substitution (spec §2/§4.6) — but
         // only when this send refers to it. A binding the request never
@@ -2589,6 +2596,17 @@ impl RequestExecutionService {
     /// the executor, after the pre-request script ran. The record survives a
     /// failed send.
     pub(crate) async fn execute_capturing(
+        &self,
+        input: ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+        sent: &mut Option<HttpRequest>,
+    ) -> DomainResult<ExecuteRequestOutput> {
+        // Flow callers enter here, so the send is pinned here as well as in `execute`.
+        self.with_send_pins(self.execute_capturing_unpinned(input, external_secrets, sent))
+            .await
+    }
+
+    async fn execute_capturing_unpinned(
         &self,
         input: ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
@@ -7267,6 +7285,177 @@ mod tests {
         };
         assert_eq!(read(b.path()).as_deref(), Some("new-key"));
         assert_eq!(read(a.path()).as_deref(), Some("a-old"), "a must be untouched");
+    }
+
+    /// Switches the shared workspace path while the request is on the wire.
+    struct SwitchingExecutor {
+        path: Arc<std::sync::Mutex<std::path::PathBuf>>,
+        to: std::path::PathBuf,
+    }
+
+    #[async_trait]
+    impl HttpExecutor for SwitchingExecutor {
+        async fn execute(&self, _req: &HttpRequest) -> DomainResult<HttpResponse> {
+            *self.path.lock().expect("lock") = self.to.clone();
+            Ok(HttpResponse {
+                status: 200,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_switch_during_the_send_keeps_script_writes_in_the_first_workspace() {
+        let a = tempfile::tempdir().expect("tempdir");
+        let b = tempfile::tempdir().expect("tempdir");
+        let seed = |dir: &std::path::Path, value: &str| {
+            let mut global = Environment::new("g");
+            global.set_variable(Variable::new("API_KEY", value));
+            rocket_infra::FsEnvironmentRepo::new(dir.join("environments"))
+                .save(&global)
+                .expect("global env");
+            let mut env = Environment::new("dev");
+            env.set_variable(Variable::new("TOKEN", value));
+            rocket_infra::FsEnvironmentRepo::new(dir.join("collections/api/environments"))
+                .save(&env)
+                .expect("collection env");
+        };
+        seed(a.path(), "a-old");
+        seed(b.path(), "b-old");
+        let path = Arc::new(std::sync::Mutex::new(a.path().to_path_buf()));
+
+        let write = |key: &str| EnvVarWrite {
+            key: key.into(),
+            value: serde_json::json!("new"),
+            persist: true,
+        };
+        let result = ScriptResult {
+            env_var_writes: vec![write("TOKEN")],
+            global_env_var_writes: vec![write("API_KEY")],
+            ..Default::default()
+        };
+        let svc = RequestExecutionService::new(
+            Box::new(rocket_infra::SharedPathEnvironmentRepo::with_secret_store(
+                Arc::clone(&path),
+                Arc::new(rocket_environment::NullSecretStore),
+            )),
+            Arc::new(SwitchingExecutor {
+                path: Arc::clone(&path),
+                to: b.path().to_path_buf(),
+            }),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)))
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
+        .with_collection_env_repo_factory(Box::new(
+            rocket_infra::SharedCollectionEnvironmentRepo::new(Arc::clone(&path)),
+        ));
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("api".into());
+        input.environment_name = Some("dev".into());
+        input.global_env_name = Some("g".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let value = |dir: &std::path::Path, sub: &str, name: &str, key: &str| {
+            rocket_infra::FsEnvironmentRepo::new(dir.join(sub))
+                .get(name)
+                .expect("read")
+                .get_value(key)
+                .map(str::to_owned)
+        };
+        assert_eq!(*path.lock().expect("lock"), b.path(), "the switch happened mid-send");
+        assert_eq!(value(a.path(), "environments", "g", "API_KEY").as_deref(), Some("new"));
+        assert_eq!(
+            value(a.path(), "collections/api/environments", "dev", "TOKEN").as_deref(),
+            Some("new")
+        );
+        assert_eq!(value(b.path(), "environments", "g", "API_KEY").as_deref(), Some("b-old"));
+        assert_eq!(
+            value(b.path(), "collections/api/environments", "dev", "TOKEN").as_deref(),
+            Some("b-old")
+        );
+    }
+
+    #[test]
+    fn a_global_env_write_stays_in_one_workspace_when_the_path_changes_after_its_read() {
+        // The path switches inside `get`. Without the pin in `apply_env_writes` the read
+        // comes from A and the save goes to B.
+        struct SwitchOnGet {
+            inner: Box<dyn EnvironmentRepository>,
+            path: Arc<std::sync::Mutex<std::path::PathBuf>>,
+            to: std::path::PathBuf,
+        }
+        impl EnvironmentRepository for SwitchOnGet {
+            fn list(&self) -> DomainResult<Vec<Environment>> {
+                self.inner.list()
+            }
+            fn get(&self, name: &str) -> DomainResult<Environment> {
+                let env = self.inner.get(name);
+                *self.path.lock().expect("lock") = self.to.clone();
+                env
+            }
+            fn save(&self, env: &Environment) -> DomainResult<()> {
+                self.inner.save(env)
+            }
+            fn delete(&self, name: &str) -> DomainResult<()> {
+                self.inner.delete(name)
+            }
+            fn pinned(&self) -> Option<Box<dyn EnvironmentRepository>> {
+                let inner = self.inner.pinned()?;
+                Some(Box::new(SwitchOnGet {
+                    inner,
+                    path: Arc::clone(&self.path),
+                    to: self.to.clone(),
+                }))
+            }
+        }
+        let a = tempfile::tempdir().expect("tempdir");
+        let b = tempfile::tempdir().expect("tempdir");
+        let path = Arc::new(std::sync::Mutex::new(a.path().to_path_buf()));
+        let shared = rocket_infra::SharedPathEnvironmentRepo::with_secret_store(
+            Arc::clone(&path),
+            Arc::new(rocket_environment::NullSecretStore),
+        );
+        let mut env = Environment::new("g");
+        env.set_variable(Variable::new("API_KEY", "a-old"));
+        shared.save(&env).expect("seed");
+        let repo = SwitchOnGet {
+            inner: Box::new(shared),
+            path: Arc::clone(&path),
+            to: b.path().to_path_buf(),
+        };
+        let svc = build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(ScriptResult::default())),
+        );
+        svc.apply_env_writes(
+            &repo,
+            "g",
+            &[EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("new"),
+                persist: true,
+            }],
+            true,
+        );
+        assert_eq!(*path.lock().expect("lock"), b.path(), "the switch happened");
+        assert!(!b.path().join("environments/g.yml").exists());
+        assert_eq!(
+            rocket_infra::FsEnvironmentRepo::new(a.path().join("environments"))
+                .get("g")
+                .expect("a")
+                .get_value("API_KEY"),
+            Some("new")
+        );
     }
 
     // -------------------------------------------------------------------------

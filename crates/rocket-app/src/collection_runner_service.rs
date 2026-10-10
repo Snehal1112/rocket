@@ -263,15 +263,16 @@ impl CollectionRunnerService {
             }
 
             let item = &items[cursor];
-            let outcome = self
-                .run_step(
+            // Each step reads and writes one workspace, like a single send.
+            let outcome = exec
+                .with_send_pins(self.run_step(
                     exec,
                     &input,
                     item,
                     steps.len(),
                     &mut carried_runtime,
                     &external_secrets,
-                )
+                ))
                 .await;
             let mut result = outcome.result;
 
