@@ -45,6 +45,7 @@ impl FsConversationRepo {
                 .create_new(true)
                 .open(self.assistant_dir.join(".gitignore"))
             {
+                // An empty file left by a failed write is kept: never overwrite.
                 Ok(mut file) => file.write_all(b"*"),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
                 Err(e) => Err(e),
@@ -53,6 +54,17 @@ impl FsConversationRepo {
         if let Err(e) = result {
             tracing::warn!("Could not write the assistant folder .gitignore: {e}");
         }
+    }
+
+    /// A regular file named `<valid id>.yml`. Symlinks and directories are not.
+    fn is_conversation_file(path: &Path) -> bool {
+        let regular = fs::symlink_metadata(path).is_ok_and(|m| m.is_file());
+        regular
+            && path.extension().is_some_and(|e| e == "yml")
+            && path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| validate_conversation_id(s).is_ok())
     }
 
     /// Reads one file. The error text never quotes file content.
@@ -73,7 +85,9 @@ impl FsConversationRepo {
         let mut out = Vec::new();
         for entry in fs::read_dir(&dir)? {
             let path = entry?.path();
-            if path.extension().is_none_or(|e| e != "yml") {
+            if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())
+                || path.extension().is_none_or(|e| e != "yml")
+            {
                 continue;
             }
             match Self::parse(&path) {
@@ -132,7 +146,7 @@ impl ConversationRepository for FsConversationRepo {
 
     fn get(&self, id: &str) -> DomainResult<ConversationRecord> {
         let path = self.file_path(id)?;
-        if !path.exists() {
+        if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
             return Err(DomainError::NotFound(format!("conversation '{id}'")));
         }
         let record = Self::parse(&path)?;
@@ -171,13 +185,26 @@ impl ConversationRepository for FsConversationRepo {
         if !dir.exists() {
             return Ok(());
         }
+        // Only conversation files go: foreign files and directories stay.
+        let mut first_error: Option<DomainError> = None;
         for entry in fs::read_dir(&dir)? {
             let path = entry?.path();
-            if path.extension().is_some_and(|e| e == "yml") {
-                fs::remove_file(&path)?;
+            if !Self::is_conversation_file(&path) {
+                continue;
+            }
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), "could not remove a conversation file: {e}");
+                    first_error.get_or_insert(e.into());
+                }
             }
         }
-        Ok(())
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
 
@@ -311,13 +338,39 @@ mod tests {
         assert_eq!(content, "custom\n");
     }
 
+    #[cfg(unix)]
     #[test]
     fn save_succeeds_when_gitignore_cannot_be_written() {
+        use std::os::unix::fs::PermissionsExt;
         let (_dir, assistant, repo) = setup();
-        // A directory named .gitignore cannot be replaced by a file.
-        fs::create_dir_all(assistant.join(".gitignore")).expect("mkdir");
-        repo.save(&record(1, "2026-10-11T09:00:00Z")).expect("save");
+        fs::create_dir_all(assistant.join("conversations")).expect("mkdir");
+        // A read-only folder refuses the new .gitignore but not the conversations inside.
+        fs::set_permissions(&assistant, fs::Permissions::from_mode(0o555)).expect("chmod");
+        let blocked = fs::File::create(assistant.join("probe")).is_err();
+        let saved = repo.save(&record(1, "2026-10-11T09:00:00Z"));
+        let has_gitignore = assistant.join(".gitignore").exists();
+        fs::set_permissions(&assistant, fs::Permissions::from_mode(0o755)).expect("chmod back");
+        if !blocked {
+            return; // Running with rights that ignore permissions, such as root.
+        }
+        assert!(!has_gitignore, "the failure path was exercised");
+        saved.expect("save still succeeds");
         assert!(repo.get(&id(1)).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_yml_files_are_ignored() {
+        let (_dir, assistant, repo) = setup();
+        repo.save(&record(1, "2026-10-11T09:00:00Z")).expect("save");
+        std::os::unix::fs::symlink(file(&assistant, 1), file(&assistant, 2)).expect("symlink");
+        assert_eq!(ids(&repo), vec![id(1)]);
+        assert!(matches!(repo.get(&id(2)), Err(DomainError::NotFound(_))));
+        repo.clear().expect("clear");
+        assert!(
+            fs::symlink_metadata(file(&assistant, 2)).is_ok(),
+            "clear leaves the link"
+        );
     }
 
     #[test]
@@ -442,7 +495,15 @@ mod tests {
         assert_eq!(ids(&repo), vec![id(2)]);
         assert!(matches!(repo.delete(&id(1)), Err(DomainError::NotFound(_))));
         fs::write(file(&assistant, 3), "version: [not yaml").expect("write corrupt");
+        let conversations = assistant.join("conversations");
+        fs::write(conversations.join("notes.yml"), "keep").expect("foreign");
+        fs::create_dir(conversations.join("x.yml")).expect("dir");
         repo.clear().expect("clear");
+        assert!(
+            conversations.join("notes.yml").is_file(),
+            "foreign file stays"
+        );
+        assert!(conversations.join("x.yml").is_dir(), "directory stays");
         assert!(repo.list().expect("list").is_empty());
         assert!(
             !file(&assistant, 3).exists(),
