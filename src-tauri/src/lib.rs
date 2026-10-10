@@ -339,20 +339,22 @@ pub fn run() {
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
             // One-time grandfathering of the collections that exist before the trust gate.
-            // It runs before any command is served. A failure is logged and retried at the
-            // next start, and until then those collections are untrusted.
-            match workspace_svc.list() {
-                Ok(workspaces) => {
-                    let paths: Vec<PathBuf> = workspaces.into_iter().map(|w| w.path).collect();
-                    let found = rocket_infra::discover_legacy_collections(
-                        &paths,
-                        &FsWorkspaceConfigRepo::new(),
-                    );
-                    if let Err(e) = trust_svc.migrate_legacy(found) {
-                        tracing::warn!(error = %e, "trust migration failed");
-                    }
+            // It runs before any command is served.
+            let migration = workspace_svc.list().and_then(|workspaces| {
+                let paths: Vec<PathBuf> = workspaces.into_iter().map(|w| w.path).collect();
+                let found = rocket_infra::discover_legacy_collections(
+                    &paths,
+                    &FsWorkspaceConfigRepo::new(),
+                );
+                trust_svc.migrate_legacy(found)
+            });
+            if let Err(e) = migration {
+                // Fail closed: mark the store migrated with nothing grandfathered, so a
+                // later start cannot grandfather collections cloned after the upgrade.
+                tracing::warn!(error = %e, "trust migration failed, no collection was grandfathered");
+                if let Err(e) = trust_store.complete_migration(Vec::new(), Vec::new()) {
+                    tracing::warn!(error = %e, "could not mark the trust store as migrated");
                 }
-                Err(e) => tracing::warn!(error = %e, "trust migration could not list workspaces"),
             }
 
             // SharedPathCollectionRepo resolves the base directory from
