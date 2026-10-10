@@ -115,6 +115,8 @@ fn validate_config(config: &AgentConfig) -> DomainResult<()> {
             )));
         }
     }
+    rocket_acp::validate_env_config(&config.credential_env_var, &config.extra_env)
+        .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
     Ok(())
 }
 
@@ -260,6 +262,7 @@ mod tests {
             args: Vec::new(),
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
+            extra_env: Vec::new(),
             vault_connection_id: vault_connection_id.to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "secret-id-1".to_string(),
@@ -293,6 +296,40 @@ mod tests {
             .save(sample_config("agent-1", "conn-1"))
             .expect("save");
         assert_eq!(service.list().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn save_validates_env_var_names_and_hides_values() {
+        use rocket_acp::EnvPair;
+        let service = service_with(Ok(None), true);
+        let pair = |n: &str| EnvPair {
+            name: n.to_string(),
+            value: "top-secret-value".to_string(),
+        };
+        let cases: Vec<(&str, Vec<EnvPair>)> = vec![
+            ("leading digit", vec![pair("1A")]),
+            ("equals sign", vec![pair("A=B")]),
+            ("space", vec![pair("A B")]),
+            ("empty", vec![pair("")]),
+            ("reserved", vec![pair("CLAUDE_CONFIG_DIR")]),
+            ("credential clash", vec![pair("ANTHROPIC_API_KEY")]),
+            ("duplicate", vec![pair("A"), pair("A")]),
+            ("too long", vec![pair(&"A".repeat(129))]),
+        ];
+        for (label, extra) in cases {
+            let mut config = sample_config("agent-1", "conn-1");
+            config.extra_env = extra;
+            let err = service.save(config).expect_err(label);
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{label}");
+            assert!(!err.to_string().contains("top-secret-value"), "{label}");
+        }
+        let mut bad_credential = sample_config("agent-1", "conn-1");
+        bad_credential.credential_env_var = "CLAUDE_CONFIG_DIR".to_string();
+        assert!(service.save(bad_credential).is_err());
+        let mut good = sample_config("agent-1", "conn-1");
+        good.extra_env = vec![pair("HTTPS_PROXY"), pair("NO_PROXY")];
+        service.save(good).expect("valid extra_env saves");
+        assert_eq!(service.list().expect("list")[0].extra_env.len(), 2);
     }
 
     #[test]

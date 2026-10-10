@@ -1,5 +1,30 @@
 use rocket_shared::error::DomainResult;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// The environment variable Rocket's session isolation sets. An agent config
+/// may not claim it.
+pub const RESERVED_ENV_VAR: &str = "CLAUDE_CONFIG_DIR";
+
+/// Longest accepted environment variable name, in bytes.
+pub const MAX_ENV_VAR_NAME_LEN: usize = 128;
+
+/// One plain (non-secret) environment variable passed to the agent process.
+/// `Debug` prints the name only, so a value never reaches a log by accident.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvPair {
+    pub name: String,
+    pub value: String,
+}
+
+impl fmt::Debug for EnvPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EnvPair")
+            .field("name", &self.name)
+            .field("value", &"***")
+            .finish()
+    }
+}
 
 /// One registered ACP agent binary/command and where to find its API key.
 /// The credential *value* never lives on this struct — only a reference to
@@ -15,10 +40,56 @@ pub struct AgentConfig {
     #[serde(default)]
     pub working_dir: Option<String>,
     pub credential_env_var: String,
+    /// Extra plain environment variables, in the order the user gave them.
+    /// Old files without this field load as an empty list.
+    #[serde(default)]
+    pub extra_env: Vec<EnvPair>,
     pub vault_connection_id: String,
     pub vault_name: String,
     pub vault_secret_id: String,
     pub vault_secret_name: String,
+}
+
+/// Checks one environment variable name: letters, digits and underscore,
+/// not starting with a digit, 1 to 128 bytes, and not `CLAUDE_CONFIG_DIR`.
+/// The error is a short reason and never contains a value.
+pub fn validate_env_var_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        return Err("must not be empty");
+    }
+    if name.len() > MAX_ENV_VAR_NAME_LEN {
+        return Err("is too long (at most 128 characters)");
+    }
+    if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return Err("must not start with a digit");
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err("may contain only letters, digits and underscores");
+    }
+    if name == RESERVED_ENV_VAR {
+        return Err("is reserved by Rocket");
+    }
+    Ok(())
+}
+
+/// Checks the credential variable name and every extra variable name. Also
+/// refuses an extra name equal to the credential name and duplicate extra
+/// names. The message names the field and never echoes a value.
+pub fn validate_env_config(credential_env_var: &str, extra_env: &[EnvPair]) -> Result<(), String> {
+    validate_env_var_name(credential_env_var).map_err(|why| format!("credential_env_var {why}"))?;
+    for (i, pair) in extra_env.iter().enumerate() {
+        let n = i + 1;
+        validate_env_var_name(&pair.name).map_err(|why| format!("extra_env #{n} name {why}"))?;
+        if pair.name == credential_env_var {
+            return Err(format!(
+                "extra_env #{n} name must differ from credential_env_var"
+            ));
+        }
+        if extra_env[..i].iter().any(|p| p.name == pair.name) {
+            return Err(format!("extra_env #{n} name is a duplicate"));
+        }
+    }
+    Ok(())
 }
 
 /// Persistence boundary for `AgentConfig`. No I/O in this crate —
@@ -50,6 +121,7 @@ mod tests {
             args: vec!["--stdio".to_string()],
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
+            extra_env: Vec::new(),
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
@@ -98,6 +170,86 @@ mod tests {
         let c: AgentConfig = serde_json::from_str(json).expect("deserialize minimal AgentConfig");
         assert_eq!(c.working_dir, None);
         assert!(c.args.is_empty());
+    }
+
+    fn pair(name: &str, value: &str) -> EnvPair {
+        EnvPair {
+            name: name.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    #[test]
+    fn env_var_name_accepts_valid_names() {
+        for name in ["A", "_x", "ANTHROPIC_API_KEY", "a1_B2"] {
+            assert!(validate_env_var_name(name).is_ok(), "{name}");
+        }
+        assert!(validate_env_var_name(&"A".repeat(128)).is_ok());
+    }
+
+    #[test]
+    fn env_var_name_refuses_bad_names() {
+        for name in [
+            "",
+            "1ABC",
+            "A=B",
+            "A B",
+            " A",
+            "A\tB",
+            "A-B",
+            "CLAUDE_CONFIG_DIR",
+            "\u{e9}t\u{e9}",
+        ] {
+            assert!(validate_env_var_name(name).is_err(), "{name:?}");
+        }
+        assert!(validate_env_var_name(&"A".repeat(129)).is_err());
+    }
+
+    #[test]
+    fn env_config_refuses_credential_clash_and_duplicates() {
+        let ok = [pair("HTTPS_PROXY", "v"), pair("OTHER", "w")];
+        assert!(validate_env_config("KEY", &ok).is_ok());
+        let clash = validate_env_config("KEY", &[pair("KEY", "v")]).expect_err("clash");
+        assert!(clash.contains("extra_env #1"));
+        let dup = validate_env_config("KEY", &[pair("A", "1"), pair("A", "2")]).expect_err("dup");
+        assert!(dup.contains("#2") && dup.contains("duplicate"));
+        let reserved =
+            validate_env_config("KEY", &[pair("CLAUDE_CONFIG_DIR", "x")]).expect_err("reserved");
+        assert!(reserved.contains("reserved"));
+        assert!(validate_env_config("CLAUDE_CONFIG_DIR", &[]).is_err());
+    }
+
+    #[test]
+    fn env_config_error_never_echoes_a_value() {
+        let err =
+            validate_env_config("KEY", &[pair("1BAD", "top-secret-value")]).expect_err("bad name");
+        assert!(!err.contains("top-secret-value"));
+        assert!(!err.contains("1BAD"));
+    }
+
+    #[test]
+    fn debug_hides_extra_env_values() {
+        let mut c = sample();
+        c.extra_env = vec![pair("PROXY", "top-secret-value")];
+        let shown = format!("{c:?}");
+        assert!(shown.contains("PROXY"));
+        assert!(!shown.contains("top-secret-value"));
+    }
+
+    #[test]
+    fn extra_env_defaults_to_empty_and_roundtrips_in_order() {
+        let json = r#"{
+            "id":"a","label":"l","command":"c","credential_env_var":"K",
+            "vault_connection_id":"c","vault_name":"v","vault_secret_id":"s",
+            "vault_secret_name":"n"
+        }"#;
+        let c: AgentConfig = serde_json::from_str(json).expect("old shape loads");
+        assert!(c.extra_env.is_empty());
+        let mut c = sample();
+        c.extra_env = vec![pair("B", "2"), pair("A", "1")];
+        let back: AgentConfig =
+            serde_json::from_str(&serde_json::to_string(&c).expect("ser")).expect("de");
+        assert_eq!(back.extra_env, c.extra_env);
     }
 
     // In-memory fake exercising the trait contract.

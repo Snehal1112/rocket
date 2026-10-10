@@ -90,6 +90,7 @@ mod tests {
             args: vec!["--stdio".to_string()],
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
+            extra_env: Vec::new(),
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
@@ -128,6 +129,29 @@ mod tests {
         repo.delete("agent-1").expect("delete");
         assert_eq!(repo.get("agent-1").expect("get after delete"), None);
         assert!(repo.list().expect("list after delete").is_empty());
+    }
+
+    #[test]
+    fn extra_env_roundtrips_in_order_and_old_yaml_loads() {
+        let (dir, repo) = setup();
+        let mut cfg = sample("agent-1");
+        cfg.extra_env = vec![
+            rocket_acp::EnvPair {
+                name: "ZED".to_string(),
+                value: "1".to_string(),
+            },
+            rocket_acp::EnvPair {
+                name: "ALPHA".to_string(),
+                value: "2".to_string(),
+            },
+        ];
+        repo.save(&cfg).expect("save");
+        assert_eq!(repo.get("agent-1").expect("get"), Some(cfg));
+
+        let old = "- id: old\n  label: l\n  command: c\n  credential_env_var: K\n  vault_connection_id: c\n  vault_name: v\n  vault_secret_id: s\n  vault_secret_name: n\n";
+        fs::write(dir.path().join("agent_configs.yml"), old).expect("write old yaml");
+        let loaded = repo.get("old").expect("get").expect("present");
+        assert!(loaded.extra_env.is_empty());
     }
 
     #[test]
@@ -231,6 +255,7 @@ mod tests {
             "args",
             "working_dir",
             "credential_env_var",
+            "extra_env",
             "vault_connection_id",
             "vault_name",
             "vault_secret_id",

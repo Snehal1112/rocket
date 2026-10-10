@@ -1,8 +1,25 @@
-use rocket_acp::AgentConfig;
+use rocket_acp::{AgentConfig, EnvPair};
 use rocket_app::AgentConfigService;
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+/// One plain environment variable. `Debug` hides the value.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvPairDto {
+    pub name: String,
+    pub value: String,
+}
+
+impl std::fmt::Debug for EnvPairDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnvPairDto")
+            .field("name", &self.name)
+            .field("value", &"***")
+            .finish()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +32,9 @@ pub struct AgentConfigDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
     pub credential_env_var: String,
+    // Old callers may omit it.
+    #[serde(default)]
+    pub extra_env: Vec<EnvPairDto>,
     pub vault_connection_id: String,
     pub vault_name: String,
     pub vault_secret_id: String,
@@ -30,6 +50,14 @@ impl From<AgentConfig> for AgentConfigDto {
             args: c.args,
             working_dir: c.working_dir,
             credential_env_var: c.credential_env_var,
+            extra_env: c
+                .extra_env
+                .into_iter()
+                .map(|p| EnvPairDto {
+                    name: p.name,
+                    value: p.value,
+                })
+                .collect(),
             vault_connection_id: c.vault_connection_id,
             vault_name: c.vault_name,
             vault_secret_id: c.vault_secret_id,
@@ -47,6 +75,14 @@ impl From<AgentConfigDto> for AgentConfig {
             args: dto.args,
             working_dir: dto.working_dir,
             credential_env_var: dto.credential_env_var,
+            extra_env: dto
+                .extra_env
+                .into_iter()
+                .map(|p| EnvPair {
+                    name: p.name,
+                    value: p.value,
+                })
+                .collect(),
             vault_connection_id: dto.vault_connection_id,
             vault_name: dto.vault_name,
             vault_secret_id: dto.vault_secret_id,
@@ -98,6 +134,10 @@ mod tests {
             args: vec!["--stdio".to_string()],
             working_dir: Some("/home/user/project".to_string()),
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
+            extra_env: vec![EnvPair {
+                name: "HTTPS_PROXY".to_string(),
+                value: "http://proxy:3128".to_string(),
+            }],
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "secret-id-1".to_string(),

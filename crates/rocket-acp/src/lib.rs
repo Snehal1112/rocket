@@ -5,7 +5,10 @@ pub mod proposal;
 pub mod session;
 pub mod session_info;
 pub mod update;
-pub use agent_config::{AgentConfig, AgentConfigRepository};
+pub use agent_config::{
+    validate_env_config, validate_env_var_name, AgentConfig, AgentConfigRepository, EnvPair,
+    MAX_ENV_VAR_NAME_LEN, RESERVED_ENV_VAR,
+};
 pub use mcp_server_spec::McpServerSpec;
 pub use proposal::{
     AgentProposal, ProposalStatus, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,

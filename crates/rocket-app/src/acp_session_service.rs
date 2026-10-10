@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use rocket_acp::{
-    AcpSessionClient, AcpUpdate, ConfigOption, PromptPart, SessionInfo, ToolCallStatus,
+    AcpSessionClient, AcpUpdate, AgentConfig, ConfigOption, PromptPart, SessionInfo, ToolCallStatus,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
@@ -157,10 +157,7 @@ impl AcpSessionService {
             .agent_config_service
             .resolve_credential(agent_config_id)
             .await?;
-        let env = vec![
-            (config.credential_env_var.clone(), credential),
-            isolation.env_entry(),
-        ];
+        let env = session_env(&config, credential, isolation.env_entry());
         let mcp_servers = mcp_server_specs(mcp_http)?;
         let info = self
             .session_client
@@ -457,6 +454,27 @@ fn mcp_server_specs(
     ])
 }
 
+/// Builds the agent process environment. Order matters because a later
+/// entry overrides an earlier one: the extra variables come first, then the
+/// credential, then Rocket's isolation entry. An extra variable that names
+/// the credential or the isolation variable is dropped, so Rocket's settings
+/// win even if the config did not pass validation.
+fn session_env(
+    config: &AgentConfig,
+    credential: String,
+    isolation_entry: (String, String),
+) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = config
+        .extra_env
+        .iter()
+        .filter(|p| p.name != config.credential_env_var && p.name != isolation_entry.0)
+        .map(|p| (p.name.clone(), p.value.clone()))
+        .collect();
+    env.push((config.credential_env_var.clone(), credential));
+    env.push(isolation_entry);
+    env
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +483,60 @@ mod tests {
     use std::sync::Mutex;
 
     use rocket_acp::{AgentConfig, AgentConfigRepository};
+
+    fn env_pair(name: &str, value: &str) -> rocket_acp::EnvPair {
+        rocket_acp::EnvPair {
+            name: name.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    fn pairs(env: &[(String, String)]) -> Vec<(&str, &str)> {
+        env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+    }
+
+    #[test]
+    fn session_env_orders_extra_then_credential_then_isolation() {
+        let mut config = sample_config();
+        config.extra_env = vec![env_pair("B", "2"), env_pair("A", "1")];
+        let env = session_env(
+            &config,
+            "cred".to_string(),
+            ("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string()),
+        );
+        assert_eq!(
+            pairs(&env),
+            vec![
+                ("B", "2"),
+                ("A", "1"),
+                ("ANTHROPIC_API_KEY", "cred"),
+                ("CLAUDE_CONFIG_DIR", "/scratch"),
+            ]
+        );
+    }
+
+    #[test]
+    fn session_env_lets_rocket_win_over_unvalidated_extra_env() {
+        let mut config = sample_config();
+        config.extra_env = vec![
+            env_pair("CLAUDE_CONFIG_DIR", "/evil"),
+            env_pair("ANTHROPIC_API_KEY", "other"),
+            env_pair("KEEP", "1"),
+        ];
+        let env = session_env(
+            &config,
+            "cred".to_string(),
+            ("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string()),
+        );
+        assert_eq!(
+            pairs(&env),
+            vec![
+                ("KEEP", "1"),
+                ("ANTHROPIC_API_KEY", "cred"),
+                ("CLAUDE_CONFIG_DIR", "/scratch"),
+            ]
+        );
+    }
     use rocket_acp::{ConfigChoice, ConfigOption, PromptCapabilities, SessionInfo, ToolCallStatus};
     use rocket_environment::external_secret::ExternalSecretRef;
     use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
@@ -613,6 +685,7 @@ mod tests {
             args: Vec::new(),
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
+            extra_env: Vec::new(),
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "secret-id-1".to_string(),
@@ -1174,8 +1247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_workspace_session_builds_http_and_stdio_specs_with_token_only_in_env(
-    ) {
+    async fn start_workspace_session_builds_http_and_stdio_specs_with_token_only_in_env() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
             Arc::new(Mutex::new(Vec::new()));
@@ -1914,7 +1986,10 @@ mod tests {
 
         // The command layer tracks the session once its resources exist.
         assert!(service.track("assistant-1"));
-        service.end_session("assistant-1").await.expect("end_session");
+        service
+            .end_session("assistant-1")
+            .await
+            .expect("end_session");
         assert_eq!(cleanup.ended(), vec!["assistant-1".to_string()]);
     }
 }
