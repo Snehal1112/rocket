@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { makeProposal } from '@/test/assistant-fixtures';
 import { AssistantChatView } from '../AssistantChatView';
@@ -120,5 +120,59 @@ describe('AssistantChatView proposals', () => {
     render(<AssistantChatView />);
     const text = document.body.textContent ?? '';
     expect(text.indexOf('Add a status test')).toBeLessThan(text.indexOf('hello there'));
+  });
+});
+
+describe('AssistantChatView scrolling', () => {
+  let scrollIntoView: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    useAssistantStore.getState().reset();
+    startSession();
+    scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
+  });
+
+  // Fakes the viewport geometry, since jsdom does no layout.
+  function scrollViewport(container: HTMLElement, distanceFromBottom: number): void {
+    const viewport = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+    Object.defineProperty(viewport, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(viewport, 'clientHeight', { value: 400, configurable: true });
+    viewport.scrollTop = 600 - distanceFromBottom;
+    act(() => {
+      viewport.dispatchEvent(new Event('scroll'));
+    });
+  }
+
+  it('follows streamed text growth while at the bottom', () => {
+    useAssistantStore.getState().appendUserMessage('hi');
+    render(<AssistantChatView />);
+    scrollIntoView.mockClear();
+    act(() => useAssistantStore.getState().appendChunk('s1', 'Hello'));
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('does not pull the reader down after they scrolled up', () => {
+    useAssistantStore.getState().appendUserMessage('hi');
+    const { container } = render(<AssistantChatView />);
+    scrollViewport(container, 300);
+    scrollIntoView.mockClear();
+    act(() => useAssistantStore.getState().appendChunk('s1', 'Hello'));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    scrollViewport(container, 10);
+    act(() => useAssistantStore.getState().appendChunk('s1', ' more'));
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('returns to the bottom when the reader sends a message', () => {
+    useAssistantStore.getState().appendUserMessage('hi');
+    useAssistantStore.getState().completeMessage('s1');
+    const { container } = render(<AssistantChatView />);
+    scrollViewport(container, 300);
+    scrollIntoView.mockClear();
+    act(() => {
+      useAssistantStore.getState().appendUserMessage('again');
+    });
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 });

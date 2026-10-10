@@ -11,6 +11,9 @@ import {
 } from '@/stores/assistant-store';
 import { AssistantProposalCard } from './AssistantProposalCard';
 
+/** How close to the bottom, in pixels, still counts as following the chat. */
+const PIN_THRESHOLD_PX = 48;
+
 const TOOL_STATUS_LABEL: Record<ToolActivityStatus, string> = {
   pending: 'waiting',
   in_progress: 'running',
@@ -129,11 +132,37 @@ export function AssistantChatView() {
   );
   const itemCount = timeline.length + pending.length;
 
-  // Keeps the newest item in view.
+  // Changes when an item is added or the last message grows while streaming.
+  const lastMessage = messages[messages.length - 1];
+  const tailLength = lastMessage && 'text' in lastMessage ? lastMessage.text.length : 0;
+  const userCount = messages.filter((m) => m.kind === 'user').length;
+  const seenUserCount = useRef(userCount);
+  const pinnedRef = useRef(true);
+
+  // Tracks whether the reader sits at the bottom of the scroll viewport.
+  useEffect(() => {
+    const viewport = endRef.current?.closest('[data-radix-scroll-area-viewport]');
+    if (!viewport) return;
+    const onScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      pinnedRef.current = distance <= PIN_THRESHOLD_PX;
+    };
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Keeps the newest content in view unless the reader scrolled up.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: itemCount and tailLength are change triggers only.
   useEffect(() => {
     if (itemCount === 0) return;
+    // Sending a message always brings the reader back to the bottom.
+    if (userCount !== seenUserCount.current) {
+      seenUserCount.current = userCount;
+      pinnedRef.current = true;
+    }
+    if (!pinnedRef.current) return;
     endRef.current?.scrollIntoView?.({ block: 'end' });
-  }, [itemCount]);
+  }, [itemCount, tailLength, userCount]);
 
   let lastStreamingId: string | undefined;
   for (const m of messages) {
