@@ -48,16 +48,13 @@ impl SecretStore for KeyringSecretStore {
     fn get(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>> {
         let entry = keyring::Entry::new(self.service, &account(scope_id, key))
             .map_err(|e| DomainError::Internal(e.to_string()))?;
-        match entry.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            // A locked or unavailable keychain must not hard-fail an environment
-            // load, which would brick app startup. Treat it as a miss.
-            Err(e) => {
-                tracing::warn!(error = %e, "keychain unavailable, environment secret unreadable");
-                Ok(None)
-            }
-        }
+        map_keyring_read(entry.get_password(), false)
+    }
+
+    fn get_strict(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>> {
+        let entry = keyring::Entry::new(self.service, &account(scope_id, key))
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+        map_keyring_read(entry.get_password(), true)
     }
 
     fn set(&self, scope_id: &str, key: &str, value: &str) -> DomainResult<()> {
@@ -78,6 +75,30 @@ impl SecretStore for KeyringSecretStore {
     }
 }
 
+/// Maps the result of a keychain read. A missing entry is `Ok(None)` in both modes. Any other
+/// error is a miss when lenient, because a locked keychain must not hard-fail an environment
+/// load and brick app startup. When strict it is an error, with a generic message that names
+/// neither the key nor a value.
+fn map_keyring_read(
+    result: Result<String, keyring::Error>,
+    strict: bool,
+) -> DomainResult<Option<String>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) if strict => {
+            tracing::warn!(error = %e, "keychain unavailable, strict secret read refused");
+            Err(DomainError::Internal(
+                "the keychain could not be read".to_string(),
+            ))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "keychain unavailable, environment secret unreadable");
+            Ok(None)
+        }
+    }
+}
+
 /// Keychain account name for one secret. `scope_id` already encodes the
 /// environment file, so this only has to append the variable key.
 fn account(scope_id: &str, key: &str) -> String {
@@ -87,6 +108,42 @@ fn account(scope_id: &str, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_entry_is_a_miss_in_both_modes() {
+        for strict in [false, true] {
+            let got = map_keyring_read(Err(keyring::Error::NoEntry), strict);
+            assert!(matches!(got, Ok(None)), "strict={strict}");
+        }
+    }
+
+    #[test]
+    fn a_value_is_returned_in_both_modes() {
+        for strict in [false, true] {
+            let got = map_keyring_read(Ok("v".to_string()), strict).expect("ok");
+            assert_eq!(got.as_deref(), Some("v"));
+        }
+    }
+
+    fn unavailable(kind: u8) -> keyring::Error {
+        match kind {
+            0 => keyring::Error::NoStorageAccess("locked secret-value-1".into()),
+            _ => keyring::Error::PlatformFailure("dbus down secret-value-1".into()),
+        }
+    }
+
+    #[test]
+    fn an_unavailable_keychain_is_a_miss_when_lenient_and_an_error_when_strict() {
+        for kind in 0..2 {
+            assert!(matches!(
+                map_keyring_read(Err(unavailable(kind)), false),
+                Ok(None)
+            ));
+            let strict = map_keyring_read(Err(unavailable(kind)), true).expect_err("refused");
+            assert!(matches!(strict, DomainError::Internal(_)));
+            assert!(!strict.to_string().contains("secret-value-1"));
+        }
+    }
 
     #[test]
     fn account_namespaces_scope_and_key() {

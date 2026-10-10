@@ -10,6 +10,9 @@ pub trait EnvironmentRepository: Send + Sync {
     /// be read or parsed, and a secret value the secret store cannot return, are errors. For
     /// masking text that is stored, where a missed secret would leak it. The default is the
     /// lenient `list`.
+    ///
+    /// The default delegates to the lenient method, so it is fail-open for any implementer or
+    /// decorator that does not override it. Every production implementer overrides it.
     fn list_strict(&self) -> DomainResult<Vec<Environment>> {
         self.list()
     }

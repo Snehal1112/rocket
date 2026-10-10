@@ -174,6 +174,10 @@ impl CollectionRepository for FsCollectionRepo {
         folders::get(self, name)
     }
 
+    fn list_strict(&self) -> DomainResult<Vec<CollectionSummary>> {
+        folders::list_with(self, true)
+    }
+
     fn get_strict(&self, name: &str) -> DomainResult<Collection> {
         folders::get_with(self, name, true)
     }

@@ -653,6 +653,18 @@ mod tests {
 
     impl SecretStore for FlakyStore {
         fn get(&self, scope: &str, key: &str) -> DomainResult<Option<String>> {
+            // A soft store: an unavailable keychain reads as a miss, like the real one.
+            if self.fail_get.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+            Ok(self
+                .entries
+                .lock()
+                .expect("lock")
+                .get(&format!("{scope}:{key}"))
+                .cloned())
+        }
+        fn get_strict(&self, scope: &str, key: &str) -> DomainResult<Option<String>> {
             if self.fail_get.load(Ordering::SeqCst) {
                 return Err(DomainError::Internal("keychain locked".into()));
             }
@@ -746,6 +758,22 @@ mod tests {
         globals.save(&env).expect("save global env");
         fx.store.fail_get.store(true, Ordering::SeqCst);
         assert_refused_and_empty(&fx, GLOBAL_SECRET);
+    }
+
+    #[test]
+    fn a_secret_with_no_stored_value_does_not_refuse_the_save() {
+        let fx = fs_fixture();
+        // The value went to another store, so this one answers NoEntry (Ok(None)).
+        let elsewhere = Arc::new(FlakyStore::default());
+        let globals =
+            FsEnvironmentRepo::with_secret_store(fx.ws_a.path().join("environments"), elsewhere);
+        let mut env = Environment::new("globals");
+        env.variables.push(Variable::secret("g", GLOBAL_SECRET));
+        globals.save(&env).expect("save global env");
+        fx.svc.pin_session("s1");
+        fx.svc
+            .save("s1", input(vec![user("q"), agent("a")]))
+            .expect("save");
     }
 
     #[test]

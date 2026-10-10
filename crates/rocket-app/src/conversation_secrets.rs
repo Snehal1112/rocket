@@ -25,7 +25,7 @@ pub(crate) fn workspace_secret_values(
         .map_err(|e| unreadable("global environments", e))?;
     add_env_secrets(&mut out, &globals);
     let listed = collections
-        .list()
+        .list_strict()
         .map_err(|e| unreadable("collection list", e))?;
     for summary in listed {
         let name = summary.name;

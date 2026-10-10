@@ -28,12 +28,27 @@ pub trait CollectionRepository: Send + Sync {
     /// List all collections (lightweight summaries).
     fn list(&self) -> DomainResult<Vec<CollectionSummary>>;
 
+    /// Like `list`, but a directory that looks like a collection (it has `opencollection.yml` or
+    /// a legacy `collection.json`) and cannot be loaded, such as a legacy collection whose
+    /// migration fails, is an error and not skipped. Plain directories stay skipped. For masking
+    /// text that is stored, where a skipped collection would leave its secrets unmasked. The
+    /// default is the lenient `list`.
+    ///
+    /// The default delegates to the lenient method, so it is fail-open for any implementer or
+    /// decorator that does not override it. Every production implementer overrides it.
+    fn list_strict(&self) -> DomainResult<Vec<CollectionSummary>> {
+        self.list()
+    }
+
     /// Get full collection tree by name.
     fn get(&self, name: &str) -> DomainResult<Collection>;
 
     /// Like `get`, but a request file that cannot be read or parsed is an error instead of
     /// being skipped. For masking text that is stored, where a skipped request would leave its
     /// secret variables unmasked. The default is the lenient `get`.
+    ///
+    /// The default delegates to the lenient method, so it is fail-open for any implementer or
+    /// decorator that does not override it. Every production implementer overrides it.
     fn get_strict(&self, name: &str) -> DomainResult<Collection> {
         self.get(name)
     }

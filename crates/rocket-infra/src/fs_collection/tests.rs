@@ -3401,3 +3401,23 @@ fn get_strict_errors_on_a_corrupt_request_file_that_get_skips() {
         "expected an error, got {strict:?}"
     );
 }
+
+#[test]
+fn list_strict_errors_on_a_legacy_collection_that_cannot_migrate() {
+    let (dir, repo) = setup();
+    repo.create("good").expect("create collection");
+    fs::create_dir_all(dir.path().join("legacy")).expect("mkdir");
+    fs::write(dir.path().join("legacy/bad.json"), "{ not json").expect("write");
+    // An interrupted earlier migration makes the next one fail.
+    fs::write(dir.path().join("legacy/.migration_in_progress"), "").expect("sentinel");
+    fs::create_dir_all(dir.path().join("plain")).expect("mkdir plain");
+
+    let lenient = repo.list().expect("lenient list");
+    assert_eq!(lenient.len(), 1, "the broken and the plain directory are skipped");
+    let strict = repo.list_strict();
+    assert!(matches!(strict, Err(DomainError::Internal(_))), "{strict:?}");
+
+    fs::remove_dir_all(dir.path().join("legacy")).expect("remove");
+    let strict = repo.list_strict().expect("plain directories stay skipped");
+    assert_eq!(strict.len(), 1);
+}

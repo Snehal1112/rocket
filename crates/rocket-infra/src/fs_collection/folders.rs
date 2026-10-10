@@ -17,6 +17,15 @@ use super::tree::{build_folder_tree, build_folder_tree_summaries};
 use super::FsCollectionRepo;
 
 pub(super) fn list(repo: &FsCollectionRepo) -> DomainResult<Vec<CollectionSummary>> {
+    list_with(repo, false)
+}
+
+/// Lists the collections. With `strict`, a legacy collection whose migration fails is an error
+/// and not skipped. A directory that is neither format stays skipped.
+pub(super) fn list_with(
+    repo: &FsCollectionRepo,
+    strict: bool,
+) -> DomainResult<Vec<CollectionSummary>> {
     let mut result = Vec::new();
     if !repo.base_dir.exists() {
         return Ok(result);
@@ -34,6 +43,11 @@ pub(super) fn list(repo: &FsCollectionRepo) -> DomainResult<Vec<CollectionSummar
                 CollectionFormat::OpenCollection => {} // Already migrated.
                 CollectionFormat::LegacyJson => {
                     if let Err(e) = migrate_collection(&path) {
+                        if strict {
+                            return Err(DomainError::Internal(format!(
+                                "collection '{name}' could not be migrated"
+                            )));
+                        }
                         tracing::warn!(collection = %name, error = %e, "failed to migrate collection");
                         continue;
                     }

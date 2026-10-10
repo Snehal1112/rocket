@@ -7,6 +7,18 @@ use rocket_shared::error::DomainResult;
 /// Implementations live in `rocket-infra` — this crate does no I/O.
 pub trait SecretStore: Send + Sync {
     fn get(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>>;
+
+    /// Like `get`, but a store that is locked or unavailable is an error and not a miss. Only a
+    /// missing entry is `Ok(None)`. For masking text that is stored, where a secret read as
+    /// missing would not be masked.
+    ///
+    /// The default delegates to the lenient `get`, so it is fail-open for any implementer or
+    /// decorator that does not override it. Every production store that can fail softly
+    /// (`KeyringSecretStore`) overrides it.
+    fn get_strict(&self, scope_id: &str, key: &str) -> DomainResult<Option<String>> {
+        self.get(scope_id, key)
+    }
+
     fn set(&self, scope_id: &str, key: &str, value: &str) -> DomainResult<()>;
     fn delete(&self, scope_id: &str, key: &str) -> DomainResult<()>;
 }

@@ -97,7 +97,12 @@ impl FsEnvironmentRepo {
         }
         let scope = Self::scope_id(&self.dir, &env.name);
         for var in env.variables.iter_mut().filter(|v| v.secret) {
-            match self.secret_store.get(&scope, &var.key) {
+            let read = if strict {
+                self.secret_store.get_strict(&scope, &var.key)
+            } else {
+                self.secret_store.get(&scope, &var.key)
+            };
+            match read {
                 Ok(Some(value)) => var.value = value,
                 Ok(None) => {}
                 Err(e) => {
