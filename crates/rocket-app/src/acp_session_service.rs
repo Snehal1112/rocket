@@ -1174,7 +1174,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_workspace_session_builds_http_and_stdio_specs_with_token_only_in_env() {
+    async fn start_workspace_session_builds_http_and_stdio_specs_with_token_only_in_env(
+    ) {
         let publisher = Arc::new(FakeEventPublisher::new());
         let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
             Arc::new(Mutex::new(Vec::new()));
