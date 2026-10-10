@@ -109,6 +109,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   // Set when a node's menu button opens the panel, so the panel takes focus.
   const [panelFocusRequest, setPanelFocusRequest] = useState<{ nodeId: string } | null>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
+  // The run history trigger, so leaving a viewed run can put focus back on it.
+  const runHistoryTriggerRef = useRef<HTMLButtonElement>(null);
   // Maps a wire to the id its undo step is keyed by. A wire that preempts another
   // one joins the step of the wire it replaced, so one Undo removes them both.
   const wireStepRef = useRef(new Map<string, string>());
@@ -544,6 +546,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               viewedRunId={viewedRecord ? viewedRecord.runId : null}
               disabled={tab.runState === 'running'}
               onChange={(runId) => setViewedFlowRun(tab.id, runId)}
+              triggerRef={runHistoryTriggerRef}
             />
             <FlowIssuesButton
               issues={issues}
@@ -646,7 +649,11 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
             <div className='absolute top-14 left-3 z-10 max-w-[45%]'>
               <ViewedRunBanner
                 record={viewedRecord}
-                onBack={() => setViewedFlowRun(tab.id, null)}
+                onBack={() => {
+                  setViewedFlowRun(tab.id, null);
+                  // The banner and its focused button unmount, so keep focus in the toolbar.
+                  runHistoryTriggerRef.current?.focus();
+                }}
               />
             </div>
           )}

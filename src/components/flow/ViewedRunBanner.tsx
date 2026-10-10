@@ -12,7 +12,8 @@ interface ViewedRunBannerProps {
 export function ViewedRunBanner({ record, onBack }: ViewedRunBannerProps) {
   return (
     <div
-      role='note'
+      role='status'
+      aria-live='polite'
       data-testid='viewed-run-banner'
       className='nokey flex max-w-full items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-xs'
     >

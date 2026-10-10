@@ -1,3 +1,4 @@
+import type { Ref } from 'react';
 import {
   Select,
   SelectContent,
@@ -17,6 +18,8 @@ interface RunHistorySelectProps {
   disabled: boolean;
   // Receives a past run's id, or null when the newest run is chosen.
   onChange: (runId: string | null) => void;
+  // Receives the trigger element, so the caller can move focus to it.
+  triggerRef?: Ref<HTMLButtonElement>;
 }
 
 // Lists the recorded runs. The newest entry is the live one, so choosing it
@@ -26,6 +29,7 @@ export function RunHistorySelect({
   viewedRunId,
   disabled,
   onChange,
+  triggerRef,
 }: RunHistorySelectProps) {
   if (history.length < 2) return null;
   const latestId = history[0].runId;
@@ -37,7 +41,7 @@ export function RunHistorySelect({
       disabled={disabled}
       onValueChange={(runId) => onChange(runId === latestId ? null : runId)}
     >
-      <SelectTrigger className='nokey h-8 w-48 text-xs' aria-label='Run history'>
+      <SelectTrigger ref={triggerRef} className='nokey h-8 w-48 text-xs' aria-label='Run history'>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

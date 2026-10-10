@@ -194,6 +194,24 @@ describe('FlowPane run history', () => {
     expect(storedTab().viewedRunId).toBeNull();
   });
 
+  it('announces the viewed-run banner as a polite status region', () => {
+    seed({ viewedRunId: 'run-1' });
+    render(<Harness />);
+    const banner = screen.getByTestId('viewed-run-banner');
+    expect(banner).toHaveAttribute('role', 'status');
+    expect(banner).toHaveAttribute('aria-live', 'polite');
+    // The run announcer is a status region too, so look the banner up among them.
+    expect(screen.getAllByRole('status')).toContain(banner);
+  });
+
+  it('moves focus to the Run history selector after Back to latest', async () => {
+    seed({ viewedRunId: 'run-1' });
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: 'Back to latest' }));
+    expect(screen.queryByTestId('viewed-run-banner')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Run history' }));
+  });
+
   it('a new run returns to live and disables the selector', () => {
     seed({ viewedRunId: 'run-1' });
     render(<Harness />);
