@@ -2,6 +2,8 @@
 
 Date: 2026-10-07
 Status: draft for review
+> **Superseded.** Section 1 (trust model) is replaced by `docs/superpowers/specs/2026-10-11-collection-trust-gate-design.md`. Section 2 (scanner) is unchanged and still pending.
+
 Builds on: `docs/superpowers/specs/2026-10-06-js-script-files-design.md` (script files and local `require`).
 
 ## Goal
