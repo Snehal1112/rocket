@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { copyTextAsync } from '@/lib/clipboard';
@@ -78,9 +78,29 @@ describe('WaitForCallbackNode', () => {
 
   it('copies the variable through the native-first clipboard helper', async () => {
     renderNode();
-    fireEvent.click(screen.getByRole('button', { name: 'Copy variable' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy variable' }));
+    });
     expect(copyTextAsync).toHaveBeenCalledTimes(1);
     await expect(vi.mocked(copyTextAsync).mock.calls[0][0]).resolves.toBe('{{callback.payment}}');
+  });
+
+  it('announces the copy and clears the message after 1500 ms', async () => {
+    vi.useFakeTimers();
+    try {
+      renderNode();
+      expect(screen.getByRole('status')).toHaveTextContent('');
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy variable' }));
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('Variable copied');
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+      });
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the received method and time after a success', () => {

@@ -138,6 +138,10 @@ export function WaitForCallbackNode({
               <Copy className='h-3 w-3' aria-hidden='true' />
             )}
           </Button>
+          {/* Always mounted, so a screen reader announces the text when it appears. */}
+          <span role='status' aria-live='polite' className='sr-only'>
+            {copied ? 'Variable copied' : ''}
+          </span>
         </div>
       </div>
 
