@@ -28,21 +28,8 @@ impl FsEnvironmentRepo {
         Self { dir, secret_store }
     }
 
-    /// An environment name must be one plain file name segment.
-    fn validate_name(name: &str) -> DomainResult<()> {
-        if name.trim().is_empty()
-            || name.contains(['/', '\\', '\0'])
-            || name.starts_with('.')
-        {
-            return Err(DomainError::InvalidInput(format!(
-                "'{name}' is not a valid environment name"
-            )));
-        }
-        Ok(())
-    }
-
     fn file_path(&self, name: &str) -> DomainResult<PathBuf> {
-        Self::validate_name(name)?;
+        Environment::validate_name(name)?;
         Ok(self.dir.join(format!("{}.yml", name)))
     }
 
@@ -140,6 +127,18 @@ impl EnvironmentRepository for FsEnvironmentRepo {
                 None
             };
             if let Some(mut env) = parsed {
+                // A stored name that cannot be used as a file name falls back to the file stem.
+                if Environment::validate_name(&env.name).is_err() {
+                    let stem = path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if Environment::validate_name(&stem).is_err() {
+                        tracing::warn!(path = %path.display(), "skipping environment with unusable name");
+                        continue;
+                    }
+                    env.name = stem;
+                }
                 self.hydrate_secrets(&mut env);
                 result.push(env);
             }
@@ -330,6 +329,29 @@ mod tests {
         }
         assert!(!dir.path().join("sub").exists());
         assert!(!dir.path().parent().expect("parent").join("evil.yml").exists());
+    }
+
+    #[test]
+    fn plain_environment_names_round_trip() {
+        let (_dir, repo) = setup();
+        for name in ["with space", "prod.v2", "caf\u{00e9}", "default", "globals"] {
+            repo.save(&Environment::new(name)).expect("save");
+            assert_eq!(repo.get(name).expect("get").name, name);
+            repo.delete(name).expect("delete");
+        }
+    }
+
+    #[test]
+    fn list_falls_back_to_file_stem_for_unusable_stored_name() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("real.yml"),
+            "name: a/b\nvariables: []\n",
+        )
+        .expect("write");
+        let list = repo.list().expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "real");
     }
 
     #[test]

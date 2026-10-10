@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::variable::Variable;
 use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::description::Description;
+use rocket_shared::error::{DomainError, DomainResult};
 
 /// OpenCollection Extensions — free-form object for custom metadata.
 pub type Extensions = serde_json::Value;
@@ -29,6 +30,34 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// An environment name becomes a file name, so it must be one plain segment.
+    pub fn validate_name(name: &str) -> DomainResult<()> {
+        if name.trim().is_empty()
+            || name.contains(['/', '\\', '\0'])
+            || name.starts_with('.')
+        {
+            return Err(DomainError::InvalidInput(format!(
+                "'{name}' is not a valid environment name"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Turns any text into a name that passes `validate_name`.
+    /// Separators become `-` and leading dots are dropped.
+    pub fn sanitize_name(raw: &str) -> String {
+        let replaced: String = raw
+            .chars()
+            .map(|c| if matches!(c, '/' | '\\' | '\0') { '-' } else { c })
+            .collect();
+        let cleaned = replaced.trim().trim_start_matches('.').trim();
+        if cleaned.is_empty() {
+            "environment".to_string()
+        } else {
+            cleaned.to_string()
+        }
+    }
+
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -78,6 +107,32 @@ impl Environment {
 mod tests {
     use super::*;
     use crate::variable::Variable;
+
+    #[test]
+    fn validate_name_accepts_plain_names() {
+        for name in ["default", "globals", "prod.v2", "Staging EU", "preprod-\u{00e9}\u{4e2d}"] {
+            assert!(Environment::validate_name(name).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn validate_name_rejects_unsafe_names() {
+        for name in ["", "  ", "../evil", "sub/dev", "a\\b", ".hidden", "..", "a\0b"] {
+            assert!(Environment::validate_name(name).is_err(), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn sanitize_name_output_is_always_valid() {
+        assert_eq!(Environment::sanitize_name("Staging / EU"), "Staging - EU");
+        assert_eq!(Environment::sanitize_name("..\\x"), "-x");
+        assert_eq!(Environment::sanitize_name(".env"), "env");
+        assert_eq!(Environment::sanitize_name(" . "), "environment");
+        for raw in ["", "/", "..", "a/b\\c", " .x"] {
+            let clean = Environment::sanitize_name(raw);
+            assert!(Environment::validate_name(&clean).is_ok(), "{raw:?}");
+        }
+    }
 
     #[test]
     fn new_environment_is_empty() {

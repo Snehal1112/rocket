@@ -3209,3 +3209,50 @@ fn create_folder_with_hidden_parent_dir_does_not_write_outside() {
     assert!(!dir.path().join("escaped").exists());
     assert!(!dir.path().join("my-api/missing").exists());
 }
+
+#[test]
+fn folder_chain_variables_reject_parent_dir_and_absolute_paths() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    for bad in ["../x/req.yml", "a/../../x/req.yml", "/etc/x/req.yml"] {
+        let err = repo
+            .get_folder_chain_variables("my-api", bad)
+            .expect_err("unsafe request path must be rejected");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{bad}: {err:?}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_folder_pointing_outside_is_refused() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let base = dir.path().join("my-api");
+    let outside = TempDir::new().expect("outside dir");
+    std::os::unix::fs::symlink(outside.path(), base.join("link")).expect("symlink");
+
+    let err = repo
+        .validate_path(&base, Path::new("link/new.yml"))
+        .expect_err("symlink escape must be refused");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+
+    fs::write(outside.path().join("folder.yml"), "info:\n  name: x\n").expect("write outside");
+    let err = repo
+        .get_folder_chain_variables("my-api", "link/req.yml")
+        .expect_err("folder chain must not follow the escaping symlink");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+}
+
+#[cfg(windows)]
+#[test]
+fn validate_path_rejects_windows_drive_paths() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let base = dir.path().join("my-api");
+    for bad in [r"C:\x", r"C:x", r"\\server\share\x", r"..\x"] {
+        let err = repo
+            .validate_path(&base, Path::new(bad))
+            .expect_err("windows path must be rejected");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{bad}");
+    }
+}

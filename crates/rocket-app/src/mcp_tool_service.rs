@@ -234,18 +234,7 @@ impl McpToolService {
     /// `environments/` directory. Mirrors the check in
     /// `src-tauri/src/commands/environments.rs::env_service_for`.
     fn validate_environment_name(name: &str) -> DomainResult<()> {
-        if name.is_empty()
-            || name.contains('\0')
-            || name.starts_with('/')
-            || name.starts_with('\\')
-            || name.starts_with('.')
-            || chips::is_unsafe_relative_path(name)
-        {
-            return Err(DomainError::InvalidInput(
-                "invalid environment name".to_string(),
-            ));
-        }
-        Ok(())
+        rocket_environment::Environment::validate_name(name)
     }
 
     /// Reads a request for the agent. A path under `environments/` is

@@ -57,9 +57,11 @@ pub(super) fn folder_chain_variables(
     .entered();
 
     let mut chain: Vec<Vec<CollectionVariable>> = Vec::new();
-    let mut current = collection_dir.clone();
+    let mut relative = std::path::PathBuf::new();
     for segment in &dir_components {
-        current = current.join(segment);
+        relative.push(segment);
+        // The canonical check also refuses a symlinked folder that points outside.
+        let current = repo.validate_path(&collection_dir, &relative)?;
         let folder_yml = current.join("folder.yml");
         let content = match fs::read_to_string(&folder_yml) {
             Ok(content) => content,

@@ -146,3 +146,26 @@ fn imports_environment_into_existing_collection() {
         .join("environments/Local.yml")
         .exists());
 }
+
+#[test]
+fn imports_environment_with_separator_in_name() {
+    let ws = TempDir::new().expect("temp dir");
+    let json = ws.path().join("env.postman_environment.json");
+    std::fs::write(
+        &json,
+        r#"{"name":"Staging / EU","values":[{"key":"host","value":"eu.example.com","enabled":true}]}"#,
+    )
+    .expect("write env json");
+    let svc = make_service(ws.path());
+    svc.import_postman_environment(&json, "default", "ws")
+        .expect("import should sanitize the name");
+    // A second import of the same name must not overwrite the first.
+    svc.import_postman_environment(&json, "default", "ws")
+        .expect("second import");
+    let repo = FsEnvironmentRepo::new(ws.path().join("collections/default/environments"));
+    assert_eq!(repo.get("Staging - EU").expect("first").name, "Staging - EU");
+    assert_eq!(
+        repo.get("Staging - EU (2)").expect("second").name,
+        "Staging - EU (2)"
+    );
+}

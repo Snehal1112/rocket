@@ -39,6 +39,22 @@ pub(crate) fn detect_collection(path: &Path) -> Option<BrunoFormat> {
     }
 }
 
+/// Makes an imported environment name safe to use as a file name.
+/// A name that had to change gets a numeric suffix if it collides with an existing one.
+fn unique_env_name(repo: &dyn EnvironmentRepository, raw: &str) -> String {
+    let clean = rocket_environment::Environment::sanitize_name(raw);
+    if clean == raw {
+        return clean;
+    }
+    let mut candidate = clean.clone();
+    let mut n = 2;
+    while repo.get(&candidate).is_ok() {
+        candidate = format!("{clean} ({n})");
+        n += 1;
+    }
+    candidate
+}
+
 /// Orchestrates the full Bruno import pipeline.
 /// Creates an `EnvironmentRepository` scoped to a single collection's `environments/` dir.
 pub trait EnvironmentRepositoryFactory: Send + Sync {
@@ -459,8 +475,14 @@ impl ImportService {
                     });
                 }
                 Ok(doc) => {
-                    let env = env_converter::convert(&env_name, &doc);
-                    let _ = env_repo.save(&env);
+                    let safe_name = unique_env_name(env_repo.as_ref(), &env_name);
+                    let env = env_converter::convert(&safe_name, &doc);
+                    if let Err(e) = env_repo.save(&env) {
+                        report.skipped.push(SkippedItem {
+                            path: p.to_string_lossy().to_string(),
+                            reason: SkipReason::ParseError(e.to_string()),
+                        });
+                    }
                 }
             }
         }
@@ -566,15 +588,15 @@ impl ImportService {
         }
 
         for postman_env in &collection.environment {
-            let mut env = rocket_environment::Environment::new(&postman_env.name);
+            let repo = self.env_factory.make(&col_name);
+            let safe_name = unique_env_name(repo.as_ref(), &postman_env.name);
+            let mut env = rocket_environment::Environment::new(&safe_name);
             for v in &postman_env.values {
                 let mut var = rocket_environment::Variable::new(&v.key, &v.value);
                 var.enabled = v.enabled;
                 env.set_variable(var);
             }
-            self.env_factory
-                .make(&col_name)
-                .save(&env)
+            repo.save(&env)
                 .map_err(ImportError::DomainError)?;
         }
 
@@ -780,16 +802,16 @@ impl ImportService {
 
         let postman_env = parse_postman_environment(json_path)?;
 
-        let mut env = Environment::new(&postman_env.name);
+        let repo = self.env_factory.make(collection_name);
+        let safe_name = unique_env_name(repo.as_ref(), &postman_env.name);
+        let mut env = Environment::new(&safe_name);
         for v in &postman_env.values {
             let mut var = Variable::new(&v.key, &v.value);
             var.enabled = v.enabled;
             env.set_variable(var);
         }
 
-        self.env_factory
-            .make(collection_name)
-            .save(&env)
+        repo.save(&env)
             .map_err(ImportError::DomainError)?;
 
         report.imported = postman_env.values.len();

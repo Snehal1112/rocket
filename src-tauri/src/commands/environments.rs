@@ -54,6 +54,7 @@ pub fn get_environment(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    Environment::validate_name(&name)?;
     env_service_for(&collection, &ws)?.get(&name)
 }
 
@@ -67,6 +68,7 @@ pub fn save_environment(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    Environment::validate_name(&env.name)?;
     env_service_for(&collection, &ws)?.save_with_capabilities(&env, &*secret_managers)
 }
 
@@ -79,6 +81,7 @@ pub fn delete_environment(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    Environment::validate_name(&name)?;
     env_service_for(&collection, &ws)?.delete(&name)
 }
 
@@ -97,6 +100,9 @@ pub fn set_global_environment(
     name: Option<String>,
     workspace_svc: State<'_, Mutex<WorkspaceService>>,
 ) -> Result<(), DomainError> {
+    if let Some(name) = &name {
+        Environment::validate_name(name)?;
+    }
     workspace_svc
         .lock()
         .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
@@ -133,6 +139,7 @@ pub fn get_global_environment(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    Environment::validate_name(&name)?;
     global_env_service(&ws)?.get(&name)
 }
 
@@ -145,6 +152,7 @@ pub fn save_global_environment(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    Environment::validate_name(&env.name)?;
     global_env_service(&ws)?.save_with_capabilities(&env, &*secret_managers)
 }
 
@@ -156,6 +164,7 @@ pub fn delete_global_environment(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
+    Environment::validate_name(&name)?;
     global_env_service(&ws)?.delete(&name)
 }
 

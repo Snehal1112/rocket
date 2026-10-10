@@ -1100,22 +1100,9 @@ fn validate_item_name(name: &str) -> DomainResult<()> {
     Ok(())
 }
 
-/// Same rule as `McpToolService::validate_environment_name`.
+/// Same rule as the environment repository.
 fn validate_environment_name(name: &str) -> DomainResult<()> {
-    if name.is_empty()
-        || name.contains('\0')
-        || name.starts_with('/')
-        || name.starts_with('\\')
-        || name.starts_with('.')
-        || std::path::Path::new(name)
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
-    {
-        return Err(DomainError::InvalidInput(
-            "invalid environment name".to_string(),
-        ));
-    }
-    Ok(())
+    rocket_environment::Environment::validate_name(name)
 }
 
 fn set_script(request: &mut Request, phase: ScriptPhase, body: String) {
