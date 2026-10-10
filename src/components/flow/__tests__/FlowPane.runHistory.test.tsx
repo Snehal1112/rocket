@@ -212,6 +212,14 @@ describe('FlowPane run history', () => {
     expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Run history' }));
   });
 
+  it('moves focus to the canvas after Back to latest when the selector is hidden', async () => {
+    seed({ runHistory: [older], viewedRunId: 'run-1' });
+    render(<Harness />);
+    expect(screen.queryByRole('combobox', { name: 'Run history' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to latest' }));
+    expect(document.activeElement).toBe(screen.getByTestId('flow-canvas'));
+  });
+
   it('a new run returns to live and disables the selector', () => {
     seed({ viewedRunId: 'run-1' });
     render(<Harness />);

@@ -85,4 +85,17 @@ describe('useStableGraph', () => {
     rerender({ nodes: renamed, edges: first.edges });
     expect(result.current.nodes).toBe(renamed);
   });
+
+  it('returns new edges when only a sourceHandle changes', () => {
+    const first = {
+      nodes: [node('a', kindA)],
+      edges: [{ ...wire('e1', 'a', 'b'), sourceHandle: 'x' }],
+    };
+    const { result, rerender } = renderHook((p) => useStableGraph(p.nodes, p.edges), {
+      initialProps: first,
+    });
+    const next = { nodes: first.nodes, edges: [{ ...wire('e1', 'a', 'b'), sourceHandle: 'y' }] };
+    rerender(next);
+    expect(result.current.edges).toBe(next.edges);
+  });
 });

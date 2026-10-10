@@ -146,6 +146,31 @@ describe('FlowPane wire undo and save', () => {
     expect(getTab().edges.filter((e) => e.targetField === 'headers')).toEqual([]);
     expect(getTab().edges).toEqual([]);
     expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Redo' }));
+    expect(getTab().edges.map((e) => e.targetField)).toEqual(['headers[X-Token].value']);
+  });
+
+  it('undoes a preempted wire whose second popover is dismissed, in one step', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    render(<Harness />);
+    fireEvent.click(screen.getByText('connect-headers'));
+    await screen.findByRole('dialog');
+    const firstId = getTab().edges[0].id;
+    fireEvent.click(screen.getByText('connect-headers'));
+    await waitFor(() => expect(getTab().edges[0].id).not.toBe(firstId));
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1));
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(getTab().edges.filter((e) => e.targetField === 'headers')).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(getTab().edges).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Redo' }));
+    expect(getTab().edges).toEqual([]);
   });
 
   it('keeps the tab dirty when an edit lands while a save is in flight', async () => {

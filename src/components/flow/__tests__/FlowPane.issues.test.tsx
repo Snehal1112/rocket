@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { computeFlowIssues } from '@/lib/flow-issues';
 import { lintFlow, listCollections, listFlows, saveFlow } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -165,6 +166,19 @@ describe('FlowPane issues', () => {
 
   const REJECTED_SAVE =
     'Invalid input: flow is invalid: the Output has a problem — node(s): out1; edge(s): ';
+
+  it('hides a quoted case value in the toast and the panel text', async () => {
+    vi.mocked(saveFlow).mockRejectedValue(
+      "Invalid input: flow is invalid: more than one case matches 'secret-token' — node(s): out1; edge(s): ",
+    );
+    render(<Harness />);
+    await userEvent.click(screen.getByLabelText('Edit Result'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(String(vi.mocked(toast.error).mock.calls[0][0])).not.toContain('secret-token');
+    expect(screen.getByTestId('node-properties-panel').textContent).toContain('value hidden');
+    expect(document.body.textContent).not.toContain('secret-token');
+  });
 
   it('clears the failed-save highlight when a wire is removed', async () => {
     vi.mocked(saveFlow).mockRejectedValue(REJECTED_SAVE);

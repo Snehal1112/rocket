@@ -23,6 +23,7 @@ function sameEdges(a: FlowEdge[], b: FlowEdge[]): boolean {
       e.sourceNodeId === o.sourceNodeId &&
       e.targetNodeId === o.targetNodeId &&
       e.targetField === o.targetField &&
+      e.sourceHandle === o.sourceHandle &&
       e.expression === o.expression
     );
   });
@@ -32,6 +33,7 @@ function sameEdges(a: FlowEdge[], b: FlowEdge[]): boolean {
 // memo keyed on them does not re-run for every drag frame.
 export function useStableGraph(nodes: FlowNode[], edges: FlowEdge[]): StableGraph {
   const last = useRef<StableGraph | null>(null);
+  // Writing the ref during render is safe: the comparison is by value, so a repeat render gives the same result.
   const prev = last.current;
   const stableNodes = prev && sameNodes(prev.nodes, nodes) ? prev.nodes : nodes;
   const stableEdges = prev && sameEdges(prev.edges, edges) ? prev.edges : edges;

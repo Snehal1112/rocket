@@ -17,7 +17,7 @@ import {
 } from '@/lib/flow-clipboard';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
-import { computeFlowIssues } from '@/lib/flow-issues';
+import { cleanSaveMessage, computeFlowIssues } from '@/lib/flow-issues';
 import { mergeFlowIssues } from '@/lib/flow-lint';
 import { buildRunRecord } from '@/lib/flow-run-history';
 import { requestFlowRun } from '@/lib/flow-run-request';
@@ -130,6 +130,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     setLabelFocusNodeId(null);
     setPanelFocusRequest(null);
     clearSaveHighlight();
+    wireStepRef.current.clear();
   }, [tab.id]);
   // Any selection other than exactly the panel's node closes the panel.
   const handleSelectedNodeIdsChange = useCallback((ids: ReadonlySet<string>) => {
@@ -449,7 +450,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
         setSaveErrorMessage(message);
         setErrorFromRun(false);
       }
-      toast.error(`Could not save flow: ${message}`);
+      toast.error(`Could not save flow: ${cleanSaveMessage(message)}`);
       return false;
     }
   };
@@ -485,7 +486,8 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     // The connect and the dialog's commit or dismissal share one undo step. A
     // wire that preempts another joins that wire's step, so one Undo removes both.
     const stepId = preemptedId ? (wireStepRef.current.get(preemptedId) ?? preemptedId) : edge.id;
-    wireStepRef.current.set(edge.id, stepId);
+    // Only a preempting wire needs a mapping. Any other wire is its own step.
+    if (preemptedId) wireStepRef.current.set(edge.id, stepId);
     updateFlowEdges(tab.id, [...base, edge], WIRE_STEP(stepId));
     // Input and trigger wires carry no value, so there is nothing to edit.
     // Clearing the pending edge also closes a preempted popover.
@@ -652,7 +654,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                 onBack={() => {
                   setViewedFlowRun(tab.id, null);
                   // The banner and its focused button unmount, so keep focus in the toolbar.
-                  runHistoryTriggerRef.current?.focus();
+                  // The selector is hidden below two runs, so fall back to the canvas.
+                  if (runHistoryTriggerRef.current) runHistoryTriggerRef.current.focus();
+                  else focusCanvas();
                 }}
               />
             </div>
@@ -713,7 +717,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
                   updateFlowEdges(
                     tab.id,
                     tab.edges.filter((e) => e.id !== pendingEdge.id),
-                    WIRE_STEP(pendingEdge.id),
+                    WIRE_STEP(wireStepRef.current.get(pendingEdge.id) ?? pendingEdge.id),
                   );
                 }
                 setPendingEdge(null);
@@ -749,7 +753,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               nodeDetail={shownDetail}
               saveError={
                 saveErrorMessage && cycleNodeIds.includes(panelNode.id)
-                  ? saveErrorMessage
+                  ? cleanSaveMessage(saveErrorMessage)
                   : undefined
               }
               activeTab={panelTab}

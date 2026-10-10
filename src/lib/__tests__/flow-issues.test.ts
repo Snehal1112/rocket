@@ -238,16 +238,19 @@ describe('computeFlowIssues: save errors', () => {
   });
 
   it('drops a save issue that repeats a client issue on the same node', () => {
-    const ifNode = node('i1', { kind: 'If', label: 'i1', condition: 'true' });
+    const ifNode = node('i1', { kind: 'If', label: 'i1', condition: '' });
     const issues = computeFlowIssues([ifNode], [], {
       save: {
         nodeIds: ['i1'],
         edgeIds: [],
-        // Same sentence as the client rule, with different case and no full stop.
-        message: 'Invalid input: flow is invalid: the if node needs an input wire — node(s): i1; edge(s): ',
+        // The backend wording from validate.rs: the client sentence without a full stop.
+        message:
+          "Invalid input: flow is invalid: the If node's condition is empty — node(s): i1; edge(s): ",
       },
     });
-    expect(issues.filter((i) => i.nodeId === 'i1').map((i) => i.code)).toEqual(['input-missing']);
+    const codes = issues.filter((i) => i.nodeId === 'i1').map((i) => i.code);
+    expect(codes).toContain('expr-blank');
+    expect(codes).not.toContain('save');
   });
 
   it('keeps a save issue whose message differs from the client issue', () => {
