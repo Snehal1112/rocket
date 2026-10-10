@@ -27,6 +27,7 @@ export function scheduleSaveUiState() {
       sidebarWidth: layoutState.sidebarWidth,
       isConsoleOpen: layoutState.isConsoleOpen,
       consoleHeight: layoutState.consoleHeight,
+      assistantPanelWidth: layoutState.assistantPanelWidth,
     };
 
     if (isWsMode) {

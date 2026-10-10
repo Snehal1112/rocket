@@ -1742,6 +1742,7 @@ export interface UiState {
   sidebarWidth?: number;
   isConsoleOpen?: boolean;
   consoleHeight?: number;
+  assistantPanelWidth?: number;
 }
 
 export const loadUiState = () => invoke<UiState | null>('load_ui_state');

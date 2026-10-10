@@ -81,6 +81,9 @@ function App() {
       if (uiState?.consoleHeight) {
         useLayoutStore.getState().setConsoleHeight(uiState.consoleHeight);
       }
+      if (uiState?.assistantPanelWidth) {
+        useLayoutStore.getState().setAssistantPanelWidth(uiState.assistantPanelWidth);
+      }
 
       if (uiState?.activeMode === 'workspace' && uiState.workspaceTabs) {
         const { workspaceId } = uiState.workspaceTabs;

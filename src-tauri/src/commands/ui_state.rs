@@ -12,6 +12,8 @@ pub struct UiState {
     pub active_collection: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_tabs: Vec<UiStateCollectionTab>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_panel_width: Option<f64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

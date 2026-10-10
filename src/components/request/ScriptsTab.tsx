@@ -98,6 +98,7 @@ export function ScriptsTab({
     tests: false,
   });
   const openAssistantPanel = useAssistantStore((s) => s.openPanel);
+  const assistantPanelOpen = useAssistantStore((s) => s.panelOpen);
   const setAssistantFocus = useAssistantStore((s) => s.setFocus);
 
   // Opens the docked assistant with this request in focus. An unsaved request
@@ -178,7 +179,7 @@ export function ScriptsTab({
               size='sm'
               className='ml-auto h-7 gap-1 text-xs'
               onClick={openAssistant}
-              aria-controls='assistant-panel'
+              aria-controls={assistantPanelOpen ? 'assistant-panel' : undefined}
               title='Open the AI Assistant with this request in focus'
             >
               <Sparkles className='h-3.5 w-3.5' />

@@ -22,6 +22,7 @@ vi.mock('@/stores/layout-store', () => ({
       sidebarWidth: 350,
       isConsoleOpen: true,
       consoleHeight: 400,
+      assistantPanelWidth: 520,
     }),
     subscribe: vi.fn(() => () => undefined),
   },
@@ -45,6 +46,7 @@ describe('scheduleSaveUiState', () => {
         sidebarWidth: 350,
         isConsoleOpen: true,
         consoleHeight: 400,
+        assistantPanelWidth: 520,
       }),
     );
   });

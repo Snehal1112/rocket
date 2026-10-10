@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render as rtlRender, screen, waitFor } from '@testing-library/react';
+import { act, render as rtlRender, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStaleSweepForTests } from '@/lib/assistant/assistant-session';
 import * as api from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
-import { AssistantPanel } from '../AssistantPanel';
+import { useLayoutStore } from '@/stores/layout-store';
+import { AssistantPanel, clampWidth } from '../AssistantPanel';
 import { AssistantToggleButton } from '../AssistantToggleButton';
 
 // Radix Select calls pointer-capture APIs that jsdom lacks.
@@ -144,7 +145,46 @@ describe('AssistantToggleButton', () => {
     await userEvent.click(button);
     expect(useAssistantStore.getState().panelOpen).toBe(true);
     expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(button).toHaveAttribute('aria-controls', 'assistant-panel');
     await userEvent.click(button);
+    expect(button).not.toHaveAttribute('aria-controls');
     expect(useAssistantStore.getState().panelOpen).toBe(false);
+  });
+});
+
+describe('AssistantPanel width', () => {
+  const originalWidth = window.innerWidth;
+  const setWindowWidth = (w: number) => {
+    Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
+  };
+
+  beforeEach(() => {
+    store().reset();
+    useAssistantStore.setState({ panelOpen: true });
+    useLayoutStore.setState({ assistantPanelWidth: 700 });
+  });
+
+  afterEach(() => {
+    setWindowWidth(originalWidth);
+  });
+
+  it('clamps to the panel limits and to the window', () => {
+    expect(clampWidth(100, 1920)).toBe(320);
+    expect(clampWidth(900, 1920)).toBe(720);
+    expect(clampWidth(700, 900)).toBe(420);
+    expect(clampWidth(700, 500)).toBe(320);
+  });
+
+  it('shows a narrower panel on a small window without losing the stored width', () => {
+    setWindowWidth(900);
+    render(<AssistantPanel />);
+    const handle = screen.getByRole('separator', { name: 'Resize AI Assistant' });
+    expect(handle).toHaveAttribute('aria-valuenow', '420');
+    act(() => {
+      setWindowWidth(1920);
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(handle).toHaveAttribute('aria-valuenow', '700');
+    expect(useLayoutStore.getState().assistantPanelWidth).toBe(700);
   });
 });

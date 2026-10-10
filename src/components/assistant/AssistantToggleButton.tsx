@@ -15,7 +15,7 @@ export function AssistantToggleButton() {
       className='h-7 w-7'
       aria-label='AI Assistant'
       aria-pressed={panelOpen}
-      aria-controls='assistant-panel'
+      aria-controls={panelOpen ? 'assistant-panel' : undefined}
       title={panelOpen ? 'Hide AI Assistant' : 'Show AI Assistant'}
       onClick={() => (panelOpen ? closePanel() : openPanel())}
     >

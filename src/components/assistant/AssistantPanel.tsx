@@ -1,5 +1,5 @@
 import { Loader2, Sparkles, X } from 'lucide-react';
-import type { CSSProperties } from 'react';
+import { type CSSProperties, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { endAssistantSession } from '@/lib/assistant/assistant-session';
 import { useAssistantStore } from '@/stores/assistant-store';
@@ -11,9 +11,13 @@ import { Composer } from './composer/Composer';
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 720;
+/** Width the main content keeps at least, so a narrow window stays usable. */
+const MIN_CONTENT_WIDTH = 480;
 
-function clampWidth(width: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width));
+/** Clamps to the panel limits and to what the window can spare. */
+export function clampWidth(width: number, windowWidth: number): number {
+  const max = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, windowWidth - MIN_CONTENT_WIDTH));
+  return Math.min(max, Math.max(MIN_WIDTH, width));
 }
 
 /** The workspace AI Assistant, docked on the right of the main layout. */
@@ -21,8 +25,20 @@ export function AssistantPanel() {
   const status = useAssistantStore((s) => s.session?.status);
   const hasMessages = useAssistantStore((s) => s.messages.length > 0);
   const closePanel = useAssistantStore((s) => s.closePanel);
-  const width = useLayoutStore((s) => s.assistantPanelWidth);
-  const setWidth = useLayoutStore((s) => s.setAssistantPanelWidth);
+  const storedWidth = useLayoutStore((s) => s.assistantPanelWidth);
+  const setStoredWidth = useLayoutStore((s) => s.setAssistantPanelWidth);
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
+
+  // The stored width stays the user's choice. Only the shown width follows the window.
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const width = clampWidth(storedWidth, windowWidth);
+  const maxWidth = clampWidth(MAX_WIDTH, windowWidth);
+  const setWidth = (w: number) => setStoredWidth(clampWidth(w, window.innerWidth));
 
   return (
     <aside
@@ -37,7 +53,7 @@ export function AssistantPanel() {
         aria-orientation='vertical'
         aria-valuenow={width}
         aria-valuemin={MIN_WIDTH}
-        aria-valuemax={MAX_WIDTH}
+        aria-valuemax={maxWidth}
         aria-label='Resize AI Assistant'
         tabIndex={0}
         className='absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-primary/30 focus-visible:bg-primary/60 focus-visible:outline-none'
@@ -46,8 +62,7 @@ export function AssistantPanel() {
           const startX = e.clientX;
           const startWidth = width;
           // The panel grows as the handle moves left.
-          const onMove = (ev: PointerEvent) =>
-            setWidth(clampWidth(startWidth - (ev.clientX - startX)));
+          const onMove = (ev: PointerEvent) => setWidth(startWidth - (ev.clientX - startX));
           const onUp = () => {
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
@@ -58,10 +73,10 @@ export function AssistantPanel() {
         onKeyDown={(e) => {
           if (e.key === 'ArrowLeft') {
             e.preventDefault();
-            setWidth(clampWidth(width + 16));
+            setWidth(width + 16);
           } else if (e.key === 'ArrowRight') {
             e.preventDefault();
-            setWidth(clampWidth(width - 16));
+            setWidth(width - 16);
           }
         }}
       />
