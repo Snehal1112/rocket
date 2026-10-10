@@ -2,6 +2,7 @@ import { Handle, type NodeProps, Position } from '@xyflow/react';
 import { Check, Copy, Hourglass } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { copyTextAsync } from '@/lib/clipboard';
 import { callbackVariable } from '@/lib/flow-callback';
 import { RESULT_HANDLE, TRIGGER_HANDLE } from '@/lib/flow-handles';
 import type { FlowIssue } from '@/lib/flow-issues';
@@ -48,7 +49,8 @@ export function WaitForCallbackNode({
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const copy = () => {
-    navigator.clipboard.writeText(variable).then(
+    // Started in the click handler, so WebKit keeps the user activation.
+    copyTextAsync(Promise.resolve(variable)).then(
       () => {
         setCopied(true);
         clearTimeout(timer.current);
@@ -130,7 +132,11 @@ export function WaitForCallbackNode({
             title='Copy variable'
             onClick={copy}
           >
-            {copied ? <Check className='h-3 w-3' /> : <Copy className='h-3 w-3' />}
+            {copied ? (
+              <Check className='h-3 w-3' aria-hidden='true' />
+            ) : (
+              <Copy className='h-3 w-3' aria-hidden='true' />
+            )}
           </Button>
         </div>
       </div>

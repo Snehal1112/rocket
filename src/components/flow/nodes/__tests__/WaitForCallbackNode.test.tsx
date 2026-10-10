@@ -1,7 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { copyTextAsync } from '@/lib/clipboard';
 import { WaitForCallbackNode, type WaitForCallbackNodeData } from '../WaitForCallbackNode';
+
+vi.mock('@/lib/clipboard', () => ({ copyTextAsync: vi.fn(async () => undefined) }));
 
 const props = {
   selected: false,
@@ -38,6 +41,8 @@ function renderNode(data: Partial<WaitForCallbackNodeData> = {}) {
 }
 
 describe('WaitForCallbackNode', () => {
+  beforeEach(() => vi.mocked(copyTextAsync).mockClear());
+
   it('has a Run when input and a result exit, and shows name, timeout and variable', () => {
     renderNode();
     const card = screen.getByTestId('wait-node-card');
@@ -71,12 +76,11 @@ describe('WaitForCallbackNode', () => {
     expect(summary).toHaveClass('truncate');
   });
 
-  it('copies the variable', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  it('copies the variable through the native-first clipboard helper', async () => {
     renderNode();
     fireEvent.click(screen.getByRole('button', { name: 'Copy variable' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('{{callback.payment}}'));
+    expect(copyTextAsync).toHaveBeenCalledTimes(1);
+    await expect(vi.mocked(copyTextAsync).mock.calls[0][0]).resolves.toBe('{{callback.payment}}');
   });
 
   it('shows the received method and time after a success', () => {

@@ -19,6 +19,7 @@ export function DurationChip({ durationMs }: { durationMs?: number }) {
         className='gap-0.5 px-1 py-0 text-[10px] font-normal text-muted-foreground'
       >
         <Timer className='h-2.5 w-2.5' aria-hidden='true' />
+        <span className='sr-only'>Last run took </span>
         {text}
       </Badge>
     </div>

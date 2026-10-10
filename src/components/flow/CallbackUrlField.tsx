@@ -36,8 +36,16 @@ export function CallbackUrlField({ url }: { url: string }) {
           aria-label='Copy callback URL'
           onClick={copy}
         >
-          {copied ? <Check className='h-3 w-3' /> : <Copy className='h-3 w-3' />}
+          {copied ? (
+            <Check className='h-3 w-3' aria-hidden='true' />
+          ) : (
+            <Copy className='h-3 w-3' aria-hidden='true' />
+          )}
         </Button>
+        {/* Always mounted, so a screen reader announces the text when it appears. */}
+        <span role='status' aria-live='polite' className='sr-only'>
+          {copied ? 'Callback URL copied' : ''}
+        </span>
       </div>
       <p className='text-[10px] text-muted-foreground'>Valid while the run is active.</p>
     </div>

@@ -17,8 +17,11 @@ describe('DurationChip', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows the duration', () => {
-    render(<DurationChip durationMs={42} />);
-    expect(screen.getByTestId('duration-chip')).toHaveTextContent('42ms');
+  it('shows the duration with screen reader text in front', () => {
+    render(<DurationChip durationMs={12} />);
+    const chip = screen.getByTestId('duration-chip');
+    expect(chip).toHaveTextContent('12ms');
+    expect(chip.textContent).toBe('Last run took 12ms');
+    expect(chip.querySelector('.sr-only')).toHaveTextContent('Last run took');
   });
 });
