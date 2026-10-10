@@ -47,8 +47,20 @@ export function cutSafely(text: string, max: number, from: 'start' | 'end' = 'st
   return isLowSurrogate(cut.charCodeAt(0)) ? cut.slice(1) : cut;
 }
 
+// Every character a tokenizer could treat as a line break.
+const LINE_BREAKS = /\r\n|[\r\v\f\u0085\u2028\u2029]/g;
+
+// NUL and the C0 controls other than tab and newline, plus DEL.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping controls is the point.
+const CONTROLS = /[\u0000-\u0008\u000e-\u001f\u007f]/g;
+
+/** Stored text with one kind of line break and no control characters. */
+function clean(text: string): string {
+  return text.replace(LINE_BREAKS, '\n').replace(CONTROLS, '');
+}
+
 function oneLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+  return clean(text).replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -56,13 +68,17 @@ function oneLine(text: string): string {
  * tags, and indent continuation lines so no stored line starts at column 0.
  */
 function quote(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '\n  ');
+  return clean(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '\n  ');
 }
 
-function capText(text: string): string {
-  return text.length > PER_MESSAGE_MAX_CHARS
-    ? `${cutSafely(text, PER_MESSAGE_MAX_CHARS)}${CUT_MARKER}`
-    : text;
+// A cut that lands inside "&amp;" or "&lt;" leaves one of these at the end.
+const PARTIAL_ENTITY = /&(?:a(?:mp?)?|l(?:t)?)?$/;
+
+/** Caps already quoted text, so the cap counts what is really sent. */
+function capQuoted(quoted: string): string {
+  if (quoted.length <= PER_MESSAGE_MAX_CHARS) return quoted;
+  const cut = cutSafely(quoted, PER_MESSAGE_MAX_CHARS).replace(PARTIAL_ENTITY, '');
+  return `${cut}${CUT_MARKER}`;
 }
 
 interface Entry {
@@ -74,18 +90,18 @@ interface Entry {
 function entryOf(message: StoredMessage): Entry | undefined {
   switch (message.kind) {
     case 'user':
-      return { label: 'User', body: quote(capText(message.text)) };
+      return { label: 'User', body: capQuoted(quote(message.text)) };
     case 'agent':
-      return { label: 'Assistant', body: quote(capText(message.text)) };
+      return { label: 'Assistant', body: capQuoted(quote(message.text)) };
     case 'tool':
       return {
         label: 'Tool call',
-        body: `${quote(capText(oneLine(message.title)))} (${quote(String(message.status))})`,
+        body: `${capQuoted(quote(oneLine(message.title)))} (${quote(String(message.status))})`,
       };
     case 'proposal':
       return {
         label: 'Proposed change',
-        body: `${quote(capText(oneLine(message.summary)))} (${quote(String(message.status))})`,
+        body: `${capQuoted(quote(oneLine(message.summary)))} (${quote(String(message.status))})`,
       };
     case 'notice':
       // Notices are app chatter, not conversation, so they are left out on purpose.
