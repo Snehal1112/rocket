@@ -14,7 +14,7 @@ pub fn substitute_path_params(url: &str, params: &[PathParam]) -> String {
     let usable: Vec<(&str, String)> = params
         .iter()
         .filter(|p| !p.name.is_empty() && !p.value.is_empty())
-        .map(|p| (p.name.as_str(), urlencoding::encode(&p.value).into_owned()))
+        .map(|p| (p.name.as_str(), encode_path_param_value(&p.value)))
         .collect();
     if usable.is_empty() {
         return url.to_string();
@@ -26,6 +26,12 @@ pub fn substitute_path_params(url: &str, params: &[PathParam]) -> String {
         .collect::<Vec<_>>()
         .join("/");
     format!("{}{}{}", &url[..start], rewritten, &url[end..])
+}
+
+/// The form a path parameter value takes in the URL. A caller that must find a substituted
+/// value again, such as a later variable pass, uses it to match the URL text exactly.
+pub fn encode_path_param_value(value: &str) -> String {
+    urlencoding::encode(value).into_owned()
 }
 
 fn is_delimiter(c: char) -> bool {

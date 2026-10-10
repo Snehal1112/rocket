@@ -16,7 +16,7 @@ use crate::flow_auth::{
     NoTokenFetcher,
 };
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
-use crate::flow_debug::{build_debug_request, cap_exchange};
+use crate::flow_debug::{build_debug_request, cap_exchange, sent_masks};
 use crate::flow_partial::{PartialPlan, PartialRun};
 use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
@@ -1745,7 +1745,10 @@ impl FlowExecutionService {
                         sent,
                         result.as_ref().ok().map(|o| &o.response),
                         error.as_deref(),
-                        secret_values,
+                        &sent_masks(
+                            secret_values,
+                            result.as_ref().ok().map(|o| &o.run_secret_values),
+                        ),
                     );
                     if *debug_on {
                         *debug = Some(record.clone());

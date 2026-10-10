@@ -33,7 +33,7 @@ pub use oauth2::{
     acquire_token, apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthConfig,
     OAuthToken,
 };
-pub use path_params::substitute_path_params;
+pub use path_params::{encode_path_param_value, substitute_path_params};
 pub use pkce::{generate_pkce, PkcePair};
 pub use proxy::{
     new_shared_proxy, ProxyMode, ProxySettings, ProxySettingsRepository, ResolvedProxy, SharedProxy,

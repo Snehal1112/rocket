@@ -8,7 +8,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowPollDetail};
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
-use crate::flow_debug::{build_debug_request, cap_exchange};
+use crate::flow_debug::{build_debug_request, cap_exchange, sent_masks};
 use crate::flow_execution_service::{
     to_flow_logs, CapturedOutput, ExecutedNode, FlowCoercion, FlowExecutionService, NodeRunContext,
     RunFlowInput,
@@ -119,7 +119,10 @@ impl FlowExecutionService {
                     sent,
                     result.as_ref().ok().map(|o| &o.response),
                     error.as_deref(),
-                    secret_values,
+                    &sent_masks(
+                        secret_values,
+                        result.as_ref().ok().map(|o| &o.run_secret_values),
+                    ),
                 );
                 if debug_on {
                     *debug = Some(record.clone());

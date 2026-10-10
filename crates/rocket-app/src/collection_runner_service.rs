@@ -994,6 +994,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_carried_runtime_variable_fills_a_later_steps_placeholder() {
+        let mut collection = Collection::new("my-api");
+        collection.root.add_request(req("First", "first.yml"));
+        let mut second = req("Second", "second.yml");
+        second.url = "https://api.test/second/{{TOKEN}}".into();
+        collection.root.add_request(second);
+
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "after-response",
+            ScriptResult {
+                runtime_vars: std::collections::HashMap::from([(
+                    "TOKEN".to_string(),
+                    serde_json::json!("abc123"),
+                )]),
+                ..Default::default()
+            },
+        );
+        let h = harness(collection, engine, RecordingExecutor::new());
+        h.runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(
+            h.executor.sent_urls(),
+            vec![
+                "https://api.test/first.yml".to_string(),
+                "https://api.test/second/abc123".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn publishes_started_step_and_finished_events() {
         use rocket_shared::events::DomainEvent;
 

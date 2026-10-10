@@ -10,6 +10,20 @@ use rocket_shared::events::{
 use rocket_shared::types::{Auth, Body, BodyMode, Header};
 use std::collections::HashSet;
 
+/// The masks for a sent-request record: the run's own secret values, plus those the send added,
+/// such as a runtime value a pre-request script set for a secret variable's name.
+pub(crate) fn sent_masks<'a>(
+    base: &'a HashSet<String>,
+    run: Option<&HashSet<String>>,
+) -> std::borrow::Cow<'a, HashSet<String>> {
+    match run {
+        Some(extra) if !extra.is_subset(base) => {
+            std::borrow::Cow::Owned(base.union(extra).cloned().collect())
+        }
+        _ => std::borrow::Cow::Borrowed(base),
+    }
+}
+
 /// Builds a debug record with every secret and credential masked.
 pub(crate) fn build_debug_request(
     sent: &HttpRequest,
@@ -255,6 +269,23 @@ mod tests {
 
     fn secrets(values: &[&str]) -> HashSet<String> {
         values.iter().map(|v| v.to_string()).collect()
+    }
+
+    #[test]
+    fn sent_masks_add_the_values_the_send_found() {
+        let base = secrets(&["flow-secret-1"]);
+        let run = secrets(&["flow-secret-1", "script-set-secret"]);
+        let sent = HttpRequest::new(HttpMethod::Get, "https://h.test/script-set-secret");
+        let record = build_debug_request(&sent, None, None, &sent_masks(&base, Some(&run)));
+        assert!(!record.url.contains("script-set-secret"), "{}", record.url);
+        assert!(matches!(
+            sent_masks(&base, Some(&secrets(&["flow-secret-1"]))),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            sent_masks(&base, None),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     fn header(key: &str, value: &str, enabled: bool) -> Header {

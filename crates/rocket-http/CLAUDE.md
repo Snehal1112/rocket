@@ -45,7 +45,7 @@ cargo test -p rocket-http <test_name>
 
 ## Key Design Rules
 
-- `HttpRequest` is the **resolved** request (variables already substituted). It is distinct from `rocket-collection`'s `Request`, which is a saved template.
+- `HttpRequest` is the **resolved** request (variables already substituted). `rocket-app` resolves it before the pre-request scripts, then once more after them for the placeholders still left, so runtime variables a script sets reach the request the executor gets. An unknown name stays as `{{name}}`. It is distinct from `rocket-collection`'s `Request`, which is a saved template.
 - `RequestOptions` defaults: `follow_redirects = true`, `timeout_ms = 30_000`, `verify_ssl = true`. These are applied via `#[serde(default)]`, so missing fields in JSON deserialise correctly.
 - `RequestOptions.client_certificates` is `Vec<ResolvedClientCertificate>` with `#[serde(skip)]`: it is never serialized and never read from IPC input. The selected environment is its only source (`rocket-app` fills it). Because it can hold key bytes, nothing may log or persist an `HttpRequest` or `RequestOptions` through another type. The tests in `request.rs` (`certificate_leaks`) pin `Debug` and `serde_json` output.
 - Auth is **stateless and functional**: `acquire_token`, `sign_request`, and `generate_pkce` are standalone functions. The service layer (`rocket-app`) calls them during request preparation — nothing here holds token state.

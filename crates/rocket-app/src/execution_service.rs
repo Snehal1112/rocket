@@ -339,6 +339,12 @@ pub(crate) struct PhaseState {
     /// Request paths of this run and the runs that started it, outermost first.
     /// `rok.runRequest` uses it to stop recursion.
     pub run_chain: Vec<String>,
+    /// Path parameters whose value still held a `{{placeholder}}` after the first resolution.
+    /// Their encoded form is in the URL, so `resolve_runtime_placeholders` finds them there.
+    pub pending_path_params: Vec<rocket_shared::types::PathParam>,
+    /// The body was GraphQL JSON and no script replaced it. Placeholders in it are then
+    /// JSON-escaped, as in the first resolution.
+    pub graphql_body: bool,
 }
 
 impl PhaseState {
@@ -1007,6 +1013,18 @@ impl RequestExecutionService {
         external_secrets: &std::collections::HashMap<String, String>,
         folders: &[FolderSettings],
     ) -> DomainResult<HttpRequest> {
+        self.resolve_request_parts(input, external_secrets, folders)
+            .map(|(request, _)| request)
+    }
+
+    /// `resolve_request_with_chain`, plus the path parameters with their values resolved. The
+    /// script phases keep the ones that still hold a placeholder for `resolve_runtime_placeholders`.
+    fn resolve_request_parts(
+        &self,
+        input: &ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+        folders: &[FolderSettings],
+    ) -> DomainResult<(HttpRequest, Vec<rocket_shared::types::PathParam>)> {
         // Build variable map: global_env < collection < env < folder < request.
         let mut vars = self.build_variable_context(
             input.global_env_name.as_deref(),
@@ -1104,7 +1122,7 @@ impl RequestExecutionService {
         options.client_certificates =
             self.environment_client_certificates(input, &vars, external_secrets);
 
-        Ok(HttpRequest {
+        let request = HttpRequest {
             method: input.method.clone(),
             url: resolved_url,
             headers: resolved_headers,
@@ -1112,7 +1130,8 @@ impl RequestExecutionService {
             body: resolved_body,
             auth: effective_auth,
             options,
-        })
+        };
+        Ok((request, resolved_path_params))
     }
 
     /// Returns the folder of `collection`, when the wiring knows where collections live.
@@ -1707,8 +1726,12 @@ impl RequestExecutionService {
         // with an error that names the folder.
         let folder_chain =
             self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())?;
-        let http_request =
-            self.resolve_request_with_chain(input, external_secrets, &folder_chain)?;
+        let (http_request, resolved_path_params) =
+            self.resolve_request_parts(input, external_secrets, &folder_chain)?;
+        let pending_path_params = resolved_path_params
+            .into_iter()
+            .filter(|p| !p.name.is_empty() && p.value.contains("{{"))
+            .collect();
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -1809,6 +1832,11 @@ impl RequestExecutionService {
                 .map(run_request::normalize_run_path)
                 .into_iter()
                 .collect(),
+            pending_path_params,
+            graphql_body: input
+                .body
+                .as_ref()
+                .is_some_and(|b| b.mode == BodyMode::GraphQl),
         })
     }
 
@@ -1933,6 +1961,7 @@ impl RequestExecutionService {
                         form_data: None,
                         file_path: None,
                     });
+                    state.graphql_body = false;
                 }
                 if let Some(n) = mutations.max_redirects {
                     state.http_request.options.max_redirects = Some(n);
@@ -1995,6 +2024,86 @@ impl RequestExecutionService {
         )
         .await;
 
+        // Runtime variables set above, or carried in by a run, fill the placeholders that are
+        // still in the request. Every caller runs this phase, so each send path gets it.
+        self.resolve_runtime_placeholders(input, state)
+    }
+
+    /// Fills the `{{placeholders}}` still left in the request once the pre-request scripts
+    /// and actions ran: in the URL, path parameters, query, headers, body and auth.
+    ///
+    /// The first resolution in `begin_phases` runs before any script, so it cannot see runtime
+    /// variables. This pass uses every scope with runtime on top. Only text that still holds
+    /// `{{` changes: a value the first pass filled in is not looked at again, so a
+    /// `{{$dynamic}}` value is never made twice, and an unknown name stays as written. Values
+    /// are put in once and not scanned again. A URL that this pass changes goes through the
+    /// request guard, like a script's `req.setUrl()`.
+    fn resolve_runtime_placeholders(
+        &self,
+        input: &ExecuteRequestInput,
+        state: &mut PhaseState,
+    ) -> DomainResult<()> {
+        mask_runtime_values_of_secret_keys(&mut state.var_ctx);
+        if state.pending_path_params.is_empty() && !has_placeholder(&state.http_request) {
+            return Ok(());
+        }
+        let vars = state.var_ctx.flatten();
+        let fill = |text: &str| -> String {
+            if text.contains("{{") {
+                resolve(text, &vars).output
+            } else {
+                text.to_string()
+            }
+        };
+
+        let mut request = state.http_request.clone();
+        // A path parameter was put in percent-encoded, so its placeholder no longer reads as
+        // `{{name}}` in the URL. Its encoded text is swapped for the newly encoded value.
+        for param in &state.pending_path_params {
+            let value = fill(&param.value);
+            if value != param.value && !value.is_empty() {
+                let old = rocket_http::encode_path_param_value(&param.value);
+                let new = rocket_http::encode_path_param_value(&value);
+                request.url = request.url.replace(&old, &new);
+            }
+        }
+        request.url = fill(&request.url);
+        for q in &mut request.query_params {
+            q.key = fill(&q.key);
+            q.value = fill(&q.value);
+        }
+        for h in &mut request.headers {
+            h.key = fill(&h.key);
+            h.value = fill(&h.value);
+        }
+        if let Some(body) = request.body.as_mut() {
+            if let Some(content) = body.content.as_mut() {
+                if content.contains("{{") {
+                    *content = if state.graphql_body {
+                        crate::graphql_request::resolve_json_text(content, |p| {
+                            resolve(p, &vars).output
+                        })
+                    } else {
+                        fill(content)
+                    };
+                }
+            }
+            if let Some(entries) = body.form_data.as_mut() {
+                for entry in entries {
+                    entry.value = fill(&entry.value);
+                }
+            }
+        }
+        request.auth = resolve_auth(request.auth, &vars);
+
+        if request.url != state.http_request.url {
+            self.check_request_guard(
+                &state.http_request.url,
+                &request.url,
+                &input.request_guard_policy,
+            )?;
+        }
+        state.http_request = request;
         Ok(())
     }
 
@@ -2587,6 +2696,67 @@ fn merge_runtime_vars(var_ctx: &mut rocket_environment::VariableContext, result:
     }
 }
 
+/// Whether any text of the request that a variable pass resolves still holds `{{`.
+fn has_placeholder(request: &HttpRequest) -> bool {
+    let has = |s: &str| s.contains("{{");
+    has(&request.url)
+        || request
+            .query_params
+            .iter()
+            .any(|q| has(&q.key) || has(&q.value))
+        || request.headers.iter().any(|h| has(&h.key) || has(&h.value))
+        || request.body.as_ref().is_some_and(|b| {
+            b.content.as_deref().is_some_and(has)
+                || b.form_data
+                    .as_ref()
+                    .is_some_and(|entries| entries.iter().any(|e| has(&e.value)))
+        })
+        || auth_has_placeholder(&request.auth)
+}
+
+/// Whether a credential field of `auth` holds `{{`. It checks the fields `resolve_auth` fills.
+fn auth_has_placeholder(auth: &Auth) -> bool {
+    // An identity pass that records whether any field it is shown holds a placeholder.
+    let found = std::cell::Cell::new(false);
+    let probe = |s: String| {
+        if s.contains("{{") {
+            found.set(true);
+        }
+        s
+    };
+    let _ = map_auth_fields(auth.clone(), probe);
+    found.get()
+}
+
+/// Treats a runtime value as secret when its key names a secret variable of another scope or a
+/// RocketVault value. A script that sets such a key gets its value masked like the original.
+fn mask_runtime_values_of_secret_keys(var_ctx: &mut VariableContext) {
+    let mut forms = Vec::new();
+    for (key, value) in &var_ctx.runtime {
+        if value.len() < MIN_REDACTION_LEN || var_ctx.secret_values.contains(value) {
+            continue;
+        }
+        let secret_key = var_ctx.external_secrets.contains_key(key)
+            || [
+                &var_ctx.global_env,
+                &var_ctx.collection,
+                &var_ctx.env,
+                &var_ctx.folder,
+                &var_ctx.request,
+            ]
+            .iter()
+            .any(|scope| {
+                scope
+                    .get(key)
+                    .is_some_and(|v| var_ctx.secret_values.contains(v))
+            });
+        if secret_key {
+            forms.extend(crate::redaction::redaction_forms(value));
+        }
+    }
+    var_ctx.secret_values.extend(forms);
+}
+
 /// Infers a `BodyMode` for a script-set string body from an explicit
 /// `Content-Type` header on the request, if the script set one. Falls back to
 /// `Json` (the historical default for `req.setBody()`) when no explicit
@@ -2625,7 +2795,12 @@ fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
 /// (Flow, collection runner) receive the raw collection auth, so it is done here.
 /// OAuth2 flows are left untouched.
 fn resolve_auth(auth: Auth, vars: &std::collections::HashMap<String, String>) -> Auth {
-    let r = |s: String| resolve(&s, vars).output;
+    map_auth_fields(auth, |s: String| resolve(&s, vars).output)
+}
+
+/// Applies `r` to each credential field of an auth value that variables may fill.
+/// OAuth2 flows are left untouched.
+fn map_auth_fields(auth: Auth, r: impl Fn(String) -> String) -> Auth {
     match auth {
         Auth::Basic { username, password } => Auth::Basic {
             username: r(username),
@@ -9700,5 +9875,318 @@ mod tests {
         let saved = env_repo.last_saved().expect("env_repo.save() was called");
         assert_eq!(saved.get_value("TOKEN"), None);
         assert_eq!(saved.get_value("KEEP"), Some("1"));
+    }
+
+    // ── Runtime variables fill the same request (G2.4) ──────────────────────
+
+    /// Script engine that records the request each before-request run saw.
+    struct RequestSeeingEngine {
+        result: ScriptResult,
+        seen: Mutex<Vec<HttpRequest>>,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for RequestSeeingEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            if ctx.phase == rocket_scripting::ScriptPhase::BeforeRequest {
+                self.seen.lock().expect("lock").push(ctx.request.clone());
+                Ok(self.result.clone())
+            } else {
+                Ok(ScriptResult::default())
+            }
+        }
+    }
+
+    struct SharedSeeingEngine(Arc<RequestSeeingEngine>);
+
+    #[async_trait]
+    impl ScriptEngine for SharedSeeingEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            self.0.execute(ctx).await
+        }
+    }
+
+    fn runtime_result(pairs: &[(&str, &str)]) -> ScriptResult {
+        ScriptResult {
+            runtime_vars: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// A service whose executor records the whole request, with history kept in memory.
+    fn runtime_svc(
+        env_repo: MockEnvRepo,
+        engine: Box<dyn ScriptEngine>,
+    ) -> (
+        RequestExecutionService,
+        Arc<CapturingExecutor>,
+        Arc<Mutex<Vec<HistoryEntry>>>,
+    ) {
+        let executor = Arc::new(CapturingExecutor {
+            sent: Mutex::new(None),
+        });
+        let history = MockHistoryRepo::new();
+        let saved = history.saved_entries_handle();
+        let svc = RequestExecutionService::new(
+            Box::new(env_repo),
+            Arc::clone(&executor) as Arc<dyn HttpExecutor>,
+            Box::new(history),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(engine);
+        (svc, executor, saved)
+    }
+
+    fn executor_request(executor: &CapturingExecutor) -> HttpRequest {
+        executor
+            .sent
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("the executor got a request")
+    }
+
+    fn header_value<'a>(request: &'a HttpRequest, name: &str) -> Option<&'a str> {
+        request
+            .headers
+            .iter()
+            .find(|h| h.key == name)
+            .map(|h| h.value.as_str())
+    }
+
+    #[tokio::test]
+    async fn a_pre_request_set_var_fills_url_path_query_header_body_and_auth() {
+        let engine = MockBeforeRequestEngine::returning(runtime_result(&[
+            ("seg", "orders"),
+            ("pid", "a b"),
+            ("qv", "q-1"),
+            ("tok", "tok-123"),
+        ]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/users/:id/{{seg}}", None);
+        input.pre_request_script = Some("// pre".into());
+        input.path_params = vec![rocket_shared::types::PathParam {
+            name: "id".into(),
+            value: "{{pid}}".into(),
+            description: None,
+        }];
+        input.query_params = vec![QueryParam {
+            key: "q".into(),
+            value: "{{qv}}".into(),
+            enabled: true,
+            description: None,
+        }];
+        input.headers = vec![Header::new("X-Token", "{{tok}}")];
+        input.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some(r#"{"t":"{{tok}}"}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        input.auth = Auth::Bearer {
+            token: "{{tok}}".into(),
+        };
+
+        let mut sent = None;
+        let output = svc
+            .execute_capturing(input, &std::collections::HashMap::new(), &mut sent)
+            .await
+            .expect("execute");
+
+        let request = executor_request(&executor);
+        assert_eq!(request.url, "https://api.test/users/a%20b/orders");
+        assert_eq!(request.query_params[0].value, "q-1");
+        assert_eq!(header_value(&request, "X-Token"), Some("tok-123"));
+        assert_eq!(
+            request.body.as_ref().and_then(|b| b.content.as_deref()),
+            Some(r#"{"t":"tok-123"}"#)
+        );
+        assert!(matches!(&request.auth, Auth::Bearer { token } if token == "tok-123"));
+        // The record of what was sent is the request the executor got.
+        let sent = sent.expect("captured");
+        assert_eq!(sent.url, request.url);
+        assert_eq!(header_value(&sent, "X-Token"), Some("tok-123"));
+        // The bearer token sent is in the credentials callers mask.
+        assert!(output.run_sent_credentials.contains("tok-123"));
+    }
+
+    #[tokio::test]
+    async fn the_pre_request_script_still_sees_the_unfilled_request() {
+        let engine = Arc::new(RequestSeeingEngine {
+            result: runtime_result(&[("tok", "tok-123")]),
+            seen: Mutex::new(Vec::new()),
+        });
+        let (svc, executor, _) = runtime_svc(
+            MockEnvRepo::empty(),
+            Box::new(SharedSeeingEngine(Arc::clone(&engine))),
+        );
+        let mut input = sample_input("https://api.test/{{tok}}", None);
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute");
+
+        let seen = engine.seen.lock().expect("lock");
+        assert_eq!(seen[0].url, "https://api.test/{{tok}}");
+        assert_eq!(executor_request(&executor).url, "https://api.test/tok-123");
+    }
+
+    #[tokio::test]
+    async fn dynamic_placeholders_are_generated_once() {
+        let engine = Arc::new(RequestSeeingEngine {
+            result: runtime_result(&[("tok", "tok-123")]),
+            seen: Mutex::new(Vec::new()),
+        });
+        let (svc, executor, _) = runtime_svc(
+            MockEnvRepo::empty(),
+            Box::new(SharedSeeingEngine(Arc::clone(&engine))),
+        );
+        let mut input = sample_input("https://api.test/{{tok}}", None);
+        input.pre_request_script = Some("// pre".into());
+        input.headers = vec![Header::new("X-Id", "{{$guid}}")];
+
+        let mut sent = None;
+        svc.execute_capturing(input, &std::collections::HashMap::new(), &mut sent)
+            .await
+            .expect("execute");
+
+        let seen_id = engine.seen.lock().expect("lock")[0]
+            .headers
+            .iter()
+            .find(|h| h.key == "X-Id")
+            .map(|h| h.value.clone())
+            .expect("the script saw the header");
+        assert!(!seen_id.contains("{{"), "the first pass made the value");
+        let request = executor_request(&executor);
+        assert_eq!(header_value(&request, "X-Id"), Some(seen_id.as_str()));
+        assert_eq!(
+            header_value(sent.as_ref().expect("captured"), "X-Id"),
+            Some(seen_id.as_str())
+        );
+        assert_eq!(request.url, "https://api.test/tok-123");
+    }
+
+    #[tokio::test]
+    async fn unresolved_names_and_script_written_braces_stay_literal() {
+        use rocket_scripting::RequestMutations;
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                body: Some(serde_json::json!("template {{notAVar}} and {{ open")),
+                ..Default::default()
+            }),
+            ..runtime_result(&[("tok", "tok-123")])
+        };
+        let engine = MockBeforeRequestEngine::returning(result);
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/{{missing}}/{{tok}}/{{$nope}}", None);
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute");
+
+        let request = executor_request(&executor);
+        assert_eq!(
+            request.url,
+            "https://api.test/{{missing}}/tok-123/{{$nope}}"
+        );
+        assert_eq!(
+            request.body.as_ref().and_then(|b| b.content.as_deref()),
+            Some("template {{notAVar}} and {{ open")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_runtime_value_in_a_graphql_body_is_json_escaped() {
+        let engine = MockBeforeRequestEngine::returning(runtime_result(&[("v", "a\"b")]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/graphql", None);
+        input.method = HttpMethod::Post;
+        input.pre_request_script = Some("// pre".into());
+        input.body = Some(Body {
+            mode: BodyMode::GraphQl,
+            content: Some(r#"{"query":"q","variables":{"v":"{{v}}"}}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        svc.execute(input).await.expect("execute");
+
+        let content = executor_request(&executor)
+            .body
+            .and_then(|b| b.content)
+            .expect("body");
+        let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+        assert_eq!(parsed["variables"]["v"], "a\"b");
+    }
+
+    #[tokio::test]
+    async fn a_script_set_value_for_a_secret_key_is_masked_in_history_and_outputs() {
+        use rocket_scripting::RequestMutations;
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("apiKey", "env-secret-123456"));
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("https://api.test/{{apiKey}}/{{copy}}".into()),
+                ..Default::default()
+            }),
+            ..runtime_result(&[
+                ("apiKey", "fresh-secret-789"),
+                ("copy", "env-secret-123456"),
+            ])
+        };
+        let engine = MockBeforeRequestEngine::returning(result);
+        let (svc, executor, saved) = runtime_svc(MockEnvRepo::with_env(env), Box::new(engine));
+        let mut input = sample_input("https://api.test/", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        let output = svc.execute(input).await.expect("execute");
+
+        assert_eq!(
+            executor_request(&executor).url,
+            "https://api.test/fresh-secret-789/env-secret-123456"
+        );
+        let history_url = saved.lock().expect("lock")[0].url.clone();
+        assert!(!history_url.contains("fresh-secret-789"), "{history_url}");
+        assert!(!history_url.contains("env-secret-123456"), "{history_url}");
+        assert!(output.run_secret_values.contains("fresh-secret-789"));
+        assert!(output.run_secret_values.contains("env-secret-123456"));
+    }
+
+    #[tokio::test]
+    async fn a_runtime_filled_url_goes_through_the_request_guard() {
+        let engine = MockBeforeRequestEngine::returning(runtime_result(&[(
+            "base",
+            "http://169.254.169.254",
+        )]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("{{base}}/latest/meta-data/", None);
+        input.pre_request_script = Some("// pre".into());
+        input.request_guard_policy = rocket_workspace::RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let err = svc.execute(input).await.expect_err("must be blocked");
+        assert!(err.to_string().contains("169.254.169.254"));
+        assert!(executor.sent.lock().expect("lock").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_nested_run_fills_placeholders_from_the_seeded_runtime() {
+        let (svc, executor, _) = runtime_svc(
+            MockEnvRepo::empty(),
+            Box::new(MockBeforeRequestEngine::returning(ScriptResult::default())),
+        );
+        let input = sample_input("https://api.test/{{tok}}", None);
+        let runtime =
+            std::collections::HashMap::from([("tok".to_string(), "from-caller".to_string())]);
+        svc.execute_nested(input, &std::collections::HashMap::new(), vec![], &runtime)
+            .await
+            .expect("nested run");
+        assert_eq!(
+            executor_request(&executor).url,
+            "https://api.test/from-caller"
+        );
     }
 }
