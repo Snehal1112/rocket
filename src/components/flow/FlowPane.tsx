@@ -28,7 +28,7 @@ import {
   parseGraphErrorMessage,
   shouldPromptForExpression,
 } from '@/lib/flow-wiring';
-import { findTabInTree } from '@/lib/pane-utils';
+import { findFlowTabAnywhere, findTabInTree } from '@/lib/pane-utils';
 import {
   type FlowEdge,
   type FlowNode,
@@ -330,19 +330,21 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
 
   // Adds the failed node's label while the node still exists, so the strip
   // keeps naming it after a rename or delete. Then snapshots the run for the
-  // history selector.
+  // history selector. The tab can be parked by a collection switch while its
+  // run goes on, so both reads look in the parked tabs too.
   const handleRunResult = useCallback(
     (result: FlowRunResult) => {
+      const anywhere = () => findFlowTabAnywhere(usePaneStore.getState(), tabId);
       const failed = result.failedNodeId
-        ? latestFlowTab()?.nodes.find((n) => n.id === result.failedNodeId)
+        ? anywhere()?.nodes.find((n) => n.id === result.failedNodeId)
         : undefined;
       const failedLabel = failed ? failed.kind.label || failed.id : undefined;
       setFlowRunResult(tabId, { ...result, ...(failedLabel ? { failedLabel } : {}) });
       // The store has just applied the result, so the tab now holds this run's maps.
-      const record = buildRunRecord(latestFlowTab(), result.runId, Date.now());
+      const record = buildRunRecord(anywhere(), result.runId, Date.now());
       if (record) recordFlowRun(tabId, record);
     },
-    [latestFlowTab, recordFlowRun, setFlowRunResult, tabId],
+    [recordFlowRun, setFlowRunResult, tabId],
   );
 
   // Selects the node an issue names and opens its Settings tab.

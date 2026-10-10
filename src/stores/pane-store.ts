@@ -1114,8 +1114,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   patchFlowNodeStatus(tabId, nodeId, status, detail) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    // Also reaches a tab parked by switchCollection, so a run that goes on there keeps its results.
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         if (!tab.nodes.some((n) => n.id === nodeId)) return tab;
         return {
@@ -1124,15 +1125,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           nodeDetail: detail ? { ...tab.nodeDetail, [nodeId]: detail } : tab.nodeDetail,
         };
       }),
-    });
+    );
   },
 
   // Merges progress into the node's detail and leaves its status alone. The
   // next status patch with a detail replaces the detail, which clears it.
   // A finished run ignores late progress.
   patchFlowNodeProgress(tabId, nodeId, message, live) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         if (tab.runState === 'done') return tab;
         if (!tab.nodes.some((n) => n.id === nodeId)) return tab;
@@ -1149,7 +1150,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           },
         };
       }),
-    });
+    );
   },
 
   setFlowRunState(tabId, runState, runId) {
@@ -1233,8 +1234,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   setFlowRunResult(tabId, lastRun) {
-    set({
-      root: updateTabInTree(get().root, tabId, (tab) => {
+    set(
+      updateTabEverywhere(get(), tabId, (tab) => {
         if (!isFlowTab(tab)) return tab;
         if (!lastRun) return { ...tab, lastRun: undefined };
         // A late result from an older run must not show during a newer run.
@@ -1243,7 +1244,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         }
         return { ...tab, lastRun: mergeRunResult(tab.lastRun, lastRun) };
       }),
-    });
+    );
   },
 
   recordFlowRun(tabId, record) {

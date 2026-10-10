@@ -9,6 +9,7 @@ import { extractPathParams, parseQueryParams } from '@/lib/url-params';
 import { createDefaultWebSocketDraft } from '@/lib/websocket-messages';
 import type {
   BodyState,
+  FlowTab,
   FolderTab,
   GrpcState,
   LeafNode,
@@ -18,7 +19,7 @@ import type {
   SplitNode,
   Tab,
 } from '@/types/pane-types';
-import { isFolderTab, isScriptTab } from '@/types/pane-types';
+import { isFlowTab, isFolderTab, isScriptTab } from '@/types/pane-types';
 
 // Maps an API Request (from the Tauri backend) to the frontend RequestState shape.
 export function mapApiRequestToState(req: ApiRequest, fromCollection = false): RequestState {
@@ -231,6 +232,21 @@ export function findTabInTree(node: PaneNode, tabId: string): { leaf: LeafNode; 
     return tab ? { leaf: node, tab } : null;
   }
   return findTabInTree(node.children[0], tabId) ?? findTabInTree(node.children[1], tabId);
+}
+
+// Finds a flow tab in the live tree, then in the tabs parked by a collection switch.
+// The live copy wins, because a parked snapshot can be stale.
+export function findFlowTabAnywhere(
+  state: { root: PaneNode; collectionTabState: Record<string, { tabs: Tab[] }> },
+  tabId: string,
+): FlowTab | null {
+  const live = findTabInTree(state.root, tabId);
+  if (live) return isFlowTab(live.tab) ? live.tab : null;
+  for (const entry of Object.values(state.collectionTabState)) {
+    const parked = entry.tabs.find((t) => t.id === tabId);
+    if (parked && isFlowTab(parked)) return parked;
+  }
+  return null;
 }
 
 // True when `path` is `folder` itself or lives below it, matching whole path segments.

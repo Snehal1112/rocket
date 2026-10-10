@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { findTabInTree } from '@/lib/pane-utils';
+import { findFlowTabAnywhere, findTabInTree } from '@/lib/pane-utils';
 import { newFlowRunId } from '@/lib/flow-run-id';
 import {
   type FlowRunSummary,
@@ -66,6 +66,13 @@ function Harness() {
     const t = s.root.tabs.find((x) => x.id === tabId);
     return t && isFlowTab(t) ? t : null;
   });
+  if (!tab) return null;
+  return <FlowPane tab={tab} groupId={usePaneStore.getState().activeGroupId} />;
+}
+
+// Keeps the pane mounted while the tab is parked in a collection snapshot.
+function AnywhereHarness() {
+  const tab = usePaneStore((s) => findFlowTabAnywhere(s, tabId));
   if (!tab) return null;
   return <FlowPane tab={tab} groupId={usePaneStore.getState().activeGroupId} />;
 }
@@ -157,5 +164,43 @@ describe('FlowPane run history recording', () => {
     await waitFor(() => expect(runFlow).toHaveBeenCalled());
     await waitFor(() => expect(storedTab().runState).toBe('done'));
     expect(storedTab().runHistory ?? []).toHaveLength(0);
+  });
+
+  it('records the run of a tab that was parked by a collection switch mid-run', async () => {
+    usePaneStore.setState({ activeCollection: 'demo' });
+    render(<AnywhereHarness />);
+    vi.mocked(runFlow).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRun = resolve;
+        }),
+    );
+    startedHandler = undefined;
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled());
+    vi.mocked(newFlowRunId).mockReturnValueOnce('run-parked');
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    act(() => {
+      startedHandler?.({
+        type: 'flowRunStarted',
+        run_id: 'run-parked',
+        flow_name: 'rec',
+        collection: 'demo',
+        total_nodes: 1,
+      });
+    });
+    act(() => usePaneStore.getState().switchCollection('other'));
+    expect(findTabInTree(usePaneStore.getState().root, tabId)).toBeNull();
+
+    await act(async () => {
+      resolveRun(summaryFor('run-parked', 'success'));
+    });
+
+    await waitFor(() =>
+      expect(findFlowTabAnywhere(usePaneStore.getState(), tabId)?.runHistory).toHaveLength(1),
+    );
+    const parked = findFlowTabAnywhere(usePaneStore.getState(), tabId);
+    expect(parked?.runHistory?.[0].runId).toBe('run-parked');
+    expect(parked?.runHistory?.[0].nodeStatus).toEqual({ out1: 'success' });
   });
 });

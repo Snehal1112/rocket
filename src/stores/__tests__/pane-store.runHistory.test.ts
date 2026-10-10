@@ -137,6 +137,31 @@ describe('pane-store flow run history', () => {
     expect(stored().viewedRunId).toBe('r1');
   });
 
+  it('keeps node status, progress and the final result of a run on a parked tab', () => {
+    const api = usePaneStore.getState();
+    usePaneStore.setState({ activeCollection: 'demo' });
+    api.setFlowRunState(tabId, 'running', 'run-1');
+    api.switchCollection('other');
+    api.patchFlowNodeStatus(tabId, 'a', 'running');
+    api.patchFlowNodeProgress(tabId, 'a', 'attempt 2/5');
+    api.setFlowRunResult(tabId, {
+      runId: 'run-1',
+      stoppedReason: 'completed',
+      totalMs: 5,
+      failedCount: 0,
+      skippedCount: 0,
+    });
+    api.switchCollection('demo');
+    expect(stored().lastRun?.runId).toBe('run-1');
+    expect(stored().nodeStatus).toEqual({ a: 'running' });
+    expect(stored().nodeDetail?.a.progress).toBe('attempt 2/5');
+  });
+
+  it('a node status patch for an unknown tab changes nothing', () => {
+    usePaneStore.getState().patchFlowNodeStatus('missing', 'a', 'success');
+    expect(stored().nodeStatus).toEqual({});
+  });
+
   it('keeps the callback URLs of a run out of its history record', () => {
     const api = usePaneStore.getState();
     api.setFlowRunState(tabId, 'running', 'run-1');

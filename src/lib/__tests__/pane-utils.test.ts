@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { LeafNode, PaneNode, RequestTab } from '@/types/pane-types';
+import type { FlowTab, LeafNode, PaneNode, RequestTab } from '@/types/pane-types';
 import {
   collectAllTabs,
   collectLeafGroupIds,
   createDefaultLeaf,
   createDefaultRequest,
   findActiveLeaf,
+  findFlowTabAnywhere,
   findFirstLeaf,
   findLeaf,
   findTabInTree,
@@ -275,5 +276,47 @@ describe('mapApiRequestToState body', () => {
     });
     expect(state.body.filePath).toBe('/tmp/dir/blob.bin');
     expect(state.body.fileName).toBe('blob.bin');
+  });
+});
+
+describe('findFlowTabAnywhere', () => {
+  const flow: FlowTab = {
+    id: 'flow-any-1',
+    title: 'Flow: f',
+    isDirty: false,
+    tabType: 'flow',
+    collectionName: 'demo',
+    flowName: 'f',
+    nodes: [],
+    edges: [],
+    nodeStatus: {},
+    runState: 'idle',
+  };
+  const emptyRoot: PaneNode = createDefaultLeaf('g1');
+  const liveRoot: PaneNode = { ...createDefaultLeaf('g1'), tabs: [flow], activeTabId: flow.id };
+
+  it('finds a tab in the live tree', () => {
+    expect(findFlowTabAnywhere({ root: liveRoot, collectionTabState: {} }, flow.id)).toBe(flow);
+  });
+
+  it('finds a tab parked in a collection snapshot', () => {
+    const state = {
+      root: emptyRoot,
+      collectionTabState: { other: { tabs: [flow], activeTabId: flow.id } },
+    };
+    expect(findFlowTabAnywhere(state, flow.id)).toBe(flow);
+  });
+
+  it('prefers the live copy over a stale parked copy', () => {
+    const stale: FlowTab = { ...flow, title: 'stale' };
+    const state = {
+      root: liveRoot,
+      collectionTabState: { other: { tabs: [stale], activeTabId: stale.id } },
+    };
+    expect(findFlowTabAnywhere(state, flow.id)).toBe(flow);
+  });
+
+  it('returns null for a missing id', () => {
+    expect(findFlowTabAnywhere({ root: liveRoot, collectionTabState: {} }, 'nope')).toBeNull();
   });
 });
