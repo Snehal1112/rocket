@@ -63,17 +63,23 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
         .collect();
 
     for edge in &flow.edges {
-        adjacency
-            .get_mut(edge.source_node_id.as_str())
-            .expect("source_node_id validated against node_ids above")
-            .push(edge.target_node_id.as_str());
-        *in_degree
-            .get_mut(edge.target_node_id.as_str())
-            .expect("target_node_id validated against node_ids above") += 1;
+        let Some(targets) = adjacency.get_mut(edge.source_node_id.as_str()) else {
+            return Err(FlowGraphError::UnknownNode {
+                node_id: edge.source_node_id.clone(),
+            });
+        };
+        targets.push(edge.target_node_id.as_str());
+        let Some(degree) = in_degree.get_mut(edge.target_node_id.as_str()) else {
+            return Err(FlowGraphError::UnknownNode {
+                node_id: edge.target_node_id.clone(),
+            });
+        };
+        *degree += 1;
     }
 
     // Node ids are unique, so each node is enqueued at most once. Each edge
-    // is therefore walked at most once, and a degree never drops below zero.
+    // is therefore walked at most once. A degree never drops below zero, so
+    // `saturating_sub` is only a guard.
     let mut queue: VecDeque<&str> = flow
         .nodes
         .iter()
@@ -84,14 +90,11 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     let mut order: Vec<String> = Vec::with_capacity(flow.nodes.len());
     while let Some(id) = queue.pop_front() {
         order.push(id.to_string());
-        for &next in adjacency
-            .get(id)
-            .expect("every node id was inserted into adjacency above")
-        {
-            let degree = in_degree
-                .get_mut(next)
-                .expect("next came from adjacency, built only from validated node ids");
-            *degree -= 1;
+        for &next in adjacency.get(id).into_iter().flatten() {
+            let Some(degree) = in_degree.get_mut(next) else {
+                continue;
+            };
+            *degree = degree.saturating_sub(1);
             if *degree == 0 {
                 queue.push_back(next);
             }
@@ -127,13 +130,12 @@ fn cycle_nodes_and_edges(
     for edge in &flow.edges {
         let (source, target) = (edge.source_node_id.as_str(), edge.target_node_id.as_str());
         if leftover.contains(source) && leftover.contains(target) {
-            *out_degree
-                .get_mut(source)
-                .expect("source is in leftover, which seeded out_degree") += 1;
-            predecessors
-                .get_mut(target)
-                .expect("target is in leftover, which seeded predecessors")
-                .push(source);
+            if let Some(out) = out_degree.get_mut(source) {
+                *out += 1;
+            }
+            if let Some(before) = predecessors.get_mut(target) {
+                before.push(source);
+            }
         }
     }
 
@@ -145,14 +147,11 @@ fn cycle_nodes_and_edges(
     let mut peeled: HashSet<&str> = HashSet::new();
     while let Some(id) = queue.pop_front() {
         peeled.insert(id);
-        for &prev in predecessors
-            .get(id)
-            .expect("queued ids come from out_degree, which shares keys with predecessors")
-        {
-            let degree = out_degree
-                .get_mut(prev)
-                .expect("prev came from predecessors, built only from leftover ids");
-            *degree -= 1;
+        for &prev in predecessors.get(id).into_iter().flatten() {
+            let Some(degree) = out_degree.get_mut(prev) else {
+                continue;
+            };
+            *degree = degree.saturating_sub(1);
             if *degree == 0 {
                 queue.push_back(prev);
             }
@@ -296,6 +295,44 @@ mod tests {
         assert!(pos("a") < pos("c"));
         assert!(pos("b") < pos("d"));
         assert!(pos("c") < pos("d"));
+    }
+
+    #[test]
+    fn parallel_edges_count_twice_and_keep_the_exact_order() {
+        let flow = Flow {
+            name: "parallel".to_string(),
+            nodes: vec![node("a"), node("b"), node("c")],
+            edges: vec![
+                edge("e1", "a", "b"),
+                edge("e2", "a", "b"),
+                edge("e3", "b", "c"),
+            ],
+            callback_host: None,
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Ok(vec!["a".to_string(), "b".to_string(), "c".to_string()])
+        );
+    }
+
+    #[test]
+    fn diamond_with_a_tail_has_a_fixed_order() {
+        let flow = Flow {
+            name: "diamond-tail".to_string(),
+            nodes: vec![node("a"), node("b"), node("c"), node("d"), node("e")],
+            edges: vec![
+                edge("e1", "a", "b"),
+                edge("e2", "a", "c"),
+                edge("e3", "b", "d"),
+                edge("e4", "c", "d"),
+                edge("e5", "d", "e"),
+            ],
+            callback_host: None,
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Ok(["a", "b", "c", "d", "e"].map(String::from).to_vec())
+        );
     }
 
     #[test]
