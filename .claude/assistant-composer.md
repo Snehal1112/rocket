@@ -30,4 +30,5 @@ Code: `src/components/assistant/composer/` and `src/lib/assistant/`.
 - Model and Effort come from the session's config options with ids `model` and `effort`, and a picker is hidden when its option is absent. `setAgentConfigOption` returns the full list, which replaces the store's list.
 - Pickers are disabled with a title explaining why (no session, or a reply is running).
 - Send becomes Stop while a turn runs. Stop right after Send may do nothing until the reply starts.
+- A continued session shows "Earlier conversation attached as context: N characters" above the chips until the first message goes out (`replaySizeHint`).
 - The context indicator shows `used / size` as a percentage, with tokens and cost on hover. It is hidden when the size is 0.
