@@ -130,6 +130,29 @@ describe('assistant-store', () => {
     });
   });
 
+  it('clears the focus when a fatal failure ends the session', () => {
+    activate();
+    store().setFocus({ collection: 'orders', path: 'get.yml' });
+    store().failMessage('s1', 'busy', false);
+    expect(store().focus).toEqual({ collection: 'orders', path: 'get.yml' });
+    store().failMessage('s1', 'agent crashed');
+    expect(store().focus).toBeUndefined();
+  });
+
+  it('clears the focus when the session ends', () => {
+    activate();
+    store().setFocus({ collection: 'orders', path: 'get.yml' });
+    store().endSession();
+    expect(store().focus).toBeUndefined();
+  });
+
+  it('keeps a focus set just before a session begins', () => {
+    store().setFocus({ collection: 'orders', path: 'get.yml' });
+    const token = store().beginSession('agent-1', 'ask');
+    store().activateSession(token, 's1', []);
+    expect(store().focus).toEqual({ collection: 'orders', path: 'get.yml' });
+  });
+
   it('drops the proposals when a failure ends the session', () => {
     activate();
     store().upsertProposal(makeProposal());

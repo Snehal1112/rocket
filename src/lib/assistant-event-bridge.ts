@@ -4,6 +4,7 @@ import {
   sweepStaleAssistantSessions,
   WORKSPACE_SWITCH_NOTICE,
 } from '@/lib/assistant/assistant-session';
+import { findActiveLeaf } from '@/lib/pane-utils';
 import {
   configOptionsFromEvent,
   listAgentProposals,
@@ -16,8 +17,10 @@ import {
   onAgentToolActivity,
   onAgentUsage,
 } from '@/lib/tauri-api';
-import { useAssistantStore } from '@/stores/assistant-store';
+import { type AssistantFocus, useAssistantStore } from '@/stores/assistant-store';
+import { type PaneState, usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
+import { isRequestTab } from '@/types/pane-types';
 
 // The created event names one proposal. The list carries the full DTOs.
 async function refreshProposals(sessionId: string): Promise<void> {
@@ -29,6 +32,20 @@ async function refreshProposals(sessionId: string): Promise<void> {
   } catch (err) {
     console.error('[assistant] failed to load proposals', err);
   }
+}
+
+/** The saved request in the active tab of the active pane, if there is one. */
+export function activeRequestFocus(
+  state: Pick<PaneState, 'root' | 'activeGroupId'>,
+): AssistantFocus | undefined {
+  const leaf = findActiveLeaf(state.root, state.activeGroupId);
+  const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
+  if (!tab || !isRequestTab(tab) || !tab.source) return undefined;
+  return { collection: tab.source.collection, path: tab.source.path };
+}
+
+function sameFocus(a: AssistantFocus | undefined, b: AssistantFocus | undefined): boolean {
+  return a?.collection === b?.collection && a?.path === b?.path;
 }
 
 /**
@@ -104,9 +121,22 @@ export function useAssistantEventBridge(): void {
       void endAssistantSession(WORKSPACE_SWITCH_NOTICE);
     });
 
+    // The focus follows the active request tab. Only a change of that tab
+    // sets it, so nothing is set on mount and an unrelated pane update is a no-op.
+    // Closing the chip clears the focus until the next switch.
+    let lastTabFocus = activeRequestFocus(usePaneStore.getState());
+    const unsubPane = usePaneStore.subscribe((state) => {
+      if (disposed) return;
+      const next = activeRequestFocus(state);
+      if (sameFocus(next, lastTabFocus)) return;
+      lastTabFocus = next;
+      store().setFocus(next);
+    });
+
     return () => {
       disposed = true;
       unsubWorkspace();
+      unsubPane();
       void settled.then((fns) => {
         for (const fn of fns) fn();
       });

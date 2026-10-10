@@ -50,6 +50,15 @@ describe('assistant session flows', () => {
     expect(store().session?.configOptions[0].currentValue).toBe('opus');
   });
 
+  it('keeps a focus set just before the start and clears it when the session ends', async () => {
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's1', configOptions: [] });
+    store().setFocus({ collection: 'orders', path: 'get.yml' });
+    await startAssistant('agent-1');
+    expect(store().focus).toEqual({ collection: 'orders', path: 'get.yml' });
+    await endAssistantSession();
+    expect(store().focus).toBeUndefined();
+  });
+
   it('ends the backend session of a failed session before starting a new one', async () => {
     activate('s-old');
     store().appendUserMessage('hi');

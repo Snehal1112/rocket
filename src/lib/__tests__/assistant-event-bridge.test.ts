@@ -7,6 +7,7 @@ import {
 import { loadPromptHistory, savePromptHistory } from '@/lib/assistant/prompt-history';
 import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
+import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { makeProposal } from '@/test/assistant-fixtures';
 import { createDeferred } from '@/test/deferred';
@@ -220,5 +221,80 @@ describe('useAssistantEventBridge', () => {
     first.unmount();
     renderHook(() => useAssistantEventBridge());
     await waitFor(() => expect(mocks.api.endStaleAssistantSessions).toHaveBeenCalledTimes(1));
+  });
+
+  describe('focus follows the active tab', () => {
+    const requestTab = (id: string, collection: string, path: string) =>
+      ({ id, tabType: 'request', title: id, source: { collection, path } }) as never;
+    const otherTab = (id: string, tabType: string) => ({ id, tabType, title: id }) as never;
+
+    function showTabs(tabs: unknown[], activeTabId: string): void {
+      usePaneStore.setState({
+        root: { type: 'leaf', groupId: 'g1', tabs, activeTabId } as never,
+        activeGroupId: 'g1',
+      });
+    }
+
+    beforeEach(() => showTabs([], ''));
+
+    it('sets the focus of a newly active saved request', async () => {
+      showTabs([requestTab('a', 'shop', 'a.yml'), requestTab('b', 'shop', 'b.yml')], 'a');
+      await mountBridge();
+      expect(store().focus).toBeUndefined();
+      showTabs([requestTab('a', 'shop', 'a.yml'), requestTab('b', 'shop', 'b.yml')], 'b');
+      expect(store().focus).toEqual({ collection: 'shop', path: 'b.yml' });
+    });
+
+    it('clears the focus on a tab that is not a saved request', async () => {
+      const tabs = [
+        requestTab('a', 'shop', 'a.yml'),
+        otherTab('f', 'folder'),
+        { id: 'u', tabType: 'request', title: 'u' } as never,
+      ];
+      showTabs(tabs, 'a');
+      await mountBridge();
+      showTabs(tabs, 'f');
+      expect(store().focus).toBeUndefined();
+      showTabs(tabs, 'a');
+      expect(store().focus).toEqual({ collection: 'shop', path: 'a.yml' });
+      showTabs(tabs, 'u');
+      expect(store().focus).toBeUndefined();
+      showTabs([], '');
+      expect(store().focus).toBeUndefined();
+    });
+
+    it('sets a new focus on a tab switch after the chip was closed', async () => {
+      const tabs = [requestTab('a', 'shop', 'a.yml'), requestTab('b', 'shop', 'b.yml')];
+      showTabs(tabs, 'a');
+      await mountBridge();
+      store().setFocus({ collection: 'shop', path: 'a.yml' });
+      store().setFocus(undefined);
+      showTabs(tabs, 'a');
+      expect(store().focus).toBeUndefined();
+      showTabs(tabs, 'b');
+      expect(store().focus).toEqual({ collection: 'shop', path: 'b.yml' });
+    });
+
+    it('does not touch the store while the same request stays active', async () => {
+      const tabs = [requestTab('a', 'shop', 'a.yml'), requestTab('b', 'shop', 'b.yml')];
+      showTabs(tabs, 'a');
+      await mountBridge();
+      showTabs(tabs, 'b');
+      const setFocus = vi.spyOn(store(), 'setFocus');
+      useAssistantStore.setState({ setFocus });
+      showTabs([...tabs, otherTab('x', 'folder')], 'b');
+      showTabs(tabs, 'b');
+      expect(setFocus).not.toHaveBeenCalled();
+    });
+
+    it('stops following the tabs after unmount', async () => {
+      const tabs = [requestTab('a', 'shop', 'a.yml'), requestTab('b', 'shop', 'b.yml')];
+      showTabs(tabs, 'a');
+      const view = renderHook(() => useAssistantEventBridge());
+      await waitFor(() => expect(mocks.handlers.proposalResolved).toBeDefined());
+      view.unmount();
+      showTabs(tabs, 'b');
+      expect(store().focus).toBeUndefined();
+    });
   });
 });

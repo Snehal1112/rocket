@@ -100,7 +100,7 @@ export interface AssistantState {
   setUsage: (sessionId: string, usage: AssistantUsage) => void;
   upsertProposal: (proposal: AgentProposal) => void;
   resolveProposal: (sessionId: string, proposalId: string, status: ProposalStatus) => void;
-  /** Ends the session in the UI and discards its proposals. */
+  /** Ends the session in the UI, discards its proposals and clears the focus. */
   endSession: (notice?: string) => void;
   /** Clears the session and conversation. Keeps the panel state and focus. */
   reset: () => void;
@@ -223,6 +223,8 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         messages: settleStreaming(state.messages, error),
         // A dead session cannot apply anything, so its proposals go too.
         proposals: fatal ? [] : state.proposals,
+        // A fatal failure returns to the Start view, so the context goes too.
+        ...(fatal ? { focus: undefined } : {}),
       };
     });
   },
@@ -307,6 +309,9 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         ? [...settled, { kind: 'notice', id: crypto.randomUUID(), text: notice }]
         : settled,
       proposals: [],
+      // A restarted agent must not inherit the stale context. The start itself
+      // keeps a focus set just before it, so only the end clears it.
+      focus: undefined,
     });
   },
 

@@ -59,7 +59,6 @@ export function Composer() {
   // A turn runs while this composer's send is in flight or the store's reply still streams.
   const running = sending || turnRunning;
   const [extraChips, setExtraChips] = useState<ComposerChip[]>([]);
-  const [dismissedFocusKey, setDismissedFocusKey] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>(() => loadPromptHistory(workspaceId));
   // Refs answer "what is typed" and "is a turn running" at once, before React re-renders,
   // so two quick Enters cannot start two turns.
@@ -75,7 +74,6 @@ export function Composer() {
       textRef.current = '';
       setText('');
       setExtraChips([]);
-      setDismissedFocusKey(null);
     }
   }, [workspaceId]);
 
@@ -86,9 +84,9 @@ export function Composer() {
   const focusItem = useMemo(() => focusReference(focus, usePaneStore.getState().root), [focus]);
 
   const chips = useMemo<ComposerChip[]>(() => {
-    if (!focusItem || chipKey(focusItem) === dismissedFocusKey) return extraChips;
+    if (!focusItem) return extraChips;
     return [{ key: chipKey(focusItem), item: focusItem, focus: true }, ...extraChips];
-  }, [focusItem, dismissedFocusKey, extraChips]);
+  }, [focusItem, extraChips]);
 
   const referenceSource = useCallback(
     (query: string) => {
@@ -117,7 +115,8 @@ export function Composer() {
 
   const handleRemoveChip = (key: string) => {
     if (chips.some((chip) => chip.key === key && chip.focus)) {
-      setDismissedFocusKey(key);
+      // The X clears the focus until the next tab switch or AI Assist click.
+      useAssistantStore.getState().setFocus(undefined);
       return;
     }
     setExtraChips((current) => removeChip(current, key));
@@ -167,8 +166,6 @@ export function Composer() {
       textRef.current = '';
       setText('');
       setExtraChips([]);
-      // The focus chip comes back for the next message.
-      setDismissedFocusKey(null);
       // The send flow adds the user message, refuses a second turn and fails the turn
       // (not the session) when the send throws.
       await sendAssistantMessage(prompt, resources.length > 0 ? resources : undefined);

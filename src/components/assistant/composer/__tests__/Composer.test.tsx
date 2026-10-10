@@ -126,6 +126,18 @@ describe('Composer', () => {
     expect(screen.getByText('list')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Remove list' }));
     expect(screen.queryByText('list')).toBeNull();
+    expect(useAssistantStore.getState().focus).toBeUndefined();
+  });
+
+  it('does not bring the focus chip back after a send', async () => {
+    const { user, content, view } = renderComposer();
+    await user.click(screen.getByRole('button', { name: 'Remove list' }));
+    typeInto(view, 'Explain it');
+    pressEnter(content);
+    await waitFor(() => expect(sendAgentPrompt).toHaveBeenCalledWith('s1', 'Explain it', undefined));
+    await waitFor(() => expect(view.state.doc.toString()).toBe(''));
+    expect(screen.queryByText('list')).toBeNull();
+    expect(useAssistantStore.getState().focus).toBeUndefined();
   });
 
   it('sends the prompt with the focus chip as a backend-built resource', async () => {
