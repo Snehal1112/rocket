@@ -306,6 +306,14 @@ impl CollectionRepository for FsCollectionRepo {
         variables::get_folder_chain_variables(self, collection, request_path)
     }
 
+    fn get_folder_chain_variables_strict(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        variables::folder_chain_variables(self, collection, request_path, true)
+    }
+
     fn get_folder_variables(
         &self,
         collection: &str,

@@ -2755,12 +2755,26 @@ mod tests {
     #[tokio::test]
     async fn response_chip_works_for_a_request_that_is_not_saved() {
         let repo = ConfigurableCollectionRepo::new();
+        // The real repo answers `NotFound` for the variables of a request that is not saved.
+        repo.missing_request_variables();
         let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
         let chip = svc
             .mask_response_chip("my-api", "unsaved.yml", None, &echo_response("plain body"))
             .await
             .expect("chip");
         assert!(chip.text.contains("plain body"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_an_unsaved_request_hits_an_io_error() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.fail_request_variables();
+        let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
+        let err = svc
+            .mask_response_chip("my-api", "unsaved.yml", None, &echo_response("body"))
+            .await
+            .expect_err("an Io error is not a missing source");
+        assert!(err.to_string().contains("variable scopes"), "{err}");
     }
 
     #[tokio::test]

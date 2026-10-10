@@ -269,8 +269,8 @@ impl McpToolService {
         let env_names: Vec<String> = environments.iter().map(|env| env.name.clone()).collect();
         let mut secrets = variable_secrets.clone();
         if let Some(path) = request_path {
-            // The wrap in `Some` is for the helpers below, which take an optional settings.
-            // Unlike a best-effort read, a failure here refuses the chip.
+            // The helpers below take `Option<&CollectionSettings>` because other callers have
+            // none. Here the settings are always read, and a read error refuses the chip.
             let settings = Some(
                 self.collection_repo
                     .get_settings(collection)

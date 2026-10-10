@@ -21,6 +21,17 @@ pub(super) fn get_folder_chain_variables(
     collection: &str,
     request_path: &str,
 ) -> DomainResult<Vec<CollectionVariable>> {
+    folder_chain_variables(repo, collection, request_path, false)
+}
+
+/// The folder chain walk. With `strict` off a `folder.yml` that cannot be read or parsed is
+/// skipped. With `strict` on it is an error. A missing `folder.yml` is always skipped.
+pub(super) fn folder_chain_variables(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    request_path: &str,
+    strict: bool,
+) -> DomainResult<Vec<CollectionVariable>> {
     Collection::validate_name(collection)?;
     let collection_dir = repo.collection_path(collection);
     let path = std::path::Path::new(request_path);
@@ -52,11 +63,17 @@ pub(super) fn get_folder_chain_variables(
         if !folder_yml.exists() {
             continue;
         }
-        let Ok(content) = fs::read_to_string(&folder_yml) else {
-            continue;
+        let content = match fs::read_to_string(&folder_yml) {
+            Ok(content) => content,
+            Err(e) if strict => return Err(e.into()),
+            Err(_) => continue,
         };
-        let Ok(oc_folder) = parse_folder_yml(&content) else {
-            continue;
+        let oc_folder = match parse_folder_yml(&content) {
+            Ok(oc_folder) => oc_folder,
+            Err(e) if strict => {
+                return Err(DomainError::Internal(format!("Failed to parse folder.yml: {e}")))
+            }
+            Err(_) => continue,
         };
         let Some(req) = oc_folder.request else {
             continue;
@@ -105,7 +122,15 @@ pub(super) fn get_request_variables(
     Collection::validate_name(collection)?;
     let collection_dir = repo.collection_path(collection);
     let file_path = resolve_request_path(repo, &collection_dir, request_path)?;
-    let content = fs::read_to_string(&file_path)?;
+    // A request file that does not exist (a tab not saved yet) is `NotFound`, so callers can
+    // tell it apart from a real read failure.
+    let content = match fs::read_to_string(&file_path) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(DomainError::NotFound(format!("request '{request_path}'")))
+        }
+        Err(e) => return Err(e.into()),
+    };
     let vars = runtime_variables_of(&content)?
         .into_iter()
         .map(CollectionVariable::from)

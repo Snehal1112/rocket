@@ -728,9 +728,12 @@ impl RequestExecutionService {
         }
 
         if let (Some(col), Some(path)) = (collection, request_path) {
-            if let Some(folder_vars) =
-                read_scope(strict, self.collection_repo.get_folder_chain_variables(col, path))?
-            {
+            let folder_read = if strict {
+                self.collection_repo.get_folder_chain_variables_strict(col, path)
+            } else {
+                self.collection_repo.get_folder_chain_variables(col, path)
+            };
+            if let Some(folder_vars) = read_scope(strict, folder_read)? {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
                     ctx.folder.insert(cv.key.clone(), val.clone());

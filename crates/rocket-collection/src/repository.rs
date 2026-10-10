@@ -271,6 +271,17 @@ pub trait CollectionRepository: Send + Sync {
         request_path: &str,
     ) -> DomainResult<Vec<CollectionVariable>>;
 
+    /// Like `get_folder_chain_variables`, but a `folder.yml` that exists and cannot be read or
+    /// parsed is an error instead of being skipped. A missing `folder.yml` is still fine. For
+    /// masking text that is sent out. The default is the lenient walk.
+    fn get_folder_chain_variables_strict(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.get_folder_chain_variables(collection, request_path)
+    }
+
     /// Read only this folder's own variables from its folder.yml (no chain walk).
     /// Returns an empty vec if the folder or its folder.yml does not exist.
     fn get_folder_variables(

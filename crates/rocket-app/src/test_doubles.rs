@@ -277,6 +277,7 @@ pub struct ConfigurableCollectionRepo {
     settings: Mutex<HashMap<String, CollectionSettings>>,
     settings_error_for: Mutex<Option<String>>,
     fail_request_vars: Mutex<bool>,
+    missing_request_vars: Mutex<bool>,
     fail_request_read: Mutex<bool>,
     request_vars: Mutex<Vec<CollectionVariable>>,
     requests: Mutex<HashMap<(String, String), CollectionRequest>>,
@@ -330,7 +331,15 @@ impl ConfigurableCollectionRepo {
             .expect("lock settings_error_for") = Some(collection.to_string());
     }
 
-    /// Makes `get_request_variables` fail with `DomainError::Internal`.
+    /// Makes `get_request_variables` fail with `DomainError::NotFound`, like an unsaved request.
+    pub fn missing_request_variables(&self) {
+        *self
+            .missing_request_vars
+            .lock()
+            .expect("lock missing_request_vars") = true;
+    }
+
+    /// Makes `get_request_variables` fail with `DomainError::Io`.
     pub fn fail_request_variables(&self) {
         *self.fail_request_vars.lock().expect("lock fail_request_vars") = true;
     }
@@ -477,8 +486,15 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(())
     }
     fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+        if *self
+            .missing_request_vars
+            .lock()
+            .expect("lock missing_request_vars")
+        {
+            return Err(DomainError::NotFound("request variables".into()));
+        }
         if *self.fail_request_vars.lock().expect("lock fail_request_vars") {
-            return Err(DomainError::Internal("request variables read failed".into()));
+            return Err(DomainError::Io("request variables read failed".into()));
         }
         Ok(self.request_vars.lock().expect("lock request_vars").clone())
     }

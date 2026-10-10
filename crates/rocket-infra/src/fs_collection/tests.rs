@@ -1240,6 +1240,37 @@ fn get_folder_chain_variables_returns_folder_vars() {
 }
 
 #[test]
+fn get_request_variables_of_a_missing_request_is_not_found() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let err = repo
+        .get_request_variables("my-api", "unsaved.yml")
+        .expect_err("a missing request file must fail");
+    assert!(matches!(err, DomainError::NotFound(_)), "{err}");
+}
+
+#[test]
+fn strict_folder_chain_variables_fail_on_a_broken_folder_yml_only() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "auth").unwrap();
+    // A missing folder.yml is fine in both modes.
+    assert!(repo
+        .get_folder_chain_variables_strict("my-api", "auth/login.yml")
+        .expect("missing folder.yml")
+        .is_empty());
+    let folder_yml = repo.collection_root_path("my-api").unwrap().join("auth/folder.yml");
+    std::fs::write(&folder_yml, "{ not: [valid").expect("write broken folder.yml");
+    assert!(repo
+        .get_folder_chain_variables("my-api", "auth/login.yml")
+        .expect("lenient walk skips it")
+        .is_empty());
+    assert!(repo
+        .get_folder_chain_variables_strict("my-api", "auth/login.yml")
+        .is_err());
+}
+
+#[test]
 fn get_summaries_returns_collection_with_summary_items() {
     let (_dir, repo) = setup();
     repo.create("pets").unwrap();
