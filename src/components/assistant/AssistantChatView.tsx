@@ -40,7 +40,7 @@ function ToolActivityLine({ title, status }: { title: string; status: ToolActivi
   );
 }
 
-function ChatItem({
+export function ChatItem({
   message,
   isLastStreaming,
 }: {

@@ -1,10 +1,11 @@
-import { Loader2, Sparkles, X } from 'lucide-react';
+import { History, Loader2, Sparkles, X } from 'lucide-react';
 import { type CSSProperties, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { endAssistantSession } from '@/lib/assistant/assistant-session';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { AssistantChatView } from './AssistantChatView';
+import { AssistantHistoryView } from './AssistantHistoryView';
 import { AssistantPermissionsPopover } from './AssistantPermissionsPopover';
 import { AssistantStartView } from './AssistantStartView';
 import { Composer } from './composer/Composer';
@@ -28,6 +29,7 @@ export function AssistantPanel() {
   const storedWidth = useLayoutStore((s) => s.assistantPanelWidth);
   const setStoredWidth = useLayoutStore((s) => s.setAssistantPanelWidth);
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
+  const [showHistory, setShowHistory] = useState(false);
 
   // The stored width stays the user's choice. Only the shown width follows the window.
   useEffect(() => {
@@ -83,6 +85,16 @@ export function AssistantPanel() {
       <header className='flex h-10 shrink-0 items-center gap-1 border-b px-3'>
         <Sparkles className='h-4 w-4 text-primary' aria-hidden='true' />
         <span className='flex-1 text-sm font-medium'>AI Assistant</span>
+        <Button
+          variant='ghost'
+          size='icon'
+          className='h-7 w-7'
+          aria-label={showHistory ? 'Back to the chat' : 'Conversation history'}
+          aria-pressed={showHistory}
+          onClick={() => setShowHistory((shown) => !shown)}
+        >
+          <History className='h-4 w-4' aria-hidden='true' />
+        </Button>
         <AssistantPermissionsPopover />
         {(status === 'active' || status === 'starting') && (
           <Button
@@ -104,7 +116,9 @@ export function AssistantPanel() {
           <X className='h-4 w-4' aria-hidden='true' />
         </Button>
       </header>
-      {status === 'starting' ? (
+      {showHistory ? (
+        <AssistantHistoryView />
+      ) : status === 'starting' ? (
         <div className='flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground'>
           <Loader2 className='h-4 w-4 animate-spin' aria-hidden='true' />
           Starting the assistant…

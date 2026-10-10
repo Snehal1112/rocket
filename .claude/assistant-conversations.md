@@ -19,3 +19,10 @@ Spec: `docs/superpowers/specs/2026-10-11-assistant-conversation-history-design.m
 - The pin is dropped when the session fails to start (`unpin_session`). It is not dropped at session end, because the final save runs after cleanup; it ages out with the 16-pin cap.
 - Every save walks every request file of the workspace, once per finished turn (debounced in the frontend).
 - Events carry ids only: `assistant-conversation-saved`, `assistant-conversation-deleted`, `assistant-conversations-cleared`.
+
+## Frontend
+
+- `assistant-store.conversationId` is made at the first user message of a session (`crypto.randomUUID()`), cleared by `beginSession` and `reset`.
+- `startConversationSaver` (`src/lib/assistant/conversation-saver.ts`, started by `useAssistantEventBridge`) saves 500 ms after a turn ends, and at once at session end and panel close. Saves are chained, so they reach the backend in order. Streaming segments are never saved, and a chat without an agent reply is not saved. The session-end save takes proposals from the previous state, because `endSession` and a fatal `failMessage` drop them in the same update. A failed save shows one toast per conversation.
+- `toStoredMessages` (`conversation-snapshot.ts`) places proposals by their anchor (`src/lib/assistant/timeline.ts`).
+- History: the panel's History button shows `AssistantHistoryView` (list, delete, Clear all with a confirm). `AssistantConversationView` renders stored messages with `ChatItem`; stored proposals are plain lines with no actions. The view reloads on the three events and on a workspace switch, which also closes the open conversation.

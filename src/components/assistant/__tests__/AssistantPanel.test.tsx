@@ -27,6 +27,10 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   endAgentSession: vi.fn(),
   getCollectionSettings: vi.fn(),
   setCollectionCapability: vi.fn(),
+  listConversations: vi.fn().mockResolvedValue([]),
+  onAssistantConversationSaved: vi.fn().mockResolvedValue(() => undefined),
+  onAssistantConversationDeleted: vi.fn().mockResolvedValue(() => undefined),
+  onAssistantConversationsCleared: vi.fn().mockResolvedValue(() => undefined),
 }));
 
 vi.mock('@/lib/queries/agent-config-queries', () => ({
@@ -56,6 +60,17 @@ function activate(sessionId = 's1'): void {
 }
 
 describe('AssistantPanel', () => {
+  it('switches between the chat and the conversation history', async () => {
+    vi.mocked(api.listConversations).mockResolvedValue([]);
+    render(<AssistantPanel />);
+    await userEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+    expect(
+      await screen.findByText('No saved conversations in this workspace yet.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to the chat' }));
+    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     resetStaleSweepForTests();
