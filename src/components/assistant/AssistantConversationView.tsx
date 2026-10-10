@@ -17,7 +17,7 @@ import {
 } from '@/lib/assistant/assistant-session';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import type { AgentProposalStatus, ConversationRecord, StoredMessage } from '@/lib/tauri-api';
-import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
+import type { AssistantMessage } from '@/stores/assistant-store';
 import { ChatItem } from './AssistantChatView';
 
 const PROPOSAL_STATUS_LABEL: Record<AgentProposalStatus, string> = {
@@ -80,7 +80,7 @@ function ContinueConversation({
       const refused = err instanceof Error && err.message === CONTINUE_WORKSPACE_MISMATCH;
       toast.error(refused ? CONTINUE_WORKSPACE_MISMATCH : 'Could not continue this conversation.');
       // When the start never began, the chat has nothing new, so the history comes back.
-      if (useAssistantStore.getState().replay?.fromId !== record.id) onContinueFailed?.();
+      if (!(err instanceof Error && 'started' in err && err.started === true)) onContinueFailed?.();
     });
   };
 

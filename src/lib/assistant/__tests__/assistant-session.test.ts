@@ -7,6 +7,7 @@ import { createDeferred } from '@/test/deferred';
 import { REPLAY_PREFACE_HEADER } from '../replay-preface';
 import {
   CONTINUE_WORKSPACE_MISMATCH,
+  ContinueError,
   continueConversation,
   endAssistantSession,
   resetStaleSweepForTests,
@@ -104,6 +105,19 @@ describe('assistant session flows', () => {
       CONTINUE_WORKSPACE_MISMATCH,
     );
     expect(api.startWorkspaceAssistant).not.toHaveBeenCalled();
+  });
+
+  it('reports started false for a pre-start throw after an earlier Continue of the same record', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    await continueConversation(stored, 'agent-1');
+    await endAssistantSession();
+    expect(store().replay?.fromId).toBe(stored.id);
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-2' });
+    const err = await continueConversation(stored, 'agent-1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ContinueError);
+    expect((err as ContinueError).started).toBe(false);
+    expect((err as ContinueError).message).toBe(CONTINUE_WORKSPACE_MISMATCH);
   });
 
   it('refuses to continue a conversation of another workspace', async () => {

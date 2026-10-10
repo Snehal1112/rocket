@@ -100,6 +100,48 @@ describe('AssistantConversationView Continue', () => {
     expect(toast.error).toHaveBeenCalledWith('Could not continue this conversation.');
   });
 
+  it('returns to the history on a pre-start throw even when a stale replay id matches', async () => {
+    // An earlier Continue of this record left its id in the store after the session ended.
+    const store = useAssistantStore.getState();
+    const token = store.beginSession('agent-1', 'ask', { fromId: record.id, preface: 'old' });
+    store.activateSession(token, 's1', []);
+    store.endSession();
+    vi.mocked(continueConversation).mockRejectedValueOnce(
+      Object.assign(new Error('workspace changed'), { started: false }),
+    );
+    const onContinueFailed = vi.fn();
+    render(
+      <AssistantConversationView
+        record={record}
+        agentLabel='Claude'
+        onBack={vi.fn()}
+        onContinued={vi.fn()}
+        onContinueFailed={onContinueFailed}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onContinueFailed).toHaveBeenCalledTimes(1));
+  });
+
+  it('keeps the chat open when the start began and then failed', async () => {
+    vi.mocked(continueConversation).mockRejectedValueOnce(
+      Object.assign(new Error('late'), { started: true }),
+    );
+    const onContinueFailed = vi.fn();
+    render(
+      <AssistantConversationView
+        record={record}
+        agentLabel='Claude'
+        onBack={vi.fn()}
+        onContinued={vi.fn()}
+        onContinueFailed={onContinueFailed}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(onContinueFailed).not.toHaveBeenCalled();
+  });
+
   it('asks for an agent when the stored one is gone', () => {
     render(
       <AssistantConversationView

@@ -140,29 +140,44 @@ export function canContinueHere(record: ConversationRecord): boolean {
   return record.workspaceId === useWorkspaceStore.getState().activeWorkspaceId;
 }
 
+/** A failed Continue. `started` tells whether the new session was begun. */
+export class ContinueError extends Error {
+  readonly started: boolean;
+  constructor(message: string, started: boolean) {
+    super(message);
+    this.name = 'ContinueError';
+    this.started = started;
+  }
+}
+
 /**
  * Starts a new session that carries a stored conversation as context. It
  * always starts in Ask mode, so a stored Agent mode is never re-applied. A
  * live session ends first, which saves it. A conversation of another
  * workspace is refused, so its transcript never reaches this workspace.
+ * A throw is a `ContinueError` that says whether the start began.
  */
 export async function continueConversation(
   record: ConversationRecord,
   agentConfigId: string,
 ): Promise<void> {
-  if (!canContinueHere(record)) {
-    throw new Error(CONTINUE_WORKSPACE_MISMATCH);
+  let started = false;
+  try {
+    if (!canContinueHere(record)) {
+      throw new Error(CONTINUE_WORKSPACE_MISMATCH);
+    }
+    const current = useAssistantStore.getState().session;
+    if (current?.status === 'active' || current?.status === 'starting') {
+      await endAssistantSession();
+    }
+    // The workspace may have changed while the live session ended.
+    if (!canContinueHere(record)) {
+      throw new Error(CONTINUE_WORKSPACE_MISMATCH);
+    }
+    const seed = { fromId: record.id, preface: buildReplayPreface(record) };
+    started = true;
+    await startAssistant(agentConfigId, 'ask', seed);
+  } catch (err) {
+    throw new ContinueError(err instanceof Error ? err.message : String(err), started);
   }
-  const current = useAssistantStore.getState().session;
-  if (current?.status === 'active' || current?.status === 'starting') {
-    await endAssistantSession();
-  }
-  // The workspace may have changed while the live session ended.
-  if (!canContinueHere(record)) {
-    throw new Error(CONTINUE_WORKSPACE_MISMATCH);
-  }
-  await startAssistant(agentConfigId, 'ask', {
-    fromId: record.id,
-    preface: buildReplayPreface(record),
-  });
 }
