@@ -30,7 +30,6 @@ This page lists the decisions and follow-ups left after implementing the six wor
 
 ### Read tools and masking
 
-- `get_folder_chain_settings` failure fails open (`unwrap_or_default`). Make it fail closed.
 - The history URL keeps percent-encoded secrets unmasked.
 - `check_in_workspace` lists collections on every call, and `list()` may auto-migrate data. Cache the result or document the migration.
 - A cache entry can be reinserted after `forget_session`.
@@ -45,21 +44,22 @@ This page lists the decisions and follow-ups left after implementing the six wor
 - `CreateFolder` resets `folder.yml` if someone creates that folder by hand in a short window.
 - A duplicate `CreateFolder` in one batch is not rejected.
 - `run_request` scripts can persist env vars. This is a deferred spec threat-model note.
-- The list, accept and reject IPC commands are sync, so they run on the main thread and do disk I/O under the proposal mutex. Make them async (`agent_proposals.rs`).
 - `ProposalService.ended` grows by one id per session with no limit.
 - `create_request_exclusive` uses `hard_link`, which fails on filesystems without hard links (exFAT, FAT, some SMB mounts), so Accept ends Failed there. Fall back to `create_new`. A crash between write and unlink leaves a hidden `.new-request.tmp.*` file.
+
+### Proposals lock (residual)
+
+- `accept` still holds the proposal mutex across apply (needed for exactly-once), so other sessions' list and propose calls wait behind a slow accept. The IPC commands are now async and no longer block the UI thread.
+- Test fixture names `GatedEnvFactory`, `GatedEnvFactory2` and `GatedEnvRepoOwned` in `proposal_service.rs` are confusing. `list_proposals` and `propose_changes` in `tool_server.rs` repeat the JoinError mapping.
 
 ### Dead code and small items
 
 - `AcpSessionService::start_session` has no non-test callers (about 17 tests use it). Remove it with its autonomy gating and its `collection_repo` field once the tests are ported.
 - Any JSON-RPC prompt error from the agent (for example a transient model overload) ends the session (`acp_agent_client.rs`). Plan 01 behaviour; the user restarts.
-- A session with no workspace pin is not checked by `check_session_workspace`, which fails open for reads only. Fail closed.
 - The no-replace move maps a vanished destination folder to Failed in some paths. Prefer Stale.
 
 ### Chips and vault masking
 
-- `chips.rs` resolves vault secrets one environment after another under a single 8 s budget, so a collection with several vault-bound environments can time out every time. The chip is then refused, which is safe but unusable. Resolve in parallel or dedupe the bindings.
-- `chips.rs` replaces a failed environment `list()` with an empty list, so only the named environment's vault secrets are resolved. A list error should refuse the chip.
 - The keyring read in the vault path is synchronous, so the 8 s timeout cannot interrupt a hung keyring call.
 - The composer shows a generic "Could not load" message, not the backend's vault message.
 
