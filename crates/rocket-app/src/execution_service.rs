@@ -917,9 +917,21 @@ impl RequestExecutionService {
         .flatten()
     }
 
+    /// Whether `{{process.env.*}}` may resolve for `collection`. A request outside any
+    /// collection (a scratch request) involves no shared file, so it is always allowed.
+    /// A collection needs the host environment permission of the trust store.
+    pub fn process_env_allowed(&self, collection: Option<&str>) -> bool {
+        match collection {
+            None => true,
+            Some(name) => self.effective_capabilities(name).process_env,
+        }
+    }
+
     /// Same as `build_variable_context`, plus the OS environment as `process.env.NAME`
-    /// (lowest priority). HTTP requests get these from the frontend, so the protocols
-    /// that resolve in the backend (WebSocket, GraphQL subscriptions, gRPC) use this.
+    /// (lowest priority) when `process_env_allowed`. HTTP requests get these from the
+    /// frontend, so the protocols that resolve in the backend (WebSocket, GraphQL
+    /// subscriptions, gRPC) use this. Without the permission the placeholders stay
+    /// unresolved.
     pub fn build_variable_context_with_process_env(
         &self,
         global_env_name: Option<&str>,
@@ -935,7 +947,9 @@ impl RequestExecutionService {
             request_path,
             external_secrets,
         );
-        scopes.process_env = std::env::vars().collect();
+        if self.process_env_allowed(collection) {
+            scopes.process_env = std::env::vars().collect();
+        }
         scopes.flatten_with_process_env()
     }
 

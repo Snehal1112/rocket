@@ -1,4 +1,4 @@
-use rocket_app::{EnvironmentService, WorkspaceService};
+use rocket_app::{EnvironmentService, RequestExecutionService, WorkspaceService};
 use rocket_environment::Environment;
 use rocket_infra::FsEnvironmentRepo;
 use rocket_shared::{error::DomainError, events::NullEventPublisher};
@@ -168,7 +168,17 @@ pub fn delete_global_environment(
     global_env_service(&ws)?.delete(&name)
 }
 
+/// The host environment for `{{process.env.*}}`. With a `collection` that is not allowed
+/// host environment access on this computer, the map is empty. Without a collection (a
+/// scratch request, a preview) it is the full map.
 #[tauri::command]
-pub fn get_process_env_vars() -> std::collections::HashMap<String, String> {
-    std::env::vars().collect()
+pub fn get_process_env_vars(
+    collection: Option<String>,
+    exec: State<'_, RequestExecutionService>,
+) -> std::collections::HashMap<String, String> {
+    if exec.process_env_allowed(collection.as_deref()) {
+        std::env::vars().collect()
+    } else {
+        std::collections::HashMap::new()
+    }
 }

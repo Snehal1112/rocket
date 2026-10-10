@@ -361,13 +361,107 @@ mod tests {
         // Default settings are Safe mode, so this also proves that hiding the
         // host environment from scripts leaves interpolation unchanged.
         std::env::set_var("ROCKET_WS_TEST_TOKEN", "from-os");
-        let svc = service(dev_env(), CollectionSettings::default());
+        let svc = service(dev_env(), CollectionSettings::default())
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let mut i = input("wss://h/ws");
         i.headers = vec![Header::new("X-Token", "{{process.env.ROCKET_WS_TEST_TOKEN}}")];
 
         let resolved = svc.resolve_websocket(&i).await.expect("resolve");
 
         assert_eq!(header(&resolved, "X-Token"), Some("from-os"));
+    }
+
+    #[tokio::test]
+    async fn process_env_stays_unresolved_for_a_collection_without_the_permission() {
+        std::env::set_var("ROCKET_WS_GATED_TOKEN", "from-os");
+        // The default store denies everything, as a clone or import would be.
+        let svc = service(dev_env(), CollectionSettings::default());
+        let mut i = input("wss://h/ws");
+        i.headers = vec![Header::new("X-Token", "{{process.env.ROCKET_WS_GATED_TOKEN}}")];
+        let resolved = svc.resolve_websocket(&i).await.expect("resolve");
+        assert_eq!(
+            header(&resolved, "X-Token"),
+            Some("{{process.env.ROCKET_WS_GATED_TOKEN}}")
+        );
+
+        // The same gate covers the messages sent later on the socket.
+        let scope = WebSocketScope {
+            collection: Some("api".into()),
+            environment_name: Some("dev".into()),
+            ..WebSocketScope::default()
+        };
+        let frame = svc
+            .resolve_websocket_message(
+                &scope,
+                WebSocketMessageKind::Text,
+                "{{process.env.ROCKET_WS_GATED_TOKEN}}",
+            )
+            .await
+            .expect("message");
+        assert_eq!(
+            frame,
+            WebSocketFrame::Text("{{process.env.ROCKET_WS_GATED_TOKEN}}".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn process_env_resolves_in_messages_with_the_permission() {
+        std::env::set_var("ROCKET_WS_MSG_TOKEN", "from-os");
+        let svc = service(dev_env(), CollectionSettings::default())
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        let scope = WebSocketScope {
+            collection: Some("api".into()),
+            environment_name: Some("dev".into()),
+            ..WebSocketScope::default()
+        };
+        let frame = svc
+            .resolve_websocket_message(
+                &scope,
+                WebSocketMessageKind::Text,
+                "{{process.env.ROCKET_WS_MSG_TOKEN}}",
+            )
+            .await
+            .expect("message");
+        assert_eq!(frame, WebSocketFrame::Text("from-os".into()));
+    }
+
+    #[test]
+    fn a_scratch_request_keeps_host_environment_access() {
+        std::env::set_var("ROCKET_WS_SCRATCH_TOKEN", "from-os");
+        let svc = service(dev_env(), CollectionSettings::default());
+        assert!(svc.process_env_allowed(None));
+        assert!(!svc.process_env_allowed(Some("api")));
+        let vars = svc.build_variable_context_with_process_env(
+            None,
+            None,
+            None,
+            None,
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(
+            vars.get("process.env.ROCKET_WS_SCRATCH_TOKEN").map(String::as_str),
+            Some("from-os")
+        );
+    }
+
+    #[test]
+    fn the_variable_context_has_no_host_environment_without_the_permission() {
+        // This is the call the gRPC command makes.
+        std::env::set_var("ROCKET_WS_CTX_TOKEN", "from-os");
+        let denied = service(dev_env(), CollectionSettings::default());
+        let ctx = |svc: &RequestExecutionService| {
+            svc.build_variable_context_with_process_env(
+                None,
+                Some("api"),
+                Some("dev"),
+                None,
+                &std::collections::HashMap::new(),
+            )
+        };
+        assert!(!ctx(&denied).contains_key("process.env.ROCKET_WS_CTX_TOKEN"));
+        let allowed = service(dev_env(), CollectionSettings::default())
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        assert!(ctx(&allowed).contains_key("process.env.ROCKET_WS_CTX_TOKEN"));
     }
 
     #[tokio::test]
