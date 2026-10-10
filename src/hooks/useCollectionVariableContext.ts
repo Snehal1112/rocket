@@ -41,7 +41,7 @@ export function useCollectionVariableContext(collection: string): CollectionVari
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: environments = NO_ENVIRONMENTS } = useEnvironments(collection);
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = NO_PROCESS_ENV } = useProcessEnvVars();
+  const { data: processEnvVars = NO_PROCESS_ENV } = useProcessEnvVars(collection);
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
+import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { type GraphQlSubscribeInput, graphqlSubscribe, graphqlUnsubscribe } from '@/lib/tauri-api';
 import { scopeFor } from '@/lib/websocket-session';
 import { type ConnectionStatus, useWebSocketStore } from '@/stores/websocket-store';
@@ -40,7 +41,9 @@ export async function startSubscription(tab: RequestTab): Promise<void> {
   const sessionId = crypto.randomUUID();
   useWebSocketStore.getState().beginSession(tab.id, sessionId);
   try {
-    await graphqlSubscribe(sessionId, buildSubscribeInput(tab));
+    const input = buildSubscribeInput(tab);
+    await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+    await graphqlSubscribe(sessionId, input);
   } catch (err) {
     useWebSocketStore.getState().failSession(tab.id, sessionId, errorText(err));
   }

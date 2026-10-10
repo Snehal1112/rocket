@@ -395,7 +395,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = {} } = useProcessEnvVars(activeCollection);
   const { data: secretConnections = [], isSuccess: secretConnectionsLoaded } =
     useSecretManagerConnections();
 

@@ -534,7 +534,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = {} } = useProcessEnvVars(tab.source?.collection);
 
   // Build the scope-aware variable context for all editors in this panel.
   const scopedContext = useMemo(() => {
@@ -1187,7 +1187,10 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         <div className='flex flex-1 min-h-0 flex-col overflow-hidden'>
           {tab.source?.collection && (
             <div className='shrink-0 px-3 pt-2 empty:hidden'>
-              <CollectionTrustBanner collection={tab.source.collection} />
+              <CollectionTrustBanner
+                key={tab.source.collection}
+                collection={tab.source.collection}
+              />
             </div>
           )}
           <div className='flex-1 min-h-0'>

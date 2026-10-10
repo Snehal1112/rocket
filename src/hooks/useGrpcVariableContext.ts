@@ -34,7 +34,7 @@ export function useGrpcVariableContext(
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = {} } = useProcessEnvVars(source?.collection);
 
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
   const [folderVars, setFolderVars] = useState<CollectionVariable[]>([]);

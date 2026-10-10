@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { environmentKeys } from '@/lib/queries/environment-queries';
 import {
   type CollectionCapability,
   type CollectionTrust,
@@ -47,6 +48,8 @@ export function useCollectionTrustEvents(): void {
   useEffect(() => {
     const refresh = () => {
       void queryClient.invalidateQueries({ queryKey: collectionTrustKeys.all });
+      // The host environment a collection may use depends on its trust.
+      void queryClient.invalidateQueries({ queryKey: environmentKeys.processAll });
     };
     const unsubs = [onCollectionTrustChanged(refresh), onCollectionChanged(refresh)];
     return () => {
@@ -65,6 +68,7 @@ function useTrustMutation<V>(collection: string, run: (vars: V) => Promise<Colle
     // A refused or failed call may mean the cache is stale, so always refetch.
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: collectionTrustKeys.one(collection) });
+      void queryClient.invalidateQueries({ queryKey: environmentKeys.processAll });
     },
   });
 }

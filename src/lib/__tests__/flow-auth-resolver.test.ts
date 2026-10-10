@@ -55,7 +55,7 @@ describe('flowAuthResolver (editor) and buildOAuth2VarContext (pre-run step)', (
       name: 'global',
       variables: [{ key: 'tenant', value: 'acme', enabled: true, secret: false }],
     });
-    qc.setQueryData(environmentKeys.process, { HOME: '/home/u' });
+    qc.setQueryData(environmentKeys.process('api'), { HOME: '/home/u' });
     setQueryClient(qc);
     useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'api' });
   });

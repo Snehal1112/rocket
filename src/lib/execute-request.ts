@@ -4,6 +4,7 @@ import { parseGraphQlResponse } from '@/lib/graphql-response';
 import { resolveInheritedFolderAuth } from '@/lib/inherited-auth';
 import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
+import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
 import type { Environment, RequestOptions } from '@/lib/tauri-api';
@@ -13,6 +14,7 @@ import {
   type Body,
   type CollectionVariable,
   type ExecuteRequestInput,
+  getProcessEnvVars as fetchProcessEnvVars,
   getCollectionSettings,
   getFolderChainVariables,
   getRequestVariables,
@@ -65,9 +67,20 @@ function getGlobalVariables(): Record<string, string> {
   return Object.fromEntries(env.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]));
 }
 
-// Reads process env vars from the query cache.
-function getProcessEnvVars(): Record<string, string> {
-  return getQueryClient().getQueryData<Record<string, string>>(environmentKeys.process) ?? {};
+// Fetches the process env vars of a collection (cached). The backend returns an empty map
+// for a collection that is not allowed host environment access. A failed read resolves to
+// nothing, so a send never blocks and nothing leaks.
+async function getProcessEnvVars(collection?: string | null): Promise<Record<string, string>> {
+  const scope = collection ?? null;
+  try {
+    return await getQueryClient().fetchQuery({
+      queryKey: environmentKeys.process(scope),
+      queryFn: () => fetchProcessEnvVars(scope),
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+  } catch {
+    return {};
+  }
 }
 
 // Returns the synthetic request header(s) that the Rust executor adds for a
@@ -241,7 +254,7 @@ export async function resolveRequestFieldsForPath(
 ): Promise<ResolvedRequestFields> {
   const envVars = getActiveVariables();
   const globalVars = getGlobalVariables();
-  const processEnvVars = getProcessEnvVars();
+  const processEnvVars = await getProcessEnvVars(collection);
 
   let collectionVars: CollectionVariable[] = [];
   let collectionHeaders: Header[] = [];
@@ -587,7 +600,7 @@ export async function buildOAuth2VarContext(
     }
   }
   return buildVariableContext({
-    processEnvVars: getProcessEnvVars(),
+    processEnvVars: await getProcessEnvVars(collection),
     globalVars: getGlobalVariables(),
     envVars: getActiveVariables(collection),
     collectionVars,
@@ -607,6 +620,8 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const preCollection = found?.tab.source?.collection;
   const preRequestPath = found?.tab.source?.path;
   const preEnvName = useEnvStore.getState().activeEnvId ?? undefined;
+
+  await warnIfProcessEnvWithheld(preCollection, [request], found?.tab.title);
 
   const preVarCtx = await buildOAuth2VarContext(preCollection, preRequestPath);
 

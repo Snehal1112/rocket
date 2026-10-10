@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useGrpcVariableContext } from '@/hooks/useGrpcVariableContext';
 import { createDefaultGrpcState, DEFAULT_GRPC_MESSAGE } from '@/lib/pane-utils';
+import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { toApiGrpcRequest } from '@/lib/request-save-mapper';
 import {
   type GrpcExecuteInput,
@@ -102,7 +103,9 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
     if (grpc.methodType === 'unary') {
       setUnary(tab.id, { status: 'sending' });
       try {
-        const response = await grpcUnaryCall({ ...buildInput(), timeoutMs: UNARY_DEADLINE_MS });
+        const input = buildInput();
+        await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+        const response = await grpcUnaryCall({ ...input, timeoutMs: UNARY_DEADLINE_MS });
         setUnary(tab.id, { status: 'done', response });
       } catch (err) {
         setUnary(tab.id, { status: 'error', error: errorText(err) });
@@ -115,7 +118,9 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
     const id = crypto.randomUUID();
     attachSession(tab.id, id);
     try {
-      await grpcStartSession(buildInput(), id);
+      const input = buildInput();
+      await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+      await grpcStartSession(input, id);
     } catch (err) {
       // A cancel during the connect already ended the session. Anything else never opened.
       if (useGrpcStore.getState().sessions[id]?.status === 'finished') return;

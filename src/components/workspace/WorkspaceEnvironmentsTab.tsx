@@ -126,7 +126,7 @@ export function WorkspaceEnvironmentsTab() {
     [environments, saveMutation, globalEnvName, setGlobalEnvMutation],
   );
 
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = {} } = useProcessEnvVars(null);
 
   const variableContext = useMemo(() => {
     const envVars: Record<string, string> = {};

@@ -47,6 +47,7 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
   // The action waiting for the user's confirmation. Allowing anything asks first.
   const [confirm, setConfirm] = useState<{
     title: string;
+    description?: string;
     note: string;
     confirmLabel?: string;
     run: () => void;
@@ -62,10 +63,18 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
     return failure ? <Alert variant='destructive'>{failure}</Alert> : null;
   }
 
+  // A later success clears an earlier failure from any of the three actions.
+  const clearErrors = {
+    onSuccess: () => {
+      setCapability.reset();
+      grant.reset();
+      revokeAll.reset();
+    },
+  };
   const allowRequested = (cap: RequestedCapability) =>
-    grant.mutate({ capabilities: [cap], fingerprint: trust.fingerprint });
+    grant.mutate({ capabilities: [cap], fingerprint: trust.fingerprint }, clearErrors);
   const setCap = (capability: CollectionCapability, enabled: boolean) =>
-    setCapability.mutate({ capability, enabled });
+    setCapability.mutate({ capability, enabled }, clearErrors);
 
   const roots = trust.contextRoots;
   const rootsAllowed = roots.requested.length > 0 && roots.pending.length === 0;
@@ -205,9 +214,11 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
           onClick={() =>
             setConfirm({
               title: 'Forget all permissions of this collection?',
-              note: 'This removes every permission above, including host environment access. The collection file is not changed.',
+              description:
+                'This removes every permission above, including host environment access. The collection file is not changed.',
+              note: '',
               confirmLabel: 'Forget',
-              run: () => revokeAll.mutate(),
+              run: () => revokeAll.mutate(undefined, clearErrors),
             })
           }
         >
@@ -219,7 +230,8 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
           <AlertDialogHeader>
             <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
             <AlertDialogDescription>
-              Only allow this for a collection whose authors you trust. {confirm?.note}
+              {confirm?.description ??
+                `Only allow this for a collection whose authors you trust. ${confirm?.note ?? ''}`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

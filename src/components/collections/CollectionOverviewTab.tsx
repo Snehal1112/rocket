@@ -120,7 +120,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = {} } = useProcessEnvVars(collectionName);
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -376,7 +376,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               className='flex-1 min-w-0 border-r border-border overflow-y-auto'
             >
               <div className='p-4 flex flex-col gap-4'>
-                <CollectionTrustBanner collection={collectionName} />
+                <CollectionTrustBanner key={collectionName} collection={collectionName} />
                 <MethodBreakdown items={items} />
 
                 <Card>

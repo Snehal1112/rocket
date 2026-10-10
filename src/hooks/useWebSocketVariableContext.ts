@@ -22,7 +22,7 @@ export function useWebSocketVariableContext(
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars();
+  const { data: processEnvVars = {} } = useProcessEnvVars(collection);
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
 
   useEffect(() => {

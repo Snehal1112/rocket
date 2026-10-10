@@ -18,7 +18,9 @@ export const environmentKeys = {
   globalName: ['environments', 'global', 'name'] as const,
   global: (name: string) => ['environments', 'global', name] as const,
   globalList: ['environments', 'global', 'list'] as const,
-  process: ['environments', 'process'] as const,
+  /** Prefix of every process env query, to invalidate them all. */
+  processAll: ['environments', 'process'] as const,
+  process: (collection: string | null) => ['environments', 'process', collection] as const,
 };
 
 export function useEnvironments(collectionName: string | null) {
@@ -51,10 +53,12 @@ export function useGlobalEnvironments() {
   });
 }
 
-export function useProcessEnvVars() {
+/** The host environment for `{{process.env.*}}`. Empty for a collection that is not allowed it. */
+export function useProcessEnvVars(collection: string | null | undefined = null) {
+  const scope = collection ?? null;
   return useQuery({
-    queryKey: environmentKeys.process,
-    queryFn: getProcessEnvVars,
+    queryKey: environmentKeys.process(scope),
+    queryFn: () => getProcessEnvVars(scope),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }

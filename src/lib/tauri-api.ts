@@ -1015,6 +1015,19 @@ export const grantRequestedCapabilities = (
     expectedFingerprint,
   });
 
+/** A collection that kept elevated capabilities at the upgrade to the trust gate. */
+export interface TrustMigrationEntry {
+  name: string;
+  path: string;
+  /** Keys such as `developerMode`, `contextRoots` and `agentRun`. */
+  capabilities: string[];
+}
+
+export const getTrustMigrationNotice = () =>
+  invoke<{ collections: TrustMigrationEntry[] }>('get_trust_migration_notice');
+
+export const dismissTrustMigrationNotice = () => invoke<void>('dismiss_trust_migration_notice');
+
 /** Removes every grant of the collection. The collection file is not touched. */
 export const revokeCollectionTrust = (collection: string) =>
   invoke<CollectionTrust>('revoke_collection_trust', { collection });
@@ -1610,8 +1623,10 @@ export const saveGlobalEnvironment = (env: Environment) =>
 export const deleteGlobalEnvironment = (name: string) =>
   invoke<void>('delete_global_environment', { name });
 
-// Process env (read-only OS vars)
-export const getProcessEnvVars = () => invoke<Record<string, string>>('get_process_env_vars');
+// Process env (read-only OS vars). With a collection that is not allowed host environment
+// access on this computer, the backend returns an empty map. Without one, the full map.
+export const getProcessEnvVars = (collection?: string | null) =>
+  invoke<Record<string, string>>('get_process_env_vars', { collection: collection ?? null });
 
 // Folder variables — server walks full parent chain
 export const getFolderChainVariables = (collection: string, requestPath: string) =>

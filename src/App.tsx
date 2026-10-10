@@ -6,6 +6,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
 import { StatusBar } from '@/components/layout/StatusBar';
+import { TrustMigrationNotice } from '@/components/layout/TrustMigrationNotice';
 import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
@@ -134,6 +135,7 @@ function App() {
         qc.invalidateQueries({ queryKey: workspaceKeys.active });
         qc.invalidateQueries({ queryKey: environmentKeys.globalName });
         qc.invalidateQueries({ queryKey: collectionTrustKeys.all });
+        qc.invalidateQueries({ queryKey: environmentKeys.processAll });
       }),
       listen<{ id: string; newName: string }>('workspace-renamed', () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.all });
@@ -256,6 +258,7 @@ function App() {
       />
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
       <Toaster position='bottom-right' />
+      <TrustMigrationNotice />
     </div>
   );
 }

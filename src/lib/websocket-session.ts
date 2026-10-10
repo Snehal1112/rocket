@@ -1,6 +1,7 @@
 import { toast } from 'sonner';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
+import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
 import {
@@ -58,7 +59,9 @@ export async function connectTab(tab: RequestTab): Promise<void> {
   const sessionId = crypto.randomUUID();
   useWebSocketStore.getState().beginSession(tab.id, sessionId);
   try {
-    await wsConnect(sessionId, buildConnectInput(tab));
+    const input = buildConnectInput(tab);
+    await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+    await wsConnect(sessionId, input);
   } catch (err) {
     useWebSocketStore.getState().failSession(tab.id, sessionId, errorText(err));
   }
@@ -71,7 +74,9 @@ export async function sendSelectedMessage(tab: RequestTab): Promise<void> {
   const message = selectedMessage(tab.request.websocket?.messages ?? []);
   if (!message) return;
   try {
-    await wsSend(session.sessionId, { kind: message.kind, data: message.data, ...scopeFor(tab) });
+    const input = { kind: message.kind, data: message.data, ...scopeFor(tab) };
+    await warnIfProcessEnvWithheld(input.collection, [input.data], tab.title);
+    await wsSend(session.sessionId, input);
   } catch (err) {
     toast.error(`Could not send: ${errorText(err)}`);
   }
