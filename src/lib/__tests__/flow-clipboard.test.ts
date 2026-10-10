@@ -101,6 +101,15 @@ describe('instantiatePaste', () => {
     ]);
   });
 
+  it('names no node in the notice when its label is empty', () => {
+    const iff = at('if', { kind: 'If', label: '', condition: 'true' });
+    const clip = copySelection([iff], [], new Set(['if']), 'demo');
+    if (!clip) throw new Error('Expected a clip');
+    expect(instantiatePaste(clip, [iff]).notices).toEqual([
+      'Pasted If has no input wire. Connect it before saving.',
+    ]);
+  });
+
   it('gives no notice when the input wire is pasted with the node', () => {
     const iff = at('if', { kind: 'If', label: 'Check', condition: 'true' });
     const nodes = [input('a'), iff];
@@ -117,15 +126,6 @@ describe('instantiatePaste', () => {
     const clip = copySelection(nodes, edges, new Set(['a', 'if']), 'demo');
     if (!clip) throw new Error('Expected a clip');
     expect(instantiatePaste(clip, nodes).notices).toHaveLength(1);
-  });
-
-  it('falls back to the node id when the label is empty', () => {
-    const iff = at('if1', { kind: 'If', label: '', condition: 'true' });
-    const clip = copySelection([iff], [], new Set(['if1']), 'demo');
-    if (!clip) throw new Error('Expected a clip');
-    // The pasted node has a fresh id, so the notice names that one.
-    const pasted = instantiatePaste(clip, [iff]);
-    expect(pasted.notices[0]).toContain(`"${pasted.nodes[0].id}"`);
   });
 
   it('gives every node and wire a fresh id and remaps the wire ends', () => {

@@ -29,8 +29,28 @@ describe('FlowCanvas copy, paste and duplicate keys', () => {
     afterEach(() => vi.restoreAllMocks());
 
     it('leaves Ctrl+C to the browser', () => {
+      const onCopy = vi.fn();
+      renderCanvas(['a'], { onCopy });
       vi.spyOn(window, 'getSelection').mockReturnValue({
         toString: () => 'abc',
+        isCollapsed: false,
+        anchorNode: screen.getByTestId('flow-canvas'),
+      } as unknown as Selection);
+      const notPrevented = fireEvent.keyDown(screen.getByTestId('flow-canvas'), {
+        key: 'c',
+        ctrlKey: true,
+      });
+      expect(onCopy).not.toHaveBeenCalled();
+      expect(notPrevented).toBe(true);
+    });
+
+    it('still copies nodes when the highlighted text is outside the canvas', () => {
+      const outside = document.createElement('p');
+      document.body.appendChild(outside);
+      vi.spyOn(window, 'getSelection').mockReturnValue({
+        toString: () => 'abc',
+        isCollapsed: false,
+        anchorNode: outside,
       } as unknown as Selection);
       const onCopy = vi.fn();
       renderCanvas(['a'], { onCopy });
@@ -38,8 +58,9 @@ describe('FlowCanvas copy, paste and duplicate keys', () => {
         key: 'c',
         ctrlKey: true,
       });
-      expect(onCopy).not.toHaveBeenCalled();
-      expect(notPrevented).toBe(true);
+      outside.remove();
+      expect(onCopy).toHaveBeenCalledTimes(1);
+      expect(notPrevented).toBe(false);
     });
 
     it('still copies nodes when the selection is empty', () => {

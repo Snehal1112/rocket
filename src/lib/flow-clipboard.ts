@@ -123,9 +123,9 @@ export function instantiatePaste(clip: FlowClip, existingNodes: FlowNode[], step
   );
   for (const node of nodes) {
     if (takesSingleInput(node.kind) && !wired.has(node.id)) {
-      notices.push(
-        `Pasted ${node.kind.kind} "${node.kind.label || node.id}" has no input wire. Connect it before saving.`,
-      );
+      // An empty label has no name to show, and the fresh id would mean nothing.
+      const name = node.kind.label ? ` "${node.kind.label}"` : '';
+      notices.push(`Pasted ${node.kind.kind}${name} has no input wire. Connect it before saving.`);
     }
   }
 

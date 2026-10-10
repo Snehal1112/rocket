@@ -602,8 +602,15 @@ function FlowCanvasInner({
       return;
     }
     if (key === 'c' && onCopy && selectedNodeIds.size > 0) {
-      // Highlighted text copies as text. Only copy nodes when no text is selected.
-      if ((window.getSelection()?.toString() ?? '') !== '') return;
+      // Text highlighted inside the canvas copies as text. Text elsewhere does not block a node copy.
+      const sel = window.getSelection();
+      const ownsText =
+        !!sel &&
+        !sel.isCollapsed &&
+        sel.toString() !== '' &&
+        sel.anchorNode !== null &&
+        !!paneRef.current?.contains(sel.anchorNode);
+      if (ownsText) return;
       e.preventDefault();
       onCopy();
       return;

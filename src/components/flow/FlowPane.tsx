@@ -59,10 +59,10 @@ import { useClearRemovedAuthTokens } from './useClearRemovedAuthTokens';
 import { ViewedRunBanner } from './ViewedRunBanner';
 import { WireScriptDialog } from './WireScriptDialog';
 
-// A new wire and the dialog that finishes it are one undo step, however long the dialog stays open.
 // Read at call time, so a copy or paste always sees the workspace that is active now.
 const currentWorkspaceId = (): string => useWorkspaceStore.getState().activeWorkspaceId;
 
+// A new wire and the dialog that finishes it are one undo step, however long the dialog stays open.
 const WIRE_STEP = (edgeId: string): FlowWriteOptions => ({
   coalesceKey: `wire:${edgeId}`,
   coalesceMs: Number.POSITIVE_INFINITY,
