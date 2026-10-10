@@ -1864,6 +1864,12 @@ mod tests {
             .expect_err("session-a's cached results must be gone after forget_session");
         // A forgotten session is no longer bound to a workspace.
         assert!(matches!(forgotten, DomainError::InvalidInput(_)));
+        // Bind it again. Its cached result must be gone, while session-b keeps its own.
+        svc.open_session("session-a", AssistantMode::Agent);
+        let rebound = svc
+            .get_test_results("session-a", "my-api", "login.yml")
+            .expect_err("session-a's cached results must have been evicted");
+        assert!(matches!(rebound, DomainError::NotFound(_)), "{rebound:?}");
         svc.get_test_results("session-b", "my-api", "login.yml")
             .expect("session-b's cached results must survive forgetting a different session");
     }

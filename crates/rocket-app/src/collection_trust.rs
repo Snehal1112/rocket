@@ -460,18 +460,120 @@ mod tests {
         assert!(svc.migration_notice().expect("notice").is_empty());
     }
 
+    /// Replaces comments, string literals and char literals with spaces, keeping newlines.
+    /// What is left is code only, so brace matching and text scans cannot be fooled by them.
+    fn mask_non_code(text: &str) -> String {
+        let c: Vec<char> = text.chars().collect();
+        let blank = |ch: char| if ch == '\n' { '\n' } else { ' ' };
+        let is_ident = |ch: char| ch.is_alphanumeric() || ch == '_';
+        let mut out = String::with_capacity(text.len());
+        let mut i = 0;
+        while i < c.len() {
+            let ch = c[i];
+            let next = c.get(i + 1).copied();
+            if ch == '/' && next == Some('/') {
+                while i < c.len() && c[i] != '\n' {
+                    out.push(' ');
+                    i += 1;
+                }
+                continue;
+            }
+            if ch == '/' && next == Some('*') {
+                let mut depth = 0usize;
+                while i < c.len() {
+                    if c[i] == '/' && c.get(i + 1) == Some(&'*') {
+                        depth += 1;
+                        out.push_str("  ");
+                        i += 2;
+                    } else if c[i] == '*' && c.get(i + 1) == Some(&'/') {
+                        depth -= 1;
+                        out.push_str("  ");
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        out.push(blank(c[i]));
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+            // Raw string: r"..." or r#"..."#.
+            if ch == 'r' && (i == 0 || !is_ident(c[i - 1])) && matches!(next, Some('"' | '#')) {
+                let mut j = i + 1;
+                let mut hashes = 0usize;
+                while c.get(j) == Some(&'#') {
+                    hashes += 1;
+                    j += 1;
+                }
+                if c.get(j) == Some(&'"') {
+                    j += 1;
+                    while j < c.len() {
+                        if c[j] == '"' && (0..hashes).all(|k| c.get(j + 1 + k) == Some(&'#')) {
+                            j += 1 + hashes;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    for k in i..j.min(c.len()) {
+                        out.push(blank(c[k]));
+                    }
+                    i = j;
+                    continue;
+                }
+            }
+            if ch == '"' {
+                out.push(' ');
+                i += 1;
+                while i < c.len() && c[i] != '"' {
+                    if c[i] == '\\' && i + 1 < c.len() {
+                        out.push(' ');
+                        i += 1;
+                    }
+                    out.push(blank(c[i]));
+                    i += 1;
+                }
+                out.push(' ');
+                i += 1;
+                continue;
+            }
+            if ch == '\'' {
+                // A char literal is 'x' or an escape. Anything else is a lifetime.
+                let end = if next == Some('\\') {
+                    (i + 2..c.len().min(i + 12)).find(|&k| c[k] == '\'')
+                } else if c.get(i + 2) == Some(&'\'') {
+                    Some(i + 2)
+                } else {
+                    None
+                };
+                if let Some(end) = end {
+                    for _ in i..=end {
+                        out.push(' ');
+                    }
+                    i = end + 1;
+                    continue;
+                }
+            }
+            out.push(ch);
+            i += 1;
+        }
+        out
+    }
+
     /// Removes `#[cfg(test)] mod name { ... }` blocks (brace-matched), so production code
-    /// that sits after a test module in the same file is still scanned.
-    fn strip_test_modules(text: &str) -> String {
+    /// that sits after a test module in the same file is still scanned. The text must be
+    /// masked with `mask_non_code` first. A single `#[cfg(test)]` item such as a function
+    /// keeps its body, so it is scanned too, and only its attribute is dropped.
+    fn strip_test_modules(masked: &str) -> String {
         let mut out = String::new();
-        let mut rest = text;
+        let mut rest = masked;
         while let Some(at) = rest.find("#[cfg(test)]") {
             out.push_str(&rest[..at]);
             let after = &rest[at + "#[cfg(test)]".len()..];
             let trimmed = after.trim_start();
             let is_mod = trimmed.starts_with("mod ") || trimmed.starts_with("pub(crate) mod ");
             if !is_mod {
-                // A single cfg(test) item such as a function or use. Drop its attribute line only.
                 rest = after;
                 continue;
             }
@@ -480,14 +582,14 @@ mod tests {
                 break;
             };
             if after.as_bytes()[open] == b';' {
-                // `mod name;` in its own file, nothing to skip here.
+                // `mod name;` lives in its own file, so there is nothing to skip here.
                 rest = &after[open + 1..];
                 continue;
             }
             let mut depth = 0usize;
             let mut end = after.len();
-            for (i, c) in after[open..].char_indices() {
-                match c {
+            for (i, ch) in after[open..].char_indices() {
+                match ch {
                     '{' => depth += 1,
                     '}' => {
                         depth -= 1;
@@ -505,24 +607,50 @@ mod tests {
         out
     }
 
-    /// Production code must read the effective capabilities, never the raw request fields.
-    /// This keeps a new consumer from bypassing the trust gate.
+    /// True when `word` appears in `line` as a whole identifier.
+    fn has_word(line: &str, word: &str) -> bool {
+        let is_ident = |ch: char| ch.is_alphanumeric() || ch == '_';
+        line.match_indices(word).any(|(at, _)| {
+            let before = line[..at].chars().next_back();
+            let after = line[at + word.len()..].chars().next();
+            !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+        })
+    }
+
+    /// Production code must not name the raw capability fields. It reads the effective
+    /// capabilities instead. This keeps a new consumer from bypassing the trust gate.
+    ///
+    /// Any whole-word mention is flagged, so field reads, struct patterns such as
+    /// `CollectionSettings { sandbox_mode, .. }` and renamed bindings are all caught.
+    /// Limits: comments, strings and `#[cfg(test)] mod` blocks are skipped, and a raw read
+    /// through a differently named accessor or a macro is not seen.
     #[test]
     fn production_code_does_not_read_the_raw_capability_fields() {
-        const FIELDS: [&str; 3] = [
-            ".sandbox_mode",
-            ".script_context_roots",
-            ".agent_autonomy_enabled",
+        const FIELDS: [&str; 4] = [
+            "sandbox_mode",
+            "script_context_roots",
+            "agent_autonomy_enabled",
+            "additional_context_roots",
         ];
-        // Exact lines that read the effective value or the script phase state, never settings.
-        const ALLOWED_LINES: [(&str, &str); 2] = [
+        // Exact lines that name the effective value or the script phase state, never settings.
+        const ALLOWED_LINES: [(&str, &str); 6] = [
+            ("execution_service.rs", "pub sandbox_mode: SandboxMode,"),
+            (
+                "execution_service.rs",
+                "let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {",
+            ),
             (
                 "execution_service.rs",
                 "let mode = match effective.sandbox_mode {",
             ),
+            ("execution_service.rs", "sandbox_mode,"),
             (
                 "execution_service.rs",
                 ".with_sandbox_mode(state.sandbox_mode)",
+            ),
+            (
+                "execution_service/script_chain.rs",
+                "sandbox: ctx.sandbox_mode,",
             ),
         ];
         const ALLOWED_FILES: [&str; 3] = [
@@ -551,18 +679,24 @@ mod tests {
             if ALLOWED_FILES.contains(&name) || name.ends_with("tests.rs") {
                 continue;
             }
+            let rel = path
+                .strip_prefix(&src)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
             let text = std::fs::read_to_string(&path).expect("read file");
-            let production = strip_test_modules(&text);
+            let production = strip_test_modules(&mask_non_code(&text));
+            // Brace matching must have removed every test module attribute.
+            assert!(
+                !production.contains("#[cfg(test)]") && !production.contains("mod tests"),
+                "{rel}: a test module was not stripped"
+            );
             for (number, line) in production.lines().enumerate() {
-                let code = line.trim_start();
-                if code.starts_with("//") {
+                let code = line.trim();
+                if ALLOWED_LINES.iter().any(|(f, l)| rel.ends_with(f) && *l == code) {
                     continue;
                 }
-                if ALLOWED_LINES.contains(&(name, code)) {
-                    continue;
-                }
-                if FIELDS.iter().any(|f| code.contains(f)) {
-                    offenders.push(format!("{name}:{}: {code}", number + 1));
+                if FIELDS.iter().any(|f| has_word(code, f)) {
+                    offenders.push(format!("{rel}:{}: {code}", number + 1));
                 }
             }
         }
@@ -572,8 +706,30 @@ mod tests {
     #[test]
     fn strip_test_modules_keeps_code_after_a_test_module() {
         let text = "fn a() {}\n#[cfg(test)]\nmod tests {\n fn x() { s.sandbox_mode; }\n}\nfn b() { t.sandbox_mode; }\n";
-        let kept = strip_test_modules(text);
+        let kept = strip_test_modules(&mask_non_code(text));
         assert!(kept.contains("fn b()"));
         assert!(!kept.contains("fn x()"));
+    }
+
+    #[test]
+    fn braces_in_strings_chars_and_comments_do_not_break_matching() {
+        let text = concat!(
+            "#[cfg(test)]\nmod tests {\n",
+            "  fn x() { let s = \"}\"; let c = '}'; let l: &'static str = \"{\"; }\n",
+            "  // }\n  /* } */\n  const R: &str = r#\"}\"#;\n}\n",
+            "fn after() { z.sandbox_mode; }\n"
+        );
+        let kept = strip_test_modules(&mask_non_code(text));
+        assert!(kept.contains("fn after()"), "{kept}");
+        assert!(!kept.contains("fn x()"), "{kept}");
+        assert!(!kept.contains("mod tests"), "{kept}");
+    }
+
+    #[test]
+    fn has_word_matches_whole_identifiers_only() {
+        assert!(has_word("CollectionSettings { sandbox_mode, .. }", "sandbox_mode"));
+        assert!(has_word("x.sandbox_mode", "sandbox_mode"));
+        assert!(!has_word(".with_sandbox_mode(m)", "sandbox_mode"));
+        assert!(!has_word("sandbox_modes", "sandbox_mode"));
     }
 }
