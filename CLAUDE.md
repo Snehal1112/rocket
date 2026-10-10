@@ -61,6 +61,7 @@ See `.claude/frontend.md` for Zustand/tabs/UI state. See `.claude/tauri-commands
 See `.claude/script-files.md` for shared .js script files and local require().
 See `.claude/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
 See `.claude/assistant-composer.md` for the AI Assistant composer (PromptEditor keys, chips, masking, storage keys).
+See `.claude/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
 See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
