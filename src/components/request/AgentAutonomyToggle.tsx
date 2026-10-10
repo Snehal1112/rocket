@@ -20,6 +20,8 @@ import {
 
 interface AgentAutonomyToggleProps {
   collectionName: string;
+  /** Shows the line about reading and proposing. Hide it where a parent already says so. */
+  showHint?: boolean;
 }
 
 /**
@@ -27,7 +29,7 @@ interface AgentAutonomyToggleProps {
  * requests. Reading the workspace and proposing changes is always allowed.
  * Rendered once per collection, so every instance needs its own element id.
  */
-export function AgentAutonomyToggle({ collectionName }: AgentAutonomyToggleProps) {
+export function AgentAutonomyToggle({ collectionName, showHint = true }: AgentAutonomyToggleProps) {
   const switchId = useId();
   // null while the setting is loading, so the switch never shows a guess.
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -90,9 +92,11 @@ export function AgentAutonomyToggle({ collectionName }: AgentAutonomyToggleProps
           Allow the agent to run requests in this collection
         </Label>
       </div>
-      <p className='text-xs text-muted-foreground'>
-        Reading and proposing changes is always allowed.
-      </p>
+      {showHint && (
+        <p className='text-xs text-muted-foreground'>
+          Reading and proposing changes is always allowed.
+        </p>
+      )}
       {error && <p className='text-xs text-destructive'>{error}</p>}
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>

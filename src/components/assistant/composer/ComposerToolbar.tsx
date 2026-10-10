@@ -133,7 +133,6 @@ export function ComposerToolbar({
   const usageView = formatUsage(usage);
   const pickersDisabled = disabled || running || changing;
   const reason = disabled ? NO_SESSION_REASON : running ? RUNNING_REASON : CHANGING_REASON;
-  const modeSummary = MODE_OPTIONS.find((option) => option.value === mode)?.description;
 
   return (
     <div className='border-t'>
@@ -206,9 +205,6 @@ export function ComposerToolbar({
           </Button>
         )}
       </div>
-      <p aria-live='polite' className='px-2.5 pb-1.5 text-xs text-muted-foreground'>
-        {modeSummary} A mode change applies from the next tool call.
-      </p>
     </div>
   );
 }

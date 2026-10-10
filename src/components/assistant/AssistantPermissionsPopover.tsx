@@ -21,7 +21,7 @@ export function AssistantPermissionsPopover() {
           <ShieldCheck className='h-4 w-4' aria-hidden='true' />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align='end' className='w-80'>
+      <PopoverContent align='end' className='w-80 p-3'>
         <div className='flex flex-col gap-3'>
           <div>
             <p className='text-sm font-medium'>Agent permissions</p>
@@ -33,7 +33,7 @@ export function AssistantPermissionsPopover() {
           {collections.length === 0 ? (
             <p className='text-xs text-muted-foreground'>No collections in this workspace.</p>
           ) : (
-            <div className='flex max-h-72 flex-col gap-2 overflow-y-auto'>
+            <div className='flex max-h-72 flex-col gap-2 overflow-y-auto pr-0.5'>
               {collections.map((c) => (
                 <section
                   key={c.name}
@@ -41,7 +41,7 @@ export function AssistantPermissionsPopover() {
                   className='flex flex-col gap-1.5 rounded-md border p-2'
                 >
                   <span className='text-xs font-medium'>{c.name}</span>
-                  <AgentAutonomyToggle collectionName={c.name} />
+                  <AgentAutonomyToggle collectionName={c.name} showHint={false} />
                 </section>
               ))}
             </div>
