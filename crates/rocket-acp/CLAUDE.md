@@ -53,6 +53,19 @@ cargo test -p rocket-acp -j4
   defined in `rocket-shared` because `DomainEvent` carries it.
 - Plain (non-camelCase) field names — this struct persists to its own
   app-level `agent_configs.yml`, not the OpenCollection format.
+- `extra_env` (plain env vars for the agent process) caveats:
+  - It is stored in plaintext in `agent_configs.yml`. Keep secrets in the
+    vault credential, not here.
+  - A variable such as `ANTHROPIC_BASE_URL` can send the credential to another
+    host. Names are validated (`validate_env_config`, also at session start),
+    but values and names such as `PATH` or `LD_PRELOAD` are not restricted.
+  - The agent inherits Rocket's own process environment. An agent that dumps
+    its env on stderr can show inherited values unmasked in a failed-start
+    message, because only the values Rocket passes are masked.
+  - Masking of the failed-start stderr tail (rocket-infra `acp_stderr_tail.rs`)
+    is an exact-match replace. It does not cover base64, URL-encoded,
+    case-changed, escape-code-split or line-wrapped forms of a secret.
+  - Env names compare case-insensitively (Windows semantics).
 
 ### Dependencies
 

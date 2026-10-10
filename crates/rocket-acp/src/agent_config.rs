@@ -66,7 +66,8 @@ pub fn validate_env_var_name(name: &str) -> Result<(), &'static str> {
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err("may contain only letters, digits and underscores");
     }
-    if name == RESERVED_ENV_VAR {
+    // Windows compares names without regard to case, so Rocket does too.
+    if name.eq_ignore_ascii_case(RESERVED_ENV_VAR) {
         return Err("is reserved by Rocket");
     }
     Ok(())
@@ -80,12 +81,15 @@ pub fn validate_env_config(credential_env_var: &str, extra_env: &[EnvPair]) -> R
     for (i, pair) in extra_env.iter().enumerate() {
         let n = i + 1;
         validate_env_var_name(&pair.name).map_err(|why| format!("extra_env #{n} name {why}"))?;
-        if pair.name == credential_env_var {
+        if pair.name.eq_ignore_ascii_case(credential_env_var) {
             return Err(format!(
                 "extra_env #{n} name must differ from credential_env_var"
             ));
         }
-        if extra_env[..i].iter().any(|p| p.name == pair.name) {
+        if extra_env[..i]
+            .iter()
+            .any(|p| p.name.eq_ignore_ascii_case(&pair.name))
+        {
             return Err(format!("extra_env #{n} name is a duplicate"));
         }
     }
@@ -217,6 +221,17 @@ mod tests {
             validate_env_config("KEY", &[pair("CLAUDE_CONFIG_DIR", "x")]).expect_err("reserved");
         assert!(reserved.contains("reserved"));
         assert!(validate_env_config("CLAUDE_CONFIG_DIR", &[]).is_err());
+    }
+
+    #[test]
+    fn env_names_are_compared_case_insensitively() {
+        assert!(validate_env_var_name("claude_config_dir").is_err());
+        assert!(validate_env_var_name("Claude_Config_Dir").is_err());
+        assert!(validate_env_config("KEY", &[pair("key", "v")]).is_err());
+        assert!(
+            validate_env_config("Anthropic_Api_Key", &[pair("ANTHROPIC_API_KEY", "v")]).is_err()
+        );
+        assert!(validate_env_config("KEY", &[pair("Path", "1"), pair("PATH", "2")]).is_err());
     }
 
     #[test]

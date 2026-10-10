@@ -1235,39 +1235,48 @@ async fn acp_agent_client_silent_failed_start_has_no_agent_output_section() {
 async fn acp_agent_client_handshake_timeout_kills_the_agent_and_reports_the_tail() {
     let dir = tempfile::tempdir().expect("tempdir");
     let pid_file = dir.path().join("agent.pid");
+    let grandchild_file = dir.path().join("grandchild.pid");
     let script = format!(
-        "echo $$ > '{}'; echo waiting-for-nothing token=sk-timeout-secret-99 >&2; sleep 60",
-        pid_file.display()
+        "echo $$ > '{}'; sleep 60 & echo $! > '{}'; echo waiting-for-nothing token=sk-timeout-secret-99 >&2; wait",
+        pid_file.display(),
+        grandchild_file.display()
     );
     let client = AcpAgentClient::with_handshake_timeout(std::time::Duration::from_millis(400));
-    let err = client
-        .start_session(
+    // An outer limit makes a hang fail the test instead of blocking it.
+    let err = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client.start_session(
             "sh",
             &sh(&script),
             "/tmp",
             &[("TOKEN".to_string(), "sk-timeout-secret-99".to_string())],
             &[],
             None,
-        )
-        .await
-        .expect_err("an agent that never answers must time out");
+        ),
+    )
+    .await
+    .expect("start_session must return, not hang")
+    .expect_err("an agent that never answers must time out");
     let message = err.to_string();
     assert!(
         message.contains("agent did not finish starting within 400 ms"),
         "got: {message}"
     );
+    assert!(message.contains("try again"), "got: {message}");
     assert!(
         message.contains("waiting-for-nothing token=***"),
         "got: {message}"
     );
     assert!(!message.contains("sk-timeout-secret-99"), "got: {message}");
 
-    let pid = std::fs::read_to_string(&pid_file).expect("read pid");
-    assert!(
-        wait_for_process_exit(pid.trim()).await,
-        "agent process {} survived the handshake timeout",
-        pid.trim()
-    );
+    for file in [&pid_file, &grandchild_file] {
+        let pid = std::fs::read_to_string(file).expect("read pid");
+        assert!(
+            wait_for_process_exit(pid.trim()).await,
+            "process {} survived the handshake timeout",
+            pid.trim()
+        );
+    }
 }
 
 #[tokio::test]

@@ -153,6 +153,9 @@ impl AcpSessionService {
         isolation: SessionIsolation,
     ) -> DomainResult<SessionInfo> {
         let config = self.agent_config_service.get(agent_config_id)?;
+        // A hand-edited agent_configs.yml skips the save-time check.
+        rocket_acp::validate_env_config(&config.credential_env_var, &config.extra_env)
+            .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
         let credential = self
             .agent_config_service
             .resolve_credential(agent_config_id)
@@ -467,7 +470,10 @@ fn session_env(
     let mut env: Vec<(String, String)> = config
         .extra_env
         .iter()
-        .filter(|p| p.name != config.credential_env_var && p.name != isolation_entry.0)
+        .filter(|p| {
+            !p.name.eq_ignore_ascii_case(&config.credential_env_var)
+                && !p.name.eq_ignore_ascii_case(&isolation_entry.0)
+        })
         .map(|p| (p.name.clone(), p.value.clone()))
         .collect();
     env.push((config.credential_env_var.clone(), credential));
@@ -513,6 +519,57 @@ mod tests {
                 ("CLAUDE_CONFIG_DIR", "/scratch"),
             ]
         );
+    }
+
+    #[test]
+    fn session_env_drops_clashes_in_any_case() {
+        let mut config = sample_config();
+        config.extra_env = vec![
+            env_pair("claude_config_dir", "/evil"),
+            env_pair("Anthropic_Api_Key", "other"),
+        ];
+        let env = session_env(
+            &config,
+            "cred".to_string(),
+            ("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string()),
+        );
+        assert_eq!(
+            pairs(&env),
+            vec![
+                ("ANTHROPIC_API_KEY", "cred"),
+                ("CLAUDE_CONFIG_DIR", "/scratch")
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn start_workspace_session_refuses_an_invalid_persisted_config() {
+        let mut bad = sample_config();
+        bad.extra_env = vec![env_pair("1BAD", "top-secret-value")];
+        let sm_repo = FakeSecretManagerRepo(Mutex::new(vec![sample_connection()]));
+        let secret_manager = Arc::new(crate::secret_manager_service::SecretManagerService::new(
+            Box::new(sm_repo),
+            Arc::new(FakeSecretStore),
+            Arc::new(FakeVaultFetcher::default()),
+        ));
+        let cfg_service = Arc::new(AgentConfigService::new(
+            Box::new(FakeAgentConfigRepo(Mutex::new(vec![bad]))),
+            secret_manager,
+        ));
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
+            noop_cleanup(),
+            cfg_service,
+        );
+        let err = service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect_err("an invalid persisted config must not start");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        let msg = err.to_string();
+        assert!(msg.contains("extra_env #1"), "got: {msg}");
+        assert!(!msg.contains("top-secret-value"));
     }
 
     #[test]

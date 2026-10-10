@@ -34,7 +34,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::acp_stderr_tail::{with_agent_output, StderrTail};
+use crate::acp_stderr_tail::{mask_secrets, with_agent_output, StderrTail};
 
 /// How long the startup handshake (`initialize` and `session/new`) may take.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -468,7 +468,7 @@ impl AcpSessionClient for AcpAgentClient {
                 "agent command '{command_owned}': ACP handshake task ended without a result"
             )),
             Err(_) => Err(format!(
-                "agent did not finish starting within {}",
+                "agent did not finish starting within {}; a first start may be downloading the agent, try again",
                 describe_duration(self.handshake_timeout)
             )),
         };
@@ -481,7 +481,10 @@ impl AcpSessionClient for AcpAgentClient {
                 let _ = terminate_process(&process);
                 let secrets: Vec<&str> = secret_values.iter().map(String::as_str).collect();
                 let tail = stderr_tail.take_masked(&secrets);
-                return Err(DomainError::Internal(with_agent_output(message, &tail)));
+                // The whole text is masked, including the protocol error in
+                // `message`, which may echo a value.
+                let full = with_agent_output(message, &tail);
+                return Err(DomainError::Internal(mask_secrets(&full, &secrets)));
             }
         };
         // The start worked. Free the tail; the drain task keeps reading.
