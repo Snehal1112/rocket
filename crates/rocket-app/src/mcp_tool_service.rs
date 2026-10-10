@@ -2763,6 +2763,249 @@ mod tests {
         assert!(chip.text.contains("Folder: orders"));
     }
 
+    fn plain_variable(key: &str, value: &str, secret: bool) -> CollectionVariable {
+        CollectionVariable {
+            key: key.into(),
+            value: value.into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret,
+        }
+    }
+
+    #[test]
+    fn read_tools_answer_not_found_for_a_missing_collection() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let results: Vec<(&str, DomainResult<()>)> = vec![
+            (
+                "get_workspace_outline",
+                svc.get_workspace_outline("s1", Some("nope"), None).map(|_| ()),
+            ),
+            ("get_request", svc.get_request("s1", "nope", "login.yml").map(|_| ())),
+            ("get_collection_settings", svc.get_collection_settings("s1", "nope").map(|_| ())),
+            ("get_environment", svc.get_environment("s1", "nope", "dev").map(|_| ())),
+            ("get_history", svc.get_history("s1", "nope", "login.yml", 5).map(|_| ())),
+            ("get_test_results", svc.get_test_results("s1", "nope", "login.yml").map(|_| ())),
+            (
+                "folder chip",
+                svc.build_chip_resource(ChipKind::Folder, "nope", Some("orders")).map(|_| ()),
+            ),
+        ];
+        for (tool, result) in results {
+            assert!(
+                matches!(result, Err(DomainError::NotFound(_))),
+                "{tool} must answer NotFound for a missing collection, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_tools_answer_not_found_for_a_missing_request_folder_or_environment() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        repo.with_summaries("my-api", two_level_tree());
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(env_with_vars());
+        let svc = service_with(Arc::clone(&repo), env_factory, RecordingPublisher::new());
+
+        let err = svc
+            .get_request("s1", "my-api", "missing.yml")
+            .expect_err("a missing request");
+        assert!(matches!(err, DomainError::NotFound(_)), "get_request: {err:?}");
+        let err = svc
+            .get_history("s1", "my-api", "missing.yml", 5)
+            .expect_err("a missing request");
+        assert!(matches!(err, DomainError::NotFound(_)), "get_history: {err:?}");
+        let err = svc
+            .build_chip_resource(ChipKind::Request, "my-api", Some("missing.yml"))
+            .expect_err("a missing request");
+        assert!(matches!(err, DomainError::NotFound(_)), "request chip: {err:?}");
+        let err = svc
+            .get_environment("s1", "my-api", "staging")
+            .expect_err("a missing environment");
+        assert!(matches!(err, DomainError::NotFound(_)), "get_environment: {err:?}");
+        let err = svc
+            .build_chip_resource(ChipKind::Environment, "my-api", Some("staging"))
+            .expect_err("a missing environment");
+        assert!(matches!(err, DomainError::NotFound(_)), "environment chip: {err:?}");
+        let err = svc
+            .build_chip_resource(ChipKind::Folder, "my-api", Some("missing-folder"))
+            .expect_err("a missing folder");
+        assert!(matches!(err, DomainError::NotFound(_)), "folder chip: {err:?}");
+
+        // A folder that is not in the tree yields an empty outline, not an error.
+        let text = svc
+            .get_workspace_outline("s1", Some("my-api"), Some("missing-folder"))
+            .expect("outline of a missing folder");
+        assert!(!text.contains("POST "), "{text}");
+    }
+
+    #[test]
+    fn read_tools_answer_invalid_input_for_unusable_paths_and_unreadable_requests() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let err = svc
+            .get_history("s1", "my-api", "environments/dev.yml", 5)
+            .expect_err("environment files are not requests");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "get_history: {err:?}");
+        let err = svc
+            .get_environment("s1", "my-api", "../dev")
+            .expect_err("a traversal-shaped environment name");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "get_environment: {err:?}");
+        let err = svc
+            .build_chip_resource(ChipKind::Folder, "my-api", Some("../orders"))
+            .expect_err("a traversal-shaped folder path");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "folder chip: {err:?}");
+
+        // A request that exists but cannot be read is reported without its cause.
+        repo.fail_request_reads();
+        let err = svc
+            .get_request("s1", "my-api", "login.yml")
+            .expect_err("an unreadable request");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "get_request: {err:?}");
+        let err = svc
+            .get_history("s1", "my-api", "login.yml", 5)
+            .expect_err("an unreadable request");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "get_history: {err:?}");
+    }
+
+    #[test]
+    fn a_folder_variable_in_a_nested_folder_is_masked_and_a_secret_one_is_never_shown() {
+        let (svc, repo) = chip_service();
+        repo.with_folder_settings(
+            "my-api",
+            "orders/eu",
+            rocket_collection::FolderSettings {
+                variables: vec![
+                    plain_variable("region", "eu-west", false),
+                    plain_variable("signingKey", "inner-folder-secret-52", true),
+                ],
+                ..Default::default()
+            },
+        );
+
+        let chip = svc
+            .build_chip_resource(ChipKind::Folder, "my-api", Some("orders/eu"))
+            .expect("chip");
+
+        assert!(chip.text.contains("region: eu-west"), "{}", chip.text);
+        assert!(
+            chip.text.contains("signingKey: (secret, value not shared)"),
+            "{}",
+            chip.text
+        );
+        assert!(!chip.text.contains("inner-folder-secret-52"), "{}", chip.text);
+    }
+
+    #[test]
+    fn secret_variables_of_every_folder_above_a_request_are_masked_in_its_chip() {
+        let (svc, repo) = chip_service();
+        repo.with_folder_settings(
+            "my-api",
+            "orders",
+            rocket_collection::FolderSettings {
+                variables: vec![plain_variable("outerKey", "outer-folder-secret-31", true)],
+                ..Default::default()
+            },
+        );
+        repo.with_folder_settings(
+            "my-api",
+            "orders/eu",
+            rocket_collection::FolderSettings {
+                variables: vec![plain_variable("innerKey", "inner-folder-secret-52", true)],
+                ..Default::default()
+            },
+        );
+        let mut request = sample_request("Get");
+        request.pre_request_script =
+            Some("const a = 'outer-folder-secret-31'; const b = 'inner-folder-secret-52';".into());
+        repo.with_request("my-api", "orders/eu/get.yml", request);
+
+        let chip = svc
+            .build_chip_resource(ChipKind::Request, "my-api", Some("orders/eu/get.yml"))
+            .expect("chip");
+
+        for leaked in ["outer-folder-secret-31", "inner-folder-secret-52"] {
+            assert!(!chip.text.contains(leaked), "{leaked} leaked: {}", chip.text);
+        }
+        assert!(chip.text.contains("Request: Get"));
+    }
+
+    #[test]
+    fn a_placeholder_embedded_in_text_is_kept_as_written_in_the_masked_views() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings(
+            "my-api",
+            CollectionSettings {
+                agent_autonomy_enabled: true,
+                variables: vec![
+                    plain_variable("x", "expanded-value", false),
+                    plain_variable("prefixed", "pre{{x}}", false),
+                ],
+                ..Default::default()
+            },
+        );
+        let mut request = sample_request("Login")
+            .with_header("X-Trace", "pre{{x}}")
+            .with_auth(Auth::Basic {
+                username: "pre{{x}}".into(),
+                password: "{{pw}}".into(),
+            });
+        request.variables = vec![plain_variable("local", "pre{{x}}", false)];
+        repo.with_request("my-api", "login.yml", request);
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let view = svc.get_request("s1", "my-api", "login.yml").expect("get_request");
+        let header = view.headers.iter().find(|h| h.key == "X-Trace").expect("header");
+        assert_eq!(header.value, "pre{{x}}");
+        assert_eq!(view.variables[0].value.as_deref(), Some("pre{{x}}"));
+        assert_eq!(view.auth["username"], "pre{{x}}");
+
+        let settings = svc
+            .get_collection_settings("s1", "my-api")
+            .expect("get_collection_settings");
+        let prefixed = settings
+            .variables
+            .iter()
+            .find(|v| v.key == "prefixed")
+            .expect("variable");
+        assert_eq!(prefixed.value.as_deref(), Some("pre{{x}}"));
+    }
+
+    #[test]
+    fn a_bearer_token_is_masked_when_literal_and_kept_when_it_is_a_reference() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request(
+            "my-api",
+            "literal.yml",
+            sample_request("Literal").with_auth(Auth::Bearer {
+                token: "sk-live-bearer-9876".into(),
+            }),
+        );
+        repo.with_request(
+            "my-api",
+            "reference.yml",
+            sample_request("Reference").with_auth(Auth::Bearer {
+                token: "{{apiToken}}".into(),
+            }),
+        );
+        let svc = service_with(Arc::clone(&repo), FakeEnvRepoFactory::new(), RecordingPublisher::new());
+
+        let literal = svc.get_request("s1", "my-api", "literal.yml").expect("literal");
+        assert_eq!(literal.auth["authType"], "bearer");
+        assert_eq!(literal.auth["token"], REDACTED);
+        let json = serde_json::to_string(&literal).expect("serialize");
+        assert!(!json.contains("sk-live-bearer-9876"), "{json}");
+
+        let reference = svc.get_request("s1", "my-api", "reference.yml").expect("reference");
+        assert_eq!(reference.auth["token"], "{{apiToken}}");
+    }
+
     struct SharedEnvFactory(Arc<FakeEnvRepoFactory>);
     impl EnvironmentRepositoryFactory for SharedEnvFactory {
         fn for_collection(&self, collection: &str) -> Box<dyn EnvironmentRepository> {

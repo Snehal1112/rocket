@@ -591,10 +591,15 @@ impl CollectionRepository for ConfigurableCollectionRepo {
     }
     fn get_folder_chain_variables(
         &self,
-        _: &str,
-        _: &str,
+        collection: &str,
+        request_path: &str,
     ) -> DomainResult<Vec<CollectionVariable>> {
-        Ok(vec![])
+        // Variables of every folder above the request, outermost first.
+        Ok(self
+            .get_folder_chain_settings(collection, request_path)?
+            .into_iter()
+            .flat_map(|folder| folder.variables)
+            .collect())
     }
     fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
         Ok(vec![])
@@ -631,6 +636,28 @@ impl CollectionRepository for ConfigurableCollectionRepo {
             .get(&(collection.to_string(), folder_path.to_string()))
             .cloned()
             .ok_or_else(|| DomainError::NotFound(folder_path.to_string()))
+    }
+    fn get_folder_chain_settings(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<rocket_collection::FolderSettings>> {
+        // Settings of every configured folder above the request, outermost first.
+        let folders = self.folder_settings.lock().expect("lock folder_settings");
+        let mut segments: Vec<&str> = request_path.split('/').collect();
+        segments.pop();
+        let mut chain = Vec::new();
+        let mut prefix = String::new();
+        for segment in segments {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(segment);
+            if let Some(settings) = folders.get(&(collection.to_string(), prefix.clone())) {
+                chain.push(settings.clone());
+            }
+        }
+        Ok(chain)
     }
     fn save_request_variables(
         &self,
