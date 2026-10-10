@@ -74,8 +74,10 @@ function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => T
   if (node.type === 'leaf') {
     const idx = node.tabs.findIndex((t) => t.id === tabId);
     if (idx === -1) return node;
+    const updated = updater(node.tabs[idx]);
+    if (updated === node.tabs[idx]) return node;
     const tabs = node.tabs.slice();
-    tabs[idx] = updater(tabs[idx]);
+    tabs[idx] = updated;
     return { ...node, tabs } satisfies LeafNode;
   }
   const left = updateTabInTree(node.children[0], tabId, updater);
@@ -102,7 +104,12 @@ function updateTabInSnapshots(
       continue;
     }
     const tabs = entry.tabs.slice();
-    tabs[idx] = updater(tabs[idx]);
+    const updated = updater(tabs[idx]);
+    if (updated === tabs[idx]) {
+      next[key] = entry;
+      continue;
+    }
+    tabs[idx] = updated;
     next[key] = { ...entry, tabs };
     changed = true;
   }
@@ -140,10 +147,11 @@ function updateTabEverywhere(
   tabId: string,
   updater: (tab: Tab) => Tab,
 ): Pick<PaneState, 'root' | 'collectionTabState'> {
-  return {
-    root: updateTabInTree(state.root, tabId, updater),
-    collectionTabState: updateTabInSnapshots(state.collectionTabState, tabId, updater),
-  };
+  const root = updateTabInTree(state.root, tabId, updater);
+  const collectionTabState = updateTabInSnapshots(state.collectionTabState, tabId, updater);
+  // The same state object makes a Zustand `set` a no-op, so nothing re-renders.
+  if (root === state.root && collectionTabState === state.collectionTabState) return state;
+  return { root, collectionTabState };
 }
 
 // Releases the streaming connections of tabs that are about to be discarded.

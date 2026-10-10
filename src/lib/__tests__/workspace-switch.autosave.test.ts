@@ -73,6 +73,7 @@ describe('workspace switch and autosave', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    clearFlowClipboard();
   });
 
   it('saves a dirty tab into the old workspace before switching', async () => {
@@ -95,7 +96,6 @@ describe('workspace switch and autosave', () => {
     backend.failSave = true;
     await expect(switchWorkspaceSafely('B')).rejects.toThrow();
     expect(getFlowClipboard()).not.toBeNull();
-    clearFlowClipboard();
   });
 
   it('runs a pending autosave into the old workspace and never fires it later', async () => {

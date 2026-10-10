@@ -1,10 +1,11 @@
 import { QueryClient } from '@tanstack/react-query';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const clearPreviews = vi.fn();
 vi.mock('@/lib/saved-request-preview', () => ({
   clearSavedRequestPreviewCache: () => clearPreviews(),
 }));
+import { clearFlowClipboard, getFlowClipboard, setFlowClipboard } from '@/lib/flow-clipboard';
 import { clearWorkspaceScopedCaches } from '@/lib/workspace-switch';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
@@ -14,6 +15,14 @@ import type { AuthState } from '@/types/pane-types';
 const auth = { authType: 'bearer' } as AuthState;
 
 describe('clearWorkspaceScopedCaches', () => {
+  afterEach(() => clearFlowClipboard());
+
+  it('clears the flow clipboard of the workspace that was left', () => {
+    setFlowClipboard({ collection: 'api', workspaceId: 'A', nodes: [], edges: [] });
+    clearWorkspaceScopedCaches(new QueryClient());
+    expect(getFlowClipboard()).toBeNull();
+  });
+
   it('drops in-memory auth of the old workspace', () => {
     useCollectionAuthStore.getState().setCollectionAuth('api', auth);
     useFolderAuthStore.getState().setFolderAuth('api', 'users', auth);

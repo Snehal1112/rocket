@@ -114,6 +114,8 @@ export const deleteWorkspaceSafely = (id: string) =>
  * queries are handled by the `workspace-switched` listener itself.
  */
 export function clearWorkspaceScopedCaches(qc: QueryClient): void {
+  // Copied nodes belong to the workspace that was just left.
+  clearFlowClipboard();
   // Removed, not invalidated, so no screen shows the old workspace's data while it reloads.
   // Global and process env keys are reloaded by the listener.
   qc.removeQueries({

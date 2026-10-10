@@ -132,4 +132,45 @@ describe('pane-store pending flow run', () => {
     const parked = usePaneStore.getState().collectionTabState.other?.tabs[0];
     expect(parked && isFlowTab(parked) ? parked.pendingRunId : null).toBe('run-3');
   });
+
+  describe('patches that change nothing', () => {
+    function countChanges(): { count: () => number; stop: () => void } {
+      let n = 0;
+      const stop = usePaneStore.subscribe(() => {
+        n++;
+      });
+      return { count: () => n, stop };
+    }
+
+    it('late progress for a parked tab whose run is done keeps the state', () => {
+      usePaneStore.setState({
+        collectionTabState: {
+          other: {
+            tabs: [{ ...flowTab, id: 'parked', runState: 'done' }],
+            activeTabId: 'parked',
+          },
+        },
+      });
+      const before = usePaneStore.getState().collectionTabState;
+      const spy = countChanges();
+      usePaneStore.getState().patchFlowNodeProgress('parked', 'a', 'late', undefined);
+      spy.stop();
+      expect(spy.count()).toBe(0);
+      expect(usePaneStore.getState().collectionTabState).toBe(before);
+    });
+
+    it('a status patch for an unknown node keeps the state', () => {
+      usePaneStore.setState({
+        collectionTabState: {
+          other: { tabs: [{ ...flowTab, id: 'parked' }], activeTabId: 'parked' },
+        },
+      });
+      const before = usePaneStore.getState().collectionTabState;
+      const spy = countChanges();
+      usePaneStore.getState().patchFlowNodeStatus('parked', 'missing', 'success');
+      spy.stop();
+      expect(spy.count()).toBe(0);
+      expect(usePaneStore.getState().collectionTabState).toBe(before);
+    });
+  });
 });
