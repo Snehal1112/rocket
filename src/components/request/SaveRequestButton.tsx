@@ -11,14 +11,14 @@ interface SaveRequestButtonProps {
 }
 
 export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
-  const markClean = usePaneStore((s) => s.markClean);
+  const markRequestSaved = usePaneStore((s) => s.markRequestSaved);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const handleSave = useCallback(async () => {
     if (!tab.source) return;
     try {
       await saveTabRequest(tab.source.collection, tab.source.path, tab);
-      markClean(tab.id);
+      markRequestSaved(tab.id, tab.request);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (err) {
@@ -26,7 +26,7 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 3000);
     }
-  }, [tab, markClean]);
+  }, [tab, markRequestSaved]);
 
   // Listen for Cmd+S keyboard shortcut.
   useEffect(() => {

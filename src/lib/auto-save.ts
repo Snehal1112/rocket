@@ -1,51 +1,8 @@
-import { toApiBody } from '@/lib/execute-request';
-import { toPersistedAuth } from '@/lib/persisted-auth';
-import { toPersistedHeaders } from '@/lib/persisted-headers';
-import {
-  toApiGraphQlRequest,
-  toApiGrpcRequest,
-  toPersistedPathParams,
-} from '@/lib/request-save-mapper';
-import {
-  type Request,
-  saveGraphQlRequest,
-  saveGrpcRequest,
-  saveRequest,
-  saveWebSocketRequest,
-} from '@/lib/tauri-api';
-import { toApiWebSocketRequest } from '@/lib/websocket-mapper';
+import { saveTabRequest } from '@/lib/save-tab-request';
 import { usePaneStore } from '@/stores/pane-store';
-import type { RequestState } from '@/types/pane-types';
+import type { RequestState, RequestTab } from '@/types/pane-types';
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function toApiRequest(uid: string, name: string, request: RequestState): Request {
-  const s = request.settings;
-
-  return {
-    uid,
-    name,
-    method: request.method,
-    url: request.url,
-    headers: toPersistedHeaders(request.headers),
-    pathParams: toPersistedPathParams(request.pathParams),
-    body: toApiBody(request.body),
-    auth: toPersistedAuth(request.auth),
-    tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
-    preRequestScript: request.preRequestScript ?? null,
-    postResponseScript: request.postResponseScript ?? null,
-    tests: request.testsScript ?? null,
-    assertions: request.assertions ?? [],
-    actions: request.actions ?? [],
-    settings: {
-      timeout: s.timeoutMs,
-      followRedirects: s.followRedirects,
-      verifySsl: s.verifySsl,
-      maxRedirects: s.maxRedirects,
-      encodeUrl: s.encodeUrl,
-    },
-  };
-}
 
 export function scheduleAutoSave(
   tabId: string,
@@ -57,34 +14,20 @@ export function scheduleAutoSave(
   cancelAutoSave(tabId);
   const timer = setTimeout(async () => {
     timers.delete(tabId);
+    // The shared save path builds the payload, so autosave and Save write the same fields.
+    const tab: RequestTab = {
+      id: tabId,
+      title,
+      tabType: 'request',
+      request,
+      response: null,
+      isDirty: true,
+      source: { collection, path },
+    };
     try {
-      if (request.requestType === 'graphql') {
-        await saveGraphQlRequest(
-          collection,
-          path,
-          toApiGraphQlRequest(tabId || crypto.randomUUID(), title, request),
-        );
-      } else if (request.requestType === 'grpc') {
-        await saveGrpcRequest(
-          collection,
-          path,
-          toApiGrpcRequest(tabId || crypto.randomUUID(), title, request),
-        );
-      } else if (request.requestType === 'websocket') {
-        await saveWebSocketRequest(
-          collection,
-          path,
-          toApiWebSocketRequest(tabId || crypto.randomUUID(), title, request),
-        );
-      } else {
-        await saveRequest(
-          collection,
-          path,
-          toApiRequest(tabId || crypto.randomUUID(), title, request),
-        );
-      }
-      // Mark tab clean after successful save.
-      usePaneStore.getState().markClean(tabId);
+      await saveTabRequest(collection, path, tab);
+      // Clean only if no newer edit landed while the save was in flight.
+      usePaneStore.getState().markRequestSaved(tabId, request);
     } catch (err) {
       console.error('[AutoSave] Failed:', err);
     }

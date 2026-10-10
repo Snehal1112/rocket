@@ -20,23 +20,20 @@ export interface RequestSavePayloadOverrides {
   fileName?: string;
 }
 
-export function buildRequestSavePayload(
-  tab: RequestTab,
-  overrides?: RequestSavePayloadOverrides,
-): ApiRequest {
-  const body = tab.request.body;
-  const s = tab.request.settings;
+// Builds the persisted HTTP payload from request state. Every save path goes through
+// this one function, so autosave and the Save button write the same fields.
+export function toApiRequest(uid: string, name: string, request: RequestState): ApiRequest {
+  const s = request.settings;
   return {
-    uid: tab.id || crypto.randomUUID(),
-    name: overrides?.name ?? tab.title,
-    ...(overrides?.fileName !== undefined ? { fileName: overrides.fileName } : {}),
-    method: tab.request.method,
-    url: tab.request.url,
-    headers: toPersistedHeaders(tab.request.headers),
-    pathParams: toPersistedPathParams(tab.request.pathParams),
-    body: toApiBody(body),
-    auth: toPersistedAuth(tab.request.auth),
-    tags: tab.request.tags && tab.request.tags.length > 0 ? tab.request.tags : undefined,
+    uid,
+    name,
+    method: request.method,
+    url: request.url,
+    headers: toPersistedHeaders(request.headers),
+    pathParams: toPersistedPathParams(request.pathParams),
+    body: toApiBody(request.body),
+    auth: toPersistedAuth(request.auth),
+    tags: request.tags && request.tags.length > 0 ? request.tags : undefined,
     settings: s
       ? {
           timeout: s.timeoutMs,
@@ -46,12 +43,25 @@ export function buildRequestSavePayload(
           encodeUrl: s.encodeUrl,
         }
       : undefined,
-    docs: tab.request.docs ?? null,
-    preRequestScript: tab.request.preRequestScript ?? null,
-    postResponseScript: tab.request.postResponseScript ?? null,
-    tests: tab.request.testsScript ?? null,
-    assertions: tab.request.assertions ?? [],
+    docs: request.docs ?? null,
+    preRequestScript: request.preRequestScript ?? null,
+    postResponseScript: request.postResponseScript ?? null,
+    tests: request.testsScript ?? null,
+    assertions: request.assertions ?? [],
+    actions: request.actions ?? [],
   };
+}
+
+export function buildRequestSavePayload(
+  tab: RequestTab,
+  overrides?: RequestSavePayloadOverrides,
+): ApiRequest {
+  const payload = toApiRequest(
+    tab.id || crypto.randomUUID(),
+    overrides?.name ?? tab.title,
+    tab.request,
+  );
+  return overrides?.fileName !== undefined ? { ...payload, fileName: overrides.fileName } : payload;
 }
 
 // Builds the persisted GraphQL payload from tab state. Shared by the Save button,

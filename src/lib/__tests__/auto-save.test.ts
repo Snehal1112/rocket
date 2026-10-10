@@ -6,10 +6,10 @@ vi.mock('@/lib/tauri-api', () => ({
   saveGrpcRequest: vi.fn().mockResolvedValue(undefined),
 }));
 
-const markClean = vi.fn();
+const markRequestSaved = vi.fn();
 vi.mock('@/stores/pane-store', () => ({
   usePaneStore: {
-    getState: () => ({ markClean }),
+    getState: () => ({ markRequestSaved }),
   },
 }));
 

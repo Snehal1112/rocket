@@ -274,6 +274,8 @@ export interface PaneState {
   markDirty: (tabId: string) => void;
   // For a flow, `saved` is the graph that was written, which may be older than the live one.
   markClean: (tabId: string, saved?: GraphSnap) => void;
+  // Clears the dirty flag only when the tab still holds the request that was written.
+  markRequestSaved: (tabId: string, saved: RequestState) => void;
 
   // Collection-keyed tab state actions.
   setActiveCollection: (name: string) => void;
@@ -613,6 +615,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   markDirty(tabId) {
     const { root } = get();
     set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: true })) });
+  },
+
+  markRequestSaved(tabId, saved) {
+    const { root } = get();
+    set({
+      root: updateTabInTree(root, tabId, (tab) =>
+        isRequestTab(tab) && tab.request === saved ? { ...tab, isDirty: false } : tab,
+      ),
+    });
   },
 
   markClean(tabId, saved) {
