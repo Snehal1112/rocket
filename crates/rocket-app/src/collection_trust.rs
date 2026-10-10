@@ -460,6 +460,51 @@ mod tests {
         assert!(svc.migration_notice().expect("notice").is_empty());
     }
 
+    /// Removes `#[cfg(test)] mod name { ... }` blocks (brace-matched), so production code
+    /// that sits after a test module in the same file is still scanned.
+    fn strip_test_modules(text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(at) = rest.find("#[cfg(test)]") {
+            out.push_str(&rest[..at]);
+            let after = &rest[at + "#[cfg(test)]".len()..];
+            let trimmed = after.trim_start();
+            let is_mod = trimmed.starts_with("mod ") || trimmed.starts_with("pub(crate) mod ");
+            if !is_mod {
+                // A single cfg(test) item such as a function or use. Drop its attribute line only.
+                rest = after;
+                continue;
+            }
+            let Some(open) = after.find(['{', ';']) else {
+                rest = "";
+                break;
+            };
+            if after.as_bytes()[open] == b';' {
+                // `mod name;` in its own file, nothing to skip here.
+                rest = &after[open + 1..];
+                continue;
+            }
+            let mut depth = 0usize;
+            let mut end = after.len();
+            for (i, c) in after[open..].char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = open + i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            rest = &after[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
     /// Production code must read the effective capabilities, never the raw request fields.
     /// This keeps a new consumer from bypassing the trust gate.
     #[test]
@@ -469,9 +514,22 @@ mod tests {
             ".script_context_roots",
             ".agent_autonomy_enabled",
         ];
-        // Reads of the script phase state and context, which are not collection settings.
-        const IGNORED: [&str; 3] = ["state.sandbox_mode", "ctx.sandbox_mode", "self.sandbox_mode"];
-        const ALLOWED_FILES: [&str; 3] = ["collection_trust.rs", "collection_service.rs", "test_doubles.rs"];
+        // Exact lines that read the effective value or the script phase state, never settings.
+        const ALLOWED_LINES: [(&str, &str); 2] = [
+            (
+                "execution_service.rs",
+                "let mode = match effective.sandbox_mode {",
+            ),
+            (
+                "execution_service.rs",
+                ".with_sandbox_mode(state.sandbox_mode)",
+            ),
+        ];
+        const ALLOWED_FILES: [&str; 3] = [
+            "collection_trust.rs",
+            "collection_service.rs",
+            "test_doubles.rs",
+        ];
 
         fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for entry in std::fs::read_dir(dir).expect("read dir").flatten() {
@@ -494,22 +552,28 @@ mod tests {
                 continue;
             }
             let text = std::fs::read_to_string(&path).expect("read file");
-            // Test modules sit at the end of a file, so the production part ends there.
-            let production = text.split("#[cfg(test)]").next().unwrap_or_default();
+            let production = strip_test_modules(&text);
             for (number, line) in production.lines().enumerate() {
                 let code = line.trim_start();
                 if code.starts_with("//") {
                     continue;
                 }
-                let mut checked = code.to_string();
-                for ignored in IGNORED {
-                    checked = checked.replace(ignored, "");
+                if ALLOWED_LINES.contains(&(name, code)) {
+                    continue;
                 }
-                if FIELDS.iter().any(|f| checked.contains(f)) {
-                    offenders.push(format!("{}:{}", path.display(), number + 1));
+                if FIELDS.iter().any(|f| code.contains(f)) {
+                    offenders.push(format!("{name}:{}: {code}", number + 1));
                 }
             }
         }
-        assert!(offenders.is_empty(), "raw capability reads: {offenders:?}");
+        assert!(offenders.is_empty(), "raw capability reads: {offenders:#?}");
+    }
+
+    #[test]
+    fn strip_test_modules_keeps_code_after_a_test_module() {
+        let text = "fn a() {}\n#[cfg(test)]\nmod tests {\n fn x() { s.sandbox_mode; }\n}\nfn b() { t.sandbox_mode; }\n";
+        let kept = strip_test_modules(text);
+        assert!(kept.contains("fn b()"));
+        assert!(!kept.contains("fn x()"));
     }
 }

@@ -35,8 +35,9 @@ pub fn test_identity(name: &str) -> rocket_collection::CollectionIdentity {
     }
 }
 
-/// In-memory trust store. `allow_all` grants every capability to every collection,
-/// which lets older tests keep their Developer-mode and agent-run setups.
+/// In-memory trust store. `allow_all` grants Developer mode, agent run and host environment
+/// to every collection, and approves only the context root `../shared`. This lets older
+/// tests keep their Developer-mode and agent-run setups.
 #[derive(Default)]
 pub struct InMemoryTrustStore {
     allow_all: bool,
@@ -81,7 +82,8 @@ impl rocket_collection::CollectionTrustStore for InMemoryTrustStore {
         if self.allow_all {
             return Ok(Some(rocket_collection::CollectionGrant {
                 developer_mode: true,
-                // Roots are approved by listing them, so allow-all echoes nothing here.
+                // Only this one root is approved. A test that needs another root must grant
+                // it explicitly with `InMemoryTrustStore::grant`.
                 context_roots: vec!["../shared".into()],
                 agent_run: true,
                 process_env: true,

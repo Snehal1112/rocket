@@ -1862,7 +1862,8 @@ mod tests {
         let forgotten = svc
             .get_test_results("session-a", "my-api", "login.yml")
             .expect_err("session-a's cached results must be gone after forget_session");
-        assert!(matches!(forgotten, DomainError::NotFound(_)));
+        // A forgotten session is no longer bound to a workspace.
+        assert!(matches!(forgotten, DomainError::InvalidInput(_)));
         svc.get_test_results("session-b", "my-api", "login.yml")
             .expect("session-b's cached results must survive forgetting a different session");
     }
@@ -2934,6 +2935,8 @@ mod tests {
     #[tokio::test]
     async fn response_chip_works_for_a_request_that_is_not_saved() {
         let repo = ConfigurableCollectionRepo::new();
+        // Settings make the fake repo list the collection.
+        repo.set_settings("my-api", CollectionSettings::default());
         // The real repo answers `NotFound` for the variables of a request that is not saved.
         repo.missing_request_variables();
         let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
@@ -2947,6 +2950,8 @@ mod tests {
     #[tokio::test]
     async fn response_chip_is_refused_when_an_unsaved_request_hits_an_io_error() {
         let repo = ConfigurableCollectionRepo::new();
+        // Settings make the fake repo list the collection.
+        repo.set_settings("my-api", CollectionSettings::default());
         repo.fail_request_variables();
         let svc = service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new());
         let err = svc
