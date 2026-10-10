@@ -227,6 +227,13 @@ impl<T: CollectionRepository> CollectionRepository for SharedCollectionRepo<T> {
     ) -> DomainResult<Vec<CollectionVariable>> {
         self.0.get_folder_chain_variables(a, b)
     }
+    fn get_folder_chain_variables_strict(
+        &self,
+        a: &str,
+        b: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        self.0.get_folder_chain_variables_strict(a, b)
+    }
     fn collection_root_path(&self, n: &str) -> DomainResult<std::path::PathBuf> {
         self.0.collection_root_path(n)
     }

@@ -1271,6 +1271,23 @@ fn strict_folder_chain_variables_fail_on_a_broken_folder_yml_only() {
 }
 
 #[test]
+fn strict_folder_chain_variables_fail_on_an_unreadable_folder_yml() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "auth").unwrap();
+    // A directory named folder.yml exists but cannot be read as a file.
+    let folder_yml = repo.collection_root_path("my-api").unwrap().join("auth/folder.yml");
+    std::fs::create_dir(&folder_yml).expect("create folder.yml directory");
+    assert!(repo
+        .get_folder_chain_variables("my-api", "auth/login.yml")
+        .expect("lenient walk skips it")
+        .is_empty());
+    assert!(repo
+        .get_folder_chain_variables_strict("my-api", "auth/login.yml")
+        .is_err());
+}
+
+#[test]
 fn get_summaries_returns_collection_with_summary_items() {
     let (_dir, repo) = setup();
     repo.create("pets").unwrap();

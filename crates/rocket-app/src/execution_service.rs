@@ -6052,6 +6052,13 @@ mod tests {
         ) -> DomainResult<Vec<CollectionVariable>> {
             self.0.get_folder_chain_variables(a, b)
         }
+        fn get_folder_chain_variables_strict(
+            &self,
+            a: &str,
+            b: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            self.0.get_folder_chain_variables_strict(a, b)
+        }
         fn get_folder_variables(&self, a: &str, b: &str) -> DomainResult<Vec<CollectionVariable>> {
             self.0.get_folder_variables(a, b)
         }

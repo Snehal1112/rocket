@@ -1678,6 +1678,14 @@ mod wsdl_tests {
         ) -> DomainResult<Vec<CollectionVariable>> {
             self.0.get_folder_chain_variables(collection, request_path)
         }
+        fn get_folder_chain_variables_strict(
+            &self,
+            collection: &str,
+            request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            self.0
+                .get_folder_chain_variables_strict(collection, request_path)
+        }
         fn get_folder_variables(
             &self,
             collection: &str,

@@ -60,11 +60,9 @@ pub(super) fn folder_chain_variables(
     for segment in &dir_components {
         current = current.join(segment);
         let folder_yml = current.join("folder.yml");
-        if !folder_yml.exists() {
-            continue;
-        }
         let content = match fs::read_to_string(&folder_yml) {
             Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) if strict => return Err(e.into()),
             Err(_) => continue,
         };
