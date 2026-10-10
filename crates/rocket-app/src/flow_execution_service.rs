@@ -7446,6 +7446,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn poll_send_error_after_a_response_saves_that_attempt_to_history() {
+        let executor = SequenceExecutor::new(vec![(404, "{}"), (0, "")]);
+        let history = InMemoryHistoryRepo::new();
+        let exec = poll_exec(&executor, status_condition(200), &history);
+        let flow = poll_flow(repeat("response.status === 200", 100, 5, 10_000), false);
+
+        let summary = service_with_flow(flow)
+            .run(&exec, run_input("poll"))
+            .await
+            .expect("run");
+
+        let step = step_of(&summary, "job");
+        assert_eq!(step.status, FlowNodeStatus::Failed);
+        assert_eq!(executor.sent_count(), 2);
+        assert_eq!(
+            history.saved_count(),
+            1,
+            "the earlier attempt that got a response is kept"
+        );
+        assert_eq!(step.status_code, Some(404));
+    }
+
+    #[tokio::test]
     async fn poll_publishes_progress_for_each_attempt() {
         let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, "{}")]);
         let history = InMemoryHistoryRepo::new();

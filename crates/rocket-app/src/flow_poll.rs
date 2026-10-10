@@ -48,7 +48,8 @@ fn note_elapsed(trace: &mut NodeTrace, elapsed_ms: u64) {
 impl FlowExecutionService {
     /// Sends `request_input` until `repeat.condition` is truthy. Each attempt
     /// runs the request's scripts. Only the attempt that ends the poll is
-    /// saved to History. A send error with no response or a condition script
+    /// saved to History, or the last attempt that got a response when a later
+    /// send fails. A send error with no response or a condition script
     /// error fails at once; giving up fails with "condition not met after …".
     /// Every failure after a response sets `poll_stats`.
     /// `trace.poll` holds the same, plus the last verdict, on every path.
@@ -131,6 +132,10 @@ impl FlowExecutionService {
             let mut output = match result {
                 Ok(output) => output,
                 Err(e) => {
+                    // The earlier attempt that got a response is the last one kept.
+                    if let Some(entry) = &pending_history {
+                        exec.save_deferred_history(entry);
+                    }
                     if let Some(stats) = poll_stats.as_mut() {
                         stats.attempts = attempt;
                         stats.elapsed_ms = millis(started.elapsed());
