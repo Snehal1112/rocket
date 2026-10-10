@@ -4,6 +4,7 @@ import type { AgentSessionStarted, ConversationRecord } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { createDeferred } from '@/test/deferred';
+import { CONVERSATION_SAVE_DEBOUNCE_MS, startConversationSaver } from '../conversation-saver';
 import { REPLAY_PREFACE_HEADER } from '../replay-preface';
 import {
   CONTINUE_WORKSPACE_MISMATCH,
@@ -23,6 +24,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   cancelAgentPrompt: vi.fn(),
   endAgentSession: vi.fn(),
   endStaleAssistantSessions: vi.fn(),
+  saveConversation: vi.fn(),
 }));
 
 const store = () => useAssistantStore.getState();
@@ -79,6 +81,46 @@ describe('assistant session flows', () => {
     store().completeMessage('s2');
     await sendAssistantMessage('Next');
     expect(vi.mocked(api.sendAgentPrompt).mock.calls[1][1]).toBe('Next');
+  });
+
+  it('saves a continued chat without the preface and with continuedFrom', async () => {
+    vi.useFakeTimers();
+    const stopSaver = startConversationSaver();
+    try {
+      useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+      vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({
+        sessionId: 's2',
+        configOptions: [],
+      });
+      vi.mocked(api.sendAgentPrompt).mockResolvedValue('end_turn');
+      vi.mocked(api.saveConversation).mockResolvedValue({
+        id: 'x',
+        title: 'And now?',
+        agentConfigId: 'agent-1',
+        mode: 'ask',
+        createdAt: '',
+        updatedAt: '',
+        messageCount: 2,
+      });
+      await continueConversation(stored, 'agent-1');
+      await sendAssistantMessage('And now?');
+      expect(vi.mocked(api.sendAgentPrompt).mock.calls[0][1]).toContain(REPLAY_PREFACE_HEADER);
+      store().appendChunk('s2', 'Here is more.');
+      store().completeMessage('s2');
+      await vi.advanceTimersByTimeAsync(CONVERSATION_SAVE_DEBOUNCE_MS);
+      expect(api.saveConversation).toHaveBeenCalledTimes(1);
+      const [sessionId, saved] = vi.mocked(api.saveConversation).mock.calls[0];
+      expect(sessionId).toBe('s2');
+      expect(saved.continuedFrom).toBe(stored.id);
+      expect(saved.messages).toEqual([
+        { kind: 'user', text: 'And now?' },
+        { kind: 'agent', text: 'Here is more.' },
+      ]);
+      expect(JSON.stringify(saved)).not.toContain(REPLAY_PREFACE_HEADER);
+    } finally {
+      stopSaver();
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the preface when the first send fails', async () => {
