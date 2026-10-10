@@ -20,7 +20,7 @@ import {
   collectionTrustKeys,
   useCollectionTrustEvents,
 } from '@/lib/queries/collection-trust-queries';
-import { environmentKeys } from '@/lib/queries/environment-queries';
+import { environmentKeys, reloadGlobalEnvironments } from '@/lib/queries/environment-queries';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
 import { getActiveWorkspace, listWorkspaces, type Workspace } from '@/lib/tauri-api';
@@ -133,7 +133,7 @@ function App() {
         useEnvStore.getState().setActiveCollection(null);
         qc.invalidateQueries({ queryKey: workspaceKeys.all });
         qc.invalidateQueries({ queryKey: workspaceKeys.active });
-        qc.invalidateQueries({ queryKey: environmentKeys.globalName });
+        void reloadGlobalEnvironments(qc);
         qc.invalidateQueries({ queryKey: collectionTrustKeys.all });
         qc.invalidateQueries({ queryKey: environmentKeys.processAll });
       }),

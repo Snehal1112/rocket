@@ -94,13 +94,38 @@ export function useDeleteEnvironment(collectionName: string | null) {
 // cache synchronously, so the entry for the active name is awaited here.
 async function refreshGlobalEnvironments(qc: QueryClient, activeName: string | null) {
   await qc.invalidateQueries({ queryKey: environmentKeys.globalAll });
-  if (activeName) {
+  await fetchActiveGlobalEnvironment(qc, activeName);
+}
+
+// A failed refetch must not turn an already persisted change into an error.
+async function fetchActiveGlobalEnvironment(qc: QueryClient, activeName: string | null) {
+  if (!activeName) return;
+  try {
     await qc.fetchQuery({
       queryKey: environmentKeys.global(activeName),
       queryFn: () => getGlobalEnvironment(activeName),
       staleTime: 0,
     });
+  } catch (error) {
+    console.warn('Could not refresh the global environment', error);
   }
+}
+
+// Drops every cached global environment and reads the active one again. A
+// workspace switch can keep the same environment name with other values.
+export async function reloadGlobalEnvironments(qc: QueryClient) {
+  qc.removeQueries({ queryKey: environmentKeys.globalAll });
+  let name: string | null = null;
+  try {
+    name = await qc.fetchQuery({
+      queryKey: environmentKeys.globalName,
+      queryFn: getGlobalEnvironmentName,
+      staleTime: 0,
+    });
+  } catch (error) {
+    console.warn('Could not read the active global environment', error);
+  }
+  await fetchActiveGlobalEnvironment(qc, name);
 }
 
 export function useSetGlobalEnvironment() {

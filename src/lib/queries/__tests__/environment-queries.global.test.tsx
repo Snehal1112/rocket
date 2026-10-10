@@ -37,6 +37,7 @@ vi.mock('@/stores/collection-auth-store', () => ({
 import { getGlobalVariables } from '@/lib/execute-request';
 import {
   environmentKeys,
+  reloadGlobalEnvironments,
   useDeleteGlobalEnvironment,
   useSaveGlobalEnvironment,
   useSetGlobalEnvironment,
@@ -99,5 +100,26 @@ describe('global environment cache', () => {
       await result.current.mutateAsync('dev');
     });
     expect(getGlobalVariables()).toEqual({ host: 'old' });
+  });
+
+  it('does not fail a saved change when the refetch fails', async () => {
+    const api = await import('@/lib/tauri-api');
+    vi.mocked(api.getGlobalEnvironment).mockRejectedValueOnce(new Error('offline'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { result } = renderHook(() => useSaveGlobalEnvironment(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync(env('prod', 'new'));
+    });
+    expect(result.current.isError).toBe(false);
+    expect(getGlobalVariables()).toEqual({ host: 'new' });
+    warn.mockRestore();
+  });
+
+  it('drops the previous workspace values when the workspace switches', async () => {
+    // The other workspace has an environment with the same name and other values.
+    store.envs = { prod: env('prod', 'other-workspace') };
+    expect(getGlobalVariables()).toEqual({ host: 'old' });
+    await reloadGlobalEnvironments(client);
+    expect(getGlobalVariables()).toEqual({ host: 'other-workspace' });
   });
 });
