@@ -157,6 +157,10 @@ export async function continueConversation(
   if (current?.status === 'active' || current?.status === 'starting') {
     await endAssistantSession();
   }
+  // The workspace may have changed while the live session ended.
+  if (!canContinueHere(record)) {
+    throw new Error(CONTINUE_WORKSPACE_MISMATCH);
+  }
   await startAssistant(agentConfigId, 'ask', {
     fromId: record.id,
     preface: buildReplayPreface(record),

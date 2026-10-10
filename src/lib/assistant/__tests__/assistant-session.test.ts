@@ -94,6 +94,18 @@ describe('assistant session flows', () => {
     ).toBe(true);
   });
 
+  it('refuses when the workspace changes while the live session ends', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+    activate('s1');
+    vi.mocked(api.endAgentSession).mockImplementationOnce(async () => {
+      useWorkspaceStore.setState({ activeWorkspaceId: 'ws-2' });
+    });
+    await expect(continueConversation(stored, 'agent-1')).rejects.toThrow(
+      CONTINUE_WORKSPACE_MISMATCH,
+    );
+    expect(api.startWorkspaceAssistant).not.toHaveBeenCalled();
+  });
+
   it('refuses to continue a conversation of another workspace', async () => {
     useWorkspaceStore.setState({ activeWorkspaceId: 'ws-2' });
     await expect(continueConversation(stored, 'agent-1')).rejects.toThrow(

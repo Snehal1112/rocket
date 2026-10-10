@@ -19,6 +19,16 @@ export function AssistantStartView() {
     s.session?.status === 'error' ? s.session.error : undefined,
   );
   const hasMessages = useAssistantStore((s) => s.messages.length > 0);
+  const startAgain = () => {
+    // A failed start retries with its own mode and replay seed, so a continuation survives.
+    const state = useAssistantStore.getState();
+    const failed = state.session?.status === 'error' ? state.session : undefined;
+    const seed =
+      failed && state.replay
+        ? { fromId: state.replay.fromId, preface: state.replay.preface }
+        : undefined;
+    void startAssistant(agentConfigId, failed?.mode, seed);
+  };
   const [selectedId, setSelectedId] = useState('');
   const agentConfigId = selectedId || agentConfigs[0]?.id || '';
 
@@ -63,11 +73,7 @@ export function AssistantStartView() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            size='sm'
-            disabled={!agentConfigId}
-            onClick={() => void startAssistant(agentConfigId)}
-          >
+          <Button size='sm' disabled={!agentConfigId} onClick={startAgain}>
             {hasMessages ? 'Start a new session' : 'Start'}
           </Button>
         </>

@@ -17,7 +17,7 @@ import {
 } from '@/lib/assistant/assistant-session';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import type { AgentProposalStatus, ConversationRecord, StoredMessage } from '@/lib/tauri-api';
-import type { AssistantMessage } from '@/stores/assistant-store';
+import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
 import { ChatItem } from './AssistantChatView';
 
 const PROPOSAL_STATUS_LABEL: Record<AgentProposalStatus, string> = {
@@ -55,9 +55,11 @@ export const MISSING_AGENT_TEXT =
 function ContinueConversation({
   record,
   onContinued,
+  onContinueFailed,
 }: {
   record: ConversationRecord;
   onContinued: () => void;
+  onContinueFailed?: () => void;
 }) {
   const { data: agentConfigs = [] } = useAgentConfigs();
   const storedAgentExists = agentConfigs.some((c) => c.id === record.agentConfigId);
@@ -73,7 +75,13 @@ function ContinueConversation({
     }
     onContinued();
     // A failed start shows its error in the Start view, like any start.
-    void continueConversation(record, agentConfigId);
+    continueConversation(record, agentConfigId).catch((err: unknown) => {
+      // Only a throw before the start gets here. The message is never logged.
+      const refused = err instanceof Error && err.message === CONTINUE_WORKSPACE_MISMATCH;
+      toast.error(refused ? CONTINUE_WORKSPACE_MISMATCH : 'Could not continue this conversation.');
+      // When the start never began, the chat has nothing new, so the history comes back.
+      if (useAssistantStore.getState().replay?.fromId !== record.id) onContinueFailed?.();
+    });
   };
 
   return (
@@ -105,11 +113,13 @@ export function AssistantConversationView({
   agentLabel,
   onBack,
   onContinued,
+  onContinueFailed,
 }: {
   record: ConversationRecord;
   agentLabel: string;
   onBack: () => void;
   onContinued?: () => void;
+  onContinueFailed?: () => void;
 }) {
   return (
     <div className='flex min-h-0 flex-1 flex-col'>
@@ -144,7 +154,13 @@ export function AssistantConversationView({
           })}
         </div>
       </ScrollArea>
-      {onContinued && <ContinueConversation record={record} onContinued={onContinued} />}
+      {onContinued && (
+        <ContinueConversation
+          record={record}
+          onContinued={onContinued}
+          onContinueFailed={onContinueFailed}
+        />
+      )}
     </div>
   );
 }

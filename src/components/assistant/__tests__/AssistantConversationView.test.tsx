@@ -1,8 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { canContinueHere, continueConversation } from '@/lib/assistant/assistant-session';
 import type { ConversationRecord } from '@/lib/tauri-api';
+import { useAssistantStore } from '@/stores/assistant-store';
 import {
   AssistantConversationView,
   CONTINUE_HINT,
@@ -22,6 +24,7 @@ vi.mock('@/lib/assistant/assistant-session', () => ({
   canContinueHere: vi.fn(() => true),
   continueConversation: vi.fn(),
 }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/lib/queries/agent-config-queries', () => ({
   useAgentConfigs: () => ({ data: [{ id: 'agent-1', label: 'Claude' }] }),
 }));
@@ -77,6 +80,24 @@ describe('AssistantConversationView Continue', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(onContinued).not.toHaveBeenCalled();
     expect(continueConversation).not.toHaveBeenCalled();
+  });
+
+  it('shows a generic toast and returns to the history when Continue throws before the start', async () => {
+    vi.mocked(continueConversation).mockRejectedValueOnce(new Error('secret text'));
+    useAssistantStore.getState().reset();
+    const onContinueFailed = vi.fn();
+    render(
+      <AssistantConversationView
+        record={record}
+        agentLabel='Claude'
+        onBack={vi.fn()}
+        onContinued={vi.fn()}
+        onContinueFailed={onContinueFailed}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onContinueFailed).toHaveBeenCalledTimes(1));
+    expect(toast.error).toHaveBeenCalledWith('Could not continue this conversation.');
   });
 
   it('asks for an agent when the stored one is gone', () => {
