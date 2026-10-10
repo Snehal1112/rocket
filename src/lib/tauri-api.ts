@@ -2944,6 +2944,106 @@ export const onAgentProposalResolved = (
 ): Promise<UnlistenFn> =>
   listen<AgentProposalResolvedEvent>('agent-proposal-resolved', (e) => handler(e.payload));
 
+// Stored assistant conversations. Records are DTOs, so their fields are
+// camelCase. Message kinds and statuses are the same words as on disk. The
+// three events are DomainEvent JSON, so their fields stay snake_case, and
+// they carry ids only.
+
+export type StoredMessage =
+  | { kind: 'user'; text: string }
+  | { kind: 'agent'; text: string }
+  | { kind: 'tool'; title: string; status: AgentToolCallStatus }
+  | { kind: 'notice'; text: string }
+  | { kind: 'proposal'; summary: string; status: AgentProposalStatus };
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  agentConfigId: string;
+  mode: AssistantMode;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  continuedFrom?: string;
+}
+
+export interface ConversationCollectionRef {
+  uid: string;
+  name: string;
+}
+
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  agentConfigId: string;
+  mode: AssistantMode;
+  workspaceId: string;
+  createdAt: string;
+  updatedAt: string;
+  collections: ConversationCollectionRef[];
+  messages: StoredMessage[];
+  continuedFrom?: string;
+}
+
+/** What the panel saves. `collections` are names; the backend stores their uid. */
+export interface ConversationInput {
+  id: string;
+  agentConfigId: string;
+  mode: AssistantMode;
+  workspaceId: string;
+  collections: string[];
+  messages: StoredMessage[];
+  continuedFrom?: string;
+}
+
+export const listConversations = () => invoke<ConversationSummary[]>('list_conversations');
+
+export const getConversation = (id: string) =>
+  invoke<ConversationRecord>('get_conversation', { id });
+
+/** Saves into the workspace the session started in, masked by the backend. */
+export const saveConversation = (sessionId: string, conversation: ConversationInput) =>
+  invoke<ConversationSummary>('save_conversation', { sessionId, conversation });
+
+export const deleteConversation = (id: string) => invoke<void>('delete_conversation', { id });
+
+export const clearConversations = () => invoke<void>('clear_conversations');
+
+export interface AssistantConversationSavedEvent {
+  type: 'assistantConversationSaved';
+  conversation_id: string;
+}
+
+export interface AssistantConversationDeletedEvent {
+  type: 'assistantConversationDeleted';
+  conversation_id: string;
+}
+
+export interface AssistantConversationsClearedEvent {
+  type: 'assistantConversationsCleared';
+}
+
+export const onAssistantConversationSaved = (
+  handler: (event: AssistantConversationSavedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AssistantConversationSavedEvent>('assistant-conversation-saved', (e) =>
+    handler(e.payload),
+  );
+
+export const onAssistantConversationDeleted = (
+  handler: (event: AssistantConversationDeletedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AssistantConversationDeletedEvent>('assistant-conversation-deleted', (e) =>
+    handler(e.payload),
+  );
+
+export const onAssistantConversationsCleared = (
+  handler: (event: AssistantConversationsClearedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AssistantConversationsClearedEvent>('assistant-conversations-cleared', (e) =>
+    handler(e.payload),
+  );
+
 export interface AgentToolInvokedEvent {
   type: 'acpToolInvoked';
   session_id: string;
