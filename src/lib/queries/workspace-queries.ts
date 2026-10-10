@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { clearPromptHistory } from '@/lib/assistant/prompt-history';
 import {
   closeWorkspace,
@@ -13,11 +14,11 @@ import {
   type RequestGuardPolicy,
   renameWorkspace,
   setMultiWorkspaceMode,
-  switchWorkspace,
   unpinWorkspace,
   updateRequestGuardPolicy,
   updateWorkspaceDescription,
 } from '@/lib/tauri-api';
+import { switchWorkspaceSafely } from '@/lib/workspace-switch';
 
 export const workspaceKeys = {
   all: ['workspaces'] as const,
@@ -66,10 +67,14 @@ export function useCreateWorkspace() {
 export function useSwitchWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => switchWorkspace(id),
+    // Saves open edits into the current workspace before the backend switches.
+    mutationFn: (id: string) => switchWorkspaceSafely(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.all });
       qc.invalidateQueries({ queryKey: workspaceKeys.active });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : String(error));
     },
   });
 }

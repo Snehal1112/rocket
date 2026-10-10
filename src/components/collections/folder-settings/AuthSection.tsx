@@ -20,6 +20,7 @@ import {
 } from '@/lib/folder-settings-convert';
 import { sameOAuth2TokenConfig, withoutOAuth2Tokens } from '@/lib/oauth2-token-config';
 import type { FolderSettings } from '@/lib/tauri-api';
+import { captureWorkspace } from '@/lib/workspace-guard';
 import { useFolderAuthStore } from '@/stores/folder-auth-store';
 import type { AuthState } from '@/types/pane-types';
 import type { FolderSectionProps } from './sections';
@@ -82,6 +83,8 @@ export function AuthSection({
   // The last committed state, so a commit can tell whether the persisted shape changed.
   const authRef = useRef(auth);
   authRef.current = auth;
+  // A token that arrives after a workspace switch must not reach the new workspace's folders.
+  const [inMountWorkspace] = useState(captureWorkspace);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: only an outside change to settings.auth or a new folder resets the editor; the local state is compared inside.
   useEffect(() => {
@@ -90,25 +93,31 @@ export function AuthSection({
     }
   }, [settings.auth, collectionName, folderPath]);
 
-  const commit = useCallback((edited: AuthState) => {
-    const next = dropTokenOnConfigChange(authRef.current, edited);
-    const previous = stateToFolderAuth(authRef.current);
-    authRef.current = next;
-    setAuth(next);
-    const target = targetRef.current;
-    const store = useFolderAuthStore.getState();
-    // Inherit means no folder auth, so nothing is kept for this folder.
-    if (next.authType === 'inherit') {
-      store.clearFolderAuth(target.collectionName, target.folderPath);
-    } else {
-      store.setFolderAuth(target.collectionName, target.folderPath, next);
-    }
-    // A fetched OAuth2 token is not saved to folder.yml, so it does not change the folder.
-    const persisted = stateToFolderAuth(next);
-    if (authFingerprint(persisted) !== authFingerprint(previous)) {
-      onChangeRef.current({ auth: persisted });
-    }
-  }, []);
+  const commit = useCallback(
+    (edited: AuthState) => {
+      const next = dropTokenOnConfigChange(authRef.current, edited);
+      const previous = stateToFolderAuth(authRef.current);
+      authRef.current = next;
+      setAuth(next);
+      const target = targetRef.current;
+      const store = useFolderAuthStore.getState();
+      // Nothing is stored for a folder of a workspace that is no longer active.
+      if (inMountWorkspace()) {
+        // Inherit means no folder auth, so nothing is kept for this folder.
+        if (next.authType === 'inherit') {
+          store.clearFolderAuth(target.collectionName, target.folderPath);
+        } else {
+          store.setFolderAuth(target.collectionName, target.folderPath, next);
+        }
+      }
+      // A fetched OAuth2 token is not saved to folder.yml, so it does not change the folder.
+      const persisted = stateToFolderAuth(next);
+      if (authFingerprint(persisted) !== authFingerprint(previous)) {
+        onChangeRef.current({ auth: persisted });
+      }
+    },
+    [inMountWorkspace],
+  );
 
   const handleTypeChange = useCallback(
     (authType: AuthState['authType']) => commit(authStateForType(authType, auth)),

@@ -38,6 +38,7 @@ import {
 } from '@/lib/tauri-api';
 import { buildScopedContext, secretKeysOf } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
+import { captureWorkspace } from '@/lib/workspace-guard';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -164,6 +165,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   collectionNameRef.current = collectionName;
   const setCollectionAuthRef = useRef(setCollectionAuth);
   setCollectionAuthRef.current = setCollectionAuth;
+  // A token that arrives after a workspace switch must not reach the new workspace's
+  // collection of the same name.
+  const [inMountWorkspace] = useState(captureWorkspace);
 
   // True once the user edits any field; reset after successful save or reload.
   const [isDirty, setIsDirty] = useState(false);
@@ -255,9 +259,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // Keep the collection auth store in sync so execute-request.ts can resolve inherited auth.
   // Guarded by isLoaded to prevent the initial empty auth from wiping a cached token.
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || !inMountWorkspace()) return;
     setCollectionAuth(collectionName, auth);
-  }, [auth, collectionName, setCollectionAuth, isLoaded]);
+  }, [auth, collectionName, setCollectionAuth, isLoaded, inMountWorkspace]);
 
   // Persist all settings to disk (no auto-save). saveCollectionSettings is a full
   // replace on the backend, so sandboxMode, scriptContextRoots and scriptFlow are read
@@ -499,7 +503,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                       // Write directly to the auth store so the token survives
                       // if the component unmounts while the OAuth2 browser flow
                       // is in progress (e.g. user switches tabs mid-flow).
-                      setCollectionAuthRef.current(collectionNameRef.current, v);
+                      if (inMountWorkspace()) {
+                        setCollectionAuthRef.current(collectionNameRef.current, v);
+                      }
                     }}
                     variableContext={scopedContext}
                     collection={collectionName}

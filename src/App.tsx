@@ -129,7 +129,8 @@ function App() {
       }),
       listen<Workspace>('workspace-switched', ({ payload }) => {
         useWorkspaceStore.getState().setActiveWorkspaceId(payload.id);
-        usePaneStore.getState().closeAll();
+        // Edits were saved before the switch. A save now would land in the new workspace.
+        usePaneStore.getState().closeAll({ saveDirty: false });
         usePaneStore.getState().openWorkspaceTabs(payload.id);
         useEnvStore.getState().setActiveCollection(null);
         qc.invalidateQueries({ queryKey: workspaceKeys.all });

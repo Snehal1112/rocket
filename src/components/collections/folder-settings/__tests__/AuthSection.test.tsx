@@ -4,6 +4,7 @@ import { authStateForType } from '@/lib/auth-type-defaults';
 import { stateToFolderAuth } from '@/lib/folder-settings-convert';
 import type { FolderSettings } from '@/lib/tauri-api';
 import { useFolderAuthStore } from '@/stores/folder-auth-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
 // CodeMirror does not run in jsdom, so the variable-aware field is replaced by a plain input.
 vi.mock('@/components/editor', () => ({
@@ -173,6 +174,16 @@ describe('AuthSection', () => {
       'fetched',
     );
     expect(screen.getByTestId('oauth2-token')).toHaveTextContent('fetched');
+  });
+
+  it('drops a token that arrives after a workspace switch', () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'A' });
+    const state = authStateForType('oauth2', { authType: 'none' });
+    renderSection(stateToFolderAuth(state));
+    // The OAuth2 flow finishes after the user switched to a workspace with a same-named folder.
+    useWorkspaceStore.setState({ activeWorkspaceId: 'B' });
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch token' }));
+    expect(useFolderAuthStore.getState().getFolderAuth('demo', 'api')).toBeUndefined();
   });
 
   it('an OAuth2 config edit still marks the folder changed', () => {

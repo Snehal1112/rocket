@@ -1,5 +1,10 @@
 import { QueryClient } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const clearPreviews = vi.fn();
+vi.mock('@/lib/saved-request-preview', () => ({
+  clearSavedRequestPreviewCache: () => clearPreviews(),
+}));
 import { clearWorkspaceScopedCaches } from '@/lib/workspace-switch';
 import { useCollectionAuthStore } from '@/stores/collection-auth-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
@@ -21,7 +26,12 @@ describe('clearWorkspaceScopedCaches', () => {
     expect(useFlowAuthStore.getState().getAuth('k')).toBeUndefined();
   });
 
-  it('invalidates collection-keyed queries but leaves global env queries to their reload', () => {
+  it('clears the saved-request previews of flow nodes', () => {
+    clearWorkspaceScopedCaches(new QueryClient());
+    expect(clearPreviews).toHaveBeenCalled();
+  });
+
+  it('removes collection-keyed queries but leaves global env queries to their reload', () => {
     const qc = new QueryClient();
     qc.setQueryData(['environments', 'api'], []);
     qc.setQueryData(['flows', 'api'], []);
@@ -30,10 +40,9 @@ describe('clearWorkspaceScopedCaches', () => {
 
     clearWorkspaceScopedCaches(qc);
 
-    const invalid = (key: readonly unknown[]) => qc.getQueryState(key)?.isInvalidated;
-    expect(invalid(['environments', 'api'])).toBe(true);
-    expect(invalid(['flows', 'api'])).toBe(true);
-    expect(invalid(['assistant', 'reference-tree', 'api'])).toBe(true);
-    expect(invalid(['environments', 'global', 'list'])).toBe(false);
+    expect(qc.getQueryData(['environments', 'api'])).toBeUndefined();
+    expect(qc.getQueryData(['flows', 'api'])).toBeUndefined();
+    expect(qc.getQueryData(['assistant', 'reference-tree', 'api'])).toBeUndefined();
+    expect(qc.getQueryData(['environments', 'global', 'list'])).toEqual([]);
   });
 });

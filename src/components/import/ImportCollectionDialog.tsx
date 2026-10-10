@@ -14,7 +14,6 @@ import {
 } from '@/components/ui/dialog';
 import {
   createWorkspace as apiCreateWorkspace,
-  switchWorkspace as apiSwitchWorkspace,
   getAppDataDir,
   type ImportReport,
   importBruno,
@@ -23,6 +22,7 @@ import {
   importPostmanEnvironment,
   importWsdl,
 } from '@/lib/tauri-api';
+import { switchWorkspaceSafely } from '@/lib/workspace-switch';
 import { describeSource, type SourceKind } from './importSources';
 
 interface ImportCollectionDialogProps {
@@ -203,7 +203,7 @@ export function ImportCollectionDialog({
       }
 
       // Switch workspace only after import completes so the UI isn't blanked mid-import.
-      if (newWsId) await apiSwitchWorkspace(newWsId);
+      if (newWsId) await switchWorkspaceSafely(newWsId);
 
       setReport(result);
       setDialogState('done');

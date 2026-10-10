@@ -1,6 +1,6 @@
 import { findTabInTree, mapApiRequestToState } from '@/lib/pane-utils';
 import { getRequest } from '@/lib/tauri-api';
-import { useEnvStore } from '@/stores/env-store';
+import { restoreActiveEnv, useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestTab } from '@/types/pane-types';
 
@@ -34,8 +34,7 @@ export async function openSavedRequestTab(
   if (store.activeCollection === null) {
     store.setActiveCollection(collection);
     useEnvStore.getState().setActiveCollection(collection);
-    const storedEnv = localStorage.getItem(`rocket-api:active-env:${collection}`);
-    useEnvStore.getState().setActiveEnvId(storedEnv ?? null);
+    restoreActiveEnv(collection);
   }
 
   const existing = findTabInTree(store.root, request.uid);

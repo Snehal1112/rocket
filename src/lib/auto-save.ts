@@ -1,8 +1,63 @@
 import { saveTabRequest } from '@/lib/save-tab-request';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { RequestState, RequestTab } from '@/types/pane-types';
 
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
+interface PendingSave {
+  timer: ReturnType<typeof setTimeout>;
+  run: () => Promise<boolean>;
+}
+
+const pending = new Map<string, PendingSave>();
+const inFlight = new Set<Promise<boolean>>();
+// True while a workspace switch is in progress. A save then could land in either workspace.
+let suspended = false;
+
+const activeWorkspaceId = () => useWorkspaceStore.getState().activeWorkspaceId;
+
+function track(save: Promise<boolean>): Promise<boolean> {
+  inFlight.add(save);
+  void save.finally(() => inFlight.delete(save));
+  return save;
+}
+
+/**
+ * Saves one request tab. The save is dropped when the active workspace is no longer the one
+ * the edit was made in, because the backend writes to whatever workspace is active.
+ * Resolves to false when the save failed or was dropped.
+ */
+async function runSave(
+  tabId: string,
+  collection: string,
+  path: string,
+  title: string,
+  request: RequestState,
+  workspaceId: string,
+): Promise<boolean> {
+  if (suspended || activeWorkspaceId() !== workspaceId) {
+    console.warn('[AutoSave] Dropped: the workspace changed since the edit.');
+    return false;
+  }
+  // The shared save path builds the payload, so autosave and Save write the same fields.
+  const tab: RequestTab = {
+    id: tabId,
+    title,
+    tabType: 'request',
+    request,
+    response: null,
+    isDirty: true,
+    source: { collection, path },
+  };
+  try {
+    await saveTabRequest(collection, path, tab);
+    // Clean only if no newer edit landed while the save was in flight.
+    usePaneStore.getState().markRequestSaved(tabId, request);
+    return true;
+  } catch (err) {
+    console.error('[AutoSave] Failed:', err);
+    return false;
+  }
+}
 
 export function scheduleAutoSave(
   tabId: string,
@@ -12,33 +67,51 @@ export function scheduleAutoSave(
   request: RequestState,
 ) {
   cancelAutoSave(tabId);
-  const timer = setTimeout(async () => {
-    timers.delete(tabId);
-    // The shared save path builds the payload, so autosave and Save write the same fields.
-    const tab: RequestTab = {
-      id: tabId,
-      title,
-      tabType: 'request',
-      request,
-      response: null,
-      isDirty: true,
-      source: { collection, path },
-    };
-    try {
-      await saveTabRequest(collection, path, tab);
-      // Clean only if no newer edit landed while the save was in flight.
-      usePaneStore.getState().markRequestSaved(tabId, request);
-    } catch (err) {
-      console.error('[AutoSave] Failed:', err);
-    }
+  // Stamped now, so a save that fires after a workspace switch is dropped.
+  const workspaceId = activeWorkspaceId();
+  const run = () => runSave(tabId, collection, path, title, request, workspaceId);
+  const timer = setTimeout(() => {
+    pending.delete(tabId);
+    void track(run());
   }, 500);
-  timers.set(tabId, timer);
+  pending.set(tabId, { timer, run });
 }
 
 export function cancelAutoSave(tabId: string) {
-  const existing = timers.get(tabId);
+  const existing = pending.get(tabId);
   if (existing) {
-    clearTimeout(existing);
-    timers.delete(tabId);
+    clearTimeout(existing.timer);
+    pending.delete(tabId);
   }
+}
+
+/**
+ * Saves the given dirty tabs and every pending autosave now, and waits for all saves,
+ * including ones already in flight. Resolves to the number of saves that did not succeed.
+ */
+export async function flushAutoSaves(dirtyTabs: RequestTab[] = []): Promise<number> {
+  const workspaceId = activeWorkspaceId();
+  for (const tab of dirtyTabs) {
+    if (!tab.source) continue;
+    cancelAutoSave(tab.id);
+    const { collection, path } = tab.source;
+    void track(runSave(tab.id, collection, path, tab.title, tab.request, workspaceId));
+  }
+  for (const [tabId, save] of pending) {
+    clearTimeout(save.timer);
+    pending.delete(tabId);
+    void track(save.run());
+  }
+  // Every save above is tracked, so this also waits for saves that were already running.
+  const results = await Promise.all([...inFlight]);
+  return results.filter((ok) => !ok).length;
+}
+
+/** Drops every autosave that fires until `resumeAutoSaves` is called. */
+export function suspendAutoSaves() {
+  suspended = true;
+}
+
+export function resumeAutoSaves() {
+  suspended = false;
 }

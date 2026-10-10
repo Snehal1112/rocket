@@ -42,7 +42,7 @@ import {
   readScriptFile,
   renameRequest,
 } from '@/lib/tauri-api';
-import { useEnvStore } from '@/stores/env-store';
+import { restoreActiveEnv, useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type {
   CollectionSection,
@@ -323,7 +323,14 @@ export interface PaneState {
 
   // Utility.
   reset: () => void;
-  closeAll: () => void;
+  /**
+   * Closes every tab. By default a dirty request tab gets an autosave. A workspace switch
+   * passes `{ saveDirty: false }`: its saves ran before the switch, and a save now would
+   * land in the new workspace.
+   */
+  closeAll: (options?: { saveDirty?: boolean }) => void;
+  /** Dirty request tabs in the pane tree that have a saved file to write to. */
+  dirtyRequestTabs: () => RequestTab[];
 
   updateTabSource: (tabId: string, source: { collection: string; path: string }) => void;
   updateTabTitle: (tabId: string, title: string) => void;
@@ -1313,9 +1320,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Sync active collection into env-store so useEnvironments() queries fire.
     useEnvStore.getState().setActiveCollection(name);
 
-    // Restore active env selection from localStorage.
-    const stored = localStorage.getItem(`rocket-api:active-env:${name}`);
-    useEnvStore.getState().setActiveEnvId(stored ?? null);
+    // Restore the active env selection, checked against this workspace's environments.
+    restoreActiveEnv(name);
   },
 
   getOpenTabCount(collection) {
@@ -1428,28 +1434,23 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     set(buildInitialState());
   },
 
-  closeAll() {
+  closeAll(options) {
+    const saveDirty = options?.saveDirty ?? true;
     const { root } = get();
-    const flush = (node: PaneNode): void => {
-      if (node.type === 'leaf') {
-        for (const tab of node.tabs) {
-          if (tab.isDirty && tab.source && isRequestTab(tab)) {
-            scheduleAutoSave(
-              tab.id,
-              tab.source.collection,
-              tab.source.path,
-              tab.title,
-              tab.request,
-            );
-          }
-        }
-      } else {
-        flush(node.children[0]);
-        flush(node.children[1]);
+    for (const tab of collectAllTabs(root)) {
+      if (!saveDirty) {
+        cancelAutoSave(tab.id);
+      } else if (tab.isDirty && tab.source && isRequestTab(tab)) {
+        scheduleAutoSave(tab.id, tab.source.collection, tab.source.path, tab.title, tab.request);
       }
-    };
-    flush(root);
+    }
     get().reset();
+  },
+
+  dirtyRequestTabs() {
+    return collectAllTabs(get().root).filter(
+      (tab): tab is RequestTab => isRequestTab(tab) && tab.isDirty && !!tab.source,
+    );
   },
 
   updateTabSource(tabId, source) {
