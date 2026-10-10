@@ -24,6 +24,15 @@ describe('buildSettingsForSave', () => {
     expect(payload.headers).toHaveLength(1);
   });
 
+  it('does not drop the agent run request', () => {
+    const payload = buildSettingsForSave(
+      { ...current, agentAutonomyEnabled: true },
+      { headers: [], variables: [] },
+    );
+
+    expect(payload.agentAutonomyEnabled).toBe(true);
+  });
+
   it('keeps the script flow from the fresh settings', () => {
     const payload = buildSettingsForSave(current, {
       headers: [],

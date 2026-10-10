@@ -1,5 +1,7 @@
 import { BoxIcon, Check, Loader2, Save, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CollectionTrustBanner } from '@/components/collections/CollectionTrustBanner';
+import { CollectionTrustSection } from '@/components/collections/CollectionTrustSection';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
@@ -374,6 +376,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               className='flex-1 min-w-0 border-r border-border overflow-y-auto'
             >
               <div className='p-4 flex flex-col gap-4'>
+                <CollectionTrustBanner collection={collectionName} />
                 <MethodBreakdown items={items} />
 
                 <Card>
@@ -414,6 +417,15 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                   </CardHeader>
                   <CardContent className='px-4 pb-4'>
                     <RequestList items={items} collectionName={collectionName} />
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className='pb-2 pt-4 px-4'>
+                    <span className='text-sm font-semibold'>Permissions on this computer</span>
+                  </CardHeader>
+                  <CardContent className='px-4 pb-4'>
+                    <CollectionTrustSection collection={collectionName} />
                   </CardContent>
                 </Card>
 

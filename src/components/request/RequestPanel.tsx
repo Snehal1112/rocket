@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { CollectionTrustBanner } from '@/components/collections/CollectionTrustBanner';
 import { SingleLineEditor } from '@/components/editor';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
@@ -1183,20 +1184,27 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         </div>
       ) : null}
       {activeSection === 'scripts' ? (
-        <div className='flex-1 min-h-0 overflow-hidden'>
-          <Suspense fallback={<EditorSkeleton />}>
-            <ScriptsTab
-              tabId={tab.id}
-              collectionName={tab.source?.collection}
-              requestPath={tab.source?.path}
-              preRequestScript={request.preRequestScript ?? ''}
-              postResponseScript={request.postResponseScript ?? ''}
-              testsScript={request.testsScript ?? ''}
-              onChangePreRequest={(v) => updateRequest(tab.id, { preRequestScript: v })}
-              onChangePostResponse={(v) => updateRequest(tab.id, { postResponseScript: v })}
-              onChangeTests={(v) => updateRequest(tab.id, { testsScript: v })}
-            />
-          </Suspense>
+        <div className='flex flex-1 min-h-0 flex-col overflow-hidden'>
+          {tab.source?.collection && (
+            <div className='shrink-0 px-3 pt-2 empty:hidden'>
+              <CollectionTrustBanner collection={tab.source.collection} />
+            </div>
+          )}
+          <div className='flex-1 min-h-0'>
+            <Suspense fallback={<EditorSkeleton />}>
+              <ScriptsTab
+                tabId={tab.id}
+                collectionName={tab.source?.collection}
+                requestPath={tab.source?.path}
+                preRequestScript={request.preRequestScript ?? ''}
+                postResponseScript={request.postResponseScript ?? ''}
+                testsScript={request.testsScript ?? ''}
+                onChangePreRequest={(v) => updateRequest(tab.id, { preRequestScript: v })}
+                onChangePostResponse={(v) => updateRequest(tab.id, { postResponseScript: v })}
+                onChangeTests={(v) => updateRequest(tab.id, { testsScript: v })}
+              />
+            </Suspense>
+          </div>
         </div>
       ) : null}
       {activeSection === 'assertions' ? (

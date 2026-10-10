@@ -957,6 +957,39 @@ export const saveCollectionSettings = (collection: string, settings: Partial<Col
 /** Capabilities a user can switch for a collection on this computer. */
 export type CollectionCapability = 'developerMode' | 'agentRun' | 'processEnv';
 
+/** Capabilities the trust banner can approve as the collection file requests them. */
+export type RequestedCapability = 'developerMode' | 'contextRoots' | 'agentRun';
+
+export interface CapabilityState {
+  /** The collection file asks for it. */
+  requested: boolean;
+  /** The user allowed it on this computer. */
+  granted: boolean;
+  /** What actually applies. */
+  effective: boolean;
+}
+
+export interface CollectionTrust {
+  developerMode: CapabilityState;
+  contextRoots: {
+    requested: string[];
+    granted: string[];
+    effective: string[];
+    pending: string[];
+  };
+  agentRun: CapabilityState;
+  processEnv: { granted: boolean };
+  /** Any capability is requested and not granted. */
+  pending: boolean;
+  /** Identifies the request that was shown, for `grantRequestedCapabilities`. */
+  fingerprint: string;
+  /** Set when the trust settings file could not be read. */
+  storeError: string | null;
+}
+
+export const getCollectionTrust = (collection: string) =>
+  invoke<CollectionTrust>('get_collection_trust', { collection });
+
 /**
  * The only way to change a capability. The collection file value is just a request, and
  * `saveCollectionSettings` ignores it. This records the grant and updates the file.
@@ -965,7 +998,26 @@ export const setCollectionCapability = (
   collection: string,
   capability: CollectionCapability,
   enabled: boolean,
-) => invoke<void>('set_collection_capability', { collection, capability, enabled });
+) => invoke<CollectionTrust>('set_collection_capability', { collection, capability, enabled });
+
+export const setCollectionContextRoots = (collection: string, roots: string[]) =>
+  invoke<CollectionTrust>('set_collection_context_roots', { collection, roots });
+
+/** Approves what the collection file asks for. Refused if it changed since `expectedFingerprint`. */
+export const grantRequestedCapabilities = (
+  collection: string,
+  capabilities: RequestedCapability[],
+  expectedFingerprint: string,
+) =>
+  invoke<CollectionTrust>('grant_requested_capabilities', {
+    collection,
+    capabilities,
+    expectedFingerprint,
+  });
+
+/** Removes every grant of the collection. The collection file is not touched. */
+export const revokeCollectionTrust = (collection: string) =>
+  invoke<CollectionTrust>('revoke_collection_trust', { collection });
 
 // ============================================================
 // Environments
@@ -1389,6 +1441,11 @@ export const onCollectionChanged = (
   handler: (event: CollectionChangedEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<CollectionChangedEvent>('collection-changed', (e) => handler(e.payload));
+
+export const onCollectionTrustChanged = (
+  handler: (event: { collection: string }) => void,
+): Promise<UnlistenFn> =>
+  listen<{ collection: string }>('collection-trust-changed', (e) => handler(e.payload));
 
 export const onRequestExecuted = (handler: () => void): Promise<UnlistenFn> =>
   listen('request-executed', () => handler());

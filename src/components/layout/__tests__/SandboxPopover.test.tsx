@@ -1,46 +1,41 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxPopover } from '@/components/layout/SandboxPopover';
 import * as tauriApi from '@/lib/tauri-api';
+import { allowed, makeTrust, renderWithQuery, requestedOnly } from '@/test/trust-fixtures';
 import { usePaneStore } from '@/stores/pane-store';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
   return {
     ...actual,
-    getCollectionSettings: vi.fn(),
+    getCollectionTrust: vi.fn(),
     setCollectionCapability: vi.fn(),
   };
 });
 
-function baseSettings(
-  overrides: Partial<tauriApi.CollectionSettings> = {},
-): tauriApi.CollectionSettings {
-  return { headers: [], variables: [], sandboxMode: 'safe', ...overrides };
-}
-
 describe('SandboxPopover', () => {
   beforeEach(() => {
     usePaneStore.getState().reset();
-    vi.mocked(tauriApi.getCollectionSettings).mockReset();
+    vi.mocked(tauriApi.getCollectionTrust).mockReset();
     vi.mocked(tauriApi.setCollectionCapability).mockReset();
   });
 
   it('is disabled with no active collection', () => {
-    render(<SandboxPopover />);
+    renderWithQuery(<SandboxPopover />);
     expect(screen.getByRole('button', { name: /JavaScript Sandbox/i })).toBeDisabled();
-    expect(tauriApi.getCollectionSettings).not.toHaveBeenCalled();
+    expect(tauriApi.getCollectionTrust).not.toHaveBeenCalled();
   });
 
   it("loads and displays the active collection's sandbox mode", async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
-    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
-      baseSettings({ sandboxMode: 'developer' }),
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust({ developerMode: allowed }),
     );
 
-    render(<SandboxPopover />);
-    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalledWith('my-api'));
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledWith('my-api'));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
@@ -55,13 +50,13 @@ describe('SandboxPopover', () => {
 
   it('records the capability immediately when switching to Safe Mode', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
-    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
-      baseSettings({ sandboxMode: 'developer', docs: 'hello' }),
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust({ developerMode: allowed }),
     );
-    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(makeTrust());
 
-    render(<SandboxPopover />);
-    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalled());
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
@@ -74,12 +69,12 @@ describe('SandboxPopover', () => {
 
   it('requires confirmation before enabling Developer Mode, and does not save on cancel', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
-    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
-      baseSettings({ sandboxMode: 'safe' }),
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust(),
     );
 
-    render(<SandboxPopover />);
-    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalled());
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
@@ -94,13 +89,13 @@ describe('SandboxPopover', () => {
 
   it('records Developer Mode only after the confirmation dialog is accepted', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
-    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
-      baseSettings({ sandboxMode: 'safe', docs: 'hello' }),
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust(),
     );
-    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.setCollectionCapability).mockResolvedValue(makeTrust());
 
-    render(<SandboxPopover />);
-    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalled());
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
@@ -116,10 +111,10 @@ describe('SandboxPopover', () => {
 
   it('shows an error instead of a confident mode when loading settings fails', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
-    vi.mocked(tauriApi.getCollectionSettings).mockRejectedValue(new Error('boom'));
+    vi.mocked(tauriApi.getCollectionTrust).mockRejectedValue(new Error('boom'));
 
-    render(<SandboxPopover />);
-    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalled());
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
@@ -130,13 +125,13 @@ describe('SandboxPopover', () => {
 
   it('shows an error and keeps the confirmation dialog open when saving Developer Mode fails', async () => {
     usePaneStore.setState({ activeCollection: 'my-api' });
-    vi.mocked(tauriApi.getCollectionSettings).mockResolvedValue(
-      baseSettings({ sandboxMode: 'safe' }),
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust(),
     );
     vi.mocked(tauriApi.setCollectionCapability).mockRejectedValue(new Error('boom'));
 
-    render(<SandboxPopover />);
-    await waitFor(() => expect(tauriApi.getCollectionSettings).toHaveBeenCalled());
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalled());
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
@@ -148,5 +143,30 @@ describe('SandboxPopover', () => {
     await waitFor(() => expect(tauriApi.setCollectionCapability).toHaveBeenCalled());
     // A failed save must not silently dismiss the dialog as if it succeeded.
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+  });
+
+  it('shows Safe mode and the requested state when the file asks for Developer mode', async () => {
+    usePaneStore.setState({ activeCollection: 'my-api' });
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust({ developerMode: requestedOnly, pending: true }),
+    );
+
+    renderWithQuery(<SandboxPopover />);
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /JavaScript Sandbox/i }));
+
+    expect(await screen.findByText('Requested by this collection')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Only enable for collections from trusted authors.'),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Allow on this computer/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /Enable/i }));
+    await waitFor(() =>
+      expect(tauriApi.setCollectionCapability).toHaveBeenCalledWith('my-api', 'developerMode', true),
+    );
   });
 });

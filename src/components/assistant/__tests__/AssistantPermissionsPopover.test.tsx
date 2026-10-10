@@ -1,7 +1,8 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '@/lib/tauri-api';
+import { makeTrust, renderWithQuery } from '@/test/trust-fixtures';
 import { AssistantPermissionsPopover } from '../AssistantPermissionsPopover';
 
 const collections = vi.hoisted(() => ({ data: [] as Array<{ name: string }> }));
@@ -13,7 +14,7 @@ vi.mock('@/lib/queries/collection-queries', () => ({
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
-  getCollectionSettings: vi.fn(),
+  getCollectionTrust: vi.fn(),
   setCollectionCapability: vi.fn(),
 }));
 
@@ -27,16 +28,12 @@ describe('AssistantPermissionsPopover', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     collections.data = [{ name: 'orders' }, { name: 'billing' }];
-    vi.mocked(api.getCollectionSettings).mockResolvedValue({
-      headers: [],
-      variables: [],
-      sandboxMode: 'safe',
-    });
-    vi.mocked(api.setCollectionCapability).mockResolvedValue(undefined);
+    vi.mocked(api.getCollectionTrust).mockResolvedValue(makeTrust());
+    vi.mocked(api.setCollectionCapability).mockResolvedValue(makeTrust());
   });
 
   it('lists every collection with its own run switch', async () => {
-    render(<AssistantPermissionsPopover />);
+    renderWithQuery(<AssistantPermissionsPopover />);
     await openPopover();
     const switches = await screen.findAllByRole('switch', { name: LABEL });
     expect(switches).toHaveLength(2);
@@ -46,7 +43,7 @@ describe('AssistantPermissionsPopover', () => {
   });
 
   it('asks before letting the agent run requests in one collection', async () => {
-    render(<AssistantPermissionsPopover />);
+    renderWithQuery(<AssistantPermissionsPopover />);
     await openPopover();
     const billing = await screen.findByRole('region', { name: 'billing' });
     const toggle = within(billing).getByRole('switch');
@@ -64,7 +61,7 @@ describe('AssistantPermissionsPopover', () => {
 
   it('says so when the workspace has no collections', async () => {
     collections.data = [];
-    render(<AssistantPermissionsPopover />);
+    renderWithQuery(<AssistantPermissionsPopover />);
     await openPopover();
     expect(await screen.findByText('No collections in this workspace.')).toBeInTheDocument();
   });

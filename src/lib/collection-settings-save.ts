@@ -16,5 +16,6 @@ export function buildSettingsForSave(
     sandboxMode: current.sandboxMode,
     scriptContextRoots: current.scriptContextRoots,
     scriptFlow: current.scriptFlow,
+    agentAutonomyEnabled: current.agentAutonomyEnabled,
   };
 }

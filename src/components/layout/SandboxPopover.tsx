@@ -1,5 +1,5 @@
 import { Lock, ShieldCheck, Unlock } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,23 +10,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  type CollectionSettings,
-  getCollectionSettings,
-  type SandboxMode,
-  setCollectionCapability,
-} from '@/lib/tauri-api';
+import { useCollectionTrust, useSetCapability } from '@/lib/queries/collection-trust-queries';
+import type { SandboxMode } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
 
 export function SandboxPopover() {
   const activeCollection = usePaneStore((s) => s.activeCollection);
-  // The loaded settings. The sandbox mode here is what the collection file requests.
-  const [settings, setSettings] = useState<CollectionSettings | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const mode: SandboxMode = settings?.sandboxMode ?? 'safe';
+  const { data: trust, isError: loadFailed } = useCollectionTrust(activeCollection);
+  const setCapability = useSetCapability(activeCollection ?? '');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const error = loadFailed ? 'Failed to load sandbox mode.' : saveError;
+  // The mode that really applies. The collection file only requests one.
+  const mode: SandboxMode = trust?.developerMode.effective ? 'developer' : 'safe';
+  const requestedNotAllowed =
+    !!trust && trust.developerMode.requested && !trust.developerMode.granted;
   // Neutral color when the real mode couldn't be confirmed — never show a confident
   // green "Safe" indicator when the load actually failed.
   const statusColorClass = error
@@ -35,47 +36,23 @@ export function SandboxPopover() {
       ? 'text-green-500 dark:text-green-400'
       : 'text-amber-500 dark:text-amber-400';
 
-  useEffect(() => {
-    if (!activeCollection) {
-      setSettings(null);
-      setError(null);
-      return;
-    }
-    let cancelled = false;
-    setError(null);
-    void getCollectionSettings(activeCollection)
-      .then((loaded) => {
-        if (!cancelled) setSettings(loaded);
-      })
-      .catch((err) => {
-        console.error('[SandboxPopover] load failed', err);
-        // Keep the icon from confidently showing "safe" (green) when we actually
-        // don't know the real, backend-persisted mode.
-        if (!cancelled) setError('Failed to load sandbox mode.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeCollection]);
-
   const [showDevConfirm, setShowDevConfirm] = useState(false);
 
   // Developer mode is a capability the user allows on this computer. The backend records
   // the grant and updates the collection file, so a plain settings save is not used.
-  // Settings are re-fetched afterwards so the state matches what is on disk.
   async function setMode(nextMode: SandboxMode) {
     if (!activeCollection) return;
     try {
-      await setCollectionCapability(activeCollection, 'developerMode', nextMode === 'developer');
-      const next: CollectionSettings = await getCollectionSettings(activeCollection);
-      setSettings(next);
-      setError(null);
+      await setCapability.mutateAsync({
+        capability: 'developerMode',
+        enabled: nextMode === 'developer',
+      });
+      setSaveError(null);
       if (nextMode === 'developer') setShowDevConfirm(false);
     } catch (err) {
       console.error('[SandboxPopover] save failed', err);
-      setError('Failed to save sandbox mode.');
-      // Leave the confirm dialog open and `settings` untouched — the caller must not
-      // treat this as a successful mode switch.
+      setSaveError('Failed to save sandbox mode.');
+      // Leave the confirm dialog open. The caller must not treat this as a mode switch.
     }
   }
 
@@ -121,11 +98,12 @@ export function SandboxPopover() {
                 {/* Mode options */}
                 <div className='p-1.5 space-y-0.5'>
                   {/* Safe Mode */}
-                  <button
+                  <Button
                     type='button'
+                    variant='ghost'
                     onClick={() => void selectSafeMode()}
                     className={cn(
-                      'w-full rounded-md p-2.5 text-left transition-all duration-150 group border',
+                      'h-auto w-full justify-start whitespace-normal rounded-md p-2.5 text-left font-normal transition-all duration-150 group border',
                       mode === 'safe'
                         ? 'border-green-500/30 dark:border-green-400/20 bg-green-500/5 dark:bg-green-400/5'
                         : 'border-transparent hover:border-border hover:bg-accent/50',
@@ -164,14 +142,15 @@ export function SandboxPopover() {
                         <div className='mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500 dark:bg-green-400' />
                       )}
                     </div>
-                  </button>
+                  </Button>
 
                   {/* Developer Mode */}
-                  <button
+                  <Button
                     type='button'
+                    variant='ghost'
                     onClick={() => setShowDevConfirm(true)}
                     className={cn(
-                      'w-full rounded-md p-2.5 text-left transition-all duration-150 group border',
+                      'h-auto w-full justify-start whitespace-normal rounded-md p-2.5 text-left font-normal transition-all duration-150 group border',
                       mode === 'developer'
                         ? 'border-amber-500/30 dark:border-amber-400/20 bg-amber-500/5 dark:bg-amber-400/5'
                         : 'border-transparent hover:border-border hover:bg-accent/50',
@@ -209,8 +188,23 @@ export function SandboxPopover() {
                         <div className='mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400' />
                       )}
                     </div>
-                  </button>
+                  </Button>
                 </div>
+
+                {requestedNotAllowed && (
+                  <div className='mx-1.5 mb-1.5 flex flex-col gap-2 rounded border border-amber-500/20 px-3 py-2'>
+                    <Badge variant='warning' className='w-fit'>
+                      Requested by this collection
+                    </Badge>
+                    <p className='text-[11px] leading-relaxed text-muted-foreground'>
+                      This collection asks for Developer mode. It runs in Safe mode until you allow
+                      it on this computer.
+                    </p>
+                    <Button size='sm' variant='outline' onClick={() => setShowDevConfirm(true)}>
+                      Allow on this computer...
+                    </Button>
+                  </div>
+                )}
 
                 {/* Warning footer — only visible in developer mode */}
                 {mode === 'developer' && (

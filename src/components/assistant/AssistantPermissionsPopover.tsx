@@ -27,7 +27,7 @@ export function AssistantPermissionsPopover() {
             <p className='text-sm font-medium'>Agent permissions</p>
             <p className='text-xs text-muted-foreground'>
               The assistant can read every collection in this workspace and propose changes. Running
-              requests needs the switch below.
+              requests needs the switch below, confirmed on this computer.
             </p>
           </div>
           {collections.length === 0 ? (

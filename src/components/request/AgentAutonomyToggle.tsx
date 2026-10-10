@@ -1,5 +1,5 @@
 import { ShieldAlert } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { getCollectionSettings, setCollectionCapability } from '@/lib/tauri-api';
+import { useCollectionTrust, useSetCapability } from '@/lib/queries/collection-trust-queries';
 
 interface AgentAutonomyToggleProps {
   collectionName: string;
@@ -27,41 +27,27 @@ interface AgentAutonomyToggleProps {
  */
 export function AgentAutonomyToggle({ collectionName, showHint = true }: AgentAutonomyToggleProps) {
   const switchId = useId();
-  // null while the setting is loading, so the switch never shows a guess.
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: trust, isError: loadFailed } = useCollectionTrust(collectionName);
+  const setCapability = useSetCapability(collectionName);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setEnabled(null);
-    setError(null);
-    void getCollectionSettings(collectionName)
-      .then((loaded) => {
-        if (!cancelled) setEnabled(loaded.agentAutonomyEnabled ?? false);
-      })
-      .catch((err) => {
-        console.error('[AgentAutonomyToggle] load failed', err);
-        if (!cancelled) setError('Failed to load this setting.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [collectionName]);
+  const error = loadFailed ? 'Failed to load this setting.' : saveError;
+  // The switch shows what applies. The collection file only requests it.
+  const enabled = trust ? trust.agentRun.effective : null;
+  const requestedNotAllowed = !!trust && trust.agentRun.requested && !trust.agentRun.granted;
 
   // Running requests is a capability the user allows on this computer. The backend records
   // the grant and updates the collection file, so a plain settings save is not used.
   const save = async (next: boolean) => {
     setSaving(true);
     try {
-      await setCollectionCapability(collectionName, 'agentRun', next);
-      setEnabled(next);
-      setError(null);
+      await setCapability.mutateAsync({ capability: 'agentRun', enabled: next });
+      setSaveError(null);
       setConfirming(false);
     } catch (err) {
       console.error('[AgentAutonomyToggle] save failed', err);
-      setError('Failed to save this setting.');
+      setSaveError('Failed to save this setting.');
     } finally {
       setSaving(false);
     }
@@ -89,6 +75,11 @@ export function AgentAutonomyToggle({ collectionName, showHint = true }: AgentAu
       {showHint && (
         <p className='text-xs text-muted-foreground'>
           Reading and proposing changes is always allowed.
+        </p>
+      )}
+      {requestedNotAllowed && (
+        <p className='text-xs text-muted-foreground'>
+          This collection&apos;s files turn this on. It is off until you allow it on this computer.
         </p>
       )}
       {error && <p className='text-xs text-destructive'>{error}</p>}
