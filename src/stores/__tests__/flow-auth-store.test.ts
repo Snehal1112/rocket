@@ -33,12 +33,36 @@ describe('flow-auth-store', () => {
     expect(getAuth('k2')).toEqual({ authType: 'none' });
   });
 
-  it('raises clearEpoch on every clear, even when nothing was removed', () => {
-    const before = useFlowAuthStore.getState().clearEpoch;
-    useFlowAuthStore.getState().clearFlow('x', 'y');
-    useFlowAuthStore.getState().clearNode('x', 'y', 'n');
+  it('raises the epoch of the flow on every clear, even when nothing was removed', () => {
+    const s = useFlowAuthStore.getState();
+    const before = s.epochOf('x', 'y');
+    s.clearFlow('x', 'y');
+    s.clearNode('x', 'y', 'n');
+    s.clearAuth(JSON.stringify(['x', 'y', '', '', 'n']));
+    expect(useFlowAuthStore.getState().epochOf('x', 'y')).toBe(before + 3);
+  });
+
+  it('leaves the epoch of other flows alone', () => {
+    const s = useFlowAuthStore.getState();
+    const other = s.epochOf('x', 'other');
+    s.clearFlow('x', 'y');
+    expect(useFlowAuthStore.getState().epochOf('x', 'other')).toBe(other);
+    expect(useFlowAuthStore.getState().epochOf('never', 'seen')).toBe(0);
+  });
+
+  it('ignores the epoch bump for a key that does not parse', () => {
+    const before = useFlowAuthStore.getState().clearEpochs;
     useFlowAuthStore.getState().clearAuth('missing');
-    expect(useFlowAuthStore.getState().clearEpoch).toBe(before + 3);
+    expect(useFlowAuthStore.getState().clearEpochs).toEqual(before);
+  });
+
+  it('clearAll empties the entries and changes the epoch of every flow', () => {
+    const s = useFlowAuthStore.getState();
+    s.setAuth('k1', { authType: 'none' });
+    const before = s.epochOf('never', 'seen');
+    s.clearAll();
+    expect(useFlowAuthStore.getState().auths).toEqual({});
+    expect(useFlowAuthStore.getState().epochOf('never', 'seen')).not.toBe(before);
   });
 
   it('is never persisted to browser storage', () => {

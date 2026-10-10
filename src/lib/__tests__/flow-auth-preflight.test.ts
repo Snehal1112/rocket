@@ -11,6 +11,7 @@ import type { Auth, FlowNode } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { resolveWithContext } from '@/lib/variable-context';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
+import { createDeferred } from '@/test/deferred';
 import type { AuthState } from '@/types/pane-types';
 
 vi.mock('@/lib/execute-request', () => ({
@@ -399,6 +400,49 @@ describe('authenticateAuthNode', () => {
     expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
   });
 
+  it('keeps a sign-in when another flow is cleared meanwhile', async () => {
+    const getToken = createDeferred<tauriApi.OAuth2TokenResult>();
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(getToken.promise);
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    const pending = authenticateAuthNode(scope, node);
+    await vi.waitFor(() => expect(tauriApi.oauth2GetToken).toHaveBeenCalled());
+    useFlowAuthStore.getState().clearFlow('api', 'other');
+    useFlowAuthStore.getState().clearNode('api', 'other', 'a');
+    getToken.resolve(result());
+
+    expect(await pending).toEqual({ accessToken: 'new-access-123456', source: 'signed-in' });
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeDefined();
+  });
+
+  it('discards a sign-in when a clear lands while the variables resolve', async () => {
+    const vars = createDeferred<Record<string, string>>();
+    vi.mocked(buildOAuth2VarContext).mockReturnValue(vars.promise);
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    const pending = authenticateAuthNode(scope, node);
+    useFlowAuthStore.getState().clearFlow('api', 'login');
+    vars.resolve(DEFAULT_VARS);
+
+    expect(await pending).toEqual({ source: 'discarded' });
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+
+  it('discards a sign-in when everything is cleared meanwhile', async () => {
+    const getToken = createDeferred<tauriApi.OAuth2TokenResult>();
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(getToken.promise);
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    const pending = authenticateAuthNode(scope, node);
+    await vi.waitFor(() => expect(tauriApi.oauth2GetToken).toHaveBeenCalled());
+    useFlowAuthStore.getState().clearAll();
+    getToken.resolve(result());
+
+    expect(await pending).toEqual({ source: 'discarded' });
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+
   it('does not write a late refresh after the node was cleared, and does not then prompt', async () => {
     const auth = oauthAuth('authorization_code');
     seed('a', auth, {
@@ -554,6 +598,46 @@ describe('authenticateAuthNode', () => {
     await expect(authenticateAuthNode(scope, node)).rejects.toThrow(
       'Sign-in for Auth node "Corporate SSO" failed: window closed',
     );
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+});
+
+describe('collectFlowAuthTokens clears', () => {
+  beforeEach(() => {
+    useFlowAuthStore.setState({ auths: {} });
+    vi.mocked(buildOAuth2VarContext).mockReset();
+    vi.mocked(buildOAuth2VarContext).mockResolvedValue(DEFAULT_VARS);
+    vi.mocked(tauriApi.oauth2GetToken).mockReset();
+  });
+
+  it('rejects with a readable error when a clear discards an interactive sign-in', async () => {
+    const getToken = createDeferred<tauriApi.OAuth2TokenResult>();
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(getToken.promise);
+
+    const pending = collectFlowAuthTokens(
+      input([authNode('a', oauthAuth('authorization_code'), 'Corporate SSO')]),
+    );
+    const settled = expect(pending).rejects.toThrow(
+      'Sign-in for Auth node "Corporate SSO" was interrupted because its tokens were cleared. Sign in again.',
+    );
+    await vi.waitFor(() => expect(tauriApi.oauth2GetToken).toHaveBeenCalled());
+    useFlowAuthStore.getState().clearFlow('api', 'login');
+    getToken.resolve(result());
+
+    await settled;
+  });
+
+  it('discards a sign-in when a clear lands while the variables resolve', async () => {
+    const vars = createDeferred<Record<string, string>>();
+    vi.mocked(buildOAuth2VarContext).mockReturnValue(vars.promise);
+    vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
+
+    const pending = collectFlowAuthTokens(input([authNode('a', oauthAuth('authorization_code'))]));
+    const settled = expect(pending).rejects.toThrow('was interrupted');
+    useFlowAuthStore.getState().clearFlow('api', 'login');
+    vars.resolve(DEFAULT_VARS);
+
+    await settled;
     expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
   });
 });

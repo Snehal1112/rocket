@@ -18,7 +18,11 @@ import { AuthNodeEditor } from '../AuthNodeEditor';
 // with the same props lets these tests drive onChange directly.
 // The props the editor last received, so tests can inspect variableContext.
 const authEditorProps = vi.hoisted(() => ({
-  last: null as null | { variableContext?: Map<string, VariableScopeEntry> },
+  last: null as null | {
+    auth: AuthState;
+    onChange: (a: AuthState) => void;
+    variableContext?: Map<string, VariableScopeEntry>;
+  },
 }));
 // The active global environment name the editor sees.
 const globalEnvState = vi.hoisted(() => ({ name: 'global' as string | null }));
@@ -229,6 +233,40 @@ describe('AuthNodeEditor', () => {
       .getState()
       .getAuth(flowAuthKey('api', 'login', 'n1', null, 'global'));
     expect(stored?.authType).toBe('bearer');
+  });
+
+  it('drops an auth change that arrives after the editor was unmounted', async () => {
+    const onChange = vi.fn();
+    const oauthKind: AuthKind = {
+      ...kind,
+      auth: {
+        authType: 'o-auth2',
+        flow: 'client_credentials',
+        accessTokenUrl: 'https://idp/token',
+        credentials: { clientId: 'c', clientSecret: 's' },
+      } as unknown as Auth,
+    };
+    const { unmount } = render(
+      <AuthNodeEditor
+        kind={oauthKind}
+        onChange={onChange}
+        collection='api'
+        flowName='login'
+        nodeId='gone'
+      />,
+    );
+    const late = authEditorProps.last;
+    expect(late?.auth.oauth2).toBeDefined();
+    unmount();
+
+    // A token fetch that finishes after the tab closed or the node was deleted.
+    late?.onChange({
+      ...late.auth,
+      oauth2: { ...(late.auth.oauth2 as NonNullable<AuthState['oauth2']>), accessToken: 'late-123456' },
+    });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(useFlowAuthStore.getState().auths).toEqual({});
   });
 
   it('toggles apply to inherited auth', async () => {
@@ -830,7 +868,7 @@ describe('AuthNodeEditor Authenticate button', () => {
     pending.resolve(tokenResult);
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'The sign-in settings changed, so the new token was not saved.',
+      'The sign-in was interrupted (settings changed or tokens were cleared), so the new token was not saved.',
     );
     expect(useFlowAuthStore.getState().auths).toEqual({});
     expect(screen.getByText('No token')).toBeInTheDocument();
@@ -886,7 +924,7 @@ describe('AuthNodeEditor Authenticate button', () => {
     pending.resolve(tokenResult);
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'The sign-in settings changed, so the new token was not saved.',
+      'The sign-in was interrupted (settings changed or tokens were cleared), so the new token was not saved.',
     );
     const entry = useFlowAuthStore
       .getState()

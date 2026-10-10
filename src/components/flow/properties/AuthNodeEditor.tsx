@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { Label } from '@/components/ui/label';
 import {
@@ -82,8 +82,19 @@ export function AuthNodeEditor({
     [stored, kind.auth, rv],
   );
 
+  // A token fetch inside the auth editor can finish after this editor is gone
+  // (tab closed, node deleted). Its late write would leave an orphan token.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const handleAuthChange = useCallback(
     (next: AuthState) => {
+      if (!mountedRef.current) return;
       // A token fetched for the old configuration must not outlive an edit to it.
       const entry = flowAuthEntryAfterEdit(stored, state, next, rv);
       setAuth(key, entry.auth, entry.fingerprint);

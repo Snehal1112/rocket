@@ -110,6 +110,7 @@ async function resolveEnv(scope: AuthNodeScope): Promise<AuthenticateEnv> {
 async function authenticate(
   env: AuthenticateEnv,
   node: AuthNode,
+  epoch: number,
   options: AuthenticateOptions = {},
 ): Promise<AuthenticateResult> {
   const { scope, rv, target } = env;
@@ -121,7 +122,6 @@ async function authenticate(
     scope.globalEnvName,
   );
   const store = useFlowAuthStore.getState();
-  const epoch = store.clearEpoch;
   // The in-memory entry can be stale if the persisted auth changed outside
   // the editor (undo, reload), and its token stale if a variable behind the
   // configuration changed value; it is used only while both still match.
@@ -137,7 +137,9 @@ async function authenticate(
   // Writes the new state unless the caller says the node changed while it waited.
   const write = (next: OAuth2State): boolean => {
     // A clear (rename, delete, node removal) ran while the provider was answering.
-    if (useFlowAuthStore.getState().clearEpoch !== epoch) return false;
+    if (useFlowAuthStore.getState().epochOf(scope.collection, scope.flowName) !== epoch) {
+      return false;
+    }
     if (options.shouldWrite && !options.shouldWrite()) return false;
     store.setAuth(key, { ...state, oauth2: next }, oauth2Fingerprint(next, rv));
     return true;
@@ -189,7 +191,9 @@ export async function authenticateAuthNode(
   options: AuthenticateOptions = {},
 ): Promise<AuthenticateResult> {
   if (!isOAuth2(node.kind.auth)) return { source: 'backend' };
-  return authenticate(await resolveEnv(scope), node, options);
+  // Read before the first wait, so a clear during variable resolution counts.
+  const epoch = useFlowAuthStore.getState().epochOf(scope.collection, scope.flowName);
+  return authenticate(await resolveEnv(scope), node, epoch, options);
 }
 
 /**
@@ -207,9 +211,16 @@ export async function collectFlowAuthTokens(
   const nodes = input.nodes.filter(isAuthNode).filter((n) => isOAuth2(n.kind.auth));
   if (nodes.length === 0) return tokens;
 
+  // Read before the first wait, so a clear during variable resolution counts.
+  const epoch = useFlowAuthStore.getState().epochOf(input.collection, input.flowName);
   const env = await resolveEnv(input);
   for (const node of nodes) {
-    const result = await authenticate(env, node);
+    const result = await authenticate(env, node, epoch);
+    if (result.source === 'discarded') {
+      throw new Error(
+        `Sign-in for Auth node "${node.kind.label}" was interrupted because its tokens were cleared. Sign in again.`,
+      );
+    }
     if (result.accessToken) tokens[node.id] = { accessToken: result.accessToken };
   }
   return tokens;

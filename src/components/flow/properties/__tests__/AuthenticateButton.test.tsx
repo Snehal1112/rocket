@@ -158,7 +158,7 @@ describe('AuthenticateButton', () => {
     render(ui());
     await userEvent.click(screen.getByRole('button', { name: 'Authenticate' }));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'The sign-in settings changed, so the new token was not saved.',
+      'The sign-in was interrupted (settings changed or tokens were cleared), so the new token was not saved.',
     );
   });
 

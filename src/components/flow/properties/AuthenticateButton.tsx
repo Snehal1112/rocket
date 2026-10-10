@@ -40,7 +40,7 @@ function messageFor(result: AuthenticateResult): Message {
     case 'discarded':
       return {
         kind: 'status',
-        text: 'The sign-in settings changed, so the new token was not saved.',
+        text: 'The sign-in was interrupted (settings changed or tokens were cleared), so the new token was not saved.',
       };
     case 'backend':
       return { kind: 'status', text: 'This grant is fetched when the flow runs.' };

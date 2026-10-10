@@ -127,5 +127,6 @@ export function clearWorkspaceScopedCaches(qc: QueryClient): void {
   // OAuth2 tokens and auth held in memory must never reach another workspace's requests.
   useCollectionAuthStore.setState({ auths: new Map() });
   useFolderAuthStore.setState({ auths: {} });
-  useFlowAuthStore.setState({ auths: {} });
+  // Also invalidates sign-ins still in flight.
+  useFlowAuthStore.getState().clearAll();
 }
