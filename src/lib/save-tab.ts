@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import { snapOf } from '@/lib/flow-history';
+import { cleanSaveMessage } from '@/lib/flow-issues';
 import { flowPayloadFromTab } from '@/lib/flow-save';
 import { saveFlow, saveScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -33,7 +34,7 @@ export async function saveFlowTab(tab: FlowTab): Promise<boolean> {
     usePaneStore.getState().markClean(tab.id, written);
     return true;
   } catch (err) {
-    toast.error(`Could not save "${tab.title}": ${messageOf(err)}`);
+    toast.error(`Could not save "${tab.title}": ${cleanSaveMessage(messageOf(err))}`);
     return false;
   }
 }

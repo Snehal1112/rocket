@@ -71,6 +71,17 @@ describe('EditorGroup unsaved flow close dialog', () => {
     expect(screen.getByRole('button', { name: 'Save and close' })).toBeInTheDocument();
   });
 
+  it('masks a case value in the save failure toast', async () => {
+    setup();
+    vi.mocked(saveFlow).mockRejectedValue(
+      "Invalid input: flow is invalid: more than one case matches 'secret-token' — node(s): sw; edge(s): ",
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save and close' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const message = String(vi.mocked(toast.error).mock.lastCall?.[0]);
+    expect(message).not.toContain('secret-token');
+  });
+
   it('Close discards the changes without saving', async () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));

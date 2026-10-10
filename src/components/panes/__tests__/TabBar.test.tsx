@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { findScriptTab, findTabInTree } from '@/lib/pane-utils';
 import { saveFlow, saveScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -138,6 +139,29 @@ describe('TabBar Save menu item', () => {
       expect(findTabInTree(usePaneStore.getState().root, 'flow-tb-1')?.tab.isDirty).toBe(false),
     );
     expect(leaf().activeTabId).toBe(second.id);
+  });
+
+  it('masks a case value in the toast when an inactive flow save fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    await usePaneStore.getState().openScriptTab('col', 'lib/b.js');
+    const second = findScriptTab(usePaneStore.getState().root, 'col', 'lib/b.js')?.tab;
+    if (!second) throw new Error('missing tab');
+    usePaneStore.getState().openTab(dirtyFlow);
+    usePaneStore.getState().setActiveTab(second.id, leaf().groupId);
+    vi.mocked(saveFlow).mockRejectedValueOnce(
+      new Error(
+        "Invalid input: flow is invalid: more than one case matches 'secret-token' — node(s): sw; edge(s): ",
+      ),
+    );
+    render(<TabBar node={leaf()} />);
+
+    fireEvent.contextMenu(screen.getByText('Flow: my-flow'));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const message = String(vi.mocked(toast.error).mock.lastCall?.[0]);
+    expect(message).not.toContain('secret-token');
+    expect(message).toContain('value hidden');
   });
 
   it('skips the save of an inactive tab that was cleaned after the menu opened', async () => {
