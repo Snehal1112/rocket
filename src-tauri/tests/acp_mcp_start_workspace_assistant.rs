@@ -288,14 +288,11 @@ fn build_fixture(client: FakeSessionClient) -> Fixture {
         Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
     );
 
-    let collection_repo: Arc<dyn CollectionRepository> =
-        Arc::new(FsCollectionRepo::new_standalone(collections_dir));
     let acp_session_svc = AcpSessionService::new(
         Box::new(client),
         Box::new(NullEventPublisher),
         Arc::new(rocket_app::NoopSessionCleanup),
         agent_config_service(),
-        collection_repo,
     );
 
     let app = tauri::test::mock_builder()

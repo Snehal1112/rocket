@@ -415,7 +415,6 @@ impl<T: CollectionRepository> CollectionRepository for SharedCollectionRepo<T> {
 #[derive(Default)]
 pub struct ConfigurableCollectionRepo {
     settings: Mutex<HashMap<String, CollectionSettings>>,
-    settings_error_for: Mutex<Option<String>>,
     fail_request_vars: Mutex<bool>,
     missing_request_vars: Mutex<bool>,
     fail_request_read: Mutex<bool>,
@@ -431,13 +430,6 @@ impl ConfigurableCollectionRepo {
         Arc::new(Self::default())
     }
 
-    /// Shorthand for a repo with one collection's autonomy flag preset.
-    pub fn with_autonomy_enabled(collection: &str, enabled: bool) -> Arc<Self> {
-        let repo = Self::new();
-        repo.set_autonomy(collection, enabled);
-        repo
-    }
-
     pub fn set_autonomy(&self, collection: &str, enabled: bool) {
         let settings = CollectionSettings {
             agent_autonomy_enabled: enabled,
@@ -449,26 +441,18 @@ impl ConfigurableCollectionRepo {
             .insert(collection.to_string(), settings);
     }
 
-    /// Replaces one collection's whole settings, for tests that need auth,
-    /// headers or variables and not only the run switch.
     /// Sets the request-level variables every request of this repo returns.
     pub fn set_request_variables(&self, vars: Vec<CollectionVariable>) {
         *self.request_vars.lock().expect("lock request_vars") = vars;
     }
 
+    /// Replaces one collection's whole settings, for tests that need auth,
+    /// headers or variables and not only the run switch.
     pub fn set_settings(&self, collection: &str, settings: CollectionSettings) {
         self.settings
             .lock()
             .expect("lock settings")
             .insert(collection.to_string(), settings);
-    }
-
-    /// Makes `get_settings(collection)` fail with `DomainError::Internal`.
-    pub fn fail_settings_for(&self, collection: &str) {
-        *self
-            .settings_error_for
-            .lock()
-            .expect("lock settings_error_for") = Some(collection.to_string());
     }
 
     /// Makes `get_request_variables` fail with `DomainError::NotFound`, like an unsaved request.
@@ -590,15 +574,6 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(crate::test_doubles::test_identity(n))
     }
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
-        let failing = self
-            .settings_error_for
-            .lock()
-            .expect("lock settings_error_for")
-            .as_deref()
-            == Some(name);
-        if failing {
-            return Err(DomainError::Internal("settings read failed".into()));
-        }
         Ok(self
             .settings
             .lock()

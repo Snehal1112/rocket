@@ -761,9 +761,7 @@ pub fn run() {
                     Arc::clone(&proposal_svc),
                 )),
                 acp_agent_config_svc,
-                Arc::clone(&acp_collection_repo),
-            )
-            .with_trust_store(Arc::clone(&trust_store));
+            );
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);

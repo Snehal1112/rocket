@@ -45,10 +45,7 @@ pub struct AcpSessionService {
     /// `live_sessions` lock, so `track` and the drain never interleave.
     shutting_down: AtomicBool,
     agent_config_service: Arc<AgentConfigService>,
-    collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     prompt_idle_timeout: Duration,
-    /// What the user allowed per collection. The default allows nothing.
-    trust_store: Arc<dyn rocket_collection::CollectionTrustStore>,
 }
 
 /// Fixed idle limit for one prompt turn, from the spec. Every update from the
@@ -64,7 +61,7 @@ type ToolCallStates = HashMap<String, (String, ToolCallStatus)>;
 /// the Tauri command layer (which owns the `AppHandle` needed to spawn the
 /// real HTTP server — see this crate's `CLAUDE.md`/the plan's Design Note for
 /// why that spawn does not happen in this crate) and passed into
-/// `start_session` as plain values, keeping this crate free of a `tauri`
+/// `start_workspace_session` as plain values, keeping this crate free of a `tauri`
 /// dependency for this feature.
 #[derive(Debug, Clone)]
 pub struct McpHttpServerCredentials {
@@ -79,14 +76,12 @@ impl AcpSessionService {
         event_publisher: Box<dyn EventPublisher>,
         cleanup: Arc<dyn SessionCleanup>,
         agent_config_service: Arc<AgentConfigService>,
-        collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
     ) -> Self {
         Self::with_prompt_idle_timeout(
             session_client,
             event_publisher,
             cleanup,
             agent_config_service,
-            collection_repo,
             DEFAULT_PROMPT_IDLE_TIMEOUT,
         )
     }
@@ -98,7 +93,6 @@ impl AcpSessionService {
         event_publisher: Box<dyn EventPublisher>,
         cleanup: Arc<dyn SessionCleanup>,
         agent_config_service: Arc<AgentConfigService>,
-        collection_repo: Arc<dyn rocket_collection::CollectionRepository>,
         prompt_idle_timeout: Duration,
     ) -> Self {
         Self {
@@ -108,19 +102,8 @@ impl AcpSessionService {
             live_sessions: Mutex::new(HashSet::new()),
             shutting_down: AtomicBool::new(false),
             agent_config_service,
-            collection_repo,
             prompt_idle_timeout,
-            trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
         }
-    }
-
-    /// Attach the trust store that decides whether the run switch is granted.
-    pub fn with_trust_store(
-        mut self,
-        store: Arc<dyn rocket_collection::CollectionTrustStore>,
-    ) -> Self {
-        self.trust_store = store;
-        self
     }
 
     /// Starts owning a started session, so every end path runs its cleanup.
@@ -154,96 +137,14 @@ impl AcpSessionService {
         }
     }
 
-    /// Spawns the configured agent and opens an ACP session in `cwd`.
-    ///
-    /// `cwd` comes from the caller, not from `AgentConfig::working_dir`, as
-    /// the spec requires. Config lookup and credential resolution errors
-    /// propagate unchanged. No event is published on failure, because no
-    /// session id exists yet. On success, `AcpSessionStarted` is published
-    /// and the session info is returned.
-    ///
-    /// The session is not tracked yet. The command layer is the only caller,
-    /// and it must register the session's resources and then call `track`,
-    /// so a sweep cannot run between the two.
-    ///
-    /// `isolation`, when present, starts the agent isolated: its `_meta`
-    /// comes from `SessionIsolation::meta`, and `CLAUDE_CONFIG_DIR` points at
-    /// the caller's empty scratch directory. `cwd` should then be an empty
-    /// scratch directory too.
-    ///
-    /// `collection` gates whether any MCP servers are attached at all: a
-    /// collection that has not opted into agent autonomy gets none —
-    /// chat-only mode. This re-checks `get_settings` on every call (not just
-    /// once), matching the design spec's "checked on every call" rule for
-    /// the tools themselves, and propagates a lookup failure instead of
-    /// silently falling back to chat-only mode, so a broken collection name
-    /// surfaces loudly rather than silently degrading.
-    ///
-    /// `mcp_http` carries the port/token of an already-running MCP HTTP
-    /// server (see `McpHttpServerCredentials`'s doc comment for why this
-    /// crate never spawns that server itself). When autonomy is enabled and
-    /// credentials are present, both an `Http` and a `Stdio` spec are
-    /// offered to the agent — the `Stdio` spec points back at this same
-    /// server through the hidden `--acp-mcp-stdio-bridge` CLI mode, for
-    /// agents that only support MCP over stdio. When autonomy is disabled,
-    /// or the caller could not spawn the HTTP server (`mcp_http` is `None`),
-    /// no MCP servers are attached — the latter fails open to chat-only mode
-    /// rather than failing the whole session start over a tool-server hiccup.
-    pub async fn start_session(
-        &self,
-        agent_config_id: &str,
-        cwd: &str,
-        collection: &str,
-        mcp_http: Option<McpHttpServerCredentials>,
-        isolation: Option<SessionIsolation>,
-    ) -> DomainResult<SessionInfo> {
-        let config = self.agent_config_service.get(agent_config_id)?;
-        let credential = self
-            .agent_config_service
-            .resolve_credential(agent_config_id)
-            .await?;
-        let mut env = vec![(config.credential_env_var.clone(), credential)];
-        let meta = isolation.as_ref().map(|isolation| {
-            env.push(isolation.env_entry());
-            isolation.meta()
-        });
-
-        // Surface an unreadable collection as an error, like before. The file only
-        // requests the switch, so the trust store decides.
-        self.collection_repo.get_settings(collection)?;
-        let autonomy_enabled = crate::collection_trust::effective_capabilities(
-            self.collection_repo.as_ref(),
-            self.trust_store.as_ref(),
-            collection,
-        )
-        .agent_run;
-        let mcp_servers: Vec<rocket_acp::McpServerSpec> = match (autonomy_enabled, mcp_http) {
-            (true, Some(creds)) => mcp_server_specs(creds)?,
-            // Autonomy is off, or the caller couldn't spawn the HTTP server
-            // (fails open to chat-only mode rather than failing the whole
-            // session start over a tool-server hiccup) — no MCP servers.
-            _ => Vec::new(),
-        };
-
-        let info = self
-            .session_client
-            .start_session(&config.command, &config.args, cwd, &env, &mcp_servers, meta)
-            .await?;
-        self.event_publisher
-            .publish(DomainEvent::AcpSessionStarted {
-                session_id: info.session_id.clone(),
-            });
-        Ok(info)
-    }
-
-    /// Starts a workspace assistant session. Unlike `start_session`, the
-    /// tool server is always attached: the workspace assistant's tools
-    /// check the workspace scope, the mode and the run switch on every
-    /// call. `isolation` adds `CLAUDE_CONFIG_DIR` to the environment and
-    /// supplies the `_meta`. Like `start_session`, the session is not
-    /// tracked yet: the command layer registers the session's resources
-    /// and then calls `track`.
-    /// Publishes `AcpSessionStarted` on success, nothing on failure.
+    /// Starts a workspace assistant session in `cwd`, which should be an
+    /// empty scratch directory. The tool server is always attached: the
+    /// workspace assistant's tools check the workspace scope, the mode and
+    /// the run switch on every call. `isolation` adds `CLAUDE_CONFIG_DIR` to
+    /// the environment and supplies the `_meta`. Config lookup and credential
+    /// errors propagate unchanged. The session is not tracked yet: the
+    /// command layer registers the session's resources and then calls
+    /// `track`. Publishes `AcpSessionStarted` on success, nothing on failure.
     pub async fn start_workspace_session(
         &self,
         agent_config_id: &str,
@@ -572,10 +473,7 @@ mod tests {
     use rocket_shared::events::NullEventPublisher;
     use tokio::sync::mpsc::UnboundedSender;
 
-    use crate::agent_isolation::{
-        isolation_meta, SessionIsolation, ROCKET_ASSISTANT_SYSTEM_PROMPT,
-    };
-    use crate::test_doubles::ConfigurableCollectionRepo;
+    use crate::agent_isolation::SessionIsolation;
 
     struct FakeAgentConfigRepo(Mutex<Vec<AgentConfig>>);
     impl AgentConfigRepository for FakeAgentConfigRepo {
@@ -909,6 +807,17 @@ mod tests {
         }
     }
 
+    fn test_creds() -> McpHttpServerCredentials {
+        McpHttpServerCredentials {
+            port: 4321,
+            token: "tok-123".to_string(),
+        }
+    }
+
+    fn test_isolation() -> SessionIsolation {
+        SessionIsolation::new("/scratch/config")
+    }
+
     fn noop_cleanup() -> Arc<dyn SessionCleanup> {
         Arc::new(NoopSessionCleanup)
     }
@@ -922,18 +831,16 @@ mod tests {
             Box::new(NullEventPublisher),
             cleanup,
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
         )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
 
     /// Starts a session and tracks it, as the command layer does once its
     /// resources are registered.
     async fn start(service: &AcpSessionService) {
         let info = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
         assert!(service.track(&info.session_id));
     }
 
@@ -944,26 +851,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_resolves_config_and_credential_and_publishes_started() {
+    async fn start_workspace_session_resolves_config_and_credential_and_publishes_started() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let session_id = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
         assert_eq!(session_id.session_id, "session-1");
 
         let events = publisher.events.lock().expect("lock");
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], DomainEvent::AcpSessionStarted { .. }));
+    }
+
+    #[tokio::test]
+    async fn start_workspace_session_publishes_no_tool_invoked_event() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+            noop_cleanup(),
+            agent_config_service(),
+        );
+
+        service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect("start_workspace_session should succeed");
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+            "starting a session must not publish AcpToolInvoked, got {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -985,9 +914,7 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let stop_reason = service
             .send_prompt("session-1", hi())
@@ -1028,9 +955,7 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         service
             .end_session("session-1")
@@ -1040,19 +965,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_unknown_agent_config_id_errors() {
+    async fn start_workspace_session_unknown_agent_config_id_errors() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let err = service
-            .start_session("no-such-agent", "/tmp", "demo", None, None)
+            .start_workspace_session("no-such-agent", "/tmp", test_creds(), test_isolation())
             .await
             .expect_err("unknown agent_config_id must error");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -1063,7 +986,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_propagates_spawn_failure() {
+    async fn start_workspace_session_propagates_spawn_failure() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let client = FakeSessionClient {
             start_should_fail: true,
@@ -1074,19 +997,17 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let err = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
             .expect_err("spawn failure must propagate");
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
     #[tokio::test]
-    async fn start_session_propagates_credential_resolution_failure_unchanged() {
+    async fn start_workspace_session_propagates_credential_resolution_failure_unchanged() {
         // Ok(None) simulates a stale/deleted vault secret — AgentConfigService
         // maps this to NotFound (proven by its own tests in subproject A);
         // this test's job is narrower: prove AcpSessionService::start_session
@@ -1099,12 +1020,10 @@ mod tests {
             agent_config_service_with(FakeVaultFetcher {
                 secret_value_result: Ok(None),
             }),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let err = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
             .expect_err("a stale vault secret must fail start_session, not silently proceed");
         assert!(matches!(err, DomainError::NotFound(_)));
@@ -1126,9 +1045,7 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let err = service
             .send_prompt("session-1", hi())
@@ -1159,10 +1076,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
             Duration::from_millis(20),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let err = service
             .send_prompt("session-1", hi())
@@ -1196,139 +1111,13 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         service
             .end_all_sessions()
             .await
             .expect("end_all_sessions should succeed");
         assert!(end_all_sessions_called.load(Ordering::SeqCst));
-    }
-
-    #[tokio::test]
-    async fn start_session_with_default_unconfigured_settings_still_works() {
-        // A collection that was never explicitly configured (no
-        // `set_autonomy` call) falls back to `CollectionSettings::default()`
-        // (autonomy off), matching the real repos' "missing settings file"
-        // behavior — this must not error.
-        let publisher = Arc::new(FakeEventPublisher::new());
-        let service = AcpSessionService::new(
-            Box::new(FakeSessionClient::default()),
-            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
-            noop_cleanup(),
-            agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
-
-        let session_id = service
-            .start_session("agent-1", "/tmp", "unconfigured-collection", None, None)
-            .await
-            .expect("an unconfigured collection must still start a chat-only session");
-        assert_eq!(session_id.session_id, "session-1");
-    }
-
-    #[tokio::test]
-    async fn start_session_with_autonomy_disabled_ignores_provided_mcp_http_credentials() {
-        let publisher = Arc::new(FakeEventPublisher::new());
-        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let client = CapturingSessionClient {
-            captured_servers: Arc::clone(&captured_servers),
-            ..Default::default()
-        };
-        let collection_repo = ConfigurableCollectionRepo::new();
-        collection_repo.set_autonomy("my-api", false);
-        let service = AcpSessionService::new(
-            Box::new(client),
-            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
-            noop_cleanup(),
-            agent_config_service(),
-            collection_repo,
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
-
-        let session_id = service
-            .start_session(
-                "agent-1",
-                "/tmp",
-                "my-api",
-                Some(McpHttpServerCredentials {
-                    port: 1234,
-                    token: "unused-token".to_string(),
-                }),
-                None,
-            )
-            .await
-            .expect("a disabled collection must still be able to start a chat-only session");
-        assert_eq!(session_id.session_id, "session-1");
-        assert!(
-            captured_servers.lock().expect("lock").is_empty(),
-            "a disabled collection must get no MCP servers even when credentials were provided"
-        );
-    }
-
-    #[tokio::test]
-    async fn start_session_with_autonomy_enabled_but_no_mcp_http_credentials_fails_open_to_chat_only(
-    ) {
-        // The HTTP tool server could not be spawned (or autonomy was enabled
-        // after the caller already decided not to try) — this must not fail
-        // the whole session start, only skip attaching any MCP servers.
-        let publisher = Arc::new(FakeEventPublisher::new());
-        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let client = CapturingSessionClient {
-            captured_servers: Arc::clone(&captured_servers),
-            ..Default::default()
-        };
-        let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("my-api", true);
-        let service = AcpSessionService::new(
-            Box::new(client),
-            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
-            noop_cleanup(),
-            agent_config_service(),
-            collection_repo,
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
-
-        let session_id = service
-            .start_session("agent-1", "/tmp", "my-api", None, None)
-            .await
-            .expect("a missing MCP HTTP server must fail open to a chat-only session");
-        assert_eq!(session_id.session_id, "session-1");
-        assert!(
-            captured_servers.lock().expect("lock").is_empty(),
-            "no MCP servers should be attached without credentials, even with autonomy enabled"
-        );
-    }
-
-    #[tokio::test]
-    async fn start_session_propagates_a_collection_settings_lookup_failure() {
-        let publisher = Arc::new(FakeEventPublisher::new());
-        let collection_repo = ConfigurableCollectionRepo::new();
-        collection_repo.fail_settings_for("broken-collection");
-        let service = AcpSessionService::new(
-            Box::new(FakeSessionClient::default()),
-            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
-            noop_cleanup(),
-            agent_config_service(),
-            collection_repo,
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
-
-        let err = service
-            .start_session("agent-1", "/tmp", "broken-collection", None, None)
-            .await
-            .expect_err(
-                "a broken collection settings read must fail start_session, not silently degrade to chat-only",
-            );
-        assert!(matches!(err, DomainError::Internal(_)));
-        assert!(
-            publisher.events.lock().expect("lock").is_empty(),
-            "no event should publish when the settings lookup fails before any session starts"
-        );
     }
 
     #[derive(Default)]
@@ -1385,8 +1174,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_with_autonomy_enabled_builds_http_and_stdio_specs_with_token_only_in_env(
-    ) {
+    async fn start_workspace_session_builds_http_and_stdio_specs_with_token_only_in_env() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
             Arc::new(Mutex::new(Vec::new()));
@@ -1394,29 +1182,25 @@ mod tests {
             captured_servers: Arc::clone(&captured_servers),
             ..Default::default()
         };
-        let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("demo", true);
         let service = AcpSessionService::new(
             Box::new(client),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            collection_repo,
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         service
-            .start_session(
+            .start_workspace_session(
                 "agent-1",
                 "/tmp",
-                "demo",
-                Some(McpHttpServerCredentials {
+                McpHttpServerCredentials {
                     port: 54321,
                     token: "s3cr3t-token".to_string(),
-                }),
-                None,
+                },
+                test_isolation(),
             )
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
 
         let servers = captured_servers.lock().expect("lock").clone();
         assert_eq!(
@@ -1437,41 +1221,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[tokio::test]
-    async fn start_session_attaches_no_mcp_servers_when_agent_run_is_not_granted() {
-        let captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let client = CapturingSessionClient {
-            captured_servers: Arc::clone(&captured_servers),
-            ..Default::default()
-        };
-        // The file asks for agent run, but nothing is granted on this computer.
-        let collection_repo = ConfigurableCollectionRepo::with_autonomy_enabled("demo", true);
-        let service = AcpSessionService::new(
-            Box::new(client),
-            Box::new(NullEventPublisher),
-            noop_cleanup(),
-            agent_config_service(),
-            collection_repo,
-        );
-
-        service
-            .start_session(
-                "agent-1",
-                "/tmp",
-                "demo",
-                Some(McpHttpServerCredentials {
-                    port: 54321,
-                    token: "s3cr3t-token".to_string(),
-                }),
-                None,
-            )
-            .await
-            .expect("start_session should succeed");
-
-        assert!(captured_servers.lock().expect("lock").is_empty());
     }
 
     fn hi() -> Vec<PromptPart> {
@@ -1502,14 +1251,12 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
             idle,
         )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
 
     #[tokio::test]
-    async fn start_session_returns_the_client_session_info() {
+    async fn start_workspace_session_returns_the_client_session_info() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let client = FakeSessionClient {
             start_config_options: vec![sample_option("model", "default")],
@@ -1518,9 +1265,9 @@ mod tests {
         let service = service_with(client, &publisher, Duration::from_secs(5));
 
         let info = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
         assert_eq!(info.session_id, "session-1");
         assert_eq!(info.config_options, vec![sample_option("model", "default")]);
         assert!(info.prompt_capabilities.embedded_context);
@@ -1678,10 +1425,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             cleanup.clone(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
             Duration::from_millis(50),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
         start(&service).await;
 
         let stop_reason = send_hi(&service, "session-1")
@@ -1775,74 +1520,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_session_with_isolation_passes_meta_and_the_config_dir_env() {
-        let client = CapturingSessionClient::default();
-        let captured_env = Arc::clone(&client.captured_env);
-        let captured_meta = Arc::clone(&client.captured_meta);
-        let service = AcpSessionService::new(
-            Box::new(client),
-            Box::new(NullEventPublisher),
-            noop_cleanup(),
-            agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
-
-        service
-            .start_session(
-                "agent-1",
-                "/scratch/cwd",
-                "demo",
-                None,
-                Some(SessionIsolation::new("/scratch/config")),
-            )
-            .await
-            .expect("start_session should succeed");
-
-        let env = captured_env.lock().expect("lock").clone();
-        assert!(
-            env.iter()
-                .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v == "/scratch/config"),
-            "CLAUDE_CONFIG_DIR must point at the scratch config dir, got {env:?}"
-        );
-        assert!(
-            env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"),
-            "the credential env var must still be passed, got {env:?}"
-        );
-        assert_eq!(
-            *captured_meta.lock().expect("lock"),
-            Some(isolation_meta(ROCKET_ASSISTANT_SYSTEM_PROMPT))
-        );
-    }
-
-    #[tokio::test]
-    async fn start_session_without_isolation_passes_no_meta_and_no_config_dir() {
-        let client = CapturingSessionClient::default();
-        let captured_env = Arc::clone(&client.captured_env);
-        let captured_meta = Arc::clone(&client.captured_meta);
-        let service = AcpSessionService::new(
-            Box::new(client),
-            Box::new(NullEventPublisher),
-            noop_cleanup(),
-            agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
-
-        service
-            .start_session("agent-1", "/tmp", "demo", None, None)
-            .await
-            .expect("start_session should succeed");
-
-        assert!(captured_meta.lock().expect("lock").is_none());
-        assert!(!captured_env
-            .lock()
-            .expect("lock")
-            .iter()
-            .any(|(k, _)| k == "CLAUDE_CONFIG_DIR"));
-    }
-
-    #[tokio::test]
     async fn end_session_runs_cleanup_once_for_a_started_session() {
         let cleanup = Arc::new(RecordingCleanup::default());
         let service = service_with_cleanup(FakeSessionClient::default(), cleanup.clone());
@@ -1882,10 +1559,8 @@ mod tests {
             Box::new(NullEventPublisher),
             cleanup.clone(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
             Duration::from_millis(20),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
         start(&service).await;
 
         send_hi(&service, "session-1")
@@ -1951,9 +1626,7 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
 
         let err = service
             .send_prompt("session-1", hi())
@@ -2002,7 +1675,7 @@ mod tests {
         let service = service_with_cleanup(client, cleanup.clone());
 
         service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
             .expect_err("spawn failure must propagate");
         service.end_all_sessions().await.expect("end_all_sessions");
@@ -2063,9 +1736,9 @@ mod tests {
         let cleanup = Arc::new(RecordingCleanup::default());
         let service = service_with_cleanup(FakeSessionClient::default(), cleanup.clone());
         let info = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
 
         // The command has not registered its resources yet, so the sweep
         // must not see the session.
@@ -2083,9 +1756,9 @@ mod tests {
         let cleanup = Arc::new(RecordingCleanup::default());
         let service = service_with_cleanup(FakeSessionClient::default(), cleanup.clone());
         let info = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
 
         service.end_all_sessions().await.expect("end_all_sessions");
 
@@ -2104,9 +1777,9 @@ mod tests {
         };
         let service = service_with_cleanup(client, cleanup.clone());
         let info = service
-            .start_session("agent-1", "/tmp", "demo", None, None)
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
-            .expect("start_session should succeed");
+            .expect("start_workspace_session should succeed");
         service.end_all_sessions().await.expect("end_all_sessions");
         assert!(!service.track(&info.session_id));
         end_session_called.store(false, Ordering::SeqCst);
@@ -2200,9 +1873,7 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             cleanup.clone(),
             agent_config_service(),
-            ConfigurableCollectionRepo::new(),
-        )
-        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        );
         let isolation = SessionIsolation {
             config_dir: "/tmp/scratch-config".to_string(),
             system_prompt_append: "rocket".to_string(),
