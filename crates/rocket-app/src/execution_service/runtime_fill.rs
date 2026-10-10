@@ -166,6 +166,56 @@ pub(crate) fn fill_names(text: &str, vars: &HashMap<String, String>) -> String {
     })
 }
 
+/// Swaps path parameter values in a URL a script rewrote. Only the path is read: after the
+/// scheme and authority, before `?` or `#`. One pass goes over its segments from left to right.
+/// A segment equal to an old value, or starting with one and then a character that cannot be part
+/// of a value (such as `.json`), gets the new value. Each segment changes at most once and the
+/// new text is never read again. `swaps` holds (old encoded value, new encoded value) pairs.
+pub(crate) fn swap_path_values(url: &str, swaps: &[(String, String)]) -> String {
+    if swaps.is_empty() {
+        return url.to_string();
+    }
+    let (start, end) = path_range(url);
+    let mut ordered: Vec<&(String, String)> =
+        swaps.iter().filter(|(old, _)| !old.is_empty()).collect();
+    // A longer old value wins over a shorter one that is its prefix.
+    ordered.sort_by_key(|(old, _)| std::cmp::Reverse(old.len()));
+    let path = url[start..end]
+        .split('/')
+        .map(|segment| {
+            for (old, new) in &ordered {
+                if let Some(rest) = segment.strip_prefix(old.as_str()) {
+                    let ends_value = rest.chars().next().map_or(true, |c| {
+                        !(c.is_ascii_alphanumeric() || c == '_' || c == '%' || c == '-')
+                    });
+                    if ends_value {
+                        return format!("{new}{rest}");
+                    }
+                }
+            }
+            segment.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    format!("{}{}{}", &url[..start], path, &url[end..])
+}
+
+/// Byte range of the path in `url`, as `rocket_http::substitute_path_params` reads it.
+fn path_range(url: &str) -> (usize, usize) {
+    let is_delimiter = |c: char| matches!(c, '/' | '?' | '#');
+    let after_scheme = url
+        .find("://")
+        .filter(|i| !url[..*i].contains(is_delimiter))
+        .map_or(0, |i| i + 3);
+    let start = url[after_scheme..]
+        .find(is_delimiter)
+        .map_or(url.len(), |i| after_scheme + i);
+    let end = url[start..]
+        .find(['?', '#'])
+        .map_or(url.len(), |i| start + i);
+    (start, end)
+}
+
 /// The first pass's templates of every field of a request, in request order.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RequestTemplates {
@@ -268,6 +318,31 @@ mod tests {
     fn fill_names_leaves_unknown_and_dynamic_names() {
         let out = fill_names("{{a}} {{b}} {{$guid}} {{ open", &vars(&[("a", "{{b}}")]));
         assert_eq!(out, "{{b}} {{b}} {{$guid}} {{ open");
+    }
+
+    #[test]
+    fn swap_path_values_reads_only_the_path() {
+        let swaps = vec![("1".to_string(), "42".to_string())];
+        assert_eq!(
+            swap_path_values("https://api1.test/items/1?page=1&x=1#1", &swaps),
+            "https://api1.test/items/42?page=1&x=1#1"
+        );
+        assert_eq!(
+            swap_path_values("https://h.test/files/1.json/12", &swaps),
+            "https://h.test/files/42.json/12"
+        );
+    }
+
+    #[test]
+    fn swap_path_values_never_replaces_twice() {
+        let swaps = vec![
+            ("ab".to_string(), "cd".to_string()),
+            ("d".to_string(), "zz".to_string()),
+        ];
+        assert_eq!(
+            swap_path_values("https://h.test/ab/d?q=ab", &swaps),
+            "https://h.test/cd/zz?q=ab"
+        );
     }
 
     #[test]

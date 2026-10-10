@@ -30,7 +30,7 @@ use std::sync::Arc;
 pub(crate) mod runtime_fill;
 pub mod websocket_resolution;
 use self::runtime_fill::{
-    allow_new_names, fill_names, fill_pairs, FieldTemplate, RequestTemplates,
+    allow_new_names, fill_names, fill_pairs, swap_path_values, FieldTemplate, RequestTemplates,
 };
 use std::cell::RefCell;
 
@@ -747,6 +747,9 @@ impl RequestExecutionService {
             if let Some(global_env) = read_scope(strict, self.env_repo.get(name))? {
                 for var in global_env.variables.iter().filter(|v| v.enabled) {
                     ctx.global_env.insert(var.key.clone(), var.value.clone());
+                    if var.secret {
+                        ctx.secret_keys.insert(var.key.clone());
+                    }
                     if var.secret && var.value.len() >= MIN_REDACTION_LEN {
                         ctx.secret_values.insert(var.value.clone());
                     }
@@ -768,6 +771,9 @@ impl RequestExecutionService {
             for cv in settings.variables.iter().filter(|v| v.enabled) {
                 let val = effective_val(cv);
                 ctx.collection.insert(cv.key.clone(), val.clone());
+                if cv.secret {
+                    ctx.secret_keys.insert(cv.key.clone());
+                }
                 if cv.secret && val.len() >= MIN_REDACTION_LEN {
                     ctx.secret_values.insert(val);
                 }
@@ -778,6 +784,9 @@ impl RequestExecutionService {
             if let Some(env) = read_scope(strict, self.regular_env_repo(collection).get(name))? {
                 for var in env.variables.iter().filter(|v| v.enabled) {
                     ctx.env.insert(var.key.clone(), var.value.clone());
+                    if var.secret {
+                        ctx.secret_keys.insert(var.key.clone());
+                    }
                     if var.secret && var.value.len() >= MIN_REDACTION_LEN {
                         ctx.secret_values.insert(var.value.clone());
                     }
@@ -795,6 +804,9 @@ impl RequestExecutionService {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
                     ctx.folder.insert(cv.key.clone(), val.clone());
+                    if cv.secret {
+                        ctx.secret_keys.insert(cv.key.clone());
+                    }
                     if cv.secret && val.len() >= MIN_REDACTION_LEN {
                         ctx.secret_values.insert(val);
                     }
@@ -809,6 +821,9 @@ impl RequestExecutionService {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
                     ctx.request.insert(cv.key.clone(), val.clone());
+                    if cv.secret {
+                        ctx.secret_keys.insert(cv.key.clone());
+                    }
                     if cv.secret && val.len() >= MIN_REDACTION_LEN {
                         ctx.secret_values.insert(val);
                     }
@@ -817,6 +832,7 @@ impl RequestExecutionService {
         }
 
         ctx.external_secrets = external_secrets.clone();
+        ctx.secret_keys.extend(external_secrets.keys().cloned());
         for value in external_secrets.values() {
             ctx.secret_values
                 .extend(crate::redaction::redaction_forms(value));
@@ -2146,9 +2162,9 @@ impl RequestExecutionService {
                 &rendered_params,
             );
         } else {
-            // A script-written URL can still carry a path parameter's encoded first value.
-            // Longer values go first, so one value inside another is not replaced in part.
-            let mut swaps: Vec<(String, String)> = templates
+            // A script-written URL can still carry a path parameter's encoded first value. Only
+            // whole path segments are swapped, once each, never the host or the query.
+            let swaps: Vec<(String, String)> = templates
                 .path_params
                 .iter()
                 .zip(&rendered_params)
@@ -2160,10 +2176,7 @@ impl RequestExecutionService {
                     )
                 })
                 .collect();
-            swaps.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-            for (old, new) in swaps {
-                request.url = request.url.replace(&old, &new);
-            }
+            request.url = swap_path_values(&request.url, &swaps);
             request.url = fill_names(&request.url, &script_vars);
         }
         let mut query: Vec<(&mut String, &mut String)> = request
@@ -2836,32 +2849,16 @@ fn auth_has_placeholder(auth: &Auth) -> bool {
     found.get()
 }
 
-/// Treats a runtime value as secret when its key names a secret variable of another scope or a
-/// RocketVault value. A script that sets such a key gets its value masked like the original.
+/// Treats a runtime value as secret when its key names a secret variable of any scope or a
+/// RocketVault value (`secret_keys`). It goes by the key, so it works when the original value is
+/// empty or too short to be masked. A script that sets such a key gets its value masked.
 fn mask_runtime_values_of_secret_keys(var_ctx: &mut VariableContext) {
-    let mut forms = Vec::new();
-    for (key, value) in &var_ctx.runtime {
-        if value.len() < MIN_REDACTION_LEN || var_ctx.secret_values.contains(value) {
-            continue;
-        }
-        let secret_key = var_ctx.external_secrets.contains_key(key)
-            || [
-                &var_ctx.global_env,
-                &var_ctx.collection,
-                &var_ctx.env,
-                &var_ctx.folder,
-                &var_ctx.request,
-            ]
-            .iter()
-            .any(|scope| {
-                scope
-                    .get(key)
-                    .is_some_and(|v| var_ctx.secret_values.contains(v))
-            });
-        if secret_key {
-            forms.extend(crate::redaction::redaction_forms(value));
-        }
-    }
+    let forms: Vec<String> = var_ctx
+        .runtime
+        .iter()
+        .filter(|(key, _)| var_ctx.secret_keys.contains(*key))
+        .flat_map(|(_, value)| crate::redaction::redaction_forms(value))
+        .collect();
     var_ctx.secret_values.extend(forms);
 }
 
@@ -10471,5 +10468,67 @@ mod tests {
             executor_request(&executor).url,
             "https://api.test/items/a%2Fb%3Fc/detail"
         );
+    }
+
+    #[tokio::test]
+    async fn a_rewritten_url_swaps_a_path_value_but_not_the_host_or_query() {
+        use rocket_scripting::RequestMutations;
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("id", "1"));
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                url: Some("https://api1.test/items/1?page=1&x=1".into()),
+                ..Default::default()
+            }),
+            ..runtime_result(&[("id", "42")])
+        };
+        let engine = MockBeforeRequestEngine::returning(result);
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::with_env(env), Box::new(engine));
+        let mut input = sample_input("https://api1.test/items/:id?page=1", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        input.path_params = vec![rocket_shared::types::PathParam {
+            name: "id".into(),
+            value: "{{id}}".into(),
+            description: None,
+        }];
+        svc.execute(input).await.expect("execute");
+        assert_eq!(
+            executor_request(&executor).url,
+            "https://api1.test/items/42?page=1&x=1"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_script_value_for_an_empty_secret_key_is_masked() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("token", ""));
+        let engine =
+            MockBeforeRequestEngine::returning(runtime_result(&[("token", "real-jwt-abc123")]));
+        let (svc, executor, saved) = runtime_svc(MockEnvRepo::with_env(env), Box::new(engine));
+        let mut input = sample_input("https://api.test/?t={{token}}", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        input.headers = vec![Header::new("X-Token", "{{token}}")];
+        let mut sent = None;
+        let output = svc
+            .execute_capturing(input, &std::collections::HashMap::new(), &mut sent)
+            .await
+            .expect("execute");
+
+        let request = executor_request(&executor);
+        assert_eq!(header_value(&request, "X-Token"), Some("real-jwt-abc123"));
+        let history_url = saved.lock().expect("lock")[0].url.clone();
+        assert!(!history_url.contains("real-jwt-abc123"), "{history_url}");
+        assert!(output.run_secret_values.contains("real-jwt-abc123"));
+        let record = crate::flow_debug::build_debug_request(
+            sent.as_ref().expect("captured"),
+            None,
+            None,
+            &crate::flow_debug::sent_masks(&std::collections::HashSet::new(), Some(&output)),
+        );
+        assert!(record
+            .headers
+            .iter()
+            .all(|h| !h.value.contains("real-jwt-abc123")));
+        assert!(!record.url.contains("real-jwt-abc123"), "{}", record.url);
     }
 }

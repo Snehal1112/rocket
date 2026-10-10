@@ -21,6 +21,10 @@ pub struct VariableContext {
     /// script-emitted console/test-error text. Not a per-scope map — a value is
     /// either sensitive or not, regardless of which scope surfaced it.
     pub secret_values: HashSet<String>,
+    /// Names of the secret variables of any scope, whatever their value, plus the RocketVault
+    /// keys. A value a script sets under one of these names is treated as secret too, even when
+    /// the original value is empty or too short to be masked.
+    pub secret_keys: HashSet<String>,
 }
 
 impl VariableContext {
@@ -166,6 +170,7 @@ mod tests {
             global_env: m(&[("k", "global")]),
             process_env: m(&[("k", "process")]),
             secret_values: std::collections::HashSet::new(),
+            secret_keys: std::collections::HashSet::new(),
         };
         assert_eq!(ctx.flatten().get("k").expect("k present"), "runtime");
     }
