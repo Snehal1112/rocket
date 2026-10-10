@@ -128,14 +128,13 @@ export const rocketTheme = EditorView.theme({
     letterSpacing: '1px',
   },
 
-  // Autocomplete dropdown — matches shadcn DropdownMenuContent tokens exactly.
+  // Autocomplete dropdown — uses the shadcn DropdownMenuContent tokens, with an opaque background.
   '.cm-tooltip.cm-tooltip-autocomplete': {
     border: '1px solid hsl(var(--dropdown-border))',
     borderRadius: 'calc(var(--radius) - 4px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
-    background: 'hsl(var(--dropdown-bg) / 0.50)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)',
+    // Opaque on purpose: WebKitGTK ignores backdrop-filter, so a translucent list is unreadable.
+    background: 'hsl(var(--dropdown-bg))',
     overflow: 'hidden',
   },
   '.cm-tooltip.cm-tooltip-autocomplete > ul': {
@@ -173,9 +172,8 @@ export const rocketTheme = EditorView.theme({
     border: '1px solid hsl(var(--dropdown-border))',
     borderRadius: 'calc(var(--radius) - 4px)',
     boxShadow: '0 2px 8px rgba(0,0,0,0.16)',
-    background: 'hsl(var(--dropdown-bg) / 0.50)',
-    backdropFilter: 'blur(8px)',
-    WebkitBackdropFilter: 'blur(8px)',
+    // Opaque on purpose: WebKitGTK ignores backdrop-filter, so a translucent list is unreadable.
+    background: 'hsl(var(--dropdown-bg))',
     color: 'hsl(var(--muted-foreground))',
     fontSize: '11px',
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
