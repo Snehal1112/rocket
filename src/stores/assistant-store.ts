@@ -63,6 +63,14 @@ export interface AssistantFocus {
   path: string;
 }
 
+/** A stored conversation carried into a new session (spec section 7, stage 2). */
+export interface ReplaySeed {
+  /** The id of the stored conversation, saved as `continuedFrom`. */
+  fromId: string;
+  /** The text put in front of the session's first prompt. */
+  preface: string;
+}
+
 export interface ToolActivity {
   callId: string;
   title: string;
@@ -81,12 +89,14 @@ export interface AssistantState {
   panelOpen: boolean;
   /** The stored conversation's id. Made at the first user message of a session. */
   conversationId?: string;
+  /** The seed of a continued session. `sent` turns true once the first prompt carried it. */
+  replay?: ReplaySeed & { sent: boolean };
 
   openPanel: () => void;
   closePanel: () => void;
   setFocus: (focus: AssistantFocus | undefined) => void;
   /** Puts a new session in 'starting' and returns the token of this start. */
-  beginSession: (agentConfigId: string, mode: AssistantMode) => number;
+  beginSession: (agentConfigId: string, mode: AssistantMode, replay?: ReplaySeed) => number;
   /** Activates the start with this token. Returns false when that start was
    *  abandoned, so the caller must end the backend session itself. */
   activateSession: (token: number, sessionId: string, configOptions: ConfigOption[]) => boolean;
@@ -102,6 +112,8 @@ export interface AssistantState {
   setConfigOptions: (sessionId: string, options: ConfigOption[]) => void;
   /** Records the mode the backend switched the current session to. */
   setMode: (sessionId: string, mode: AssistantMode) => void;
+  /** Records that the first prompt of this session carried the replay preface. */
+  markReplaySent: (sessionId: string) => void;
   setUsage: (sessionId: string, usage: AssistantUsage) => void;
   upsertProposal: (proposal: AgentProposal) => void;
   resolveProposal: (sessionId: string, proposalId: string, status: ProposalStatus) => void;
@@ -154,12 +166,13 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   focus: undefined,
   panelOpen: false,
   conversationId: undefined,
+  replay: undefined,
 
   openPanel: () => set({ panelOpen: true }),
   closePanel: () => set({ panelOpen: false }),
   setFocus: (focus) => set({ focus }),
 
-  beginSession(agentConfigId, mode) {
+  beginSession(agentConfigId, mode, replay) {
     startCounter += 1;
     currentStartToken = startCounter;
     set({
@@ -169,6 +182,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       proposalAnchors: {},
       usage: undefined,
       conversationId: undefined,
+      replay: replay ? { ...replay, sent: false } : undefined,
     });
     return currentStartToken;
   },
@@ -285,6 +299,14 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     );
   },
 
+  markReplaySent(sessionId) {
+    set((state) =>
+      state.replay && isCurrent(state, sessionId)
+        ? { replay: { ...state.replay, sent: true } }
+        : state,
+    );
+  },
+
   setUsage(sessionId, usage) {
     set((state) => (isCurrent(state, sessionId) ? { usage } : state));
   },
@@ -347,6 +369,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       proposalAnchors: {},
       usage: undefined,
       conversationId: undefined,
+      replay: undefined,
     });
   },
 }));

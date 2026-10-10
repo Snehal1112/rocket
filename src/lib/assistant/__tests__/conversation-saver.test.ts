@@ -58,6 +58,21 @@ describe('startConversationSaver', () => {
     vi.useRealTimers();
   });
 
+  it('records the conversation a continued session came from', async () => {
+    const token = store().beginSession('agent-1', 'ask', { fromId: 'c0', preface: 'P' });
+    store().activateSession(token, 's1', []);
+    turn('Why 401?', 'Hello');
+    await vi.advanceTimersByTimeAsync(CONVERSATION_SAVE_DEBOUNCE_MS);
+    expect(save.mock.calls[0][1]).toMatchObject({
+      continuedFrom: 'c0',
+      mode: 'ask',
+      messages: [
+        { kind: 'user', text: 'Why 401?' },
+        { kind: 'agent', text: 'Hello' },
+      ],
+    });
+  });
+
   it('saves 500 ms after a turn finishes', async () => {
     activate();
     turn('Why 401?', 'Hello');

@@ -37,7 +37,7 @@ export const HISTORY_EMPTY_TEXT = 'No saved conversations in this workspace yet.
 const UNTITLED = 'Untitled conversation';
 
 /** The stored conversations of the active workspace. */
-export function AssistantHistoryView() {
+export function AssistantHistoryView({ onContinued }: { onContinued?: () => void }) {
   const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const { data: agentConfigs = [] } = useAgentConfigs();
   // The list is tagged with its workspace, so another workspace's list is never shown.
@@ -189,6 +189,7 @@ export function AssistantHistoryView() {
         record={open}
         agentLabel={agentLabel(open.agentConfigId)}
         onBack={() => setOpen(undefined)}
+        onContinued={onContinued}
       />
     );
   }

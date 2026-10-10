@@ -115,7 +115,7 @@ export function AssistantPanel() {
           <X className='h-4 w-4' aria-hidden='true' />
         </Button>
       </header>
-      {showHistory && <AssistantHistoryView />}
+      {showHistory && <AssistantHistoryView onContinued={() => setShowHistory(false)} />}
       {/* The chat stays mounted while the history is shown, so the draft is kept. */}
       <div
         className={showHistory ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}

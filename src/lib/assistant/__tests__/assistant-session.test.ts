@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '@/lib/tauri-api';
-import type { AgentSessionStarted } from '@/lib/tauri-api';
+import type { AgentSessionStarted, ConversationRecord } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import { createDeferred } from '@/test/deferred';
+import { REPLAY_PREFACE_HEADER } from '../replay-preface';
 import {
+  CONTINUE_WORKSPACE_MISMATCH,
+  continueConversation,
   endAssistantSession,
   resetStaleSweepForTests,
   sendAssistantMessage,
@@ -35,6 +39,68 @@ describe('assistant session flows', () => {
     vi.mocked(api.endStaleAssistantSessions).mockResolvedValue(0);
     vi.mocked(api.endAgentSession).mockResolvedValue(undefined);
     vi.mocked(api.cancelAgentPrompt).mockResolvedValue(undefined);
+  });
+
+  const stored: ConversationRecord = {
+    id: '0b6f3f4e-0000-4000-8000-000000000001',
+    title: 'Why 401?',
+    agentConfigId: 'agent-1',
+    mode: 'agent',
+    workspaceId: 'ws-1',
+    createdAt: '2026-10-11T09:12:00Z',
+    updatedAt: '2026-10-11T09:20:41Z',
+    collections: [],
+    messages: [
+      { kind: 'user', text: 'Why 401?' },
+      { kind: 'agent', text: 'The token expired.' },
+    ],
+  };
+
+  it('continues in Ask mode and sends the preface with the first message only', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    vi.mocked(api.sendAgentPrompt).mockResolvedValue('end_turn');
+    activate('s1');
+    await continueConversation(stored, 'agent-1');
+    expect(api.endAgentSession).toHaveBeenCalledWith('s1');
+    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'ask', undefined);
+    expect(store().session).toMatchObject({ sessionId: 's2', status: 'active', mode: 'ask' });
+    expect(store().replay).toMatchObject({ fromId: stored.id, sent: false });
+
+    await sendAssistantMessage('  And now?  ');
+    const first = vi.mocked(api.sendAgentPrompt).mock.calls[0][1];
+    expect(first.startsWith(REPLAY_PREFACE_HEADER)).toBe(true);
+    expect(first).toContain('Assistant: The token expired.');
+    expect(first.endsWith('\n\nAnd now?')).toBe(true);
+    expect(store().messages[0]).toMatchObject({ kind: 'user', text: 'And now?' });
+    expect(store().replay?.sent).toBe(true);
+
+    store().completeMessage('s2');
+    await sendAssistantMessage('Next');
+    expect(vi.mocked(api.sendAgentPrompt).mock.calls[1][1]).toBe('Next');
+  });
+
+  it('keeps the preface when the first send fails', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    await continueConversation(stored, 'agent-1');
+    vi.mocked(api.sendAgentPrompt).mockRejectedValueOnce('agent busy');
+    await sendAssistantMessage('First try');
+    expect(store().replay?.sent).toBe(false);
+    vi.mocked(api.sendAgentPrompt).mockResolvedValueOnce('end_turn');
+    await sendAssistantMessage('Second try');
+    expect(
+      vi.mocked(api.sendAgentPrompt).mock.calls[1][1].startsWith(REPLAY_PREFACE_HEADER),
+    ).toBe(true);
+  });
+
+  it('refuses to continue a conversation of another workspace', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-2' });
+    await expect(continueConversation(stored, 'agent-1')).rejects.toThrow(
+      CONTINUE_WORKSPACE_MISMATCH,
+    );
+    expect(api.startWorkspaceAssistant).not.toHaveBeenCalled();
+    expect(store().session).toBeUndefined();
   });
 
   it('starts a session and activates it with the reported options', async () => {
