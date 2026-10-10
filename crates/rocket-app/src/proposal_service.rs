@@ -1732,7 +1732,7 @@ mod tests {
     }
 
     #[test]
-    fn set_env_var_fails_without_writing_when_the_variable_became_secret() {
+    fn set_env_var_goes_stale_without_writing_when_the_variable_became_secret() {
         let f = fixture();
         let ids = f
             .svc
@@ -1746,11 +1746,8 @@ mod tests {
             }
         }
         let resolved = f.svc.accept("s1", &ids[0]).expect("accept");
-        assert!(matches!(resolved.status, ProposalStatus::Failed { .. }));
-        assert!(resolved
-            .status
-            .message()
-            .is_some_and(|m| m.contains("not accessible")));
+        // The secret flag is part of the variable fingerprint, so the change is stale.
+        assert!(matches!(resolved.status, ProposalStatus::Stale));
         let envs = f.envs.envs.lock().expect("lock");
         let host = envs["dev"]
             .variables
