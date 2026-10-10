@@ -160,7 +160,8 @@ impl<R: tauri::Runtime> Clone for RocketMcpToolServer<R> {
 /// is the id `set_assistant_mode`, `end_agent_session` and the session
 /// cleanup address a session by, so the mode, the test-result cache and the
 /// pending outline all live under one key. A call that arrives before
-/// `bind` uses the provisional id, which has no mode, so it runs in Ask.
+/// `bind` uses the provisional id, which is never pinned to a workspace, so
+/// it is refused as unbound.
 #[derive(Debug)]
 pub struct McpSessionBinding {
     provisional_id: String,
@@ -1486,7 +1487,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn calls_before_bind_run_in_ask_mode_and_after_bind_use_the_real_session() {
+    async fn calls_before_bind_are_refused_and_after_bind_use_the_real_session() {
         let fixture = TestFixture::new(true);
         let binding = Arc::new(McpSessionBinding::new("provisional-1".to_string()));
         let server: RocketMcpToolServer<tauri::test::MockRuntime> =
@@ -1503,7 +1504,8 @@ mod tests {
         };
 
         let before = server.run_request(run_params()).await.expect("tool call");
-        assert!(tool_text(&before).contains("Not available in Ask mode"));
+        assert!(tool_is_error(&before));
+        assert!(tool_text(&before).contains("not bound to a workspace"));
 
         binding.bind("acp-real-1");
         let after = server.run_request(run_params()).await.expect("tool call");
