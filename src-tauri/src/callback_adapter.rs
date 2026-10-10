@@ -22,7 +22,7 @@ impl CallbackListener for HyperCallbackAdapter {
     async fn open(&self, host: Option<&str>) -> DomainResult<CallbackEndpoint> {
         let mut server = self.0.open(host).await?;
         // Capacity 1: the server channel already holds up to 16 calls, so
-        // the 503 limit stays close to the spec's 100 held calls.
+        // the 503 limit stays close to the spec's 16 held calls.
         let (sender, calls) = tokio::sync::mpsc::channel(1);
         // Forward server calls as rocket-app calls until either side closes.
         tokio::spawn(async move {

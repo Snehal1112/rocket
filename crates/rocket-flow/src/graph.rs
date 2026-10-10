@@ -78,8 +78,8 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     }
 
     // Node ids are unique, so each node is enqueued at most once. Each edge
-    // is therefore walked at most once. A degree never drops below zero, so
-    // `saturating_sub` is only a guard.
+    // is therefore walked at most once. A degree never drops below zero. If it
+    // ever did, the node is skipped so it cannot be queued twice.
     let mut queue: VecDeque<&str> = flow
         .nodes
         .iter()
@@ -94,8 +94,11 @@ pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
             let Some(degree) = in_degree.get_mut(next) else {
                 continue;
             };
-            *degree = degree.saturating_sub(1);
-            if *degree == 0 {
+            let Some(left) = degree.checked_sub(1) else {
+                continue;
+            };
+            *degree = left;
+            if left == 0 {
                 queue.push_back(next);
             }
         }
@@ -151,8 +154,11 @@ fn cycle_nodes_and_edges(
             let Some(degree) = out_degree.get_mut(prev) else {
                 continue;
             };
-            *degree = degree.saturating_sub(1);
-            if *degree == 0 {
+            let Some(left) = degree.checked_sub(1) else {
+                continue;
+            };
+            *degree = left;
+            if left == 0 {
                 queue.push_back(prev);
             }
         }

@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 
 /// A callback body larger than this gets 413. Webhook payloads rarely come close.
 pub const MAX_BODY_BYTES: usize = 262_144;
-/// Calls queued for the Wait node. A full queue answers 503 and the sender retries.
+/// Calls queued for the Wait node. A full queue answers 503 and the call is not delivered (most webhook senders retry).
 pub const CHANNEL_CAPACITY: usize = 16;
 pub const TOKEN_LEN: usize = 32;
 /// At most this many connections are served at once.

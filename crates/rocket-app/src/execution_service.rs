@@ -2515,7 +2515,7 @@ impl RequestExecutionService {
         // Publish domain event.
         self.events.publish(DomainEvent::RequestExecuted {
             method: input.method.to_string(),
-            url: redacted_url.clone(),
+            url: redacted_url,
             status: response.status,
             duration_ms: response.duration_ms,
         });
