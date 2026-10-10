@@ -151,6 +151,10 @@ impl<'a> EnvironmentRepository for RefEnvRepo<'a> {
     fn delete(&self, name: &str) -> DomainResult<()> {
         self.0.delete(name)
     }
+
+    fn pinned(&self) -> Option<Box<dyn EnvironmentRepository>> {
+        self.0.pinned()
+    }
 }
 
 /// Extended response from `execute()` that includes HTTP response plus script outputs.
@@ -1417,6 +1421,9 @@ impl RequestExecutionService {
         if persist_writes.is_empty() {
             return;
         }
+        // Read and write the same directory, even if the workspace is switched in between.
+        let pinned = repo.pinned();
+        let repo: &dyn EnvironmentRepository = pinned.as_deref().unwrap_or(repo);
         let mut env = match repo.get(env_name) {
             Ok(env) => env,
             Err(e) => {
@@ -7213,6 +7220,53 @@ mod tests {
             .last_saved()
             .expect("env_repo.save() should have been called for global env write");
         assert_eq!(saved.get_value("API_KEY"), Some("new-key"));
+    }
+
+    #[tokio::test]
+    async fn global_env_write_goes_to_the_workspace_active_at_send_time() {
+        let a = tempfile::tempdir().expect("tempdir");
+        let b = tempfile::tempdir().expect("tempdir");
+        let path = Arc::new(std::sync::Mutex::new(a.path().to_path_buf()));
+        let repo = rocket_infra::SharedPathEnvironmentRepo::with_secret_store(
+            Arc::clone(&path),
+            Arc::new(rocket_environment::NullSecretStore),
+        );
+        let seed = |value: &str| {
+            let mut env = Environment::new("g");
+            env.set_variable(Variable::new("API_KEY", value));
+            repo.save(&env).expect("seed");
+        };
+        seed("a-old");
+        *path.lock().expect("lock") = b.path().to_path_buf();
+        seed("b-old");
+
+        let result = ScriptResult {
+            global_env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("new-key"),
+                persist: false,
+            }],
+            ..Default::default()
+        };
+        let svc = build_svc_with_script(
+            Box::new(repo),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(MockScriptEngine::returning_post_response(result)),
+        );
+        let mut input = sample_input("https://example.com", None);
+        input.global_env_name = Some("g".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let read = |dir: &std::path::Path| {
+            rocket_infra::FsEnvironmentRepo::new(dir.join("environments"))
+                .get("g")
+                .expect("read")
+                .get_value("API_KEY")
+                .map(str::to_owned)
+        };
+        assert_eq!(read(b.path()).as_deref(), Some("new-key"));
+        assert_eq!(read(a.path()).as_deref(), Some("a-old"), "a must be untouched");
     }
 
     // -------------------------------------------------------------------------

@@ -20,11 +20,10 @@ use rocket_app::{
 use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_environment::secret_store::SecretStore;
 use rocket_infra::{
-    scripting::DenoScriptEngine, CloneDestinationCapabilities, FsAuditLogRepo, FsCollectionRepo,
-    FsComplianceProfileRepo, FsContractRepo, FsCookieRepo, FsEnvironmentRepo,
-    FsRepositoryPathResolver, FsTemplateRepo, FsWorkspaceConfigRepo, FsWorkspaceRepo,
-    KeyringSecretStore, NotifyFileWatcher, ReqwestExecutor, SharedCollectionEnvironmentRepo,
-    SharedPathCollectionRepo,
+    scripting::DenoScriptEngine, CloneDestinationCapabilities, FsAuditLogRepo,
+    FsComplianceProfileRepo, FsContractRepo, FsRepositoryPathResolver, FsWorkspaceConfigRepo,
+    FsWorkspaceRepo, KeyringSecretStore, NotifyFileWatcher, ReqwestExecutor,
+    SharedCollectionEnvironmentRepo, SharedPathCollectionRepo, SharedPathEnvironmentRepo,
 };
 use rocket_shared::events::NullEventPublisher;
 use rocket_workspace::WorkspaceConfigRepository;
@@ -285,7 +284,8 @@ pub fn run() {
                 let _ = config_repo.save(&active_ws.path, &config);
             }
 
-            // Derive per-service directories from the active workspace.
+            // Create the startup workspace's folders. Services read the live
+            // active path on every call, so these values are not kept.
             let workspace_base = active_ws.path.clone();
             let collections_dir = workspace_base.join("collections");
             let environments_dir = workspace_base.join("environments");
@@ -413,12 +413,18 @@ pub fn run() {
                 ))),
                 Box::new(NullEventPublisher),
             );
+            // Templates, cookies and global environments live under the workspace
+            // folder, so they follow a workspace switch like collections do.
             let template_svc = TemplateService::new(
-                Box::new(FsTemplateRepo::new(templates_dir)),
+                Box::new(rocket_infra::SharedPathTemplateRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(NullEventPublisher),
             );
             let cookie_svc = CookieService::new(
-                Box::new(FsCookieRepo::new(cookies_dir.clone())),
+                Box::new(rocket_infra::SharedPathCookieRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(NullEventPublisher),
             );
             // App-level proxy: the service validates and stores it, the executor reads it.
@@ -432,7 +438,11 @@ pub fn run() {
             );
             let executor: Arc<dyn rocket_http::HttpExecutor> = Arc::new(
                 ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))
-                    .with_cookie_repo(Arc::new(FsCookieRepo::new(cookies_dir.clone())))
+                    // The jar is read on every request and pinned once per response, so
+                    // a response that lands after a switch is stored in the new workspace.
+                    .with_cookie_repo(Arc::new(rocket_infra::SharedPathCookieRepo::new(
+                        Arc::clone(&active_workspace_path),
+                    )))
                     .with_proxy(Arc::clone(&shared_proxy)),
             );
 
@@ -512,8 +522,8 @@ pub fn run() {
             );
 
             let exec_svc = RequestExecutionService::new_with_audit(
-                Box::new(FsEnvironmentRepo::with_secret_store(
-                    environments_dir.clone(),
+                Box::new(SharedPathEnvironmentRepo::with_secret_store(
+                    Arc::clone(&active_workspace_path),
                     env_secret_store(),
                 )),
                 Arc::clone(&executor),
@@ -524,7 +534,9 @@ pub fn run() {
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(
                     &active_workspace_path,
                 ))),
-                Box::new(FsCookieRepo::new(cookies_dir.clone())),
+                Box::new(rocket_infra::SharedPathCookieRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
                 Box::new(rocket_infra::FsSecretManagerRepo::new(
@@ -540,16 +552,16 @@ pub fn run() {
             ));
 
             // OAuth2Service — stand-alone service for token acquisition flows.
-            // Uses its own repo instances pointed at the same paths as the exec service.
+            // Its repos follow the active workspace, like the exec service's.
             // A factory, because the Flow runner needs a second instance for its
             // token fetcher and `OAuth2Service` is not `Clone`.
             let make_oauth2_service = || {
                 rocket_app::oauth2_service::OAuth2Service::new(
-                    Box::new(FsEnvironmentRepo::with_secret_store(
-                        environments_dir.clone(),
+                    Box::new(SharedPathEnvironmentRepo::with_secret_store(
+                        Arc::clone(&active_workspace_path),
                         env_secret_store(),
                     )),
-                    Box::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
+                    Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
                 )
                 // Client certificates live on a collection's own environment, and a token
                 // endpoint that needs mutual TLS gets the matching one.
@@ -591,8 +603,8 @@ pub fn run() {
             // the environment file.
             let mcp_exec_svc = Arc::new(
                 RequestExecutionService::new_with_audit(
-                    Box::new(FsEnvironmentRepo::with_secret_store(
-                        environments_dir.clone(),
+                    Box::new(SharedPathEnvironmentRepo::with_secret_store(
+                        Arc::clone(&active_workspace_path),
                         env_secret_store(),
                     )),
                     Arc::clone(&executor),
@@ -602,7 +614,9 @@ pub fn run() {
                     Box::new(SharedPathCollectionRepo::new(Arc::clone(
                         &active_workspace_path,
                     ))),
-                    Box::new(FsCookieRepo::new(cookies_dir.clone())),
+                    Box::new(rocket_infra::SharedPathCookieRepo::new(Arc::clone(
+                        &active_workspace_path,
+                    ))),
                     Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                     audit_publisher.clone(),
                     Box::new(rocket_infra::FsSecretManagerRepo::new(

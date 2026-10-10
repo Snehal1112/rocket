@@ -7,6 +7,15 @@ pub trait EnvironmentRepository: Send + Sync {
     fn get(&self, name: &str) -> DomainResult<Environment>;
     fn save(&self, env: &Environment) -> DomainResult<()>;
     fn delete(&self, name: &str) -> DomainResult<()>;
+
+    /// A repository fixed to the directory this one points at right now.
+    ///
+    /// A repository that follows the active workspace returns one, so a
+    /// read-modify-write stays in one workspace even if the user switches
+    /// in between. A repository with a fixed directory returns `None`.
+    fn pinned(&self) -> Option<Box<dyn EnvironmentRepository>> {
+        None
+    }
 }
 
 /// Resolves an `EnvironmentRepository` scoped to one collection's own

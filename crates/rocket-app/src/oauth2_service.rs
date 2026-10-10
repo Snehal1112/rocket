@@ -1428,4 +1428,52 @@ pub(crate) mod tests {
             ["pkcs12 idp.example.com file:/ws/collections/api/certs/client.p12 pass:-"]
         );
     }
+
+    #[test]
+    fn variable_context_follows_the_active_workspace() {
+        use std::sync::Mutex;
+        let a = tempfile::tempdir().expect("tempdir");
+        let b = tempfile::tempdir().expect("tempdir");
+        let path = Arc::new(Mutex::new(a.path().to_path_buf()));
+        let svc = OAuth2Service::new(
+            Box::new(rocket_infra::SharedPathEnvironmentRepo::with_secret_store(
+                Arc::clone(&path),
+                Arc::new(rocket_environment::NullSecretStore),
+            )),
+            Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(&path))),
+        );
+        // Each workspace has a collection "api" and a global environment "g".
+        for (dir, value) in [(a.path(), "a"), (b.path(), "b")] {
+            let collections = rocket_infra::SharedPathCollectionRepo::new(Arc::new(Mutex::new(
+                dir.to_path_buf(),
+            )));
+            collections.create("api").expect("create collection");
+            let settings = CollectionSettings {
+                variables: vec![CollectionVariable {
+                    key: "col".into(),
+                    value: value.into(),
+                    initial_value: String::new(),
+                    enabled: true,
+                    secret: false,
+                }],
+                ..CollectionSettings::default()
+            };
+            collections.save_settings("api", &settings).expect("settings");
+            let mut env = Environment::new("g");
+            env.set_variable(Variable::new("glob", value));
+            rocket_infra::FsEnvironmentRepo::new(dir.join("environments"))
+                .save(&env)
+                .expect("global env");
+        }
+        let ctx = |svc: &OAuth2Service| {
+            let vars = svc.build_variable_context(Some("api"), Some("g"), None, &HashMap::new());
+            (vars.get("col").cloned(), vars.get("glob").cloned())
+        };
+
+        assert_eq!(ctx(&svc), (Some("a".into()), Some("a".into())));
+        *path.lock().expect("lock") = b.path().to_path_buf();
+        assert_eq!(ctx(&svc), (Some("b".into()), Some("b".into())));
+        *path.lock().expect("lock") = a.path().to_path_buf();
+        assert_eq!(ctx(&svc), (Some("a".into()), Some("a".into())));
+    }
 }

@@ -33,6 +33,7 @@ cargo check -p rocket-infra
 | `FsHistoryRepo` | `HistoryRepository` | One `.yml` file per history entry under `history/`, sorted newest-first. |
 | `FsTemplateRepo` | `TemplateRepository` | Template storage under `templates/`. |
 | `FsCookieRepo` | `CookieRepository` | Cookie jar storage under `cookies/`. |
+| `SharedPathEnvironmentRepo`, `SharedPathCookieRepo`, `SharedPathTemplateRepo` | `EnvironmentRepository`, `CookieRepository`, `TemplateRepository` | Global environments, cookie jars and templates of the active workspace (`<ws>/environments`, `<ws>/cookies`, `<ws>/templates`), resolved per call like `SharedPathCollectionRepo`. `pinned()` returns a repo fixed to the current workspace; `RepoCookieStore` and global env script writes use it so one read-modify-write never spans a switch. |
 | `FsWorkspaceRepo` | `WorkspaceRepository` | Persists the workspace registry to `workspaces.yml`. Creates a "My Workspace" on first load. |
 | `FsWorkspaceConfigRepo` | `WorkspaceConfigRepository` | Reads/writes per-workspace `workspace.yml` (collections list, description, environment settings). |
 | `ReqwestExecutor` | `HttpExecutor` | Executes HTTP requests via `reqwest`. Handles all auth schemes, body types, and AWS SigV4 signing. |

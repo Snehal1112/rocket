@@ -28,21 +28,25 @@ impl RepoCookieStore {
         }
     }
 
-    fn store(&self, cookie: Cookie) -> DomainResult<()> {
-        let mut jar = self
-            .repo
+    fn store(repo: &dyn CookieRepository, cookie: Cookie) -> DomainResult<()> {
+        let mut jar = repo
             .get_by_domain(&cookie.domain)?
             .unwrap_or_else(|| CookieJar::new(cookie.domain.clone()));
         jar.add(cookie);
-        self.repo.save(&jar)
+        repo.save(&jar)
     }
 
-    fn remove(&self, domain: &str, name: &str, path: &str) -> DomainResult<()> {
-        if let Some(mut jar) = self.repo.get_by_domain(domain)? {
+    fn remove(
+        repo: &dyn CookieRepository,
+        domain: &str,
+        name: &str,
+        path: &str,
+    ) -> DomainResult<()> {
+        if let Some(mut jar) = repo.get_by_domain(domain)? {
             let before = jar.cookies.len();
             jar.cookies.retain(|c| !(c.name == name && c.path == path));
             if jar.cookies.len() != before {
-                self.repo.save(&jar)?;
+                repo.save(&jar)?;
             }
         }
         Ok(())
@@ -56,14 +60,21 @@ impl CookieStore for RepoCookieStore {
         };
         // The lock guards no data of its own, so a poisoned lock is safe to recover.
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // One workspace for the whole batch. A repository that follows the active
+        // workspace is read at this moment, so a response that arrives after a
+        // workspace switch stores its cookies in the new workspace.
+        let pinned = self.repo.pinned();
+        let repo: &dyn CookieRepository = pinned.as_deref().unwrap_or(self.repo.as_ref());
         let now = Utc::now();
         for value in cookie_headers {
             let Ok(text) = value.to_str() else {
                 continue;
             };
             let outcome = match parse_set_cookie(text, host, url.path(), now) {
-                SetCookie::Store(cookie) => self.store(cookie),
-                SetCookie::Remove { domain, name, path } => self.remove(&domain, &name, &path),
+                SetCookie::Store(cookie) => Self::store(repo, cookie),
+                SetCookie::Remove { domain, name, path } => {
+                    Self::remove(repo, &domain, &name, &path)
+                }
                 SetCookie::Rejected => Ok(()),
             };
             // Never log the header: it carries the cookie value.
@@ -259,6 +270,44 @@ mod tests {
         me.headers
             .push(rocket_shared::types::Header::new("Cookie", "manual=1"));
         assert_eq!(exec.execute(&me).await.expect("me").status, 200);
+    }
+
+    #[tokio::test]
+    async fn the_cookie_jar_follows_a_workspace_switch() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/login"))
+            .respond_with(ResponseTemplate::new(200).insert_header("Set-Cookie", "sid=abc; Path=/"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/me"))
+            .and(header("cookie", "sid=abc"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let a = tempfile::tempdir().expect("tempdir");
+        let b = tempfile::tempdir().expect("tempdir");
+        let active = Arc::new(Mutex::new(a.path().to_path_buf()));
+        let exec = crate::ReqwestExecutor::new().with_cookie_repo(Arc::new(
+            crate::SharedPathCookieRepo::new(Arc::clone(&active)),
+        ));
+        let get = |p: &str| HttpRequest::new(HttpMethod::Get, format!("{}{p}", server.uri()));
+
+        exec.execute(&get("/login")).await.expect("login in a");
+        assert!(a.path().join("cookies").exists());
+
+        *active.lock().expect("lock") = b.path().to_path_buf();
+        let in_b = exec.execute(&get("/me")).await.expect("me in b");
+        assert_eq!(in_b.status, 404, "a's cookie must not be sent from b");
+        assert!(!b.path().join("cookies").exists());
+
+        *active.lock().expect("lock") = a.path().to_path_buf();
+        let back_in_a = exec.execute(&get("/me")).await.expect("me in a");
+        assert_eq!(
+            back_in_a.status, 200,
+            "a's cookie is sent again after switching back"
+        );
     }
 
     #[test]
