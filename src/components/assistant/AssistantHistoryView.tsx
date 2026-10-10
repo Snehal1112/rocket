@@ -62,6 +62,8 @@ export function AssistantHistoryView({
   // Counters let a late response see that a newer request or a switch happened.
   const listRequest = useRef(0);
   const openRequest = useRef(0);
+  // The id of the conversation that is open or loading, so a delete can cancel its load.
+  const openingId = useRef<string | undefined>(undefined);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -118,6 +120,10 @@ export function AssistantHistoryView({
       onAssistantConversationSaved(guard(() => void reload())),
       onAssistantConversationDeleted(
         guard((e) => {
+          if (openingId.current === e.conversation_id) {
+            openingId.current = undefined;
+            openRequest.current += 1;
+          }
           setOpen((current) => (current?.id === e.conversation_id ? undefined : current));
           void reload();
         }),
@@ -151,6 +157,7 @@ export function AssistantHistoryView({
 
   const openConversation = async (id: string) => {
     const request = ++openRequest.current;
+    openingId.current = id;
     try {
       const record = await getConversation(id);
       if (mounted.current && request === openRequest.current) setOpen(record);

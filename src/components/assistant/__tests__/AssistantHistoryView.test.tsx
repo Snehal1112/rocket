@@ -187,6 +187,19 @@ describe('AssistantHistoryView', () => {
     expect(screen.queryByRole('button', { name: 'Back to the history' })).toBeNull();
   });
 
+  it('does not reopen a conversation deleted while it loads', async () => {
+    let resolveRecord: (value: ConversationRecord) => void = () => undefined;
+    vi.mocked(api.getConversation).mockReturnValue(
+      new Promise((resolve) => { resolveRecord = resolve; }),
+    );
+    render(<AssistantHistoryView />);
+    await userEvent.click(await screen.findByText('Why does login return 401?'));
+    act(() => mocks.handlers.deleted({ type: 'assistantConversationDeleted', conversation_id: 'c1' }));
+    await act(async () => resolveRecord(record));
+    expect(screen.queryByText('The token expired.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Back to the history' })).toBeNull();
+  });
+
   it('shows a generic error with a retry', async () => {
     vi.mocked(api.listConversations).mockRejectedValueOnce(new Error('secret path /x/y'));
     render(<AssistantHistoryView />);
