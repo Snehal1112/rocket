@@ -462,6 +462,9 @@ export interface Template {
   body?: Body;
 }
 
+// Mirrors the Rust RunSource enum, which serialises as snake_case.
+export type RunSource = 'manual' | 'runner' | 'load_test' | 'flow' | 'agent';
+
 export interface HistoryEntry {
   id: string;
   method: string;
@@ -472,6 +475,7 @@ export interface HistoryEntry {
   timestamp: string;
   collection?: string;
   requestName?: string;
+  runSource?: RunSource;
 }
 
 export interface HistoryFilter {
@@ -479,6 +483,7 @@ export interface HistoryFilter {
   urlContains?: string;
   statusMin?: number;
   statusMax?: number;
+  runSource?: RunSource;
 }
 
 export interface Cookie {
