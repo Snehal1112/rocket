@@ -12,6 +12,8 @@ pub struct HistoryFilter {
     pub status_min: Option<u16>,
     /// Maximum status code (inclusive).
     pub status_max: Option<u16>,
+    /// Match entries triggered by this source. Legacy entries count as `Manual`.
+    pub run_source: Option<rocket_shared::RunSource>,
 }
 
 #[cfg(test)]
@@ -61,5 +63,19 @@ mod tests {
         assert!(f.url_contains.is_none());
         assert!(f.status_min.is_none());
         assert!(f.status_max.is_none());
+        assert!(f.run_source.is_none());
+    }
+
+    /// The run source must use the camelCase key and the snake_case value.
+    #[test]
+    fn filter_serialises_run_source_as_camel_case_key() {
+        let f = HistoryFilter {
+            run_source: Some(rocket_shared::RunSource::LoadTest),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&f).unwrap();
+        assert!(json.contains("\"runSource\":\"load_test\""), "got: {json}");
+        let back: HistoryFilter = serde_json::from_str(r#"{"runSource":"agent"}"#).unwrap();
+        assert_eq!(back.run_source, Some(rocket_shared::RunSource::Agent));
     }
 }

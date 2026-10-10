@@ -103,6 +103,11 @@ impl HistoryRepository for FsHistoryRepo {
                     continue;
                 }
             }
+            if let Some(source) = filter.run_source {
+                if entry.run_source != source {
+                    continue;
+                }
+            }
             results.push(entry);
         }
         Ok(results)
@@ -112,6 +117,7 @@ impl HistoryRepository for FsHistoryRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::RunSource;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, FsHistoryRepo) {
@@ -189,6 +195,70 @@ mod tests {
         let results = repo.search(&filter).unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|e| e.method.to_uppercase() == "GET"));
+    }
+
+    fn save_with_source(repo: &FsHistoryRepo, method: &str, status: u16, s: RunSource) {
+        let e = HistoryEntry::new(method, "/x", status, 1, 0).with_run_source(s);
+        repo.save(&e).unwrap();
+    }
+
+    #[test]
+    fn search_by_run_source_matches_each_source() {
+        let (_dir, repo) = setup();
+        let all = [
+            RunSource::Manual,
+            RunSource::Runner,
+            RunSource::LoadTest,
+            RunSource::Flow,
+            RunSource::Agent,
+        ];
+        for s in all {
+            save_with_source(&repo, "GET", 200, s);
+        }
+        for s in all {
+            let filter = HistoryFilter {
+                run_source: Some(s),
+                ..Default::default()
+            };
+            let results = repo.search(&filter).unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].run_source, s);
+        }
+    }
+
+    #[test]
+    fn search_manual_matches_legacy_entries_without_the_field() {
+        let (dir, repo) = setup();
+        let legacy = "id: legacy1\nmethod: GET\nurl: /old\nstatus: 200\ndurationMs: 5\nresponseSize: 0\ntimestamp: '2026-01-01T00:00:00Z'\n";
+        std::fs::write(dir.path().join("legacy1.yml"), legacy).unwrap();
+        save_with_source(&repo, "GET", 200, RunSource::Agent);
+        let manual = HistoryFilter {
+            run_source: Some(RunSource::Manual),
+            ..Default::default()
+        };
+        let results = repo.search(&manual).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "legacy1");
+    }
+
+    #[test]
+    fn search_run_source_combines_with_method_and_status() {
+        let (_dir, repo) = setup();
+        save_with_source(&repo, "GET", 200, RunSource::Runner);
+        save_with_source(&repo, "POST", 200, RunSource::Runner);
+        save_with_source(&repo, "GET", 500, RunSource::Runner);
+        save_with_source(&repo, "GET", 200, RunSource::Flow);
+        let filter = HistoryFilter {
+            method: Some("GET".to_string()),
+            status_min: Some(200),
+            status_max: Some(299),
+            run_source: Some(RunSource::Runner),
+            ..Default::default()
+        };
+        let results = repo.search(&filter).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].method, "GET");
+        assert_eq!(results[0].status, 200);
     }
 
     #[test]
