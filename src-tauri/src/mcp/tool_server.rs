@@ -1261,6 +1261,8 @@ mod tests {
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
                 .expect("build mock tauri app");
             app.manage(Arc::clone(&mcp_tool_svc));
+            // Tools refuse a session that was never pinned to a workspace.
+            mcp_tool_svc.open_session("session-1", AssistantMode::Ask);
 
             Self {
                 app_handle: app.handle().clone(),
@@ -1709,6 +1711,23 @@ mod tests {
             .expect("tool call");
         assert!(tool_is_error(&result));
         assert!(tool_text(&result).contains("Not available in Ask mode"));
+    }
+
+    #[tokio::test]
+    async fn propose_changes_is_refused_for_a_session_that_was_forgotten() {
+        let fixture = TestFixture::new(true);
+        fixture.mcp_tool_svc.forget_session(&fixture.session_id);
+        let params: ProposeChangesParams = serde_json::from_value(serde_json::json!({
+            "changes": [{ "op": "create_folder", "collection": "demo", "name": "reports" }]
+        }))
+        .expect("parse");
+        let result = fixture
+            .server()
+            .propose_changes(Parameters(params))
+            .await
+            .expect("tool call");
+        assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("not bound to a workspace"));
     }
 
     #[tokio::test]

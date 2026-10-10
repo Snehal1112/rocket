@@ -325,8 +325,9 @@ impl McpToolService {
     }
 
     /// Refuses a session that was opened in another workspace than the
-    /// active one. A session with no pin is not checked. An unreadable
-    /// active path counts as a mismatch.
+    /// active one. A session with no pin is refused too, so an unknown or
+    /// forgotten id fails closed. An unreadable active path counts as a
+    /// mismatch.
     pub fn check_session_workspace(&self, session_id: &str) -> DomainResult<()> {
         let pinned = self
             .workspace_pins
@@ -335,7 +336,10 @@ impl McpToolService {
             .get(session_id)
             .cloned();
         let Some(pinned) = pinned else {
-            return Ok(());
+            return Err(DomainError::InvalidInput(
+                "This session is not bound to a workspace. Ask the user to start a new session."
+                    .to_string(),
+            ));
         };
         let same = self
             .active_workspace_path
@@ -526,6 +530,7 @@ impl McpToolService {
     }
 
     pub fn list_collections(&self, session_id: &str) -> DomainResult<Vec<CollectionBrief>> {
+        self.check_session_workspace(session_id)?;
         let briefs: Vec<CollectionBrief> = self
             .collection_repo
             .list()?
@@ -1673,7 +1678,80 @@ mod tests {
         assert!(svc.check_mode("pinned", AssistantMode::Edit).is_err());
         assert!(svc.get_request("pinned", "my-api", "login.yml").is_err());
         svc.forget_session("pinned");
-        assert!(svc.check_session_workspace("pinned").is_ok(), "pin is gone");
+        assert!(
+            svc.check_session_workspace("pinned").is_err(),
+            "pin is gone, so the session is refused"
+        );
+    }
+
+    fn assert_not_bound<T: std::fmt::Debug>(what: &str, result: DomainResult<T>) {
+        match result {
+            Err(DomainError::InvalidInput(msg)) => assert!(
+                msg.contains("not bound to a workspace"),
+                "{what}: {msg}"
+            ),
+            other => panic!("{what} must be refused as unbound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unpinned_session_is_refused_by_every_tool_path() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+        );
+
+        assert_not_bound(
+            "read tool",
+            svc.get_request("unpinned", "my-api", "login.yml"),
+        );
+        assert_not_bound(
+            "propose_changes gate",
+            svc.check_mode("unpinned", AssistantMode::Edit),
+        );
+        assert_not_bound("outline", svc.get_workspace_outline("unpinned", None, None));
+        assert_not_bound("list_collections", svc.list_collections("unpinned"));
+    }
+
+    #[test]
+    fn a_pinned_session_in_the_same_workspace_is_allowed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+        );
+        svc.open_session("fresh", AssistantMode::Edit);
+
+        svc.get_request("fresh", "my-api", "login.yml")
+            .expect("read tool");
+        svc.check_mode("fresh", AssistantMode::Edit)
+            .expect("propose_changes gate");
+        svc.get_workspace_outline("fresh", None, None)
+            .expect("outline");
+    }
+
+    #[test]
+    fn calls_are_refused_after_forget_session() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            RecordingPublisher::new(),
+        );
+        svc.open_session("gone", AssistantMode::Agent);
+        svc.get_request("gone", "my-api", "login.yml")
+            .expect("before forget");
+
+        svc.forget_session("gone");
+        assert_not_bound("read tool", svc.get_request("gone", "my-api", "login.yml"));
+        assert_not_bound("propose_changes gate", svc.check_mode("gone", AssistantMode::Edit));
+        assert_not_bound("outline", svc.get_workspace_outline("gone", None, None));
     }
 
     #[tokio::test]
@@ -2166,7 +2244,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_session_with_no_recorded_mode_runs_in_ask_mode() {
+    async fn a_session_with_no_recorded_mode_is_refused_and_reads_as_ask() {
         let (svc, _repo) = mode_test_service(true);
 
         assert_eq!(svc.mode("unbound-1"), AssistantMode::Ask);
@@ -2174,7 +2252,7 @@ mod tests {
             .run_request("unbound-1", "my-api", "login.yml", None)
             .await
             .map(|_| ());
-        assert_refused_by_mode("run_request", run, "Ask");
+        assert_not_bound("run_request", run);
     }
 
     #[tokio::test]
