@@ -17,9 +17,12 @@ describe('AgentAutonomyToggle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(makeTrust());
-    vi.mocked(tauriApi.setCollectionCapability).mockImplementation(async (_c, _cap, enabled) =>
-      makeTrust({ agentRun: enabled ? allowed : makeTrust().agentRun }),
-    );
+    // The backend keeps the new state, so the refetch after a call sees it too.
+    vi.mocked(tauriApi.setCollectionCapability).mockImplementation(async (_c, _cap, enabled) => {
+      const next = makeTrust({ agentRun: enabled ? allowed : makeTrust().agentRun });
+      vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(next);
+      return next;
+    });
   });
 
   it('is off when the collection has never opted in', async () => {

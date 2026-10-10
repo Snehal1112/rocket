@@ -12,6 +12,16 @@ import {
   setCollectionCapability,
 } from '@/lib/tauri-api';
 
+/** Readable text of a failed trust call. The backend sends plain messages. */
+export function trustErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string') {
+    return err.message;
+  }
+  return 'The change could not be saved.';
+}
+
 export const collectionTrustKeys = {
   all: ['collection-trust'] as const,
   one: (collection: string) => ['collection-trust', collection] as const,
@@ -51,6 +61,10 @@ function useTrustMutation<V>(collection: string, run: (vars: V) => Promise<Colle
     mutationFn: run,
     onSuccess: (trust) => {
       queryClient.setQueryData(collectionTrustKeys.one(collection), trust);
+    },
+    // A refused or failed call may mean the cache is stale, so always refetch.
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: collectionTrustKeys.one(collection) });
     },
   });
 }

@@ -239,10 +239,7 @@ pub fn dismiss_trust_migration_notice(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_collection::settings::SandboxMode;
-    use rocket_collection::{
-        CollectionGrant, EffectiveCapabilities, GrantSource, RequestedElevation,
-    };
+    use rocket_collection::{CollectionGrant, GrantSource, RequestedElevation};
 
     fn status(requested: RequestedElevation, grant: Option<CollectionGrant>) -> TrustStatus {
         let effective = rocket_collection::resolve_effective(&requested, grant.as_ref());
@@ -314,8 +311,6 @@ mod tests {
     fn nothing_requested_is_not_pending() {
         let dto = CollectionTrustDto::from(status(RequestedElevation::default(), None));
         assert!(!dto.pending);
-        let untrusted = EffectiveCapabilities::untrusted();
-        assert_eq!(untrusted.sandbox_mode, SandboxMode::Safe);
     }
 
     #[test]

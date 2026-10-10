@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Alert } from '@/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,12 +21,15 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  trustErrorMessage,
   useCollectionTrust,
   useGrantRequested,
   useRevokeTrust,
   useSetCapability,
 } from '@/lib/queries/collection-trust-queries';
 import type { CollectionCapability, RequestedCapability } from '@/lib/tauri-api';
+
+const FILE_NOTE = 'This also updates the collection file.';
 
 const yesNo = (v: boolean) => (v ? 'Yes' : 'No');
 
@@ -35,15 +39,28 @@ interface CollectionTrustSectionProps {
 
 /** Requested versus allowed capabilities of a collection, with allow and revoke actions. */
 export function CollectionTrustSection({ collection }: CollectionTrustSectionProps) {
-  const { data: trust } = useCollectionTrust(collection);
+  const { data: trust, isError: loadFailed } = useCollectionTrust(collection);
   const setCapability = useSetCapability(collection);
   const grant = useGrantRequested(collection);
   const revokeAll = useRevokeTrust(collection);
 
   // The action waiting for the user's confirmation. Allowing anything asks first.
-  const [confirm, setConfirm] = useState<{ label: string; run: () => void } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    note: string;
+    confirmLabel?: string;
+    run: () => void;
+  } | null>(null);
 
-  if (!trust) return null;
+  const failure = loadFailed
+    ? 'Could not load the permissions of this collection.'
+    : [setCapability.error, grant.error, revokeAll.error]
+        .filter((e): e is Error => e !== null)
+        .map(trustErrorMessage)[0];
+
+  if (!trust) {
+    return failure ? <Alert variant='destructive'>{failure}</Alert> : null;
+  }
 
   const allowRequested = (cap: RequestedCapability) =>
     grant.mutate({ capabilities: [cap], fingerprint: trust.fingerprint });
@@ -55,6 +72,7 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
 
   return (
     <div className='flex flex-col gap-3'>
+      {failure && <Alert variant='destructive'>{failure}</Alert>}
       <Table>
         <TableHeader>
           <TableRow>
@@ -80,7 +98,8 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
                   variant='outline'
                   onClick={() =>
                     setConfirm({
-                      label: 'Developer mode',
+                      title: 'Allow Developer mode on this computer?',
+                      note: FILE_NOTE,
                       run: () =>
                         trust.developerMode.requested
                           ? allowRequested('developerMode')
@@ -113,7 +132,8 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
                   variant='outline'
                   onClick={() =>
                     setConfirm({
-                      label: 'Extra script folders',
+                      title: 'Allow extra script folders on this computer?',
+                      note: '',
                       run: () => allowRequested('contextRoots'),
                     })
                   }
@@ -140,7 +160,8 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
                   variant='outline'
                   onClick={() =>
                     setConfirm({
-                      label: 'Agent request runs',
+                      title: 'Allow agent request runs on this computer?',
+                      note: FILE_NOTE,
                       run: () =>
                         trust.agentRun.requested
                           ? allowRequested('agentRun')
@@ -165,7 +186,8 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
                   trust.processEnv.granted
                     ? setCap('processEnv', false)
                     : setConfirm({
-                        label: 'Host environment variables',
+                        title: 'Allow host environment variables on this computer?',
+                        note: '',
                         run: () => setCap('processEnv', true),
                       })
                 }
@@ -177,21 +199,34 @@ export function CollectionTrustSection({ collection }: CollectionTrustSectionPro
         </TableBody>
       </Table>
       <div>
-        <Button size='sm' variant='ghost' onClick={() => revokeAll.mutate()}>
+        <Button
+          size='sm'
+          variant='ghost'
+          onClick={() =>
+            setConfirm({
+              title: 'Forget all permissions of this collection?',
+              note: 'This removes every permission above, including host environment access. The collection file is not changed.',
+              confirmLabel: 'Forget',
+              run: () => revokeAll.mutate(),
+            })
+          }
+        >
           Forget this collection&apos;s permissions
         </Button>
       </div>
       <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Allow {confirm?.label} on this computer?</AlertDialogTitle>
+            <AlertDialogTitle>{confirm?.title}</AlertDialogTitle>
             <AlertDialogDescription>
-              Only allow this for a collection whose authors you trust.
+              Only allow this for a collection whose authors you trust. {confirm?.note}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => confirm?.run()}>Allow</AlertDialogAction>
+            <AlertDialogAction onClick={() => confirm?.run()}>
+              {confirm?.confirmLabel ?? 'Allow'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

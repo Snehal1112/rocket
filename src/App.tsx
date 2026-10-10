@@ -15,7 +15,10 @@ import { useBackendLogs } from '@/hooks/useBackendLogs';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAssistantEventBridge } from '@/lib/assistant-event-bridge';
 import { useGraphQlSubscriptionEventBridge } from '@/lib/graphql-subscription-event-bridge';
-import { useCollectionTrustEvents } from '@/lib/queries/collection-trust-queries';
+import {
+  collectionTrustKeys,
+  useCollectionTrustEvents,
+} from '@/lib/queries/collection-trust-queries';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
@@ -130,6 +133,7 @@ function App() {
         qc.invalidateQueries({ queryKey: workspaceKeys.all });
         qc.invalidateQueries({ queryKey: workspaceKeys.active });
         qc.invalidateQueries({ queryKey: environmentKeys.globalName });
+        qc.invalidateQueries({ queryKey: collectionTrustKeys.all });
       }),
       listen<{ id: string; newName: string }>('workspace-renamed', () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.all });

@@ -79,6 +79,10 @@ describe('CollectionTrustSection', () => {
       expect(tauriApi.setCollectionCapability).toHaveBeenCalledWith('c', 'agentRun', false),
     );
     await user.click(screen.getByRole('button', { name: /Forget this collection/ }));
+    expect(tauriApi.revokeCollectionTrust).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/including host environment access/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Forget' }));
     await waitFor(() => expect(tauriApi.revokeCollectionTrust).toHaveBeenCalledWith('c'));
   });
 
@@ -91,5 +95,32 @@ describe('CollectionTrustSection', () => {
     );
     renderWithQuery(<CollectionTrustSection collection='c' />);
     expect(await screen.findByText('Pending')).toBeInTheDocument();
+  });
+
+  it('shows the refusal when an allow fails and refetches', async () => {
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(
+      makeTrust({ agentRun: requestedOnly, pending: true }),
+    );
+    vi.mocked(tauriApi.grantRequestedCapabilities).mockRejectedValue(
+      new Error("This collection's settings changed. Review them again."),
+    );
+    renderWithQuery(<CollectionTrustSection collection='c' />);
+    const user = userEvent.setup();
+    await user.click(
+      within(await screen.findByRole('row', { name: /Agent may run requests/ })).getByRole(
+        'button',
+        { name: 'Allow...' },
+      ),
+    );
+    await user.click(await screen.findByRole('button', { name: 'Allow' }));
+    expect(await screen.findByText(/settings changed/)).toBeInTheDocument();
+    // The failed call still refreshes the cache.
+    await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows an alert when loading fails', async () => {
+    vi.mocked(tauriApi.getCollectionTrust).mockRejectedValue(new Error('boom'));
+    renderWithQuery(<CollectionTrustSection collection='c' />);
+    expect(await screen.findByText(/Could not load the permissions/)).toBeInTheDocument();
   });
 });

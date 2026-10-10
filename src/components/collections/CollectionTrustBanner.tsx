@@ -1,5 +1,5 @@
 import { ShieldAlert } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -13,7 +13,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { useCollectionTrust, useGrantRequested } from '@/lib/queries/collection-trust-queries';
+import {
+  trustErrorMessage,
+  useCollectionTrust,
+  useGrantRequested,
+} from '@/lib/queries/collection-trust-queries';
 import type { CollectionTrust, RequestedCapability } from '@/lib/tauri-api';
 
 interface PendingCapability {
@@ -49,6 +53,18 @@ export function pendingCapabilities(trust: CollectionTrust): PendingCapability[]
   return out;
 }
 
+const CONSEQUENCE: Record<RequestedCapability, string> = {
+  developerMode: 'its scripts run in Safe mode',
+  contextRoots: 'its extra script folders are not available',
+  agentRun: 'the agent cannot run its requests',
+};
+
+/** What the user was shown when Review opened. Later refetches never replace it. */
+interface Reviewed {
+  fingerprint: string;
+  pending: PendingCapability[];
+}
+
 interface CollectionTrustBannerProps {
   collection: string;
 }
@@ -57,26 +73,51 @@ interface CollectionTrustBannerProps {
 export function CollectionTrustBanner({ collection }: CollectionTrustBannerProps) {
   const { data: trust } = useCollectionTrust(collection);
   const grant = useGrantRequested(collection);
-  const [reviewing, setReviewing] = useState(false);
+  const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const [selected, setSelected] = useState<RequestedCapability[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [changedNotice, setChangedNotice] = useState(false);
+
+  // The collection file changed while the dialog was open. Drop the review, so nothing
+  // is ever approved with a fingerprint the user did not see.
+  const liveFingerprint = trust?.fingerprint;
+  useEffect(() => {
+    if (reviewed && liveFingerprint !== undefined && liveFingerprint !== reviewed.fingerprint) {
+      setReviewed(null);
+      setSelected([]);
+      setError(null);
+      setChangedNotice(true);
+    }
+  }, [liveFingerprint, reviewed]);
 
   if (!trust) return null;
   const pending = pendingCapabilities(trust);
-  if (!trust.storeError && pending.length === 0) return null;
+  if (!trust.storeError && pending.length === 0 && !changedNotice) return null;
+
+  const openReview = () => {
+    setChangedNotice(false);
+    setError(null);
+    setSelected([]);
+    setReviewed({ fingerprint: trust.fingerprint, pending });
+  };
+
+  const closeReview = () => {
+    setReviewed(null);
+    setSelected([]);
+  };
 
   const toggle = (id: RequestedCapability, on: boolean) =>
     setSelected((cur) => (on ? [...cur, id] : cur.filter((c) => c !== id)));
 
   const allow = async () => {
+    if (!reviewed) return;
     try {
-      await grant.mutateAsync({ capabilities: selected, fingerprint: trust.fingerprint });
+      await grant.mutateAsync({ capabilities: selected, fingerprint: reviewed.fingerprint });
+      closeReview();
       setError(null);
-      setReviewing(false);
-      setSelected([]);
     } catch (err) {
       console.error('[CollectionTrustBanner] grant failed', err);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(trustErrorMessage(err));
     }
   };
 
@@ -91,6 +132,12 @@ export function CollectionTrustBanner({ collection }: CollectionTrustBannerProps
           </p>
         </Alert>
       )}
+      {changedNotice && (
+        <Alert variant='destructive'>
+          <ShieldAlert className='mt-0.5 h-4 w-4 shrink-0' aria-hidden='true' />
+          <p>Settings changed, review again.</p>
+        </Alert>
+      )}
       {pending.length > 0 && (
         <Alert>
           <ShieldAlert className='mt-0.5 h-4 w-4 shrink-0' aria-hidden='true' />
@@ -99,12 +146,13 @@ export function CollectionTrustBanner({ collection }: CollectionTrustBannerProps
               This collection asks for more access than it has on this computer.
             </p>
             <p className='text-muted-foreground'>
-              It asks for: {pending.map((p) => p.label).join(', ')}. Until you allow them, its
-              scripts run in Safe mode and the agent cannot run its requests. Only allow this for a
+              It asks for: {pending.map((p) => p.label).join(', ')}. Until you allow{' '}
+              {pending.length === 1 ? 'it' : 'them'},{' '}
+              {pending.map((p) => CONSEQUENCE[p.id]).join(' and ')}. Only allow this for a
               collection whose authors you trust.
             </p>
             <div>
-              <Button size='sm' variant='outline' onClick={() => setReviewing(true)}>
+              <Button size='sm' variant='outline' onClick={openReview}>
                 Review...
               </Button>
             </div>
@@ -112,7 +160,7 @@ export function CollectionTrustBanner({ collection }: CollectionTrustBannerProps
         </Alert>
       )}
 
-      <AlertDialog open={reviewing} onOpenChange={setReviewing}>
+      <AlertDialog open={reviewed !== null} onOpenChange={(open) => !open && closeReview()}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Allow access for this collection?</AlertDialogTitle>
@@ -121,7 +169,7 @@ export function CollectionTrustBanner({ collection }: CollectionTrustBannerProps
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className='flex flex-col gap-3'>
-            {pending.map((p) => (
+            {reviewed?.pending.map((p) => (
               <div key={p.id} className='flex items-start gap-2'>
                 <Checkbox
                   id={`trust-${p.id}`}
