@@ -269,9 +269,7 @@ function ValueSection({ value, truncated = false }: { value: string; truncated?:
 
 // A wire's value as the step received it. A credential is never shown.
 function WireValueText({ wire }: { wire: FlowWireValue }) {
-  if (wire.credential) {
-    return <p className='italic text-muted-foreground'>Credential (hidden)</p>;
-  }
+  // An error comes first, so a failed credential wire says why it failed.
   if (wire.error) {
     return (
       <p
@@ -282,13 +280,16 @@ function WireValueText({ wire }: { wire: FlowWireValue }) {
       </p>
     );
   }
+  if (wire.credential) {
+    return <p className='italic text-muted-foreground'>Credential (hidden)</p>;
+  }
   if (wire.value === undefined) return null;
   return (
     <>
       <pre className='max-h-32 select-text overflow-auto whitespace-pre-wrap rounded-md border p-1.5 font-mono text-[11px] [overflow-wrap:anywhere]'>
         {wire.value === '' ? <span className='italic'>(empty)</span> : wire.value}
       </pre>
-      {wire.truncated && <p className='text-muted-foreground'>Cut at 16 KB.</p>}
+      {wire.truncated && <p className='text-muted-foreground'>Value was cut.</p>}
     </>
   );
 }
@@ -385,26 +386,24 @@ function LogsSection({ logs }: { logs: FlowLogEntry[] }) {
 }
 
 // Whole seconds left before a running node gives up. Each live event restarts
-// the count from the backend's `remainingMs`, and the hook ticks once a second.
+// the count from the backend's `remainingMs`. The deadline is fixed during
+// render, so a new live object shows its own seconds on the first render.
+// The tick only asks for a re-render, and it stops once the time is up.
 function useSecondsLeft(live?: FlowLiveProgress): number | undefined {
-  const [deadline, setDeadline] = useState<number | undefined>(undefined);
-  const [now, setNow] = useState(() => Date.now());
+  const [, setTick] = useState(0);
+  const deadline = useMemo(
+    () => (live?.remainingMs === undefined ? undefined : Date.now() + live.remainingMs),
+    [live],
+  );
+  const left =
+    deadline === undefined ? undefined : Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  const expired = left === 0;
   useEffect(() => {
-    const remaining = live?.remainingMs;
-    if (remaining === undefined) {
-      setDeadline(undefined);
-      return;
-    }
-    const start = Date.now();
-    setNow(start);
-    setDeadline(start + remaining);
-  }, [live]);
-  useEffect(() => {
-    if (deadline === undefined) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    if (deadline === undefined || expired) return;
+    const id = setInterval(() => setTick((tick) => tick + 1), 1000);
     return () => clearInterval(id);
-  }, [deadline]);
-  return deadline === undefined ? undefined : Math.max(0, Math.ceil((deadline - now) / 1000));
+  }, [deadline, expired]);
+  return left;
 }
 
 function verdictText(conditionMet?: boolean): string {
@@ -473,12 +472,25 @@ function RejectedCallSection({ call }: { call: FlowRejectedCall }) {
   );
 }
 
+// The live callback URL of a Wait node, shown whenever the run holds one.
+function CallbackUrlSection({ url }: { url: string }) {
+  return (
+    <section className='space-y-1'>
+      <h4 className='font-medium'>Callback URL</h4>
+      <CallbackUrlField url={url} />
+    </section>
+  );
+}
+
 export function LastRunTab({ node, status, detail, nodes, callbackUrl }: LastRunTabProps) {
   if (status === 'idle') {
     return (
-      <p className='text-xs text-muted-foreground'>
-        Not run yet. Run the flow to see results here.
-      </p>
+      <div data-node-id={node.id} className='space-y-3 text-xs'>
+        <p className='text-muted-foreground'>Not run yet. Run the flow to see results here.</p>
+        {node.kind.kind === 'WaitForCallback' && callbackUrl && (
+          <CallbackUrlSection url={callbackUrl} />
+        )}
+      </div>
     );
   }
 
@@ -526,10 +538,7 @@ export function LastRunTab({ node, status, detail, nodes, callbackUrl }: LastRun
         </>
       )}
       {node.kind.kind === 'WaitForCallback' && callbackUrl && (
-        <section className='space-y-1'>
-          <h4 className='font-medium'>Callback URL</h4>
-          <CallbackUrlField url={callbackUrl} />
-        </section>
+        <CallbackUrlSection url={callbackUrl} />
       )}
       {node.kind.kind === 'WaitForCallback' && status !== 'running' && detail?.trace?.wait && (
         <>

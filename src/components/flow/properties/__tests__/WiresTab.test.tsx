@@ -197,9 +197,10 @@ describe('WiresTab', () => {
       },
     });
     expect(screen.queryByTestId('wire-value')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /Last value/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Last value of Value' }));
     expect(screen.getByTestId('wire-value')).toHaveTextContent('big value');
-    expect(screen.getByText('Cut at 16 KB.')).toBeInTheDocument();
+    expect(screen.getByText('Value was cut.')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('16 KB');
   });
 
   it('shows a credential wire as hidden', () => {
@@ -236,8 +237,110 @@ describe('WiresTab', () => {
       />,
     );
     expect(screen.getByTestId('wire-credential')).toHaveTextContent('Credential (hidden)');
-    expect(screen.queryByRole('button', { name: /Last value/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Last value of/ })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('leaked-token-123456');
+  });
+
+  it('shows the error of a failed credential wire, not the hidden credential', () => {
+    const auth = n('signin', {
+      kind: 'Auth',
+      label: 'Sign in',
+      auth: { authType: 'bearer', token: 't' },
+      applyToInherit: false,
+    });
+    render(
+      <WiresTab
+        node={users}
+        nodes={[auth, users]}
+        edges={[
+          { id: 'ea', sourceNodeId: 'signin', targetNodeId: 'users', targetField: 'auth', expression: '' },
+        ]}
+        nodeDetail={{
+          users: {
+            trace: {
+              wires: [
+                {
+                  edgeId: 'ea',
+                  sourceNodeId: 'signin',
+                  targetField: 'auth',
+                  credential: true,
+                  error: 'Auth failed',
+                },
+              ],
+              failedEdgeId: 'ea',
+            },
+          },
+        }}
+        onEditWire={vi.fn()}
+        onSelectNode={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('wire-error')).toHaveTextContent('Auth failed');
+    expect(screen.queryByTestId('wire-credential')).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('Credential (hidden)');
+  });
+
+  it('names each Last value button by its field', () => {
+    const into = [
+      { id: 'b1', sourceNodeId: 'login', targetNodeId: 'users', targetField: 'body', expression: 'a' },
+      { id: 'u1', sourceNodeId: 'login', targetNodeId: 'users', targetField: 'url', expression: 'b' },
+    ];
+    render(
+      <WiresTab
+        node={users}
+        nodes={[login, users]}
+        edges={into}
+        nodeDetail={{
+          users: {
+            trace: {
+              wires: [
+                { edgeId: 'b1', sourceNodeId: 'login', targetField: 'body', value: 'one' },
+                { edgeId: 'u1', sourceNodeId: 'login', targetField: 'url', value: 'two' },
+              ],
+            },
+          },
+        }}
+        onEditWire={vi.fn()}
+        onSelectNode={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Last value of Body' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Last value of URL' })).toBeInTheDocument();
+  });
+
+  describe('a wire whose script changed since the last run', () => {
+    // e3 reads "response.body", whose hash is eb16adfc.
+    const detailWith = (hash: string) => ({
+      out: {
+        trace: {
+          wires: [
+            {
+              edgeId: 'e3',
+              sourceNodeId: 'check',
+              targetField: 'value',
+              value: 'big value',
+              expressionHash: hash,
+            },
+          ],
+        },
+      },
+    });
+
+    it('says so and keeps the value, dimmed', async () => {
+      renderTab(out, { nodeStatus: { out: 'success' }, nodeDetail: detailWith('00000000') });
+      expect(screen.getByTestId('wire-stale')).toHaveTextContent(
+        'Script changed since the last run.',
+      );
+      expect(screen.getByTestId('wire-value-block')).toHaveClass('opacity-60');
+      await userEvent.click(screen.getByRole('button', { name: 'Last value of Value' }));
+      expect(screen.getByTestId('wire-value')).toHaveTextContent('big value');
+    });
+
+    it('says nothing when the script is the one that ran', () => {
+      renderTab(out, { nodeStatus: { out: 'success' }, nodeDetail: detailWith('eb16adfc') });
+      expect(screen.queryByTestId('wire-stale')).not.toBeInTheDocument();
+      expect(screen.getByTestId('wire-value-block')).not.toHaveClass('opacity-60');
+    });
   });
 
   it('highlights only the wire that failed', () => {

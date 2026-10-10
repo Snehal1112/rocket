@@ -1,5 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   FlowDebugRequest,
@@ -406,7 +407,8 @@ describe('LastRunTab trace', () => {
     expect(rows[0]).toHaveTextContent('X-Key');
     expect(rows[0]).toHaveTextContent('← API Key');
     expect(rows[0]).toHaveTextContent('••••••');
-    expect(rows[1]).toHaveTextContent('Cut at 16 KB.');
+    expect(rows[1]).toHaveTextContent('Value was cut.');
+    expect(rows[1]).not.toHaveTextContent('16 KB');
   });
 
   it('never shows a value on a credential input', () => {
@@ -424,6 +426,18 @@ describe('LastRunTab trace', () => {
     render(<LastRunTab node={login} status='success' detail={{ trace }} />);
     expect(screen.getByTestId('last-run-input')).toHaveTextContent('Credential (hidden)');
     expect(document.body).not.toHaveTextContent('leaked-token-123456');
+  });
+
+  it('shows the error of a failed credential input, not the hidden credential', () => {
+    const trace: FlowStepTrace = {
+      wires: [
+        { edgeId: 'ea', sourceNodeId: 'src', targetField: 'auth', credential: true, error: 'Auth failed' },
+      ],
+      failedEdgeId: 'ea',
+    };
+    render(<LastRunTab node={login} status='failed' detail={{ error: 'wire failed', trace }} />);
+    expect(screen.getByTestId('last-run-input-error')).toHaveTextContent('Auth failed');
+    expect(screen.getByTestId('last-run-input')).not.toHaveTextContent('Credential (hidden)');
   });
 
   it('marks the input that failed and shows its error', () => {
@@ -598,6 +612,41 @@ describe('LastRunTab live progress', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('counts down to 0s left and then runs no timer', () => {
+    vi.useFakeTimers();
+    render(<LastRunTab node={poller} status='running' detail={{ live: { remainingMs: 2000 } }} />);
+    expect(screen.getByTestId('last-run-poll-live')).toHaveTextContent('2s left');
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.getByTestId('last-run-poll-live')).toHaveTextContent('0s left');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('shows the seconds of a new live object right away', () => {
+    vi.useFakeTimers();
+    const first = { remainingMs: 12000 };
+    const { rerender } = render(
+      <LastRunTab node={poller} status='running' detail={{ live: first }} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByTestId('last-run-poll-live')).toHaveTextContent('7s left');
+    rerender(
+      <LastRunTab node={poller} status='running' detail={{ live: { remainingMs: 30000 } }} />,
+    );
+    expect(screen.getByTestId('last-run-poll-live')).toHaveTextContent('30s left');
+  });
+
+  it('has the seconds in the very first render, before any effect runs', () => {
+    vi.useFakeTimers();
+    const html = renderToString(
+      <LastRunTab node={poller} status='running' detail={{ live: { remainingMs: 30000 } }} />,
+    );
+    expect(html).toContain('30s left');
+  });
+
   it('shows the poll result after the run', () => {
     render(
       <LastRunTab
@@ -690,5 +739,26 @@ describe('LastRunTab live progress', () => {
     expect(screen.getByTestId('last-run-wait')).toHaveTextContent('3 ignored');
     expect(screen.getByTestId('last-run-rejected')).toBeInTheDocument();
     expect(screen.queryByTestId('last-run-wait-live')).not.toBeInTheDocument();
+  });
+});
+
+describe('LastRunTab idle callback URL', () => {
+  const wait = node({ kind: 'WaitForCallback', label: 'Hook', name: 'hook', timeoutMs: 60000 });
+  const url = 'http://10.0.0.5:4000/cb/tok';
+
+  it('shows the URL of a Wait node under the not-run text', () => {
+    render(<LastRunTab node={wait} status='idle' callbackUrl={url} />);
+    expect(screen.getByText(/Not run yet/)).toBeInTheDocument();
+    expect(screen.getByTestId('callback-url')).toHaveTextContent(url);
+  });
+
+  it('shows no URL for a Request node at idle', () => {
+    render(<LastRunTab node={request} status='idle' callbackUrl={url} />);
+    expect(screen.queryByTestId('callback-url')).not.toBeInTheDocument();
+  });
+
+  it('shows no URL for a Wait node that has none', () => {
+    render(<LastRunTab node={wait} status='idle' />);
+    expect(screen.queryByTestId('callback-url')).not.toBeInTheDocument();
   });
 });

@@ -44,15 +44,9 @@ function NodeLink({ row, onSelectNode }: { row: WireRow; onSelectNode: (id: stri
 }
 
 // The value the last run put on a wire. Collapsed, because one can be 16 KB.
-function ResolvedValue({ resolved }: { resolved: WireResolved }) {
+function ResolvedValue({ resolved, field }: { resolved: WireResolved; field: string }) {
   const [open, setOpen] = useState(false);
-  if (resolved.credential) {
-    return (
-      <p data-testid='wire-credential' className='italic text-muted-foreground'>
-        Credential (hidden)
-      </p>
-    );
-  }
+  // An error comes first, so a failed credential wire says why it failed.
   if (resolved.error) {
     return (
       <p
@@ -63,30 +57,52 @@ function ResolvedValue({ resolved }: { resolved: WireResolved }) {
       </p>
     );
   }
+  if (resolved.credential) {
+    return (
+      <p data-testid='wire-credential' className='italic text-muted-foreground'>
+        Credential (hidden)
+      </p>
+    );
+  }
   if (resolved.value === undefined) return null;
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <Button type='button' variant='ghost' size='sm' className='h-5 px-1 text-[11px]'>
-          <ChevronRight
-            className={
-              open ? 'h-3 w-3 rotate-90 transition-transform' : 'h-3 w-3 transition-transform'
-            }
-            aria-hidden='true'
-          />
-          Last value
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <pre
-          data-testid='wire-value'
-          className='mt-1 max-h-40 select-text overflow-auto whitespace-pre-wrap rounded-md border p-1.5 font-mono text-[11px] [overflow-wrap:anywhere]'
-        >
-          {resolved.value === '' ? <span className='italic'>(empty)</span> : resolved.value}
-        </pre>
-        {resolved.truncated && <p className='text-muted-foreground'>Cut at 16 KB.</p>}
-      </CollapsibleContent>
-    </Collapsible>
+    <>
+      {resolved.stale && (
+        <p data-testid='wire-stale' className='text-muted-foreground'>
+          Script changed since the last run.
+        </p>
+      )}
+      <div data-testid='wire-value-block' className={cn(resolved.stale && 'opacity-60')}>
+        <Collapsible open={open} onOpenChange={setOpen}>
+          <CollapsibleTrigger asChild>
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              className='h-5 px-1 text-[11px]'
+              aria-label={`Last value of ${field}`}
+            >
+              <ChevronRight
+                className={
+                  open ? 'h-3 w-3 rotate-90 transition-transform' : 'h-3 w-3 transition-transform'
+                }
+                aria-hidden='true'
+              />
+              Last value
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre
+              data-testid='wire-value'
+              className='mt-1 max-h-40 select-text overflow-auto whitespace-pre-wrap rounded-md border p-1.5 font-mono text-[11px] [overflow-wrap:anywhere]'
+            >
+              {resolved.value === '' ? <span className='italic'>(empty)</span> : resolved.value}
+            </pre>
+            {resolved.truncated && <p className='text-muted-foreground'>Value was cut.</p>}
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
+    </>
   );
 }
 
@@ -132,7 +148,7 @@ function Row({
         <p className='truncate font-mono text-[11px] text-muted-foreground'>
           {row.preview ?? '(no script)'}
         </p>
-        {row.resolved && <ResolvedValue resolved={row.resolved} />}
+        {row.resolved && <ResolvedValue resolved={row.resolved} field={row.field} />}
       </div>
       {row.editable && (
         <Button
