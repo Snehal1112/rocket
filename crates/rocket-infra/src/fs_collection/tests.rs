@@ -2662,6 +2662,52 @@ fn collection_root_path_returns_the_directory_and_rejects_unknown() {
     assert!(repo.collection_root_path("../escape").is_err());
 }
 
+#[test]
+fn collection_identity_reads_the_uid_and_canonical_root() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = repo.collection_root_path("col").expect("root");
+    fs::write(
+        root.join("opencollection.yml"),
+        "opencollection: 1.0.0\nuid: abc123\ninfo:\n  name: col\n",
+    )
+    .expect("write");
+    let id = repo.collection_identity("col").expect("identity");
+    assert_eq!(id.uid.as_deref(), Some("abc123"));
+    assert_eq!(id.canonical_root, root.canonicalize().expect("canonical"));
+}
+
+#[test]
+fn collection_identity_without_a_uid_is_none() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    let root = repo.collection_root_path("col").expect("root");
+    fs::write(root.join("opencollection.yml"), "opencollection: 1.0.0\n").expect("write");
+    assert_eq!(repo.collection_identity("col").expect("identity").uid, None);
+}
+
+#[cfg(unix)]
+#[test]
+fn collection_identity_resolves_a_symlinked_folder() {
+    let (dir, repo) = setup();
+    repo.create("real").expect("create");
+    std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).expect("link");
+    let real = repo.collection_identity("real").expect("real");
+    let link = repo.collection_identity("link").expect("link");
+    assert_eq!(real.canonical_root, link.canonical_root);
+}
+
+#[test]
+fn collection_identity_rejects_unknown_and_unreadable() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create");
+    assert!(repo.collection_identity("missing").is_err());
+    assert!(repo.collection_identity("../escape").is_err());
+    let root = repo.collection_root_path("col").expect("root");
+    fs::write(root.join("opencollection.yml"), "{{{ not yaml").expect("write");
+    assert!(repo.collection_identity("col").is_err());
+}
+
 fn script_names(items: &[rocket_collection::CollectionItem]) -> Vec<String> {
     items
         .iter()

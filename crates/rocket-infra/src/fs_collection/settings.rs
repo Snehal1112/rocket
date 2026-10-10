@@ -1,7 +1,7 @@
 use std::fs;
 
 use rocket_collection::settings::SandboxMode;
-use rocket_collection::{Collection, CollectionSettings, CollectionVariable, ScriptFlow};
+use rocket_collection::{Collection, CollectionIdentity, CollectionSettings, CollectionVariable, ScriptFlow};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -225,6 +225,33 @@ fn set_agent_autonomy_enabled_in_extensions(
     root.insert(rocketapi_key, serde_yaml::Value::Mapping(rocketapi));
 
     Some(serde_yaml::Value::Mapping(root))
+}
+
+/// The canonical folder (symlinks resolved) plus the `uid` of `opencollection.yml`.
+/// A missing file or a file without a uid gives `None`. An unreadable file is an error,
+/// so a caller treats the collection as untrusted.
+pub(super) fn collection_identity(
+    repo: &FsCollectionRepo,
+    name: &str,
+) -> DomainResult<CollectionIdentity> {
+    Collection::validate_name(name)?;
+    let dir = repo.collection_path(name);
+    let canonical_root = dir
+        .canonicalize()
+        .ok()
+        .filter(|p| p.is_dir())
+        .ok_or_else(|| DomainError::NotFound(format!("Collection '{name}' not found")))?;
+    let path = repo.settings_path(name);
+    let uid = if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        let oc: OcCollection = serde_yaml::from_str(&content).map_err(|_| {
+            DomainError::Internal("Failed to parse opencollection.yml".into())
+        })?;
+        oc.uid.filter(|u| !u.trim().is_empty())
+    } else {
+        None
+    };
+    Ok(CollectionIdentity { canonical_root, uid })
 }
 
 pub(super) fn get_settings(

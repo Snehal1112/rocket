@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
 
 use rocket_collection::{
-    Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
+    Collection, CollectionIdentity, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
     FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase,
     WebSocketRequest,
 };
@@ -121,6 +121,10 @@ pub(super) fn reject_unsafe_components(path: &Path) -> Result<(), DomainError> {
 }
 
 impl CollectionRepository for FsCollectionRepo {
+    fn collection_identity(&self, name: &str) -> DomainResult<CollectionIdentity> {
+        settings::collection_identity(self, name)
+    }
+
     fn collection_root_path(&self, name: &str) -> DomainResult<PathBuf> {
         Collection::validate_name(name)?;
         let path = self.collection_path(name);
