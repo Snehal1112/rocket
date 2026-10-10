@@ -752,11 +752,16 @@ pub(crate) fn mask_response_body(body: &str, secret_values: &HashSet<String>) ->
 /// Replaces every known secret value in `text`, in its plain, trimmed, per-line and
 /// percent-encoded forms.
 pub(crate) fn mask_secret_text(text: &str, secret_values: &HashSet<String>) -> String {
+    redact_url_secrets(text, &secret_redaction_forms(secret_values))
+}
+
+/// Every redaction form of every secret. Build it once to mask many texts.
+pub(crate) fn secret_redaction_forms(secret_values: &HashSet<String>) -> HashSet<String> {
     let mut all: HashSet<String> = HashSet::new();
     for secret in secret_values {
         all.extend(redaction_forms(secret));
     }
-    redact_url_secrets(text, &all)
+    all
 }
 
 /// A requested history limit, where 0 means the maximum.

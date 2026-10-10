@@ -18,7 +18,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::conversation_secrets::workspace_secret_values;
-use crate::mcp_read_views::mask_secret_text;
+use crate::mcp_read_views::secret_redaction_forms;
+use crate::redaction::redact_url_secrets;
 
 /// Sessions whose workspace pin is kept. The oldest pin is dropped first.
 pub const MAX_SESSION_PINS: usize = 16;
@@ -165,10 +166,11 @@ impl ConversationService {
                 "a conversation is saved only after the assistant replied".to_string(),
             ));
         }
-        let total_text: usize = input.messages.iter().map(text_bytes).sum();
-        if total_text > MAX_INPUT_TEXT_BYTES {
+        // The oldest whole messages go first, so a long chat keeps saving its newest turns.
+        let keep_from = first_kept_index(&input.messages);
+        if keep_from == input.messages.len() {
             return Err(DomainError::InvalidInput(
-                "the conversation is too large to save".to_string(),
+                "the newest message is too large to save".to_string(),
             ));
         }
         let pin = self.pin(session_id)?;
@@ -191,10 +193,13 @@ impl ConversationService {
             .cloned();
         // Only the newest messages are kept, so the rest is dropped before any masking work.
         let mut messages = input.messages;
+        messages.drain(..keep_from);
         if messages.len() > MAX_MESSAGES {
             messages.drain(..messages.len() - MAX_MESSAGES);
         }
-        let mask = |text: &str| mask_secret_text(text, &secrets);
+        // The redaction forms are built once and reused for every message and the title.
+        let forms = secret_redaction_forms(&secrets);
+        let mask = |text: &str| redact_url_secrets(text, &forms);
         let messages: Vec<StoredMessage> = messages
             .into_iter()
             .map(|message| message.map_text(mask))
@@ -249,6 +254,21 @@ impl ConversationService {
             .publish(DomainEvent::AssistantConversationsCleared);
         Ok(())
     }
+}
+
+/// Index of the oldest message to keep so the kept text fits `MAX_INPUT_TEXT_BYTES`.
+/// It equals the length when even the newest message alone is over the bound.
+fn first_kept_index(messages: &[StoredMessage]) -> usize {
+    let mut total = 0usize;
+    let mut start = messages.len();
+    for (index, message) in messages.iter().enumerate().rev() {
+        total = total.saturating_add(text_bytes(message));
+        if total > MAX_INPUT_TEXT_BYTES {
+            break;
+        }
+        start = index;
+    }
+    start
 }
 
 fn text_bytes(message: &StoredMessage) -> usize {
@@ -906,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn an_oversized_payload_is_refused_and_extra_messages_are_dropped_oldest_first() {
+    fn a_single_message_over_the_bound_is_refused_and_extra_messages_are_dropped_oldest_first() {
         let fx = fixture_with(collections());
         fx.svc.pin_session("s1");
         let huge = "x".repeat(MAX_INPUT_TEXT_BYTES + 1);
@@ -924,6 +944,55 @@ mod tests {
             panic!("agent last");
         };
         assert_eq!(text, &format!("reply {}", MAX_MESSAGES + 4));
+    }
+
+    #[test]
+    fn an_oversized_chat_saves_only_its_newest_messages() {
+        let fx = fixture_with(collections());
+        fx.svc.pin_session("s1");
+        let big = "y".repeat(MAX_INPUT_TEXT_BYTES / 2 + 1);
+        fx.svc
+            .save(
+                "s1",
+                input(vec![
+                    user("first question"),
+                    agent(&big),
+                    agent(&big),
+                    agent("newest reply"),
+                ]),
+            )
+            .expect("save");
+        let record = fx.svc.get(ID).expect("get");
+        assert_eq!(
+            record.title, "first question",
+            "the title uses the original input"
+        );
+        let texts: Vec<usize> = record.messages.iter().map(text_bytes).collect();
+        assert_eq!(texts.len(), 2, "the oldest two messages were dropped");
+        let StoredMessage::Agent { text } = &record.messages[1] else {
+            panic!("agent last");
+        };
+        assert_eq!(text, "newest reply");
+    }
+
+    #[test]
+    fn dropping_for_size_still_masks_before_the_caps() {
+        let fx = fixture_with(collections());
+        fx.svc.pin_session("s1");
+        let big = "y".repeat(MAX_INPUT_TEXT_BYTES - 100);
+        fx.svc
+            .save(
+                "s1",
+                input(vec![
+                    agent(&big),
+                    user(&format!("use {COLLECTION_SECRET}")),
+                    agent("ok"),
+                ]),
+            )
+            .expect("save");
+        let raw = std::fs::read_to_string(stored_file(&fx)).expect("read");
+        assert!(!raw.contains(COLLECTION_SECRET));
+        assert!(raw.contains(REDACTED));
     }
 
     #[test]
