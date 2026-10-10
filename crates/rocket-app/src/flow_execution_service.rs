@@ -766,7 +766,8 @@ fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
         skip_reason: step.skip_reason,
         branch: step.branch.clone(),
         logs: step.logs.clone(),
-        debug_request: step.debug_request.clone().map(Box::new),
+        // The summary keeps the full record; the event would send it twice.
+        debug_request: None,
         exchange: step.exchange.clone().map(Box::new),
         attempts: step.attempts,
         trace: step.trace.clone().map(Box::new),
@@ -2133,6 +2134,36 @@ mod tests {
     use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
     use rocket_shared::events::{DomainEvent, EventPublisher};
     use std::sync::Arc;
+
+    #[test]
+    fn step_completed_event_leaves_out_debug_request() {
+        let record = rocket_shared::events::FlowDebugRequest {
+            method: "GET".into(),
+            url: "https://h.test/".into(),
+            headers: Vec::new(),
+            body: None,
+            body_truncated: false,
+            response: None,
+            error: None,
+        };
+        let step = FlowStepResult {
+            debug_request: Some(record.clone()),
+            exchange: Some(record),
+            ..failed_step("job", "x".into())
+        };
+
+        match step_completed_event("run-1", &step) {
+            DomainEvent::FlowStepCompleted {
+                debug_request,
+                exchange,
+                ..
+            } => {
+                assert!(debug_request.is_none(), "the summary carries the record");
+                assert!(exchange.is_some());
+            }
+            other => panic!("unexpected event {other:?}"),
+        }
+    }
 
     // ---- Minimal fakes shared by every task in this file ---------------
     // Only the methods this file's code paths actually call return real
@@ -6858,7 +6889,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_debug_request_node_reports_the_masked_request_on_the_step_and_event() {
+    async fn a_debug_request_node_reports_the_masked_request_on_the_step_not_the_event() {
         let (summary, events) = run_debug_node(true, "https://x.test", 200).await;
         let step = step_of(&summary, "r");
         let debug = step.debug_request.as_ref().expect("debug record");
@@ -6872,8 +6903,9 @@ mod tests {
         assert_eq!(debug.body.as_deref(), Some(r#"{"k":"••••••"}"#));
         assert_eq!(debug.response.as_ref().map(|r| r.status), Some(200));
         assert_eq!(
-            completed_debug(&events, "r").map(|d| *d),
-            step.debug_request
+            completed_debug(&events, "r"),
+            None,
+            "the event leaves the record to the summary"
         );
     }
 
@@ -7142,8 +7174,9 @@ mod tests {
             debug.error
         );
         assert_eq!(
-            completed_debug(&events, "r").map(|d| *d),
-            step.debug_request
+            completed_debug(&events, "r"),
+            None,
+            "the event leaves the record to the summary"
         );
     }
 
