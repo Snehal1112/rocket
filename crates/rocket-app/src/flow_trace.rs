@@ -56,6 +56,7 @@ impl NodeTrace {
         self.step.wires.push(FlowWireValue {
             value: Some(value),
             truncated,
+            expression_hash: Some(expression_hash(&edge.expression)),
             ..blank_wire(edge)
         });
     }
@@ -97,11 +98,23 @@ impl NodeTrace {
             Some(wire) => wire.error = Some(error),
             None => self.step.wires.push(FlowWireValue {
                 error: Some(error),
+                expression_hash: Some(expression_hash(&edge.expression)),
                 ..blank_wire(edge)
             }),
         }
         self.step.failed_edge_id = Some(edge.id.clone());
     }
+}
+
+/// FNV-1a 32-bit hash of `text`, as eight lowercase hex digits. The UI has the
+/// same function (`src/lib/flow-expression-hash.ts`), pinned by the same vectors.
+pub(crate) fn expression_hash(text: &str) -> String {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in text.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("{hash:08x}")
 }
 
 /// A wire record that names `edge` and holds nothing else yet.
@@ -229,6 +242,42 @@ mod tests {
         assert_eq!(trace.step.wires.len(), 5, "every wire is still listed");
         assert!(trace.step.wires[4].truncated);
         assert_eq!(trace.step.wires[4].value.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn expression_hash_matches_the_shared_test_vector() {
+        // The same vectors are pinned in src/lib/__tests__/flow-expression-hash.test.ts.
+        assert_eq!(expression_hash("response.body"), "eb16adfc");
+        assert_eq!(expression_hash(""), "811c9dc5");
+        assert_eq!(expression_hash("é"), "1e9de8c1");
+        assert_eq!(expression_hash("a→b"), "af11e8a0");
+    }
+
+    #[test]
+    fn record_wire_records_the_hash_of_the_edge_expression() {
+        let mut trace = NodeTrace::default();
+        trace.record_wire(&edge("e1", "body"), "value", &masks(&[]));
+        assert_eq!(
+            trace.step.wires[0].expression_hash.as_deref(),
+            Some("eb16adfc")
+        );
+    }
+
+    #[test]
+    fn record_failure_on_a_new_wire_records_the_hash_too() {
+        let mut trace = NodeTrace::default();
+        trace.record_failure(&edge("e1", "url"), "boom", &masks(&[]));
+        assert_eq!(
+            trace.step.wires[0].expression_hash.as_deref(),
+            Some("eb16adfc")
+        );
+    }
+
+    #[test]
+    fn a_credential_wire_has_no_hash() {
+        let mut trace = NodeTrace::default();
+        trace.record_credential_wire(&edge("ea", "auth"));
+        assert_eq!(trace.step.wires[0].expression_hash, None);
     }
 
     #[test]

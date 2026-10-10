@@ -363,7 +363,12 @@ describe('last run values', () => {
       users: { trace: { wires: [{ edgeId: 'e1', sourceNodeId: 'login', targetField: 'x', value: '••••••' }] } },
     };
     const [incoming] = incomingRows(users, [login, users], [into], {}, detail);
-    expect(incoming.resolved).toEqual({ value: '••••••', truncated: false, credential: false });
+    expect(incoming.resolved).toEqual({
+      value: '••••••',
+      truncated: false,
+      credential: false,
+      stale: false,
+    });
     const [group] = outgoingGroups(login, [login, users], [into], {}, detail);
     expect(group.rows[0].resolved?.value).toBe('••••••');
   });
@@ -385,7 +390,12 @@ describe('last run values', () => {
       },
     };
     const [row] = incomingRows(users, [login, users], [into], {}, detail);
-    expect(row.resolved).toEqual({ value: undefined, truncated: false, credential: true });
+    expect(row.resolved).toEqual({
+      value: undefined,
+      truncated: false,
+      credential: true,
+      stale: false,
+    });
   });
 
   it('marks the wire that failed', () => {
@@ -401,5 +411,40 @@ describe('last run values', () => {
     const rows = incomingRows(users, [login, users], [into, second], {}, detail);
     expect(rows.map((r) => r.failed)).toEqual([false, true]);
     expect(rows[1].resolved?.error).toBe('boom');
+  });
+
+  describe('stale', () => {
+    // The hash of "response.body", computed by the same function the backend uses.
+    const wireWith = (hash?: string) => ({
+      users: {
+        trace: {
+          wires: [
+            {
+              edgeId: 'e1',
+              sourceNodeId: 'login',
+              targetField: 'x',
+              value: 'v',
+              ...(hash === undefined ? {} : { expressionHash: hash }),
+            },
+          ],
+        },
+      },
+    });
+
+    it('is true when the recorded hash differs from the current script', () => {
+      const [row] = incomingRows(users, [login, users], [into], {}, wireWith('00000000'));
+      expect(row.resolved?.stale).toBe(true);
+    });
+
+    it('is false when the recorded hash equals the hash of the current script', () => {
+      const same = { ...into, expression: 'response.body' };
+      const [row] = incomingRows(users, [login, users], [same], {}, wireWith('eb16adfc'));
+      expect(row.resolved?.stale).toBe(false);
+    });
+
+    it('is false for a run saved without a hash', () => {
+      const [row] = incomingRows(users, [login, users], [into], {}, wireWith());
+      expect(row.resolved?.stale).toBe(false);
+    });
   });
 });

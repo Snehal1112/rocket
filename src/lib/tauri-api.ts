@@ -2359,10 +2359,12 @@ export interface FlowWireValue {
   targetField: string;
   /** Absent for a credential wire and for a wire that failed before it had a value. */
   value?: string;
-  /** True when `value` was cut at 16 KB or by the 64 KB per-step budget. */
+  /** True when `value` was cut at its size limit. */
   truncated?: boolean;
   /** True for an `auth` wire. Its credential is never sent to the UI. */
   credential?: boolean;
+  /** FNV-1a hash of the edge's script when the wire was read. Absent in older runs. */
+  expressionHash?: string;
   error?: string;
 }
 

@@ -143,6 +143,10 @@ pub struct FlowWireValue {
     /// True for an `auth` wire. Its credential is never recorded.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub credential: bool,
+    /// FNV-1a hash of the edge's script text when the wire was read. It holds
+    /// no value, so it is safe to keep. The UI compares it with the script now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -1841,6 +1845,29 @@ mod tests {
         // The target field itself ends in ".value", so match the key.
         assert!(!json.contains(r#""value":"#), "{json}");
         assert!(!json.contains("truncated"), "{json}");
+    }
+
+    #[test]
+    fn a_flow_wire_value_carries_its_expression_hash_in_camel_case() {
+        let wire = FlowWireValue {
+            edge_id: "e1".into(),
+            source_node_id: "in".into(),
+            target_field: "body".into(),
+            expression_hash: Some("eb16adfc".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&wire).expect("serialize");
+        assert!(json.contains(r#""expressionHash":"eb16adfc""#), "{json}");
+        let back: FlowWireValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, wire);
+    }
+
+    #[test]
+    fn a_flow_wire_value_saved_before_the_hash_existed_still_parses() {
+        let old = r#"{"edgeId":"e1","sourceNodeId":"in","targetField":"body","value":"42"}"#;
+        let wire: FlowWireValue = serde_json::from_str(old).expect("deserialize");
+        assert_eq!(wire.expression_hash, None);
+        assert_eq!(wire.value.as_deref(), Some("42"));
     }
 
     #[test]

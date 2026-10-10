@@ -166,7 +166,9 @@ settled. A remounted toolbar follows the tab's `pendingRunId` until
 
 `execute_node` fills a `NodeTrace` out-param; the run loop moves it into
 `FlowStepResult.trace` and the `FlowStepCompleted` event. It records each data
-wire's value (`record_wire`), an `auth` wire as `credential: true` with no
+wire's value (`record_wire`) with a hash of the wire's script
+(`expression_hash`, FNV-1a 32-bit hex, no value) so the UI can mark a wire
+stale, an `auth` wire as `credential: true` with no
 value, an If/Switch decision (`record_route`) and the failing wire
 (`record_failure`, `failed_edge_id`). Values are masked with `secret_values`
 plus `credentials.secret_forms()` first and capped second (16 KB per wire,

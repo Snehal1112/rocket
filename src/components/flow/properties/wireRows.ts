@@ -1,3 +1,4 @@
+import { expressionHash } from '@/lib/flow-expression-hash';
 import {
   AUTH_HANDLE,
   caseIdFromHandle,
@@ -15,6 +16,8 @@ export interface WireResolved {
   truncated: boolean;
   credential: boolean;
   error?: string;
+  /** True when the script on this wire changed since the run that recorded the value. */
+  stale: boolean;
 }
 
 export interface WireRow {
@@ -130,6 +133,10 @@ function row(
       truncated: recorded.truncated ?? false,
       credential: recorded.credential ?? false,
       error: recorded.error,
+      // A run saved without a hash cannot say, so it is never stale.
+      stale:
+        recorded.expressionHash !== undefined &&
+        recorded.expressionHash !== expressionHash(edge.expression),
     },
     failed: targetTrace?.failedEdgeId === edge.id,
   };
