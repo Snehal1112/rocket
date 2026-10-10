@@ -217,6 +217,15 @@ impl CollectionRunnerService {
         exec: &RequestExecutionService,
         input: RunCollectionInput,
     ) -> DomainResult<RunSummary> {
+        // The whole run reads and writes the workspace it started in. Steps keep these pins.
+        exec.with_send_pins(self.run_unpinned(exec, input)).await
+    }
+
+    async fn run_unpinned(
+        &self,
+        exec: &RequestExecutionService,
+        input: RunCollectionInput,
+    ) -> DomainResult<RunSummary> {
         let collection = self.collection_repo.get(&input.collection)?;
         let items = flatten_run_set(&collection, input.folder_path.as_deref())?;
 
@@ -263,16 +272,15 @@ impl CollectionRunnerService {
             }
 
             let item = &items[cursor];
-            // Each step reads and writes one workspace, like a single send.
-            let outcome = exec
-                .with_send_pins(self.run_step(
+            let outcome = self
+                .run_step(
                     exec,
                     &input,
                     item,
                     steps.len(),
                     &mut carried_runtime,
                     &external_secrets,
-                ))
+                )
                 .await;
             let mut result = outcome.result;
 

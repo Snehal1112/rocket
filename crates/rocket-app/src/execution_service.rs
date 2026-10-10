@@ -503,7 +503,7 @@ impl RequestExecutionService {
         collection: &str,
     ) -> rocket_collection::EffectiveCapabilities {
         crate::collection_trust::effective_capabilities(
-            self.collection_repo.as_ref(),
+            &*self.send_collection_repo(),
             self.trust_store.as_ref(),
             collection,
         )
@@ -773,7 +773,7 @@ impl RequestExecutionService {
 
         if let Some(col) = collection {
             let settings =
-                read_scope(strict, self.collection_repo.get_settings(col))?.unwrap_or_default();
+                read_scope(strict, self.send_collection_repo().get_settings(col))?.unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
                 let val = effective_val(cv);
                 ctx.collection.insert(cv.key.clone(), val.clone());
@@ -802,9 +802,9 @@ impl RequestExecutionService {
 
         if let (Some(col), Some(path)) = (collection, request_path) {
             let folder_read = if strict {
-                self.collection_repo.get_folder_chain_variables_strict(col, path)
+                self.send_collection_repo().get_folder_chain_variables_strict(col, path)
             } else {
-                self.collection_repo.get_folder_chain_variables(col, path)
+                self.send_collection_repo().get_folder_chain_variables(col, path)
             };
             if let Some(folder_vars) = read_scope(strict, folder_read)? {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
@@ -822,7 +822,7 @@ impl RequestExecutionService {
 
         if let (Some(col), Some(path)) = (collection, request_path) {
             if let Some(request_vars) =
-                read_scope(strict, self.collection_repo.get_request_variables(col, path))?
+                read_scope(strict, self.send_collection_repo().get_request_variables(col, path))?
             {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
@@ -1016,7 +1016,7 @@ impl RequestExecutionService {
     ) -> DomainResult<Vec<FolderSettings>> {
         match (collection, request_path) {
             (Some(_), Some(path)) if path.starts_with(FLOW_INLINE_PATH_PREFIX) => Ok(Vec::new()),
-            (Some(col), Some(path)) => self.collection_repo.get_folder_chain_settings(col, path),
+            (Some(col), Some(path)) => self.send_collection_repo().get_folder_chain_settings(col, path),
             _ => Ok(Vec::new()),
         }
     }
@@ -1032,7 +1032,7 @@ impl RequestExecutionService {
     ) -> (Auth, Vec<Header>) {
         match collection {
             Some(col) => {
-                let settings = self.collection_repo.get_settings(col).unwrap_or_default();
+                let settings = self.send_collection_repo().get_settings(col).unwrap_or_default();
                 apply_inherited_defaults(request_auth, request_headers, settings, folders)
             }
             None => (request_auth, request_headers.to_vec()),
@@ -1350,9 +1350,9 @@ impl RequestExecutionService {
         key: &str,
         value: &str,
     ) -> DomainResult<()> {
-        let mut settings = self.collection_repo.get_settings(collection)?;
+        let mut settings = self.send_collection_repo().get_settings(collection)?;
         upsert_variable(&mut settings.variables, key, value);
-        self.collection_repo.save_settings(collection, &settings)?;
+        self.send_collection_repo().save_settings(collection, &settings)?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
             key: key.to_string(),
@@ -1368,11 +1368,11 @@ impl RequestExecutionService {
 
     /// Removes a collection variable and publishes the same events as a write.
     fn apply_collection_var_delete(&self, collection: &str, key: &str) -> DomainResult<()> {
-        let mut settings = self.collection_repo.get_settings(collection)?;
+        let mut settings = self.send_collection_repo().get_settings(collection)?;
         if !remove_variable(&mut settings.variables, key) {
             return Ok(());
         }
-        self.collection_repo.save_settings(collection, &settings)?;
+        self.send_collection_repo().save_settings(collection, &settings)?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
             key: key.to_string(),
@@ -1711,10 +1711,10 @@ impl RequestExecutionService {
                             .parent()
                             .and_then(|p| p.to_str())
                             .unwrap_or("");
-                        match self.collection_repo.get_folder_variables(col, folder_path) {
+                        match self.send_collection_repo().get_folder_variables(col, folder_path) {
                             Ok(mut vars) => {
                                 upsert_variable(&mut vars, var_name, &str_val);
-                                if let Err(e) = self.collection_repo.save_folder_variables(
+                                if let Err(e) = self.send_collection_repo().save_folder_variables(
                                     col,
                                     folder_path,
                                     vars,
@@ -1730,11 +1730,11 @@ impl RequestExecutionService {
                 }
                 "request" => {
                     if let (Some(col), Some(path)) = (collection, request_path) {
-                        match self.collection_repo.get_request_variables(col, path) {
+                        match self.send_collection_repo().get_request_variables(col, path) {
                             Ok(mut vars) => {
                                 upsert_variable(&mut vars, var_name, &str_val);
                                 if let Err(e) =
-                                    self.collection_repo.save_request_variables(col, path, vars)
+                                    self.send_collection_repo().save_request_variables(col, path, vars)
                                 {
                                     tracing::warn!(error = %e, variable = %var_name, "failed to persist request var from action");
                                 }
@@ -1846,7 +1846,7 @@ impl RequestExecutionService {
 
         let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {
             Some(col) => {
-                let settings = self.collection_repo.get_settings(col).unwrap_or_default();
+                let settings = self.send_collection_repo().get_settings(col).unwrap_or_default();
                 // The collection file only requests a mode. The trust store decides.
                 let effective = self.effective_capabilities(col);
                 let mode = match effective.sandbox_mode {
@@ -2727,7 +2727,7 @@ impl RequestExecutionService {
             secret_values,
             ..Default::default()
         };
-        if let Ok(settings) = self.collection_repo.get_settings(collection_root) {
+        if let Ok(settings) = self.send_collection_repo().get_settings(collection_root) {
             for cv in settings.variables.iter().filter(|v| v.enabled) {
                 let val = if cv.value.is_empty() {
                     cv.initial_value.clone()
@@ -7382,6 +7382,61 @@ mod tests {
             value(b.path(), "collections/api/environments", "dev", "TOKEN").as_deref(),
             Some("b-old")
         );
+    }
+
+    #[tokio::test]
+    async fn a_switch_during_the_send_keeps_collection_variable_writes_in_the_first_workspace() {
+        use rocket_collection::CollectionRepository as _;
+        let a = tempfile::tempdir().expect("tempdir");
+        let b = tempfile::tempdir().expect("tempdir");
+        let path = Arc::new(std::sync::Mutex::new(a.path().to_path_buf()));
+        let collections = rocket_infra::SharedPathCollectionRepo::new(Arc::clone(&path));
+        collections.create("api").expect("create in a");
+        *path.lock().expect("lock") = b.path().to_path_buf();
+        collections.create("api").expect("create in b");
+        *path.lock().expect("lock") = a.path().to_path_buf();
+
+        let result = ScriptResult {
+            collection_var_writes: vec![CollectionVarWrite {
+                key: "BASE_URL".into(),
+                value: serde_json::json!("https://a.test"),
+            }],
+            ..Default::default()
+        };
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(SwitchingExecutor {
+                path: Arc::clone(&path),
+                to: b.path().to_path_buf(),
+            }),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(&path))),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)))
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+
+        let mut input = sample_input("https://example.com", None);
+        input.collection = Some("api".into());
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let base_url = |dir: &std::path::Path| {
+            rocket_infra::FsCollectionRepo::new_standalone(dir.join("collections"))
+                .get_settings("api")
+                .expect("settings")
+                .variables
+                .iter()
+                .find(|v| v.key == "BASE_URL")
+                .map(|v| v.value.clone())
+        };
+        assert_eq!(*path.lock().expect("lock"), b.path(), "the switch happened mid-send");
+        assert_eq!(base_url(a.path()).as_deref(), Some("https://a.test"));
+        assert_eq!(base_url(b.path()), None, "b's collection must be untouched");
     }
 
     #[test]

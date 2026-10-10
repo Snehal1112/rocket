@@ -378,6 +378,15 @@ pub trait CollectionRepository: Send + Sync {
             "saving request scripts is not supported by this repository".into(),
         ))
     }
+
+    /// A repository fixed to the workspace this one points at right now.
+    ///
+    /// A repository that follows the active workspace returns one, so a send can read and
+    /// write one workspace even if the user switches meanwhile. A repository with a fixed
+    /// location returns `None`.
+    fn pinned(&self) -> Option<Box<dyn CollectionRepository>> {
+        None
+    }
 }
 
 #[cfg(test)]

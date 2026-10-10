@@ -1046,6 +1046,18 @@ impl FlowExecutionService {
         auth_tokens: FlowAuthTokens,
         options: FlowRunOptions,
     ) -> DomainResult<FlowRunSummary> {
+        // The whole run reads and writes the workspace it started in. Its sends keep these pins.
+        exec.with_send_pins(self.run_with_options_unpinned(exec, input, auth_tokens, options))
+            .await
+    }
+
+    async fn run_with_options_unpinned(
+        &self,
+        exec: &RequestExecutionService,
+        input: RunFlowInput,
+        auth_tokens: FlowAuthTokens,
+        options: FlowRunOptions,
+    ) -> DomainResult<FlowRunSummary> {
         let FlowRunOptions { run_id, partial } = options;
         let run_id = crate::flow_run_id::choose_run_id(run_id)?;
         // Reserved before anything else, so a duplicate id is refused at once,

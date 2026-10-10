@@ -120,7 +120,7 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         let collection = self.input.collection.as_deref().ok_or_else(invalid)?;
         let tree = self
             .svc
-            .collection_repo
+            .send_collection_repo()
             .get(collection)
             .map_err(|_| invalid())?;
         let item = match find_run_target(&tree, &target) {

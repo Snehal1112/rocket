@@ -172,6 +172,11 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().collection_identity(name)
     }
 
+    fn pinned(&self) -> Option<Box<dyn CollectionRepository>> {
+        // Same per-collection locks, so pinned and unpinned writes still serialise.
+        Some(Box::new(self.repo()))
+    }
+
     fn collection_root_path(&self, name: &str) -> DomainResult<std::path::PathBuf> {
         self.repo().collection_root_path(name)
     }
@@ -370,6 +375,19 @@ mod tests {
     }
 
     // --- Runtime path switching ---
+
+    #[test]
+    fn a_pinned_repo_keeps_its_workspace_after_a_switch() {
+        let dir_a = TempDir::new().unwrap();
+        let dir_b = TempDir::new().unwrap();
+        let shared_path = Arc::new(Mutex::new(dir_a.path().to_path_buf()));
+        let repo = SharedPathCollectionRepo::new(Arc::clone(&shared_path));
+        let pinned = repo.pinned().expect("a shared repo pins");
+        *shared_path.lock().unwrap() = dir_b.path().to_path_buf();
+        pinned.create("alpha").unwrap();
+        assert!(dir_a.path().join("collections/alpha").exists());
+        assert!(!dir_b.path().join("collections/alpha").exists());
+    }
 
     #[test]
     fn switching_workspace_path_redirects_subsequent_calls() {
