@@ -988,6 +988,7 @@ pub struct FakeVaultSecretFetcher {
     get_secret_value_calls: AtomicUsize,
     delay: std::time::Duration,
     failing_ids: Vec<String>,
+    not_found_ids: Vec<String>,
 }
 
 impl FakeVaultSecretFetcher {
@@ -997,6 +998,22 @@ impl FakeVaultSecretFetcher {
             get_secret_value_calls: AtomicUsize::new(0),
             delay: std::time::Duration::ZERO,
             failing_ids: Vec::new(),
+            not_found_ids: Vec::new(),
+        })
+    }
+
+    /// A fetcher that answers `NotFound` for every id in `not_found_ids`, as it does
+    /// for a deleted connection or a secret gone from the vault.
+    pub fn with_not_found(
+        values: HashMap<String, String>,
+        not_found_ids: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            values,
+            get_secret_value_calls: AtomicUsize::new(0),
+            delay: std::time::Duration::ZERO,
+            failing_ids: Vec::new(),
+            not_found_ids,
         })
     }
 
@@ -1011,6 +1028,7 @@ impl FakeVaultSecretFetcher {
             get_secret_value_calls: AtomicUsize::new(0),
             delay,
             failing_ids,
+            not_found_ids: Vec::new(),
         })
     }
 
@@ -1043,6 +1061,9 @@ impl VaultSecretFetcher for FakeVaultSecretFetcher {
         }
         if self.failing_ids.iter().any(|id| id == secret_id) {
             return Err(DomainError::Internal("vault unreachable".to_string()));
+        }
+        if self.not_found_ids.iter().any(|id| id == secret_id) {
+            return Err(DomainError::NotFound(secret_id.to_string()));
         }
         Ok(self.values.get(secret_id).cloned())
     }

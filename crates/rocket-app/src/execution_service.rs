@@ -790,7 +790,8 @@ impl RequestExecutionService {
     ///
     /// The distinct fetches (connection id, vault name, secret id) across all the
     /// environments are collected first, and each one is fetched once, all concurrently.
-    /// An environment that cannot be read adds nothing, as in `external_secret_values`.
+    /// A missing environment (`NotFound`) adds nothing, as `resolve_external_secrets_partial` does.
+    /// Any other environment read error fails the call.
     /// Fails on the first fetch error, because text masked without that value could leak it.
     /// A deleted connection (`NotFound`) or a secret gone from the vault has no value to leak,
     /// so it is skipped. The caller bounds the whole batch with its own deadline.
@@ -803,8 +804,12 @@ impl RequestExecutionService {
         let mut seen = std::collections::HashSet::new();
         let mut fetches = Vec::new();
         for name in environment_names {
-            let Ok(env) = repo.get(name) else {
-                continue;
+            let env = match repo.get(name) {
+                Ok(env) => env,
+                // A deleted environment has no bindings to resolve.
+                Err(DomainError::NotFound(_)) => continue,
+                // Any other read error could hide a binding, so it must not be skipped.
+                Err(error) => return Err(error),
             };
             for binding in &env.external_secrets {
                 for secret_ref in &binding.secret_names {

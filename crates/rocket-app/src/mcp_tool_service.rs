@@ -897,13 +897,20 @@ mod tests {
         envs: Arc<StdMutex<StdHashMap<String, Environment>>>,
         /// When set, `list` on every handle fails.
         fail_list: Arc<std::sync::atomic::AtomicBool>,
+        /// When set, `get` on every handle fails with a non-NotFound error.
+        fail_get: Arc<std::sync::atomic::AtomicBool>,
     }
     impl FakeEnvRepoFactory {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 envs: Arc::new(StdMutex::new(StdHashMap::new())),
                 fail_list: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                fail_get: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             })
+        }
+        fn fail_get(&self) {
+            self.fail_get
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
         fn fail_list(&self) {
             self.fail_list
@@ -921,11 +928,13 @@ mod tests {
             Box::new(FakeEnvRepoHandle(
                 Arc::clone(&self.envs),
                 Arc::clone(&self.fail_list),
+                Arc::clone(&self.fail_get),
             ))
         }
     }
     struct FakeEnvRepoHandle(
         Arc<StdMutex<StdHashMap<String, Environment>>>,
+        Arc<std::sync::atomic::AtomicBool>,
         Arc<std::sync::atomic::AtomicBool>,
     );
     impl EnvironmentRepository for FakeEnvRepoHandle {
@@ -936,6 +945,9 @@ mod tests {
             Ok(self.0.lock().expect("lock").values().cloned().collect())
         }
         fn get(&self, name: &str) -> DomainResult<Environment> {
+            if self.2.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(DomainError::Internal("environment read failed".into()));
+            }
             self.0
                 .lock()
                 .expect("lock")
@@ -2701,12 +2713,21 @@ mod tests {
         secret_store: Arc<dyn rocket_environment::SecretStore>,
         fetcher: Arc<dyn rocket_environment::VaultSecretFetcher>,
     ) -> McpToolService {
-        let repo = ConfigurableCollectionRepo::new();
-        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
         let env_factory = FakeEnvRepoFactory::new();
         for env in envs {
             env_factory.with_env(env);
         }
+        vault_chip_service_with_factory(env_factory, secret_store, fetcher)
+    }
+
+    /// A service over an already filled environment factory.
+    fn vault_chip_service_with_factory(
+        env_factory: Arc<FakeEnvRepoFactory>,
+        secret_store: Arc<dyn rocket_environment::SecretStore>,
+        fetcher: Arc<dyn rocket_environment::VaultSecretFetcher>,
+    ) -> McpToolService {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
         let connection = rocket_environment::SecretManagerConnection {
             id: "c1".into(),
             label: "Test".into(),
@@ -3017,5 +3038,54 @@ mod tests {
             .expect("chip");
         assert_eq!(fetcher.call_count(), 0);
         assert!(chip.text.contains("plain body"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_skips_a_deleted_vault_binding_and_masks_the_rest() {
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::with_not_found(
+            [("id-live".to_string(), "live-vault-value-77".to_string())].into(),
+            vec!["id-gone".to_string()],
+        );
+        let mut env = Environment::new("dev");
+        env.external_secrets.push(vault_binding("gone", "id-gone"));
+        env.external_secrets.push(vault_binding("live", "id-live"));
+        let svc = vault_chip_service_with_envs(
+            vec![env],
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher,
+        );
+        let chip = svc
+            .mask_response_chip(
+                "my-api",
+                "echo.yml",
+                None,
+                &echo_response("live-vault-value-77 and plain"),
+            )
+            .await
+            .expect("a deleted connection must not refuse the chip");
+        assert!(!chip.text.contains("live-vault-value-77"), "{}", chip.text);
+        assert!(chip.text.contains("plain"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_an_environment_cannot_be_read() {
+        let env_factory = FakeEnvRepoFactory::new();
+        let mut env = Environment::new("dev");
+        env.external_secrets.push(vault_binding("prod", "id1"));
+        env_factory.with_env(env);
+        env_factory.fail_get();
+        let svc = vault_chip_service_with_factory(
+            env_factory,
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            crate::test_doubles::FakeVaultSecretFetcher::new(Default::default()),
+        );
+        let err = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response("body"))
+            .await
+            .expect_err("an unreadable environment must refuse the chip");
+        assert!(
+            err.to_string().contains("could not resolve vault secrets"),
+            "{err}"
+        );
     }
 }
