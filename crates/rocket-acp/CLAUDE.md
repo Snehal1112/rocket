@@ -65,6 +65,8 @@ cargo test -p rocket-acp -j4
   - Masking of the failed-start stderr tail (rocket-infra `acp_stderr_tail.rs`)
     is an exact-match replace. It does not cover base64, URL-encoded,
     case-changed, escape-code-split or line-wrapped forms of a secret.
+    Overlapping secrets (one value containing part of another) can also leave
+    a fragment, especially at the front of an overflowed buffer.
   - Env names compare case-insensitively (Windows semantics).
 
 ### Dependencies
