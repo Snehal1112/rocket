@@ -212,6 +212,20 @@ fn mask_call_headers(
         .collect()
 }
 
+/// The first `MAX_REJECTED_HEADERS` headers of a received call, masked, with
+/// each value cut to 1 KiB.
+fn capped_headers(
+    headers: &[(String, String)],
+    secret_values: &HashSet<String>,
+) -> Vec<FlowDebugHeader> {
+    let kept = &headers[..headers.len().min(MAX_REJECTED_HEADERS)];
+    let mut masked = mask_call_headers(kept, secret_values);
+    for header in &mut masked {
+        cap_text(&mut header.value, 1024);
+    }
+    masked
+}
+
 /// The record of an accepted callback. The call itself is the response,
 /// so a reader sees what arrived; the request side holds its method and
 /// path.
@@ -239,6 +253,9 @@ pub(crate) fn callback_exchange(
     })
 }
 
+/// The most headers a turned-down call record keeps.
+pub(crate) const MAX_REJECTED_HEADERS: usize = 32;
+
 /// The largest turned-down call body a live progress event carries, in bytes.
 pub(crate) const LIVE_REJECTED_BODY_LIMIT: usize = 2_048;
 
@@ -255,7 +272,7 @@ pub(crate) fn rejected_call(
     FlowRejectedCall {
         method: call.method.clone(),
         url: redact_url_secrets(&call_url(call), secret_values),
-        headers: mask_call_headers(&call.headers, secret_values),
+        headers: capped_headers(&call.headers, secret_values),
         body,
         body_truncated,
         reason: reason.to_string(),
@@ -731,6 +748,23 @@ mod tests {
         assert_eq!(record.body, format!(r#"{{"t":"{REDACTED}"}}"#));
         assert!(!record.body_truncated);
         assert_eq!(record.reason, "no match");
+    }
+
+    #[test]
+    fn a_rejected_call_caps_header_count_and_value_bytes() {
+        let mut call = turned_down("{}");
+        call.headers = (0..1000)
+            .map(|i| (format!("X-H-{i}"), "v".to_string()))
+            .collect();
+        call.headers.push(("X-Big".into(), "b".repeat(100_000)));
+        let record = rejected_call(&call, &secrets(&[]), EXCHANGE_BODY_LIMIT, "no match");
+        assert!(record.headers.len() <= MAX_REJECTED_HEADERS);
+        assert!(record.headers.iter().all(|h| h.value.len() <= 1024));
+
+        let mut big = turned_down("{}");
+        big.headers = vec![("X-Big".into(), "b".repeat(100_000))];
+        let record = rejected_call(&big, &secrets(&[]), EXCHANGE_BODY_LIMIT, "no match");
+        assert_eq!(record.headers[0].value.len(), 1024);
     }
 
     #[test]

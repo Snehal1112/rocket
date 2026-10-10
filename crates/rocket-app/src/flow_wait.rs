@@ -7,7 +7,9 @@ use std::time::Duration;
 use rocket_flow::FlowNode;
 use rocket_http::HttpResponse;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowWaitDetail};
+use rocket_shared::events::{
+    FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowRejectedCall, FlowWaitDetail,
+};
 use rocket_shared::types::Header;
 use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 
@@ -104,13 +106,29 @@ impl FlowExecutionService {
             last_rejected: None,
         });
 
+        // The last turned-down call not yet shown live; the ticker shows it.
+        let mut held: Option<FlowRejectedCall> = None;
+
         loop {
-            tokio::select! {
+            let call = tokio::select! {
                 biased;
                 _ = ctx.cancel.cancelled() => {
                     return Err(DomainError::Internal("cancelled".into()));
                 }
                 _ = sleep_until(deadline) => {
+                    // A call queued before the deadline still counts.
+                    while let Ok(call) = endpoint.calls.try_recv() {
+                        if let Some(done) = self
+                            .judge_call(
+                                exec, input, node, &call, accept_when, secret_values,
+                                trace_masks, logs, trace, ctx, started, deadline,
+                                &mut ignored, &mut held, exchange,
+                            )
+                            .await?
+                        {
+                            return Ok(done);
+                        }
+                    }
                     let secs = timeout_ms as f64 / 1000.0;
                     return Err(DomainError::InvalidInput(format!(
                         "no matching callback within {secs}s ({ignored} ignored)"
@@ -123,72 +141,11 @@ impl FlowExecutionService {
                             node.id
                         )));
                     };
-                    if let Some(source) = accept_when {
-                        let outcome = exec
-                            .evaluate_flow_callback_condition(
-                                &input.collection,
-                                &call,
-                                source,
-                                secret_values,
-                            )
-                            .await;
-                        logs.extend(outcome.logs);
-                        match outcome.result?.as_str() {
-                            "true" => {}
-                            "false" => {
-                                ignored += 1;
-                                // Masked once, kept whole in the trace; the live copy is cut.
-                                let record = rejected_call(
-                                    &call,
-                                    trace_masks,
-                                    EXCHANGE_BODY_LIMIT,
-                                    REJECT_REASON,
-                                );
-                                let live_record = live_rejected_call(&record);
-                                if let Some(wait) = trace.step.wait.as_mut() {
-                                    wait.ignored = ignored;
-                                    wait.last_rejected = Some(record);
-                                }
-                                // Shown at once, with a smaller body than the trace keeps.
-                                let remaining = deadline.saturating_duration_since(Instant::now());
-                                self.publish_live_progress(
-                                    ctx,
-                                    None,
-                                    None,
-                                    format!(
-                                        "waiting… {}s left · {ignored} ignored call(s)",
-                                        seconds_left(remaining)
-                                    ),
-                                    FlowLiveProgress {
-                                        remaining_ms: Some(millis(remaining)),
-                                        ignored: Some(ignored),
-                                        last_rejected: Some(live_record),
-                                        ..Default::default()
-                                    },
-                                );
-                                continue;
-                            }
-                            other => {
-                                return Err(DomainError::InvalidInput(format!(
-                                    "accept_when of node '{}' evaluated to '{other}', expected true or false",
-                                    node.id
-                                )))
-                            }
-                        }
-                    }
-                    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    *exchange = Some(crate::flow_debug::callback_exchange(
-                        &call,
-                        duration_ms,
-                        secret_values,
-                    ));
-                    return Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(
-                        callback_output(&call, duration_ms),
-                    ))));
+                    call
                 }
                 _ = ticker.tick() => {
                     let remaining = deadline.saturating_duration_since(Instant::now());
-                    // The ticker carries counts only, never a call.
+                    // The held turned-down call, if any, goes out with the counts.
                     self.publish_live_progress(
                         ctx,
                         None,
@@ -200,12 +157,128 @@ impl FlowExecutionService {
                         FlowLiveProgress {
                             remaining_ms: Some(millis(remaining)),
                             ignored: Some(ignored),
+                            last_rejected: held.take(),
                             ..Default::default()
                         },
                     );
+                    continue;
+                }
+            };
+            if let Some(done) = self
+                .judge_call(
+                    exec,
+                    input,
+                    node,
+                    &call,
+                    accept_when,
+                    secret_values,
+                    trace_masks,
+                    logs,
+                    trace,
+                    ctx,
+                    started,
+                    deadline,
+                    &mut ignored,
+                    &mut held,
+                    exchange,
+                )
+                .await?
+            {
+                return Ok(done);
+            }
+        }
+    }
+
+    /// Judges one received call. Returns the node's result when the call is
+    /// accepted, or `None` after turning it down. The first turned-down call
+    /// is shown live at once; later ones are held for the ticker.
+    #[allow(clippy::too_many_arguments)]
+    async fn judge_call(
+        &self,
+        exec: &RequestExecutionService,
+        input: &RunFlowInput,
+        node: &FlowNode,
+        call: &ReceivedCall,
+        accept_when: Option<&str>,
+        secret_values: &HashSet<String>,
+        trace_masks: &HashSet<String>,
+        logs: &mut Vec<FlowLogEntry>,
+        trace: &mut NodeTrace,
+        ctx: &mut NodeRunContext,
+        started: Instant,
+        deadline: Instant,
+        ignored: &mut u32,
+        held: &mut Option<FlowRejectedCall>,
+        exchange: &mut Option<FlowDebugRequest>,
+    ) -> DomainResult<Option<ExecutedNode>> {
+        if let Some(source) = accept_when {
+            let eval = exec.evaluate_flow_callback_condition(
+                &input.collection,
+                call,
+                source,
+                secret_values,
+            );
+            // A stop must not wait for a slow script.
+            let outcome = tokio::select! {
+                biased;
+                _ = ctx.cancel.cancelled() => {
+                    return Err(DomainError::Internal("cancelled".into()));
+                }
+                outcome = eval => outcome,
+            };
+            logs.extend(outcome.logs);
+            match outcome.result?.as_str() {
+                "true" => {}
+                "false" => {
+                    *ignored += 1;
+                    // Masked once, kept whole in the trace; the live copy is cut.
+                    let record =
+                        rejected_call(call, trace_masks, EXCHANGE_BODY_LIMIT, REJECT_REASON);
+                    let live_record = live_rejected_call(&record);
+                    if let Some(wait) = trace.step.wait.as_mut() {
+                        wait.ignored = *ignored;
+                        wait.last_rejected = Some(record);
+                    }
+                    if *ignored == 1 {
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        self.publish_live_progress(
+                            ctx,
+                            None,
+                            None,
+                            format!(
+                                "waiting… {}s left · {} ignored call(s)",
+                                seconds_left(remaining),
+                                *ignored
+                            ),
+                            FlowLiveProgress {
+                                remaining_ms: Some(millis(remaining)),
+                                ignored: Some(*ignored),
+                                last_rejected: Some(live_record),
+                                ..Default::default()
+                            },
+                        );
+                    } else {
+                        *held = Some(live_record);
+                    }
+                    return Ok(None);
+                }
+                other => {
+                    return Err(DomainError::InvalidInput(format!(
+                        "accept_when of node '{}' evaluated to '{other}', expected true or false",
+                        node.id
+                    )))
                 }
             }
         }
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        *exchange = Some(crate::flow_debug::callback_exchange(
+            call,
+            duration_ms,
+            secret_values,
+        ));
+        Ok(Some(ExecutedNode::plain(CapturedOutput::Request(
+            Box::new(callback_output(call, duration_ms)),
+        ))))
     }
 }
 

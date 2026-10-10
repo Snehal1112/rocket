@@ -8277,6 +8277,46 @@ mod tests {
             .all(|l| l.ignored.is_some() && l.remaining_ms.is_some()));
     }
 
+    #[tokio::test]
+    async fn a_burst_of_turned_down_calls_is_batched_into_few_live_events() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        for _ in 0..50 {
+            fake.queue_on_open(event_call("payment.pending"));
+        }
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(
+            &executor,
+            scripted(vec![(
+                "const request",
+                Scripted::Value(serde_json::json!(false)),
+            )]),
+        );
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 1000, Some("request.body.ok"))),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+
+        let summary = service.run(&exec, run_input("cb")).await.expect("run");
+
+        let with_call = publisher
+            .events()
+            .into_iter()
+            .filter(|e| {
+                matches!(e, DomainEvent::FlowStepProgress { node_id, live: Some(l), .. }
+                    if node_id == "w" && l.last_rejected.is_some())
+            })
+            .count();
+        assert!(with_call <= 3, "got {with_call} live events with a call");
+        let wait = step_of(&summary, "w")
+            .trace
+            .clone()
+            .and_then(|t| t.wait)
+            .expect("wait detail");
+        assert_eq!(wait.ignored, 50, "the trace still counts every call");
+    }
+
     fn echoing_call(url: &str) -> crate::callback_listener::ReceivedCall {
         crate::callback_listener::ReceivedCall {
             method: "POST".to_string(),
@@ -8488,6 +8528,84 @@ mod tests {
         assert_eq!(step.error.as_deref(), Some("cancelled"));
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
         assert!(fake.is_closed(0), "the endpoint closes after a cancel");
+    }
+
+    /// Script engine whose accept_when check never finishes.
+    struct BlockingAcceptEngine;
+    #[async_trait]
+    impl ScriptEngine for BlockingAcceptEngine {
+        async fn execute(&self, ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            if ctx.code.contains("const request") {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+            let mut vars = HashMap::new();
+            vars.insert("__jsonq_result__".to_string(), serde_json::json!("x"));
+            Ok(ScriptResult {
+                runtime_vars: vars,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_during_accept_when_ends_the_run_promptly() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 60_000, Some("request.body.ok"))),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, Box::new(BlockingAcceptEngine));
+
+        let started = std::time::Instant::now();
+        let (summary, ()) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            fake.sender(0)
+                .send(event_call("payment.completed"))
+                .await
+                .expect("send");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let run_id = publisher
+                .events()
+                .into_iter()
+                .find_map(|e| match e {
+                    DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id),
+                    _ => None,
+                })
+                .expect("the run started");
+            service.cancel(&run_id);
+        });
+        let summary = summary.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        let step = step_of(&summary, "w");
+        assert_eq!(step.error.as_deref(), Some("cancelled"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn wait_accepts_a_call_queued_when_the_deadline_has_passed() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+        let flow = register_then_wait(wait_node_with("w", 1000, None));
+        let service = service_with_listener(flow, &fake);
+
+        let (summary, ()) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            // Block the runtime past the 1 s deadline, then queue the call, so
+            // the deadline and the call are both ready on the next poll.
+            std::thread::sleep(std::time::Duration::from_millis(1300));
+            fake.sender(0)
+                .try_send(event_call("payment.completed"))
+                .expect("send");
+        });
+        let summary = summary.expect("run");
+
+        assert_eq!(status_of(&summary, "w"), FlowNodeStatus::Success);
     }
 
     #[tokio::test]
