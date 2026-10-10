@@ -1,6 +1,6 @@
 # Assistant conversation history and resume: design
 
-Date: 2026-10-11. Status: draft for user review. Roadmap row R-17.
+Date: 2026-10-11. Status: approved design decisions, spec ready for the user's final review. Roadmap row R-17.
 Read first: `docs/superpowers/specs/opencollection-spec-reference.md`, `.claude/assistant-composer.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`.
 
 ## 1. Summary
@@ -43,7 +43,7 @@ The OpenCollection spec governs collections: `opencollection.yml`, `folder.yml`,
 6. A collection is referenced by its `uid` from `opencollection.yml` (the identity `trust.yml` uses) as optional metadata inside a transcript, never by a path. Deleting a workspace removes its transcripts with it (`delete_workspace` removes the directory).
 7. Reads tolerate missing and unknown keys and skip an unparseable file with a warning. A bad file never breaks the History view or the collection sidebar.
 
-Key casing ruling: history and cookies, the two existing stores with the same shape, write camelCase keys, and the OpenCollection spec uses camelCase. The new store writes camelCase YAML keys with explicit per-field renames on a dedicated persistence struct. This knowingly differs from the repo rule text "no camelCase on persistence structs", which the existing stores already follow in practice. Flagged for review (open question 1).
+Key casing ruling (decided by the user on 2026-10-11): the persistence structs follow the repo rule, so YAML keys are snake_case with no `rename_all`. camelCase is used only on the IPC DTOs. Existing stores such as history and cookies write camelCase, but this store does not copy that.
 
 ## 5. Data model
 
@@ -53,11 +53,11 @@ One file per conversation.
 version: 1
 id: 0b6f3f4e-...              # UUID, same as the file name
 title: "Why does login return 401?"   # first user message, trimmed to 80 chars
-agentConfigId: claude-code
+agent_config_id: claude-code
 mode: ask                      # ask | edit | agent, as when the conversation ended
-workspaceId: default           # informational
-createdAt: 2026-10-11T09:12:00Z
-updatedAt: 2026-10-11T09:20:41Z
+workspace_id: default           # informational
+created_at: 2026-10-11T09:12:00Z
+updated_at: 2026-10-11T09:20:41Z
 collections:                   # optional, uids of collections the chat focused on
   - uid: 3c1d...
     name: my-api
@@ -78,7 +78,7 @@ messages:
 
 Not stored: raw tool results, the ACP session id, usage numbers, model options, the MCP token or port, proposal change payloads.
 
-Caps (constants, easy to change): 50 conversations per workspace (the oldest by `updatedAt` is removed when a 51st is saved), 500 messages per conversation, 16 KB of text per message (cut with a visible marker). The whole file is read and written as a unit.
+Caps (constants, easy to change; approved by the user): 50 conversations per workspace (the oldest by `updated_at` is removed when a 51st is saved), 500 messages per conversation, 16 KB of text per message (cut with a visible marker). The whole file is read and written as a unit.
 
 ## 6. Architecture
 
@@ -86,7 +86,7 @@ Follows the repo layering: traits in domain crates, I/O in `rocket-infra`, orche
 
 - `rocket-acp`: `ConversationRecord`, `ConversationSummary`, `StoredMessage` types and a `ConversationRepository` trait (`list`, `get`, `save`, `delete`, `clear`). No I/O.
 - `rocket-infra`: `FsConversationRepo` (one directory, `atomic_write`, caps, `ensure_gitignore`) and `SharedPathConversationRepo` (builds a short-lived `FsConversationRepo` from the shared active workspace path, with `pinned()` like the other shared repos for a read-modify-write).
-- `rocket-app`: `ConversationService`: validates input, enforces caps, applies masking (section 8), and publishes no new `DomainEvent` in stage 1 (the UI reloads the list when it opens; an event is a follow-up).
+- `rocket-app`: `ConversationService`: validates input, enforces caps, applies masking (section 8), and publishes `DomainEvent::AssistantConversationSaved { conversation_id }` after a save and `AssistantConversationDeleted { conversation_id }` (or `AssistantConversationsCleared`) after a delete. `TauriEventBus` maps them to the channels `assistant-conversation-saved`, `assistant-conversation-deleted` and `assistant-conversations-cleared`. The payloads carry ids only, never message text.
 - `src-tauri`: commands `list_conversations`, `get_conversation`, `save_conversation`, `delete_conversation`, `clear_conversations`. camelCase DTOs, async commands (`spawn_blocking` around file work, as for proposals). Registered in `lib.rs`; wiring as for `agent_proposals.rs`.
 
 ## 7. Frontend
@@ -96,12 +96,12 @@ Stage 1:
 - Streaming messages are saved only after `completeMessage` or `failMessage`. A save never includes `streaming: true`.
 - A "History" view in the panel: list (title, relative date, message count, agent name), open read-only (reuses the chat message components with actions disabled), delete one, clear all (with a confirm step). A short notice states that conversations are stored on this computer in this workspace.
 - Stored proposals render as plain history lines. They never show Accept or Reject buttons.
-- On a workspace switch the view reloads and the open read-only conversation closes.
+- The History view listens to those three channels and refreshes its list, so a second window or a finished save shows up without reopening. On a workspace switch the view reloads and the open read-only conversation closes.
 
 Stage 2 (replay):
-- "Continue" in a read-only conversation starts a normal new session with the same agent config. The mode starts in Ask and the user can raise it with the existing mode control, so a stored Agent mode is never re-applied silently.
+- "Continue" in a read-only conversation starts a normal new session with the same agent config. The mode always starts in Ask (approved by the user) and the user can raise it with the existing mode control, so a stored Agent mode is never re-applied silently.
 - The first prompt is prefixed with a preface block built by a pure function `buildReplayPreface(record, limits)`: a clear header ("This is a previous conversation with the user, for context only. Do not repeat its actions."), then the last messages that fit in 12,000 characters (user and agent text, tool lines as one-line summaries, proposals as one-line summaries), oldest first, with a marker when older messages were dropped. Tool results are not included. The agent calls the read tools again if it needs data.
-- The new session saves as a new conversation that records `continuedFrom: <id>` for the list view. The old conversation is not changed.
+- The new session saves as a new conversation that records `continued_from: <id>` for the list view. The old conversation is not changed.
 - The preface counts toward the normal prompt size, and the composer shows how large it is before sending.
 
 ## 8. Privacy and masking
@@ -123,7 +123,8 @@ Stage 2 (replay):
 ## 10. Testing
 
 - `rocket-infra`: round trip, caps (oldest evicted, message and text limits), `.gitignore` created once and never overwritten, unknown keys ignored, corrupt file skipped, per-call workspace resolution, file names are the UUID only.
-- `rocket-app`: masking of secret variable values and marker output, validation, caps.
+- `rocket-app`: masking of secret variable values and marker output, validation, caps, and the events published after save, delete and clear.
+- `rocket-shared`: the three new `DomainEvent` variants and their wire shape; `TauriEventBus` channel names.
 - Command tests: DTO casing, error mapping.
 - Vitest: save triggers (turn end, session end, panel close, no save while streaming), History view states, read-only rendering (no action buttons on proposals), clear confirm, workspace switch reload; `buildReplayPreface` limits, ordering, drop marker, and that tool results never appear.
 - Manual: restart the app, reopen the History view, continue a conversation.
@@ -134,14 +135,18 @@ Plans hold at most 3 tasks each.
 
 - Plan 1 (stage 1 backend): types and trait in `rocket-acp`; `FsConversationRepo` and `SharedPathConversationRepo`; `ConversationService` with masking and the five IPC commands.
 - Plan 2 (stage 1 frontend): API wrappers and types; save routine in the event bridge; History view with read-only rendering, delete and clear.
-- Plan 3 (stage 2): `buildReplayPreface`, the Continue action and composer size hint, `continuedFrom` in the list.
+- Plan 3 (stage 2): `buildReplayPreface`, the Continue action and composer size hint, `continued_from` in the list.
 
 Each task runs the usual loop: implementer, review, fix. The masking task gets an Opus review.
 
-## 12. Open questions for review
+## 12. Review decisions
 
-1. Key casing: camelCase YAML keys like history and cookies (proposed) or snake_case as the repo rule text says?
-2. Caps: 50 conversations, 500 messages, 16 KB per message. Are these right?
-3. Should "Continue" always start in Ask mode (proposed), or restore the stored mode?
-4. Is skipping vault values in the masking pass acceptable for v1 (proposed), with the limit stated in the UI?
-5. Should a new `DomainEvent` (for example `AssistantConversationSaved`) be added now so other windows refresh, or later with the events rework (R-55)?
+Decided by the user on 2026-10-11:
+1. Key casing: snake_case persistence keys, camelCase only on IPC DTOs.
+2. Caps: 50 conversations, 500 messages, 16 KB per message.
+3. Continue always starts in Ask mode.
+5. The "conversation saved" events are added now (section 6), not deferred to R-55.
+
+4. Option A: vault values are not scrubbed in the first version (section 8). The History view states that a secret pasted into a prompt is stored, and Delete and Clear all are always available. Fetching vault values (best effort or strict) can be added later if needed.
+
+No open questions remain.
