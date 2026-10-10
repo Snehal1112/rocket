@@ -10,8 +10,9 @@ interface PendingSave {
 
 const pending = new Map<string, PendingSave>();
 const inFlight = new Set<Promise<boolean>>();
-// True while a workspace switch is in progress. A save then could land in either workspace.
-let suspended = false;
+// Above zero while a workspace change is in progress. A save then could land in either
+// workspace. A counter, so one change ending never re-enables saves for another.
+let suspended = 0;
 
 const activeWorkspaceId = () => useWorkspaceStore.getState().activeWorkspaceId;
 
@@ -34,7 +35,7 @@ async function runSave(
   request: RequestState,
   workspaceId: string,
 ): Promise<boolean> {
-  if (suspended || activeWorkspaceId() !== workspaceId) {
+  if (suspended > 0 || activeWorkspaceId() !== workspaceId) {
     console.warn('[AutoSave] Dropped: the workspace changed since the edit.');
     return false;
   }
@@ -107,11 +108,16 @@ export async function flushAutoSaves(dirtyTabs: RequestTab[] = []): Promise<numb
   return results.filter((ok) => !ok).length;
 }
 
-/** Drops every autosave that fires until `resumeAutoSaves` is called. */
+/** Waits for the saves that are already running, without starting pending ones. */
+export async function waitForAutoSaves(): Promise<void> {
+  await Promise.all([...inFlight]);
+}
+
+/** Drops every autosave that fires until each call has its `resumeAutoSaves`. */
 export function suspendAutoSaves() {
-  suspended = true;
+  suspended += 1;
 }
 
 export function resumeAutoSaves() {
-  suspended = false;
+  suspended = Math.max(0, suspended - 1);
 }

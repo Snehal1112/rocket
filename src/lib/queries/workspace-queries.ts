@@ -2,9 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { clearPromptHistory } from '@/lib/assistant/prompt-history';
 import {
-  closeWorkspace,
   createWorkspace,
-  deleteWorkspace,
   getActiveWorkspace,
   getMultiWorkspaceMode,
   getWorkspaceConfig,
@@ -18,7 +16,11 @@ import {
   updateRequestGuardPolicy,
   updateWorkspaceDescription,
 } from '@/lib/tauri-api';
-import { switchWorkspaceSafely } from '@/lib/workspace-switch';
+import {
+  closeWorkspaceSafely,
+  deleteWorkspaceSafely,
+  switchWorkspaceSafely,
+} from '@/lib/workspace-switch';
 
 export const workspaceKeys = {
   all: ['workspaces'] as const,
@@ -90,15 +92,19 @@ export function useRenameWorkspace() {
 export function useCloseWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => closeWorkspace(id),
+    // Closing the active workspace activates another one, like a switch.
+    mutationFn: (id: string) => closeWorkspaceSafely(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: workspaceKeys.all }),
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
   });
 }
 
 export function useDeleteWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteWorkspace(id),
+    mutationFn: (id: string) => deleteWorkspaceSafely(id),
     onSuccess: (_data, id) => {
       // The assistant's prompts for a deleted workspace are not kept.
       clearPromptHistory(id);

@@ -86,12 +86,51 @@ pub fn switch_workspace(
     flow_exec.clear_run_cache();
     // Restart the file watcher on the new workspace's collections directory so
     // filesystem changes in the new workspace trigger sidebar refreshes.
-    let new_collections_dir = workspace.path.join("collections");
-    std::fs::create_dir_all(&new_collections_dir).ok();
+    restart_watcher(&watcher, &workspace.path, app);
+    workspace.try_into()
+}
+
+/// Points the file watcher at `workspace`'s collections directory.
+fn restart_watcher(
+    watcher: &NotifyFileWatcher,
+    workspace: &std::path::Path,
+    app: tauri::AppHandle,
+) {
+    let collections_dir = workspace.join("collections");
+    std::fs::create_dir_all(&collections_dir).ok();
     watcher.stop();
     let publisher = Arc::new(crate::tauri_event_bus::TauriEventBus::new(app));
-    let _ = watcher.start(new_collections_dir, publisher);
-    workspace.try_into()
+    let _ = watcher.start(collections_dir, publisher);
+}
+
+/// Runs a close or delete and moves the file watcher when it changed the active workspace.
+fn remove_workspace(
+    remove: impl FnOnce(&WorkspaceService) -> Result<(), DomainError>,
+    svc: &Mutex<WorkspaceService>,
+    active: &Mutex<PathBuf>,
+    watcher: &NotifyFileWatcher,
+    flow_exec: &FlowExecutionService,
+    app: tauri::AppHandle,
+) -> Result<(), DomainError> {
+    let read_active = || {
+        active
+            .lock()
+            .map(|p| p.clone())
+            .map_err(|_| DomainError::Internal("workspace path lock poisoned".into()))
+    };
+    let before = read_active()?;
+    remove(
+        &*svc
+            .lock()
+            .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?,
+    )?;
+    // The active workspace may have changed, and cached runs belong to one workspace.
+    flow_exec.clear_run_cache();
+    let after = read_active()?;
+    if after != before {
+        restart_watcher(watcher, &after, app);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,28 +148,24 @@ pub fn rename_workspace(
 pub fn close_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
+    active: State<'_, Arc<Mutex<PathBuf>>>,
+    watcher: State<'_, NotifyFileWatcher>,
     flow_exec: State<'_, FlowExecutionService>,
+    app: tauri::AppHandle,
 ) -> Result<(), DomainError> {
-    svc.lock()
-        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
-        .close(&id)?;
-    // The active workspace may have changed, and cached runs belong to one workspace.
-    flow_exec.clear_run_cache();
-    Ok(())
+    remove_workspace(|s| s.close(&id), &svc, &active, &watcher, &flow_exec, app)
 }
 
 #[tauri::command]
 pub fn delete_workspace(
     id: String,
     svc: State<'_, Mutex<WorkspaceService>>,
+    active: State<'_, Arc<Mutex<PathBuf>>>,
+    watcher: State<'_, NotifyFileWatcher>,
     flow_exec: State<'_, FlowExecutionService>,
+    app: tauri::AppHandle,
 ) -> Result<(), DomainError> {
-    svc.lock()
-        .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
-        .delete(&id)?;
-    // The active workspace may have changed, and cached runs belong to one workspace.
-    flow_exec.clear_run_cache();
-    Ok(())
+    remove_workspace(|s| s.delete(&id), &svc, &active, &watcher, &flow_exec, app)
 }
 
 #[tauri::command]

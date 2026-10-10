@@ -6,7 +6,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_workspace::{
     RepositoryId, RepositoryPathResolver, RepositorySelector, ResolvedRepository, Workspace,
-    WorkspaceConfig, WorkspaceConfigRepository, WorkspaceRepository,
+    WorkspaceConfig, WorkspaceConfigRepository, WorkspaceRegistry, WorkspaceRepository,
 };
 
 pub struct WorkspaceService {
@@ -183,15 +183,11 @@ impl WorkspaceService {
             ));
         }
         registry.workspaces.retain(|w| w.id != id);
-        if registry.active_workspace_id == id {
-            registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock().map_err(|_| {
-                DomainError::Internal("active workspace path lock poisoned".into())
-            })? = registry.workspaces[0].path.clone();
-        }
+        let new_active = self.repoint_if_active(&mut registry, id)?;
         self.repo.save(&registry)?;
         self.publisher
             .publish(DomainEvent::WorkspaceClosed { id: id.to_string() });
+        self.publish_switched(new_active.as_ref());
         Ok(())
     }
 
@@ -396,16 +392,46 @@ impl WorkspaceService {
             })?;
         }
         registry.workspaces.retain(|w| w.id != id);
-        if registry.active_workspace_id == id {
-            registry.active_workspace_id = registry.workspaces[0].id.clone();
-            *self.active_path.lock().map_err(|_| {
-                DomainError::Internal("active workspace path lock poisoned".into())
-            })? = registry.workspaces[0].path.clone();
-        }
+        let new_active = self.repoint_if_active(&mut registry, id)?;
         self.repo.save(&registry)?;
         self.publisher
             .publish(DomainEvent::WorkspaceDeleted { id: id.to_string() });
+        self.publish_switched(new_active.as_ref());
         Ok(())
+    }
+
+    /// Makes the first remaining workspace active when `removed` was the active one, and
+    /// returns it. `None` means the active workspace did not change.
+    fn repoint_if_active(
+        &self,
+        registry: &mut WorkspaceRegistry,
+        removed: &str,
+    ) -> DomainResult<Option<Workspace>> {
+        if registry.active_workspace_id != removed {
+            return Ok(None);
+        }
+        let next = registry
+            .workspaces
+            .first()
+            .cloned()
+            .ok_or_else(|| DomainError::InvalidInput("No workspace left to activate".into()))?;
+        registry.active_workspace_id = next.id.clone();
+        *self.active_path.lock().map_err(|_| {
+            DomainError::Internal("active workspace path lock poisoned".into())
+        })? = next.path.clone();
+        Ok(Some(next))
+    }
+
+    /// Tells listeners that another workspace is active after a close or delete, the same
+    /// event a switch sends, so they reload exactly as they do for a switch.
+    fn publish_switched(&self, workspace: Option<&Workspace>) {
+        if let Some(workspace) = workspace {
+            self.publisher.publish(DomainEvent::WorkspaceSwitched {
+                id: workspace.id.clone(),
+                name: workspace.name.clone(),
+                path: workspace.path.to_string_lossy().to_string(),
+            });
+        }
     }
 }
 
@@ -691,6 +717,61 @@ mod tests {
         svc.switch(&ws.id).unwrap();
         svc.close(&ws.id).unwrap();
         assert_eq!(svc.get_active().unwrap().id, "default");
+    }
+
+    /// Records the names of published events.
+    #[derive(Clone, Default)]
+    struct EventNames(Arc<Mutex<Vec<String>>>);
+    impl EventPublisher for EventNames {
+        fn publish(&self, event: DomainEvent) {
+            let name = match event {
+                DomainEvent::WorkspaceSwitched { id, .. } => format!("switched:{id}"),
+                DomainEvent::WorkspaceClosed { id } => format!("closed:{id}"),
+                DomainEvent::WorkspaceDeleted { id } => format!("deleted:{id}"),
+                _ => return,
+            };
+            self.0.lock().expect("lock").push(name);
+        }
+    }
+
+    fn service_with_events(tmp: &TempDir) -> (WorkspaceService, EventNames) {
+        let (repo, config_repo, active_path) = service_dependencies(tmp);
+        let events = EventNames::default();
+        let svc =
+            WorkspaceService::new(repo, config_repo, Box::new(events.clone()), active_path);
+        (svc, events)
+    }
+
+    #[test]
+    fn closing_or_deleting_the_active_workspace_publishes_a_switch() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let closing = svc.create("Closing", tmp.path().join("closing")).unwrap();
+        let deleting = svc.create("Deleting", tmp.path().join("deleting")).unwrap();
+        svc.switch(&closing.id).unwrap();
+        svc.close(&closing.id).unwrap();
+        svc.switch(&deleting.id).unwrap();
+        svc.delete(&deleting.id).unwrap();
+        assert_eq!(
+            *events.0.lock().unwrap(),
+            [
+                format!("switched:{}", closing.id),
+                format!("closed:{}", closing.id),
+                "switched:default".to_string(),
+                format!("switched:{}", deleting.id),
+                format!("deleted:{}", deleting.id),
+                "switched:default".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn closing_another_workspace_publishes_no_switch() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let other = svc.create("Other", tmp.path().join("other")).unwrap();
+        svc.close(&other.id).unwrap();
+        assert_eq!(*events.0.lock().unwrap(), [format!("closed:{}", other.id)]);
     }
 
     #[test]

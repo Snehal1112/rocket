@@ -73,6 +73,8 @@ export function WorkspaceSwitcher() {
     <div key={ws.id} className='flex items-center group'>
       <DropdownMenuItem
         className='flex-1 gap-2'
+        // One workspace change at a time.
+        disabled={switchWorkspaceMutation.isPending}
         onSelect={() => {
           if (ws.id !== activeId) switchWorkspaceMutation.mutate(ws.id);
         }}
