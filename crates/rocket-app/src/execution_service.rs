@@ -27,7 +27,12 @@ use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam}
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+pub(crate) mod runtime_fill;
 pub mod websocket_resolution;
+use self::runtime_fill::{
+    allow_new_names, fill_names, fill_pairs, FieldTemplate, RequestTemplates,
+};
+use std::cell::RefCell;
 
 #[cfg(test)]
 mod folder_chain_e2e_tests;
@@ -299,6 +304,27 @@ fn hold_back_vault_writes(
         .collect()
 }
 
+/// The first resolution of a request, with the templates the runtime pass needs later.
+struct ResolvedParts {
+    request: HttpRequest,
+    templates: RequestTemplates,
+}
+
+/// Path parameters with the value `value` gives each template.
+fn path_param_values(
+    templates: &[(String, FieldTemplate)],
+    value: impl Fn(&FieldTemplate) -> String,
+) -> Vec<rocket_shared::types::PathParam> {
+    templates
+        .iter()
+        .map(|(name, template)| rocket_shared::types::PathParam {
+            name: name.clone(),
+            value: value(template),
+            description: None,
+        })
+        .collect()
+}
+
 /// Mutable state threaded through the phases of one request execution.
 ///
 /// `RequestExecutionService::execute()` and `CollectionRunnerService` both drive
@@ -339,12 +365,11 @@ pub(crate) struct PhaseState {
     /// Request paths of this run and the runs that started it, outermost first.
     /// `rok.runRequest` uses it to stop recursion.
     pub run_chain: Vec<String>,
-    /// Path parameters whose value still held a `{{placeholder}}` after the first resolution.
-    /// Their encoded form is in the URL, so `resolve_runtime_placeholders` finds them there.
-    pub pending_path_params: Vec<rocket_shared::types::PathParam>,
-    /// The body was GraphQL JSON and no script replaced it. Placeholders in it are then
-    /// JSON-escaped, as in the first resolution.
-    pub graphql_body: bool,
+    /// Each request field as the first resolution saw it, for `resolve_runtime_placeholders`.
+    pub templates: RequestTemplates,
+    /// Names a pre-request script added in text it wrote (URL, header, body). Script text is
+    /// filled only for these and the names the first resolution could not resolve.
+    pub script_names: std::collections::HashSet<String>,
 }
 
 impl PhaseState {
@@ -1014,17 +1039,17 @@ impl RequestExecutionService {
         folders: &[FolderSettings],
     ) -> DomainResult<HttpRequest> {
         self.resolve_request_parts(input, external_secrets, folders)
-            .map(|(request, _)| request)
+            .map(|parts| parts.request)
     }
 
-    /// `resolve_request_with_chain`, plus the path parameters with their values resolved. The
-    /// script phases keep the ones that still hold a placeholder for `resolve_runtime_placeholders`.
+    /// `resolve_request_with_chain`, plus the field templates `resolve_runtime_placeholders`
+    /// renders again after the pre-request scripts.
     fn resolve_request_parts(
         &self,
         input: &ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
         folders: &[FolderSettings],
-    ) -> DomainResult<(HttpRequest, Vec<rocket_shared::types::PathParam>)> {
+    ) -> DomainResult<ResolvedParts> {
         // Build variable map: global_env < collection < env < folder < request.
         let mut vars = self.build_variable_context(
             input.global_env_name.as_deref(),
@@ -1043,40 +1068,61 @@ impl RequestExecutionService {
             &input.headers,
         );
 
+        // Each field is recorded as a template, so the pass after the pre-request scripts can
+        // put runtime values into it without reading a filled-in value again.
+        let unresolved = RefCell::new(std::collections::HashSet::new());
+        let rec = |text: &str, json: bool| -> FieldTemplate {
+            FieldTemplate::record(text, json, &vars, &mut unresolved.borrow_mut())
+        };
+
         // Resolve {{placeholders}} in auth, URL and headers.
-        let effective_auth = resolve_auth(effective_auth, &vars);
-        let resolved_url = resolve(&input.url, &vars).output;
+        let auth_templates = RefCell::new(Vec::new());
+        let effective_auth = map_auth_fields(effective_auth, |s: String| {
+            let template = rec(&s, false);
+            let output = template.output.clone();
+            auth_templates.borrow_mut().push(template);
+            output
+        });
+        let url_template = rec(&input.url, false);
         // Path parameter values may hold {{placeholders}}, so they resolve before they are
         // substituted. The substitution runs on the resolved URL, so a placeholder in the URL
         // itself never swallows a parameter.
-        let resolved_path_params: Vec<rocket_shared::types::PathParam> = input
+        let path_templates: Vec<(String, FieldTemplate)> = input
             .path_params
             .iter()
-            .map(|p| rocket_shared::types::PathParam {
-                name: p.name.clone(),
-                value: resolve(&p.value, &vars).output,
-                description: None,
-            })
+            .map(|p| (p.name.clone(), rec(&p.value, false)))
             .collect();
+        let resolved_path_params = path_param_values(&path_templates, |t| t.output.clone());
         let resolved_url =
-            rocket_http::substitute_path_params(&resolved_url, &resolved_path_params);
+            rocket_http::substitute_path_params(&url_template.output, &resolved_path_params);
         // Query keys and values resolve like headers do, so a runner step or a flow node sends
         // the same query string as the single send.
+        let query_templates: Vec<(FieldTemplate, FieldTemplate)> = input
+            .query_params
+            .iter()
+            .map(|q| (rec(&q.key, false), rec(&q.value, false)))
+            .collect();
         let resolved_query_params: Vec<QueryParam> = input
             .query_params
             .iter()
-            .map(|q| QueryParam {
-                key: resolve(&q.key, &vars).output,
-                value: resolve(&q.value, &vars).output,
+            .zip(&query_templates)
+            .map(|(q, (k, v))| QueryParam {
+                key: k.output.clone(),
+                value: v.output.clone(),
                 enabled: q.enabled,
                 description: q.description.clone(),
             })
             .collect();
+        let header_templates: Vec<(FieldTemplate, FieldTemplate)> = effective_headers
+            .iter()
+            .map(|h| (rec(&h.key, false), rec(&h.value, false)))
+            .collect();
         let resolved_headers: Vec<Header> = effective_headers
             .iter()
-            .map(|h| Header {
-                key: resolve(&h.key, &vars).output,
-                value: resolve(&h.value, &vars).output,
+            .zip(&header_templates)
+            .map(|(h, (k, v))| Header {
+                key: k.output.clone(),
+                value: v.output.clone(),
                 enabled: h.enabled,
                 description: None,
             })
@@ -1085,13 +1131,13 @@ impl RequestExecutionService {
         // Resolve {{placeholders}} in the body: raw `content` for text-like modes,
         // and each form-data entry's `value` for multipart. Keys and file paths
         // are left untouched.
+        let mut body_template = None;
+        let mut form_templates = Vec::new();
         let resolved_body = input.body.clone().map(|mut body| {
             if let Some(content) = &body.content {
-                body.content = Some(if body.mode == BodyMode::GraphQl {
-                    crate::graphql_request::resolve_json_text(content, |p| resolve(p, &vars).output)
-                } else {
-                    resolve(content, &vars).output
-                });
+                let template = rec(content, body.mode == BodyMode::GraphQl);
+                body.content = Some(template.output.clone());
+                body_template = Some(template);
             }
             // Past resolution it is plain JSON for the rest of the pipeline.
             if body.mode == BodyMode::GraphQl {
@@ -1103,7 +1149,9 @@ impl RequestExecutionService {
                         .iter()
                         .map(|entry| {
                             let mut entry = entry.clone();
-                            entry.value = resolve(&entry.value, &vars).output;
+                            let template = rec(&entry.value, false);
+                            entry.value = template.output.clone();
+                            form_templates.push(template);
                             entry
                         })
                         .collect(),
@@ -1131,7 +1179,18 @@ impl RequestExecutionService {
             auth: effective_auth,
             options,
         };
-        Ok((request, resolved_path_params))
+        let templates = RequestTemplates {
+            url_output: request.url.clone(),
+            url: url_template,
+            path_params: path_templates,
+            query: query_templates,
+            headers: header_templates,
+            body: body_template,
+            form: form_templates,
+            auth: auth_templates.into_inner(),
+            unresolved: unresolved.into_inner(),
+        };
+        Ok(ResolvedParts { request, templates })
     }
 
     /// Returns the folder of `collection`, when the wiring knows where collections live.
@@ -1726,12 +1785,10 @@ impl RequestExecutionService {
         // with an error that names the folder.
         let folder_chain =
             self.folder_chain(input.collection.as_deref(), input.request_path.as_deref())?;
-        let (http_request, resolved_path_params) =
-            self.resolve_request_parts(input, external_secrets, &folder_chain)?;
-        let pending_path_params = resolved_path_params
-            .into_iter()
-            .filter(|p| !p.name.is_empty() && p.value.contains("{{"))
-            .collect();
+        let ResolvedParts {
+            request: http_request,
+            templates,
+        } = self.resolve_request_parts(input, external_secrets, &folder_chain)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
         // request carries a real credential (not None / Inherit). This captures
@@ -1832,11 +1889,8 @@ impl RequestExecutionService {
                 .map(run_request::normalize_run_path)
                 .into_iter()
                 .collect(),
-            pending_path_params,
-            graphql_body: input
-                .body
-                .as_ref()
-                .is_some_and(|b| b.mode == BodyMode::GraphQl),
+            templates,
+            script_names: std::collections::HashSet::new(),
         })
     }
 
@@ -1896,6 +1950,7 @@ impl RequestExecutionService {
                     // guard does not get to steer the run via
                     // setNextRequest() or leave variables behind either.
                     self.check_request_guard(&original_url, url, &input.request_guard_policy)?;
+                    allow_new_names(&mut state.script_names, Some(&original_url), url);
                     state.http_request.url = url.clone();
                 }
                 if let Some(ref method_str) = mutations.method {
@@ -1919,6 +1974,17 @@ impl RequestExecutionService {
                 for mutation in &mutations.headers {
                     match mutation {
                         rocket_scripting::HeaderMutation::Set { name, value } => {
+                            let existing = state
+                                .http_request
+                                .headers
+                                .iter()
+                                .find(|h| h.key.eq_ignore_ascii_case(name))
+                                .map(|h| format!("{}\n{}", h.key, h.value));
+                            allow_new_names(
+                                &mut state.script_names,
+                                existing.as_deref(),
+                                &format!("{name}\n{value}"),
+                            );
                             if let Some(h) = state
                                 .http_request
                                 .headers
@@ -1955,13 +2021,18 @@ impl RequestExecutionService {
                         .as_str()
                         .map(str::to_owned)
                         .unwrap_or_else(|| body_val.to_string());
+                    let old_content = state
+                        .http_request
+                        .body
+                        .as_ref()
+                        .and_then(|b| b.content.clone());
+                    allow_new_names(&mut state.script_names, old_content.as_deref(), &content);
                     state.http_request.body = Some(rocket_shared::types::Body {
                         mode,
                         content: Some(content),
                         form_data: None,
                         file_path: None,
                     });
-                    state.graphql_body = false;
                 }
                 if let Some(n) = mutations.max_redirects {
                     state.http_request.options.max_redirects = Some(n);
@@ -2026,75 +2097,112 @@ impl RequestExecutionService {
 
         // Runtime variables set above, or carried in by a run, fill the placeholders that are
         // still in the request. Every caller runs this phase, so each send path gets it.
-        self.resolve_runtime_placeholders(input, state)
+        self.resolve_runtime_placeholders(input, mode, state)
     }
 
-    /// Fills the `{{placeholders}}` still left in the request once the pre-request scripts
-    /// and actions ran: in the URL, path parameters, query, headers, body and auth.
+    /// Puts runtime variables into the request once the pre-request scripts and actions ran:
+    /// the URL, path parameters, query, headers, body and auth.
     ///
     /// The first resolution in `begin_phases` runs before any script, so it cannot see runtime
-    /// variables. This pass uses every scope with runtime on top. Only text that still holds
-    /// `{{` changes: a value the first pass filled in is not looked at again, so a
-    /// `{{$dynamic}}` value is never made twice, and an unknown name stays as written. Values
-    /// are put in once and not scanned again. A URL that this pass changes goes through the
-    /// request guard, like a script's `req.setUrl()`.
+    /// variables. A field the scripts did not rewrite is rendered again from its template
+    /// (`runtime_fill`): each placeholder of the original text that names a runtime variable
+    /// gets that value, so runtime wins over every other scope, and every other placeholder keeps
+    /// its first value (a `{{$dynamic}}` value is never made twice). Values are put in as they are
+    /// and never read for placeholders again. Text a script wrote is filled only for names the
+    /// first pass could not resolve and names the script added, from every scope but the
+    /// RocketVault one. A URL this pass changes goes through the request guard. A skipped runner
+    /// step is left alone.
     fn resolve_runtime_placeholders(
         &self,
         input: &ExecuteRequestInput,
+        mode: ExecutionMode,
         state: &mut PhaseState,
     ) -> DomainResult<()> {
-        mask_runtime_values_of_secret_keys(&mut state.var_ctx);
-        if state.pending_path_params.is_empty() && !has_placeholder(&state.http_request) {
+        if mode == ExecutionMode::Runner && state.skip_request {
             return Ok(());
         }
-        let vars = state.var_ctx.flatten();
-        let fill = |text: &str| -> String {
-            if text.contains("{{") {
-                resolve(text, &vars).output
-            } else {
-                text.to_string()
-            }
-        };
+        mask_runtime_values_of_secret_keys(&mut state.var_ctx);
+        if state.var_ctx.runtime.is_empty() && !has_placeholder(&state.http_request) {
+            return Ok(());
+        }
+        let runtime = &state.var_ctx.runtime;
+        let templates = &state.templates;
+        // Script text never reaches the RocketVault scope, so a value built from response data
+        // cannot pull a vault secret in.
+        let script_vars: std::collections::HashMap<String, String> = VariableContext {
+            external_secrets: std::collections::HashMap::new(),
+            ..state.var_ctx.clone()
+        }
+        .flatten()
+        .into_iter()
+        .filter(|(k, _)| templates.unresolved.contains(k) || state.script_names.contains(k))
+        .collect();
 
         let mut request = state.http_request.clone();
-        // A path parameter was put in percent-encoded, so its placeholder no longer reads as
-        // `{{name}}` in the URL. Its encoded text is swapped for the newly encoded value.
-        for param in &state.pending_path_params {
-            let value = fill(&param.value);
-            if value != param.value && !value.is_empty() {
-                let old = rocket_http::encode_path_param_value(&param.value);
-                let new = rocket_http::encode_path_param_value(&value);
+        let rendered_params = path_param_values(&templates.path_params, |t| t.render(runtime));
+        if request.url == templates.url_output {
+            request.url = rocket_http::substitute_path_params(
+                &templates.url.render(runtime),
+                &rendered_params,
+            );
+        } else {
+            // A script-written URL can still carry a path parameter's encoded first value.
+            // Longer values go first, so one value inside another is not replaced in part.
+            let mut swaps: Vec<(String, String)> = templates
+                .path_params
+                .iter()
+                .zip(&rendered_params)
+                .filter(|((_, t), p)| p.value != t.output && !p.value.is_empty())
+                .map(|((_, t), p)| {
+                    (
+                        rocket_http::encode_path_param_value(&t.output),
+                        rocket_http::encode_path_param_value(&p.value),
+                    )
+                })
+                .collect();
+            swaps.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+            for (old, new) in swaps {
                 request.url = request.url.replace(&old, &new);
             }
+            request.url = fill_names(&request.url, &script_vars);
         }
-        request.url = fill(&request.url);
-        for q in &mut request.query_params {
-            q.key = fill(&q.key);
-            q.value = fill(&q.value);
-        }
-        for h in &mut request.headers {
-            h.key = fill(&h.key);
-            h.value = fill(&h.value);
-        }
+        let mut query: Vec<(&mut String, &mut String)> = request
+            .query_params
+            .iter_mut()
+            .map(|q| (&mut q.key, &mut q.value))
+            .collect();
+        fill_pairs(&mut query, &templates.query, runtime, &script_vars);
+        let mut headers: Vec<(&mut String, &mut String)> = request
+            .headers
+            .iter_mut()
+            .map(|h| (&mut h.key, &mut h.value))
+            .collect();
+        fill_pairs(&mut headers, &templates.headers, runtime, &script_vars);
         if let Some(body) = request.body.as_mut() {
             if let Some(content) = body.content.as_mut() {
-                if content.contains("{{") {
-                    *content = if state.graphql_body {
-                        crate::graphql_request::resolve_json_text(content, |p| {
-                            resolve(p, &vars).output
-                        })
-                    } else {
-                        fill(content)
+                *content = match &templates.body {
+                    Some(t) if t.output == *content => t.render(runtime),
+                    _ => fill_names(content, &script_vars),
+                };
+            }
+            if let Some(entries) = body.form_data.as_mut() {
+                for (i, entry) in entries.iter_mut().enumerate() {
+                    entry.value = match templates.form.get(i) {
+                        Some(t) if t.output == entry.value => t.render(runtime),
+                        _ => fill_names(&entry.value, &script_vars),
                     };
                 }
             }
-            if let Some(entries) = body.form_data.as_mut() {
-                for entry in entries {
-                    entry.value = fill(&entry.value);
-                }
-            }
         }
-        request.auth = resolve_auth(request.auth, &vars);
+        let index = std::cell::Cell::new(0);
+        request.auth = map_auth_fields(request.auth, |field: String| {
+            let at = index.get();
+            index.set(at + 1);
+            match templates.auth.get(at) {
+                Some(t) if t.output == field => t.render(runtime),
+                _ => fill_names(&field, &script_vars),
+            }
+        });
 
         if request.url != state.http_request.url {
             self.check_request_guard(
@@ -10187,6 +10295,181 @@ mod tests {
         assert_eq!(
             executor_request(&executor).url,
             "https://api.test/from-caller"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_placeholder_inside_an_env_or_vault_value_stays_literal() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("apiKey", "env-secret-123456"));
+        env.set_variable(Variable::new(
+            "next",
+            "https://evil.test/?k={{apiKey}}&v={{vault.key}}",
+        ));
+        let engine = MockBeforeRequestEngine::returning(runtime_result(&[("tok", "tok-1")]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::with_env(env), Box::new(engine));
+        let mut input = sample_input("{{next}}&t={{tok}}", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        let secrets = std::collections::HashMap::from([(
+            "vault.key".to_string(),
+            "vault-secret-abcdef".to_string(),
+        )]);
+        let mut sent = None;
+        svc.execute_capturing(input, &secrets, &mut sent)
+            .await
+            .expect("execute");
+
+        assert_eq!(
+            executor_request(&executor).url,
+            "https://evil.test/?k={{apiKey}}&v={{vault.key}}&t=tok-1"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_script_written_header_placeholder_is_filled() {
+        use rocket_scripting::{HeaderMutation, RequestMutations};
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("region", "eu-1"));
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                headers: vec![HeaderMutation::Set {
+                    name: "X-Ctx".into(),
+                    value: "{{tok}}/{{region}}/{{$guid}}".into(),
+                }],
+                ..Default::default()
+            }),
+            ..runtime_result(&[("tok", "tok-1")])
+        };
+        let engine = MockBeforeRequestEngine::returning(result);
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::with_env(env), Box::new(engine));
+        let mut input = sample_input("https://api.test/", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        svc.execute(input).await.expect("execute");
+
+        // Script-written names are filled from every scope. `$dynamic` names are not made here.
+        assert_eq!(
+            header_value(&executor_request(&executor), "X-Ctx"),
+            Some("tok-1/eu-1/{{$guid}}")
+        );
+    }
+
+    #[tokio::test]
+    async fn overlapping_path_param_values_are_filled_without_cutting_each_other() {
+        let engine =
+            MockBeforeRequestEngine::returning(runtime_result(&[("x", "X1"), ("y", "Y2")]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/:a/:b", None);
+        input.pre_request_script = Some("// pre".into());
+        input.path_params = vec![
+            rocket_shared::types::PathParam {
+                name: "a".into(),
+                value: "{{x}}".into(),
+                description: None,
+            },
+            rocket_shared::types::PathParam {
+                name: "b".into(),
+                value: "{{x}}{{y}}".into(),
+                description: None,
+            },
+        ];
+        svc.execute(input).await.expect("execute");
+        assert_eq!(executor_request(&executor).url, "https://api.test/X1/X1Y2");
+    }
+
+    #[tokio::test]
+    async fn a_runtime_value_with_cr_lf_does_not_add_a_header() {
+        let engine =
+            MockBeforeRequestEngine::returning(runtime_result(&[("tok", "a\r\nX-Injected: 1")]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/", None);
+        input.pre_request_script = Some("// pre".into());
+        input.headers = vec![Header::new("X-Token", "{{tok}}")];
+        svc.execute(input).await.expect("execute");
+
+        // The value stays inside its one header. The HTTP client refuses a header value
+        // with CR or LF when it builds the request, so nothing is injected on the wire.
+        let request = executor_request(&executor);
+        assert_eq!(request.headers.len(), 1);
+        assert!(header_value(&request, "X-Injected").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_runtime_value_shadows_an_env_value_and_keeps_dynamic_values() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("token", "old-token"));
+        let engine = Arc::new(RequestSeeingEngine {
+            result: runtime_result(&[("token", "fresh-token")]),
+            seen: Mutex::new(Vec::new()),
+        });
+        let (svc, executor, _) = runtime_svc(
+            MockEnvRepo::with_env(env),
+            Box::new(SharedSeeingEngine(Arc::clone(&engine))),
+        );
+        let mut input = sample_input("https://api.test/{{token}}", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        input.headers = vec![Header::new("X-Id", "{{$guid}}-{{token}}")];
+        svc.execute(input).await.expect("execute");
+
+        let seen = engine.seen.lock().expect("lock")[0].clone();
+        assert_eq!(seen.url, "https://api.test/old-token");
+        let seen_id = header_value(&seen, "X-Id")
+            .and_then(|v| v.strip_suffix("-old-token"))
+            .expect("the script saw the first values")
+            .to_string();
+        let request = executor_request(&executor);
+        assert_eq!(request.url, "https://api.test/fresh-token");
+        assert_eq!(
+            header_value(&request, "X-Id"),
+            Some(format!("{seen_id}-fresh-token").as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn script_written_text_never_reads_the_vault_scope() {
+        use rocket_scripting::{HeaderMutation, RequestMutations};
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                headers: vec![HeaderMutation::Set {
+                    name: "X-Leak".into(),
+                    value: "{{vault.key}}/{{tok}}".into(),
+                }],
+                ..Default::default()
+            }),
+            ..runtime_result(&[("tok", "tok-1")])
+        };
+        let engine = MockBeforeRequestEngine::returning(result);
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/", None);
+        input.pre_request_script = Some("// pre".into());
+        let secrets = std::collections::HashMap::from([(
+            "vault.key".to_string(),
+            "vault-secret-abcdef".to_string(),
+        )]);
+        let mut sent = None;
+        svc.execute_capturing(input, &secrets, &mut sent)
+            .await
+            .expect("execute");
+        assert_eq!(
+            header_value(&executor_request(&executor), "X-Leak"),
+            Some("{{vault.key}}/tok-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_runtime_path_param_with_slash_and_question_mark_is_encoded() {
+        let engine = MockBeforeRequestEngine::returning(runtime_result(&[("id", "a/b?c")]));
+        let (svc, executor, _) = runtime_svc(MockEnvRepo::empty(), Box::new(engine));
+        let mut input = sample_input("https://api.test/items/:id/detail", None);
+        input.pre_request_script = Some("// pre".into());
+        input.path_params = vec![rocket_shared::types::PathParam {
+            name: "id".into(),
+            value: "{{id}}".into(),
+            description: None,
+        }];
+        svc.execute(input).await.expect("execute");
+        assert_eq!(
+            executor_request(&executor).url,
+            "https://api.test/items/a%2Fb%3Fc/detail"
         );
     }
 }

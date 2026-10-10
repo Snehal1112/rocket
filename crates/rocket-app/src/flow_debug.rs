@@ -10,18 +10,28 @@ use rocket_shared::events::{
 use rocket_shared::types::{Auth, Body, BodyMode, Header};
 use std::collections::HashSet;
 
-/// The masks for a sent-request record: the run's own secret values, plus those the send added,
-/// such as a runtime value a pre-request script set for a secret variable's name.
+/// The masks for a sent-request record: the run's own secret values, plus those the send
+/// found (`run_secret_values`, such as a runtime value a pre-request script set for a secret
+/// variable's name) and the credentials it sent (`run_sent_credentials`).
 pub(crate) fn sent_masks<'a>(
     base: &'a HashSet<String>,
-    run: Option<&HashSet<String>>,
+    output: Option<&crate::execution_service::ExecuteRequestOutput>,
 ) -> std::borrow::Cow<'a, HashSet<String>> {
-    match run {
-        Some(extra) if !extra.is_subset(base) => {
-            std::borrow::Cow::Owned(base.union(extra).cloned().collect())
-        }
-        _ => std::borrow::Cow::Borrowed(base),
+    let Some(output) = output else {
+        return std::borrow::Cow::Borrowed(base);
+    };
+    let extra: Vec<&String> = output
+        .run_secret_values
+        .iter()
+        .chain(&output.run_sent_credentials)
+        .filter(|value| !base.contains(*value))
+        .collect();
+    if extra.is_empty() {
+        return std::borrow::Cow::Borrowed(base);
     }
+    let mut all = base.clone();
+    all.extend(extra.into_iter().cloned());
+    std::borrow::Cow::Owned(all)
 }
 
 /// Builds a debug record with every secret and credential masked.
@@ -272,16 +282,31 @@ mod tests {
     }
 
     #[test]
-    fn sent_masks_add_the_values_the_send_found() {
+    fn sent_masks_add_the_values_and_credentials_the_send_found() {
         let base = secrets(&["flow-secret-1"]);
-        let run = secrets(&["flow-secret-1", "script-set-secret"]);
-        let sent = HttpRequest::new(HttpMethod::Get, "https://h.test/script-set-secret");
-        let record = build_debug_request(&sent, None, None, &sent_masks(&base, Some(&run)));
+        let output = crate::execution_service::ExecuteRequestOutput {
+            response: HttpResponse::default(),
+            test_results: vec![],
+            console_entries: vec![],
+            script_error: None,
+            deferred_history: None,
+            run_secret_values: secrets(&["flow-secret-1", "script-set-secret"]),
+            run_sent_credentials: secrets(&["sent-token-123"]),
+        };
+        let mut sent = HttpRequest::new(
+            HttpMethod::Get,
+            "https://h.test/script-set-secret?t=sent-token-123",
+        );
+        sent.body = Some(Body {
+            mode: BodyMode::Text,
+            content: Some("sent-token-123".into()),
+            form_data: None,
+            file_path: None,
+        });
+        let record = build_debug_request(&sent, None, None, &sent_masks(&base, Some(&output)));
         assert!(!record.url.contains("script-set-secret"), "{}", record.url);
-        assert!(matches!(
-            sent_masks(&base, Some(&secrets(&["flow-secret-1"]))),
-            std::borrow::Cow::Borrowed(_)
-        ));
+        assert!(!record.url.contains("sent-token-123"), "{}", record.url);
+        assert!(!record.body.unwrap_or_default().contains("sent-token-123"));
         assert!(matches!(
             sent_masks(&base, None),
             std::borrow::Cow::Borrowed(_)
