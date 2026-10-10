@@ -2490,9 +2490,8 @@ impl RequestExecutionService {
         }
 
         // Persist history (non-fatal — a save failure won't cancel the response).
-        // Redact secret values from the URL before it reaches rocket-history —
-        // the dispatched request and the RequestExecuted event below still
-        // carry the real, unredacted URL; only the persisted copy is redacted.
+        // Redact secret values from the URL before it reaches rocket-history and
+        // the RequestExecuted event. Only the dispatched request keeps the real URL.
         let redacted_url =
             crate::redaction::redact_secrets(&state.http_request.url, &state.var_ctx.secret_values);
         let mut entry = HistoryEntry::new(
@@ -2516,7 +2515,7 @@ impl RequestExecutionService {
         // Publish domain event.
         self.events.publish(DomainEvent::RequestExecuted {
             method: input.method.to_string(),
-            url: state.http_request.url.clone(),
+            url: redacted_url.clone(),
             status: response.status,
             duration_ms: response.duration_ms,
         });
@@ -4156,6 +4155,110 @@ mod tests {
             "expected the redaction marker in place of the secret, got: {}",
             saved[0].url
         );
+    }
+
+    #[tokio::test]
+    async fn request_executed_event_redacts_external_secret_value_from_the_url() {
+        use rocket_shared::events::DomainEvent;
+
+        struct SharedPublisher(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPublisher {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+
+        let mut env = Environment::new("prod");
+        env.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-test-value".to_string()),
+        )]));
+
+        let publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let pub_arc = Arc::clone(&publisher);
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(publisher)),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        );
+
+        svc.execute(sample_input(
+            "https://api.example.com/{{payments.apiKey}}?token={{payments.apiKey}}",
+            Some("prod"),
+        ))
+        .await
+        .expect("execute");
+
+        let events = pub_arc.events.lock().expect("lock events");
+        let url = events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::RequestExecuted { url, .. } => Some(url.clone()),
+                _ => None,
+            })
+            .expect("a RequestExecuted event");
+        assert!(
+            !url.contains("sk-live-test-value"),
+            "the event must not carry the resolved secret, got: {url}"
+        );
+        assert!(
+            url.contains("••••••"),
+            "expected the redaction marker in the event URL, got: {url}"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_executed_event_keeps_a_url_without_secrets_unchanged() {
+        use rocket_shared::events::DomainEvent;
+
+        struct SharedPublisher(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPublisher {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+
+        let publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let pub_arc = Arc::clone(&publisher);
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(publisher)),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        svc.execute(sample_input("https://example.com/items?page=2", None))
+            .await
+            .expect("execute");
+
+        let events = pub_arc.events.lock().expect("lock events");
+        let url = events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::RequestExecuted { url, .. } => Some(url.clone()),
+                _ => None,
+            })
+            .expect("a RequestExecuted event");
+        assert_eq!(url, "https://example.com/items?page=2");
     }
 
     #[tokio::test]
