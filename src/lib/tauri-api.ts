@@ -570,6 +570,8 @@ export interface ExecuteRequestInput {
   actions?: ActionEntry[];
   /** Opt-in per-workspace policy checked against BeforeRequest req.setUrl() redirects. */
   requestGuardPolicy?: RequestGuardPolicy;
+  /** Who triggered the send. The backend defaults to manual when omitted. */
+  runSource?: RunSource;
 }
 
 export interface FileChangedEvent {

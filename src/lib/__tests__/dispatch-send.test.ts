@@ -41,4 +41,16 @@ describe('dispatchSend', () => {
     expect(executeGraphQlRequest).not.toHaveBeenCalled();
     expect(executeRequest).toHaveBeenCalledWith(baseInput);
   });
+
+  it('leaves runSource unset for a normal send and keeps it when given', async () => {
+    await dispatchSend(createDefaultRequestFor('http'), baseInput, undefined);
+    expect(vi.mocked(executeRequest).mock.calls[0][0]).not.toHaveProperty('runSource');
+
+    await dispatchSend(
+      createDefaultRequestFor('http'),
+      { ...baseInput, runSource: 'runner' },
+      undefined,
+    );
+    expect(vi.mocked(executeRequest).mock.calls[1][0]).toHaveProperty('runSource', 'runner');
+  });
 });

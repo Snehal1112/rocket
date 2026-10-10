@@ -167,6 +167,24 @@ describe('executeRunnerEntry', () => {
     );
   });
 
+  it('tags runner sends with runSource runner', async () => {
+    vi.mocked(executeRequest).mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: [],
+      body: '',
+      durationMs: 10,
+      ttfbMs: 5,
+      sizeBytes: 0,
+      testResults: [],
+      consoleEntries: [],
+      scriptError: null,
+    });
+    await executeRunnerEntry('demo', 'ping.yml', baseRequest(), undefined);
+
+    expect(executeRequest).toHaveBeenCalledWith(expect.objectContaining({ runSource: 'runner' }));
+  });
+
   it('sends a graphql entry through executeGraphQlRequest and fails it on errors[]', async () => {
     vi.mocked(executeGraphQlRequest).mockResolvedValue({
       status: 200,

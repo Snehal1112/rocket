@@ -58,6 +58,7 @@ export async function executeRunnerEntry(
       globalEnvName,
       pathParams: resolved.pathParams,
       requestGuardPolicy,
+      runSource: 'runner',
     };
 
     const result = graphql
