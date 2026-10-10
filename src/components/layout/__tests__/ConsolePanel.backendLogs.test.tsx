@@ -29,6 +29,21 @@ describe('ConsolePanel backend logs', () => {
     expect(screen.queryByText('request started')).toBeNull();
   });
 
+  it('shows INFO lines with target agent although INFO is off', () => {
+    useConsoleStore.getState().addLogEntry({
+      timestamp: '2026-10-02T10:00:00Z',
+      level: 'INFO',
+      target: 'agent',
+      message: 'Agent: get_request - Read request',
+      fields: {},
+      spanFields: {},
+    });
+    addLog('INFO', 'request started');
+    renderPanel();
+    expect(screen.getByText('Agent: get_request - Read request')).toBeInTheDocument();
+    expect(screen.queryByText('request started')).toBeNull();
+  });
+
   it('includes INFO when the toggle is on', () => {
     addLog('INFO', 'request started');
     renderPanel();

@@ -186,8 +186,11 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
   const dragRef = useRef<{ y: number; h: number } | null>(null);
 
   // Backend logs show WARN and ERROR by default; INFO is opt-in.
+  // Agent tool lines are INFO but always show, so agent actions stay visible.
   const visible = useMemo(() => {
-    const logs = showInfoLogs ? logEntries : logEntries.filter((l) => l.level !== 'INFO');
+    const logs = showInfoLogs
+      ? logEntries
+      : logEntries.filter((l) => l.level !== 'INFO' || l.target === 'agent');
     if (logs.length === 0) return entries as PanelEntry[];
     const all: PanelEntry[] = [...entries, ...logs];
     return all.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
