@@ -940,13 +940,20 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
             }
         }
         let proposals = proposal_service(&self.app_handle)?;
-        let result = proposals
-            .propose(self.binding.session_id(), changes)
-            .map(|proposal_ids| ProposeChangesResult {
-                proposal_ids,
-                status: PROPOSALS_QUEUED,
-            })
-            .map_err(for_agent);
+        // The service reads the workspace from disk, so it runs off the async
+        // executor.
+        let session_id = self.binding.session_id().to_string();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            proposals.propose(&session_id, changes)
+        })
+        .await
+        .map_err(|_| DomainError::Internal("proposal task failed".to_string()))
+        .and_then(|inner| inner)
+        .map(|proposal_ids| ProposeChangesResult {
+            proposal_ids,
+            status: PROPOSALS_QUEUED,
+        })
+        .map_err(for_agent);
         Ok(to_tool_result(result))
     }
 
@@ -955,11 +962,16 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     )]
     async fn list_proposals(&self) -> Result<CallToolResult, McpError> {
         let proposals = proposal_service(&self.app_handle)?;
-        let views: Vec<ProposalView> = proposals
-            .list(self.binding.session_id())
-            .into_iter()
-            .map(ProposalView::from)
-            .collect();
+        // The list can wait on a slow accept, so it runs off the async executor.
+        let session_id = self.binding.session_id().to_string();
+        let listed =
+            tauri::async_runtime::spawn_blocking(move || proposals.list(&session_id)).await;
+        let Ok(listed) = listed else {
+            return Ok(to_tool_result::<Vec<ProposalView>>(Err(for_agent(
+                DomainError::Internal("proposal task failed".to_string()),
+            ))));
+        };
+        let views: Vec<ProposalView> = listed.into_iter().map(ProposalView::from).collect();
         Ok(to_tool_result(Ok(views)))
     }
 

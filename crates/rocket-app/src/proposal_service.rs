@@ -1350,6 +1350,90 @@ mod tests {
             .collect()
     }
 
+    /// An environment repo whose `get` waits for a release signal.
+    struct GatedEnvFactory {
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: StdMutex<std::sync::mpsc::Receiver<()>>,
+        inner: Arc<MemoryEnvs>,
+    }
+
+    struct GatedEnvFactory2(Arc<GatedEnvFactory>);
+
+    impl EnvironmentRepositoryFactory for GatedEnvFactory2 {
+        fn for_collection(&self, _collection: &str) -> Box<dyn EnvironmentRepository> {
+            Box::new(GatedEnvRepoOwned(Arc::clone(&self.0)))
+        }
+    }
+
+    struct GatedEnvRepoOwned(Arc<GatedEnvFactory>);
+
+    impl EnvironmentRepository for GatedEnvRepoOwned {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            MemoryEnvRepo(Arc::clone(&self.0.inner)).list()
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.0.entered.send(()).expect("signal entered");
+            self.0
+                .release
+                .lock()
+                .expect("lock")
+                .recv()
+                .expect("release signal");
+            MemoryEnvRepo(Arc::clone(&self.0.inner)).get(name)
+        }
+        fn save(&self, env: &Environment) -> DomainResult<()> {
+            MemoryEnvRepo(Arc::clone(&self.0.inner)).save(env)
+        }
+        fn delete(&self, name: &str) -> DomainResult<()> {
+            MemoryEnvRepo(Arc::clone(&self.0.inner)).delete(name)
+        }
+    }
+
+    #[test]
+    fn list_and_propose_do_not_wait_for_another_propose_that_is_reading_disk() {
+        let f = fixture();
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let gated = Arc::new(GatedEnvFactory {
+            entered: entered_tx,
+            release: StdMutex::new(release_rx),
+            inner: Arc::clone(&f.envs),
+        });
+        let slow = Arc::new(ProposalService::new(
+            CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    f._dir.path().to_path_buf(),
+                )),
+                Box::new(SharedPublisher(Arc::clone(&f.events))),
+            ),
+            Arc::new(GatedEnvFactory2(gated)),
+            f.events.clone(),
+        ));
+        slow.propose("s1", vec![folder("first")]).expect("seed");
+
+        let worker = {
+            let slow = Arc::clone(&slow);
+            std::thread::spawn(move || slow.propose("s2", vec![set_var("HOST", "other")]))
+        };
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker is reading the environment");
+
+        // The worker is inside the slow read, so the store lock must be free.
+        assert_eq!(slow.list("s1").len(), 1);
+        assert!(slow.list("s2").is_empty());
+        slow.propose("s1", vec![folder("second")])
+            .expect("another session's propose is not blocked");
+
+        release_tx.send(()).expect("release the worker");
+        let ids = worker
+            .join()
+            .expect("worker thread")
+            .expect("the slow propose succeeds");
+        assert_eq!(ids.len(), 1);
+        assert_eq!(slow.list("s2").len(), 1);
+    }
+
     #[test]
     fn propose_queues_a_pending_proposal_and_writes_nothing() {
         let f = fixture();

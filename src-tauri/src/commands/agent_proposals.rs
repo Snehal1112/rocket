@@ -240,42 +240,156 @@ impl From<AgentProposal> for AgentProposalDto {
     }
 }
 
+/// Runs a blocking service call off the UI thread. The service holds a
+/// std mutex and does disk I/O, so it must not run on the main thread.
+async fn run_blocking<T, F>(svc: Arc<ProposalService>, call: F) -> Result<T, DomainError>
+where
+    T: Send + 'static,
+    F: FnOnce(&ProposalService) -> Result<T, DomainError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || call(&svc))
+        .await
+        .map_err(|e| DomainError::Internal(format!("proposal task failed: {e}")))?
+}
+
+async fn list_proposals_inner(
+    svc: Arc<ProposalService>,
+    session_id: String,
+) -> Result<Vec<AgentProposalDto>, DomainError> {
+    run_blocking(svc, move |svc| {
+        Ok(svc
+            .list(&session_id)
+            .into_iter()
+            .map(AgentProposalDto::from)
+            .collect())
+    })
+    .await
+}
+
+async fn accept_proposal_inner(
+    svc: Arc<ProposalService>,
+    session_id: String,
+    proposal_id: String,
+) -> Result<AgentProposalDto, DomainError> {
+    run_blocking(svc, move |svc| {
+        svc.accept(&session_id, &proposal_id)
+            .map(AgentProposalDto::from)
+    })
+    .await
+}
+
+async fn reject_proposal_inner(
+    svc: Arc<ProposalService>,
+    session_id: String,
+    proposal_id: String,
+) -> Result<AgentProposalDto, DomainError> {
+    run_blocking(svc, move |svc| {
+        svc.reject(&session_id, &proposal_id)
+            .map(AgentProposalDto::from)
+    })
+    .await
+}
+
 #[tauri::command]
-pub fn list_agent_proposals(
+pub async fn list_agent_proposals(
     session_id: String,
     svc: State<'_, Arc<ProposalService>>,
 ) -> Result<Vec<AgentProposalDto>, DomainError> {
-    Ok(svc
-        .list(&session_id)
-        .into_iter()
-        .map(AgentProposalDto::from)
-        .collect())
+    list_proposals_inner(Arc::clone(&svc), session_id).await
 }
 
 #[tauri::command]
-pub fn accept_agent_proposal(
+pub async fn accept_agent_proposal(
     session_id: String,
     proposal_id: String,
     svc: State<'_, Arc<ProposalService>>,
 ) -> Result<AgentProposalDto, DomainError> {
-    svc.accept(&session_id, &proposal_id)
-        .map(AgentProposalDto::from)
+    accept_proposal_inner(Arc::clone(&svc), session_id, proposal_id).await
 }
 
 #[tauri::command]
-pub fn reject_agent_proposal(
+pub async fn reject_agent_proposal(
     session_id: String,
     proposal_id: String,
     svc: State<'_, Arc<ProposalService>>,
 ) -> Result<AgentProposalDto, DomainError> {
-    svc.reject(&session_id, &proposal_id)
-        .map(AgentProposalDto::from)
+    reject_proposal_inner(Arc::clone(&svc), session_id, proposal_id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rocket_acp::proposal::ProposalStatus;
+
+    use rocket_app::CollectionService;
+    use rocket_shared::events::NullEventPublisher;
+
+    /// A service over a temp workspace that holds a "demo" collection.
+    fn service() -> (tempfile::TempDir, Arc<ProposalService>) {
+        use rocket_collection::CollectionRepository;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = rocket_infra::FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        repo.create("demo").expect("create collection");
+        let svc = ProposalService::new(
+            CollectionService::new(
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    dir.path().to_path_buf(),
+                )),
+                Box::new(NullEventPublisher),
+            ),
+            Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(
+                Arc::new(std::sync::Mutex::new(dir.path().to_path_buf())),
+            )),
+            Arc::new(NullEventPublisher),
+        );
+        (dir, Arc::new(svc))
+    }
+
+    fn new_folder(name: &str) -> ProposedChange {
+        ProposedChange::CreateFolder {
+            collection: "demo".into(),
+            parent_path: String::new(),
+            name: name.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_async_commands_list_accept_and_reject_like_the_service() {
+        let (dir, svc) = service();
+        let ids = svc
+            .propose("s1", vec![new_folder("kept"), new_folder("dropped")])
+            .expect("propose");
+
+        let listed = list_proposals_inner(Arc::clone(&svc), "s1".into())
+            .await
+            .expect("list");
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().all(|p| p.status == "pending"));
+
+        let accepted = accept_proposal_inner(Arc::clone(&svc), "s1".into(), ids[0].clone())
+            .await
+            .expect("accept");
+        assert_eq!(accepted.status, "accepted");
+        assert!(dir.path().join("demo").join("kept").is_dir());
+
+        let rejected = reject_proposal_inner(Arc::clone(&svc), "s1".into(), ids[1].clone())
+            .await
+            .expect("reject");
+        assert_eq!(rejected.status, "rejected");
+        assert!(!dir.path().join("demo").join("dropped").exists());
+
+        let again = accept_proposal_inner(Arc::clone(&svc), "s1".into(), ids[0].clone())
+            .await
+            .expect_err("a second accept is refused");
+        assert!(matches!(again, DomainError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn a_panicking_blocking_call_maps_to_an_internal_error() {
+        let (_dir, svc) = service();
+        let result: Result<(), DomainError> = run_blocking(svc, |_| panic!("boom")).await;
+        assert!(matches!(result, Err(DomainError::Internal(_))));
+    }
 
     #[test]
     fn a_failed_edit_script_proposal_serializes_in_camel_case() {
