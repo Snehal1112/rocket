@@ -65,7 +65,7 @@ A script written from Bruno's JavaScript API Reference runs in Rocket with `bru`
 
 - Reads see the same script's earlier writes (a small overlay in `bootstrap.js`). Today they read only the snapshot.
 - Non-string runtime variables (numbers, objects) are kept as JSON text when merged between phases. Today they are silently dropped.
-- Risk: `getProcessEnv` reads a snapshot of the whole host environment (`std::env::vars()`), so in Safe mode a script from an untrusted collection can read host variables. Implemented as specified. Gating it to Developer mode is a one-line change.
+- `getProcessEnv` reads a snapshot of the host environment (`std::env::vars()`). The script engine empties the snapshot in Safe mode, so every key is undefined there. Only Developer mode sees the real environment.
 
 ## Errors and safety
 

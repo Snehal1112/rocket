@@ -1694,7 +1694,8 @@ impl RequestExecutionService {
             input.request_path.as_deref(),
             external_secrets,
         );
-        // Scripts read the host environment through rok.getProcessEnv.
+        // Scripts read the host environment through rok.getProcessEnv. The script
+        // engine empties it again in Safe mode.
         var_ctx.process_env = std::env::vars().collect();
         // Flow run variables (e.g. `callback.<name>`) behave like runtime
         // variables. A script that sets the same key later still wins.

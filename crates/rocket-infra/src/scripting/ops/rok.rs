@@ -174,7 +174,7 @@ pub fn op_rok_get_request_var(state: &OpState, #[string] key: String) -> String 
         .unwrap_or_default()
 }
 
-/// True if the host environment snapshot holds key.
+/// True if the host environment snapshot holds key. The snapshot is empty in Safe mode.
 #[op2(fast)]
 pub fn op_rok_has_process_env(state: &OpState, #[string] key: String) -> bool {
     state
@@ -185,6 +185,8 @@ pub fn op_rok_has_process_env(state: &OpState, #[string] key: String) -> bool {
 }
 
 /// rok.getProcessEnv(key) — reads the host environment snapshot.
+/// Safe mode scripts get an empty snapshot, so every key is undefined. Only
+/// Developer mode sees the real environment (the engine clears it otherwise).
 #[op2]
 #[string]
 pub fn op_rok_get_process_env(state: &OpState, #[string] key: String) -> String {

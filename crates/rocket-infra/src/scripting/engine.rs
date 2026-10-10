@@ -492,9 +492,15 @@ async fn run_script_async(
         let op_state = runtime.op_state();
         let mut state = op_state.borrow_mut();
         let secret_values = ctx.variables.secret_values.clone();
+        // Safe mode hides the host environment. This is the single choke point
+        // for every script entry point, so callers need not filter it.
+        let mut variables = ctx.variables;
+        if sandbox_mode == SandboxMode::Safe {
+            variables.process_env.clear();
+        }
         state.put(ScriptInputState {
             phase: ctx.phase,
-            variables: ctx.variables,
+            variables,
             request: ctx.request,
             response: ctx.response,
             env_name: ctx.env_name,
@@ -1816,11 +1822,50 @@ mod tests {
             "rok.setVar('out', rok.getProcessEnv('HOME_DIR') + '|' + String(rok.getProcessEnv('NOPE')))",
         );
         ctx.variables = vars;
+        ctx.sandbox_mode = SandboxMode::Developer;
         let result = engine.execute(ctx).await.expect("execute");
         assert_eq!(
             result.runtime_vars.get("out").expect("out present"),
             "/home/me|undefined"
         );
+    }
+
+    #[tokio::test]
+    async fn rok_get_process_env_is_undefined_in_safe_mode() {
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.process_env
+            .insert("HOME_DIR".into(), "/home/me".into());
+        let mut ctx = minimal_ctx(
+            "rok.setVar('out', String(rok.getProcessEnv('HOME_DIR')) + '|' + String(rok.getProcessEnv('PATH')))",
+        );
+        ctx.variables = vars;
+        ctx.sandbox_mode = SandboxMode::Safe;
+        let result = engine.execute(ctx).await.expect("execute");
+        assert_eq!(
+            result.runtime_vars.get("out").expect("out present"),
+            "undefined|undefined"
+        );
+    }
+
+    #[tokio::test]
+    async fn rok_get_process_env_reads_the_real_env_only_in_developer_mode() {
+        // PATH exists in every test environment, so no env mutation is needed.
+        let expected = std::env::var("PATH").expect("PATH should be set");
+        let code = "rok.setVar('out', String(rok.getProcessEnv('PATH')))";
+        for (mode, want) in [
+            (SandboxMode::Safe, "undefined".to_string()),
+            (SandboxMode::Developer, expected),
+        ] {
+            let mut ctx = minimal_ctx(code);
+            ctx.variables.process_env = std::env::vars().collect();
+            ctx.sandbox_mode = mode;
+            let result = DenoScriptEngine::new()
+                .execute(ctx)
+                .await
+                .expect("execute");
+            assert_eq!(result.runtime_vars.get("out").expect("out present"), &want);
+        }
     }
 
     #[tokio::test]

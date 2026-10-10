@@ -358,6 +358,8 @@ mod tests {
 
     #[tokio::test]
     async fn process_env_placeholders_resolve_in_the_url_and_headers() {
+        // Default settings are Safe mode, so this also proves that hiding the
+        // host environment from scripts leaves interpolation unchanged.
         std::env::set_var("ROCKET_WS_TEST_TOKEN", "from-os");
         let svc = service(dev_env(), CollectionSettings::default());
         let mut i = input("wss://h/ws");
