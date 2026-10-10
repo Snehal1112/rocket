@@ -197,6 +197,31 @@ describe('assistant-store', () => {
     expect(lastMessage()).toMatchObject({ kind: 'notice', text: 'Workspace changed.' });
   });
 
+  it('anchors a new proposal to the last message and keeps it on update', () => {
+    activate();
+    store().appendUserMessage('hi');
+    const lastId = store().messages[store().messages.length - 1].id;
+    store().upsertProposal(makeProposal());
+    store().appendChunk('s1', 'more');
+    store().upsertProposal(makeProposal({ summary: 'Changed' }));
+    expect(store().proposalAnchors).toEqual({ p1: lastId });
+  });
+
+  it('anchors a proposal with no messages to the start', () => {
+    activate();
+    store().upsertProposal(makeProposal());
+    expect(store().proposalAnchors).toEqual({ p1: null });
+  });
+
+  it('clears the anchors with the proposals on fatal failure and reset', () => {
+    activate();
+    store().upsertProposal(makeProposal());
+    store().failMessage('s1', 'boom', true);
+    expect(store().proposalAnchors).toEqual({});
+    store().reset();
+    expect(store().proposalAnchors).toEqual({});
+  });
+
   it('upserts proposals by id and resolves their status', () => {
     activate();
     store().upsertProposal(makeProposal());

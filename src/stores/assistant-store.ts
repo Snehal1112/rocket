@@ -73,6 +73,9 @@ export interface AssistantState {
   session?: AssistantSession;
   messages: AssistantMessage[];
   proposals: AgentProposal[];
+  /** Where each proposal sits in the chat: the id of the last message when it
+   *  arrived, or null for the start. Kept apart from the wire DTO. */
+  proposalAnchors: Record<string, string | null>;
   usage?: AssistantUsage;
   focus?: AssistantFocus;
   panelOpen: boolean;
@@ -143,6 +146,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   session: undefined,
   messages: [],
   proposals: [],
+  proposalAnchors: {},
   usage: undefined,
   focus: undefined,
   panelOpen: false,
@@ -158,6 +162,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       session: { sessionId: '', agentConfigId, status: 'starting', configOptions: [], mode },
       messages: [],
       proposals: [],
+      proposalAnchors: {},
       usage: undefined,
     });
     return currentStartToken;
@@ -223,6 +228,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         messages: settleStreaming(state.messages, error),
         // A dead session cannot apply anything, so its proposals go too.
         proposals: fatal ? [] : state.proposals,
+        proposalAnchors: fatal ? {} : state.proposalAnchors,
         // A fatal failure returns to the Start view, so the context goes too.
         ...(fatal ? { focus: undefined } : {}),
       };
@@ -277,7 +283,13 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     set((state) => {
       if (!isCurrent(state, proposal.sessionId)) return state;
       const index = state.proposals.findIndex((p) => p.id === proposal.id);
-      if (index === -1) return { proposals: [...state.proposals, proposal] };
+      if (index === -1) {
+        const last = state.messages[state.messages.length - 1];
+        return {
+          proposals: [...state.proposals, proposal],
+          proposalAnchors: { ...state.proposalAnchors, [proposal.id]: last ? last.id : null },
+        };
+      }
       // A late list result must not undo a status the resolved event set.
       if (proposal.status === 'pending' && state.proposals[index].status !== 'pending') {
         return state;
@@ -309,6 +321,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         ? [...settled, { kind: 'notice', id: crypto.randomUUID(), text: notice }]
         : settled,
       proposals: [],
+      proposalAnchors: {},
       // A restarted agent must not inherit the stale context. The start itself
       // keeps a focus set just before it, so only the end clears it.
       focus: undefined,
@@ -317,6 +330,12 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
 
   reset() {
     currentStartToken = 0;
-    set({ session: undefined, messages: [], proposals: [], usage: undefined });
+    set({
+      session: undefined,
+      messages: [],
+      proposals: [],
+      proposalAnchors: {},
+      usage: undefined,
+    });
   },
 }));

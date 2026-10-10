@@ -1,7 +1,8 @@
 import { Check, Loader2, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { AgentProposal } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import {
   type AssistantMessage,
@@ -77,12 +78,56 @@ function ChatItem({
   }
 }
 
-/** The conversation: messages, tool activity lines, notices and proposals. */
+type TimelineEntry =
+  | { type: 'message'; message: AssistantMessage }
+  | { type: 'proposal'; proposal: AgentProposal };
+
+/** Interleaves messages with resolved proposals placed after their anchor. */
+export function buildTimeline(
+  messages: AssistantMessage[],
+  resolved: AgentProposal[],
+  anchors: Record<string, string | null>,
+): TimelineEntry[] {
+  const messageIds = new Set(messages.map((m) => m.id));
+  const byAnchor = new Map<string | null, AgentProposal[]>();
+  for (const p of resolved) {
+    const anchor = anchors[p.id] ?? null;
+    // A gone anchor message falls back to the end of the chat.
+    const key = anchor === null || messageIds.has(anchor) ? anchor : '__end__';
+    const list = byAnchor.get(key) ?? [];
+    list.push(p);
+    byAnchor.set(key, list);
+  }
+  const place = (key: string | null): TimelineEntry[] =>
+    (byAnchor.get(key) ?? [])
+      .slice()
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .map((proposal) => ({ type: 'proposal', proposal }));
+  const entries: TimelineEntry[] = place(null);
+  for (const message of messages) {
+    entries.push({ type: 'message', message }, ...place(message.id));
+  }
+  entries.push(...place('__end__'));
+  return entries;
+}
+
+/** The conversation: messages, tool lines, notices and resolved proposals. */
 export function AssistantChatView() {
   const messages = useAssistantStore((s) => s.messages);
   const proposals = useAssistantStore((s) => s.proposals);
+  const anchors = useAssistantStore((s) => s.proposalAnchors);
   const endRef = useRef<HTMLDivElement>(null);
-  const itemCount = messages.length + proposals.length;
+  const pending = useMemo(() => proposals.filter((p) => p.status === 'pending'), [proposals]);
+  const timeline = useMemo(
+    () =>
+      buildTimeline(
+        messages,
+        proposals.filter((p) => p.status !== 'pending'),
+        anchors,
+      ),
+    [messages, proposals, anchors],
+  );
+  const itemCount = timeline.length + pending.length;
 
   // Keeps the newest item in view.
   useEffect(() => {
@@ -97,12 +142,20 @@ export function AssistantChatView() {
   return (
     <ScrollArea className='min-h-0 flex-1'>
       <div className='flex flex-col gap-3 p-3'>
-        {messages.map((m) => (
-          <ChatItem key={m.id} message={m} isLastStreaming={m.id === lastStreamingId} />
-        ))}
-        {proposals.length > 0 && (
+        {timeline.map((entry) =>
+          entry.type === 'message' ? (
+            <ChatItem
+              key={entry.message.id}
+              message={entry.message}
+              isLastStreaming={entry.message.id === lastStreamingId}
+            />
+          ) : (
+            <AssistantProposalCard key={entry.proposal.id} proposal={entry.proposal} inline />
+          ),
+        )}
+        {pending.length > 0 && (
           <section aria-label='Proposals' className='flex flex-col gap-2'>
-            {proposals.map((p) => (
+            {pending.map((p) => (
               <AssistantProposalCard key={p.id} proposal={p} />
             ))}
           </section>
