@@ -110,7 +110,8 @@ export interface AssistantState {
 }
 
 // Start tokens live outside the state. They only decide whether a finished
-// start still has an owner, and nothing renders them.
+// start still has an owner, and nothing renders them. They stay at module level
+// on purpose, because moving them into the state would re-render subscribers.
 let startCounter = 0;
 let currentStartToken = 0;
 
@@ -184,17 +185,21 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   appendUserMessage(text) {
     const state = get();
     if (state.session?.status !== 'active' || selectTurnRunning(state)) return false;
+    const userId = crypto.randomUUID();
+    const agentId = crypto.randomUUID();
     set({
       messages: [
         ...state.messages,
-        { kind: 'user', id: crypto.randomUUID(), text },
-        { kind: 'agent', id: crypto.randomUUID(), text: '', streaming: true },
+        { kind: 'user', id: userId, text },
+        { kind: 'agent', id: agentId, text: '', streaming: true },
       ],
     });
     return true;
   },
 
   appendChunk(sessionId, text) {
+    // Used only when a new segment starts. Unused ids are cheap to drop.
+    const newSegmentId = crypto.randomUUID();
     set((state) => {
       if (!text || !isCurrent(state, sessionId)) return state;
       const last = state.messages[state.messages.length - 1];
@@ -204,10 +209,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       // After a tool line, the reply goes on in a new segment of the same turn.
       if (!selectTurnRunning(state)) return state;
       return {
-        messages: [
-          ...state.messages,
-          { kind: 'agent', id: crypto.randomUUID(), text, streaming: true },
-        ],
+        messages: [...state.messages, { kind: 'agent', id: newSegmentId, text, streaming: true }],
       };
     });
   },
@@ -236,13 +238,16 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   },
 
   upsertToolActivity(sessionId, activity) {
+    // Used only when a new tool line is added. Unused ids are cheap to drop.
+    const newLineId = crypto.randomUUID();
     set((state) => {
       if (!isCurrent(state, sessionId)) return state;
       const index = state.messages.findIndex(
         (m) => m.kind === 'tool' && m.callId === activity.callId,
       );
       if (index !== -1) {
-        const existing = state.messages[index] as ToolActivityMessage;
+        const existing = state.messages[index];
+        if (existing.kind !== 'tool') return state;
         const messages = state.messages.slice();
         messages[index] = {
           ...existing,
@@ -254,7 +259,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       // Updates that arrive between turns are dropped, like the backend does.
       if (!selectTurnRunning(state)) return state;
       return {
-        messages: [...state.messages, { kind: 'tool', id: crypto.randomUUID(), ...activity }],
+        messages: [...state.messages, { kind: 'tool', id: newLineId, ...activity }],
       };
     });
   },
