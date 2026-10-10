@@ -40,17 +40,44 @@ const RESERVED_ENV_VAR = 'CLAUDE_CONFIG_DIR';
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // Mirrors the backend rules for fast feedback. The backend stays the authority.
+function validateEnvName(name: string): string | null {
+  if (name.length === 0) return 'Name is required.';
+  if (name.length > 128) return 'Name must be at most 128 characters.';
+  if (!ENV_NAME_PATTERN.test(name)) {
+    return 'Use letters, digits and underscore only, and do not start with a digit.';
+  }
+  if (name.toLowerCase() === RESERVED_ENV_VAR.toLowerCase()) {
+    return `${RESERVED_ENV_VAR} is reserved.`;
+  }
+  return null;
+}
+
+const SECRET_VALUE_MESSAGE =
+  'This looks like a secret value. This field takes only the name of an environment variable, for example ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. Put the secret itself in the RocketVault secret below. If this is a real key, treat it as exposed and revoke it.';
+
+// Heuristic only. The message never repeats the entered text.
+function looksLikeSecret(text: string): boolean {
+  return (
+    /[-./]/.test(text) ||
+    text.length > 64 ||
+    ['sk-', 'ghp_', 'xox', 'AKIA', 'eyJ'].some((prefix) => text.startsWith(prefix))
+  );
+}
+
+// An empty value is not flagged here. The save handler reports it as required.
+function validateCredentialEnvVar(value: string): string | null {
+  const text = value.trim();
+  if (text.length === 0) return null;
+  if (looksLikeSecret(text)) return SECRET_VALUE_MESSAGE;
+  return validateEnvName(text);
+}
+
 function validateEnvRows(rows: EnvRow[], credentialEnvVar: string): (string | null)[] {
   const credential = credentialEnvVar.trim().toLowerCase();
   return rows.map((row, index) => {
-    const name = row.name;
-    const lower = name.toLowerCase();
-    if (name.length === 0) return 'Name is required.';
-    if (name.length > 128) return 'Name must be at most 128 characters.';
-    if (!ENV_NAME_PATTERN.test(name)) {
-      return 'Use letters, digits and underscore only, and do not start with a digit.';
-    }
-    if (lower === RESERVED_ENV_VAR.toLowerCase()) return `${RESERVED_ENV_VAR} is reserved.`;
+    const lower = row.name.toLowerCase();
+    const nameError = validateEnvName(row.name);
+    if (nameError) return nameError;
     if (credential && lower === credential) {
       return 'Must differ from the credential env var.';
     }
@@ -74,6 +101,15 @@ const emptyForm = {
   vaultSecretId: '',
   vaultSecretName: '',
 };
+
+// Maps the known backend rule violation to a friendlier text without echoing input.
+function saveErrorMessage(e: unknown): string {
+  const text = String(e);
+  if (text.includes('credential_env_var may contain only')) {
+    return 'The credential variable name is not valid. Use only letters, digits and underscores.';
+  }
+  return `Could not save agent: ${text}`;
+}
 
 export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogProps) {
   const { data: configs = [], isLoading, isError, error, refetch } = useAgentConfigs();
@@ -162,7 +198,8 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   };
 
   const envErrors = editing ? validateEnvRows(editing.extraEnv, editing.credentialEnvVar) : [];
-  const envInvalid = envErrors.some((e) => e !== null);
+  const credentialError = editing ? validateCredentialEnvVar(editing.credentialEnvVar) : null;
+  const envInvalid = envErrors.some((e) => e !== null) || credentialError !== null;
 
   const updateEnvRow = (key: string, patch: Partial<Pick<EnvRow, 'name' | 'value'>>) => {
     if (!editing) return;
@@ -207,7 +244,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       await saveMutation.mutateAsync(config);
       cancelEdit();
     } catch (e) {
-      toast.error(`Could not save agent: ${String(e)}`);
+      toast.error(saveErrorMessage(e));
     }
   };
 
@@ -312,7 +349,20 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                   onChange={(e) => setEditing({ ...editing, credentialEnvVar: e.target.value })}
                   placeholder='ANTHROPIC_API_KEY'
                   className='h-8 text-sm'
+                  aria-invalid={credentialError !== null}
+                  autoComplete='off'
+                  spellCheck={false}
                 />
+                {credentialError && (
+                  <p role='alert' className='mt-1 text-xs text-destructive'>
+                    {credentialError}
+                  </p>
+                )}
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  The NAME of the environment variable the agent reads its key from, for example
+                  ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. The key itself comes from the
+                  RocketVault secret below.
+                </p>
                 <p className='mt-1 text-xs text-muted-foreground'>
                   If the vault secret is a short-lived token (e.g. an OAuth access token) rather
                   than a static API key, sessions may need to be restarted after it expires — the

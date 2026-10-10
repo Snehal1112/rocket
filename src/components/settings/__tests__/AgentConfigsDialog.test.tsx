@@ -189,6 +189,80 @@ describe('AgentConfigsDialog', () => {
     expect(api.saveAgentConfig).not.toHaveBeenCalled();
   });
 
+  describe('credential env var validation', () => {
+    const fake = 'sk-test-not-a-real-key-123';
+
+    async function setCredential(value: string) {
+      const field = await screen.findByLabelText('Credential Env Var');
+      await userEvent.clear(field);
+      await userEvent.type(field, value);
+    }
+
+    it('saves a valid name', async () => {
+      await openEdit();
+      await setCredential('CLAUDE_CODE_OAUTH_TOKEN');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+      expect(api.saveAgentConfig).toHaveBeenCalledWith({
+        ...claude,
+        credentialEnvVar: 'CLAUDE_CODE_OAUTH_TOKEN',
+      });
+    });
+
+    it('flags a token-like value without echoing it and blocks Save', async () => {
+      await openEdit();
+      await setCredential(fake);
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent(/looks like a secret value/);
+      expect(alert).toHaveTextContent(/treat it as exposed and revoke it/);
+      expect(alert.textContent).not.toContain(fake);
+      expect(document.body.textContent).not.toContain(fake);
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    it('flags a name that starts with a digit', async () => {
+      await openEdit();
+      await setCredential('1KEY');
+      expect(screen.getByRole('alert')).toHaveTextContent(/do not start with a digit/);
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    it('flags the reserved name', async () => {
+      await openEdit();
+      await setCredential('claude_config_dir');
+      expect(screen.getByRole('alert')).toHaveTextContent(/reserved/);
+    });
+
+    it('shows the message on open for an invalid stored config and does not save', async () => {
+      vi.mocked(api.listAgentConfigs).mockResolvedValue([{ ...claude, credentialEnvVar: fake }]);
+      await openEdit();
+      expect(screen.getByRole('alert')).toHaveTextContent(/looks like a secret value/);
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+      expect(api.saveAgentConfig).not.toHaveBeenCalled();
+    });
+
+    it('explains in the helper text that the field takes a name', async () => {
+      await openEdit();
+      expect(screen.getByText(/The NAME of the environment variable/)).toHaveTextContent(
+        /ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/,
+      );
+    });
+
+    it('maps the backend rule error to a friendly toast', async () => {
+      vi.mocked(api.saveAgentConfig).mockRejectedValue(
+        'Invalid input: agent config credential_env_var may contain only letters, digits and underscores',
+      );
+      await openEdit();
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          'The credential variable name is not valid. Use only letters, digits and underscores.',
+        ),
+      );
+    });
+  });
+
   it('rejects a new agent with required fields missing', async () => {
     renderDialog();
     await userEvent.click(await screen.findByRole('button', { name: 'Add Agent' }));
