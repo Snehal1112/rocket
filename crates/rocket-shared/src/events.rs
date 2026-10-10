@@ -601,6 +601,13 @@ pub enum DomainEvent {
         size: u64,
         cost_usd: Option<f64>,
     },
+    /// Emitted after an assistant conversation was saved. Carries the id
+    /// only, never message text.
+    AssistantConversationSaved { conversation_id: String },
+    /// Emitted after one stored assistant conversation was deleted.
+    AssistantConversationDeleted { conversation_id: String },
+    /// Emitted after every stored conversation of the workspace was deleted.
+    AssistantConversationsCleared,
 
     // gRPC session events
     /// Emitted once a streaming gRPC call has been opened.
@@ -1983,6 +1990,28 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"acpToolInvoked","session_id":"sess-1","tool":"run_request","summary":"Ran GET /users"}"#
+        );
+    }
+
+    #[test]
+    fn assistant_conversation_events_carry_ids_only() {
+        let saved = DomainEvent::AssistantConversationSaved {
+            conversation_id: "c1".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&saved).expect("serialize"),
+            r#"{"type":"assistantConversationSaved","conversation_id":"c1"}"#
+        );
+        let deleted = DomainEvent::AssistantConversationDeleted {
+            conversation_id: "c1".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&deleted).expect("serialize"),
+            r#"{"type":"assistantConversationDeleted","conversation_id":"c1"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&DomainEvent::AssistantConversationsCleared).expect("serialize"),
+            r#"{"type":"assistantConversationsCleared"}"#
         );
     }
 

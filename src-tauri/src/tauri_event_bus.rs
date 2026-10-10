@@ -13,7 +13,23 @@ impl TauriEventBus {
 
 impl EventPublisher for TauriEventBus {
     fn publish(&self, event: DomainEvent) {
-        let event_name = match &event {
+        let event_name = channel_for(&event);
+        let _ = self.app.emit(event_name, &event);
+        // A branch switch replaces the working-tree content visible to the
+        // collection sidebar, so also fire "collection-changed" so that any
+        // expanded CollectionNode re-fetches its request tree.
+        if matches!(
+            &event,
+            DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. }
+        ) {
+            let _ = self.app.emit("collection-changed", &event);
+        }
+    }
+}
+
+/// The frontend channel for each event.
+pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
+    match event {
             // File watcher events are collection changes — the sidebar
             // needs to refresh when files are created/modified/deleted.
             DomainEvent::FileChanged { .. } => "collection-changed",
@@ -52,6 +68,10 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::AcpToolActivity { .. } => "agent-session-tool-activity",
             DomainEvent::AcpConfigOptionsChanged { .. } => "agent-session-config-options",
             DomainEvent::AcpUsage { .. } => "agent-session-usage",
+            // Stored assistant conversations. The payloads hold ids only.
+            DomainEvent::AssistantConversationSaved { .. } => "assistant-conversation-saved",
+            DomainEvent::AssistantConversationDeleted { .. } => "assistant-conversation-deleted",
+            DomainEvent::AssistantConversationsCleared => "assistant-conversations-cleared",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. } => "collection-changed",
@@ -99,16 +119,28 @@ impl EventPublisher for TauriEventBus {
             DomainEvent::TestsCompleted { .. } => "script-tests",
             DomainEvent::ScriptError { .. } => "script-error",
             DomainEvent::ScriptVariableWritten { .. } => "script-variable-written",
-        };
-        let _ = self.app.emit(event_name, &event);
-        // A branch switch replaces the working-tree content visible to the
-        // collection sidebar, so also fire "collection-changed" so that any
-        // expanded CollectionNode re-fetches its request tree.
-        if matches!(
-            &event,
-            DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. }
-        ) {
-            let _ = self.app.emit("collection-changed", &event);
-        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assistant_conversation_events_have_their_own_channels() {
+        let id = || "c1".to_string();
+        assert_eq!(
+            channel_for(&DomainEvent::AssistantConversationSaved { conversation_id: id() }),
+            "assistant-conversation-saved"
+        );
+        assert_eq!(
+            channel_for(&DomainEvent::AssistantConversationDeleted { conversation_id: id() }),
+            "assistant-conversation-deleted"
+        );
+        assert_eq!(
+            channel_for(&DomainEvent::AssistantConversationsCleared),
+            "assistant-conversations-cleared"
+        );
+        assert_eq!(channel_for(&DomainEvent::HistoryCleared), "history-changed");
     }
 }
