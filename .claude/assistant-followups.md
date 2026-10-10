@@ -51,7 +51,6 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 
 - Nothing in `src/` listens to the `agent-tool-invoked` event.
 - `AcpToolInvoked` is documented as emitted regardless of outcome (`crates/rocket-shared/src/events.rs` ~547-551). It is published only on success, and never by `propose_changes` or `list_proposals`.
-- The History entry carries `runSource`, but the TS `HistoryEntry` and `HistoryFilter` types and `HistoryPanel` ignore it. The run-source badge and filter are missing.
 - There is no agent-running indicator outside the panel. `AssistantToggleButton` is a static icon.
 - The Rust `UiState` struct (`src-tauri/src/commands/ui_state.rs`) lacks `sidebarWidth`, `isConsoleOpen` and `consoleHeight`. The frontend values are dropped on each save. This is pre-existing since 2026-05-01.
 
