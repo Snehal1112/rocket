@@ -4,7 +4,7 @@
 // over its stdin/stdout. This module implements no tool logic of its own —
 // every `tools/list`/`tools/call` request received over stdio is forwarded
 // verbatim to Plan 04's real HTTP MCP backend and the response is forwarded
-// back unchanged. That backend already re-checks `agent_autonomy_enabled` and
+// back unchanged. That backend already re-checks the effective agent run switch and
 // enforces the `secret` variable boundary on every call, so this bridge has
 // no additional authorization logic to duplicate.
 //

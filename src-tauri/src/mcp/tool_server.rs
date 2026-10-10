@@ -1151,7 +1151,9 @@ mod tests {
     }
 
     use rocket_collection::request::Request as CollectionRequest;
-    use rocket_collection::{settings::CollectionSettings, CollectionRepository};
+    use rocket_collection::{
+        settings::CollectionSettings, CollectionGrant, CollectionRepository, CollectionTrustStore,
+    };
     use rocket_environment::{
         Environment, EnvironmentRepositoryFactory, NullSecretStore, NullVaultSecretFetcher,
         Variable,
@@ -1230,6 +1232,22 @@ mod tests {
                 )
                 .expect("save request");
 
+            // The file only requests the run switch. The agent needs the grant too.
+            let trust_store: Arc<dyn CollectionTrustStore> = Arc::new(
+                rocket_infra::FsCollectionTrustStore::new(tmp.path().join("trust.yml")),
+            );
+            if agent_autonomy_enabled {
+                trust_store
+                    .put(
+                        &setup_repo.collection_identity("demo").expect("identity"),
+                        CollectionGrant {
+                            agent_run: true,
+                            ..Default::default()
+                        },
+                    )
+                    .expect("grant agent run");
+            }
+
             let env_factory = SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path));
             let mut env = Environment::new("dev");
             env.set_variable(Variable::new("API_KEY", "plain-value"));
@@ -1256,6 +1274,7 @@ mod tests {
                 Arc::new(NullSecretStore),
                 Arc::new(NullVaultSecretFetcher),
             )
+            .with_trust_store(Arc::clone(&trust_store))
             .with_collection_env_repo_factory(Box::new(
                 SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path)),
             ));
@@ -1268,7 +1287,8 @@ mod tests {
                 Box::new(FsWorkspaceConfigRepo::new()),
                 Arc::clone(&ws_path),
                 Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
-            ));
+            )
+            .with_trust_store(Arc::clone(&trust_store)));
 
             let app = tauri::test::mock_builder()
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))

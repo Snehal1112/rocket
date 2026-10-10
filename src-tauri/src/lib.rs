@@ -327,6 +327,34 @@ pub fn run() {
                 audit_bridge::ServiceBackedAuditPublisher::new(audit_svc.clone()),
             );
 
+            // What the user allowed per collection on this computer. One store is
+            // shared by every service, so a grant is seen by all of them at once.
+            let trust_store: Arc<dyn rocket_collection::CollectionTrustStore> =
+                Arc::new(rocket_infra::FsCollectionTrustStore::new(data_dir.join("trust.yml")));
+            let trust_svc = rocket_app::CollectionTrustService::new(
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Arc::clone(&trust_store),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            );
+            // One-time grandfathering of the collections that exist before the trust gate.
+            // It runs before any command is served. A failure is logged and retried at the
+            // next start, and until then those collections are untrusted.
+            match workspace_svc.list() {
+                Ok(workspaces) => {
+                    let paths: Vec<PathBuf> = workspaces.into_iter().map(|w| w.path).collect();
+                    let found = rocket_infra::discover_legacy_collections(
+                        &paths,
+                        &FsWorkspaceConfigRepo::new(),
+                    );
+                    if let Err(e) = trust_svc.migrate_legacy(found) {
+                        tracing::warn!(error = %e, "trust migration failed");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "trust migration could not list workspaces"),
+            }
+
             // SharedPathCollectionRepo resolves the base directory from
             // active_workspace_path at call time, so switching workspaces
             // automatically redirects all collection reads/writes. The file
@@ -339,7 +367,8 @@ pub fn run() {
                 ))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
-            );
+            )
+            .with_trust_store(Arc::clone(&trust_store));
             // Holds the assistant's proposed changes until the user accepts
             // them. It applies them through its own CollectionService, built
             // like collection_svc above, so accepted changes follow workspace
@@ -503,6 +532,7 @@ pub fn run() {
                 Arc::clone(&vault_fetcher),
             )
             .with_script_engine(Box::new(DenoScriptEngine::new()))
+            .with_trust_store(Arc::clone(&trust_store))
             .with_collection_env_repo_factory(Box::new(
                 SharedCollectionEnvironmentRepo::new(Arc::clone(&active_workspace_path)),
             ));
@@ -580,6 +610,7 @@ pub fn run() {
                     Arc::clone(&vault_fetcher),
                 )
                 .with_script_engine(Box::new(DenoScriptEngine::new()))
+                .with_trust_store(Arc::clone(&trust_store))
                 .with_collection_env_repo_factory(Box::new(
                     SharedCollectionEnvironmentRepo::with_secret_store(
                         Arc::clone(&active_workspace_path),
@@ -611,7 +642,8 @@ pub fn run() {
                 Box::new(rocket_infra::SharedPathHistoryRepo::new(Arc::clone(
                     &active_workspace_path,
                 ))),
-            ));
+            )
+            .with_trust_store(Arc::clone(&trust_store)));
 
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows
@@ -714,10 +746,12 @@ pub fn run() {
                 )),
                 acp_agent_config_svc,
                 Arc::clone(&acp_collection_repo),
-            );
+            )
+            .with_trust_store(Arc::clone(&trust_store));
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);
+            app.manage(trust_svc);
             app.manage(contract_svc);
             app.manage(grpc_svc);
             app.manage(history_svc);
@@ -820,6 +854,9 @@ pub fn run() {
             commands::collections::reorder_items,
             commands::collections::get_collection_settings,
             commands::collections::save_collection_settings,
+            commands::collection_trust::set_collection_capability,
+            commands::collection_trust::get_trust_migration_notice,
+            commands::collection_trust::dismiss_trust_migration_notice,
             commands::collections::scan_collections_in_path,
             commands::collections::detect_cloned_structure,
             commands::collections::get_folder_chain_variables,

@@ -5,6 +5,7 @@ pub mod agent_proposals;
 pub mod app;
 pub mod assistant_chips;
 pub mod audit;
+pub mod collection_trust;
 pub mod collections;
 pub mod contract;
 pub mod contract_dtos;
