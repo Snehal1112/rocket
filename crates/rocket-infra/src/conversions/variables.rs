@@ -21,7 +21,7 @@ impl From<OcVariable> for CollectionVariable {
             value: current,
             initial_value: initial,
             enabled: !v.disabled.unwrap_or(false),
-            secret: false,
+            secret: v.secret.unwrap_or(false),
         }
     }
 }
@@ -42,6 +42,7 @@ impl From<CollectionVariable> for OcVariable {
             },
             description: None,
             disabled: if cv.enabled { None } else { Some(true) },
+            secret: if cv.secret { Some(true) } else { None },
         }
     }
 }
@@ -76,6 +77,7 @@ impl From<Variable> for OcVariable {
             description: v.description,
             // Omit disabled entirely when enabled (cleaner YAML output).
             disabled: if v.enabled { None } else { Some(true) },
+            secret: None,
         }
     }
 }

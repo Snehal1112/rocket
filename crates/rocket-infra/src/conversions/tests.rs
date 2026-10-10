@@ -359,6 +359,7 @@ fn collection_variable_backward_compat_old_yaml_without_initial() {
         initial: None,
         description: None,
         disabled: None,
+        secret: None,
     };
     let cv = CollectionVariable::from(oc);
     assert_eq!(
@@ -412,6 +413,7 @@ fn variable_oc_to_domain() {
         initial: None,
         description: Some(Description::text("Server host")),
         disabled: Some(true),
+        secret: None,
     };
     let v: Variable = oc.into();
     assert_eq!(v.key, "HOST");
@@ -458,6 +460,7 @@ fn environment_oc_to_domain() {
             initial: None,
             description: None,
             disabled: None,
+            secret: None,
         })],
         external_secrets: Vec::new(),
         client_certificates: Vec::new(),

@@ -19,6 +19,10 @@ pub struct OcVariable {
     pub description: Option<OcDescription>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
+    /// Rocket extension for collection, folder and request variables. Omitted when false.
+    /// Environments use `OcSecretVariable` instead, which carries no value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<bool>,
 }
 
 /// OpenCollection SecretVariable — schema: { secret: true, name, description, disabled, type }.

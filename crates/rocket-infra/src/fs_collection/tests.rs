@@ -3302,3 +3302,76 @@ fn validate_path_rejects_windows_drive_paths() {
         assert!(matches!(err, DomainError::InvalidInput(_)), "{bad}");
     }
 }
+
+fn secret_var(key: &str, secret: bool) -> CollectionVariable {
+    CollectionVariable {
+        key: key.to_string(),
+        value: "v".to_string(),
+        initial_value: "v".to_string(),
+        enabled: true,
+        secret,
+    }
+}
+
+#[test]
+fn secret_flag_survives_a_collection_settings_round_trip() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let settings = CollectionSettings {
+        variables: vec![secret_var("token", true), secret_var("plain", false)],
+        ..Default::default()
+    };
+    repo.save_settings("my-api", &settings).unwrap();
+    let loaded = repo.get_settings("my-api").unwrap();
+    assert_eq!(loaded.variables, settings.variables);
+    let yaml = fs::read_to_string(dir.path().join("my-api/opencollection.yml")).unwrap();
+    assert_eq!(yaml.matches("secret: true").count(), 1, "{yaml}");
+    assert!(!yaml.contains("secret: false"), "{yaml}");
+}
+
+#[test]
+fn secret_flag_survives_a_folder_variables_round_trip() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "auth").unwrap();
+    let vars = vec![secret_var("token", true), secret_var("plain", false)];
+    repo.save_folder_variables("my-api", "auth", vars.clone())
+        .unwrap();
+    assert_eq!(repo.get_folder_variables("my-api", "auth").unwrap(), vars);
+}
+
+#[test]
+fn secret_flag_survives_a_request_variables_round_trip() {
+    let (_dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    let mut req = rocket_collection::Request::new("Login", HttpMethod::Post, "https://example.com");
+    req.variables = vec![secret_var("token", true), secret_var("plain", false)];
+    repo.save_request("my-api", "login.yml", &req).unwrap();
+    assert_eq!(
+        repo.get_request("my-api", "login.yml").unwrap().variables,
+        req.variables
+    );
+    // The dedicated variables save path keeps the flag too.
+    let vars = vec![secret_var("other", true)];
+    repo.save_request_variables("my-api", "login.yml", vars.clone())
+        .unwrap();
+    assert_eq!(
+        repo.get_request_variables("my-api", "login.yml").unwrap(),
+        vars
+    );
+}
+
+#[test]
+fn variable_without_secret_field_loads_as_non_secret_and_is_not_rewritten_with_it() {
+    let (dir, repo) = setup();
+    repo.create("my-api").unwrap();
+    repo.create_folder("my-api", "auth").unwrap();
+    let path = dir.path().join("my-api/auth/folder.yml");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    assert!(!existing.contains("secret"));
+    repo.save_folder_variables("my-api", "auth", vec![secret_var("a", false)])
+        .unwrap();
+    let yaml = fs::read_to_string(&path).unwrap();
+    assert!(!yaml.contains("secret"), "{yaml}");
+    assert!(!repo.get_folder_variables("my-api", "auth").unwrap()[0].secret);
+}

@@ -118,6 +118,7 @@ mod tests {
             initial: Some(VariableValue::simple("127.0.0.1")),
             description: Some(Description::text("Server host")),
             disabled: Some(false),
+            secret: None,
         };
         let yaml = serde_yaml::to_string(&var).unwrap();
         let back: OcVariable = serde_yaml::from_str(&yaml).unwrap();
@@ -956,6 +957,7 @@ externalSecrets:
             initial: None,
             description: None,
             disabled: None,
+            secret: None,
         });
         let yaml = serde_yaml::to_string(&plain).expect("serialize plain entry");
         assert!(yaml.contains("name: HOST"), "got:\n{yaml}");
