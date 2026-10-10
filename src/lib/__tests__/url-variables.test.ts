@@ -69,6 +69,23 @@ describe('secretKeysOf', () => {
 });
 
 describe('buildScopedContext secret flag', () => {
+  it('marks process env entries as secret and keeps the value', () => {
+    const ctx = buildScopedContext({ processEnvVars: { AWS_SECRET_ACCESS_KEY: 'abc' } });
+    expect(ctx.get('process.env.AWS_SECRET_ACCESS_KEY')).toEqual(
+      expect.objectContaining({ source: 'process', value: 'abc', secret: true }),
+    );
+  });
+
+  it('lets a higher non-secret layer override a process env entry', () => {
+    const ctx = buildScopedContext({
+      processEnvVars: { HOME: '/home/u' },
+      envVars: { 'process.env.HOME': 'plain' },
+    });
+    expect(ctx.get('process.env.HOME')).toEqual(
+      expect.objectContaining({ source: 'environment', secret: false }),
+    );
+  });
+
   it('marks a secret environment variable as secret', () => {
     const ctx = buildScopedContext({
       envVars: { apiKey: 'sk-live-123', host: 'api.test' },

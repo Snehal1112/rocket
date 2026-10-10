@@ -97,6 +97,11 @@ export function VariablePopover({
   }, []);
 
   const readOnly = forceReadOnly || resolvedEntry?.secret || !isEditable(resolvedEntry);
+  // A secret that is set but empty looks "set" under the mask. Point to where it is edited.
+  const secretEmpty =
+    !!resolvedEntry?.secret &&
+    resolvedEntry.value === '' &&
+    (resolvedEntry.source === 'environment' || resolvedEntry.source === 'global');
 
   const handleCommit = useCallback(async () => {
     if (committedRef.current || readOnly) return;
@@ -176,6 +181,11 @@ export function VariablePopover({
           }}
         />
       </div>
+      {secretEmpty && (
+        <p className='px-3 pb-1.5 text-2xs text-muted-foreground'>
+          Secret value is empty. Open the environment editor to set it.
+        </p>
+      )}
 
       {/* Footer: scope badge + nav link */}
       <div className='flex items-center justify-between gap-4 px-2 py-1.5 border-t border-border/50 bg-muted/30'>

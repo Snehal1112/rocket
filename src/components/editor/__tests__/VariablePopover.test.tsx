@@ -106,3 +106,37 @@ describe('VariablePopover blur', () => {
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });
+
+describe('VariablePopover empty secret hint', () => {
+  const HINT = /environment editor/i;
+
+  it('hints to open the environment editor when an environment secret is empty', () => {
+    renderPopover(entry({ secret: true, value: '' }));
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+  });
+
+  it('shows the same hint for an empty global secret', () => {
+    renderPopover(entry({ secret: true, value: '', source: 'global', label: 'Global' }));
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+  });
+
+  it('shows no hint when the secret has a value', () => {
+    renderPopover(entry({ secret: true }));
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('shows no hint for a vault secret, which is always empty here', () => {
+    renderPopover(entry({ secret: true, value: '', source: 'vault', label: 'Vault (pay)' }));
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('shows no hint for a process env secret', () => {
+    renderPopover(entry({ secret: true, value: '', source: 'process', label: 'Process Env' }));
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('keeps the empty secret read-only', () => {
+    renderPopover(entry({ secret: true, value: '' }));
+    expect(screen.getByRole('textbox')).toHaveAttribute('readonly');
+  });
+});

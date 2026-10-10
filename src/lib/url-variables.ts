@@ -53,6 +53,8 @@ export function secretKeysOf(
 // Vault entries come from the active environment's External Secrets bindings.
 // Their values are only fetched at send time, so they are always masked here.
 // Secret entries keep their value in memory (OAuth2 resolves from it) and are masked by the consumers that read entry.secret.
+// Process env entries are always secret, because a variable name says nothing about whether its value is sensitive.
+// The value stays for the resolver.
 export function buildScopedContext(params: {
   runtimeVars?: Record<string, string>;
   requestVars?: CollectionVariable[];
@@ -75,7 +77,7 @@ export function buildScopedContext(params: {
   for (const name of listDynamicVars())
     add(`$${name}`, generateDynamicVar(name) ?? '', 'dynamic', 'Dynamic');
   for (const [k, v] of Object.entries(params.processEnvVars ?? {}))
-    add(`process.env.${k}`, v, 'process', 'Process Env');
+    add(`process.env.${k}`, v, 'process', 'Process Env', true);
   for (const [k, v] of Object.entries(params.globalVars ?? {}))
     add(k, v, 'global', 'Global', params.globalSecretKeys?.has(k) ?? false);
   for (const v of (params.collectionVars ?? []).filter((v) => v.enabled)) {
