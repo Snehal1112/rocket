@@ -66,3 +66,9 @@ rocket-scripting = { path = "crates/rocket-scripting" }
 rocket-acp = { path = "crates/rocket-acp" }
 rocket-flow = { path = "crates/rocket-flow" }
 rocket-grpc = { path = "crates/rocket-grpc" }
+
+# Smaller debug info for dev and test builds: file names and line numbers only. Backtraces and
+# panic locations keep working. Variable inspection in a debugger does not. Linking V8 with full
+# debug info is the main cause of the 1+ GiB linker peak.
+[profile.dev]
+debug = "line-tables-only"
