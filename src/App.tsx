@@ -26,6 +26,7 @@ import { getQueryClient } from '@/lib/query-client';
 import { getActiveWorkspace, listWorkspaces, type Workspace } from '@/lib/tauri-api';
 import { restoreUiState, scheduleSaveUiState, subscribeLayoutStoreToUiState } from '@/lib/ui-state';
 import { useWebSocketEventBridge } from '@/lib/websocket-event-bridge';
+import { clearWorkspaceScopedCaches } from '@/lib/workspace-switch';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useEnvStore } from '@/stores/env-store';
 import { useLayoutStore } from '@/stores/layout-store';
@@ -136,6 +137,7 @@ function App() {
         void reloadGlobalEnvironments(qc);
         qc.invalidateQueries({ queryKey: collectionTrustKeys.all });
         qc.invalidateQueries({ queryKey: environmentKeys.processAll });
+        clearWorkspaceScopedCaches(qc);
       }),
       listen<{ id: string; newName: string }>('workspace-renamed', () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.all });

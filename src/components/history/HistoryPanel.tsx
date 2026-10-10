@@ -7,6 +7,7 @@ import type { HistoryEntry } from '@/lib/tauri-api';
 import { listHistory, searchHistory } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { RequestTab } from '@/types/pane-types';
 
 // HTTP method filter options.
@@ -75,12 +76,15 @@ export function HistoryPanel() {
     }
   }, []);
 
-  // Load on mount, and re-fetch immediately when method or status changes.
+  // The panel stays mounted, so it reloads when the workspace changes.
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+
+  // Load on mount, and re-fetch immediately when method, status or workspace changes.
   // (urlQuery is excluded — debounced separately in handleUrlChange below.)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: urlQuery excluded intentionally, debounced in handleUrlChange
+  // biome-ignore lint/correctness/useExhaustiveDependencies: urlQuery excluded intentionally, debounced in handleUrlChange; activeWorkspaceId only triggers a reload
   useEffect(() => {
     void fetchEntries(urlQuery, method, statusLabel);
-  }, [fetchEntries, method, statusLabel]);
+  }, [fetchEntries, method, statusLabel, activeWorkspaceId]);
 
   // Debounced URL search with 300 ms delay.
   function handleUrlChange(value: string) {
