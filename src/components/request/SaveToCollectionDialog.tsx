@@ -83,7 +83,7 @@ export function SaveToCollectionDialog({ open, tab, onClose }: SaveToCollectionD
         path: saved.fileName ?? fsName,
       });
       store.updateTabTitle(tab.id, trimmedName);
-      store.markClean(tab.id);
+      store.markRequestSaved(tab.id, tab.request);
       onClose();
     } catch (err) {
       console.error('[SaveToCollectionDialog]', err);
