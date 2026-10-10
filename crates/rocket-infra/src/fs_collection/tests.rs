@@ -1277,6 +1277,7 @@ fn strict_folder_chain_variables_fail_on_an_unreadable_folder_yml() {
     repo.create_folder("my-api", "auth").unwrap();
     // A directory named folder.yml exists but cannot be read as a file.
     let folder_yml = repo.collection_root_path("my-api").unwrap().join("auth/folder.yml");
+    let _ = std::fs::remove_file(&folder_yml);
     std::fs::create_dir(&folder_yml).expect("create folder.yml directory");
     assert!(repo
         .get_folder_chain_variables("my-api", "auth/login.yml")
@@ -2928,11 +2929,8 @@ fn script_create_returns_a_normalised_relative_path() {
         repo.create_script_file("col", "./lib", "one").expect("dot"),
         "lib/one.js"
     );
-    assert_eq!(
-        repo.create_script_file("col", "a/../b", "two")
-            .expect("dotdot"),
-        "b/two.js"
-    );
+    // Parent-directory components are refused, not normalised.
+    assert!(repo.create_script_file("col", "a/../b", "two").is_err());
     assert_eq!(
         repo.create_script_file("col", "lib/", "three")
             .expect("slash"),
@@ -2996,7 +2994,7 @@ fn script_rename_returns_a_normalised_path() {
     repo.create_folder("col", "lib").expect("lib");
     repo.create_script_file("col", "lib", "a").expect("a");
     assert_eq!(
-        repo.rename_script_file("col", "./lib/../lib/a.js", "b")
+        repo.rename_script_file("col", "./lib//a.js", "b")
             .expect("rename"),
         "lib/b.js"
     );
