@@ -33,6 +33,14 @@ describe('flow-auth-store', () => {
     expect(getAuth('k2')).toEqual({ authType: 'none' });
   });
 
+  it('raises clearEpoch on every clear, even when nothing was removed', () => {
+    const before = useFlowAuthStore.getState().clearEpoch;
+    useFlowAuthStore.getState().clearFlow('x', 'y');
+    useFlowAuthStore.getState().clearNode('x', 'y', 'n');
+    useFlowAuthStore.getState().clearAuth('missing');
+    expect(useFlowAuthStore.getState().clearEpoch).toBe(before + 3);
+  });
+
   it('is never persisted to browser storage', () => {
     useFlowAuthStore
       .getState()

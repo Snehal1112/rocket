@@ -121,6 +121,7 @@ async function authenticate(
     scope.globalEnvName,
   );
   const store = useFlowAuthStore.getState();
+  const epoch = store.clearEpoch;
   // The in-memory entry can be stale if the persisted auth changed outside
   // the editor (undo, reload), and its token stale if a variable behind the
   // configuration changed value; it is used only while both still match.
@@ -135,6 +136,8 @@ async function authenticate(
 
   // Writes the new state unless the caller says the node changed while it waited.
   const write = (next: OAuth2State): boolean => {
+    // A clear (rename, delete, node removal) ran while the provider was answering.
+    if (useFlowAuthStore.getState().clearEpoch !== epoch) return false;
     if (options.shouldWrite && !options.shouldWrite()) return false;
     store.setAuth(key, { ...state, oauth2: next }, oauth2Fingerprint(next, rv));
     return true;

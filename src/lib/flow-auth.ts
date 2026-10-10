@@ -39,13 +39,20 @@ export function flowAuthKey(
   environmentName: string | null | undefined,
   globalEnvironmentName: string | null | undefined,
 ): string {
-  return `${collection}::${flowName}::${environmentName || ''}::${globalEnvironmentName || ''}::${nodeId}`;
+  // A JSON array, so no name can change where one part ends and the next begins.
+  return JSON.stringify([
+    collection,
+    flowName,
+    environmentName || '',
+    globalEnvironmentName || '',
+    nodeId,
+  ]);
 }
 
 /**
  * True when `key` (from `flowAuthKey`) belongs to the flow, and, when `nodeId`
- * is given, to that node in any environment. The node id is the last segment
- * and must equal `nodeId` exactly, so node "a" never matches node "ba".
+ * is given, to that node in any environment. The parts are compared exactly,
+ * so node "a" never matches node "ba". Keys in any other format never match.
  */
 export function flowAuthKeyMatches(
   key: string,
@@ -53,8 +60,15 @@ export function flowAuthKeyMatches(
   flowName: string,
   nodeId?: string,
 ): boolean {
-  if (!key.startsWith(`${collection}::${flowName}::`)) return false;
-  return nodeId === undefined || key.endsWith(`::${nodeId}`);
+  let parts: unknown;
+  try {
+    parts = JSON.parse(key);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parts) || parts.length !== 5) return false;
+  if (parts[0] !== collection || parts[1] !== flowName) return false;
+  return nodeId === undefined || parts[4] === nodeId;
 }
 
 export function isOAuth2(auth: Auth): boolean {

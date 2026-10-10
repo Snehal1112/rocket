@@ -3,6 +3,7 @@ import {
   DEFAULT_AUTH_NODE_AUTH,
   describeAuth,
   flowAuthKey,
+  flowAuthKeyMatches,
   flowAuthState,
   isInteractiveGrant,
   isOAuth2,
@@ -26,8 +27,12 @@ const oauth = (flow: string): Auth =>
 
 describe('flowAuthKey', () => {
   it('joins collection, flow and node so tokens never cross flows', () => {
-    expect(flowAuthKey('api', 'login', 'n1', 'dev', 'g')).toBe('api::login::dev::g::n1');
-    expect(flowAuthKey('api', 'login', 'n1', null, null)).toBe('api::login::::::n1');
+    expect(flowAuthKey('api', 'login', 'n1', 'dev', 'g')).not.toBe(
+      flowAuthKey('api', 'other', 'n1', 'dev', 'g'),
+    );
+    expect(flowAuthKey('api', 'login', 'n1', null, null)).toBe(
+      flowAuthKey('api', 'login', 'n1', '', ''),
+    );
     expect(flowAuthKey('api', 'login', 'n1', 'dev', null)).not.toBe(
       flowAuthKey('api', 'other', 'n1', 'dev', null),
     );
@@ -63,6 +68,39 @@ describe('flowAuthKey', () => {
     expect(flowAuthKey('api', 'login', 'n1', 'a', null)).not.toBe(
       flowAuthKey('api', 'login', 'n1', null, 'a'),
     );
+  });
+
+  it('does not collide when environment names contain the old separator', () => {
+    expect(flowAuthKey('api', 'login', 'n1', 'x::', 'y')).not.toBe(
+      flowAuthKey('api', 'login', 'n1', 'x', '::y'),
+    );
+  });
+});
+
+describe('flowAuthKeyMatches', () => {
+  const key = flowAuthKey('api', 'login', 'n1', 'dev', 'g');
+
+  it('matches the flow in any environment, and the node when one is given', () => {
+    expect(flowAuthKeyMatches(key, 'api', 'login')).toBe(true);
+    expect(flowAuthKeyMatches(key, 'api', 'login', 'n1')).toBe(true);
+  });
+
+  it('does not match another node, flow or collection', () => {
+    expect(flowAuthKeyMatches(key, 'api', 'login', 'n')).toBe(false);
+    expect(
+      flowAuthKeyMatches(flowAuthKey('api', 'login', 'ba', null, null), 'api', 'login', 'a'),
+    ).toBe(false);
+    expect(flowAuthKeyMatches(flowAuthKey('api', 'a::b', 'n1', null, null), 'api', 'a')).toBe(
+      false,
+    );
+    expect(flowAuthKeyMatches(key, 'api', 'other')).toBe(false);
+    expect(flowAuthKeyMatches(key, 'other', 'login')).toBe(false);
+  });
+
+  it('does not match a key in the old format or a malformed one', () => {
+    expect(flowAuthKeyMatches('api::login::dev::g::n1', 'api', 'login')).toBe(false);
+    expect(flowAuthKeyMatches('[1,2]', 'api', 'login')).toBe(false);
+    expect(flowAuthKeyMatches('', 'api', 'login')).toBe(false);
   });
 });
 

@@ -381,6 +381,49 @@ describe('authenticateAuthNode', () => {
     vi.mocked(buildOAuth2VarContext).mockResolvedValue(DEFAULT_VARS);
   });
 
+  it('does not write a late sign-in after the flow tokens were cleared', async () => {
+    let release: (r: tauriApi.OAuth2TokenResult) => void = () => {};
+    vi.mocked(tauriApi.oauth2GetToken).mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));
+
+    const pending = authenticateAuthNode(scope, node);
+    await vi.waitFor(() => expect(tauriApi.oauth2GetToken).toHaveBeenCalled());
+    useFlowAuthStore.getState().clearFlow('api', 'login');
+    release(result());
+
+    expect(await pending).toEqual({ source: 'discarded' });
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+
+  it('does not write a late refresh after the node was cleared, and does not then prompt', async () => {
+    const auth = oauthAuth('authorization_code');
+    seed('a', auth, {
+      accessToken: 'old-123456',
+      refreshToken: 'ref-123456',
+      expiresIn: 60,
+      tokenAcquiredAt: 1,
+    });
+    let release: (r: tauriApi.OAuth2TokenResult) => void = () => {};
+    vi.mocked(tauriApi.oauth2RefreshToken).mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    const pending = authenticateAuthNode(scope, asAuthNode(authNode('a', auth)));
+    await vi.waitFor(() => expect(tauriApi.oauth2RefreshToken).toHaveBeenCalled());
+    useFlowAuthStore.getState().clearNode('api', 'login', 'a');
+    release(result());
+
+    expect(await pending).toEqual({ source: 'discarded' });
+    expect(tauriApi.oauth2GetToken).not.toHaveBeenCalled();
+    expect(useFlowAuthStore.getState().getEntry(key('a'))).toBeUndefined();
+  });
+
   it('signs in an interactive grant and keeps the token in memory', async () => {
     vi.mocked(tauriApi.oauth2GetToken).mockResolvedValue(result());
     const node = asAuthNode(authNode('a', oauthAuth('authorization_code')));

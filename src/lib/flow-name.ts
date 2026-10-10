@@ -3,8 +3,8 @@ const INVALID_CHARS = /[/\\:*?"<>|]/;
 
 /**
  * Returns why `raw` is not a usable flow name, or null when it is fine.
- * "::" is rejected explicitly because Auth token keys join their parts with
- * it and `flowAuthKeyMatches` matches by prefix. The letter or digit rule
+ * "::" is still rejected for readability, but Auth token keys no longer
+ * depend on it. The letter or digit rule
  * mirrors the backend, which derives the file name from ASCII letters and digits.
  */
 export function validateFlowName(raw: string): string | null {

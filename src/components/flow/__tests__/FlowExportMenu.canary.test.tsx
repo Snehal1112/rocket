@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flowAuthKey } from '@/lib/flow-auth';
 import type { FlowNode } from '@/lib/tauri-api';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import type { FlowTab } from '@/types/pane-types';
@@ -118,7 +119,7 @@ describe('FlowExportMenu never exports a credential', () => {
     // A token held in memory must stay out of every export.
     useFlowAuthStore.setState({
       auths: {
-        'demo::leaky::::::a1': {
+        [flowAuthKey('demo', 'leaky', 'a1', null, null)]: {
           auth: {
             authType: 'oauth2',
             oauth2: { accessToken: REPORT_CANARIES[7] } as never,
