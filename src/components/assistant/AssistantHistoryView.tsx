@@ -1,5 +1,5 @@
 import { Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -40,27 +40,63 @@ const UNTITLED = 'Untitled conversation';
 export function AssistantHistoryView() {
   const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const { data: agentConfigs = [] } = useAgentConfigs();
-  const [items, setItems] = useState<ConversationSummary[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string>();
+  // The list is tagged with its workspace, so another workspace's list is never shown.
+  const [list, setList] = useState<{
+    workspaceId: string | undefined;
+    items: ConversationSummary[];
+    loaded: boolean;
+    failed: boolean;
+  }>({ workspaceId, items: [], loaded: false, failed: false });
   const [open, setOpen] = useState<ConversationRecord>();
   const [confirmClear, setConfirmClear] = useState(false);
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+  const [clearing, setClearing] = useState(false);
+  const workspaceRef = useRef(workspaceId);
+  workspaceRef.current = workspaceId;
+  // Counters let a late response see that a newer request or a switch happened.
+  const listRequest = useRef(0);
+  const openRequest = useRef(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const shown = list.workspaceId === workspaceId ? list : undefined;
+  const items = shown?.items ?? [];
+  const loaded = shown?.loaded ?? false;
+  const failed = shown?.failed ?? false;
 
   const reload = useCallback(async () => {
+    const request = ++listRequest.current;
+    const forWorkspace = workspaceRef.current;
+    let next: ConversationSummary[] = [];
+    let didFail = false;
     try {
-      setItems(await listConversations());
-      setError(undefined);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoaded(true);
+      next = await listConversations();
+    } catch {
+      didFail = true;
     }
+    if (
+      !mounted.current ||
+      request !== listRequest.current ||
+      forWorkspace !== workspaceRef.current
+    ) {
+      return;
+    }
+    setList({ workspaceId: forWorkspace, items: next, loaded: true, failed: didFail });
   }, []);
 
   // A workspace switch closes the open conversation and loads the other list.
   // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId is a change trigger only.
   useEffect(() => {
+    openRequest.current += 1;
     setOpen(undefined);
+    setBusyIds(new Set());
+    setConfirmClear(false);
     void reload();
   }, [workspaceId, reload]);
 
@@ -82,6 +118,7 @@ export function AssistantHistoryView() {
       ),
       onAssistantConversationsCleared(
         guard(() => {
+          openRequest.current += 1;
           setOpen(undefined);
           void reload();
         }),
@@ -101,31 +138,47 @@ export function AssistantHistoryView() {
   const agentLabel = (id: string) => agentConfigs.find((c) => c.id === id)?.label ?? id;
 
   const openConversation = async (id: string) => {
+    const request = ++openRequest.current;
     try {
-      setOpen(await getConversation(id));
-    } catch (err) {
-      toast.error(`Could not open the conversation: ${String(err)}`);
+      const record = await getConversation(id);
+      if (mounted.current && request === openRequest.current) setOpen(record);
+    } catch {
+      if (mounted.current && request === openRequest.current) {
+        toast.error('Could not open the conversation.');
+      }
     }
   };
 
   const remove = async (id: string) => {
+    if (busyIds.has(id)) return;
+    setBusyIds((current) => new Set(current).add(id));
     try {
       await deleteConversation(id);
-    } catch (err) {
-      toast.error(`Could not delete the conversation: ${String(err)}`);
+    } catch {
+      toast.error('Could not delete the conversation.');
     } finally {
+      if (mounted.current) {
+        setBusyIds((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }
       void reload();
     }
   };
 
   const clearAll = async () => {
     setConfirmClear(false);
+    setClearing(true);
     try {
       await clearConversations();
+      openRequest.current += 1;
       setOpen(undefined);
-    } catch (err) {
-      toast.error(`Could not clear the history: ${String(err)}`);
+    } catch {
+      toast.error('Could not clear the history.');
     } finally {
+      if (mounted.current) setClearing(false);
       void reload();
     }
   };
@@ -148,7 +201,7 @@ export function AssistantHistoryView() {
           variant='ghost'
           size='sm'
           className='h-7 text-xs'
-          disabled={items.length === 0}
+          disabled={items.length === 0 || clearing}
           onClick={() => setConfirmClear(true)}
         >
           Clear all
@@ -157,12 +210,21 @@ export function AssistantHistoryView() {
       <p className='border-b px-3 py-2 text-xs text-muted-foreground'>{HISTORY_PRIVACY_NOTICE}</p>
       <ScrollArea className='min-h-0 flex-1'>
         <ul className='flex flex-col gap-1 p-2'>
-          {loaded && error && (
-            <li role='alert' className='px-1 text-xs text-destructive'>
-              {error}
+          {!loaded && <li className='px-1 text-xs text-muted-foreground'>Loading…</li>}
+          {loaded && failed && (
+            <li role='alert' className='flex items-center gap-2 px-1 text-xs text-destructive'>
+              <span>Could not load the conversations.</span>
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-6 text-xs'
+                onClick={() => void reload()}
+              >
+                Retry
+              </Button>
             </li>
           )}
-          {loaded && !error && items.length === 0 && (
+          {loaded && !failed && items.length === 0 && (
             <li className='px-1 text-xs text-muted-foreground'>{HISTORY_EMPTY_TEXT}</li>
           )}
           {items.map((item) => (
@@ -174,7 +236,7 @@ export function AssistantHistoryView() {
               >
                 <span className='w-full truncate text-sm'>{item.title || UNTITLED}</span>
                 <span className='text-xs text-muted-foreground'>
-                  {`${agentLabel(item.agentConfigId)} · ${item.messageCount} messages · ${formatRelativeTime(item.updatedAt)}`}
+                  {`${agentLabel(item.agentConfigId)} · ${item.messageCount} ${item.messageCount === 1 ? 'item' : 'items'} · ${formatRelativeTime(item.updatedAt)}`}
                 </span>
               </Button>
               <Button
@@ -182,6 +244,7 @@ export function AssistantHistoryView() {
                 size='icon'
                 className='h-7 w-7 shrink-0'
                 aria-label={`Delete "${item.title || UNTITLED}"`}
+                disabled={busyIds.has(item.id)}
                 onClick={() => void remove(item.id)}
               >
                 <Trash2 className='h-3.5 w-3.5' aria-hidden='true' />

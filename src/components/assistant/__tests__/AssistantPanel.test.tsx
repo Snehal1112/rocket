@@ -14,6 +14,11 @@ import { AssistantToggleButton } from '../AssistantToggleButton';
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false;
 }
+// CodeMirror measures text ranges, which jsdom lacks.
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => undefined;
 }
@@ -69,6 +74,22 @@ describe('AssistantPanel', () => {
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Back to the chat' }));
     expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
+  });
+
+  it('keeps the composer draft while the history is shown', async () => {
+    activate();
+    render(<AssistantPanel />);
+    const box = screen.getByRole('textbox', { name: 'Message the AI assistant' });
+    await userEvent.type(box, 'draft');
+    // CodeMirror in jsdom may drop keystrokes, so compare with what was typed.
+    const typed = box.textContent ?? '';
+    expect(typed.length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
+    expect(screen.queryByRole('textbox', { name: 'Message the AI assistant' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to the chat' }));
+    expect(screen.getByRole('textbox', { name: 'Message the AI assistant' })).toHaveTextContent(
+      typed,
+    );
   });
 
   beforeEach(() => {

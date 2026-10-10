@@ -90,7 +90,6 @@ export function AssistantPanel() {
           size='icon'
           className='h-7 w-7'
           aria-label={showHistory ? 'Back to the chat' : 'Conversation history'}
-          aria-pressed={showHistory}
           onClick={() => setShowHistory((shown) => !shown)}
         >
           <History className='h-4 w-4' aria-hidden='true' />
@@ -116,24 +115,30 @@ export function AssistantPanel() {
           <X className='h-4 w-4' aria-hidden='true' />
         </Button>
       </header>
-      {showHistory ? (
-        <AssistantHistoryView />
-      ) : status === 'starting' ? (
-        <div className='flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground'>
-          <Loader2 className='h-4 w-4 animate-spin' aria-hidden='true' />
-          Starting the assistant…
-        </div>
-      ) : status === 'active' ? (
-        <>
-          <AssistantChatView />
-          <Composer />
-        </>
-      ) : (
-        <>
-          {hasMessages && <AssistantChatView />}
-          <AssistantStartView />
-        </>
-      )}
+      {showHistory && <AssistantHistoryView />}
+      {/* The chat stays mounted while the history is shown, so the draft is kept. */}
+      <div
+        className={showHistory ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}
+        aria-hidden={showHistory}
+        inert={showHistory}
+      >
+        {status === 'starting' ? (
+          <div className='flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground'>
+            <Loader2 className='h-4 w-4 animate-spin' aria-hidden='true' />
+            Starting the assistant…
+          </div>
+        ) : status === 'active' ? (
+          <>
+            <AssistantChatView />
+            <Composer />
+          </>
+        ) : (
+          <>
+            {hasMessages && <AssistantChatView />}
+            <AssistantStartView />
+          </>
+        )}
+      </div>
     </aside>
   );
 }
