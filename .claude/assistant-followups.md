@@ -1,6 +1,6 @@
 # Workspace AI assistant: decisions and follow-ups
 
-This page lists the decisions and follow-ups left after implementing the six workspace-assistant plans on branch `worktree-acp-mcp-tool-server`. The design is in `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md` and the plans are in `docs/superpowers/plans/workspace-ai-assistant/`. Items marked as fixed in the review ledgers are left out. Everything listed as open was still open at the end of the final review; items that the reviews confirmed as fixed are left out.
+This page lists the decisions and follow-ups for the six workspace-assistant plans on branch `worktree-acp-mcp-tool-server`. The design is in `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md` and the plans are in `docs/superpowers/plans/workspace-ai-assistant/`. Verified on 2026-10-11 against HEAD (after S1/S2). Fixed items are left out.
 
 ## Decisions (rulings)
 
@@ -17,67 +17,74 @@ This page lists the decisions and follow-ups left after implementing the six wor
 
 ### Sessions and cleanup
 
-- `current_uid()` reads the uid by path from a probe file. Use `file.metadata()` on the open handle instead (`scratch.rs`).
-- The idle sleep restarts when the client reports a result during the drain phase. The message text now says "no update for Ns".
-- `tool_status_from_wire` falls back to `InProgress`, while `category_to_wire` returns `None`. Make them consistent (Plan 01 Task 1).
-- The startup sweep treats a scratch root with no pid marker as stale. A concurrent instance could be creating that root. Fix: treat an unmarked root younger than 60 s as live.
-- The outline goes stale between session start and the first prompt.
-- `start_workspace_session` duplicates the credential and env setup.
-- The start path does not warn when `try_state` for `McpToolService` is `None`.
-- No test checks that session start publishes no `AcpToolInvoked`.
-- rustfmt width drift in `src-tauri/tests/acp_mcp_start_agent_session.rs` and `tool_server.rs`.
+- `current_uid()` reads the uid by path from a probe file. Use `file.metadata()` on the open handle instead (`src-tauri/src/agent_session/scratch.rs` ~223-233).
+- The idle sleep restarts on every update during the drain phase (`crates/rocket-app/src/acp_session_service.rs` ~323).
+- `tool_status_from_wire` falls back to `InProgress` while `category_to_wire` returns `None` (`crates/rocket-infra/src/acp_agent_client.rs` ~719 and ~789). Make them consistent.
+- The startup sweep treats a scratch root with no pid marker as stale. There is no 60 s grace for a root that a concurrent instance is creating (`scratch.rs` ~115).
+- The outline goes stale between session start and the first prompt (`src-tauri/src/commands/acp_sessions.rs` ~34-43).
+- `start_workspace_session` duplicates the credential and env setup (`crates/rocket-app/src/acp_session_service.rs` ~201-262).
+- rustfmt drift across the workspace. Run `cargo fmt` once. CI exists.
 
 ### Read tools and masking
 
-- The history URL keeps percent-encoded secrets unmasked.
-- `check_in_workspace` lists collections on every call, and `list()` may auto-migrate data. Cache the result or document the migration.
-- A cache entry can be reinserted after `forget_session`.
-- `basic_header_values_from_secrets` clones the request. This is minor.
-- `CapturedOutput` Debug output has not been checked for secrets.
-- Missing tests: the D error arms and the folder chain at service level, a secret folder var, `pre{{x}}`, bearer auth, and the `test_doubles.rs` doc comment that sits on `set_request_variables`.
-- rustfmt width drift in `crates/rocket-app/src/mcp_tool_service.rs` (import) and the `mcp_exec_svc` block in `lib.rs`.
+- The history URL keeps percent-encoded secrets unmasked. `mask_url` masks by field name only (`crates/rocket-app/src/mcp_read_views.rs` ~294).
+- `check_in_workspace` lists collections on every call (`crates/rocket-app/src/mcp_tool_service.rs` ~249-254).
+- A cache entry can be reinserted after `forget_session`. `run_request` also does not re-check the session pin or the workspace after `execute().await` (`mcp_tool_service.rs` ~766 and ~826). A workspace switch during a long run can cache results under the old workspace.
+- `run_request` scripts can persist env vars. This is a deferred threat-model note.
+- No focused test checks that a `get_settings` failure makes `run_request` fail (`mcp_tool_service.rs` ~215).
+- The `pre{{x}}` test should say that an embedded placeholder in a credential-named field (for example an `Authorization` header with `pre{{x}}`) stays masked by design (`is_reference_only` in `mcp_read_views.rs` ~323).
 
-### Proposals backend
+### Proposals
 
-- The store mutex is held across disk I/O and event publishing. A subscriber that calls back would deadlock. Release the lock before I/O.
-- `CreateFolder` resets `folder.yml` if someone creates that folder by hand in a short window.
-- A duplicate `CreateFolder` in one batch is not rejected.
-- `run_request` scripts can persist env vars. This is a deferred spec threat-model note.
-- `ProposalService.ended` grows by one id per session with no limit.
-- `create_request_exclusive` uses `hard_link`, which fails on filesystems without hard links (exFAT, FAT, some SMB mounts), so Accept ends Failed there. Fall back to `create_new`. A crash between write and unlink leaves a hidden `.new-request.tmp.*` file.
-
-### Proposals lock (residual)
-
-- `accept` still holds the proposal mutex across apply (needed for exactly-once), so other sessions' list and propose calls wait behind a slow accept. The IPC commands are now async and no longer block the UI thread.
-- Test fixture names `GatedEnvFactory`, `GatedEnvFactory2` and `GatedEnvRepoOwned` in `proposal_service.rs` are confusing. `list_proposals` and `propose_changes` in `tool_server.rs` repeat the JoinError mapping.
+- A duplicate `CreateFolder` in one batch is not rejected. Validate the batch in `propose` (`crates/rocket-app/src/proposal_service.rs` ~134-200).
+- The `ended` set grows without limit (`proposal_service.rs` ~303). Bound it or expire entries. Fix this together with the batch check above.
+- `accept` still holds the proposal mutex across the apply (needed for exactly-once). Other sessions' `list` and `propose` calls wait behind a slow accept. IPC commands are async, so the UI thread is not blocked.
+- `create_request_exclusive` uses `hard_link`, which fails on FAT, exFAT and some SMB mounts. There is no `create_new` fallback (`crates/rocket-infra/src/fs_collection/requests.rs` ~172).
+- Fixture names `GatedEnvFactory`, `GatedEnvFactory2` and `GatedEnvRepoOwned` are confusing (`proposal_service.rs` ~1341-1351). The JoinError mapping is repeated in `crates/rocket-app/src/tool_server.rs` ~947 and ~969.
+- `forget_session` and the proposal `clear_session` are separate calls. No test checks that both run on every end path.
 
 ### Dead code and small items
 
-- `AcpSessionService::start_session` has no non-test callers (about 17 tests use it). Remove it with its autonomy gating and its `collection_repo` field once the tests are ported.
-- Any JSON-RPC prompt error from the agent (for example a transient model overload) ends the session (`acp_agent_client.rs`). Plan 01 behaviour; the user restarts.
-- The no-replace move maps a vanished destination folder to Failed in some paths. Prefer Stale.
+- Any JSON-RPC prompt error ends the session (`acp_session_service.rs` ~303). Plan 01 behaviour; the user restarts.
 
-### Chips and vault masking
+### Agent actions and UI wiring
 
-- The keyring read in the vault path is synchronous, so the 8 s timeout cannot interrupt a hung keyring call.
-- The composer shows a generic "Could not load" message, not the backend's vault message.
+- Nothing in `src/` listens to the `agent-tool-invoked` event.
+- `AcpToolInvoked` is documented as emitted regardless of outcome (`crates/rocket-shared/src/events.rs` ~547-551). It is published only on success, and never by `propose_changes` or `list_proposals`.
+- The History entry carries `runSource`, but the TS `HistoryEntry` and `HistoryFilter` types and `HistoryPanel` ignore it. The run-source badge and filter are missing.
+- There is no agent-running indicator outside the panel. `AssistantToggleButton` is a static icon.
+- The Rust `UiState` struct (`src-tauri/src/commands/ui_state.rs`) lacks `sidebarWidth`, `isConsoleOpen` and `consoleHeight`. The frontend values are dropped on each save. This is pre-existing since 2026-05-01.
+
+### Agent config
+
+- `extra_env` is not implemented.
+- Agent stderr is discarded, so a failed start shows no reason (`acp_agent_client.rs` ~279).
+- There is no handshake timeout.
+- The credential env var name format is not validated (`crates/rocket-app/src/agent_config_service.rs` ~100-117).
+
+### Chips and vault
+
+- The keyring read in the vault path is synchronous, so the 8 s timeout cannot interrupt it (`chips.rs` ~206).
+- The composer shows a generic "Could not load" toast, not the backend vault message (`Composer.tsx` ~147).
 
 ### Panel UI
 
-- Scroll does not follow streamed text growth inside the last item.
-- The panel width is not persisted (`assistantPanelWidth` is not in ui-state).
-- The panel width is unbounded on a narrow window.
-- `aria-controls` points at an element that is not mounted.
-- Minor code cleanups: `randomUUID` is called inside `set` updaters, `currentStartToken` is module-level, there is an `as ToolActivityMessage` cast, and the disposal test does not cover overlapping mounts.
+- `aria-valuemin` is fixed at 320.
+- A tool line or proposal card that grows without a new message is not followed by the scroll.
+- The ScriptsTab `aria-controls` change has no test.
+- Test hygiene in `AssistantChatView.test.tsx`: `scrollIntoView` is overwritten and never restored.
 
 ### Composer and chips
 
-- Prompt history stores typed secrets in localStorage per workspace. Entries are capped at 4000 characters and cleared on workspace delete, but a secret typed into a prompt is still kept locally.
-- `variableContext` presence toggle recreates the view. The tooltip parent body needs a visual check, and `fontSize` is a literal.
+- Prompt history keeps typed secrets in localStorage (`src/lib/assistant/prompt-history.ts`).
+- `fontSize` is a literal `'13px'` in `prompt-editor-theme.ts`.
+- The `variableContext` toggle tooltip has not had a visual check.
 
 ## Known limitations
 
 - Stop right after Send can do nothing. Cancel can arrive before the prompt reaches the agent. The UI disables Stop until the first update, so the cost is one ignored click. A turn-started flag would fix it.
-- A start that is still in flight across a webview reload can orphan a session until the app exits or reloads.
+- A start still in flight at a webview reload can track after the `end_stale_assistant_sessions` sweep and survive until the next sweep. The sweep runs on each load.
+- The no-replace move maps `NotFound` and `AlreadyExists` to Stale. A raw rename race error is still `Io`, so Accept ends Failed.
 - Exclusive creates only catch exact-name collisions on case-sensitive Linux. Case and Unicode variants rely on the `path_exists` checks at propose and accept time.
-- The assistant uses only environment-supplied credentials. It does not use a stored Claude login.
+- The assistant uses only environment-supplied credentials. It does not use a stored Claude login. This is deliberate.
+- Cookies and others are unaffected.
