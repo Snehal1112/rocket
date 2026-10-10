@@ -22,7 +22,7 @@ export interface ConversationSnapshot {
 
 /**
  * The chat as stored messages, in reading order. Proposals sit after their
- * anchor message. Streaming and empty reply segments are left out, and a
+ * anchor message. Only resolved proposals are kept. Streaming and empty reply segments are left out, and a
  * reply's error becomes a notice.
  */
 export function toStoredMessages(
@@ -33,6 +33,8 @@ export function toStoredMessages(
   const out: StoredMessage[] = [];
   for (const entry of buildTimeline(messages, proposals, anchors)) {
     if (entry.type === 'proposal') {
+      // A pending proposal is a stale line once the chat ends, so it is skipped.
+      if (entry.proposal.status === 'pending') continue;
       out.push({
         kind: 'proposal',
         summary: entry.proposal.summary,

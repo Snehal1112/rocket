@@ -20,6 +20,20 @@ describe('assistant-store', () => {
     useAssistantStore.setState({ panelOpen: false, focus: undefined });
   });
 
+  it('gives the conversation an id at the first user message and a new one per session', () => {
+    activate();
+    expect(store().conversationId).toBeUndefined();
+    store().appendUserMessage('hi');
+    const first = store().conversationId;
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    store().completeMessage('s1');
+    store().appendUserMessage('again');
+    expect(store().conversationId).toBe(first);
+    store().endSession();
+    activate('s2');
+    expect(store().conversationId).toBeUndefined();
+  });
+
   it('opens and closes the panel and keeps the focus', () => {
     store().openPanel();
     store().setFocus({ collection: 'orders', path: 'get.yml' });

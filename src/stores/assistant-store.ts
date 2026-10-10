@@ -79,6 +79,8 @@ export interface AssistantState {
   usage?: AssistantUsage;
   focus?: AssistantFocus;
   panelOpen: boolean;
+  /** The stored conversation's id. Made at the first user message of a session. */
+  conversationId?: string;
 
   openPanel: () => void;
   closePanel: () => void;
@@ -151,6 +153,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   usage: undefined,
   focus: undefined,
   panelOpen: false,
+  conversationId: undefined,
 
   openPanel: () => set({ panelOpen: true }),
   closePanel: () => set({ panelOpen: false }),
@@ -165,6 +168,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       proposals: [],
       proposalAnchors: {},
       usage: undefined,
+      conversationId: undefined,
     });
     return currentStartToken;
   },
@@ -188,6 +192,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     const userId = crypto.randomUUID();
     const agentId = crypto.randomUUID();
     set({
+      conversationId: state.conversationId ?? crypto.randomUUID(),
       messages: [
         ...state.messages,
         { kind: 'user', id: userId, text },
@@ -341,6 +346,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       proposals: [],
       proposalAnchors: {},
       usage: undefined,
+      conversationId: undefined,
     });
   },
 }));

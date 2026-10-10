@@ -35,6 +35,18 @@ describe('toStoredMessages', () => {
   });
 });
 
+describe('toStoredMessages pending proposals', () => {
+  it('leaves out a proposal that is still pending', () => {
+    const pending = makeProposal({ id: 'p1', summary: 'Waiting', status: 'pending' });
+    const done = makeProposal({ id: 'p2', summary: 'Done', status: 'accepted' });
+    const list: AssistantMessage[] = [{ kind: 'user', id: 'u1', text: 'Hi' }];
+    expect(toStoredMessages(list, [pending, done], { p1: 'u1', p2: 'u1' })).toEqual([
+      { kind: 'user', text: 'Hi' },
+      { kind: 'proposal', summary: 'Done', status: 'accepted' },
+    ]);
+  });
+});
+
 describe('buildConversationInput', () => {
   const base = {
     conversationId: 'c1',

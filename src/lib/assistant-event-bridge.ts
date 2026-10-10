@@ -4,6 +4,7 @@ import {
   sweepStaleAssistantSessions,
   WORKSPACE_SWITCH_NOTICE,
 } from '@/lib/assistant/assistant-session';
+import { startConversationSaver } from '@/lib/assistant/conversation-saver';
 import { findActiveLeaf } from '@/lib/pane-utils';
 import {
   configOptionsFromEvent,
@@ -58,6 +59,8 @@ function sameFocus(a: AssistantFocus | undefined, b: AssistantFocus | undefined)
 export function useAssistantEventBridge(): void {
   useEffect(() => {
     void sweepStaleAssistantSessions();
+    // Saves the conversation after each turn, at session end and at panel close.
+    const stopSaver = startConversationSaver();
     const store = () => useAssistantStore.getState();
     let disposed = false;
     // Handlers ignore events once the effect is torn down, so an overlapping
@@ -150,6 +153,7 @@ export function useAssistantEventBridge(): void {
 
     return () => {
       disposed = true;
+      stopSaver();
       unsubWorkspace();
       unsubPane();
       void settled.then((fns) => {

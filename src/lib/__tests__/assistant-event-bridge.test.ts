@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
       listAgentProposals: vi.fn(),
       endAgentSession: vi.fn(),
       endStaleAssistantSessions: vi.fn(),
+      saveConversation: vi.fn().mockResolvedValue(undefined),
     },
   };
 });
