@@ -970,6 +970,8 @@ impl SecretStore for FakeSecretStore {
 pub struct FakeVaultSecretFetcher {
     values: HashMap<String, String>, // secret_id -> value
     get_secret_value_calls: AtomicUsize,
+    delay: std::time::Duration,
+    failing_ids: Vec<String>,
 }
 
 impl FakeVaultSecretFetcher {
@@ -977,6 +979,22 @@ impl FakeVaultSecretFetcher {
         Arc::new(Self {
             values,
             get_secret_value_calls: AtomicUsize::new(0),
+            delay: std::time::Duration::ZERO,
+            failing_ids: Vec::new(),
+        })
+    }
+
+    /// A fetcher that sleeps `delay` per call and fails for every id in `failing_ids`.
+    pub fn slow_or_failing(
+        values: HashMap<String, String>,
+        delay: std::time::Duration,
+        failing_ids: Vec<String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            values,
+            get_secret_value_calls: AtomicUsize::new(0),
+            delay,
+            failing_ids,
         })
     }
 
@@ -1004,6 +1022,12 @@ impl VaultSecretFetcher for FakeVaultSecretFetcher {
         secret_id: &str,
     ) -> DomainResult<Option<String>> {
         self.get_secret_value_calls.fetch_add(1, Ordering::SeqCst);
+        if !self.delay.is_zero() {
+            tokio::time::sleep(self.delay).await;
+        }
+        if self.failing_ids.iter().any(|id| id == secret_id) {
+            return Err(DomainError::Internal("vault unreachable".to_string()));
+        }
         Ok(self.values.get(secret_id).cloned())
     }
 

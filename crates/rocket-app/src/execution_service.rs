@@ -783,23 +783,59 @@ impl RequestExecutionService {
         .secret_values
     }
 
-    /// The values of the environment's RocketVault secrets, for masking text.
+    /// The RocketVault secret values of several environments at once, for masking text.
     ///
-    /// Fails if a binding could not be resolved, because text masked without that binding's
-    /// values could leak them. A binding whose connection or secret no longer exists is not a
-    /// failure: it has no value to leak.
-    pub(crate) async fn external_secret_values(
+    /// The distinct fetches (connection id, vault name, secret id) across all the
+    /// environments are collected first, and each one is fetched once, all concurrently.
+    /// An environment that cannot be read adds nothing, as in `external_secret_values`.
+    /// Fails on the first fetch error, because text masked without that value could leak it.
+    /// A deleted connection (`NotFound`) or a secret gone from the vault has no value to leak,
+    /// so it is skipped. The caller bounds the whole batch with its own deadline.
+    pub(crate) async fn external_secret_values_for_environments(
         &self,
         collection: &str,
-        environment_name: Option<&str>,
+        environment_names: &[String],
     ) -> DomainResult<std::collections::HashSet<String>> {
-        let (resolved, failures) = self
-            .resolve_external_secrets_partial(Some(collection), environment_name)
-            .await;
-        match failures.into_iter().next() {
-            Some(failure) => Err(failure.error),
-            None => Ok(resolved.into_values().collect()),
+        let repo = self.regular_env_repo(Some(collection));
+        let mut seen = std::collections::HashSet::new();
+        let mut fetches = Vec::new();
+        for name in environment_names {
+            let Ok(env) = repo.get(name) else {
+                continue;
+            };
+            for binding in &env.external_secrets {
+                for secret_ref in &binding.secret_names {
+                    let key = (
+                        binding.connection_id.clone(),
+                        binding.vault_name.clone(),
+                        secret_ref.secret_id.clone(),
+                    );
+                    if seen.insert(key.clone()) {
+                        fetches.push(key);
+                    }
+                }
+            }
         }
+        let results: Vec<Option<String>> = futures_util::future::try_join_all(fetches.iter().map(
+            |(connection_id, vault_name, secret_id)| async move {
+                match crate::vault_secret_resolution::resolve_vault_secret_value(
+                    self.secret_manager_repo.as_ref(),
+                    self.vault_connection_secret_store.as_ref(),
+                    self.vault_fetcher.as_ref(),
+                    connection_id,
+                    vault_name,
+                    secret_id,
+                )
+                .await
+                {
+                    Ok(value) => Ok(value),
+                    Err(rocket_shared::error::DomainError::NotFound(_)) => Ok(None),
+                    Err(error) => Err(error),
+                }
+            },
+        ))
+        .await?;
+        Ok(results.into_iter().flatten().collect())
     }
 
     /// Secret variable values of every scope that applies to one request. A real read or parse error is

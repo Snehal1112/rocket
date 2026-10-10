@@ -5,6 +5,7 @@
 //! the only scope check is that the collection belongs to the active workspace.
 
 use std::collections::HashSet;
+use std::time::Duration;
 
 use rocket_collection::Request;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -19,6 +20,9 @@ use crate::mcp_read_views::{
     basic_header_values_from_secrets, literal_credential_values, mask_secret_text,
     MaskedEnvironment, MaskedFolderSettings, MaskedRequest, MaskedSettings,
 };
+
+/// How long the vault secrets of all environments may take to resolve, all together.
+const VAULT_RESOLVE_DEADLINE: Duration = Duration::from_secs(8);
 
 /// Whether `path` is absolute, has a drive prefix or leaves its base directory. Backslashes are
 /// treated as separators, so a Windows-style path is refused on every platform.
@@ -126,7 +130,7 @@ impl McpToolService {
     /// literal credentials of both the saved request and the tab's request, plus the `Basic`
     /// header values built from them. This is the masking `run_request` applies to a response.
     /// Fails closed: if the environment has vault bindings that cannot be resolved (or take
-    /// longer than 8 s), the chip is refused.
+    /// longer than 8 s in total), the chip is refused.
     /// Values that only exist at run time in the frontend, such as a script's `setVar`, are
     /// not known here.
     pub async fn mask_response_chip(
@@ -135,6 +139,25 @@ impl McpToolService {
         request_path: &str,
         environment_name: Option<&str>,
         input: &ResponseChipInput,
+    ) -> DomainResult<ChipResource> {
+        self.mask_response_chip_within(
+            collection,
+            request_path,
+            environment_name,
+            input,
+            VAULT_RESOLVE_DEADLINE,
+        )
+        .await
+    }
+
+    /// `mask_response_chip` with an explicit deadline for the whole vault resolution.
+    pub(super) async fn mask_response_chip_within(
+        &self,
+        collection: &str,
+        request_path: &str,
+        environment_name: Option<&str>,
+        input: &ResponseChipInput,
+        deadline: std::time::Duration,
     ) -> DomainResult<ChipResource> {
         self.check_collection_listed(collection)?;
         check_relative_path(request_path)?;
@@ -176,18 +199,11 @@ impl McpToolService {
                 env_names.push(name.to_string());
             }
         }
-        let resolve_all = async {
-            let mut values = HashSet::new();
-            for name in &env_names {
-                values.extend(
-                    self.execution_svc
-                        .external_secret_values(collection, Some(name))
-                        .await?,
-                );
-            }
-            Ok::<_, DomainError>(values)
-        };
-        match tokio::time::timeout(std::time::Duration::from_secs(8), resolve_all).await {
+        // The whole batch shares one deadline. Distinct fetches run concurrently.
+        let resolve_all = self
+            .execution_svc
+            .external_secret_values_for_environments(collection, &env_names);
+        match tokio::time::timeout(deadline, resolve_all).await {
             Ok(Ok(values)) => secrets.extend(values),
             _ => {
                 return Err(DomainError::InvalidInput(

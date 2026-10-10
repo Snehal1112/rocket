@@ -2594,26 +2594,41 @@ mod tests {
         }
     }
 
+    /// A vault binding of `secret_id` under `alias`.
+    fn vault_binding(alias: &str, secret_id: &str) -> rocket_environment::ExternalSecretBinding {
+        rocket_environment::ExternalSecretBinding {
+            alias: alias.into(),
+            connection_id: "c1".into(),
+            vault_name: "main".into(),
+            secret_names: vec![rocket_environment::ExternalSecretRef {
+                name: "db".into(),
+                secret_id: secret_id.into(),
+            }],
+        }
+    }
+
     /// A service whose `dev` environment is bound to one vault secret.
     fn vault_chip_service(
         secret_store: Arc<dyn rocket_environment::SecretStore>,
         fetcher: Arc<dyn rocket_environment::VaultSecretFetcher>,
     ) -> McpToolService {
-        use rocket_environment::{ExternalSecretBinding, ExternalSecretRef};
+        let mut env = Environment::new("dev");
+        env.external_secrets.push(vault_binding("prod", "id1"));
+        vault_chip_service_with_envs(vec![env], secret_store, fetcher)
+    }
+
+    /// A service whose collection has the given environments.
+    fn vault_chip_service_with_envs(
+        envs: Vec<Environment>,
+        secret_store: Arc<dyn rocket_environment::SecretStore>,
+        fetcher: Arc<dyn rocket_environment::VaultSecretFetcher>,
+    ) -> McpToolService {
         let repo = ConfigurableCollectionRepo::new();
         repo.with_request("my-api", "echo.yml", sample_request("Echo"));
         let env_factory = FakeEnvRepoFactory::new();
-        let mut env = Environment::new("dev");
-        env.external_secrets.push(ExternalSecretBinding {
-            alias: "prod".into(),
-            connection_id: "c1".into(),
-            vault_name: "main".into(),
-            secret_names: vec![ExternalSecretRef {
-                name: "db".into(),
-                secret_id: "id1".into(),
-            }],
-        });
-        env_factory.with_env(env);
+        for env in envs {
+            env_factory.with_env(env);
+        }
         let connection = rocket_environment::SecretManagerConnection {
             id: "c1".into(),
             label: "Test".into(),
@@ -2775,5 +2790,140 @@ mod tests {
                 "{err}"
             );
         }
+    }
+
+    /// `count` environments that all bind the same secret, plus one own secret each.
+    fn shared_binding_envs(count: usize) -> Vec<Environment> {
+        (0..count)
+            .map(|n| {
+                let mut env = Environment::new(&format!("env{n}"));
+                env.external_secrets.push(vault_binding("shared", "id-shared"));
+                env.external_secrets
+                    .push(vault_binding("own", &format!("id-own-{n}")));
+                env
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn response_chip_fetches_each_distinct_vault_binding_once() {
+        let mut values: StdHashMap<String, String> =
+            [("id-shared".to_string(), "shared-vault-value-1".to_string())].into();
+        for n in 0..4 {
+            values.insert(format!("id-own-{n}"), format!("own-vault-value-{n}"));
+        }
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::new(values);
+        let svc = vault_chip_service_with_envs(
+            shared_binding_envs(4),
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher.clone(),
+        );
+        let chip = svc
+            .mask_response_chip(
+                "my-api",
+                "echo.yml",
+                Some("env0"),
+                &echo_response("shared-vault-value-1 own-vault-value-3"),
+            )
+            .await
+            .expect("chip");
+        assert_eq!(fetcher.call_count(), 5, "1 shared + 4 own bindings");
+        assert!(!chip.text.contains("shared-vault-value-1"), "{}", chip.text);
+        assert!(!chip.text.contains("own-vault-value-3"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_resolves_slow_vault_bindings_concurrently() {
+        let values: StdHashMap<String, String> = (0..6)
+            .map(|n| (format!("id-own-{n}"), format!("own-vault-value-{n}")))
+            .collect();
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::slow_or_failing(
+            values,
+            std::time::Duration::from_millis(300),
+            Vec::new(),
+        );
+        let svc = vault_chip_service_with_envs(
+            shared_binding_envs(6),
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher,
+        );
+        // Sequentially this would take 7 x 300 ms, well past the deadline.
+        let chip = svc
+            .mask_response_chip_within(
+                "my-api",
+                "echo.yml",
+                None,
+                &echo_response("own-vault-value-5"),
+                std::time::Duration::from_millis(1500),
+            )
+            .await
+            .expect("concurrent resolution fits the deadline");
+        assert!(!chip.text.contains("own-vault-value-5"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_the_deadline_passes() {
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::slow_or_failing(
+            Default::default(),
+            std::time::Duration::from_millis(500),
+            Vec::new(),
+        );
+        let svc = vault_chip_service_with_envs(
+            shared_binding_envs(2),
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher,
+        );
+        let err = svc
+            .mask_response_chip_within(
+                "my-api",
+                "echo.yml",
+                None,
+                &echo_response("body"),
+                std::time::Duration::from_millis(50),
+            )
+            .await
+            .expect_err("a passed deadline must refuse the chip");
+        assert!(
+            err.to_string().contains("could not resolve vault secrets"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn response_chip_is_refused_when_one_binding_fails() {
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::slow_or_failing(
+            Default::default(),
+            std::time::Duration::ZERO,
+            vec!["id-own-2".to_string()],
+        );
+        let svc = vault_chip_service_with_envs(
+            shared_binding_envs(4),
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher,
+        );
+        let err = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response("body"))
+            .await
+            .expect_err("one failing binding must refuse the whole chip");
+        assert!(
+            err.to_string().contains("could not resolve vault secrets"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn response_chip_with_environments_but_no_bindings_still_works() {
+        let fetcher = crate::test_doubles::FakeVaultSecretFetcher::new(Default::default());
+        let svc = vault_chip_service_with_envs(
+            vec![Environment::new("a"), Environment::new("b")],
+            Arc::new(crate::test_doubles::FakeSecretStore("client-secret".into())),
+            fetcher.clone(),
+        );
+        let chip = svc
+            .mask_response_chip("my-api", "echo.yml", Some("a"), &echo_response("plain body"))
+            .await
+            .expect("chip");
+        assert_eq!(fetcher.call_count(), 0);
+        assert!(chip.text.contains("plain body"), "{}", chip.text);
     }
 }
