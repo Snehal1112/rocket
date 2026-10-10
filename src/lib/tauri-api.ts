@@ -448,10 +448,17 @@ export interface AgentConfig {
   args: string[];
   workingDir?: string;
   credentialEnvVar: string;
+  // Plain-text variables for the agent process. Older data may omit this.
+  extraEnv: AgentEnvPair[];
   vaultConnectionId: string;
   vaultName: string;
   vaultSecretId: string;
   vaultSecretName: string;
+}
+
+export interface AgentEnvPair {
+  name: string;
+  value: string;
 }
 
 export interface Template {

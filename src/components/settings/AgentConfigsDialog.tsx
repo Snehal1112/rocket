@@ -1,4 +1,4 @@
-import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,39 @@ interface AgentConfigsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+interface EnvRow {
+  key: string;
+  name: string;
+  value: string;
+}
+
+const RESERVED_ENV_VAR = 'CLAUDE_CONFIG_DIR';
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+// Mirrors the backend rules for fast feedback. The backend stays the authority.
+function validateEnvRows(rows: EnvRow[], credentialEnvVar: string): (string | null)[] {
+  const credential = credentialEnvVar.trim().toLowerCase();
+  return rows.map((row, index) => {
+    const name = row.name;
+    const lower = name.toLowerCase();
+    if (name.length === 0) return 'Name is required.';
+    if (name.length > 128) return 'Name must be at most 128 characters.';
+    if (!ENV_NAME_PATTERN.test(name)) {
+      return 'Use letters, digits and underscore only, and do not start with a digit.';
+    }
+    if (lower === RESERVED_ENV_VAR.toLowerCase()) return `${RESERVED_ENV_VAR} is reserved.`;
+    if (credential && lower === credential) {
+      return 'Must differ from the credential env var.';
+    }
+    if (rows.findIndex((r) => r.name.toLowerCase() === lower) !== index) {
+      return 'Duplicate variable name.';
+    }
+    return null;
+  });
+}
+
 const emptyForm = {
+  extraEnv: [] as EnvRow[],
   id: '',
   label: '',
   command: '',
@@ -91,6 +123,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       args: c.args.join(', '),
       workingDir: c.workingDir ?? '',
       credentialEnvVar: c.credentialEnvVar,
+      extraEnv: (c.extraEnv ?? []).map((p) => ({ key: crypto.randomUUID(), ...p })),
       vaultConnectionId: c.vaultConnectionId,
       vaultName: c.vaultName,
       vaultSecretId: c.vaultSecretId,
@@ -128,8 +161,19 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     }
   };
 
-  const handleSave = async () => {
+  const envErrors = editing ? validateEnvRows(editing.extraEnv, editing.credentialEnvVar) : [];
+  const envInvalid = envErrors.some((e) => e !== null);
+
+  const updateEnvRow = (key: string, patch: Partial<Pick<EnvRow, 'name' | 'value'>>) => {
     if (!editing) return;
+    setEditing({
+      ...editing,
+      extraEnv: editing.extraEnv.map((r) => (r.key === key ? { ...r, ...patch } : r)),
+    });
+  };
+
+  const handleSave = async () => {
+    if (!editing || envInvalid) return;
     if (
       !editing.label.trim() ||
       !editing.command.trim() ||
@@ -153,6 +197,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         .filter((a) => a.length > 0),
       workingDir: editing.workingDir.trim() || undefined,
       credentialEnvVar: editing.credentialEnvVar.trim(),
+      extraEnv: editing.extraEnv.map(({ name, value }) => ({ name, value })),
       vaultConnectionId: editing.vaultConnectionId,
       vaultName: editing.vaultName.trim(),
       vaultSecretId: editing.vaultSecretId,
@@ -274,6 +319,71 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                   value is only re-fetched when a new agent session starts.
                 </p>
               </div>
+              <div className='space-y-2'>
+                <Label className='text-sm'>Environment variables</Label>
+                <p className='text-xs text-muted-foreground'>
+                  Values are stored as plain text. Put secrets in the RocketVault credential, not
+                  here.
+                </p>
+                <p className='text-xs text-muted-foreground'>
+                  A variable such as ANTHROPIC_BASE_URL can send the credential to another host.
+                </p>
+                {editing.extraEnv.map((row, index) => (
+                  <div key={row.key} className='space-y-1'>
+                    <div className='flex items-center gap-2'>
+                      <Input
+                        aria-label={`Variable name ${index + 1}`}
+                        aria-invalid={envErrors[index] !== null}
+                        value={row.name}
+                        onChange={(e) => updateEnvRow(row.key, { name: e.target.value })}
+                        placeholder='NAME'
+                        className='h-8 flex-1 text-sm'
+                      />
+                      <Input
+                        aria-label={`Variable value ${index + 1}`}
+                        value={row.value}
+                        onChange={(e) => updateEnvRow(row.key, { value: e.target.value })}
+                        placeholder='value'
+                        className='h-8 flex-1 text-sm'
+                      />
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        aria-label={`Remove variable ${index + 1}`}
+                        onClick={() =>
+                          setEditing({
+                            ...editing,
+                            extraEnv: editing.extraEnv.filter((r) => r.key !== row.key),
+                          })
+                        }
+                      >
+                        <X className='h-3.5 w-3.5' aria-hidden='true' />
+                      </Button>
+                    </div>
+                    {envErrors[index] && (
+                      <p role='alert' className='text-xs text-destructive'>
+                        {envErrors[index]}
+                      </p>
+                    )}
+                  </div>
+                ))}
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() =>
+                    setEditing({
+                      ...editing,
+                      extraEnv: [
+                        ...editing.extraEnv,
+                        { key: crypto.randomUUID(), name: '', value: '' },
+                      ],
+                    })
+                  }
+                >
+                  <Plus className='mr-1.5 h-3.5 w-3.5' aria-hidden='true' />
+                  Add variable
+                </Button>
+              </div>
               <div>
                 <Label className='text-sm'>Vault Connection</Label>
                 <Select
@@ -376,7 +486,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 <Button
                   size='sm'
                   onClick={() => void handleSave()}
-                  disabled={saveMutation.isPending}
+                  disabled={saveMutation.isPending || envInvalid}
                   aria-busy={saveMutation.isPending}
                 >
                   {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}

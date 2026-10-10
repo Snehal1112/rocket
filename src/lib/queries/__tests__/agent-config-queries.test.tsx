@@ -28,6 +28,7 @@ const sampleConfig: tauriApi.AgentConfig = {
   args: ['--stdio'],
   workingDir: undefined,
   credentialEnvVar: 'ANTHROPIC_API_KEY',
+  extraEnv: [],
   vaultConnectionId: 'conn-1',
   vaultName: 'prod-vault',
   vaultSecretId: 'secret-id-1',

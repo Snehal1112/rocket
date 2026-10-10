@@ -29,6 +29,7 @@ const claude: api.AgentConfig = {
   args: ['--stdio', '--verbose'],
   workingDir: '/work',
   credentialEnvVar: 'ANTHROPIC_API_KEY',
+  extraEnv: [],
   vaultConnectionId: 'conn-1',
   vaultName: 'prod-vault',
   vaultSecretId: 'sec-1',
@@ -81,6 +82,93 @@ describe('AgentConfigsDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
     expect(api.saveAgentConfig).toHaveBeenCalledWith({ ...claude, label: 'Claude Code' });
+  });
+
+  async function openEdit() {
+    renderDialog();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+  }
+
+  async function addVariable(name: string, value = '') {
+    await userEvent.click(screen.getByRole('button', { name: 'Add variable' }));
+    const names = screen.getAllByLabelText(/Variable name/);
+    const values = screen.getAllByLabelText(/Variable value/);
+    await userEvent.type(names[names.length - 1], name);
+    if (value) await userEvent.type(values[values.length - 1], value);
+  }
+
+  it('saves added variables with the exact payload', async () => {
+    await openEdit();
+    await addVariable('ANTHROPIC_BASE_URL', 'https://proxy.example');
+    await addVariable('HTTPS_PROXY', 'http://p:8080');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(api.saveAgentConfig).toHaveBeenCalledWith({
+      ...claude,
+      extraEnv: [
+        { name: 'ANTHROPIC_BASE_URL', value: 'https://proxy.example' },
+        { name: 'HTTPS_PROXY', value: 'http://p:8080' },
+      ],
+    });
+  });
+
+  it('removes a variable row', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([
+      {
+        ...claude,
+        extraEnv: [
+          { name: 'A', value: '1' },
+          { name: 'B', value: '2' },
+        ],
+      },
+    ]);
+    await openEdit();
+    await userEvent.click(screen.getByRole('button', { name: 'Remove variable 1' }));
+    expect(screen.getAllByLabelText(/Variable name/)).toHaveLength(1);
+    expect(screen.getByLabelText('Variable name 1')).toHaveValue('B');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(api.saveAgentConfig).toHaveBeenCalledWith({
+      ...claude,
+      extraEnv: [{ name: 'B', value: '2' }],
+    });
+  });
+
+  it.each([
+    ['1BAD', /do not start with a digit/],
+    ['BAD NAME', /letters, digits and underscore/],
+    ['A=B', /letters, digits and underscore/],
+    ['CLAUDE_CONFIG_DIR', /reserved/],
+    ['claude_config_dir', /reserved/],
+    ['anthropic_api_key', /differ from the credential/],
+    ['A'.repeat(129), /at most 128/],
+  ])('flags %s and blocks Save', async (name, message) => {
+    await openEdit();
+    await addVariable(name);
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(api.saveAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('flags an empty name and duplicates case-insensitively', async () => {
+    await openEdit();
+    await userEvent.click(screen.getByRole('button', { name: 'Add variable' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Name is required.');
+    await userEvent.type(screen.getByLabelText('Variable name 1'), 'Foo');
+    await addVariable('FOO');
+    expect(screen.getByRole('alert')).toHaveTextContent('Duplicate variable name.');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('loads an old config without extraEnv as empty', async () => {
+    const { extraEnv: _omit, ...old } = claude;
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([old as api.AgentConfig]);
+    await openEdit();
+    expect(screen.queryByLabelText(/Variable name/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(api.saveAgentConfig).toHaveBeenCalledWith({ ...claude, extraEnv: [] });
   });
 
   it('rejects an empty command', async () => {
