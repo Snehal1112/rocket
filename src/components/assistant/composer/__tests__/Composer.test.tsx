@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadRememberedModel } from '@/lib/assistant/model-memory';
 import { loadPromptHistory } from '@/lib/assistant/prompt-history';
+import { replaySizeHint } from '@/lib/assistant/replay-preface';
 import { createDefaultLeaf } from '@/lib/pane-utils';
 import {
   buildAssistantChipResource,
@@ -273,5 +274,16 @@ describe('Composer', () => {
     await user.click(screen.getByRole('menuitemradio', { name: /Edit/ }));
     expect(setAssistantMode).toHaveBeenCalledWith('s1', 'edit');
     expect(await screen.findByRole('button', { name: 'Mode: Edit' })).toBeInTheDocument();
+  });
+
+  it('shows the size of an attached earlier conversation until the first message goes out', () => {
+    const token = useAssistantStore
+      .getState()
+      .beginSession('agent-1', 'ask', { fromId: 'c0', preface: 'x'.repeat(8412) });
+    useAssistantStore.getState().activateSession(token, 's1', []);
+    renderComposer();
+    expect(screen.getByText(replaySizeHint(8412))).toBeInTheDocument();
+    act(() => useAssistantStore.getState().markReplaySent('s1'));
+    expect(screen.queryByText(replaySizeHint(8412))).toBeNull();
   });
 });

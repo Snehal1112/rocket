@@ -136,6 +136,12 @@ export function AssistantHistoryView({ onContinued }: { onContinued?: () => void
   }, [reload]);
 
   const agentLabel = (id: string) => agentConfigs.find((c) => c.id === id)?.label ?? id;
+  const continuedFromLabel = (id: string) => {
+    const from = items.find((i) => i.id === id);
+    return from
+      ? `Continued from "${from.title || UNTITLED}"`
+      : 'Continued from an earlier conversation';
+  };
 
   const openConversation = async (id: string) => {
     const request = ++openRequest.current;
@@ -239,6 +245,11 @@ export function AssistantHistoryView({ onContinued }: { onContinued?: () => void
                 <span className='text-xs text-muted-foreground'>
                   {`${agentLabel(item.agentConfigId)} · ${item.messageCount} ${item.messageCount === 1 ? 'item' : 'items'} · ${formatRelativeTime(item.updatedAt)}`}
                 </span>
+                {item.continuedFrom && (
+                  <span className='text-xs text-muted-foreground'>
+                    {continuedFromLabel(item.continuedFrom)}
+                  </span>
+                )}
               </Button>
               <Button
                 variant='ghost'

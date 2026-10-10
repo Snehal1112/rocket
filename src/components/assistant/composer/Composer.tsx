@@ -8,6 +8,7 @@ import {
   loadPromptHistory,
   savePromptHistory,
 } from '@/lib/assistant/prompt-history';
+import { replaySizeHint } from '@/lib/assistant/replay-preface';
 import { filterSlashCommands } from '@/lib/assistant/slash-commands';
 import type { ReferenceItem } from '@/lib/assistant/types';
 import {
@@ -51,6 +52,10 @@ export function Composer() {
   const setConfigOptions = useAssistantStore((s) => s.setConfigOptions);
   const setMode = useAssistantStore((s) => s.setMode);
   const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  // The preface of a continued session goes out with the first prompt, so its size is shown.
+  const replayChars = useAssistantStore((s) =>
+    s.replay && !s.replay.sent ? s.replay.preface.length : 0,
+  );
 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -211,6 +216,9 @@ export function Composer() {
 
   return (
     <div className='m-2 shrink-0 rounded-md border bg-dropdown-bg shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30'>
+      {replayChars > 0 && (
+        <p className='px-3 pt-2 text-xs text-muted-foreground'>{replaySizeHint(replayChars)}</p>
+      )}
       <ComposerChips chips={chips} onRemove={handleRemoveChip} />
       <PromptEditor
         value={text}

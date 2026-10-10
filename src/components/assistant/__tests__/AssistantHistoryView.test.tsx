@@ -258,4 +258,17 @@ describe('AssistantHistoryView', () => {
     expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Back to the history']);
     expect(within(document.body).queryByRole('textbox')).toBeNull();
   });
+
+  it('names the conversation a continued one came from', async () => {
+    vi.mocked(api.listConversations).mockResolvedValue([
+      { ...summary, id: 'c2', title: 'Follow-up', continuedFrom: 'c1' },
+      { ...summary, id: 'c3', title: 'Older follow-up', continuedFrom: 'gone' },
+      summary,
+    ]);
+    render(<AssistantHistoryView />);
+    expect(
+      await screen.findByText('Continued from "Why does login return 401?"'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Continued from an earlier conversation')).toBeInTheDocument();
+  });
 });
