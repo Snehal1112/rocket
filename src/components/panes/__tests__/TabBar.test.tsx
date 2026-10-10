@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findScriptTab, findTabInTree } from '@/lib/pane-utils';
 import { saveFlow, saveScriptFile } from '@/lib/tauri-api';
@@ -110,6 +110,8 @@ describe('TabBar Save menu item', () => {
     fireEvent.click(screen.getByText('Save'));
 
     await waitFor(() => expect(saveScriptFile).toHaveBeenCalledWith('col', 'lib/a.js', 'two'));
+    const second = findScriptTab(usePaneStore.getState().root, 'col', 'lib/b.js')?.tab;
+    expect(leaf().activeTabId).toBe(second?.id);
     await waitFor(() =>
       expect(findScriptTab(usePaneStore.getState().root, 'col', 'lib/a.js')?.tab.isDirty).toBe(
         false,
@@ -135,6 +137,24 @@ describe('TabBar Save menu item', () => {
     await waitFor(() =>
       expect(findTabInTree(usePaneStore.getState().root, 'flow-tb-1')?.tab.isDirty).toBe(false),
     );
+    expect(leaf().activeTabId).toBe(second.id);
+  });
+
+  it('skips the save of an inactive tab that was cleaned after the menu opened', async () => {
+    await usePaneStore.getState().openScriptTab('col', 'lib/a.js');
+    const first = findScriptTab(usePaneStore.getState().root, 'col', 'lib/a.js')?.tab;
+    if (!first) throw new Error('missing tab');
+    usePaneStore.getState().updateScriptContent(first.id, 'two');
+    await usePaneStore.getState().openScriptTab('col', 'lib/b.js');
+    render(<TabBar node={leaf()} />);
+
+    fireEvent.contextMenu(screen.getByText('a.js'));
+    // Another save finishes while the menu is open. The rendered tab object is stale.
+    act(() => usePaneStore.getState().markScriptSaved(first.id, 'two'));
+    fireEvent.click(screen.getByText('Save'));
+
+    await Promise.resolve();
+    expect(saveScriptFile).not.toHaveBeenCalled();
   });
 
   it('disables Save on a clean flow tab', () => {

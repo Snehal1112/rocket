@@ -29,7 +29,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Input } from '@/components/ui/input';
-import { collectLeafGroupIds } from '@/lib/pane-utils';
+import { collectLeafGroupIds, findTabInTree } from '@/lib/pane-utils';
 import { saveFlowTab, saveScriptTab } from '@/lib/save-tab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
@@ -146,14 +146,16 @@ export function TabBar({
                   disabled={(!tab.isDirty && showSave) || folderNotActive}
                   onClick={() => {
                     // Only the active tab has a mounted pane listening for the event.
-                    if (!isActive && isScriptTab(tab)) {
-                      void saveScriptTab(tab);
-                      return;
-                    }
-                    if (!isActive && isFlowTab(tab)) {
-                      void saveFlowTab(tab).then((saved) => {
-                        if (saved) toast.success('Flow saved.');
-                      });
+                    // The menu's tab object can be stale, so save the current one.
+                    if (!isActive && (isScriptTab(tab) || isFlowTab(tab))) {
+                      const fresh = findTabInTree(usePaneStore.getState().root, tab.id)?.tab;
+                      if (!fresh?.isDirty) return;
+                      if (isScriptTab(fresh)) void saveScriptTab(fresh);
+                      else if (isFlowTab(fresh)) {
+                        void saveFlowTab(fresh).then((saved) => {
+                          if (saved) toast.success('Flow saved.');
+                        });
+                      }
                       return;
                     }
                     window.dispatchEvent(
