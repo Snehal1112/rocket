@@ -137,6 +137,7 @@ pub fn mask_secrets(text: &str, secrets: &[&str]) -> String {
 
 /// Masks every secret, strips control characters and keeps the last
 /// `TAIL_LIMIT` bytes. Masking runs first, on the whole buffer.
+#[cfg(test)]
 pub fn mask_output(raw: &[u8], secrets: &[&str]) -> String {
     mask_output_from(raw, secrets, false)
 }
