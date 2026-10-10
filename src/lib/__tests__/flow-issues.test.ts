@@ -222,6 +222,49 @@ describe('computeFlowIssues: save errors', () => {
     expect(saved.every((i) => i.severity === 'error')).toBe(true);
   });
 
+  it('lists a node once when the save error names it twice', () => {
+    const issues = computeFlowIssues(nodes, [], {
+      save: { nodeIds: ['a', 'a', 'b'], edgeIds: [], message: 'Invalid input: changed' },
+    });
+    expect(only(issues, 'save').map((i) => i.nodeId)).toEqual(['a', 'b']);
+  });
+
+  it('lists a wire once when the save error names it twice', () => {
+    const edges = [wire('e1', 'a', 'b', 'value')];
+    const issues = computeFlowIssues(nodes, edges, {
+      save: { nodeIds: [], edgeIds: ['e1', 'e1'], message: null },
+    });
+    expect(only(issues, 'save')).toHaveLength(1);
+  });
+
+  it('drops a save issue that repeats a client issue on the same node', () => {
+    const ifNode = node('i1', { kind: 'If', label: 'i1', condition: 'true' });
+    const issues = computeFlowIssues([ifNode], [], {
+      save: {
+        nodeIds: ['i1'],
+        edgeIds: [],
+        // Same sentence as the client rule, with different case and no full stop.
+        message: 'Invalid input: flow is invalid: the if node needs an input wire — node(s): i1; edge(s): ',
+      },
+    });
+    expect(issues.filter((i) => i.nodeId === 'i1').map((i) => i.code)).toEqual(['input-missing']);
+  });
+
+  it('keeps a save issue whose message differs from the client issue', () => {
+    const ifNode = node('i1', { kind: 'If', label: 'i1', condition: 'true' });
+    const issues = computeFlowIssues([ifNode], [], {
+      save: {
+        nodeIds: ['i1'],
+        edgeIds: [],
+        message: 'Invalid input: flow is invalid: the If node has a different problem — node(s): i1; edge(s): ',
+      },
+    });
+    expect(issues.filter((i) => i.nodeId === 'i1').map((i) => i.code).sort()).toEqual([
+      'input-missing',
+      'save',
+    ]);
+  });
+
   it('lists errors before warnings', () => {
     const issues = computeFlowIssues(nodes, [], { save: { nodeIds: ['b'], edgeIds: [], message: null } });
     const severities = issues.map((i) => i.severity);
@@ -244,6 +287,36 @@ describe('cleanSaveMessage', () => {
 
   it('leaves a message without ids readable', () => {
     expect(cleanSaveMessage('disk full')).toBe('Disk full.');
+  });
+
+  it('hides the case value of a Switch duplicate-match error', () => {
+    const cleaned = cleanSaveMessage(
+      "Invalid input: flow is invalid: more than one case matches 'secret-token' — node(s): sw; edge(s): ",
+    );
+    expect(cleaned).not.toContain('secret-token');
+    expect(cleaned).toBe('More than one case matches value hidden.');
+  });
+
+  it('hides a double-quoted value in the middle of a sentence', () => {
+    const cleaned = cleanSaveMessage('switch case "secret-token" is duplicated');
+    expect(cleaned).not.toContain('secret-token');
+    expect(cleaned).toBe('Switch case value hidden is duplicated.');
+  });
+
+  it('hides a value that contains a quote, and keeps a leading label quote', () => {
+    const cleaned = cleanSaveMessage(
+      "'Router': more than one case matches 'it's-secret' — node(s): sw; edge(s): ",
+    );
+    expect(cleaned).not.toContain('secret');
+    expect(cleaned).toBe("'Router': more than one case matches value hidden.");
+  });
+
+  it('does not hide the id of a duplicate case id', () => {
+    expect(
+      cleanSaveMessage(
+        "Invalid input: flow is invalid: more than one case has id 'c1' — node(s): sw; edge(s): ",
+      ),
+    ).toBe("More than one case has id 'c1'.");
   });
 });
 

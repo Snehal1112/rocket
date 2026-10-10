@@ -238,12 +238,18 @@ function waitIssues(node: FlowNode, nodes: FlowNode[]): FlowIssue[] {
 // Turns a save_flow error such as
 // "Invalid input: flow contains a cycle through node(s): a, b; edge(s): e1"
 // into a sentence a person can read, without ids.
+// Quoted text after match, matches, case or value is a user's Switch case value, which may be
+// a secret. The first branch takes a quote at the end of the text, so a value that contains a
+// quote is hidden whole. The second branch takes the next closing quote.
+const QUOTED_CASE_VALUE = /(\b(?:matches|match|case|value)\s+)(['"])(?:.*\2(?=[.!?]?$)|[^'"]*\2)/gi;
+
 export function cleanSaveMessage(message: string): string {
   const cleaned = message
     .replace(/^Invalid input:\s*/, '')
     .replace(/^flow is invalid:\s*/, '')
     .replace(/\s*(?:—|-)?\s*node\(s\):[^;]*(?:;\s*edge\(s\):.*)?$/, '')
     .replace(/\s+through\s*$/, '')
+    .replace(QUOTED_CASE_VALUE, '$1value hidden')
     .trim();
   if (!cleaned) return 'The last save was rejected.';
   const sentence = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
@@ -257,13 +263,35 @@ function saveIssues(save: SaveErrorInfo, nodeIds: Set<string>, edgeIds: Set<stri
       ? 'Run the full flow, or Run from the named node.'
       : 'Fix this, then save again.';
   return [
-    ...save.nodeIds
+    ...[...new Set(save.nodeIds)]
       .filter((id) => nodeIds.has(id))
       .map((nodeId): FlowIssue => ({ code: 'save', severity: 'error', nodeId, message, hint })),
-    ...save.edgeIds
+    ...[...new Set(save.edgeIds)]
       .filter((id) => edgeIds.has(id))
       .map((edgeId): FlowIssue => ({ code: 'save', severity: 'error', edgeId, message, hint })),
   ];
+}
+
+// The same sentence with a different case or a missing full stop is the same message.
+const normalizedMessage = (message: string) =>
+  message
+    .trim()
+    .replace(/[.!?]+$/, '')
+    .toLowerCase();
+
+const issueSpot = (i: FlowIssue) =>
+  `${i.nodeId ?? ''}|${i.edgeId ?? ''}|${normalizedMessage(i.message)}`;
+
+// A save issue that says what another issue on the same node or wire already says adds nothing.
+function dropRepeatedSaveIssues(issues: FlowIssue[]): FlowIssue[] {
+  const seen = new Set(issues.filter((i) => i.code !== 'save').map(issueSpot));
+  return issues.filter((i) => {
+    if (i.code !== 'save') return true;
+    const spot = issueSpot(i);
+    if (seen.has(spot)) return false;
+    seen.add(spot);
+    return true;
+  });
 }
 
 // Rules in BACKEND_LINT_CODES (src/lib/flow-lint.ts) come from lint_flow only.
@@ -292,7 +320,7 @@ export function computeFlowIssues(
     );
   }
   const rank = (i: FlowIssue) => (i.severity === 'error' ? 0 : 1);
-  return issues.sort((a, b) => rank(a) - rank(b));
+  return dropRepeatedSaveIssues(issues).sort((a, b) => rank(a) - rank(b));
 }
 
 export function groupIssuesByNode(issues: FlowIssue[]): Map<string, FlowIssue[]> {
