@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rocket_acp::ConfigOption;
 use rocket_app::{
-    AcpSessionService, AssistantMode, McpHttpServerCredentials, McpToolService,
+    AcpSessionService, AssistantMode, ConversationService, McpHttpServerCredentials, McpToolService,
     SessionIsolation, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 use rocket_shared::error::DomainError;
@@ -116,6 +116,7 @@ pub async fn start_workspace_assistant(
     registry: State<'_, Arc<McpServerRegistry>>,
     mcp_tool_svc: State<'_, Arc<McpToolService>>,
     resources: State<'_, Arc<SessionResourceRegistry>>,
+    conversations: State<'_, Arc<ConversationService>>,
     svc: State<'_, AcpSessionService>,
 ) -> Result<AgentSessionStartedDto, DomainError> {
     start_workspace_assistant_inner(
@@ -126,6 +127,7 @@ pub async fn start_workspace_assistant(
         &registry,
         &mcp_tool_svc,
         &resources,
+        &conversations,
         &svc,
     )
     .await
@@ -149,6 +151,7 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
     registry: &McpServerRegistry,
     mcp_tool_svc: &McpToolService,
     resources: &SessionResourceRegistry,
+    conversations: &ConversationService,
     svc: &AcpSessionService,
 ) -> Result<AgentSessionStartedDto, DomainError> {
     // An empty working directory and an empty CLAUDE_CONFIG_DIR, created
@@ -193,6 +196,9 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
         mode,
         info.prompt_capabilities.embedded_context,
     );
+    // The same moment as the tool pin, so the conversation of this session
+    // is saved into the workspace it started in, even after a switch.
+    conversations.pin_session(&info.session_id);
     handle.binding.bind(&info.session_id);
     registry.register(info.session_id.clone(), handle);
     // Cleanup removes the scratch and forgets both ids when the session

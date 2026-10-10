@@ -9,6 +9,8 @@ pub(crate) mod client_certificates;
 pub mod collection_runner_service;
 pub mod collection_service;
 pub mod collection_trust;
+pub(crate) mod conversation_secrets;
+pub mod conversation_service;
 pub mod contract_service;
 pub mod cookie_service;
 pub mod env_audit;
@@ -70,6 +72,7 @@ pub use collection_runner_service::{
 pub use collection_service::CollectionService;
 pub use collection_trust::{effective_capabilities, Capability, CollectionTrustService, TrustStatus};
 pub use contract_service::ContractService;
+pub use conversation_service::{ConversationInput, ConversationService, MAX_SESSION_PINS};
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use execution_service::websocket_resolution::{

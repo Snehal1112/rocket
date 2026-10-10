@@ -17,7 +17,7 @@ use rocket_acp::{
     PromptCapabilities, PromptPart, SessionInfo,
 };
 use rocket_app::{
-    isolation_meta, AcpSessionService, AssistantMode, McpToolService, SessionCleanup,
+    isolation_meta, AcpSessionService, AssistantMode, ConversationService, McpToolService, SessionCleanup,
     ISOLATION_ENV_CONFIG_DIR, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 use rocket_collection::CollectionRepository;
@@ -29,7 +29,7 @@ use rocket_lib::agent_session::cleanup::{SessionResourceRegistry, TauriSessionCl
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsSecretManagerRepo,
-    FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo,
+    FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo, SharedPathConversationRepo,
 };
 use rocket_lib::commands::acp_sessions::start_workspace_assistant_inner;
 use rocket_lib::mcp::registry::McpServerRegistry;
@@ -244,6 +244,7 @@ struct Fixture {
     mcp_tool_svc: McpToolService,
     registry: Arc<McpServerRegistry>,
     resources: Arc<SessionResourceRegistry>,
+    conversation_svc: ConversationService,
     acp_session_svc: AcpSessionService,
     app_handle: tauri::AppHandle<tauri::test::MockRuntime>,
     _tmp: TempDir,
@@ -296,6 +297,14 @@ fn build_fixture(client: FakeSessionClient) -> Fixture {
         agent_config_service(),
     );
 
+    let conversation_svc = ConversationService::new(
+        Arc::new(SharedPathConversationRepo::new(Arc::clone(&ws_path))),
+        Arc::new(FsCollectionRepo::new_standalone(collections_dir.clone())),
+        Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
+        Arc::new(FsEnvironmentRepo::new(tmp.path().join("environments"))),
+        Arc::new(NullEventPublisher),
+    );
+
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build mock tauri app");
@@ -303,6 +312,7 @@ fn build_fixture(client: FakeSessionClient) -> Fixture {
         mcp_tool_svc,
         registry: Arc::new(McpServerRegistry::new()),
         resources: Arc::new(SessionResourceRegistry::new()),
+        conversation_svc,
         acp_session_svc,
         app_handle: app.handle().clone(),
         _tmp: tmp,
@@ -336,6 +346,7 @@ async fn start(fx: &Fixture) -> DomainResult<rocket_lib::commands::acp_session_d
         &fx.registry,
         &fx.mcp_tool_svc,
         &fx.resources,
+        &fx.conversation_svc,
         &fx.acp_session_svc,
     )
     .await
@@ -458,4 +469,37 @@ async fn session_start_failure_removes_the_scratch_directories() {
         .expect("CLAUDE_CONFIG_DIR must be set");
     assert!(!config_dir.exists(), "the scratch config dir must be removed");
     assert!(fx.resources.is_empty());
+}
+
+#[tokio::test]
+async fn a_started_session_can_save_its_conversation_into_its_workspace() {
+    let (client, _, _) = client(false, "acp-real-session-2");
+    let fx = build_fixture(client);
+    let session_id = start(&fx).await.expect("start").session_id;
+
+    let id = "0b6f3f4e-0000-4000-8000-000000000001";
+    fx.conversation_svc
+        .save(
+            &session_id,
+            rocket_app::ConversationInput {
+                id: id.into(),
+                agent_config_id: "agent-1".into(),
+                mode: rocket_acp::ConversationMode::Edit,
+                workspace_id: "default".into(),
+                collections: vec!["demo".into()],
+                messages: vec![
+                    rocket_acp::StoredMessage::User { text: "hi".into() },
+                    rocket_acp::StoredMessage::Agent { text: "hello".into() },
+                ],
+                continued_from: None,
+            },
+        )
+        .expect("the start pinned the workspace");
+    assert!(fx
+        ._tmp
+        .path()
+        .join("assistant")
+        .join("conversations")
+        .join(format!("{id}.yml"))
+        .is_file());
 }

@@ -4,6 +4,7 @@ pub mod agent_configs;
 pub mod agent_proposals;
 pub mod app;
 pub mod assistant_chips;
+pub mod assistant_conversations;
 pub mod audit;
 pub mod collection_trust;
 pub mod collections;

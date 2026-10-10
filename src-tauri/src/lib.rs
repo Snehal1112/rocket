@@ -661,6 +661,25 @@ pub fn run() {
             )
             .with_trust_store(Arc::clone(&trust_store)));
 
+            // Stored assistant conversations of the active workspace. The
+            // environment repositories read secret values from the keychain,
+            // because masking needs the real values.
+            let conversation_svc = Arc::new(rocket_app::ConversationService::new(
+                Arc::new(rocket_infra::SharedPathConversationRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                Arc::new(SharedCollectionEnvironmentRepo::with_secret_store(
+                    Arc::clone(&active_workspace_path),
+                    env_secret_store(),
+                )),
+                Arc::new(SharedPathEnvironmentRepo::with_secret_store(
+                    Arc::clone(&active_workspace_path),
+                    env_secret_store(),
+                )),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            ));
+
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows
             // — see SharedPathFlowRepo's doc comment.
@@ -793,6 +812,7 @@ pub fn run() {
             app.manage(Arc::clone(&session_resources));
             app.manage(mcp_tool_svc);
             app.manage(Arc::clone(&proposal_svc));
+            app.manage(conversation_svc);
 
             // Agent processes run in their own process groups, so a signal
             // sent to Rocket alone never reaches them. Route those signals
@@ -1052,6 +1072,11 @@ pub fn run() {
             commands::agent_proposals::list_agent_proposals,
             commands::agent_proposals::accept_agent_proposal,
             commands::agent_proposals::reject_agent_proposal,
+            commands::assistant_conversations::list_conversations,
+            commands::assistant_conversations::get_conversation,
+            commands::assistant_conversations::save_conversation,
+            commands::assistant_conversations::delete_conversation,
+            commands::assistant_conversations::clear_conversations,
             commands::acp_sessions::set_assistant_mode,
             commands::acp_sessions::start_workspace_assistant,
             commands::acp_sessions::end_stale_assistant_sessions,
