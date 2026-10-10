@@ -90,9 +90,22 @@ describe('resolveRequestFieldsForPath with a pre-request rok.setVar', () => {
         headers: [{ id: '1', key: 'X-T', value: '{{token}}', enabled: true }],
         preRequestScript: "rok.setVar('token', 'fresh');",
       }),
+      true,
     );
     expect(resolved.url).toBe('https://api.example.com/{{token}}');
     expect(values(resolved.headers, 'X-T')).toEqual(['{{token}}']);
+  });
+
+  it('resolves the name for a path that runs no script, such as a cURL copy', async () => {
+    const resolved = await resolveRequestFieldsForPath(
+      'api',
+      PATH,
+      request({
+        url: 'https://api.example.com/{{token}}',
+        preRequestScript: "rok.setVar('token', 'fresh');",
+      }),
+    );
+    expect(resolved.url).toBe('https://api.example.com/tok-123');
   });
 
   it('resolves the name as before when no script sets it', async () => {
@@ -103,6 +116,7 @@ describe('resolveRequestFieldsForPath with a pre-request rok.setVar', () => {
         url: 'https://api.example.com/{{token}}',
         preRequestScript: "rok.setVar('other', 'x');",
       }),
+      true,
     );
     expect(resolved.url).toBe('https://api.example.com/tok-123');
   });

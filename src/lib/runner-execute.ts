@@ -33,7 +33,7 @@ export async function executeRunnerEntry(
 ): Promise<RunnerExecutionOutcome> {
   try {
     const requestState = graphql ? mapGraphQlToState(graphql) : mapApiRequestToState(request, true);
-    const resolved = await resolveRequestFieldsForPath(collection, requestPath, requestState);
+    const resolved = await resolveRequestFieldsForPath(collection, requestPath, requestState, true);
     const globalEnvName = getActiveGlobalEnvName();
     const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
 

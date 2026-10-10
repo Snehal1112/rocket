@@ -73,6 +73,7 @@ describe('executeRunnerEntry', () => {
       'demo',
       'ping.yml',
       expect.objectContaining({ auth: { authType: 'inherit' } }),
+      true,
     );
   });
 

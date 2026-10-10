@@ -252,10 +252,16 @@ export function toApiOptions(settings: RequestSettings | undefined): RequestOpti
 // test dialog, the collection runner) gets consistent {{var}}
 // substitution, regardless of whether the request came from an open
 // tab or a tree walk over getCollection().
+//
+// `forSend` is set by the paths that send the request with its pre-request script (the
+// single send and the runner). Only they leave names the script sets as placeholders for the
+// backend. A cURL copy, a load test or an introspection call runs no script, so they resolve
+// those names from their scopes as before.
 export async function resolveRequestFieldsForPath(
   collection: string | undefined,
   requestPath: string | undefined,
   request: RequestState,
+  forSend = false,
 ): Promise<ResolvedRequestFields> {
   const envVars = getActiveVariables();
   const globalVars = getGlobalVariables();
@@ -305,7 +311,8 @@ export async function resolveRequestFieldsForPath(
   });
   // A name the pre-request script sets with rok.setVar stays a placeholder in the request
   // fields, so the backend fills it with the script's value (runtime wins) after the script.
-  const runsScript = request.requestType === 'http' || request.requestType === 'graphql';
+  const runsScript =
+    forSend && (request.requestType === 'http' || request.requestType === 'graphql');
   const fieldCtx = runsScript ? withoutScriptRuntimeVars(ctx, request.preRequestScript) : ctx;
   const resolve = (text: string) => resolveWithContext(text, fieldCtx);
 
@@ -410,6 +417,7 @@ export async function resolveRequestFieldsForPath(
 export async function resolveRequestFields(
   tabId: string,
   request: RequestState,
+  forSend = false,
 ): Promise<ResolvedRequestFields> {
   const { root } = usePaneStore.getState();
   const found = findTabInTree(root, tabId);
@@ -417,6 +425,7 @@ export async function resolveRequestFields(
     found?.tab.source?.collection,
     found?.tab.source?.path,
     request,
+    forSend,
   );
 }
 
@@ -655,7 +664,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     environmentName,
     requestPath,
     graphql: resolvedGraphql,
-  } = await resolveRequestFields(tabId, effectiveRequest);
+  } = await resolveRequestFields(tabId, effectiveRequest, true);
 
   const globalEnvName = getActiveGlobalEnvName();
   const requestName = found?.tab.title ?? resolvedUrl;
