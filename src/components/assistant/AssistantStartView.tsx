@@ -20,9 +20,11 @@ export function AssistantStartView() {
   );
   const hasMessages = useAssistantStore((s) => s.messages.length > 0);
   const startAgain = () => {
-    // A failed start retries with its own mode and replay seed, so a continuation survives.
+    // A failed start has no session id. It retries with its own mode and replay seed, so a
+    // continuation survives. A session that died mid-chat restarts with the defaults.
     const state = useAssistantStore.getState();
-    const failed = state.session?.status === 'error' ? state.session : undefined;
+    const failed =
+      state.session?.status === 'error' && !state.session.sessionId ? state.session : undefined;
     const seed =
       failed && state.replay
         ? { fromId: state.replay.fromId, preface: state.replay.preface }

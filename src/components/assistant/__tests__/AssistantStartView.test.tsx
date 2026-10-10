@@ -51,6 +51,28 @@ describe('AssistantStartView retry', () => {
     expect(startAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined);
   });
 
+  it('restarts in the default mode after a mid-session fatal failure', async () => {
+    const store = useAssistantStore.getState();
+    const token = store.beginSession('agent-1', 'ask');
+    store.activateSession(token, 's1', []);
+    store.setMode('s1', 'agent');
+    store.failMessage('s1', 'dead', true);
+    renderView();
+    await userEvent.click(screen.getByRole('button', { name: /Start/ }));
+    expect(startAssistant).toHaveBeenCalledWith('agent-1', undefined, undefined);
+  });
+
+  it('drops the replay seed after a continued session dies mid-chat', async () => {
+    const store = useAssistantStore.getState();
+    const token = store.beginSession('agent-1', 'ask', { fromId: 'c0', preface: 'earlier' });
+    store.activateSession(token, 's1', []);
+    store.markReplaySent('s1');
+    store.failMessage('s1', 'dead', true);
+    renderView();
+    await userEvent.click(screen.getByRole('button', { name: /Start/ }));
+    expect(startAssistant).toHaveBeenCalledWith('agent-1', undefined, undefined);
+  });
+
   it('starts fresh with defaults when there was no failure', async () => {
     renderView();
     await userEvent.click(screen.getByRole('button', { name: 'Start' }));
