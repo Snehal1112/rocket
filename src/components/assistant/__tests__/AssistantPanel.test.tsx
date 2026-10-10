@@ -86,6 +86,15 @@ describe('AssistantPanel', () => {
     expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
   });
 
+  it('keeps newlines in a multi-line start error', () => {
+    const token = store().beginSession('agent-1', 'edit');
+    store().failStart(token, 'agent exited\nagent output:\nline one\nline two');
+    render(<AssistantPanel />);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe('agent exited\nagent output:\nline one\nline two');
+    expect(alert).toHaveClass('whitespace-pre-wrap', 'overflow-y-auto', 'max-h-40');
+  });
+
   it('renders replies and one muted line per tool call', () => {
     activate();
     store().appendUserMessage('Why does login fail?');

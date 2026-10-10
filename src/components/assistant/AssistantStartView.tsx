@@ -37,7 +37,14 @@ export function AssistantStartView() {
           </p>
         </>
       )}
-      {error && <p className='text-xs text-destructive'>{error}</p>}
+      {error && (
+        <p
+          role='alert'
+          className='max-h-40 select-text overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs text-destructive'
+        >
+          {error}
+        </p>
+      )}
       {agentConfigs.length === 0 ? (
         <p className='text-xs text-muted-foreground'>
           No agents are configured yet. Add one with the agent button in the title bar.
