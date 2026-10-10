@@ -10,7 +10,8 @@ use crate::oc::{OcHttpRequest, OcItem};
 use super::folder_file::parse_folder_yml;
 use super::paths::{is_request_file, read_uid_from_yaml};
 
-pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
+/// With `strict`, a request file that cannot be parsed is an error and not a skipped item.
+pub(super) fn build_folder_tree(current: &Path, strict: bool) -> DomainResult<Folder> {
     build_tree(current, &mut |path, entry_name| {
         let content = fs::read_to_string(path)?;
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -42,6 +43,11 @@ pub(super) fn build_folder_tree(current: &Path) -> DomainResult<Folder> {
             }
             Ok(other) => Ok(other),
             Err(e) => {
+                if strict {
+                    return Err(DomainError::Internal(format!(
+                        "request file '{entry_name}' cannot be parsed"
+                    )));
+                }
                 tracing::warn!(path = %path.display(), error = %e, "skipping corrupt request file");
                 Ok(None)
             }

@@ -48,6 +48,10 @@ impl EnvironmentRepository for SharedPathEnvironmentRepo {
         self.current().list()
     }
 
+    fn list_strict(&self) -> DomainResult<Vec<Environment>> {
+        self.current().list_strict()
+    }
+
     fn get(&self, name: &str) -> DomainResult<Environment> {
         self.current().get(name)
     }

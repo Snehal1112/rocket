@@ -3382,3 +3382,22 @@ fn oc_variable_yaml_without_secret_is_non_secret_and_with_secret_is_secret() {
     let secret: OcVariable = serde_yaml::from_str("name: a\nvalue: x\nsecret: true\n").unwrap();
     assert!(CollectionVariable::from(secret).secret);
 }
+
+#[test]
+fn get_strict_errors_on_a_corrupt_request_file_that_get_skips() {
+    let (dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    fs::write(
+        dir.path().join("my-api/broken.yml"),
+        "info:\n  name: Broken\n  type: http\nhttp:\n  method: GET\n  url: https://example.com\n  body:\n    type: bogus\n    data: x\n",
+    )
+    .expect("write broken.yml");
+
+    let lenient = repo.get("my-api").expect("get skips the broken file");
+    assert!(lenient.root.items.is_empty());
+    let strict = repo.get_strict("my-api");
+    assert!(
+        matches!(strict, Err(DomainError::Internal(_))),
+        "expected an error, got {strict:?}"
+    );
+}

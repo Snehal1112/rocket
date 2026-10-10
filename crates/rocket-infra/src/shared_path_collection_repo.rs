@@ -44,6 +44,10 @@ impl CollectionRepository for SharedPathCollectionRepo {
         self.repo().list()
     }
 
+    fn get_strict(&self, name: &str) -> DomainResult<Collection> {
+        self.repo().get_strict(name)
+    }
+
     fn get(&self, name: &str) -> DomainResult<Collection> {
         self.repo().get(name)
     }

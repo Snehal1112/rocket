@@ -85,8 +85,15 @@ impl FsEnvironmentRepo {
     /// app startup on a locked keychain — so it is logged and the variable keeps
     /// whatever value the YAML produced (empty for a spec SecretVariable entry).
     fn hydrate_secrets(&self, env: &mut Environment) {
+        // A lenient hydrate never fails, so the strict error cannot occur.
+        let _ = self.hydrate_secrets_with(env, false);
+    }
+
+    /// Like `hydrate_secrets`, but with `strict` a secret store error is returned. The error
+    /// text names the variable key only, never a value.
+    fn hydrate_secrets_with(&self, env: &mut Environment, strict: bool) -> DomainResult<()> {
         if !env.variables.iter().any(|v| v.secret) {
-            return;
+            return Ok(());
         }
         let scope = Self::scope_id(&self.dir, &env.name);
         for var in env.variables.iter_mut().filter(|v| v.secret) {
@@ -94,6 +101,12 @@ impl FsEnvironmentRepo {
                 Ok(Some(value)) => var.value = value,
                 Ok(None) => {}
                 Err(e) => {
+                    if strict {
+                        return Err(DomainError::Internal(format!(
+                            "secret store unavailable for environment '{}' variable '{}'",
+                            env.name, var.key
+                        )));
+                    }
                     tracing::warn!(
                         key = %var.key,
                         error = %e,
@@ -102,11 +115,12 @@ impl FsEnvironmentRepo {
                 }
             }
         }
+        Ok(())
     }
-}
 
-impl EnvironmentRepository for FsEnvironmentRepo {
-    fn list(&self) -> DomainResult<Vec<Environment>> {
+    /// Reads every environment file. With `strict`, a corrupt file, an unusable name and a
+    /// secret store error are errors instead of being skipped.
+    fn list_with(&self, strict: bool) -> DomainResult<Vec<Environment>> {
         let mut result = Vec::new();
         if !self.dir.exists() {
             return Ok(result);
@@ -122,6 +136,11 @@ impl EnvironmentRepository for FsEnvironmentRepo {
                 Some(Environment::from(oc))
             } else if let Ok(env) = serde_yaml::from_str::<Environment>(&content) {
                 Some(env)
+            } else if strict {
+                return Err(DomainError::Internal(format!(
+                    "environment file '{}' cannot be parsed",
+                    path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+                )));
             } else {
                 tracing::warn!(path = %path.display(), "skipping corrupt environment YAML file");
                 None
@@ -134,17 +153,32 @@ impl EnvironmentRepository for FsEnvironmentRepo {
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_default();
                     if Environment::validate_name(&stem).is_err() {
+                        if strict {
+                            return Err(DomainError::Internal(
+                                "an environment file has an unusable name".to_string(),
+                            ));
+                        }
                         tracing::warn!(path = %path.display(), "skipping environment with unusable name");
                         continue;
                     }
                     env.name = stem;
                 }
-                self.hydrate_secrets(&mut env);
+                self.hydrate_secrets_with(&mut env, strict)?;
                 result.push(env);
             }
         }
         result.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(result)
+    }
+}
+
+impl EnvironmentRepository for FsEnvironmentRepo {
+    fn list(&self) -> DomainResult<Vec<Environment>> {
+        self.list_with(false)
+    }
+
+    fn list_strict(&self) -> DomainResult<Vec<Environment>> {
+        self.list_with(true)
     }
 
     fn get(&self, name: &str) -> DomainResult<Environment> {
@@ -853,5 +887,38 @@ mod tests {
             saved["clientCertificates"], original["clientCertificates"],
             "{raw}"
         );
+    }
+
+    #[test]
+    fn list_strict_errors_on_a_corrupt_file_that_list_skips() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = FsEnvironmentRepo::new(tmp.path().join("environments"));
+        let mut env = Environment::new("ok");
+        env.set_variable(Variable::new("host", "a.test"));
+        repo.save(&env).expect("save");
+        fs::write(tmp.path().join("environments/bad.yml"), "name: [unclosed\n")
+            .expect("write corrupt file");
+
+        assert_eq!(repo.list().expect("lenient list").len(), 1);
+        let strict = repo.list_strict();
+        assert!(matches!(strict, Err(DomainError::Internal(_))), "{strict:?}");
+    }
+
+    #[test]
+    fn list_strict_errors_when_the_secret_store_fails_and_list_does_not() {
+        let tmp = TempDir::new().expect("tempdir");
+        let store = Arc::new(InMemorySecretStore::default());
+        let repo = FsEnvironmentRepo::with_secret_store(
+            tmp.path().join("environments"),
+            store.clone(),
+        );
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("token", "s3cret-value-1"));
+        repo.save(&env).expect("save");
+        store.fail_get.store(true, Ordering::SeqCst);
+
+        assert_eq!(repo.list().expect("lenient list").len(), 1);
+        let err = repo.list_strict().expect_err("strict list fails");
+        assert!(!err.to_string().contains("s3cret-value-1"));
     }
 }

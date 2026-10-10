@@ -62,6 +62,15 @@ pub(super) fn list(repo: &FsCollectionRepo) -> DomainResult<Vec<CollectionSummar
 
 #[tracing::instrument(name = "collection_get", skip(repo), fields(collection_name = %name))]
 pub(super) fn get(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collection> {
+    get_with(repo, name, false)
+}
+
+/// Loads the whole tree. With `strict`, a request file that cannot be parsed is an error.
+pub(super) fn get_with(
+    repo: &FsCollectionRepo,
+    name: &str,
+    strict: bool,
+) -> DomainResult<Collection> {
     Collection::validate_name(name)?;
     let path = repo.collection_path(name);
     if !path.exists() {
@@ -79,7 +88,7 @@ pub(super) fn get(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collectio
     if detect_format(&path) == CollectionFormat::LegacyJson {
         migrate_collection(&path)?;
     }
-    let root = build_folder_tree(&path)?;
+    let root = build_folder_tree(&path, strict)?;
     let settings = super::settings::get_settings(repo, name).unwrap_or_default();
     Ok(Collection {
         name: name.to_string(),

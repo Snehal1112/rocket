@@ -31,6 +31,13 @@ pub trait CollectionRepository: Send + Sync {
     /// Get full collection tree by name.
     fn get(&self, name: &str) -> DomainResult<Collection>;
 
+    /// Like `get`, but a request file that cannot be read or parsed is an error instead of
+    /// being skipped. For masking text that is stored, where a skipped request would leave its
+    /// secret variables unmasked. The default is the lenient `get`.
+    fn get_strict(&self, name: &str) -> DomainResult<Collection> {
+        self.get(name)
+    }
+
     /// Get collection tree with lightweight request summaries instead of full Request bodies.
     /// Use for sidebar loads; call `get_request` for the full body when the user opens a request.
     fn get_summaries(&self, name: &str) -> DomainResult<Collection>;

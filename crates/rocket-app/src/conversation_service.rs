@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use rocket_acp::conversation::{
     conversation_title, has_agent_reply, validate_conversation_id, ConversationCollection,
     ConversationMode, ConversationRecord, ConversationRepository, ConversationSummary,
-    StoredMessage, CONVERSATION_FORMAT_VERSION,
+    StoredMessage, CONVERSATION_FORMAT_VERSION, MAX_MESSAGES,
 };
 use rocket_collection::CollectionRepository;
 use rocket_environment::{EnvironmentRepository, EnvironmentRepositoryFactory};
@@ -22,6 +22,9 @@ use crate::mcp_read_views::mask_secret_text;
 
 /// Sessions whose workspace pin is kept. The oldest pin is dropped first.
 pub const MAX_SESSION_PINS: usize = 16;
+
+/// The most text one save accepts, before any work. A real conversation is far below this.
+pub const MAX_INPUT_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
 /// What the panel sends to save. `collections` are names; the record keeps
 /// their `opencollection.yml` uid.
@@ -108,6 +111,14 @@ impl ConversationService {
         }
     }
 
+    /// Drops the pin of a session that did not start. Safe for an unknown id.
+    pub fn unpin_session(&self, session_id: &str) {
+        self.pins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(id, _)| id != session_id);
+    }
+
     fn pin(&self, session_id: &str) -> DomainResult<Arc<WorkspacePin>> {
         self.pins
             .lock()
@@ -154,6 +165,12 @@ impl ConversationService {
                 "a conversation is saved only after the assistant replied".to_string(),
             ));
         }
+        let total_text: usize = input.messages.iter().map(text_bytes).sum();
+        if total_text > MAX_INPUT_TEXT_BYTES {
+            return Err(DomainError::InvalidInput(
+                "the conversation is too large to save".to_string(),
+            ));
+        }
         let pin = self.pin(session_id)?;
         let secrets = workspace_secret_values(
             pin.collections.as_ref(),
@@ -166,12 +183,28 @@ impl ConversationService {
                     .to_string(),
             )
         })?;
-        let messages: Vec<StoredMessage> = input
+        // The title comes from the first user message, which the cap below may drop.
+        let first_user = input
             .messages
+            .iter()
+            .find(|m| matches!(m, StoredMessage::User { .. }))
+            .cloned();
+        // Only the newest messages are kept, so the rest is dropped before any masking work.
+        let mut messages = input.messages;
+        if messages.len() > MAX_MESSAGES {
+            messages.drain(..messages.len() - MAX_MESSAGES);
+        }
+        let mask = |text: &str| mask_secret_text(text, &secrets);
+        let messages: Vec<StoredMessage> = messages
             .into_iter()
-            .map(|message| message.map_text(|text| mask_secret_text(text, &secrets)))
+            .map(|message| message.map_text(mask))
             .collect();
-        let title = conversation_title(&messages);
+        let title = conversation_title(
+            &first_user
+                .map(|m| m.map_text(mask))
+                .into_iter()
+                .collect::<Vec<_>>(),
+        );
         let now = (self.now)();
         let created_at = match pin.conversations.get(&input.id) {
             Ok(existing) if !existing.created_at.is_empty() => existing.created_at,
@@ -215,6 +248,16 @@ impl ConversationService {
         self.events
             .publish(DomainEvent::AssistantConversationsCleared);
         Ok(())
+    }
+}
+
+fn text_bytes(message: &StoredMessage) -> usize {
+    match message {
+        StoredMessage::User { text }
+        | StoredMessage::Agent { text }
+        | StoredMessage::Notice { text } => text.len(),
+        StoredMessage::Tool { title, .. } => title.len(),
+        StoredMessage::Proposal { summary, .. } => summary.len(),
     }
 }
 
@@ -589,5 +632,278 @@ mod tests {
                 input(vec![user("q"), agent("a")]),
             )
             .expect("the newest pin saves");
+    }
+
+    // Tests on real files, for the unreadable-source cases the doubles cannot show.
+
+    use rocket_collection::GraphQlRequest;
+    use rocket_environment::secret_store::SecretStore;
+    use rocket_infra::{
+        FsEnvironmentRepo, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo,
+        SharedPathConversationRepo, SharedPathEnvironmentRepo,
+    };
+    use std::sync::atomic::AtomicBool;
+
+    /// Keeps values in memory. `fail_get` makes every read fail, like a locked keychain.
+    #[derive(Default)]
+    struct FlakyStore {
+        entries: StdMutex<std::collections::HashMap<String, String>>,
+        fail_get: AtomicBool,
+    }
+
+    impl SecretStore for FlakyStore {
+        fn get(&self, scope: &str, key: &str) -> DomainResult<Option<String>> {
+            if self.fail_get.load(Ordering::SeqCst) {
+                return Err(DomainError::Internal("keychain locked".into()));
+            }
+            Ok(self
+                .entries
+                .lock()
+                .expect("lock")
+                .get(&format!("{scope}:{key}"))
+                .cloned())
+        }
+        fn set(&self, scope: &str, key: &str, value: &str) -> DomainResult<()> {
+            self.entries
+                .lock()
+                .expect("lock")
+                .insert(format!("{scope}:{key}"), value.into());
+            Ok(())
+        }
+        fn delete(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    struct FsFixture {
+        ws_a: tempfile::TempDir,
+        ws_b: tempfile::TempDir,
+        active: Arc<StdMutex<PathBuf>>,
+        store: Arc<FlakyStore>,
+        svc: ConversationService,
+    }
+
+    fn fs_fixture() -> FsFixture {
+        let ws_a = tempfile::tempdir().expect("tempdir");
+        let ws_b = tempfile::tempdir().expect("tempdir");
+        let active = Arc::new(StdMutex::new(ws_a.path().to_path_buf()));
+        let store = Arc::new(FlakyStore::default());
+        let svc = ConversationService::new(
+            Arc::new(SharedPathConversationRepo::new(Arc::clone(&active))),
+            Arc::new(SharedPathCollectionRepo::new(Arc::clone(&active))),
+            Arc::new(SharedCollectionEnvironmentRepo::with_secret_store(
+                Arc::clone(&active),
+                store.clone(),
+            )),
+            Arc::new(SharedPathEnvironmentRepo::with_secret_store(
+                Arc::clone(&active),
+                store.clone(),
+            )),
+            RecordingPublisher::new(),
+        )
+        .with_clock(Arc::new(|| "2026-10-11T09:20:41Z".to_string()));
+        FsFixture {
+            ws_a,
+            ws_b,
+            active,
+            store,
+            svc,
+        }
+    }
+
+    fn make_collection(fx: &FsFixture) -> SharedPathCollectionRepo {
+        let repo = SharedPathCollectionRepo::new(Arc::clone(&fx.active));
+        repo.create("demo").expect("create collection");
+        repo
+    }
+
+    fn assert_refused_and_empty(fx: &FsFixture, secret: &str) {
+        fx.svc.pin_session("s1");
+        let err = fx
+            .svc
+            .save("s1", input(vec![user(secret), agent("a")]))
+            .expect_err("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(
+            !err.to_string().contains(secret),
+            "the error echoes no value"
+        );
+        assert!(
+            !fx.ws_a.path().join("assistant").exists(),
+            "nothing was written"
+        );
+    }
+
+    #[test]
+    fn a_failing_secret_store_refuses_the_save() {
+        let fx = fs_fixture();
+        let globals = FsEnvironmentRepo::with_secret_store(
+            fx.ws_a.path().join("environments"),
+            fx.store.clone(),
+        );
+        let mut env = Environment::new("globals");
+        env.variables.push(Variable::secret("g", GLOBAL_SECRET));
+        globals.save(&env).expect("save global env");
+        fx.store.fail_get.store(true, Ordering::SeqCst);
+        assert_refused_and_empty(&fx, GLOBAL_SECRET);
+    }
+
+    #[test]
+    fn a_failing_secret_store_refuses_the_save_for_a_collection_environment() {
+        let fx = fs_fixture();
+        make_collection(&fx);
+        let repo = FsEnvironmentRepo::with_secret_store(
+            fx.ws_a.path().join("collections/demo/environments"),
+            fx.store.clone(),
+        );
+        let mut env = Environment::new("dev");
+        env.variables.push(Variable::secret("e", ENV_SECRET));
+        repo.save(&env).expect("save env");
+        fx.store.fail_get.store(true, Ordering::SeqCst);
+        assert_refused_and_empty(&fx, ENV_SECRET);
+    }
+
+    #[test]
+    fn a_corrupt_environment_file_refuses_the_save() {
+        let fx = fs_fixture();
+        std::fs::create_dir_all(fx.ws_a.path().join("environments")).expect("mkdir");
+        std::fs::write(
+            fx.ws_a.path().join("environments/bad.yml"),
+            "name: [unclosed\n",
+        )
+        .expect("write");
+        assert_refused_and_empty(&fx, "anything");
+    }
+
+    #[test]
+    fn a_corrupt_request_file_refuses_the_save() {
+        let fx = fs_fixture();
+        make_collection(&fx);
+        std::fs::write(
+            fx.ws_a.path().join("collections/demo/broken.yml"),
+            "info:\n  name: Broken\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n  body:\n    type: bogus\n    data: x\n",
+        )
+        .expect("write");
+        assert_refused_and_empty(&fx, "anything");
+    }
+
+    #[test]
+    fn a_corrupt_folder_file_refuses_the_save() {
+        let fx = fs_fixture();
+        let repo = make_collection(&fx);
+        repo.create_folder("demo", "auth").expect("folder");
+        let request = Request::new("login", HttpMethod::Get, "https://x.test");
+        repo.save_request("demo", "auth/login.yml", &request)
+            .expect("save request");
+        std::fs::write(
+            fx.ws_a.path().join("collections/demo/auth/folder.yml"),
+            "info: [unclosed\n",
+        )
+        .expect("write");
+        assert_refused_and_empty(&fx, "anything");
+    }
+
+    #[test]
+    fn secrets_come_from_the_pinned_workspace_after_a_switch() {
+        let fx = fs_fixture();
+        let repo = make_collection(&fx);
+        repo.save_settings(
+            "demo",
+            &CollectionSettings {
+                variables: vec![var("token", COLLECTION_SECRET, "", true)],
+                ..Default::default()
+            },
+        )
+        .expect("save settings");
+        fx.svc.pin_session("s1");
+        *fx.active.lock().expect("lock") = fx.ws_b.path().to_path_buf();
+        fx.svc
+            .save(
+                "s1",
+                input(vec![user(&format!("use {COLLECTION_SECRET}")), agent("a")]),
+            )
+            .expect("save");
+        let raw = std::fs::read_to_string(
+            fx.ws_a
+                .path()
+                .join("assistant")
+                .join("conversations")
+                .join(format!("{ID}.yml")),
+        )
+        .expect("stored in the pinned workspace");
+        assert!(
+            !raw.contains(COLLECTION_SECRET),
+            "the pinned workspace's secret is masked"
+        );
+        assert!(!fx.ws_b.path().join("assistant").exists());
+    }
+
+    #[test]
+    fn nested_folders_and_every_request_kind_are_scrubbed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("demo", CollectionSettings::default());
+        let mut gql = GraphQlRequest::new("gql", "https://x.test/graphql");
+        gql.variables = vec![var("a", "gql-secret-888888", "", true)];
+        let mut ws = rocket_collection::WebSocketRequest::new("ws", "wss://x.test");
+        ws.variables = vec![var("b", "ws-secret-999999", "", true)];
+        let mut grpc = rocket_collection::GrpcRequest::new("grpc", "x.test:443");
+        grpc.variables = vec![var("c", "grpc-secret-000000", "", true)];
+        let mut inner = Folder::new("b");
+        inner.items.push(CollectionItem::GraphQl(Box::new(gql)));
+        inner.items.push(CollectionItem::WebSocket(Box::new(ws)));
+        inner.items.push(CollectionItem::Grpc(Box::new(grpc)));
+        let mut outer = Folder::new("a");
+        outer.items.push(CollectionItem::Folder(inner));
+        let mut tree = Collection::new("demo");
+        tree.root.items.push(CollectionItem::Folder(outer));
+        repo.with_summaries("demo", tree);
+        repo.with_folder_settings(
+            "demo",
+            "a/b",
+            FolderSettings {
+                variables: vec![var("deep", "deep-secret-123456", "", true)],
+                ..Default::default()
+            },
+        );
+        let fx = fixture_with(repo);
+        fx.svc.pin_session("s1");
+        let all = "gql-secret-888888 ws-secret-999999 grpc-secret-000000 deep-secret-123456";
+        fx.svc
+            .save("s1", input(vec![user(all), agent("a")]))
+            .expect("save");
+        let raw = std::fs::read_to_string(stored_file(&fx)).expect("read");
+        for secret in all.split(' ') {
+            assert!(!raw.contains(secret), "{secret} reached disk");
+        }
+    }
+
+    #[test]
+    fn an_oversized_payload_is_refused_and_extra_messages_are_dropped_oldest_first() {
+        let fx = fixture_with(collections());
+        fx.svc.pin_session("s1");
+        let huge = "x".repeat(MAX_INPUT_TEXT_BYTES + 1);
+        let err = fx.svc.save("s1", input(vec![user("q"), agent(&huge)]));
+        assert!(matches!(err, Err(DomainError::InvalidInput(_))));
+        assert!(!fx.ws_a_path.join("assistant").exists());
+
+        let mut many = vec![user("first question")];
+        many.extend((0..MAX_MESSAGES + 5).map(|n| agent(&format!("reply {n}"))));
+        fx.svc.save("s1", input(many)).expect("save");
+        let record = fx.svc.get(ID).expect("get");
+        assert_eq!(record.messages.len(), MAX_MESSAGES);
+        assert_eq!(record.title, "first question", "the title survives the cap");
+        let StoredMessage::Agent { text } = &record.messages[MAX_MESSAGES - 1] else {
+            panic!("agent last");
+        };
+        assert_eq!(text, &format!("reply {}", MAX_MESSAGES + 4));
+    }
+
+    #[test]
+    fn unpin_session_forgets_the_pin() {
+        let fx = fixture_with(collections());
+        fx.svc.pin_session("s1");
+        fx.svc.unpin_session("s1");
+        let err = fx.svc.save("s1", input(vec![user("q"), agent("a")]));
+        assert!(matches!(err, Err(DomainError::InvalidInput(_))));
     }
 }

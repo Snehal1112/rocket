@@ -5,6 +5,15 @@ use crate::environment::Environment;
 pub trait EnvironmentRepository: Send + Sync {
     fn list(&self) -> DomainResult<Vec<Environment>>;
     fn get(&self, name: &str) -> DomainResult<Environment>;
+
+    /// Like `list`, but nothing is skipped or left unresolved: an environment file that cannot
+    /// be read or parsed, and a secret value the secret store cannot return, are errors. For
+    /// masking text that is stored, where a missed secret would leak it. The default is the
+    /// lenient `list`.
+    fn list_strict(&self) -> DomainResult<Vec<Environment>> {
+        self.list()
+    }
+
     fn save(&self, env: &Environment) -> DomainResult<()>;
     fn delete(&self, name: &str) -> DomainResult<()>;
 

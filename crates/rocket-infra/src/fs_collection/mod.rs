@@ -174,6 +174,10 @@ impl CollectionRepository for FsCollectionRepo {
         folders::get(self, name)
     }
 
+    fn get_strict(&self, name: &str) -> DomainResult<Collection> {
+        folders::get_with(self, name, true)
+    }
+
     fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
         folders::get_summaries(self, name)
     }

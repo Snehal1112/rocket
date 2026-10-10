@@ -20,15 +20,49 @@ pub(crate) fn workspace_secret_values(
     global_envs: &dyn EnvironmentRepository,
 ) -> DomainResult<HashSet<String>> {
     let mut out = HashSet::new();
-    add_env_secrets(&mut out, &global_envs.list()?);
-    for summary in collections.list()? {
+    let globals = global_envs
+        .list_strict()
+        .map_err(|e| unreadable("global environments", e))?;
+    add_env_secrets(&mut out, &globals);
+    let listed = collections
+        .list()
+        .map_err(|e| unreadable("collection list", e))?;
+    for summary in listed {
         let name = summary.name;
-        add_variable_secrets(&mut out, &collections.get_settings(&name)?.variables);
-        add_env_secrets(&mut out, &collection_envs.for_collection(&name).list()?);
-        let tree = collections.get(&name)?;
+        let settings = collections
+            .get_settings(&name)
+            .map_err(|e| unreadable(&format!("settings of collection '{name}'"), e))?;
+        add_variable_secrets(&mut out, &settings.variables);
+        let envs = collection_envs
+            .for_collection(&name)
+            .list_strict()
+            .map_err(|e| unreadable(&format!("environments of collection '{name}'"), e))?;
+        add_env_secrets(&mut out, &envs);
+        let tree = collections
+            .get_strict(&name)
+            .map_err(|e| unreadable(&format!("requests of collection '{name}'"), e))?;
         walk_folder(collections, &name, &tree.root, "", &mut out)?;
     }
     Ok(out)
+}
+
+/// Logs which scope could not be read and the kind of error, never its text, which may name
+/// a value. The error is returned unchanged for the caller to refuse the save.
+fn unreadable(scope: &str, e: DomainError) -> DomainError {
+    let kind = match &e {
+        DomainError::NotFound(_) => "not_found",
+        DomainError::InvalidInput(_) => "invalid_input",
+        DomainError::Io(_) => "io",
+        DomainError::Serialization(_) => "serialization",
+        DomainError::Internal(_) => "internal",
+        _ => "other",
+    };
+    tracing::warn!(
+        scope,
+        kind,
+        "cannot read a variable scope, so the conversation is not saved"
+    );
+    e
 }
 
 fn add_variable_secrets(out: &mut HashSet<String>, vars: &[CollectionVariable]) {
@@ -73,7 +107,12 @@ fn walk_folder(
                 match collections.get_folder_settings(collection, &child_path) {
                     Ok(settings) => add_variable_secrets(out, &settings.variables),
                     Err(DomainError::NotFound(_)) => {}
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        return Err(unreadable(
+                            &format!("folder settings '{child_path}' of collection '{collection}'"),
+                            e,
+                        ))
+                    }
                 }
                 walk_folder(collections, collection, child, &child_path, out)?;
             }

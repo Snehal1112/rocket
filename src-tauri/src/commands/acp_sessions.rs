@@ -216,6 +216,7 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
         // The app is shutting down. Nothing tracks this session, so kill
         // its agent and run its cleanup here.
         let _ = svc.end_untracked(&info.session_id).await;
+        conversations.unpin_session(&info.session_id);
         return Err(DomainError::Internal(
             "the app is shutting down".to_string(),
         ));
