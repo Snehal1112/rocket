@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Only cancel superseded runs on pull requests, never on main.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      # Yarn 4 uses --immutable, which replaces the Yarn 1 --frozen-lockfile flag.
+      - name: Install frontend dependencies
+        run: yarn install --immutable
+
+      - name: TypeScript check
+        run: yarn tsc --noEmit
+
+      - name: Biome check
+        run: yarn check
+
+      # The run flag keeps Vitest out of watch mode.
+      - name: Vitest
+        run: yarn test --run
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
+  rust-check:
+    name: Rust check
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy
+
+      # The Cargo workspace builds into the root target directory.
+      - name: Rust cache
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: . -> target
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Cargo check
+        run: cargo check --workspace --all-targets -j4
+
+      # TODO: Report-only until the existing clippy backlog is cleared.
+      # Then drop continue-on-error and add -D warnings to fail on any warning.
+      - name: Cargo clippy (report only)
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets -j4
+
+  rust-test:
+    name: Rust tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      # The Cargo workspace builds into the root target directory.
+      - name: Rust cache
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: . -> target
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # CI runners are not the developer laptop, so the workspace run is fine here.
+      # Linking every test binary is memory heavy. Use -j2 to stay inside runner RAM.
+      - name: Cargo test
+        run: cargo test --workspace -j2
