@@ -1,5 +1,7 @@
+import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { setQueryClient } from '@/lib/query-client';
 import { cancelAutoSave, scheduleAutoSave } from '@/lib/auto-save';
 import * as api from '@/lib/tauri-api';
 import type { AgentProposal } from '@/lib/tauri-api';
@@ -40,6 +42,8 @@ function firstTab(): RequestTab | undefined {
 describe('proposal actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // acceptProposal refreshes the collection list through the app's query client.
+    setQueryClient(new QueryClient());
     usePaneStore.getState().reset();
     useAssistantStore.getState().reset();
     const token = useAssistantStore.getState().beginSession('agent-1', 'edit');

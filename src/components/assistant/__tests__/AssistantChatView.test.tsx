@@ -93,7 +93,8 @@ describe('AssistantChatView proposals', () => {
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(within(entry).getByText('Diff no longer available.')).toBeInTheDocument();
-    expect(within(entry).queryByRole('button', { name: /accept|reject/i })).toBeNull();
+    // Exact names: the row's own toggle reads "Accepted …".
+    expect(within(entry).queryByRole('button', { name: /^(accept|reject)$/i })).toBeNull();
   });
 
   it('orders proposals that share an anchor by creation time', () => {

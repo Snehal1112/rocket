@@ -56,8 +56,10 @@ describe('ComposerToolbar', () => {
     expect(props.onModeChange).toHaveBeenCalledWith('edit');
   });
 
-  it('shows the one-line summary of the current mode', () => {
-    setup({ mode: 'agent' });
+  it('explains each mode in the mode menu', async () => {
+    // The summary line under the toolbar was removed; the menu describes each mode.
+    const { user } = setup({ mode: 'agent' });
+    await user.click(screen.getByRole('button', { name: 'Mode: Agent' }));
     expect(screen.getByText(/environment's credentials only/)).toBeInTheDocument();
   });
 
