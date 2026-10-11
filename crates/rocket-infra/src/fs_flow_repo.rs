@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rocket_collection::Collection;
-use rocket_flow::{Flow, FlowRepository};
+use rocket_flow::{Flow, FlowListEntry, FlowRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -39,8 +39,12 @@ impl FsFlowRepo {
     fn read_flow(path: &Path) -> DomainResult<Flow> {
         let content = fs::read_to_string(path)
             .map_err(|e| DomainError::Io(format!("Failed to read flow file: {e}")))?;
-        serde_yaml::from_str(&content)
-            .map_err(|e| DomainError::InvalidInput(format!("Failed to parse flow YAML: {e}")))
+        serde_yaml::from_str(&content).map_err(|e| {
+            DomainError::InvalidInput(format!(
+                "Failed to parse flow YAML: {}",
+                redact_quoted(&e.to_string())
+            ))
+        })
     }
 
     /// The rename algorithm. `remove` deletes the old file and is a parameter
@@ -98,6 +102,41 @@ fn not_found(collection: &str, name: &str) -> DomainError {
     DomainError::NotFound(format!("Flow '{name}' in collection '{collection}'"))
 }
 
+/// Replaces every double-quoted segment with `"..."`. serde_yaml puts the
+/// offending file value in double quotes, and that value must not reach the UI.
+fn redact_quoted(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut in_quote = false;
+    let mut escaped = false;
+    for ch in message.chars() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quote = false;
+                out.push('"');
+            }
+        } else {
+            out.push(ch);
+            if ch == '"' {
+                in_quote = true;
+                out.push_str("...");
+            }
+        }
+    }
+    out
+}
+
+/// The text of a read or parse failure, without the `Display` prefix of the error type.
+fn failure_message(err: DomainError) -> String {
+    match err {
+        DomainError::InvalidInput(message) | DomainError::Io(message) => message,
+        other => other.to_string(),
+    }
+}
+
 /// Lowercase, hyphen-separated slug for a Flow's filename. This repo has no
 /// existing shared slugify helper to reuse (`Collection::validate_name`
 /// rejects invalid names rather than transforming them) — this is new,
@@ -149,6 +188,43 @@ impl FlowRepository for FsFlowRepo {
         }
         names.sort();
         Ok(names)
+    }
+
+    fn list_entries(&self, collection: &str) -> DomainResult<Vec<FlowListEntry>> {
+        let dir = self.flows_dir(collection)?;
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&dir).map_err(|e| DomainError::Io(e.to_string()))? {
+            let entry = entry.map_err(|e| DomainError::Io(e.to_string()))?;
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "yml") {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string)
+                .unwrap_or_default();
+            match Self::read_flow(&path) {
+                Ok(flow) => {
+                    // Only list names that `get` can resolve back to this same file.
+                    if slugify(&flow.name) == stem {
+                        entries.push(FlowListEntry::healthy(flow.name));
+                    }
+                }
+                Err(err) => {
+                    // Delete maps a name to `slugify(name).yml`, so a stem that is
+                    // not a slug could not be targeted. Such a file stays hidden.
+                    if !stem.is_empty() && slugify(&stem) == stem {
+                        entries.push(FlowListEntry::corrupt(stem, failure_message(err)));
+                    }
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(entries)
     }
 
     fn get(&self, collection: &str, name: &str) -> DomainResult<Flow> {
@@ -1099,5 +1175,162 @@ edges:
             repo.get("acme", "Sign In"),
             Err(DomainError::NotFound(_))
         ));
+    }
+
+    fn write_flow_file(dir: &TempDir, file: &str, content: &str) {
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(&flows_dir).expect("create flows dir");
+        fs::write(flows_dir.join(file), content).expect("write flow file");
+    }
+
+    #[test]
+    fn list_entries_shows_unparseable_files_as_corrupt_with_a_message() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Good Flow"))
+            .expect("save valid flow");
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+        write_flow_file(&dir, "empty.yml", "");
+
+        let entries = repo.list_entries("acme").expect("list_entries");
+
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["Good Flow", "broken", "empty"]);
+        assert_eq!(entries[0], FlowListEntry::healthy("Good Flow"));
+        for corrupt in &entries[1..] {
+            let message = corrupt
+                .error
+                .as_deref()
+                .expect("a corrupt entry carries a message");
+            assert!(
+                message.starts_with("Failed to parse flow YAML"),
+                "got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_still_skips_unparseable_files() {
+        let (dir, repo) = setup();
+        repo.save("acme", &sample("Good Flow"))
+            .expect("save valid flow");
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["Good Flow".to_string()]
+        );
+    }
+
+    #[test]
+    fn corrupt_message_has_no_file_contents_and_no_path() {
+        let (dir, repo) = setup();
+        write_flow_file(
+            &dir,
+            "leaky.yml",
+            "name: Leaky\nnodes: sk-secret-value-123\nedges: []\n",
+        );
+
+        let entries = repo.list_entries("acme").expect("list_entries");
+
+        assert_eq!(entries.len(), 1);
+        let message = entries[0].error.as_deref().expect("message");
+        assert!(!message.is_empty());
+        assert!(
+            !message.contains("sk-secret-value-123"),
+            "file content leaked: {message}"
+        );
+        let dir_text = dir.path().to_string_lossy().into_owned();
+        assert!(!message.contains(&dir_text), "path leaked: {message}");
+    }
+
+    #[test]
+    fn redact_quoted_replaces_quoted_values_and_handles_escapes() {
+        assert_eq!(
+            redact_quoted("invalid type: string \"a\\\"b\", expected a sequence at line 2"),
+            "invalid type: string \"...\", expected a sequence at line 2"
+        );
+        assert_eq!(
+            redact_quoted("missing field `nodes`"),
+            "missing field `nodes`"
+        );
+        assert_eq!(redact_quoted("cut \"off"), "cut \"...");
+    }
+
+    #[test]
+    fn list_entries_skips_corrupt_files_whose_stem_is_not_a_slug() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "My Broken.yml", "not: valid: yaml: [");
+
+        assert!(repo.list_entries("acme").expect("list_entries").is_empty());
+    }
+
+    #[test]
+    fn list_entries_still_skips_a_valid_file_whose_name_does_not_match_its_filename() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "renamed.yml", "name: Other\nnodes: []\nedges: []\n");
+        repo.save("acme", &sample("Good Flow"))
+            .expect("save valid flow");
+
+        assert_eq!(
+            repo.list_entries("acme").expect("list_entries"),
+            vec![FlowListEntry::healthy("Good Flow")]
+        );
+    }
+
+    #[test]
+    fn list_entries_on_a_collection_with_no_flows_dir_is_empty() {
+        let (_dir, repo) = setup();
+        assert!(repo.list_entries("acme").expect("list_entries").is_empty());
+    }
+
+    #[test]
+    fn a_corrupt_flow_can_be_deleted() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+
+        repo.delete("acme", "broken")
+            .expect("delete a corrupt flow");
+
+        assert!(flow_files(&dir).is_empty());
+        assert!(repo.list_entries("acme").expect("list_entries").is_empty());
+    }
+
+    #[test]
+    fn a_corrupt_flow_cannot_be_renamed_and_the_file_is_left_alone() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+
+        let err = repo
+            .rename("acme", "broken", "Fixed")
+            .expect_err("rename needs a parsable file");
+
+        match err {
+            DomainError::InvalidInput(message) => {
+                assert!(
+                    message.starts_with("Failed to parse flow YAML"),
+                    "{message}"
+                )
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+        assert_eq!(flow_files(&dir), vec!["broken.yml".to_string()]);
+    }
+
+    #[test]
+    fn opening_a_corrupt_flow_fails_with_the_parse_message() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+
+        let err = repo.get("acme", "broken").expect_err("must not load");
+
+        match err {
+            DomainError::InvalidInput(message) => {
+                assert!(
+                    message.starts_with("Failed to parse flow YAML"),
+                    "{message}"
+                )
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
     }
 }

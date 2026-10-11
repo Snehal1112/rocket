@@ -53,12 +53,50 @@ pub struct Flow {
     pub callback_host: Option<String>,
 }
 
+/// One row of a collection's flow list. A file that cannot be parsed is listed
+/// too, with `error` set, so the user can see and delete it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlowListEntry {
+    /// The flow name. For a corrupt file this is the file stem, because the
+    /// name inside the file cannot be read.
+    pub name: String,
+    /// The parse or read message when the file is corrupt. `None` when healthy.
+    pub error: Option<String>,
+}
+
+impl FlowListEntry {
+    pub fn healthy(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            error: None,
+        }
+    }
+
+    pub fn corrupt(name: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            error: Some(error.into()),
+        }
+    }
+}
+
 /// Persistence boundary for `Flow`. No I/O in this crate —
 /// `rocket-infra`'s `FsFlowRepo` (Plan 03) implements this. Flows are keyed
 /// by `(collection, flow.name)`; `save` replaces any flow with the same key.
 pub trait FlowRepository: Send + Sync {
     /// Returns the names of all flows in `collection`.
     fn list(&self, collection: &str) -> DomainResult<Vec<String>>;
+
+    /// Like `list`, but a flow that exists and cannot be read is returned as a
+    /// corrupt entry instead of being left out. The default wraps `list`, which
+    /// has no corrupt flows to report. File-backed stores override it.
+    fn list_entries(&self, collection: &str) -> DomainResult<Vec<FlowListEntry>> {
+        Ok(self
+            .list(collection)?
+            .into_iter()
+            .map(FlowListEntry::healthy)
+            .collect())
+    }
     fn get(&self, collection: &str, name: &str) -> DomainResult<Flow>;
     fn save(&self, collection: &str, flow: &Flow) -> DomainResult<()>;
     fn delete(&self, collection: &str, name: &str) -> DomainResult<()>;

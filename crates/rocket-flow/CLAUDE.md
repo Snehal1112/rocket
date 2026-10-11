@@ -29,7 +29,7 @@ cargo test -p rocket-flow -j4
 |---|---|
 | `handle.rs` | Exit/input handle names (`result`, `true`, `false`, `default`, `input`, `trigger`, `auth`, `case:<id>`) |
 | `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch/WaitForCallback/Transform/Auth), `SwitchCase`, `RepeatUntil`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
-| `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
+| `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait. `list_entries` returns corrupt files as entries with an `error`; its default wraps `list`. |
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
 | `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V17 (spec §7, listed in the file header), and `is_request_wire_field` |
 | `lint.rs` | Non-blocking lint tier: `validate_with_warnings(flow, ctx)`, `graph_error_lints`, `FlowLint`, `LintSeverity`, `LintContext` |

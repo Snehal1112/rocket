@@ -2,7 +2,8 @@ use crate::flow_lint_context::{CollectionLintContext, LintEnvironment, LintSourc
 use rocket_flow::describe::{display_label, wire_ends};
 use rocket_flow::lint::{graph_error_lints, validate_with_warnings, FlowLint, NoLintContext};
 use rocket_flow::{
-    validate_report, Flow, FlowGraphError, FlowNode, FlowRepository, ValidationReport,
+    validate_report, Flow, FlowGraphError, FlowListEntry, FlowNode, FlowRepository,
+    ValidationReport,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use std::collections::HashSet;
@@ -35,6 +36,11 @@ impl FlowService {
 
     pub fn list(&self, collection: &str) -> DomainResult<Vec<String>> {
         self.flow_repo.list(collection)
+    }
+
+    /// Like `list`, but a flow file that cannot be read is included as a corrupt entry.
+    pub fn list_entries(&self, collection: &str) -> DomainResult<Vec<FlowListEntry>> {
+        self.flow_repo.list_entries(collection)
     }
 
     pub fn get(&self, collection: &str, name: &str) -> DomainResult<Flow> {
@@ -415,6 +421,16 @@ mod tests {
             vec!["Login Then Fetch".to_string()]
         );
         assert_eq!(svc.list("other").expect("list other"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn list_entries_defaults_to_healthy_entries_for_a_repo_without_an_override() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::seeded("demo", sample_flow())));
+        assert_eq!(
+            svc.list_entries("demo").expect("list_entries"),
+            vec![FlowListEntry::healthy("Login Then Fetch")]
+        );
+        assert!(svc.list_entries("other").expect("other").is_empty());
     }
 
     #[test]

@@ -416,12 +416,31 @@ impl From<FlowDto> for Flow {
     }
 }
 
+/// One row of the flow list. `error` is present only for a flow file that cannot be parsed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowListEntryDto {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl From<rocket_flow::FlowListEntry> for FlowListEntryDto {
+    fn from(entry: rocket_flow::FlowListEntry) -> Self {
+        Self {
+            name: entry.name,
+            error: entry.error,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn list_flows(
     collection: String,
     svc: State<'_, FlowService>,
-) -> Result<Vec<String>, DomainError> {
-    svc.list(&collection)
+) -> Result<Vec<FlowListEntryDto>, DomainError> {
+    svc.list_entries(&collection)
+        .map(|entries| entries.into_iter().map(FlowListEntryDto::from).collect())
 }
 
 #[tauri::command]
@@ -704,6 +723,23 @@ mod tests {
     }
 
     use rocket_flow::lint::{FlowLint, LintSeverity};
+
+    #[test]
+    fn list_entry_dto_omits_error_for_a_healthy_flow_and_carries_it_for_a_corrupt_one() {
+        let healthy = FlowListEntryDto::from(rocket_flow::FlowListEntry::healthy("Login"));
+        assert_eq!(
+            serde_json::to_value(&healthy).expect("serialize"),
+            serde_json::json!({ "name": "Login" })
+        );
+        let corrupt = FlowListEntryDto::from(rocket_flow::FlowListEntry::corrupt(
+            "broken",
+            "Failed to parse flow YAML: EOF",
+        ));
+        assert_eq!(
+            serde_json::to_value(&corrupt).expect("serialize"),
+            serde_json::json!({ "name": "broken", "error": "Failed to parse flow YAML: EOF" })
+        );
+    }
 
     const LINT_FIXTURE: &str = include_str!("../../../src/lib/__tests__/fixtures/flow-lint.json");
 

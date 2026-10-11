@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rocket_flow::{Flow, FlowRepository};
+use rocket_flow::{Flow, FlowListEntry, FlowRepository};
 use rocket_shared::error::DomainResult;
 
 use crate::FsFlowRepo;
@@ -35,6 +35,10 @@ impl SharedPathFlowRepo {
 impl FlowRepository for SharedPathFlowRepo {
     fn list(&self, collection: &str) -> DomainResult<Vec<String>> {
         self.repo().list(collection)
+    }
+
+    fn list_entries(&self, collection: &str) -> DomainResult<Vec<FlowListEntry>> {
+        self.repo().list_entries(collection)
     }
 
     fn get(&self, collection: &str, name: &str) -> DomainResult<Flow> {
@@ -115,5 +119,20 @@ mod tests {
             .expect("read flows dir")
             .collect();
         assert_eq!(files.len(), 1, "a rename must never leave two flow files");
+    }
+
+    #[test]
+    fn list_entries_goes_through_the_fs_override_so_corrupt_files_show() {
+        let dir = TempDir::new().expect("temp dir");
+        let flows = dir.path().join("collections").join("acme").join("flows");
+        std::fs::create_dir_all(&flows).expect("create flows dir");
+        std::fs::write(flows.join("broken.yml"), b"not: valid: yaml: [").expect("write");
+        let repo = SharedPathFlowRepo::new(Arc::new(Mutex::new(dir.path().to_path_buf())));
+
+        let entries = repo.list_entries("acme").expect("list_entries");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "broken");
+        assert!(entries[0].error.is_some());
     }
 }
