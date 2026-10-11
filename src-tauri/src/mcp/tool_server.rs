@@ -86,7 +86,8 @@ pub const MCP_HTTP_PATH: &str = "/mcp";
 
 use rocket_app::mcp_read_views::HISTORY_LIMIT_MAX;
 use rocket_acp::proposal::{
-    AgentProposal, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+    AgentProposal, FolderSettingsPatch, ProposedChange, ProposedRequest, ProposedVariable,
+    RequestPatch, ScriptPhase,
 };
 use rocket_app::AssistantMode;
 use rocket_app::McpToolService;
@@ -238,6 +239,13 @@ pub struct CollectionParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FolderParams {
+    pub collection: String,
+    /// The folder path inside the collection, for example "auth/v2". Not "".
+    pub folder_path: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct GetRequestParams {
     pub collection: String,
     pub request_path: String,
@@ -347,6 +355,13 @@ pub enum ProposedChangeParams {
         key: String,
         value: String,
     },
+    /// Change some sections of a folder's own settings (default headers,
+    /// variables, scripts, docs). Folder auth cannot be changed.
+    UpdateFolderSettings {
+        collection: String,
+        folder_path: String,
+        patch: FolderSettingsPatchParams,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -408,6 +423,35 @@ pub struct RequestPatchParams {
     pub query_params: Option<Vec<KeyValueParams>>,
     #[serde(default)]
     pub body: Option<BodyParams>,
+    #[serde(default)]
+    pub docs: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VariableParams {
+    pub key: String,
+    pub value: String,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+}
+
+/// Sections to change in a folder. A given section replaces the whole section,
+/// an omitted one stays as it is, and an empty script string clears the
+/// script. Unknown fields, such as `auth`, are refused rather than dropped.
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FolderSettingsPatchParams {
+    #[serde(default)]
+    pub headers: Option<Vec<KeyValueParams>>,
+    #[serde(default)]
+    pub variables: Option<Vec<VariableParams>>,
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    #[serde(default)]
+    pub post_response_script: Option<String>,
+    #[serde(default)]
+    pub tests_script: Option<String>,
     #[serde(default)]
     pub docs: Option<String>,
 }
@@ -678,6 +722,37 @@ fn check_change_sizes(change: &ProposedChangeParams) -> Result<(), String> {
             check_len("key", key, MAX_FIELD_BYTES)?;
             check_len("value", value, MAX_FIELD_BYTES)
         }
+        ProposedChangeParams::UpdateFolderSettings {
+            collection,
+            folder_path,
+            patch,
+        } => {
+            check_len("collection", collection, MAX_FIELD_BYTES)?;
+            check_len("folder_path", folder_path, MAX_FIELD_BYTES)?;
+            if let Some(headers) = &patch.headers {
+                check_pairs("header", headers)?;
+            }
+            if let Some(variables) = &patch.variables {
+                if variables.len() > MAX_PAIRS_PER_CHANGE {
+                    return Err(format!(
+                        "too many variable entries: {}, at most {MAX_PAIRS_PER_CHANGE} are allowed",
+                        variables.len()
+                    ));
+                }
+                for variable in variables {
+                    check_len("variable key", &variable.key, MAX_FIELD_BYTES)?;
+                    check_len("variable value", &variable.value, MAX_FIELD_BYTES)?;
+                }
+            }
+            check_opt("pre_request_script", &patch.pre_request_script, MAX_TEXT_BYTES)?;
+            check_opt(
+                "post_response_script",
+                &patch.post_response_script,
+                MAX_TEXT_BYTES,
+            )?;
+            check_opt("tests_script", &patch.tests_script, MAX_TEXT_BYTES)?;
+            check_opt("docs", &patch.docs, MAX_TEXT_BYTES)
+        }
     }
 }
 
@@ -755,6 +830,31 @@ fn to_domain_change(params: ProposedChangeParams) -> Result<ProposedChange, Stri
             environment,
             key,
             value,
+        },
+        ProposedChangeParams::UpdateFolderSettings {
+            collection,
+            folder_path,
+            patch,
+        } => ProposedChange::UpdateFolderSettings {
+            collection,
+            folder_path,
+            patch: FolderSettingsPatch {
+                headers: patch.headers.map(to_headers),
+                variables: patch.variables.map(|list| {
+                    list.into_iter()
+                        .map(|v| ProposedVariable {
+                            key: v.key,
+                            value: v.value,
+                            enabled: v.enabled,
+                        })
+                        .collect()
+                }),
+                pre_request_script: patch.pre_request_script,
+                post_response_script: patch.post_response_script,
+                tests_script: patch.tests_script,
+                docs: patch.docs,
+            },
+            base_fingerprint: String::new(),
         },
     })
 }
@@ -856,6 +956,22 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 
     #[tool(
+        description = "Read one folder's own settings: auth type (credentials masked), default headers, variables, the three scripts and docs, plus the names of its direct subfolders and requests. Pass the folder path inside the collection, for example \"auth/v2\". Folder settings apply to every request below the folder."
+    )]
+    async fn get_folder_settings(
+        &self,
+        Parameters(params): Parameters<FolderParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let svc = mcp_tool_service(&self.app_handle)?;
+        let result = svc.get_folder_settings(
+            self.binding.session_id(),
+            &params.collection,
+            &params.folder_path,
+        );
+        Ok(to_tool_result(result))
+    }
+
+    #[tool(
         description = "Read one environment of a collection: variable names and non-secret values. Secret variables appear by name only."
     )]
     async fn get_environment(
@@ -908,7 +1024,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 
     #[tool(
-        description = "Propose workspace changes for the user to review: create_folder, create_request, update_request, edit_script, move_item, rename_item or set_env_var (non-secret only). Nothing is written until the user accepts each proposal. Returns the new proposal ids. Not available in Ask mode."
+        description = "Propose workspace changes for the user to review: create_folder, create_request, update_request, edit_script, move_item, rename_item, set_env_var (non-secret only) or update_folder_settings (a folder's default headers, variables, scripts and docs; never auth). Nothing is written until the user accepts each proposal. Returns the new proposal ids. Not available in Ask mode."
     )]
     async fn propose_changes(
         &self,
@@ -1458,6 +1574,7 @@ mod tests {
         let expected = vec![
             "get_collection_settings",
             "get_environment",
+            "get_folder_settings",
             "get_history",
             "get_request",
             "get_test_results",
@@ -1558,6 +1675,105 @@ mod tests {
         let params: ProposeChangesParams =
             serde_json::from_value(serde_json::json!({ "changes": [change] })).expect("parse");
         params.changes.into_iter().next().expect("one change")
+    }
+
+    #[test]
+    fn a_folder_patch_with_an_auth_field_is_refused() {
+        let parsed = serde_json::from_value::<ProposeChangesParams>(serde_json::json!({
+            "changes": [{
+                "op": "update_folder_settings", "collection": "demo", "folder_path": "auth",
+                "patch": { "docs": "x", "auth": { "authType": "bearer", "token": "t" } }
+            }]
+        }));
+        assert!(parsed.is_err(), "auth must not be dropped silently");
+    }
+
+    #[test]
+    fn folder_patch_params_convert_to_the_domain_change() {
+        let change = to_domain_change(parse_one(serde_json::json!({
+            "op": "update_folder_settings", "collection": "demo", "folder_path": "auth",
+            "patch": {
+                "headers": [{ "key": "X-Key", "value": "v" }],
+                "variables": [{ "key": "HOST", "value": "h", "enabled": false }],
+                "pre_request_script": "a();",
+                "tests_script": ""
+            }
+        })))
+        .expect("convert");
+        let ProposedChange::UpdateFolderSettings {
+            collection,
+            folder_path,
+            patch,
+            base_fingerprint,
+        } = change
+        else {
+            panic!("expected UpdateFolderSettings");
+        };
+        assert_eq!(collection, "demo");
+        assert_eq!(folder_path, "auth");
+        assert!(base_fingerprint.is_empty(), "the service fills the fingerprint");
+        assert_eq!(patch.headers.expect("headers")[0].key, "X-Key");
+        let variables = patch.variables.expect("variables");
+        assert_eq!(variables[0].key, "HOST");
+        assert!(!variables[0].enabled);
+        assert_eq!(patch.pre_request_script.as_deref(), Some("a();"));
+        assert_eq!(patch.tests_script.as_deref(), Some(""));
+        assert_eq!(patch.docs, None);
+    }
+
+    #[test]
+    fn oversized_folder_patch_fields_are_refused() {
+        let too_many: Vec<serde_json::Value> = (0..=MAX_PAIRS_PER_CHANGE)
+            .map(|i| serde_json::json!({ "key": format!("K{i}"), "value": "v" }))
+            .collect();
+        let cases = [
+            serde_json::json!({ "headers": too_many }),
+            serde_json::json!({ "variables": too_many }),
+            serde_json::json!({ "pre_request_script": "x".repeat(MAX_TEXT_BYTES + 1) }),
+            serde_json::json!({ "docs": "x".repeat(MAX_TEXT_BYTES + 1) }),
+            serde_json::json!({ "variables": [{ "key": "k", "value": "x".repeat(MAX_FIELD_BYTES + 1) }] }),
+        ];
+        for patch in cases {
+            let change = parse_one(serde_json::json!({
+                "op": "update_folder_settings", "collection": "demo",
+                "folder_path": "auth", "patch": patch
+            }));
+            assert!(check_change_sizes(&change).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_folder_proposal_is_refused_in_ask_mode() {
+        let fixture = TestFixture::new(true);
+        let params: ProposeChangesParams = serde_json::from_value(serde_json::json!({
+            "changes": [{
+                "op": "update_folder_settings", "collection": "demo",
+                "folder_path": "auth", "patch": { "docs": "x" }
+            }]
+        }))
+        .expect("parse");
+        let result = fixture
+            .server_in(AssistantMode::Ask)
+            .propose_changes(Parameters(params))
+            .await
+            .expect("tool call");
+        assert!(tool_is_error(&result));
+        assert!(tool_text(&result).contains("Not available in Ask mode"));
+    }
+
+    #[tokio::test]
+    async fn get_folder_settings_answers_in_ask_mode_and_refuses_the_root() {
+        let fixture = TestFixture::new(true);
+        let server = fixture.server_in(AssistantMode::Ask);
+        let root = server
+            .get_folder_settings(Parameters(FolderParams {
+                collection: "demo".into(),
+                folder_path: String::new(),
+            }))
+            .await
+            .expect("tool call");
+        assert!(tool_is_error(&root));
+        assert!(tool_text(&root).contains("get_collection_settings"));
     }
 
     #[test]
