@@ -1306,7 +1306,7 @@ mod tests {
     }
 
     /// A "demo" collection with one request ("ping.yml"), one "dev" environment
-    /// holding one plain variable ("API_KEY") and one secret variable
+    /// holding one plain variable ("BASE_URL") and one secret variable
     /// ("SECRET_TOKEN"), and `agent_autonomy_enabled` set as requested.
     struct TestFixture {
         _tmp: TempDir,
@@ -1366,7 +1366,7 @@ mod tests {
 
             let env_factory = SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path));
             let mut env = Environment::new("dev");
-            env.set_variable(Variable::new("API_KEY", "plain-value"));
+            env.set_variable(Variable::new("BASE_URL", "plain-value"));
             let mut secret_var = Variable::new("SECRET_TOKEN", "secret-value");
             secret_var.secret = true;
             env.set_variable(secret_var);

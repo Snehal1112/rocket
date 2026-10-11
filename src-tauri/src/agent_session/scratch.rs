@@ -248,14 +248,29 @@ fn path_to_string(path: &Path) -> Result<String, DomainError> {
     })
 }
 
+/// A temp directory with mode 0700, so the parent check holds under any umask.
+#[cfg(all(test, unix))]
+pub(crate) fn private_tempdir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+        .expect("tempdir")
+}
+
+/// A temp directory for the tests. Non-Unix systems have no mode to check.
+#[cfg(all(test, not(unix)))]
+pub(crate) fn private_tempdir() -> tempfile::TempDir {
+    tempfile::private_tempdir()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn create_in_makes_empty_cwd_and_config_dirs_under_a_fresh_root() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
 
         assert!(scratch.root().starts_with(parent.path()));
@@ -271,7 +286,7 @@ mod tests {
 
     #[test]
     fn two_scratches_never_share_a_root() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let a = SessionScratch::create_in(parent.path()).expect("create a");
         let b = SessionScratch::create_in(parent.path()).expect("create b");
         assert_ne!(a.root(), b.root());
@@ -279,7 +294,7 @@ mod tests {
 
     #[test]
     fn dropping_removes_the_whole_root_even_with_files_inside() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
         let root = scratch.root().to_path_buf();
         std::fs::create_dir_all(scratch.config_dir().join("projects"))
@@ -296,7 +311,7 @@ mod tests {
     #[test]
     fn scratch_dirs_are_private_to_the_user() {
         use std::os::unix::fs::PermissionsExt;
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
         for dir in [scratch.root(), scratch.cwd(), scratch.config_dir()] {
             let mode = std::fs::metadata(dir).expect("metadata").permissions().mode() & 0o777;
@@ -308,7 +323,7 @@ mod tests {
     #[test]
     fn a_pre_existing_open_parent_is_rejected() {
         use std::os::unix::fs::PermissionsExt;
-        let base = TempDir::new().expect("tempdir");
+        let base = private_tempdir();
         let parent = base.path().join("open-parent");
         std::fs::create_dir(&parent).expect("create parent");
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777))
@@ -321,7 +336,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlinked_parent_is_rejected() {
-        let base = TempDir::new().expect("tempdir");
+        let base = private_tempdir();
         let target = base.path().join("target");
         std::fs::create_dir(&target).expect("create target");
         let link = base.path().join("link");
@@ -333,7 +348,7 @@ mod tests {
 
     #[test]
     fn isolation_returns_the_cwd_and_points_config_dir_at_the_scratch() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
         let (cwd, isolation) = scratch.isolation().expect("utf-8 paths");
         assert_eq!(Path::new(&cwd), scratch.cwd());
@@ -351,7 +366,7 @@ mod tests {
 
     #[test]
     fn create_in_writes_the_owner_marker() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
         let text = std::fs::read_to_string(scratch.root().join(OWNER_MARKER)).expect("marker");
         assert_eq!(text, std::process::id().to_string());
@@ -359,7 +374,7 @@ mod tests {
 
     #[test]
     fn sweep_keeps_a_root_owned_by_a_live_process() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let live = root_with_owner(parent.path(), Some(&std::process::id().to_string()));
         assert_eq!(sweep_stale_scratch_in(parent.path()), 0);
         assert!(live.is_dir());
@@ -368,7 +383,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn sweep_removes_a_root_owned_by_a_dead_process() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let dead = root_with_owner(parent.path(), Some("4294967294"));
         assert_eq!(sweep_stale_scratch_in(parent.path()), 1);
         assert!(!dead.exists());
@@ -376,7 +391,7 @@ mod tests {
 
     #[test]
     fn sweep_removes_a_root_without_a_usable_marker() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let none = root_with_owner(parent.path(), None);
         let bad = root_with_owner(parent.path(), Some("not-a-pid"));
         assert_eq!(sweep_stale_scratch_in(parent.path()), 2);
@@ -386,7 +401,7 @@ mod tests {
 
     #[test]
     fn sweep_removes_uuid_dirs_and_leaves_everything_else() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let stale = parent.path().join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(stale.join("config/projects")).expect("stale dir");
         std::fs::write(stale.join("config/.claude.json"), "{}").expect("stale file");
@@ -408,7 +423,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn sweep_does_not_follow_a_uuid_named_symlink() {
-        let base = TempDir::new().expect("tempdir");
+        let base = private_tempdir();
         let parent = base.path().join("parent");
         std::fs::create_dir(&parent).expect("parent");
         let target = base.path().join("target");
@@ -425,7 +440,7 @@ mod tests {
 
     #[test]
     fn sweep_of_a_missing_parent_removes_nothing() {
-        let base = TempDir::new().expect("tempdir");
+        let base = private_tempdir();
         assert_eq!(sweep_stale_scratch_in(&base.path().join("absent")), 0);
     }
 }

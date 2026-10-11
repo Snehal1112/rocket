@@ -122,7 +122,7 @@ impl SessionCleanup for TauriSessionCleanup {
 mod tests {
     use super::*;
     use crate::mcp::tool_server::{McpHttpServerHandle, McpSessionBinding};
-    use tempfile::TempDir;
+    use crate::agent_session::scratch::private_tempdir;
     use tokio_util::sync::CancellationToken;
 
     fn handle() -> (McpHttpServerHandle, CancellationToken) {
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn on_session_ended_forgets_both_ids_shuts_the_server_and_removes_scratch() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let mcp_registry = Arc::new(McpServerRegistry::new());
         let resources = Arc::new(SessionResourceRegistry::new());
         let (server, shutdown) = handle();
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn on_session_ended_twice_is_harmless() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let mcp_registry = Arc::new(McpServerRegistry::new());
         let resources = Arc::new(SessionResourceRegistry::new());
         resources.register(
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn on_session_ended_leaves_other_sessions_alone() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let mcp_registry = Arc::new(McpServerRegistry::new());
         let resources = Arc::new(SessionResourceRegistry::new());
         let other = SessionScratch::create_in(parent.path()).expect("scratch");
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn clear_all_removes_every_scratch() {
-        let parent = TempDir::new().expect("tempdir");
+        let parent = private_tempdir();
         let resources = SessionResourceRegistry::new();
         let a = SessionScratch::create_in(parent.path()).expect("scratch a");
         let b = SessionScratch::create_in(parent.path()).expect("scratch b");
