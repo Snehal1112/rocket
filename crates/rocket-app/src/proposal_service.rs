@@ -8,9 +8,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rocket_acp::proposal::{
-    AgentProposal, ProposalStatus, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+    AgentProposal, FolderSettingsPatch, ProposalStatus, ProposedChange, ProposedRequest,
+    RequestPatch, ScriptPhase,
 };
-use rocket_collection::{request_filename_for, CollectionItem, Folder, Request};
+use rocket_collection::{
+    request_filename_for, CollectionItem, CollectionVariable, Folder, FolderSettings, Request,
+};
 use rocket_environment::{Environment, EnvironmentRepositoryFactory, Variable};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -407,11 +410,27 @@ impl ProposalService {
                 }
                 Some(self.item_fingerprint(&collection, &root, path)?)
             }
-            // Replaced in plan 01 task 3.
-            ProposedChange::UpdateFolderSettings { .. } => {
-                return Err(DomainError::InvalidInput(
-                    "folder settings changes are not supported yet".to_string(),
-                ));
+            ProposedChange::UpdateFolderSettings {
+                folder_path, patch, ..
+            } => {
+                if folder_path.is_empty() {
+                    return Err(DomainError::InvalidInput(
+                        "the collection root has no folder settings".to_string(),
+                    ));
+                }
+                if patch.is_empty() {
+                    return Err(DomainError::InvalidInput(
+                        "the patch changes no field".to_string(),
+                    ));
+                }
+                check_folder_variables(patch)?;
+                let root = self.tree(&collection)?;
+                if !is_folder(&root, folder_path) {
+                    return Err(DomainError::NotFound(format!(
+                        "folder '{folder_path}' in '{collection}'"
+                    )));
+                }
+                Some(self.folder_settings_fingerprint(&collection, folder_path)?)
             }
             ProposedChange::SetEnvVar {
                 environment, key, ..
@@ -467,6 +486,18 @@ impl ProposalService {
             )));
         }
         Ok(())
+    }
+
+    /// The fingerprint of a folder's stored settings, read now.
+    fn folder_settings_fingerprint(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<String> {
+        let settings = self
+            .collections
+            .get_folder_settings(collection, folder_path)?;
+        Ok(folder_fingerprint(&settings))
     }
 
     fn http_request_fingerprint(
@@ -585,8 +616,21 @@ impl ProposalService {
             // `apply_env_var` compares the variable's fingerprint on the copy
             // it saves.
             ProposedChange::SetEnvVar { .. } => Ok(true),
-            // Replaced in plan 01 task 3.
-            ProposedChange::UpdateFolderSettings { .. } => Ok(false),
+            ProposedChange::UpdateFolderSettings {
+                collection,
+                folder_path,
+                base_fingerprint,
+                ..
+            } => {
+                let root = self.tree(collection)?;
+                if !is_folder(&root, folder_path) {
+                    return Ok(false);
+                }
+                unchanged(
+                    self.folder_settings_fingerprint(collection, folder_path),
+                    base_fingerprint,
+                )
+            }
         }
     }
 
@@ -708,8 +752,24 @@ impl ProposalService {
                 key,
                 value,
             } => self.apply_env_var(collection, environment, key, value, env_fingerprint),
-            // Replaced in plan 01 task 3.
-            ProposedChange::UpdateFolderSettings { .. } => Ok(false),
+            ProposedChange::UpdateFolderSettings {
+                collection,
+                folder_path,
+                patch,
+                base_fingerprint,
+            } => {
+                let mut settings = self
+                    .collections
+                    .get_folder_settings(collection, folder_path)?;
+                if folder_fingerprint(&settings) != *base_fingerprint {
+                    return Ok(false);
+                }
+                apply_folder_patch(&mut settings, patch);
+                applied(
+                    self.collections
+                        .save_folder_settings(collection, folder_path, &settings),
+                )
+            }
         }
     }
 
@@ -955,6 +1015,87 @@ fn env_var_fingerprint(env: &Environment, key: &str) -> String {
     sha256_hex(&text)
 }
 
+/// Fingerprint of a folder's stored settings: headers, variables, the three
+/// scripts, docs and auth. Auth is included so a manual auth change also makes
+/// a pending proposal stale, although a proposal never writes it.
+fn folder_fingerprint(settings: &FolderSettings) -> String {
+    let headers: Vec<_> = settings
+        .headers
+        .iter()
+        .map(|h| (&h.key, &h.value, h.enabled))
+        .collect();
+    let variables: Vec<_> = settings
+        .variables
+        .iter()
+        .map(|v| (&v.key, &v.value, &v.initial_value, v.enabled, v.secret))
+        .collect();
+    let text = serde_json::json!({
+        "headers": headers,
+        "variables": variables,
+        "auth": settings.auth,
+        "pre": settings.pre_request_script,
+        "post": settings.post_response_script,
+        "tests": settings.tests_script,
+        "docs": settings.docs,
+    })
+    .to_string();
+    sha256_hex(&text)
+}
+
+/// Replaces the sections the patch sets. Auth is never touched.
+fn apply_folder_patch(settings: &mut FolderSettings, patch: &FolderSettingsPatch) {
+    if let Some(headers) = &patch.headers {
+        settings.headers = headers.clone();
+    }
+    if let Some(variables) = &patch.variables {
+        // An equal initial value means "no initial value" in folder.yml.
+        settings.variables = variables
+            .iter()
+            .map(|v| CollectionVariable {
+                key: v.key.clone(),
+                value: v.value.clone(),
+                initial_value: v.value.clone(),
+                enabled: v.enabled,
+                secret: false,
+            })
+            .collect();
+    }
+    if let Some(script) = &patch.pre_request_script {
+        settings.pre_request_script = Some(script.clone());
+    }
+    if let Some(script) = &patch.post_response_script {
+        settings.post_response_script = Some(script.clone());
+    }
+    if let Some(script) = &patch.tests_script {
+        settings.tests_script = Some(script.clone());
+    }
+    if let Some(docs) = &patch.docs {
+        settings.docs = Some(docs.clone());
+    }
+}
+
+/// Refuses a variable list with an empty or repeated name.
+fn check_folder_variables(patch: &FolderSettingsPatch) -> DomainResult<()> {
+    let Some(variables) = &patch.variables else {
+        return Ok(());
+    };
+    let mut seen = HashSet::new();
+    for variable in variables {
+        if variable.key.trim().is_empty() {
+            return Err(DomainError::InvalidInput(
+                "variable name cannot be empty".to_string(),
+            ));
+        }
+        if !seen.insert(variable.key.as_str()) {
+            return Err(DomainError::InvalidInput(format!(
+                "duplicate folder variable '{}'",
+                variable.key
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Refuses a value that carries the placeholder the read tools show for a
 /// hidden credential. Saving it would overwrite the real value.
 fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
@@ -986,6 +1127,26 @@ fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
                     .flatten()
                     .any(|q| pair_masked(&q.key, &q.value))
                 || patch.body.as_ref().is_some_and(body_masked)
+        }
+        ProposedChange::UpdateFolderSettings { patch, .. } => {
+            patch
+                .headers
+                .iter()
+                .flatten()
+                .any(|h| pair_masked(&h.key, &h.value))
+                || patch
+                    .variables
+                    .iter()
+                    .flatten()
+                    .any(|v| pair_masked(&v.key, &v.value))
+                || [
+                    &patch.pre_request_script,
+                    &patch.post_response_script,
+                    &patch.tests_script,
+                    &patch.docs,
+                ]
+                .into_iter()
+                .any(|text| text.as_deref().is_some_and(masked))
         }
         _ => false,
     };
@@ -1197,9 +1358,10 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex as StdMutex;
 
+    use rocket_acp::proposal::ProposedVariable;
     use rocket_collection::{CollectionRepository, RequestScriptPhase};
     use rocket_environment::{Environment, EnvironmentRepository};
-    use rocket_shared::types::{Header, HttpMethod};
+    use rocket_shared::types::{Auth, Header, HttpMethod};
 
     use crate::test_doubles::{RecordingPublisher, SharedPublisher};
 
@@ -2577,5 +2739,243 @@ mod tests {
             body: "rok.test('ok', () => {});".into(),
             base_fingerprint: String::new(),
         });
+    }
+
+    fn folder_update(path: &str, patch: FolderSettingsPatch) -> ProposedChange {
+        ProposedChange::UpdateFolderSettings {
+            collection: "demo".into(),
+            folder_path: path.into(),
+            patch,
+            base_fingerprint: String::new(),
+        }
+    }
+
+    /// A "reports" folder with a bearer auth, old docs and one header.
+    fn fixture_with_folder() -> Fixture {
+        let f = fixture();
+        f.repo.create_folder("demo", "reports").expect("create folder");
+        f.repo
+            .save_folder_settings(
+                "demo",
+                "reports",
+                &FolderSettings {
+                    headers: vec![Header::new("X-Old", "old")],
+                    auth: Some(Auth::Bearer {
+                        token: "folder-token-1".into(),
+                    }),
+                    pre_request_script: Some("old pre".into()),
+                    tests_script: Some("old tests".into()),
+                    docs: Some("old docs".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("save folder settings");
+        f
+    }
+    #[test]
+    fn accepting_a_folder_update_changes_only_the_given_sections() {
+        let f = fixture_with_folder();
+        let ids = f
+            .svc
+            .propose(
+                "s1",
+                vec![folder_update(
+                    "reports",
+                    FolderSettingsPatch {
+                        headers: Some(vec![Header::new("X-New", "new")]),
+                        variables: Some(vec![ProposedVariable {
+                            key: "HOST".into(),
+                            value: "api.example.com".into(),
+                            enabled: true,
+                        }]),
+                        ..FolderSettingsPatch::default()
+                    },
+                )],
+            )
+            .expect("propose");
+        let accepted = f.svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(accepted.status, ProposalStatus::Accepted);
+
+        let saved = f.repo.get_folder_settings("demo", "reports").expect("read");
+        assert_eq!(saved.headers.len(), 1);
+        assert_eq!(saved.headers[0].key, "X-New");
+        assert_eq!(saved.variables.len(), 1);
+        assert_eq!(saved.variables[0].key, "HOST");
+        assert!(!saved.variables[0].secret);
+        // Sections the patch omits, and auth, survive.
+        assert_eq!(saved.pre_request_script.as_deref(), Some("old pre"));
+        assert_eq!(saved.tests_script.as_deref(), Some("old tests"));
+        assert_eq!(saved.docs.as_deref(), Some("old docs"));
+        assert_eq!(
+            saved.auth,
+            Some(Auth::Bearer {
+                token: "folder-token-1".into()
+            })
+        );
+        assert!(f.events.events().iter().any(|e| matches!(
+            e,
+            DomainEvent::FolderSettingsSaved { folder_path, .. } if folder_path == "reports"
+        )));
+    }
+
+    #[test]
+    fn an_empty_script_string_clears_that_script_only() {
+        let f = fixture_with_folder();
+        let ids = f
+            .svc
+            .propose(
+                "s1",
+                vec![folder_update(
+                    "reports",
+                    FolderSettingsPatch {
+                        tests_script: Some(String::new()),
+                        ..FolderSettingsPatch::default()
+                    },
+                )],
+            )
+            .expect("propose");
+        f.svc.accept("s1", &ids[0]).expect("accept");
+        let saved = f.repo.get_folder_settings("demo", "reports").expect("read");
+        assert_eq!(saved.tests_script, None);
+        assert_eq!(saved.pre_request_script.as_deref(), Some("old pre"));
+    }
+
+    #[test]
+    fn a_folder_edited_after_the_proposal_makes_it_stale_and_writes_nothing() {
+        let f = fixture_with_folder();
+        let ids = f
+            .svc
+            .propose(
+                "s1",
+                vec![folder_update(
+                    "reports",
+                    FolderSettingsPatch {
+                        docs: Some("agent docs".into()),
+                        ..FolderSettingsPatch::default()
+                    },
+                )],
+            )
+            .expect("propose");
+        // The user changes only the auth by hand. That must also make it stale.
+        let mut current = f.repo.get_folder_settings("demo", "reports").expect("read");
+        current.auth = Some(Auth::Bearer {
+            token: "changed".into(),
+        });
+        f.repo
+            .save_folder_settings("demo", "reports", &current)
+            .expect("manual save");
+
+        let resolved = f.svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(resolved.status, ProposalStatus::Stale);
+        let saved = f.repo.get_folder_settings("demo", "reports").expect("read");
+        assert_eq!(saved.docs.as_deref(), Some("old docs"));
+    }
+
+    #[test]
+    fn a_folder_update_refuses_the_root_a_missing_folder_and_an_empty_patch() {
+        let f = fixture_with_folder();
+        let docs = FolderSettingsPatch {
+            docs: Some("x".into()),
+            ..FolderSettingsPatch::default()
+        };
+        assert!(matches!(
+            f.svc.propose("s1", vec![folder_update("", docs.clone())]),
+            Err(DomainError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            f.svc.propose("s1", vec![folder_update("nope", docs.clone())]),
+            Err(DomainError::NotFound(_))
+        ));
+        assert!(matches!(
+            f.svc.propose(
+                "s1",
+                vec![folder_update("reports", FolderSettingsPatch::default())]
+            ),
+            Err(DomainError::InvalidInput(m)) if m.contains("changes no field")
+        ));
+        assert!(matches!(
+            f.svc.propose("s1", vec![folder_update("../reports", docs)]),
+            Err(DomainError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn a_folder_update_refuses_duplicate_or_empty_variable_names() {
+        let f = fixture_with_folder();
+        let variable = |key: &str| ProposedVariable {
+            key: key.into(),
+            value: "v".into(),
+            enabled: true,
+        };
+        for variables in [vec![variable("A"), variable("A")], vec![variable(" ")]] {
+            let result = f.svc.propose(
+                "s1",
+                vec![folder_update(
+                    "reports",
+                    FolderSettingsPatch {
+                        variables: Some(variables),
+                        ..FolderSettingsPatch::default()
+                    },
+                )],
+            );
+            assert!(matches!(result, Err(DomainError::InvalidInput(_))), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn a_folder_update_with_the_masked_placeholder_is_refused() {
+        let f = fixture_with_folder();
+        let masked = format!("prefix {REDACTED}");
+        let patches = [
+            FolderSettingsPatch {
+                headers: Some(vec![Header::new("Authorization", masked.clone())]),
+                ..FolderSettingsPatch::default()
+            },
+            FolderSettingsPatch {
+                variables: Some(vec![ProposedVariable {
+                    key: "K".into(),
+                    value: masked.clone(),
+                    enabled: true,
+                }]),
+                ..FolderSettingsPatch::default()
+            },
+            FolderSettingsPatch {
+                pre_request_script: Some(masked.clone()),
+                ..FolderSettingsPatch::default()
+            },
+            FolderSettingsPatch {
+                docs: Some(masked),
+                ..FolderSettingsPatch::default()
+            },
+        ];
+        for patch in patches {
+            let result = f.svc.propose("s1", vec![folder_update("reports", patch)]);
+            assert!(
+                matches!(&result, Err(DomainError::InvalidInput(m)) if m.contains("masked placeholder")),
+                "{result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_folder_fingerprint_covers_every_section_including_auth() {
+        let base = FolderSettings::default();
+        let changed = |edit: fn(&mut FolderSettings)| {
+            let mut settings = base.clone();
+            edit(&mut settings);
+            folder_fingerprint(&settings)
+        };
+        let reference = folder_fingerprint(&base);
+        assert_eq!(reference.len(), 64);
+        for fingerprint in [
+            changed(|s| s.headers.push(Header::new("A", "b"))),
+            changed(|s| s.auth = Some(Auth::Bearer { token: "t".into() })),
+            changed(|s| s.pre_request_script = Some("x".into())),
+            changed(|s| s.post_response_script = Some("x".into())),
+            changed(|s| s.tests_script = Some("x".into())),
+            changed(|s| s.docs = Some("x".into())),
+        ] {
+            assert_ne!(fingerprint, reference);
+        }
     }
 }
