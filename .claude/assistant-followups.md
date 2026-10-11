@@ -47,6 +47,11 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 - A folder patch replaces whole sections. There is no per-item merge.
 - The folder diff's before side can show the value of a secret-flagged variable. Mask it as the request diff does.
 - gRPC requests do not inherit folder settings.
+- `apply` reads folder settings without the collection lock, so a manual save landing in that sub-millisecond gap is reverted. It needs compare-and-swap in `edit_folder_yml`. The same window exists for request and env-var applies.
+- An unparseable `folder.yml` on propose gives the agent a generic error. The spec says it should name the folder.
+- Re-proposing a secret-flagged folder variable silently makes it non-secret, and the diff before side drops the flag.
+- The dirty flag can briefly carry over on a folder switch, which gives a spurious Accept block.
+- No tool-server test covers a successful get_folder_settings read in Ask mode, or a folder.yml parse failure.
 - Closing a Folder Settings tab with unsaved edits still does not warn.
 
 ### Dead code and small items

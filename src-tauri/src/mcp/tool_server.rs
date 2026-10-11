@@ -956,7 +956,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 
     #[tool(
-        description = "Read one folder's own settings: auth type (credentials masked), default headers, variables, the three scripts and docs, plus the names of its direct subfolders and requests. Pass the folder path inside the collection, for example \"auth/v2\". Folder settings apply to every request below the folder."
+        description = "Read one folder's own settings: auth type (credentials masked), default headers, variables, the three scripts and docs, plus the names of its direct subfolders and requests. Pass the folder path inside the collection, for example \"auth/v2\". Folder settings apply to every HTTP request below the folder. gRPC requests do not inherit them."
     )]
     async fn get_folder_settings(
         &self,

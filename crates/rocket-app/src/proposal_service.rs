@@ -1155,7 +1155,8 @@ fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
             "a value contains the masked placeholder '{REDACTED}', which stands for a hidden \
              credential, so it cannot be saved. If you did not read the real values, omit the \
              whole headers, query_params, url or body field from the proposal instead of \
-             echoing masked entries; a list replaces the whole field"
+             echoing masked entries; a list replaces the whole field. For a folder patch, omit the \
+             whole headers, variables, script or docs field instead"
         )));
     }
     Ok(())
@@ -2869,6 +2870,28 @@ mod tests {
         assert_eq!(resolved.status, ProposalStatus::Stale);
         let saved = f.repo.get_folder_settings("demo", "reports").expect("read");
         assert_eq!(saved.docs.as_deref(), Some("old docs"));
+    }
+
+    #[test]
+    fn a_folder_removed_after_the_proposal_makes_it_stale() {
+        let f = fixture_with_folder();
+        let ids = f
+            .svc
+            .propose(
+                "s1",
+                vec![folder_update(
+                    "reports",
+                    FolderSettingsPatch {
+                        docs: Some("new docs".into()),
+                        ..FolderSettingsPatch::default()
+                    },
+                )],
+            )
+            .expect("propose");
+        std::fs::remove_dir_all(f._dir.path().join("demo").join("reports"))
+            .expect("remove folder");
+        let accepted = f.svc.accept("s1", &ids[0]).expect("accept");
+        assert_eq!(accepted.status, ProposalStatus::Stale);
     }
 
     #[test]
