@@ -26,18 +26,20 @@ Chosen over: auto-approving Rocket tools by matching (spoofable through `command
 ## Backend
 
 - **`rocket-acp`**:
-  - New `AcpUpdate::PermissionRequest { request_id, call_id, title, kind, summary, options }`.
+  - New `AcpUpdate::PermissionRequest { request_id, call_id, title, kind, summary, options }` and `AcpUpdate::PermissionResolved { request_id, option_id: Option<String> }`.
   - `PermissionOption { id, name, kind }`, where `kind` is `allow_once | allow_always | reject_once | reject_always`.
-  - `summary` is a short, masked text of the tool arguments, capped in length.
-  - New trait method `AcpSessionClient::resolve_permission(session_id, request_id, option_id: Option<&str>) -> DomainResult<()>`. `None` means cancelled.
-- **`rocket-infra` (`acp_agent_client.rs`)**: the `RequestPermissionRequest` handler:
-  1. Looks up the turn's current `update_tx`. With no active turn it denies at once, exactly as today.
-  2. Creates a `request_id` and stores a `oneshot::Sender` in a per-session pending map.
-  3. Sends `AcpUpdate::PermissionRequest`.
-  4. Awaits the oneshot and replies `Selected(option_id)` or `Cancelled`.
-- **Draining**: the pending map answers `Cancelled` and clears on turn stop (`cancel`), session end, agent process exit and app shutdown. A request can never outlive its turn.
-- **`resolve_permission` validation**: the request must exist and not be answered yet, and `option_id` must be one the agent offered. Otherwise it returns a `DomainError` without touching the agent. Double answers are rejected.
-- **`rocket-app`**: `AcpSessionService::respond_permission` forwards to the client. It publishes a `DomainEvent::AcpPermissionRequested` for the UI (`TauriEventBus` delivers it; `NullEventPublisher` in tests) and an `AcpPermissionResolved` when the request is answered or drained.
+  - `summary` is a short text of the tool arguments, masked and capped at 500 characters.
+  - New trait method `AcpSessionClient::resolve_permission(session_id, request_id, option_id: Option<&str>) -> DomainResult<()>`, with a default body that returns `NotFound`, so the four existing test doubles need no change. `None` means cancelled.
+- **`rocket-infra`**:
+  - A `PermissionBroker` (new file `acp_permissions.rs`) owns the pending map: `register`, `resolve`, `drain_cancelled`. It is unit-testable without a process.
+  - The `RequestPermissionRequest` handler **must not wait inside the handler**: `on_receive_request` callbacks run inside the connection's dispatch loop, so waiting there would freeze every other message, including the prompt response and the cancel. The handler registers the request, sends `PermissionRequest`, then calls `connection.spawn(...)` for a task that awaits the answer and calls `responder.respond(...)`, and returns at once.
+  - With no active turn (no update sender) it denies at once, as today.
+- **Draining**: pending requests are answered `Cancelled` by `cancel()` (the ACP rule: on cancel, pending permission requests are answered cancelled), when a turn ends, and in `end_session`. A drained or answered request sends `PermissionResolved` on the turn's channel when it still exists.
+- **`resolve_permission` validation**: the request must exist and not be answered yet, and `option_id` must be one the agent offered. Otherwise it returns a `DomainError` without touching the agent.
+- **`rocket-app`**:
+  - `AcpSessionService::respond_permission` forwards to the client.
+  - `publish_update` maps the two updates to `DomainEvent::AcpPermissionRequested` and `DomainEvent::AcpPermissionResolved` (`TauriEventBus` delivers them; `NullEventPublisher` in tests).
+  - **Idle clock**: `send_prompt` kills a session after 120 s without an update. The turn loop tracks pending request ids from those two updates and does not count idle time while any is pending, so an unanswered card never ends the session. The clock restarts when the answer arrives.
 - **`src-tauri`**: a thin command `respond_agent_permission(session_id, request_id, option_id: Option<String>)`. The IPC DTO is camelCase. Persistence structs are unchanged.
 
 No timeout. The agent waits for the user, and stopping the turn cancels the request.
@@ -45,8 +47,8 @@ No timeout. The agent waits for the user, and stopping the turn cancels the requ
 ## Frontend
 
 - `assistant-store`: `pendingPermissions: AgentPermissionRequest[]` plus an anchor to the last chat message, like `proposalAnchors`. Cleared with the session on fatal errors and on `resolve`.
-- `AssistantPermissionCard` (shadcn `Card`, `Button`, `Badge`; lucide icons): tool title, summary, one button per offered option. Reject kinds use the outline or destructive style. `execute` and `edit` kinds get a caution badge. After an answer it collapses to a one-line inline row.
-- The turn indicator reads "Waiting for your approval" while a request is pending.
+- `AssistantPermissionCard` (shadcn `Card`, `Button`, `Badge`; lucide icons): tool title, summary, one button per offered option. Reject kinds use the outline or destructive style. `execute` and `edit` kinds get a caution badge. After an answer it becomes a one-line row showing the chosen option, or "Cancelled".
+- Cards live in their own "Permissions" section above the proposals section, not in the message timeline. An answered card stays there as a one-line row until the session ends. The card text says the agent is waiting for the answer.
 - The event bridge in `assistant-session.ts` maps the two events to store actions.
 
 ## Edge cases
