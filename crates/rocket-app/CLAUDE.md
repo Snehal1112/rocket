@@ -205,14 +205,21 @@ real one is 32 characters); the full URL still is.
 
 ## Flow lint (`flow_service.rs`)
 
-`FlowService::lint(collection, flow)` lints the graph it is given (the
-canvas, saved or not) and never fails or touches the repository: a
-`validate` failure first, as `invalid_graph` error lints, then the
-`rocket_flow::validate_with_warnings` warnings. It passes `NoLintContext`
-until F-21 and F-22 add a context built from the collection. `save` and the
-run path do not call it, so lints never block either. The `lint_flow` IPC
-command is plan P21. `lint` runs `validate` first, which is super-linear on very
-large flows (about 3.5 s at 20k If nodes), so it is fine at drawn sizes.
+`FlowService::lint_with_environment(collection, flow, env)` lints the graph it
+is given (the canvas, saved or not) and never fails or touches the
+repository. First comes the full `validate_report` error list, capped at 50,
+as `invalid_graph` error lints that carry their node or edge ids. Then come
+the `rocket_flow::validate_with_warnings` warnings, asked of a
+`CollectionLintContext` built from the `LintSources` and the environment names
+(`with_lint_sources`; without sources the context is `NoLintContext` and those
+rules stay silent). `lint` is the same with no environment. The async
+`lint_flow` IPC command takes `environmentName` and `globalEnvName`. `save` and
+the run path never call lint, so lints never block either. `validate` is linear
+in the flow size.
+
+`list_entries` returns an unparseable flow file as a corrupt entry with an
+`error` instead of hiding it. A run is refused over `MAX_RUN_STEPS` (10,000
+nodes), checked in `load_ordered_nodes` before any event is published.
 
 ## Assistant chips (`McpToolService::build_chip_resource`, `mask_response_chip`)
 

@@ -93,6 +93,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **Script limits.** `ScriptLimits.max_host_calls` (default 8) bounds in-flight host calls per script.
 
+**Flow files (`fs_flow_repo.rs`).** `FsFlowRepo::list_entries` reports an unparseable file as a corrupt entry. `FsFlowRepo::save` refuses to overwrite an unparseable file ("Delete the broken file first"), which stops a new flow from taking over a broken file's slug.
+
 ## Testing
 
 All repository types have unit tests using `tempfile::TempDir` for ephemeral filesystem fixtures. `ReqwestExecutor` OAuth2 tests use `wiremock` to mock the token endpoint. Network tests that require live HTTP are marked `#[ignore]`.
