@@ -42,6 +42,14 @@ impl KeyringSecretStore {
             service: "com.rocketapi.proxy",
         }
     }
+
+    /// Backs agent credentials saved from the agent dialog. A separate keychain
+    /// service from the other namespaces so the entries can never collide.
+    pub fn new_agent_credentials() -> Self {
+        Self {
+            service: "com.rocketapi.agent-credentials",
+        }
+    }
 }
 
 impl SecretStore for KeyringSecretStore {
@@ -108,6 +116,19 @@ fn account(scope_id: &str, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agent_credentials_namespace_is_distinct() {
+        let agent = KeyringSecretStore::new_agent_credentials();
+        assert_eq!(agent.service, "com.rocketapi.agent-credentials");
+        for other in [
+            KeyringSecretStore::new_env_secrets(),
+            KeyringSecretStore::new_vault_connections(),
+            KeyringSecretStore::new_proxy(),
+        ] {
+            assert_ne!(agent.service, other.service);
+        }
+    }
 
     #[test]
     fn a_missing_entry_is_a_miss_in_both_modes() {

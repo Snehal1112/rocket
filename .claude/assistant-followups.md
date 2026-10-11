@@ -68,6 +68,12 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 - Agent stderr is discarded, so a failed start shows no reason (`acp_agent_client.rs` ~279).
 - There is no handshake timeout.
 - The credential env var name format is not validated (`crates/rocket-app/src/agent_config_service.rs` ~100-117).
+- Stored conversations do not scrub agent credentials from the env or keychain sources (same as vault values).
+- The credential commands run the keychain call on a runtime thread (no `spawn_blocking`).
+- A token typed into a prompt is stored.
+- A failed best-effort keychain delete can leave a stale entry that a later keychain config with the same id would inherit.
+- `has_local_credential` uses `is_some`, while resolve ignores entries that are blank after trim.
+- Tests in `acp_session_service` use the real process env reader.
 
 ### Chips and vault
 

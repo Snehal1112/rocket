@@ -131,6 +131,31 @@ pub async fn test_agent_config(
     svc.test_agent_config(&id).await
 }
 
+#[tauri::command]
+pub async fn set_agent_credential(
+    config_id: String,
+    value: String,
+    svc: State<'_, AgentConfigService>,
+) -> Result<(), DomainError> {
+    svc.set_local_credential(&config_id, &value)
+}
+
+#[tauri::command]
+pub async fn clear_agent_credential(
+    config_id: String,
+    svc: State<'_, AgentConfigService>,
+) -> Result<(), DomainError> {
+    svc.clear_local_credential(&config_id)
+}
+
+#[tauri::command]
+pub async fn has_agent_credential(
+    config_id: String,
+    svc: State<'_, AgentConfigService>,
+) -> Result<bool, DomainError> {
+    svc.has_local_credential(&config_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

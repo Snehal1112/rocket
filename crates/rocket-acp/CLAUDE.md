@@ -40,10 +40,15 @@ cargo test -p rocket-acp -j4
 
 ### Key Design Points
 
-- `AgentConfig` never holds a credential *value* — only
-  `vault_connection_id`/`vault_name`/`vault_secret_id`, a reference resolved
-  on demand by `rocket-app`'s `AgentConfigService` through the existing
-  RocketVault `SecretManagerService`/`VaultSecretFetcher` machinery.
+- `AgentConfig` never holds a credential *value*. It holds `credential_source`
+  (vault, keychain or env) and `source_env_var`. The vault source keeps only
+  `vault_connection_id`/`vault_name`/`vault_secret_id`, resolved on demand by
+  `rocket-app`'s `AgentConfigService` through the existing RocketVault
+  machinery. The keychain source reads a value stored under the config id in
+  the `com.rocketapi.agent-credentials` keychain service. The env source reads
+  the variable named by `source_env_var` from Rocket's own process env.
+  Env names are validated.
+- The env source sees only what Rocket's process was started with.
 - No cross-domain-crate dependencies — other entities are referenced by plain
   `String` id, not by importing another domain crate's types.
 - `FolderSettingsPatch` has no auth field and uses `ProposedVariable` because this crate must not depend on `rocket-collection`.

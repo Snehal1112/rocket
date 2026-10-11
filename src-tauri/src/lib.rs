@@ -477,14 +477,17 @@ pub fn run() {
                 Arc::clone(&vault_fetcher),
             ));
 
+            let agent_credential_store: Arc<dyn rocket_environment::secret_store::SecretStore> =
+                Arc::new(rocket_infra::KeyringSecretStore::new_agent_credentials());
+            let agent_env_reader = rocket_app::process_env_reader();
+
             let agent_config_svc = rocket_app::AgentConfigService::new(
                 Box::new(rocket_infra::FsAgentConfigRepo::new(
                     data_dir.join("agent_configs.yml"),
                 )),
                 agent_config_secret_manager,
-                // Replaced in plan 01 task 3.
-                Arc::new(rocket_environment::NullSecretStore),
-                rocket_app::process_env_reader(),
+                Arc::clone(&agent_credential_store),
+                Arc::clone(&agent_env_reader),
             );
 
             // A dedicated SecretManagerService + AgentConfigService pair for
@@ -503,9 +506,8 @@ pub fn run() {
                     data_dir.join("agent_configs.yml"),
                 )),
                 acp_agent_config_secret_manager,
-                // Replaced in plan 01 task 3.
-                Arc::new(rocket_environment::NullSecretStore),
-                rocket_app::process_env_reader(),
+                Arc::clone(&agent_credential_store),
+                Arc::clone(&agent_env_reader),
             ));
 
             // Reads agent_autonomy_enabled for the session's collection. This
@@ -1069,6 +1071,9 @@ pub fn run() {
             commands::agent_configs::save_agent_config,
             commands::agent_configs::delete_agent_config,
             commands::agent_configs::test_agent_config,
+            commands::agent_configs::set_agent_credential,
+            commands::agent_configs::clear_agent_credential,
+            commands::agent_configs::has_agent_credential,
             commands::assistant_chips::build_assistant_chip_resource,
             commands::assistant_chips::mask_assistant_response,
             commands::acp_sessions::send_agent_prompt,
