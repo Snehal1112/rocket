@@ -46,7 +46,7 @@ No timeout. The agent waits for the user, and stopping the turn cancels the requ
 
 ## Frontend
 
-- `assistant-store`: `pendingPermissions: AgentPermissionRequest[]` plus an anchor to the last chat message, like `proposalAnchors`. Cleared with the session on fatal errors and on `resolve`.
+- `assistant-store`: `permissions: AgentPermission[]`, each `pending` or answered. Cleared with the session, like `proposals`.
 - `AssistantPermissionCard` (shadcn `Card`, `Button`, `Badge`; lucide icons): tool title, summary, one button per offered option. Reject kinds use the outline or destructive style. `execute` and `edit` kinds get a caution badge. After an answer it becomes a one-line row showing the chosen option, or "Cancelled".
 - Cards live in their own "Permissions" section above the proposals section, not in the message timeline. An answered card stays there as a one-line row until the session ends. The card text says the agent is waiting for the answer.
 - The event bridge in `assistant-session.ts` maps the two events to store actions.
