@@ -32,6 +32,7 @@ pub(crate) mod flow_callbacks;
 pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;
+pub mod flow_lint_context;
 pub(crate) mod flow_partial;
 pub(crate) mod flow_poll;
 mod flow_references;
@@ -114,6 +115,7 @@ pub use flow_execution_service::{
     RunFlowInput,
 };
 pub use flow_partial::PartialRun;
+pub use flow_lint_context::{LintEnvironment, LintSources};
 pub use flow_references::{FlowReferenceUpdater, FlowRewriteReport};
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;

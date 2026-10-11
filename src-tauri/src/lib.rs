@@ -744,9 +744,24 @@ pub fn run() {
             // Flow CRUD and Flow execution both need to follow workspace switches, the
             // same reasoning CollectionRunnerService's collection_repo already follows
             // — see SharedPathFlowRepo's doc comment.
+            // Lints read only variable keys, so these repos use a store that never
+            // touches the OS keychain. They follow workspace switches like the rest.
+            let lint_sources = rocket_app::LintSources {
+                collection_repo: Box::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                env_factory: Box::new(SharedCollectionEnvironmentRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                global_env_repo: Box::new(SharedPathEnvironmentRepo::with_secret_store(
+                    Arc::clone(&active_workspace_path),
+                    Arc::new(rocket_environment::NullSecretStore),
+                )),
+            };
             let flow_svc = rocket_app::FlowService::new(Box::new(
                 rocket_infra::SharedPathFlowRepo::new(Arc::clone(&active_workspace_path)),
-            ));
+            ))
+            .with_lint_sources(lint_sources);
 
             // Collection Runner — SharedPathCollectionRepo, not a path-pinned
             // FsCollectionRepo: the run set is the entire content of a run (URLs,

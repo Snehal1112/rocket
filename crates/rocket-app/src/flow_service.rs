@@ -1,14 +1,27 @@
+use crate::flow_lint_context::{CollectionLintContext, LintEnvironment, LintSources};
 use rocket_flow::lint::{graph_error_lints, validate_with_warnings, FlowLint, NoLintContext};
 use rocket_flow::{validate, Flow, FlowGraphError, FlowRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 pub struct FlowService {
     flow_repo: Box<dyn FlowRepository>,
+    /// Where lints read the collection and the environments. Without it no
+    /// lint that needs them can run.
+    lint_sources: Option<LintSources>,
 }
 
 impl FlowService {
     pub fn new(flow_repo: Box<dyn FlowRepository>) -> Self {
-        Self { flow_repo }
+        Self {
+            flow_repo,
+            lint_sources: None,
+        }
+    }
+
+    /// Lets lints ask about saved requests and variables.
+    pub fn with_lint_sources(mut self, sources: LintSources) -> Self {
+        self.lint_sources = Some(sources);
+        self
     }
 
     /// The repository, for in-crate helpers that must bypass `validate`.
@@ -50,19 +63,34 @@ impl FlowService {
         self.flow_repo.save(collection, &flow)
     }
 
+    /// Lints `flow` with no environment selected. See `lint_with_environment`.
+    pub fn lint(&self, collection: &str, flow: &Flow) -> Vec<FlowLint> {
+        self.lint_with_environment(collection, flow, LintEnvironment::default())
+    }
+
     /// Lints `flow` as given, not the saved file, and never fails. A
     /// structural `validate` failure comes first, as `invalid_graph` error
     /// lints that carry its node or edge ids. Then come the warnings of
-    /// `validate_with_warnings`. Lints never block save or run.
-    pub fn lint(&self, collection: &str, flow: &Flow) -> Vec<FlowLint> {
-        // F-21 and F-22 build a context from `collection` here, for saved
-        // requests and known variables. Until then no lint needs one.
-        let _ = collection;
+    /// `validate_with_warnings`, which ask a context built from `env`. Without
+    /// lint sources the context knows nothing and those rules stay silent.
+    /// Lints never block save or run.
+    pub fn lint_with_environment(
+        &self,
+        collection: &str,
+        flow: &Flow,
+        env: LintEnvironment<'_>,
+    ) -> Vec<FlowLint> {
         let mut lints = match validate(flow) {
             Ok(_) => Vec::new(),
             Err(error) => graph_error_lints(flow, &error),
         };
-        lints.extend(validate_with_warnings(flow, &NoLintContext));
+        match &self.lint_sources {
+            Some(sources) => {
+                let ctx = CollectionLintContext::new(sources, collection, env, flow);
+                lints.extend(validate_with_warnings(flow, &ctx));
+            }
+            None => lints.extend(validate_with_warnings(flow, &NoLintContext)),
+        }
         lints
     }
 }
@@ -595,5 +623,16 @@ mod tests {
         svc.save("demo", flow.clone())
             .expect("a flow with warnings must still save");
         assert_eq!(svc.get("demo", "Routing").expect("get"), flow);
+    }
+
+    #[test]
+    fn lint_with_environment_without_sources_matches_lint() {
+        let svc = FlowService::new(Box::new(UntouchedRepo));
+        let flow = routing_flow();
+        let env = crate::flow_lint_context::LintEnvironment {
+            environment_name: Some("dev"),
+            global_env_name: None,
+        };
+        assert_eq!(svc.lint_with_environment("demo", &flow, env), svc.lint("demo", &flow));
     }
 }

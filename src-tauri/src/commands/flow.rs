@@ -1,6 +1,6 @@
 use rocket_app::{
     FlowExecutionService, FlowReferenceUpdater, FlowRunCallback, FlowRunOptions, FlowRunSummary,
-    FlowService, PartialRun, RequestExecutionService, RunFlowInput,
+    FlowService, LintEnvironment, PartialRun, RequestExecutionService, RunFlowInput,
 };
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
@@ -510,15 +510,24 @@ impl From<rocket_flow::lint::FlowLint> for FlowLintDto {
 }
 
 /// Lints the graph the canvas holds now, saved or not. Never fails because
-/// of what the graph contains: problems come back as lints.
+/// of what the graph contains: problems come back as lints. The environment
+/// names are the ones a run would use. Without them the variable rule stays
+/// silent for names it cannot find. Async, so the file reads do not run on
+/// the main thread.
 #[tauri::command]
-pub fn lint_flow(
+pub async fn lint_flow(
     collection: String,
     flow: FlowDto,
+    environment_name: Option<String>,
+    global_env_name: Option<String>,
     svc: State<'_, FlowService>,
 ) -> Result<Vec<FlowLintDto>, DomainError> {
+    let env = LintEnvironment {
+        environment_name: environment_name.as_deref(),
+        global_env_name: global_env_name.as_deref(),
+    };
     Ok(svc
-        .lint(&collection, &flow.into())
+        .lint_with_environment(&collection, &flow.into(), env)
         .into_iter()
         .map(FlowLintDto::from)
         .collect())
