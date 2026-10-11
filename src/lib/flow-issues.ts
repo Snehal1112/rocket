@@ -4,6 +4,7 @@ import {
   MIN_CALLBACK_TIMEOUT_MS,
 } from '@/lib/flow-callback';
 import { TRIGGER_HANDLE, takesSingleInput } from '@/lib/flow-handles';
+import { parseGraphProblems } from '@/lib/flow-wiring';
 import type { FlowEdge, FlowNode, FlowNodeKind, RepeatUntil } from '@/lib/tauri-api';
 
 export type IssueSeverity = 'error' | 'warning';
@@ -263,25 +264,67 @@ function waitIssues(node: FlowNode, nodes: FlowNode[]): FlowIssue[] {
 // quote is hidden whole. The second branch takes the next closing quote.
 const QUOTED_CASE_VALUE = /(\b(?:matches|match|case|value)\s+)(['"])(?:.*\2(?=[.!?]?$)|[^'"]*\2)/gi;
 
+// Most problems the toast spells out. The canvas shows every one on its node or wire.
+const MAX_TOAST_PROBLEMS = 3;
+
+// Hides quoted case values, then makes the text one sentence.
+function tidySentence(text: string): string {
+  const masked = text.replace(QUOTED_CASE_VALUE, '$1value hidden').trim();
+  if (!masked) return '';
+  const sentence = masked.charAt(0).toUpperCase() + masked.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
 export function cleanSaveMessage(message: string): string {
+  const multi = parseGraphProblems(message);
+  if (multi) {
+    const shown = multi.problems
+      .slice(0, MAX_TOAST_PROBLEMS)
+      .map((p) => tidySentence(p.text))
+      .filter(Boolean);
+    const more = multi.total - shown.length;
+    return [
+      `Flow has ${multi.total} problems.`,
+      ...shown,
+      ...(more > 0 ? [`And ${more} more.`] : []),
+    ].join(' ');
+  }
   const cleaned = message
     .replace(/^Invalid input:\s*/, '')
     .replace(/^flow is invalid:\s*/, '')
     .replace(/\s*(?:—|-)?\s*node\(s\):[^;]*(?:;\s*edge\(s\):.*)?$/, '')
-    .replace(/\s+through\s*$/, '')
-    .replace(QUOTED_CASE_VALUE, '$1value hidden')
-    .trim();
-  if (!cleaned) return 'The last save was rejected.';
-  const sentence = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+    .replace(/\s+through\s*$/, '');
+  return tidySentence(cleaned) || 'The last save was rejected.';
+}
+
+// The text the properties panel shows for one flagged node. A multi-problem
+// message gives only the problems that name this node.
+export function saveMessageForNode(message: string, nodeId: string): string {
+  const own = parseGraphProblems(message)?.problems.filter((p) => p.nodeIds.includes(nodeId));
+  if (!own || own.length === 0) return cleanSaveMessage(message);
+  return own.map((p) => tidySentence(p.text)).join(' ');
 }
 
 function saveIssues(save: SaveErrorInfo, nodeIds: Set<string>, edgeIds: Set<string>): FlowIssue[] {
-  const message = cleanSaveMessage(save.message ?? '');
   const hint =
     save.kind === 'run'
       ? 'Run the full flow, or Run from the named node.'
       : 'Fix this, then save again.';
+  const multi = parseGraphProblems(save.message ?? '');
+  if (multi) {
+    return multi.problems.flatMap((problem) => {
+      const message = tidySentence(problem.text);
+      return [
+        ...[...new Set(problem.nodeIds)]
+          .filter((id) => nodeIds.has(id))
+          .map((nodeId): FlowIssue => ({ code: 'save', severity: 'error', nodeId, message, hint })),
+        ...[...new Set(problem.edgeIds)]
+          .filter((id) => edgeIds.has(id))
+          .map((edgeId): FlowIssue => ({ code: 'save', severity: 'error', edgeId, message, hint })),
+      ];
+    });
+  }
+  const message = cleanSaveMessage(save.message ?? '');
   return [
     ...[...new Set(save.nodeIds)]
       .filter((id) => nodeIds.has(id))

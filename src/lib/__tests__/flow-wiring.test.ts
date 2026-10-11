@@ -7,6 +7,7 @@ import {
   isDataLessTarget,
   isValidFlowConnection,
   parseGraphErrorMessage,
+  parseGraphProblems,
   shouldPromptForExpression,
 } from '../flow-wiring';
 
@@ -278,6 +279,63 @@ describe('parseGraphErrorMessage', () => {
 
   it('returns null for an unrelated error message', () => {
     expect(parseGraphErrorMessage('Invalid input: flow name is empty')).toBeNull();
+  });
+});
+
+const MULTI_MESSAGE =
+  "Invalid input: flow has 2 problems: 'Logged in?': the If node needs exactly one input wire, found 0 [nodes if1; edges ]. wire from 'Login' to 'Result': the source node has no exit named 'true'; its only exit is 'result' [nodes ; edges e9]. — node(s): if1; edge(s): e9";
+
+describe('parseGraphProblems', () => {
+  it('splits a multi-problem message into one problem per sentence', () => {
+    expect(parseGraphProblems(MULTI_MESSAGE)).toEqual({
+      total: 2,
+      problems: [
+        {
+          text: "'Logged in?': the If node needs exactly one input wire, found 0",
+          nodeIds: ['if1'],
+          edgeIds: [],
+        },
+        {
+          text: "wire from 'Login' to 'Result': the source node has no exit named 'true'; its only exit is 'result'",
+          nodeIds: [],
+          edgeIds: ['e9'],
+        },
+      ],
+    });
+  });
+
+  it('reads the total of a message whose list was cut', () => {
+    const cut =
+      "Invalid input: flow has 53 problems, showing the first 2: 'Check': the If node's condition is empty [nodes if1; edges ]. 'Pick': the Switch node's value is empty [nodes sw; edges ]. — node(s): if1, sw; edge(s): ";
+    const parsed = parseGraphProblems(cut);
+    expect(parsed?.total).toBe(53);
+    expect(parsed?.problems.map((p) => p.nodeIds)).toEqual([['if1'], ['sw']]);
+  });
+
+  it('keeps several ids of one problem, such as a cycle', () => {
+    const cycle =
+      'Invalid input: flow has 2 problems: flow contains a cycle [nodes a, b; edges e1, e2]. \'Check\': the If node\'s condition is empty [nodes if1; edges ]. — node(s): a, b, if1; edge(s): e1, e2';
+    expect(parseGraphProblems(cycle)?.problems[0]).toEqual({
+      text: 'flow contains a cycle',
+      nodeIds: ['a', 'b'],
+      edgeIds: ['e1', 'e2'],
+    });
+  });
+
+  it('returns null for a single-problem or unrelated message', () => {
+    expect(
+      parseGraphProblems(
+        'Invalid input: flow is invalid: the If node needs exactly one input wire, found 0 — node(s): b; edge(s): ',
+      ),
+    ).toBeNull();
+    expect(parseGraphProblems('disk full')).toBeNull();
+  });
+
+  it('leaves the old id parser reading the union of ids', () => {
+    expect(parseGraphErrorMessage(MULTI_MESSAGE)).toEqual({
+      nodeIds: ['if1'],
+      edgeIds: ['e9'],
+    });
   });
 });
 

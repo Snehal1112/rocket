@@ -153,3 +153,42 @@ export function parseGraphErrorMessage(message: string): GraphErrorIds | null {
   if (!match) return null;
   return { nodeIds: splitIds(match[1]), edgeIds: splitIds(match[2]) };
 }
+
+export interface GraphProblem {
+  text: string;
+  nodeIds: string[];
+  edgeIds: string[];
+}
+
+export interface GraphProblems {
+  /** The number of problems the flow has, which can be more than were listed. */
+  total: number;
+  problems: GraphProblem[];
+}
+
+// The header of a save error that lists several problems. rocket_app builds it:
+// "flow has N problems:" or "flow has N problems, showing the first M:".
+const PROBLEMS_HEADER =
+  /^(?:Invalid input:\s*)?flow has (\d+) problems(?:, showing the first \d+)?:\s*/;
+// One listed problem: its text, then a tag that holds its ids, then a full stop.
+const PROBLEM = /(.+?) \[nodes ([^;\]]*); edges ([^\]]*)\]\./g;
+// The combined list that closes every graph error.
+const COMBINED_TAIL = /\s*—\s*node\(s\):[^;]*;\s*edge\(s\):.*$/;
+
+// Reads a save error that lists several problems, one entry per problem with
+// its own ids. Returns null for any other message, so the caller falls back to
+// parseGraphErrorMessage, which still reads the combined list of ids.
+export function parseGraphProblems(message: string): GraphProblems | null {
+  const header = message.match(PROBLEMS_HEADER);
+  if (!header) return null;
+  const body = message.slice(header[0].length).replace(COMBINED_TAIL, '');
+  const problems = [...body.matchAll(PROBLEM)].map(
+    (m): GraphProblem => ({
+      text: (m[1] ?? '').trim(),
+      nodeIds: splitIds(m[2]),
+      edgeIds: splitIds(m[3]),
+    }),
+  );
+  if (problems.length === 0) return null;
+  return { total: Number(header[1]), problems };
+}

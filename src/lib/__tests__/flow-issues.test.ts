@@ -7,6 +7,7 @@ import {
   type FlowIssue,
   groupIssuesByNode,
   issueCountLabel,
+  saveMessageForNode,
   summarizeIssues,
   worstSeverity,
 } from '../flow-issues';
@@ -380,6 +381,94 @@ describe('cleanSaveMessage', () => {
         "Invalid input: flow is invalid: more than one case has id 'c1' — node(s): sw; edge(s): ",
       ),
     ).toBe("More than one case has id 'c1'.");
+  });
+});
+
+const MULTI_MESSAGE =
+  "Invalid input: flow has 2 problems: 'Logged in?': the If node needs exactly one input wire, found 0 [nodes if1; edges ]. wire from 'Login' to 'Result': the source node has no exit named 'true'; its only exit is 'result' [nodes ; edges e9]. — node(s): if1; edge(s): e9";
+
+describe('multi-problem save messages', () => {
+  const nodes = [
+    node('login', {
+      kind: 'Request',
+      label: 'Login',
+      source: { type: 'Saved', requestPath: 'login.yml' },
+    }),
+    node('out', { kind: 'Output', label: 'Result' }),
+    node('if1', { kind: 'If', label: 'Logged in?', condition: 'response.status === 200' }),
+  ];
+  const edges = [wire('e9', 'login', 'out', 'value', 'true')];
+
+  it('puts each problem on its own node or wire', () => {
+    const issues = computeFlowIssues(nodes, edges, {
+      save: { nodeIds: ['if1'], edgeIds: ['e9'], message: MULTI_MESSAGE },
+    }).filter((i) => i.code === 'save');
+    expect(issues).toEqual([
+      {
+        code: 'save',
+        severity: 'error',
+        nodeId: 'if1',
+        message: "'Logged in?': the If node needs exactly one input wire, found 0.",
+        hint: 'Fix this, then save again.',
+      },
+      {
+        code: 'save',
+        severity: 'error',
+        edgeId: 'e9',
+        message:
+          "Wire from 'Login' to 'Result': the source node has no exit named 'true'; its only exit is 'result'.",
+        hint: 'Fix this, then save again.',
+      },
+    ]);
+  });
+
+  it('skips a problem whose node is no longer on the canvas', () => {
+    const issues = computeFlowIssues(nodes.slice(0, 2), edges, {
+      save: { nodeIds: ['if1'], edgeIds: ['e9'], message: MULTI_MESSAGE },
+    }).filter((i) => i.code === 'save');
+    expect(issues.map((i) => i.edgeId ?? i.nodeId)).toEqual(['e9']);
+  });
+
+  it('keeps the toast short and counts the rest', () => {
+    expect(cleanSaveMessage(MULTI_MESSAGE)).toBe(
+      "Flow has 2 problems. 'Logged in?': the If node needs exactly one input wire, found 0. Wire from 'Login' to 'Result': the source node has no exit named 'true'; its only exit is 'result'.",
+    );
+    const cut =
+      "Invalid input: flow has 53 problems, showing the first 2: 'Check': the If node's condition is empty [nodes if1; edges ]. 'Pick': the Switch node's value is empty [nodes sw; edges ]. — node(s): if1, sw; edge(s): ";
+    expect(cleanSaveMessage(cut)).toBe(
+      "Flow has 53 problems. 'Check': the If node's condition is empty. 'Pick': the Switch node's value is empty. And 51 more.",
+    );
+  });
+
+  it('still hides a case value in a multi-problem message', () => {
+    const message =
+      "Invalid input: flow has 2 problems: 'Router': more than one case matches 'secret-token' [nodes sw; edges ]. 'Check': the If node's condition is empty [nodes if1; edges ]. — node(s): sw, if1; edge(s): ";
+    expect(cleanSaveMessage(message)).not.toContain('secret-token');
+    const issues = computeFlowIssues(
+      [
+        node('sw', { kind: 'Switch', label: 'Router', value: 'response.body', cases: [] }),
+        node('if1', { kind: 'If', label: 'Check', condition: 'true' }),
+      ],
+      [],
+      { save: { nodeIds: ['sw', 'if1'], edgeIds: [], message } },
+    ).filter((i) => i.code === 'save');
+    expect(issues[0]?.message).toBe("'Router': more than one case matches value hidden.");
+    expect(JSON.stringify(issues)).not.toContain('secret-token');
+  });
+
+  it('shows the panel only the problems of its own node', () => {
+    expect(saveMessageForNode(MULTI_MESSAGE, 'if1')).toBe(
+      "'Logged in?': the If node needs exactly one input wire, found 0.",
+    );
+    // A node the message does not name gets the whole short text.
+    expect(saveMessageForNode(MULTI_MESSAGE, 'other')).toBe(cleanSaveMessage(MULTI_MESSAGE));
+    // A single-problem message is cleaned as before.
+    expect(
+      saveMessageForNode(
+        'Invalid input: flow is invalid: the If node needs exactly one input wire, found 0 — node(s): b; edge(s): ',
+        'b',
+      ),
+    ).toBe('The If node needs exactly one input wire, found 0.');
   });
 });
 

@@ -18,7 +18,7 @@ import {
 } from '@/lib/flow-clipboard';
 import { removeSwitchCase, replaceNodeKind } from '@/lib/flow-graph-edits';
 import { type FlowWriteOptions, pruneSelection, snapOf } from '@/lib/flow-history';
-import { cleanSaveMessage, computeFlowIssues } from '@/lib/flow-issues';
+import { cleanSaveMessage, computeFlowIssues, saveMessageForNode } from '@/lib/flow-issues';
 import { mergeFlowIssues } from '@/lib/flow-lint';
 import { buildRunRecord } from '@/lib/flow-run-history';
 import { requestFlowRun } from '@/lib/flow-run-request';
@@ -767,7 +767,7 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
               nodeDetail={shownDetail}
               saveError={
                 saveErrorMessage && cycleNodeIds.includes(panelNode.id)
-                  ? cleanSaveMessage(saveErrorMessage)
+                  ? saveMessageForNode(saveErrorMessage, panelNode.id)
                   : undefined
               }
               activeTab={panelTab}
