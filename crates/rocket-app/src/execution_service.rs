@@ -1279,6 +1279,8 @@ impl RequestExecutionService {
                     console,
                 );
                 self.apply_env_writes(repo.as_ref(), name, &writes, true);
+                // Later phases read this snapshot, so it must show the write.
+                mirror_env_writes(&mut var_ctx.env, &writes);
             } else {
                 tracing::warn!(
                     "rok.setEnvVar write(s) queued but no active environment is selected — write(s) dropped"
@@ -1297,6 +1299,7 @@ impl RequestExecutionService {
                     console,
                 );
                 self.apply_env_writes(self.global_env_repo().as_ref(), name, &writes, true);
+                mirror_env_writes(&mut var_ctx.global_env, &writes);
             } else {
                 tracing::warn!(
                     "rok.setGlobalEnvVar write(s) queued but no global environment is selected — write(s) dropped"
@@ -1312,6 +1315,7 @@ impl RequestExecutionService {
                         if let Err(e) = self.apply_collection_var_delete(col, &write.key) {
                             tracing::warn!(error = %e, key = %write.key, "failed to persist collection var delete");
                         }
+                        var_ctx.collection.remove(&write.key);
                         continue;
                     }
                     let str_val = write
@@ -1332,6 +1336,7 @@ impl RequestExecutionService {
                     if let Err(e) = self.apply_collection_var_write(col, &write.key, &str_val) {
                         tracing::warn!(error = %e, key = %write.key, "failed to persist collection var write");
                     }
+                    var_ctx.collection.insert(write.key.clone(), str_val);
                 }
             }
         }
@@ -2821,6 +2826,26 @@ fn with_body_override(response: &HttpResponse, body: Option<&str>) -> HttpRespon
         patched.body_base64 = None;
     }
     patched
+}
+
+/// Shows a script's environment writes in the in-memory scope, so the next script of the
+/// same request reads what the previous one wrote. A null value deletes the key.
+fn mirror_env_writes(
+    scope: &mut std::collections::HashMap<String, String>,
+    writes: &[rocket_scripting::EnvVarWrite],
+) {
+    for write in writes {
+        if write.value.is_null() {
+            scope.remove(&write.key);
+            continue;
+        }
+        let text = write
+            .value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| write.value.to_string());
+        scope.insert(write.key.clone(), text);
+    }
 }
 
 /// Merges a script's runtime writes and deletes into the variable context.
@@ -6828,6 +6853,41 @@ mod tests {
         );
         // The response shown to the user is the real one.
         assert_ne!(output.response.body, "patched");
+    }
+
+    #[tokio::test]
+    async fn tests_script_sees_the_env_var_written_by_the_after_response_script() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("TOKEN", "old"));
+        let capture = CapturingScriptEngine::with_after_response(ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "TOKEN".into(),
+                value: serde_json::json!("new-token"),
+                persist: true,
+            }],
+            ..Default::default()
+        });
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(env))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.post_response_script = Some("// post".into());
+        input.tests_script = Some("// tests".into());
+        svc.execute(input).await.expect("execute failed");
+
+        let contexts = capture.contexts();
+        let tests_ctx = contexts
+            .iter()
+            .find(|c| c.phase == rocket_scripting::ScriptPhase::Tests)
+            .expect("tests phase ran");
+        assert_eq!(
+            tests_ctx.variables.env.get("TOKEN").map(String::as_str),
+            Some("new-token"),
+            "the tests phase must read the value the post-response script wrote"
+        );
     }
 
     #[tokio::test]
