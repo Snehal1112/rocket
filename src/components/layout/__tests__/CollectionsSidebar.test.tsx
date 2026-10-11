@@ -220,14 +220,14 @@ describe('CollectionsSidebar flow delete', () => {
     usePaneStore.setState({ activeCollection: 'col' });
   });
 
-  it('warns about unsaved edits, deletes the flow, closes its tab and refreshes the list', async () => {
-    usePaneStore.getState().openTab(loginTab({ isDirty: true }));
+  it('deletes the flow, closes a clean tab and refreshes the list', async () => {
+    usePaneStore.getState().openTab(loginTab());
     render(<CollectionsSidebar />, { wrapper });
 
     await userEvent.click(await screen.findByRole('button', { name: 'Actions for Login' }));
     await userEvent.click(await screen.findByText('Delete'));
     expect(await screen.findByText(/Delete flow 'Login'/)).toBeInTheDocument();
-    expect(screen.getByText(/unsaved changes that will be lost/)).toBeInTheDocument();
+    expect(screen.queryByText(/unsaved changes/)).not.toBeInTheDocument();
 
     vi.mocked(tauriApi.listFlows).mockResolvedValue([]);
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -237,6 +237,26 @@ describe('CollectionsSidebar flow delete', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Actions for Login' })).not.toBeInTheDocument(),
     );
+  });
+
+  it('keeps a dirty tab open and parked, so a later save recreates the file', async () => {
+    usePaneStore.getState().openTab(loginTab({ isDirty: true }));
+    usePaneStore.setState({
+      collectionTabState: {
+        other: { tabs: [loginTab({ id: 'parked', isDirty: true })], activeTabId: 'parked' },
+      },
+    });
+    render(<CollectionsSidebar />, { wrapper });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for Login' }));
+    await userEvent.click(await screen.findByText('Delete'));
+    expect(await screen.findByText(/tab stays open/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(tauriApi.deleteFlow).toHaveBeenCalledWith('col', 'Login'));
+    await waitFor(() => expect(toast.info).toHaveBeenCalled());
+    expect(flowTabs()).toHaveLength(1);
+    expect(usePaneStore.getState().collectionTabState.other?.tabs).toHaveLength(1);
   });
 
   it('blocks delete while the flow runs and leaves the dialog closed', async () => {

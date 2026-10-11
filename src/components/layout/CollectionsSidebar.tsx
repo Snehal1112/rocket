@@ -50,6 +50,7 @@ import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
+import { isFlowTab } from '@/types/pane-types';
 import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
@@ -125,6 +126,7 @@ export function CollectionsSidebar() {
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
+    let keepDirtyFlow = false;
     try {
       if (deleteTarget.type === 'flow') {
         // A run can start while the dialog is open, so check again here.
@@ -141,11 +143,24 @@ export function CollectionsSidebar() {
           setDeleteTarget(null);
           return;
         }
+        // A dirty tab holds edits the file may no longer have, so it must outlive the delete.
+        keepDirtyFlow = hasDirtyFlow(
+          before.root,
+          before.collectionTabState,
+          deleteTarget.collection,
+          deleteTarget.name,
+        );
         await deleteFlow(deleteTarget.collection, deleteTarget.name);
-        // Drop tabs parked in collection snapshots too, so none comes back after a switch.
-        usePaneStore.getState().dropParkedFlowTabs(deleteTarget.collection, deleteTarget.name);
-        // The flow is gone, so its in-memory Auth tokens go too, whichever tab held them.
-        useFlowAuthStore.getState().clearFlow(deleteTarget.collection, deleteTarget.name);
+        if (keepDirtyFlow) {
+          toast.info(
+            `"${deleteTarget.name}" was deleted. Its open tab has unsaved edits, so save it to recreate the file.`,
+          );
+        } else {
+          // Drop tabs parked in collection snapshots too, so none comes back after a switch.
+          usePaneStore.getState().dropParkedFlowTabs(deleteTarget.collection, deleteTarget.name);
+          // The flow is gone, so its in-memory Auth tokens go too, whichever tab held them.
+          useFlowAuthStore.getState().clearFlow(deleteTarget.collection, deleteTarget.name);
+        }
         void getQueryClient().invalidateQueries({
           queryKey: flowKeys.collection(deleteTarget.collection),
         });
@@ -172,6 +187,7 @@ export function CollectionsSidebar() {
         store.closeExampleTabsUnder(deleteTarget.collection, deleteTarget.path);
       }
       for (const { tab, groupId } of findAffectedTabs(store.root, deleteTarget)) {
+        if (keepDirtyFlow && isFlowTab(tab) && tab.isDirty) continue;
         store.closeTab(tab.id, groupId);
       }
       void getQueryClient().invalidateQueries({ queryKey: collectionKeys.all });
@@ -657,7 +673,8 @@ export function CollectionsSidebar() {
               {flowsUsingTarget.length > 0 &&
                 ` Used by ${flowsUsingTarget.length} ${flowsUsingTarget.length === 1 ? 'flow' : 'flows'}: ${flowsUsingTarget.join(', ')}.`}
               {deleteHasDirtyScripts && ' An open script has unsaved changes that will be lost.'}
-              {deleteHasDirtyFlows && ' An open flow has unsaved changes that will be lost.'}
+              {deleteHasDirtyFlows &&
+                ' An open flow has unsaved changes. Its tab stays open so you can save it again.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
