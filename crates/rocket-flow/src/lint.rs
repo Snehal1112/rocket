@@ -416,7 +416,10 @@ fn auth_no_effect_lint(
     else {
         return None;
     };
-    if index.auth_sources.contains(node.id.as_str()) {
+    // Any wire out of the node uses its value, such as an `auth` wire or a data
+    // wire into a header. Only a node with no wire out can be idle.
+    if index.auth_sources.contains(node.id.as_str()) || index.successors.contains_key(node.id.as_str())
+    {
         return None;
     }
     if *apply_to_inherit && inherited_auth_may_apply(flow, index, ctx) {
@@ -518,6 +521,12 @@ fn callback_lints(node: &FlowNode, index: &GraphIndex<'_>, ctx: &dyn LintContext
         return Vec::new();
     };
     if index.waits.is_empty() {
+        return Vec::new();
+    }
+    // A wire replaces the saved field at run time, so the saved text may not be
+    // sent. Stay silent rather than guess which field carried the callback URL.
+    let wired = index.wired_fields(&node.id);
+    if wired.url || wired.body || wired.headers {
         return Vec::new();
     }
     let names: Vec<&str> = index.waits.iter().map(|(name, _)| *name).collect();
@@ -1473,6 +1482,32 @@ mod tests {
                 edge("e1", "r", handle::RESULT, "w", handle::TRIGGER),
                 edge("e2", "w", handle::RESULT, "r", handle::TRIGGER),
             ],
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["payment"]));
+        assert!(only(&lints, CALLBACK_NOT_WIRED).is_empty());
+    }
+
+    #[test]
+    fn an_auth_node_wired_into_a_data_field_is_not_idle() {
+        let f = flow(
+            vec![auth("a", false), inline_req("r"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", "headers[Authorization].value"),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        assert!(only(&lint(&f), AUTH_NO_EFFECT).is_empty());
+    }
+
+    #[test]
+    fn a_wired_url_means_the_saved_url_is_not_scanned_for_callbacks() {
+        let f = flow(
+            vec![
+                input("in"),
+                request("r"),
+                wait_node("w", "Pay wait", "payment"),
+            ],
+            vec![edge("e1", "in", handle::RESULT, "r", "url")],
         );
         let lints = lint_with(&f, &sends("r.yml", &["payment"]));
         assert!(only(&lints, CALLBACK_NOT_WIRED).is_empty());
