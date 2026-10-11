@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { useBackendFlowLints } from '@/hooks/useBackendFlowLints';
+import { useFlowLintEnvironment } from '@/hooks/useFlowLintEnvironment';
 import { getActiveGlobalEnvName } from '@/lib/execute-request';
 import { collectFlowAuthTokens } from '@/lib/flow-auth-preflight';
 import {
@@ -68,15 +69,6 @@ const WIRE_STEP = (edgeId: string): FlowWriteOptions => ({
   coalesceKey: `wire:${edgeId}`,
   coalesceMs: Number.POSITIVE_INFINITY,
 });
-
-/** The active global environment name, or null when none is set or the cache is not ready. */
-function readActiveGlobalEnvName(): string | null {
-  try {
-    return getActiveGlobalEnvName() ?? null;
-  } catch {
-    return null;
-  }
-}
 
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
@@ -190,11 +182,9 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     if (wasDirtyRef.current && !tab.isDirty) setLintRefresh((n) => n + 1);
     wasDirtyRef.current = tab.isDirty;
   }, [tab.isDirty]);
+  const lintEnvironment = useFlowLintEnvironment(activeEnvironmentName);
   const backendIssues = useBackendFlowLints(tab.collectionName ?? null, lintTarget, undefined, {
-    environment: {
-      environmentName: activeEnvironmentName,
-      globalEnvName: readActiveGlobalEnvName(),
-    },
+    environment: lintEnvironment,
     refreshKey: lintRefresh,
   });
   const graphIds = useMemo(

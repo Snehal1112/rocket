@@ -128,6 +128,8 @@ fn resolved_at_run_time(name: &str) -> bool {
         || name.starts_with('$')
         || name.starts_with("process.env.")
         || name.starts_with("callback.")
+        // A run adds `flow-auth.<id>`, `flow-callback.<id>.url` and similar secrets.
+        || name.starts_with("flow-")
 }
 
 impl LintContext for CollectionLintContext<'_> {
@@ -420,6 +422,7 @@ mod tests {
             "$notARealOne",
             "process.env.HOME",
             "callback.payment",
+            "flow-callback.n1.url",
             "",
         ] {
             assert_eq!(ctx.variable_is_known(name), None, "{name:?}");
