@@ -84,6 +84,59 @@ impl RequestPatch {
     }
 }
 
+/// One folder variable the agent proposes. There is no secret flag: a folder
+/// variable is never secret at run time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProposedVariable {
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+/// A partial update of a folder's settings. `None` keeps a section as it is.
+/// A given section replaces the whole section. A script given as an empty
+/// string clears it. Auth cannot be patched.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FolderSettingsPatch {
+    pub headers: Option<Vec<Header>>,
+    pub variables: Option<Vec<ProposedVariable>>,
+    pub pre_request_script: Option<String>,
+    pub post_response_script: Option<String>,
+    pub tests_script: Option<String>,
+    pub docs: Option<String>,
+}
+
+impl FolderSettingsPatch {
+    /// Names of the sections this patch sets, in a fixed order.
+    pub fn changed_fields(&self) -> Vec<&'static str> {
+        let mut fields = Vec::new();
+        if self.headers.is_some() {
+            fields.push("headers");
+        }
+        if self.variables.is_some() {
+            fields.push("variables");
+        }
+        if self.pre_request_script.is_some() {
+            fields.push("pre-request script");
+        }
+        if self.post_response_script.is_some() {
+            fields.push("post-response script");
+        }
+        if self.tests_script.is_some() {
+            fields.push("tests script");
+        }
+        if self.docs.is_some() {
+            fields.push("docs");
+        }
+        fields
+    }
+
+    /// True when the patch sets no section.
+    pub fn is_empty(&self) -> bool {
+        self.changed_fields().is_empty()
+    }
+}
+
 /// One proposed operation. Paths are relative to the collection root, and
 /// `""` is the root. Update-style changes carry `base_fingerprint`, the hash
 /// of the item's stored form when the change was proposed.
@@ -130,6 +183,12 @@ pub enum ProposedChange {
         key: String,
         value: String,
     },
+    UpdateFolderSettings {
+        collection: String,
+        folder_path: String,
+        patch: FolderSettingsPatch,
+        base_fingerprint: String,
+    },
 }
 
 impl ProposedChange {
@@ -142,7 +201,8 @@ impl ProposedChange {
             | ProposedChange::EditScript { collection, .. }
             | ProposedChange::MoveItem { collection, .. }
             | ProposedChange::RenameItem { collection, .. }
-            | ProposedChange::SetEnvVar { collection, .. } => collection,
+            | ProposedChange::SetEnvVar { collection, .. }
+            | ProposedChange::UpdateFolderSettings { collection, .. } => collection,
         }
     }
 
@@ -159,6 +219,9 @@ impl ProposedChange {
                 base_fingerprint, ..
             }
             | ProposedChange::RenameItem {
+                base_fingerprint, ..
+            }
+            | ProposedChange::UpdateFolderSettings {
                 base_fingerprint, ..
             } => Some(base_fingerprint),
             ProposedChange::CreateFolder { .. }
@@ -181,6 +244,9 @@ impl ProposedChange {
                 base_fingerprint, ..
             }
             | ProposedChange::RenameItem {
+                base_fingerprint, ..
+            }
+            | ProposedChange::UpdateFolderSettings {
                 base_fingerprint, ..
             } => *base_fingerprint = fingerprint,
             ProposedChange::CreateFolder { .. }
@@ -252,6 +318,15 @@ impl ProposedChange {
                 key,
                 ..
             } => format!("Set variable '{key}' in environment '{environment}' of {collection}"),
+            ProposedChange::UpdateFolderSettings {
+                collection,
+                folder_path,
+                patch,
+                ..
+            } => format!(
+                "Update {} of folder '{folder_path}' in {collection}",
+                patch.changed_fields().join(", ")
+            ),
         }
     }
 }
@@ -430,5 +505,59 @@ mod tests {
         assert_eq!(ScriptPhase::PreRequest.label(), "pre-request");
         assert_eq!(ScriptPhase::PostResponse.label(), "post-response");
         assert_eq!(ScriptPhase::Tests.label(), "tests");
+    }
+
+    fn folder_update(patch: FolderSettingsPatch) -> ProposedChange {
+        ProposedChange::UpdateFolderSettings {
+            collection: "demo".into(),
+            folder_path: "auth/v2".into(),
+            patch,
+            base_fingerprint: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_folder_patch_lists_the_sections_it_sets_in_a_fixed_order() {
+        assert!(FolderSettingsPatch::default().is_empty());
+        let patch = FolderSettingsPatch {
+            docs: Some("notes".into()),
+            headers: Some(vec![]),
+            pre_request_script: Some(String::new()),
+            ..FolderSettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+        assert_eq!(
+            patch.changed_fields(),
+            vec!["headers", "pre-request script", "docs"]
+        );
+    }
+
+    #[test]
+    fn a_folder_update_summary_names_sections_and_never_values() {
+        let change = folder_update(FolderSettingsPatch {
+            headers: Some(vec![Header::new("X-Key", "header-value-must-not-leak")]),
+            variables: Some(vec![ProposedVariable {
+                key: "HOST".into(),
+                value: "variable-value-must-not-leak".into(),
+                enabled: true,
+            }]),
+            tests_script: Some("script-body-must-not-leak".into()),
+            ..FolderSettingsPatch::default()
+        });
+        let summary = change.summary();
+        assert_eq!(
+            summary,
+            "Update headers, variables, tests script of folder 'auth/v2' in demo"
+        );
+        assert!(!summary.contains("must-not-leak"));
+    }
+
+    #[test]
+    fn a_folder_update_has_a_collection_and_takes_a_fingerprint() {
+        let mut change = folder_update(FolderSettingsPatch::default());
+        assert_eq!(change.collection(), "demo");
+        assert_eq!(change.base_fingerprint(), Some(""));
+        change.set_base_fingerprint("abc".into());
+        assert_eq!(change.base_fingerprint(), Some("abc"));
     }
 }

@@ -35,7 +35,7 @@ cargo test -p rocket-acp -j4
 | `update.rs` | `AcpUpdate` (typed agent updates) and `ToolCallStatus` |
 | `prompt.rs` | `PromptPart` (text and embedded text resources) |
 | `mcp_server_spec.rs` | `McpServerSpec` |
-| `proposal.rs` | `AgentProposal`, `ProposalStatus`, `ProposedChange`, `ProposedRequest`, `RequestPatch`, `ScriptPhase`: pure proposal data, applied by `rocket-app`'s `ProposalService` |
+| `proposal.rs` | `AgentProposal`, `ProposalStatus`, `ProposedChange`, `ProposedRequest`, `RequestPatch`, `FolderSettingsPatch`, `ProposedVariable`, `ScriptPhase`: pure proposal data, applied by `rocket-app`'s `ProposalService` |
 | `conversation.rs` | Stored assistant conversations: `ConversationRecord`, `ConversationSummary`, `StoredMessage`, caps (`MAX_CONVERSATIONS`, `MAX_MESSAGES`, `MAX_MESSAGE_TEXT_BYTES`), `validate_conversation_id` (lowercase UUID) and the `ConversationRepository` trait. Persisted as snake_case YAML by `rocket-infra`; see `.claude/assistant-conversations.md`. |
 
 ### Key Design Points
@@ -46,6 +46,7 @@ cargo test -p rocket-acp -j4
   RocketVault `SecretManagerService`/`VaultSecretFetcher` machinery.
 - No cross-domain-crate dependencies — other entities are referenced by plain
   `String` id, not by importing another domain crate's types.
+- `FolderSettingsPatch` has no auth field and uses `ProposedVariable` because this crate must not depend on `rocket-collection`.
 - `AcpSessionClient` must stay object-safe (`rocket-app` holds it as
   `Box<dyn AcpSessionClient>`) and must not depend on `agent-client-protocol`,
   `DomainEvent`, or Tauri. `send_prompt` streams typed `AcpUpdate`s through a plain

@@ -407,6 +407,12 @@ impl ProposalService {
                 }
                 Some(self.item_fingerprint(&collection, &root, path)?)
             }
+            // Replaced in plan 01 task 3.
+            ProposedChange::UpdateFolderSettings { .. } => {
+                return Err(DomainError::InvalidInput(
+                    "folder settings changes are not supported yet".to_string(),
+                ));
+            }
             ProposedChange::SetEnvVar {
                 environment, key, ..
             } => {
@@ -579,6 +585,8 @@ impl ProposalService {
             // `apply_env_var` compares the variable's fingerprint on the copy
             // it saves.
             ProposedChange::SetEnvVar { .. } => Ok(true),
+            // Replaced in plan 01 task 3.
+            ProposedChange::UpdateFolderSettings { .. } => Ok(false),
         }
     }
 
@@ -700,6 +708,8 @@ impl ProposalService {
                 key,
                 value,
             } => self.apply_env_var(collection, environment, key, value, env_fingerprint),
+            // Replaced in plan 01 task 3.
+            ProposedChange::UpdateFolderSettings { .. } => Ok(false),
         }
     }
 
@@ -1054,6 +1064,7 @@ fn normalize_paths(change: &mut ProposedChange) {
         }
         ProposedChange::RenameItem { path, .. } => trim(path),
         ProposedChange::SetEnvVar { .. } => {}
+        ProposedChange::UpdateFolderSettings { folder_path, .. } => trim(folder_path),
     }
 }
 
@@ -1070,6 +1081,7 @@ fn paths_of(change: &ProposedChange) -> Vec<&str> {
         } => vec![from_path.as_str(), to_folder.as_str()],
         ProposedChange::RenameItem { path, .. } => vec![path.as_str()],
         ProposedChange::SetEnvVar { .. } => vec![],
+        ProposedChange::UpdateFolderSettings { folder_path, .. } => vec![folder_path.as_str()],
     }
 }
 

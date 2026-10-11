@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use rocket_acp::proposal::{
-    AgentProposal, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+    AgentProposal, FolderSettingsPatch, ProposedChange, ProposedRequest, ProposedVariable,
+    RequestPatch, ScriptPhase,
 };
 use rocket_app::ProposalService;
 use rocket_shared::error::DomainError;
@@ -70,6 +71,62 @@ pub enum ProposedChangeDto {
         key: String,
         value: String,
     },
+    UpdateFolderSettings {
+        collection: String,
+        folder_path: String,
+        patch: FolderSettingsPatchDto,
+    },
+}
+
+/// Only the sections the patch sets are present.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderSettingsPatchDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<Vec<Header>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variables: Option<Vec<ProposedVariableDto>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pre_request_script: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_response_script: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tests_script: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposedVariableDto {
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+}
+
+impl From<ProposedVariable> for ProposedVariableDto {
+    fn from(variable: ProposedVariable) -> Self {
+        Self {
+            key: variable.key,
+            value: variable.value,
+            enabled: variable.enabled,
+        }
+    }
+}
+
+impl From<FolderSettingsPatch> for FolderSettingsPatchDto {
+    fn from(patch: FolderSettingsPatch) -> Self {
+        Self {
+            headers: patch.headers,
+            variables: patch
+                .variables
+                .map(|list| list.into_iter().map(Into::into).collect()),
+            pre_request_script: patch.pre_request_script,
+            post_response_script: patch.post_response_script,
+            tests_script: patch.tests_script,
+            docs: patch.docs,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -221,6 +278,16 @@ impl From<ProposedChange> for ProposedChangeDto {
                 environment,
                 key,
                 value,
+            },
+            ProposedChange::UpdateFolderSettings {
+                collection,
+                folder_path,
+                patch,
+                ..
+            } => Self::UpdateFolderSettings {
+                collection,
+                folder_path,
+                patch: patch.into(),
             },
         }
     }
@@ -480,5 +547,30 @@ mod tests {
         let json = serde_json::to_value(AgentProposalDto::from(proposal)).expect("serialize");
         assert_eq!(json["change"]["op"], "setEnvVar");
         assert_eq!(json["change"]["environment"], "dev");
+    }
+
+    #[test]
+    fn a_folder_update_dto_is_camel_case_and_omits_unset_sections() {
+        let dto = ProposedChangeDto::from(ProposedChange::UpdateFolderSettings {
+            collection: "demo".into(),
+            folder_path: "auth".into(),
+            patch: FolderSettingsPatch {
+                tests_script: Some("x".into()),
+                variables: Some(vec![ProposedVariable {
+                    key: "HOST".into(),
+                    value: "h".into(),
+                    enabled: true,
+                }]),
+                ..FolderSettingsPatch::default()
+            },
+            base_fingerprint: "secret-fingerprint".into(),
+        });
+        let json = serde_json::to_value(&dto).expect("serialize");
+        assert_eq!(json["op"], "updateFolderSettings");
+        assert_eq!(json["folderPath"], "auth");
+        assert_eq!(json["patch"]["testsScript"], "x");
+        assert_eq!(json["patch"]["variables"][0]["key"], "HOST");
+        assert!(json["patch"].get("headers").is_none());
+        assert!(!json.to_string().contains("secret-fingerprint"));
     }
 }

@@ -19,7 +19,8 @@ pub use conversation::{
 };
 pub use mcp_server_spec::McpServerSpec;
 pub use proposal::{
-    AgentProposal, ProposalStatus, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+    AgentProposal, FolderSettingsPatch, ProposalStatus, ProposedChange, ProposedRequest,
+    ProposedVariable, RequestPatch, ScriptPhase,
 };
 pub use prompt::PromptPart;
 pub use session::AcpSessionClient;
