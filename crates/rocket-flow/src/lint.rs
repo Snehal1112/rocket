@@ -30,6 +30,8 @@ pub const UNKNOWN_VARIABLE: &str = "unknown_variable";
 pub const AUTH_NO_EFFECT: &str = "auth_no_effect";
 /// An `auth` wire into a saved request that already has its own explicit auth.
 pub const AUTH_WIRE_OVERRIDES_AUTH: &str = "auth_wire_overrides_auth";
+/// A saved request sends a Wait for callback URL but has no path to that Wait.
+pub const CALLBACK_NOT_WIRED: &str = "callback_not_wired";
 
 /// Longest variable name the variable rule lints.
 const MAX_NAME_LEN: usize = 64;
@@ -108,6 +110,7 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
         lints.extend(unknown_variable_lint(node, &index, ctx));
         lints.extend(auth_no_effect_lint(node, flow, &index, ctx));
         lints.extend(auth_wire_lints(node, &index, ctx));
+        lints.extend(callback_lints(node, &index, ctx));
     }
     lints
 }
@@ -498,6 +501,50 @@ fn auth_wire_lints(
             );
             lint.edge_id = Some(edge.id.clone());
             Some(lint)
+        })
+        .collect()
+}
+
+/// One lint per Wait for callback node whose `{{callback.<name>}}` a saved
+/// request sends without a path to that Wait. The request registers the URL,
+/// so it must run before the Wait starts (rule V15 checks inline requests).
+/// Disabled fields and scripts are not scanned, so a lint here is certain.
+fn callback_lints(node: &FlowNode, index: &GraphIndex<'_>, ctx: &dyn LintContext) -> Vec<FlowLint> {
+    let FlowNodeKind::Request {
+        source: RequestSource::Saved { request_path },
+        ..
+    } = &node.kind
+    else {
+        return Vec::new();
+    };
+    if index.waits.is_empty() {
+        return Vec::new();
+    }
+    let names: Vec<&str> = index.waits.iter().map(|(name, _)| *name).collect();
+    let Some(used) = ctx.saved_request_callbacks(request_path, &names) else {
+        return Vec::new();
+    };
+    if used.is_empty() {
+        return Vec::new();
+    }
+    let downstream = index.downstream_of(&node.id);
+    index
+        .waits
+        .iter()
+        .filter(|(name, wait)| {
+            used.iter().any(|u| u.as_str() == *name) && !downstream.contains(wait.id.as_str())
+        })
+        .map(|(_, wait)| {
+            warning(
+                CALLBACK_NOT_WIRED,
+                node,
+                format!(
+                    "'{}' sends the callback URL of '{}', but it is not wired before that Wait for callback node.",
+                    display_label(node),
+                    display_label(wait)
+                ),
+                "Wire this request's 'result' exit into the Wait for callback node's 'trigger' input, so the URL is sent before the wait starts.",
+            )
         })
         .collect()
 }
@@ -1298,6 +1345,157 @@ mod tests {
             let text = format!("{} {}", l.message, l.hint.as_deref().unwrap_or(""));
             assert!(!text.contains("{{token}}"), "leaked in: {text}");
         }
+    }
+
+    fn wait_node(id: &str, label: &str, name: &str) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::WaitForCallback {
+                label: label.to_string(),
+                name: name.to_string(),
+                timeout_ms: 60_000,
+                accept_when: None,
+            },
+        )
+    }
+
+    /// `path` sends `{{callback.<name>}}` for each given name.
+    fn sends(path: &str, names: &[&str]) -> AuthCallbackContext {
+        AuthCallbackContext {
+            callbacks: HashMap::from([(
+                path.to_string(),
+                names.iter().map(|n| n.to_string()).collect(),
+            )]),
+            ..AuthCallbackContext::default()
+        }
+    }
+
+    #[test]
+    fn a_saved_request_wired_before_its_wait_is_not_flagged() {
+        let f = flow(
+            vec![request("r"), wait_node("w", "Pay wait", "payment"), output("out")],
+            vec![
+                edge("e1", "r", handle::RESULT, "w", handle::TRIGGER),
+                edge("e2", "w", handle::RESULT, "out", "value"),
+            ],
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["payment"]));
+        assert!(only(&lints, CALLBACK_NOT_WIRED).is_empty());
+    }
+
+    #[test]
+    fn a_saved_request_with_no_path_to_its_wait_is_one_warning_naming_both_labels() {
+        let f = flow(
+            vec![request("r"), wait_node("w", "Pay wait", "payment"), output("out")],
+            vec![edge("e1", "w", handle::RESULT, "out", "value")],
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["payment"]));
+        let found = only(&lints, CALLBACK_NOT_WIRED);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].node_id.as_deref(), Some("r"));
+        assert_eq!(found[0].edge_id, None);
+        assert_eq!(found[0].severity, LintSeverity::Warning);
+        assert!(found[0].message.contains("'r'") && found[0].message.contains("'Pay wait'"));
+        assert!(found[0].hint.is_some());
+    }
+
+    #[test]
+    fn a_request_downstream_of_its_wait_is_flagged() {
+        let f = flow(
+            vec![wait_node("w", "Pay wait", "payment"), request("r"), output("out")],
+            vec![
+                edge("e1", "w", handle::RESULT, "r", handle::TRIGGER),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["payment"]));
+        assert_eq!(only(&lints, CALLBACK_NOT_WIRED).len(), 1);
+    }
+
+    #[test]
+    fn a_request_reaching_its_wait_through_other_nodes_is_not_flagged() {
+        let f = flow(
+            vec![request("r1"), request("r2"), wait_node("w", "Pay wait", "payment")],
+            vec![
+                edge("e1", "r1", handle::RESULT, "r2", handle::TRIGGER),
+                edge("e2", "r2", handle::RESULT, "w", handle::TRIGGER),
+            ],
+        );
+        let lints = lint_with(&f, &sends("r1.yml", &["payment"]));
+        assert!(only(&lints, CALLBACK_NOT_WIRED).is_empty());
+    }
+
+    #[test]
+    fn a_request_that_does_not_use_the_variable_or_is_unknown_is_silent() {
+        let f = flow(
+            vec![request("r"), wait_node("w", "Pay wait", "payment")],
+            Vec::new(),
+        );
+        assert!(only(&lint_with(&f, &sends("r.yml", &[])), CALLBACK_NOT_WIRED).is_empty());
+        assert!(only(
+            &lint_with(&f, &sends("other.yml", &["payment"])),
+            CALLBACK_NOT_WIRED
+        )
+        .is_empty());
+        assert!(only(&lint(&f), CALLBACK_NOT_WIRED).is_empty());
+    }
+
+    #[test]
+    fn only_the_wait_without_a_path_is_named() {
+        let f = flow(
+            vec![
+                request("r"),
+                wait_node("w1", "First wait", "one"),
+                wait_node("w2", "Second wait", "two"),
+            ],
+            vec![edge("e1", "r", handle::RESULT, "w1", handle::TRIGGER)],
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["one", "two"]));
+        let found = only(&lints, CALLBACK_NOT_WIRED);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].message.contains("'Second wait'"), "{}", found[0].message);
+    }
+
+    #[test]
+    fn an_inline_request_is_left_to_the_validate_rule() {
+        let f = flow(
+            vec![inline_req("r"), wait_node("w", "Pay wait", "payment")],
+            Vec::new(),
+        );
+        assert!(only(&lint_with(&f, &sends("r", &["payment"])), CALLBACK_NOT_WIRED).is_empty());
+    }
+
+    #[test]
+    fn a_cycle_does_not_hang_the_callback_rule() {
+        let f = flow(
+            vec![request("r"), wait_node("w", "Pay wait", "payment")],
+            vec![
+                edge("e1", "r", handle::RESULT, "w", handle::TRIGGER),
+                edge("e2", "w", handle::RESULT, "r", handle::TRIGGER),
+            ],
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["payment"]));
+        assert!(only(&lints, CALLBACK_NOT_WIRED).is_empty());
+    }
+
+    #[test]
+    fn the_callback_lint_never_quotes_the_wait_name() {
+        let f = flow(
+            vec![request("r"), wait_node("w", "Pay wait", "payment")],
+            Vec::new(),
+        );
+        let lints = lint_with(&f, &sends("r.yml", &["payment"]));
+        let found = only(&lints, CALLBACK_NOT_WIRED);
+        assert_eq!(found.len(), 1);
+        let text = format!(
+            "{} {}",
+            found[0].message,
+            found[0].hint.as_deref().unwrap_or("")
+        );
+        assert!(
+            !text.contains("payment") && !text.contains("callback."),
+            "{text}"
+        );
     }
 
     fn keys(lints: &[FlowLint]) -> Vec<(Option<&str>, Option<&str>, &str)> {

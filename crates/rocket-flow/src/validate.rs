@@ -388,8 +388,9 @@ fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
 /// V15: every inline Request that sends `{{callback.<name>}}` must run before
 /// the Wait for callback node of that name, so it is an ancestor of the Wait
 /// node in the wire graph. Only inline url, headers and body are inspected.
-/// Saved requests cannot be read in this pure crate, so they are skipped, and
-/// so are values fed in through wired fields.
+/// Saved requests cannot be read in this pure crate, so the
+/// `callback_not_wired` lint in `lint.rs` covers them. Values fed in through
+/// wired fields are skipped.
 fn check_callback_order(flow: &Flow) -> Result<(), FlowGraphError> {
     for wait in &flow.nodes {
         let FlowNodeKind::WaitForCallback { name, .. } = &wait.kind else {

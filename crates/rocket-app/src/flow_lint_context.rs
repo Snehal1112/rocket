@@ -167,6 +167,15 @@ impl LintContext for CollectionLintContext<'_> {
             request_path,
         )
     }
+
+    fn saved_request_callbacks(&self, request_path: &str, names: &[&str]) -> Option<Vec<String>> {
+        crate::flow_lint_facts::saved_request_callbacks(
+            self.repo,
+            self.collection,
+            request_path,
+            names,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -331,6 +340,28 @@ mod tests {
         let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
         assert_eq!(ctx.saved_request_auth_is_explicit("a.yml"), Some(true));
         assert_eq!(ctx.saved_request_auth_is_explicit("gone.yml"), None);
+    }
+
+    #[test]
+    fn the_context_answers_which_callbacks_a_saved_request_sends() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request(
+            "demo",
+            "hook.yml",
+            Request::new(
+                "hook",
+                HttpMethod::Post,
+                "https://example.test/{{callback.payment}}",
+            ),
+        );
+        let src = sources(&repo, None, None);
+        let flow = flow_of(vec![inline_node("a")]);
+        let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
+        assert_eq!(
+            ctx.saved_request_callbacks("hook.yml", &["payment", "other"]),
+            Some(vec!["payment".to_string()])
+        );
+        assert_eq!(ctx.saved_request_callbacks("gone.yml", &["payment"]), None);
     }
 
     #[test]
