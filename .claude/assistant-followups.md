@@ -67,7 +67,9 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 - `extra_env` is not implemented.
 - Agent stderr is discarded, so a failed start shows no reason (`acp_agent_client.rs` ~279).
 - There is no handshake timeout.
-- The credential env var name format is not validated (`crates/rocket-app/src/agent_config_service.rs` ~100-117).
+- Hardening ideas for the agent credential sources: when a config becomes `keychain` from another source (or is new), delete any old entry for its id first, so a failed best-effort delete cannot leave a stale one behind.
+- Editing a vault agent, choosing Keychain and leaving the field blank saves an agent with no entry. It fails closed with a clear message at Test or session start. A fix should check that the source was not `keychain` when the dialog opened, not `!hasSavedCredential`, because a locked keychain reads as "not saved".
+- The failure toast after a credential save shows the raw backend text. Every backend error on that path is value-free today. A fixed message would be defense in depth.
 - Stored conversations do not scrub agent credentials from the env or keychain sources (same as vault values).
 - The credential commands run the keychain call on a runtime thread (no `spawn_blocking`).
 - A token typed into a prompt is stored.

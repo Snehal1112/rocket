@@ -88,7 +88,7 @@ Nothing in the messages quotes a value. The agent process receives the value onl
 - Old file without the new fields: loads as `vault`, unchanged.
 - `env` with a name Rocket does not have: clear error at session start and in Test, before any process is spawned.
 - Keychain unavailable (headless Linux without a secret service): `get_strict` error is surfaced as "the OS keychain is not available"; there is no plaintext fallback.
-- A config switched from `vault` to `keychain` keeps its old vault fields in the file (harmless), and they are ignored.
+- The dialog sends empty vault fields for a `keychain` or `env` config, so a config switched away from `vault` loses its old vault fields on the next save. A hand-edited file that keeps them is harmless, and they are ignored.
 - Two sessions started from the same config read the credential separately at each start.
 
 ## 9. Privacy and known limits
