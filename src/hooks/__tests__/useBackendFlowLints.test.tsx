@@ -58,7 +58,48 @@ describe('useBackendFlowLints', () => {
     rerender({ flow: outputs(2) });
     await flush();
     expect(lintFlow).toHaveBeenCalledTimes(1);
-    expect(lintFlow).toHaveBeenCalledWith('demo', outputs(2));
+    expect(lintFlow).toHaveBeenCalledWith('demo', outputs(2), {
+      environmentName: null,
+      globalEnvName: null,
+    });
+  });
+
+  it('lints again when the active environment changes', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    const { rerender } = renderHook(
+      ({ env }) =>
+        useBackendFlowLints('demo', outputs(0), undefined, {
+          environment: { environmentName: env, globalEnvName: null },
+        }),
+      { initialProps: { env: 'dev' } },
+    );
+    await flush();
+    expect(lintFlow).toHaveBeenLastCalledWith('demo', outputs(0), {
+      environmentName: 'dev',
+      globalEnvName: null,
+    });
+    rerender({ env: 'prod' });
+    await flush();
+    expect(lintFlow).toHaveBeenCalledTimes(2);
+    expect(lintFlow).toHaveBeenLastCalledWith('demo', outputs(0), {
+      environmentName: 'prod',
+      globalEnvName: null,
+    });
+  });
+
+  it('lints again when the refresh key changes, such as after a save', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    const { rerender } = renderHook(
+      ({ refreshKey }) => useBackendFlowLints('demo', outputs(0), undefined, { refreshKey }),
+      { initialProps: { refreshKey: 0 } },
+    );
+    await flush();
+    rerender({ refreshKey: 0 });
+    await flush();
+    expect(lintFlow).toHaveBeenCalledTimes(1);
+    rerender({ refreshKey: 1 });
+    await flush();
+    expect(lintFlow).toHaveBeenCalledTimes(2);
   });
 
   it('does not lint again when a render brings an equal graph', async () => {

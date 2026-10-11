@@ -69,6 +69,15 @@ const WIRE_STEP = (edgeId: string): FlowWriteOptions => ({
   coalesceMs: Number.POSITIVE_INFINITY,
 });
 
+/** The active global environment name, or null when none is set or the cache is not ready. */
+function readActiveGlobalEnvName(): string | null {
+  try {
+    return getActiveGlobalEnvName() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
   const updateFlowNodes = usePaneStore((s) => s.updateFlowNodes);
   const updateFlowGraph = usePaneStore((s) => s.updateFlowGraph);
@@ -172,7 +181,22 @@ export function FlowPane({ tab, groupId }: { tab: FlowTab; groupId: string }) {
     () => flowPayloadFromTab(tab)?.flow ?? null,
     [tab.collectionName, tab.flowName, tab.nodes, tab.edges, tab.callbackHost],
   );
-  const backendIssues = useBackendFlowLints(tab.collectionName ?? null, lintTarget);
+  // A save lints again, because a saved request or a variable may have changed
+  // since the last edit. Undoing back to the saved state also clears the flag,
+  // which costs one extra lint and is harmless.
+  const [lintRefresh, setLintRefresh] = useState(0);
+  const wasDirtyRef = useRef(tab.isDirty);
+  useEffect(() => {
+    if (wasDirtyRef.current && !tab.isDirty) setLintRefresh((n) => n + 1);
+    wasDirtyRef.current = tab.isDirty;
+  }, [tab.isDirty]);
+  const backendIssues = useBackendFlowLints(tab.collectionName ?? null, lintTarget, undefined, {
+    environment: {
+      environmentName: activeEnvironmentName,
+      globalEnvName: readActiveGlobalEnvName(),
+    },
+    refreshKey: lintRefresh,
+  });
   const graphIds = useMemo(
     () => ({
       nodeIds: new Set(stable.nodes.map((n) => n.id)),

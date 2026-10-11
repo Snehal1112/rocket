@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { lintFlow } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -131,9 +132,47 @@ describe('FlowPane backend lint feed', () => {
     ]);
     render(<Harness />);
     await waitFor(() =>
-      expect(lintFlow).toHaveBeenCalledWith('demo', expect.objectContaining({ name: 'lint' })),
+      expect(lintFlow).toHaveBeenCalledWith(
+        'demo',
+        expect.objectContaining({ name: 'lint' }),
+        expect.any(Object),
+      ),
     );
     expect(await screen.findByRole('button', { name: '1 warning' })).toBeInTheDocument();
+  });
+
+  it('shows the dangling request and unknown variable lints in the issue list', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([
+      {
+        code: 'dangling_saved_request',
+        severity: 'error',
+        nodeId: 'req1',
+        message: "'Login' uses a saved request that no longer exists in this collection.",
+        hint: "Pick another saved request in the node's properties, or restore the request file.",
+      },
+      {
+        code: 'unknown_variable',
+        severity: 'warning',
+        nodeId: 'in1',
+        message: "'User' leaves {{who}} as literal text, because no variable has that name.",
+      },
+    ]);
+    render(<Harness />);
+    const button = await screen.findByRole('button', { name: /1 error, 1 warning/ });
+    await userEvent.click(button);
+    const list = await screen.findByRole('list', { name: 'Flow issues' });
+    expect(list).toHaveTextContent('no longer exists in this collection');
+    expect(list).toHaveTextContent('{{who}} as literal text');
+  });
+
+  it('lints again after a save clears the dirty flag', async () => {
+    vi.mocked(lintFlow).mockResolvedValue([]);
+    usePaneStore.getState().reset();
+    usePaneStore.getState().openTab({ ...baseTab, isDirty: true });
+    render(<Harness />);
+    await waitFor(() => expect(lintFlow).toHaveBeenCalledTimes(1));
+    act(() => usePaneStore.getState().markClean(baseTab.id));
+    await waitFor(() => expect(lintFlow).toHaveBeenCalledTimes(2), { timeout: 3000 });
   });
 
   it('keeps the canvas usable when the lint call fails', async () => {

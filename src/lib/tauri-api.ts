@@ -2453,9 +2453,24 @@ export interface FlowLint {
   hint?: string;
 }
 
-/** Lints the graph as the canvas holds it now, saved or not. */
-export const lintFlow = (collection: string, flow: Flow) =>
-  invoke<FlowLint[]>('lint_flow', { collection, flow });
+/** The environments a lint reads, by name. Null or absent means none is selected. */
+export interface FlowLintEnvironment {
+  environmentName?: string | null;
+  globalEnvName?: string | null;
+}
+
+/**
+ * Lints the graph as the canvas holds it now, saved or not. The environment
+ * names are the ones a run would use, so the variable rule can tell a typo
+ * from a defined name. Without them that rule stays silent.
+ */
+export const lintFlow = (collection: string, flow: Flow, environment: FlowLintEnvironment = {}) =>
+  invoke<FlowLint[]>('lint_flow', {
+    collection,
+    flow,
+    environmentName: environment.environmentName ?? null,
+    globalEnvName: environment.globalEnvName ?? null,
+  });
 
 export const deleteFlow = (collection: string, name: string) =>
   invoke<void>('delete_flow', { collection, name });

@@ -103,3 +103,32 @@ describe('mergeFlowIssues', () => {
     );
   });
 });
+
+describe('the F-21 and F-22 codes', () => {
+  it('are owned by the backend', () => {
+    expect(BACKEND_LINT_CODES).toEqual(
+      expect.arrayContaining(['dangling_saved_request', 'unknown_variable']),
+    );
+  });
+
+  it('map to client issues with their node, severity and hint', () => {
+    expect(
+      toFlowIssue({
+        code: 'dangling_saved_request',
+        severity: 'error',
+        nodeId: 'req1',
+        message: "'Login' uses a saved request that no longer exists in this collection.",
+        hint: 'Pick another saved request.',
+      }),
+    ).toEqual({
+      code: 'dangling_saved_request',
+      severity: 'error',
+      nodeId: 'req1',
+      message: "'Login' uses a saved request that no longer exists in this collection.",
+      hint: 'Pick another saved request.',
+    });
+    expect(
+      toFlowIssue({ code: 'unknown_variable', severity: 'warning', nodeId: 'n', message: 'm' }),
+    ).toEqual({ code: 'unknown_variable', severity: 'warning', nodeId: 'n', message: 'm' });
+  });
+});

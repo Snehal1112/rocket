@@ -695,4 +695,95 @@ mod tests {
             .expect("a flow with a dangling request must still save");
         assert_eq!(svc.get("demo", "Dangling").expect("get"), flow);
     }
+
+    fn inline_flow(url: &str) -> Flow {
+        Flow {
+            name: "Inline".to_string(),
+            nodes: vec![node_of(
+                "req",
+                FlowNodeKind::Request {
+                    label: "Get".to_string(),
+                    source: rocket_flow::RequestSource::Inline {
+                        request: rocket_flow::InlineRequestData {
+                            method: "GET".to_string(),
+                            url: url.to_string(),
+                            headers: vec![],
+                            body: None,
+                        },
+                    },
+                    debug: false,
+                    repeat_until: None,
+                },
+            )],
+            edges: vec![],
+            callback_host: None,
+        }
+    }
+
+    #[test]
+    fn lint_reports_an_unknown_variable_for_the_active_environment() {
+        use crate::test_doubles::{
+            ConfigurableCollectionRepo, NullEnvRepo, SharedCollectionRepo, StaticEnvRepo,
+        };
+        use rocket_environment::{Environment, Variable};
+        struct OneEnv(Environment);
+        impl rocket_environment::EnvironmentRepositoryFactory for OneEnv {
+            fn for_collection(
+                &self,
+                _collection: &str,
+            ) -> Box<dyn rocket_environment::EnvironmentRepository> {
+                Box::new(StaticEnvRepo(self.0.clone()))
+            }
+        }
+        let mut env = Environment::new("dev");
+        env.variables = vec![Variable::new("host", "h")];
+        let svc = FlowService::new(Box::new(UntouchedRepo)).with_lint_sources(
+            crate::flow_lint_context::LintSources {
+                collection_repo: Box::new(SharedCollectionRepo(ConfigurableCollectionRepo::new())),
+                env_factory: Box::new(OneEnv(env)),
+                global_env_repo: Box::new(NullEnvRepo),
+            },
+        );
+        let flow = inline_flow("{{host}}/{{typo}}");
+        let dev = crate::flow_lint_context::LintEnvironment {
+            environment_name: Some("dev"),
+            global_env_name: None,
+        };
+        let lints = svc.lint_with_environment("demo", &flow, dev);
+        assert_eq!(
+            lint_keys(&lints),
+            vec![(Some("req"), None, rocket_flow::lint::UNKNOWN_VARIABLE)]
+        );
+        assert!(lints[0].message.contains("{{typo}}"));
+        assert!(!lints[0].message.contains("host"));
+        // No environment selected: the rule cannot tell, so it stays silent.
+        assert!(svc.lint("demo", &flow).is_empty());
+    }
+
+    #[test]
+    fn a_saved_request_in_the_flow_silences_the_variable_rule() {
+        let svc = FlowService::new(Box::new(UntouchedRepo))
+            .with_lint_sources(lint_sources_with_nothing_saved());
+        let mut flow = inline_flow("{{typo}}");
+        flow.nodes.push(node_of(
+            "saved",
+            FlowNodeKind::Request {
+                label: "Saved".to_string(),
+                source: rocket_flow::RequestSource::Saved {
+                    request_path: "a.yml".to_string(),
+                },
+                debug: false,
+                repeat_until: None,
+            },
+        ));
+        let dev = crate::flow_lint_context::LintEnvironment {
+            environment_name: Some("dev"),
+            global_env_name: None,
+        };
+        let lints = svc.lint_with_environment("demo", &flow, dev);
+        assert!(
+            lints.iter().all(|l| l.code != rocket_flow::lint::UNKNOWN_VARIABLE),
+            "a saved request may set variables at run time"
+        );
+    }
 }

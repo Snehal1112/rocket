@@ -18,7 +18,23 @@ describe('lintFlow', () => {
   it('sends the unsaved graph and returns the lints', async () => {
     vi.mocked(invoke).mockResolvedValue([]);
     await expect(lintFlow('demo', flow)).resolves.toEqual([]);
-    expect(invoke).toHaveBeenCalledWith('lint_flow', { collection: 'demo', flow });
+    expect(invoke).toHaveBeenCalledWith('lint_flow', {
+      collection: 'demo',
+      flow,
+      environmentName: null,
+      globalEnvName: null,
+    });
+  });
+
+  it('sends the environment names the run would use', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await lintFlow('demo', flow, { environmentName: 'dev', globalEnvName: 'shared' });
+    expect(invoke).toHaveBeenCalledWith('lint_flow', {
+      collection: 'demo',
+      flow,
+      environmentName: 'dev',
+      globalEnvName: 'shared',
+    });
   });
 
   it('returns the golden fixture shape shared with the Rust DTO', async () => {

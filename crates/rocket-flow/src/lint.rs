@@ -23,6 +23,14 @@ pub const SWITCH_WITHOUT_DEFAULT: &str = "switch_without_default";
 pub const NO_PATH_TO_OUTPUT: &str = "no_path_to_output";
 /// A Request node uses a saved request that is no longer in the collection.
 pub const DANGLING_SAVED_REQUEST: &str = "dangling_saved_request";
+/// An inline Request or an Input node sends `{{name}}` as literal text,
+/// because no variable has that name.
+pub const UNKNOWN_VARIABLE: &str = "unknown_variable";
+
+/// Longest variable name the variable rule lints.
+const MAX_NAME_LEN: usize = 64;
+/// How many names a message lists before it counts the rest.
+const MAX_LISTED_NAMES: usize = 5;
 
 /// How serious a lint is. Neither severity blocks save or run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +88,7 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
         lints.extend(exit_lints(node, &index));
         lints.extend(no_path_lint(node, &index));
         lints.extend(dangling_request_lint(node, ctx));
+        lints.extend(unknown_variable_lint(node, &index, ctx));
     }
     lints
 }
@@ -88,23 +97,48 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
 struct GraphIndex<'a> {
     /// The exits of each node that have at least one wire.
     wired_exits: HashMap<&'a str, HashSet<&'a str>>,
+    /// The request fields each node receives by wire.
+    wired_fields: HashMap<&'a str, WiredFields>,
     /// Ids with a path to an Output, or `None` when the flow has no Output.
     reaching_output: Option<HashSet<&'a str>>,
+}
+
+/// Which fields of a node a wire replaces.
+#[derive(Debug, Clone, Copy, Default)]
+struct WiredFields {
+    url: bool,
+    body: bool,
+    /// Any `headers[...]` wire. One flag, so a selector the rule cannot
+    /// match to a header never leads to a false lint.
+    headers: bool,
 }
 
 impl<'a> GraphIndex<'a> {
     fn new(flow: &'a Flow) -> Self {
         let mut wired_exits: HashMap<&'a str, HashSet<&'a str>> = HashMap::new();
+        let mut wired_fields: HashMap<&'a str, WiredFields> = HashMap::new();
         for edge in &flow.edges {
             wired_exits
                 .entry(edge.source_node_id.as_str())
                 .or_default()
                 .insert(edge.source_handle.as_str());
+            let fields = wired_fields.entry(edge.target_node_id.as_str()).or_default();
+            match edge.target_field.as_str() {
+                "url" => fields.url = true,
+                "body" => fields.body = true,
+                field if field.starts_with("headers[") => fields.headers = true,
+                _ => {}
+            }
         }
         Self {
             wired_exits,
+            wired_fields,
             reaching_output: nodes_reaching_output(flow),
         }
+    }
+
+    fn wired_fields(&self, node_id: &str) -> WiredFields {
+        self.wired_fields.get(node_id).copied().unwrap_or_default()
     }
 
     fn is_wired(&self, node_id: &str, exit: &str) -> bool {
@@ -178,6 +212,112 @@ fn dangling_request_lint(node: &FlowNode, ctx: &dyn LintContext) -> Option<FlowL
             display_label(node)
         ),
         "Pick another saved request in the node's properties, or restore the request file. A run that reaches this node fails there.",
+    ))
+}
+
+/// The text of `{{name}}` placeholders in `text` that the variable rule
+/// may lint, first seen first, each name once. This reads the text like
+/// `rocket_environment::resolve`: the name runs to the first `}}` and is
+/// trimmed. An unclosed `{{` is ignored. Only plain variable-like names
+/// are kept, so JSON, GraphQL or script text that holds `{{` adds nothing.
+fn placeholder_names<'a>(text: &'a str, seen: &mut HashSet<&'a str>, out: &mut Vec<&'a str>) {
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("}}") else {
+            return;
+        };
+        let name = after[..end].trim();
+        if lintable_name(name) && seen.insert(name) {
+            out.push(name);
+        }
+        rest = &after[end + 2..];
+    }
+}
+
+/// A plain variable name that the run resolves from the scopes the
+/// context reads. Dynamic (`$`), `process.env.` and `callback.` names are
+/// resolved by other means, so they are left out.
+fn lintable_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_NAME_LEN
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        && !name.starts_with("process.env.")
+        && !name.starts_with("callback.")
+}
+
+fn braced(name: &str) -> String {
+    let mut text = String::from("{{");
+    text.push_str(name);
+    text.push_str("}}");
+    text
+}
+
+/// One warning per node that sends `{{name}}` as literal text. It covers an
+/// inline Request's url, header names and values and body, and an Input
+/// node's value, which are the fields the run resolves from variables and
+/// leaves as written when a name is missing. A field that a wire replaces
+/// is skipped. The message lists variable names only, never any other text.
+fn unknown_variable_lint(
+    node: &FlowNode,
+    index: &GraphIndex<'_>,
+    ctx: &dyn LintContext,
+) -> Option<FlowLint> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut names: Vec<&str> = Vec::new();
+    match &node.kind {
+        FlowNodeKind::Request {
+            source: RequestSource::Inline { request },
+            ..
+        } => {
+            let wired = index.wired_fields(&node.id);
+            if !wired.url {
+                placeholder_names(&request.url, &mut seen, &mut names);
+            }
+            for header in &request.headers {
+                placeholder_names(&header.name, &mut seen, &mut names);
+                if !wired.headers {
+                    placeholder_names(&header.value, &mut seen, &mut names);
+                }
+            }
+            if let (Some(body), false) = (&request.body, wired.body) {
+                placeholder_names(body, &mut seen, &mut names);
+            }
+        }
+        FlowNodeKind::Input { value, .. } => placeholder_names(value.data(), &mut seen, &mut names),
+        _ => return None,
+    }
+    let unknown: Vec<&str> = names
+        .into_iter()
+        .filter(|name| ctx.variable_is_known(name) == Some(false))
+        .collect();
+    if unknown.is_empty() {
+        return None;
+    }
+    let mut list = unknown
+        .iter()
+        .take(MAX_LISTED_NAMES)
+        .map(|name| braced(name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if unknown.len() > MAX_LISTED_NAMES {
+        list.push_str(&format!(" and {} more", unknown.len() - MAX_LISTED_NAMES));
+    }
+    let which = if unknown.len() == 1 {
+        "that name"
+    } else {
+        "those names"
+    };
+    Some(warning(
+        UNKNOWN_VARIABLE,
+        node,
+        format!(
+            "'{}' leaves {list} as literal text, because no variable has {which}.",
+            display_label(node)
+        ),
+        "Define the variable in the collection variables or in the active environment, or correct the name in the node.",
     ))
 }
 
@@ -1596,5 +1736,202 @@ mod tests {
                 repeat_until: None,
             },
         )
+    }
+
+    fn unknown_in(f: &Flow) -> Vec<FlowLint> {
+        let all = validate_with_warnings(f, &EverythingMissing);
+        all.into_iter().filter(|l| l.code == UNKNOWN_VARIABLE).collect()
+    }
+
+    #[test]
+    fn unknown_names_in_url_headers_and_body_are_one_warning_listing_names() {
+        let f = flow(
+            vec![inline_request(
+                "n1",
+                "Create user",
+                "https://x.test/{{userId}}?k={{ apiKey }}",
+                &[("X-{{tenant}}", "{{userId}}")],
+                Some("{\"a\": \"{{payload}}\"}"),
+            )],
+            vec![],
+        );
+        let found = unknown_in(&f);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].severity, LintSeverity::Warning);
+        assert_eq!(found[0].node_id.as_deref(), Some("n1"));
+        assert_eq!(
+            found[0].message,
+            "'Create user' leaves {{userId}}, {{apiKey}}, {{tenant}}, {{payload}} as literal text, because no variable has those names."
+        );
+        let hint = found[0].hint.as_deref().expect("a hint");
+        assert!(hint.starts_with("Define the variable"), "got: {hint}");
+    }
+
+    #[test]
+    fn one_unknown_name_reads_in_the_singular() {
+        let f = flow(
+            vec![inline_request("n1", "Get", "https://x.test/{{id}}/{{id}}", &[], None)],
+            vec![],
+        );
+        assert_eq!(
+            unknown_in(&f)[0].message,
+            "'Get' leaves {{id}} as literal text, because no variable has that name."
+        );
+    }
+
+    #[test]
+    fn more_than_five_names_are_cut_with_a_count() {
+        let f = flow(
+            vec![inline_request(
+                "n1",
+                "Big",
+                "{{a}}{{b}}{{c}}{{d}}{{e}}{{f}}{{g}}",
+                &[],
+                None,
+            )],
+            vec![],
+        );
+        assert_eq!(
+            unknown_in(&f)[0].message,
+            "'Big' leaves {{a}}, {{b}}, {{c}}, {{d}}, {{e}} and 2 more as literal text, because no variable has those names."
+        );
+    }
+
+    #[test]
+    fn known_and_unanswered_names_are_skipped() {
+        let f = flow(
+            vec![inline_request("n1", "Get", "{{known}}/{{maybe}}/{{gone}}", &[], None)],
+            vec![],
+        );
+        let ctx = FakeContext {
+            requests: vec![],
+            variables: vec![("known", true), ("gone", false)],
+        };
+        let lints = validate_with_warnings(&f, &ctx);
+        let found = only(&lints, UNKNOWN_VARIABLE);
+        assert_eq!(found.len(), 1);
+        // `maybe` got None and `known` got true, so only `gone` is named.
+        assert!(found[0].message.contains("{{gone}}"));
+        assert!(!found[0].message.contains("maybe"));
+        assert!(!found[0].message.contains("known"));
+        assert!(only(&lint(&f), UNKNOWN_VARIABLE).is_empty());
+    }
+
+    #[test]
+    fn run_time_and_odd_names_are_never_linted() {
+        let f = flow(
+            vec![inline_request(
+                "n1",
+                "Get",
+                "{{$guid}} {{ $randomInt }} {{process.env.HOME}} {{callback.pay}} {{}} {{\"x\":1}} {{a b}} {{open",
+                &[],
+                Some("query {{ user { id } }}"),
+            )],
+            vec![],
+        );
+        // EverythingMissing says "no" to anything it is asked, so silence proves the rule's own filter.
+        assert!(unknown_in(&f).is_empty());
+    }
+
+    #[test]
+    fn the_message_lists_names_and_nothing_else() {
+        let f = flow(
+            vec![inline_request(
+                "n1",
+                "Get",
+                "https://secret-host.test/{{token}}?key=s3cr3t",
+                &[("Authorization", "Bearer s3cr3t {{token}}")],
+                Some("{\"password\": \"s3cr3t\"}"),
+            )],
+            vec![],
+        );
+        let found = unknown_in(&f);
+        let text = format!("{} {}", found[0].message, found[0].hint.as_deref().unwrap_or(""));
+        for leaked in ["s3cr3t", "secret-host", "https", "Bearer", "password"] {
+            assert!(!text.contains(leaked), "{leaked} leaked in: {text}");
+        }
+    }
+
+    #[test]
+    fn a_wired_field_is_not_linted() {
+        let f = flow(
+            vec![
+                input("in"),
+                inline_request(
+                    "n1",
+                    "Get",
+                    "{{urlVar}}",
+                    &[("X-A", "{{headerVar}}")],
+                    Some("{{bodyVar}}"),
+                ),
+            ],
+            vec![
+                edge("e1", "in", handle::RESULT, "n1", "url"),
+                edge("e2", "in", handle::RESULT, "n1", "headers[X-A].value"),
+                edge("e3", "in", handle::RESULT, "n1", "body"),
+            ],
+        );
+        assert!(unknown_in(&f).is_empty());
+        // A wire into one field leaves the other fields linted.
+        let f = flow(
+            vec![input("in"), inline_request("n1", "Get", "{{urlVar}}", &[], Some("{{bodyVar}}"))],
+            vec![edge("e1", "in", handle::RESULT, "n1", "url")],
+        );
+        let found = unknown_in(&f);
+        assert!(found[0].message.contains("{{bodyVar}}"));
+        assert!(!found[0].message.contains("urlVar"));
+    }
+
+    #[test]
+    fn an_input_node_value_is_linted() {
+        let f = flow(
+            vec![node(
+                "in",
+                FlowNodeKind::Input {
+                    label: "User".to_string(),
+                    value: rocket_shared::VariableValue::simple("{{who}}"),
+                },
+            )],
+            vec![],
+        );
+        assert_eq!(
+            unknown_in(&f)[0].message,
+            "'User' leaves {{who}} as literal text, because no variable has that name."
+        );
+    }
+
+    #[test]
+    fn a_saved_request_has_no_variable_lint() {
+        let f = flow(vec![saved_request("n1", "Log in", "{{x}}.yml")], vec![]);
+        assert!(unknown_in(&f).is_empty());
+    }
+
+    #[test]
+    fn the_rule_asks_once_per_distinct_name_per_node() {
+        let f = flow(
+            vec![inline_request("n1", "Get", "{{a}}{{a}}{{b}}", &[("H", "{{a}}")], Some("{{b}}"))],
+            vec![],
+        );
+        let counting = Counting::default();
+        let _ = validate_with_warnings(&f, &counting);
+        assert_eq!(counting.variables.get(), 2);
+    }
+
+    /// n inline Request nodes that each use one unknown name.
+    fn inline_requests(n: usize) -> Flow {
+        flow(
+            (0..n)
+                .map(|i| inline_request(&format!("n{i}"), &format!("Req {i}"), &format!("{{{{v{i}}}}}"), &[], None))
+                .collect(),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn unknown_variable_rule_is_linear() {
+        assert_eq!(unknown_in(&inline_requests(20_000)).len(), 20_000);
+        assert_linear(inline_requests, |f| {
+            let _ = validate_with_warnings(f, &EverythingMissing);
+        });
     }
 }
