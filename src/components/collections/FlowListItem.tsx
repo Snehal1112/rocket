@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { MoreHorizontal, Pencil, Trash2, Workflow } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, TriangleAlert, Workflow } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { flowAuthKeyMatches } from '@/lib/flow-auth';
 import { validateFlowName } from '@/lib/flow-name';
@@ -24,6 +25,8 @@ interface FlowListItemProps {
   name: string;
   collectionName: string;
   onDelete: (target: DeleteTarget) => void;
+  /** Set when the flow file cannot be parsed. The row then cannot be opened or renamed. */
+  error?: string;
 }
 
 function errorMessage(err: unknown): string {
@@ -43,7 +46,7 @@ function holdsAuthTokens(collectionName: string, name: string): boolean {
   );
 }
 
-export function FlowListItem({ name, collectionName, onDelete }: FlowListItemProps) {
+export function FlowListItem({ name, collectionName, onDelete, error }: FlowListItemProps) {
   const queryClient = useQueryClient();
   const active = usePaneStore((s) =>
     hasActiveTab(s.root, (t) => isFlowTabFor(t, collectionName, name)),
@@ -56,6 +59,10 @@ export function FlowListItem({ name, collectionName, onDelete }: FlowListItemPro
 
   const open = async () => {
     if (isRenaming) return;
+    if (error) {
+      toast.error(`"${name}" cannot be opened: ${error}`);
+      return;
+    }
     try {
       await usePaneStore.getState().openFlowTab(collectionName, name);
     } catch (err) {
@@ -136,9 +143,17 @@ export function FlowListItem({ name, collectionName, onDelete }: FlowListItemPro
         <TreeItemContent
           className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
           onClick={() => void open()}
-          aria-label={`Open flow ${name}`}
+          aria-label={error ? `Corrupt flow ${name}: ${error}` : `Open flow ${name}`}
         >
-          <Workflow aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          {error ? (
+            <TriangleAlert
+              aria-hidden='true'
+              data-testid='flow-corrupt-icon'
+              className='h-3.5 w-3.5 shrink-0 text-destructive'
+            />
+          ) : (
+            <Workflow aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+          )}
           {isRenaming ? (
             <Input
               autoFocus
@@ -155,6 +170,15 @@ export function FlowListItem({ name, collectionName, onDelete }: FlowListItemPro
               onBlur={() => void handleRename()}
               onClick={(e) => e.stopPropagation()}
             />
+          ) : error ? (
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className='truncate text-destructive'>{name}</span>
+                </TooltipTrigger>
+                <TooltipContent className='max-w-xs break-words'>{error}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <span className='truncate text-foreground'>{name}</span>
           )}
@@ -179,7 +203,7 @@ export function FlowListItem({ name, collectionName, onDelete }: FlowListItemPro
           // Keeps the rename input focused instead of returning focus to the trigger.
           onCloseAutoFocus={(e) => e.preventDefault()}
         >
-          <DropdownMenuItem onSelect={startRename}>
+          <DropdownMenuItem onSelect={startRename} disabled={!!error}>
             <Pencil aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Rename
           </DropdownMenuItem>
           <DropdownMenuItem className='text-destructive' onClick={requestDelete}>

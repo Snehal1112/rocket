@@ -2433,7 +2433,14 @@ export interface Flow {
 
 export type FlowNodeStatus = 'idle' | 'running' | 'success' | 'failed' | 'skipped';
 
-export const listFlows = (collection: string) => invoke<string[]>('list_flows', { collection });
+/** One row of a collection's flow list. `error` is set when the flow file cannot be parsed. */
+export interface FlowListEntry {
+  name: string;
+  error?: string;
+}
+
+export const listFlows = (collection: string) =>
+  invoke<FlowListEntry[]>('list_flows', { collection });
 
 export const getFlow = (collection: string, name: string) =>
   invoke<Flow>('get_flow', { collection, name });

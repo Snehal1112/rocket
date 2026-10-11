@@ -6,12 +6,16 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 describe('flow tauri-api bindings', () => {
-  it('listFlows invokes list_flows with the collection name', async () => {
-    vi.mocked(invoke).mockResolvedValue(['My Flow']);
+  it('listFlows invokes list_flows and returns entries, with an error for a corrupt file', async () => {
+    const entries = [
+      { name: 'My Flow' },
+      { name: 'broken', error: 'Failed to parse flow YAML: EOF' },
+    ];
+    vi.mocked(invoke).mockResolvedValue(entries);
     const { listFlows } = await import('@/lib/tauri-api');
     const result = await listFlows('my-collection');
     expect(invoke).toHaveBeenCalledWith('list_flows', { collection: 'my-collection' });
-    expect(result).toEqual(['My Flow']);
+    expect(result).toEqual(entries);
   });
 
   it('getFlow invokes get_flow with collection and name', async () => {

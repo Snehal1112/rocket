@@ -214,7 +214,7 @@ describe('CollectionsSidebar flow delete', () => {
       root: { uid: 'root', name: 'col', items: [] },
       settings: { headers: [], variables: [], sandboxMode: 'safe' },
     });
-    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue(['Login']);
+    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue([{ name: 'Login' }]);
     vi.mocked(tauriApi.deleteFlow).mockReset().mockResolvedValue(undefined);
     useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
     usePaneStore.setState({ activeCollection: 'col' });

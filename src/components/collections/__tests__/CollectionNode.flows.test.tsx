@@ -53,7 +53,7 @@ describe('CollectionNode flows group', () => {
       root: { uid: 'root', name: 'my-collection', items: [] },
       settings: { headers: [], variables: [], sandboxMode: 'safe' },
     });
-    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue(['Login', 'Sync']);
+    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue([{ name: 'Login' }, { name: 'Sync' }]);
     // Opens the node through the pane store's active collection, as the sibling test does.
     usePaneStore.setState({ activeCollection: summary.name });
   });
@@ -64,6 +64,29 @@ describe('CollectionNode flows group', () => {
     expect(screen.getByLabelText('Open flow Sync')).toBeInTheDocument();
     expect(screen.getByText('Flows')).toBeInTheDocument();
     expect(tauriApi.listFlows).toHaveBeenCalledWith('my-collection');
+  });
+
+  it('lists a corrupt flow in the Flows group with its message', async () => {
+    vi.mocked(tauriApi.listFlows).mockResolvedValue([
+      { name: 'Login' },
+      { name: 'broken', error: 'Failed to parse flow YAML: EOF' },
+    ]);
+    renderNode();
+    expect(await screen.findByLabelText('Open flow Login')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Corrupt flow broken: Failed to parse flow YAML: EOF'),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Open flow broken')).not.toBeInTheDocument();
+  });
+
+  it('applies the sidebar filter to corrupt flow names too', async () => {
+    vi.mocked(tauriApi.listFlows).mockResolvedValue([
+      { name: 'Login' },
+      { name: 'broken', error: 'Failed to parse flow YAML: EOF' },
+    ]);
+    renderNode('log');
+    expect(await screen.findByLabelText('Open flow Login')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Corrupt flow broken/)).not.toBeInTheDocument();
   });
 
   it('applies the sidebar filter to flow names', async () => {

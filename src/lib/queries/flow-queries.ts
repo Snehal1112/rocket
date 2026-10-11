@@ -7,7 +7,7 @@ export const flowKeys = {
 };
 
 /**
- * The flow names of one collection. Invalidate `flowKeys.collection(name)` after
+ * The flows of one collection as entries. A flow file that cannot be parsed has an `error`. Invalidate `flowKeys.collection(name)` after
  * create, rename and delete, because the app caches queries for 30 seconds.
  * Pass `enabled = false` to hold the fetch until the list is on screen.
  */

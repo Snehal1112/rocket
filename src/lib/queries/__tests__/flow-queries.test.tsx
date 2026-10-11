@@ -19,12 +19,30 @@ describe('useFlows', () => {
   });
 
   it('lists the flows of a collection under its own key', async () => {
-    vi.mocked(listFlows).mockResolvedValue(['Login', 'Sync']);
+    vi.mocked(listFlows).mockResolvedValue([{ name: 'Login' }, { name: 'Sync' }]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { result } = renderHook(() => useFlows('demo'), { wrapper: wrapperFor(client) });
-    await waitFor(() => expect(result.current.data).toEqual(['Login', 'Sync']));
+    await waitFor(() =>
+      expect(result.current.data).toEqual([{ name: 'Login' }, { name: 'Sync' }]),
+    );
     expect(listFlows).toHaveBeenCalledWith('demo');
-    expect(client.getQueryData(flowKeys.collection('demo'))).toEqual(['Login', 'Sync']);
+    expect(client.getQueryData(flowKeys.collection('demo'))).toEqual([
+      { name: 'Login' },
+      { name: 'Sync' },
+    ]);
+  });
+
+  it('passes a corrupt entry through with its message', async () => {
+    vi.mocked(listFlows).mockResolvedValue([
+      { name: 'broken', error: 'Failed to parse flow YAML: EOF' },
+    ]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useFlows('demo'), { wrapper: wrapperFor(client) });
+    await waitFor(() =>
+      expect(result.current.data).toEqual([
+        { name: 'broken', error: 'Failed to parse flow YAML: EOF' },
+      ]),
+    );
   });
 
   it('does not fetch without a collection or while disabled', async () => {
@@ -36,11 +54,14 @@ describe('useFlows', () => {
   });
 
   it('refetches after the collection key is invalidated', async () => {
-    vi.mocked(listFlows).mockResolvedValueOnce(['Login']).mockResolvedValue(['Login', 'New']);
+    vi.mocked(listFlows).mockResolvedValueOnce([{ name: 'Login' }])
+      .mockResolvedValue([{ name: 'Login' }, { name: 'New' }]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { result } = renderHook(() => useFlows('demo'), { wrapper: wrapperFor(client) });
-    await waitFor(() => expect(result.current.data).toEqual(['Login']));
+    await waitFor(() => expect(result.current.data).toEqual([{ name: 'Login' }]));
     await client.invalidateQueries({ queryKey: flowKeys.collection('demo') });
-    await waitFor(() => expect(result.current.data).toEqual(['Login', 'New']));
+    await waitFor(() =>
+      expect(result.current.data).toEqual([{ name: 'Login' }, { name: 'New' }]),
+    );
   });
 });

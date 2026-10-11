@@ -132,7 +132,7 @@ describe('FlowPane picker', () => {
   });
 
   it('shows a flow that appears after the flow list is invalidated', async () => {
-    vi.mocked(listFlows).mockResolvedValueOnce([]).mockResolvedValue(['Alpha']);
+    vi.mocked(listFlows).mockResolvedValueOnce([]).mockResolvedValue([{ name: 'Alpha' }]);
     const { client } = renderPicker();
     expect(await screen.findByText('No flows yet')).toBeInTheDocument();
 
@@ -158,6 +158,25 @@ describe('FlowPane picker', () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith({ queryKey: flowKeys.collection('demo') }),
     );
+  });
+
+  it('refuses to create a flow over a corrupt file with the same name', async () => {
+    vi.mocked(listFlows).mockResolvedValue([
+      { name: 'broken', error: 'Failed to parse flow YAML: EOF' },
+    ]);
+    const openFlowTab = vi.fn().mockResolvedValue(undefined);
+    usePaneStore.setState({ openFlowTab });
+    renderPicker();
+    // Wait for the list to load, so the corrupt entry is known.
+    await waitFor(() => expect(listFlows).toHaveBeenCalled());
+    await screen.findByText('Select flow');
+
+    await userEvent.type(screen.getByLabelText('New flow name'), 'broken');
+    await userEvent.click(screen.getByRole('button', { name: 'Create flow' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/corrupt/i);
+    expect(saveFlow).not.toHaveBeenCalled();
+    expect(openFlowTab).not.toHaveBeenCalled();
   });
 
   it('rejects a name containing "::" without calling the backend', async () => {

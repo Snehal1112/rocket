@@ -33,12 +33,12 @@ const runningTab: FlowTab = {
   runState: 'running',
 };
 
-function renderItem(onDelete = vi.fn()) {
+function renderItem(onDelete = vi.fn(), error?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <Tree aria-label='tree'>
-        <FlowListItem name='Login' collectionName='col' onDelete={onDelete} />
+        <FlowListItem name='Login' collectionName='col' onDelete={onDelete} error={error} />
       </Tree>
     </QueryClientProvider>,
   );
@@ -185,5 +185,56 @@ describe('FlowListItem', () => {
     const tab = collectAllTabs(usePaneStore.getState().root).filter(isFlowTab)[0];
     expect(tab?.flowName).toBe('Login');
     expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([authKey]);
+  });
+});
+
+describe('FlowListItem corrupt flow', () => {
+  const message = 'Failed to parse flow YAML: EOF while parsing a value';
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.mocked(getFlow).mockReset().mockResolvedValue({ name: 'Login', nodes: [], edges: [] });
+    vi.mocked(toast.error).mockReset();
+    vi.mocked(renameFlow).mockReset();
+  });
+
+  it('shows a warning icon for a corrupt flow', () => {
+    renderItem(vi.fn(), message);
+    expect(screen.getByTestId('flow-corrupt-icon')).toBeInTheDocument();
+  });
+
+  it('shows no warning icon without an error', () => {
+    renderItem();
+    expect(screen.queryByTestId('flow-corrupt-icon')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Open flow Login')).toBeInTheDocument();
+  });
+
+  it('names the problem in the row label', () => {
+    renderItem(vi.fn(), message);
+    expect(screen.getByLabelText(`Corrupt flow Login: ${message}`)).toBeInTheDocument();
+  });
+
+  it('shows the message in an error toast on click and opens no tab', async () => {
+    renderItem(vi.fn(), message);
+    fireEvent.click(screen.getByText('Login'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining(message)));
+    expect(getFlow).not.toHaveBeenCalled();
+    expect(collectAllTabs(usePaneStore.getState().root).filter(isFlowTab)).toHaveLength(0);
+  });
+
+  it('keeps Delete available', async () => {
+    const { onDelete } = renderItem(vi.fn(), message);
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Login' }));
+    await userEvent.click(await screen.findByText('Delete'));
+    expect(onDelete).toHaveBeenCalledWith({ type: 'flow', collection: 'col', name: 'Login' });
+  });
+
+  it('disables Rename, because the name inside the file cannot be read', async () => {
+    renderItem(vi.fn(), message);
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for Login' }));
+    const item = (await screen.findByText('Rename')).closest('[role="menuitem"]');
+    expect(item).toHaveAttribute('data-disabled');
+    await userEvent.click(screen.getByText('Rename'));
+    expect(renameFlow).not.toHaveBeenCalled();
   });
 });

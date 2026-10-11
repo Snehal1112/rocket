@@ -13,12 +13,17 @@ import {
 } from '@/components/ui/select';
 import { validateFlowName } from '@/lib/flow-name';
 import { flowKeys, useFlows } from '@/lib/queries/flow-queries';
-import { type CollectionSummary, listCollections, saveFlow } from '@/lib/tauri-api';
+import {
+  type CollectionSummary,
+  type FlowListEntry,
+  listCollections,
+  saveFlow,
+} from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FlowTab } from '@/types/pane-types';
 
 // Stable empty list, so the query default does not change identity on each render.
-const NO_FLOWS: string[] = [];
+const NO_FLOWS: FlowListEntry[] = [];
 
 /** Shown while a flow tab has no flow chosen yet: pick a collection and a flow, or create one. */
 export function FlowPicker({ tab, groupId }: { tab: FlowTab; groupId: string }) {
@@ -29,7 +34,7 @@ export function FlowPicker({ tab, groupId }: { tab: FlowTab; groupId: string }) 
   // Start from the tab's own collection, so a tab opened for a collection
   // (or one that fell back after a failed load) keeps that choice.
   const [selectedCollection, setSelectedCollection] = useState(tab.collectionName ?? '');
-  const { data: flowNames = NO_FLOWS } = useFlows(selectedCollection || null);
+  const { data: flows = NO_FLOWS } = useFlows(selectedCollection || null);
   const [newFlowName, setNewFlowName] = useState('');
   const [createError, setCreateError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -49,7 +54,14 @@ export function FlowPicker({ tab, groupId }: { tab: FlowTab; groupId: string }) 
   const handleCreate = async () => {
     const name = newFlowName.trim();
     if (!selectedCollection || !name) return;
-    if (flowNames.includes(name)) {
+    const existing = flows.find((f) => f.name === name);
+    if (existing?.error) {
+      setCreateError(
+        `A corrupt flow file named "${name}" already exists. Delete it from the sidebar first.`,
+      );
+      return;
+    }
+    if (existing) {
       openFlow(name);
       return;
     }
@@ -85,14 +97,14 @@ export function FlowPicker({ tab, groupId }: { tab: FlowTab; groupId: string }) 
           ))}
         </SelectContent>
       </Select>
-      <Select disabled={!selectedCollection || flowNames.length === 0} onValueChange={openFlow}>
+      <Select disabled={!selectedCollection || flows.length === 0} onValueChange={openFlow}>
         <SelectTrigger className='w-64' aria-label='Flow'>
-          <SelectValue placeholder={flowNames.length === 0 ? 'No flows yet' : 'Select flow'} />
+          <SelectValue placeholder={flows.length === 0 ? 'No flows yet' : 'Select flow'} />
         </SelectTrigger>
         <SelectContent>
-          {flowNames.map((name) => (
-            <SelectItem key={name} value={name}>
-              {name}
+          {flows.map((flow) => (
+            <SelectItem key={flow.name} value={flow.name} disabled={!!flow.error}>
+              {flow.error ? `${flow.name} (corrupt)` : flow.name}
             </SelectItem>
           ))}
         </SelectContent>
