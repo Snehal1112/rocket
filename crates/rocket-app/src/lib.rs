@@ -103,7 +103,7 @@ pub use grpc_service::{GrpcExecuteInput, GrpcService};
 pub use history_service::HistoryService;
 pub use load_test_service::LoadTestService;
 pub use mcp_read_views::{
-    CollectionBrief, HistoryBrief, MaskedBody, MaskedEnvironment, MaskedFolderSettings,
+    CollectionBrief, FolderChildView, FolderView, HistoryBrief, MaskedBody, MaskedEnvironment, MaskedFolderSettings,
     MaskedPair, MaskedRequest, MaskedSettings, MaskedVariable,
 };
 pub use mcp_tool_service::{

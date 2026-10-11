@@ -7,7 +7,7 @@
 //! is refused before anything is read or written.
 //!
 //! Read tools (`get_workspace_outline`, `list_collections`, `get_request`,
-//! `get_collection_settings`, `get_environment`, `get_history`,
+//! `get_collection_settings`, `get_folder_settings`, `get_environment`, `get_history`,
 //! `get_test_results`) are always allowed and return masked views from
 //! `mcp_read_views`. `run_request` also needs the collection's run switch
 //! ("Allow the agent to run requests in this collection"). The collection file
@@ -34,9 +34,10 @@ mod chips;
 
 use crate::execution_service::RequestExecutionService;
 use crate::mcp_read_views::{
-    basic_header_values_from_secrets, filter_folder, history_limit, literal_credential_values, mask_response_body, mask_secret_text,
+    basic_header_values_from_secrets, filter_folder, find_folder, folder_children, history_limit, literal_credential_values, mask_response_body, mask_secret_text,
     normalize_folder, outline_entries, render_outline, CollectionBrief, HistoryBrief,
-    MaskedEnvironment, MaskedRequest, MaskedSettings, OutlineCollection,
+    FolderView, MaskedEnvironment, MaskedFolderSettings, MaskedRequest, MaskedSettings,
+    OutlineCollection,
 };
 use crate::runner_sequence::{build_step_input, RunItem};
 
@@ -605,6 +606,45 @@ impl McpToolService {
             session_id,
             "get_collection_settings",
             format!("read the settings of '{collection}'"),
+        );
+        Ok(view)
+    }
+
+    pub fn get_folder_settings(
+        &self,
+        session_id: &str,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<FolderView> {
+        self.check_in_workspace(session_id, collection)?;
+        let Some(path) = normalize_folder(folder_path)? else {
+            return Err(DomainError::InvalidInput(
+                "the collection root has no folder settings; use get_collection_settings"
+                    .to_string(),
+            ));
+        };
+        let tree = self.collection_repo.get_summaries(collection)?;
+        let folder = find_folder(&tree.root, &path)
+            .ok_or_else(|| DomainError::NotFound(format!("folder '{path}' in '{collection}'")))?;
+        let children = folder_children(folder);
+        let settings = self
+            .collection_repo
+            .get_folder_settings(collection, &path)
+            .map_err(|_| {
+                DomainError::InvalidInput(format!(
+                    "could not read the settings of folder '{path}' in '{collection}'"
+                ))
+            })?;
+        let view = FolderView {
+            collection: collection.to_string(),
+            path: path.clone(),
+            settings: MaskedFolderSettings::from_settings(&settings),
+            children,
+        };
+        self.publish_tool_invoked(
+            session_id,
+            "get_folder_settings",
+            format!("read the settings of folder '{path}' in '{collection}'"),
         );
         Ok(view)
     }
@@ -1195,6 +1235,10 @@ mod tests {
                 (
                     "get_collection_settings",
                     svc.get_collection_settings("s1", outside).map(|_| ()),
+                ),
+                (
+                    "get_folder_settings",
+                    svc.get_folder_settings("s1", outside, "auth").map(|_| ()),
                 ),
                 ("get_environment", svc.get_environment("s1", outside, "dev").map(|_| ())),
                 ("get_history", svc.get_history("s1", outside, "login.yml", 5).map(|_| ())),
@@ -2786,6 +2830,7 @@ mod tests {
             ),
             ("get_request", svc.get_request("s1", "nope", "login.yml").map(|_| ())),
             ("get_collection_settings", svc.get_collection_settings("s1", "nope").map(|_| ())),
+            ("get_folder_settings", svc.get_folder_settings("s1", "nope", "auth").map(|_| ())),
             ("get_environment", svc.get_environment("s1", "nope", "dev").map(|_| ())),
             ("get_history", svc.get_history("s1", "nope", "login.yml", 5).map(|_| ())),
             ("get_test_results", svc.get_test_results("s1", "nope", "login.yml").map(|_| ())),
@@ -3420,6 +3465,89 @@ mod tests {
         assert!(
             err.to_string().contains("could not resolve vault secrets"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn get_folder_settings_returns_masked_settings_and_the_children() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        repo.with_summaries("my-api", two_level_tree());
+        repo.with_folder_settings(
+            "my-api",
+            "auth",
+            rocket_collection::FolderSettings {
+                headers: vec![Header::new("X-Signature", "folder-sig-4242")],
+                variables: vec![
+                    plain_variable("clientSecret", "folder-secret-8888", true),
+                    plain_variable("HOST", "api.example.com", false),
+                ],
+                pre_request_script: Some("rok.setVar('a', 1);".into()),
+                ..Default::default()
+            },
+        );
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            Arc::clone(&publisher),
+        );
+
+        let view = svc
+            .get_folder_settings("s1", "my-api", "/auth/")
+            .expect("folder view");
+
+        assert_eq!(view.path, "auth");
+        assert_eq!(view.children.len(), 1);
+        assert_eq!(view.children[0].name, "refresh.yml");
+        assert_eq!(view.children[0].kind, "request");
+        let text = serde_json::to_string(&view).expect("serialize");
+        assert!(!text.contains("folder-sig-4242"), "{text}");
+        assert!(!text.contains("folder-secret-8888"), "{text}");
+        assert!(text.contains("api.example.com"));
+        assert!(text.contains("rok.setVar('a', 1);"));
+        assert!(publisher.events().iter().any(|e| matches!(
+            e,
+            DomainEvent::AcpToolInvoked { tool, summary, .. }
+                if tool == "get_folder_settings" && !summary.contains("folder-sig-4242")
+        )));
+    }
+
+    #[test]
+    fn get_folder_settings_refuses_the_root_a_missing_folder_and_a_bad_path() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "login.yml", sample_request("Login"));
+        repo.with_summaries("my-api", two_level_tree());
+        let publisher = RecordingPublisher::new();
+        let svc = service_with(
+            Arc::clone(&repo),
+            FakeEnvRepoFactory::new(),
+            Arc::clone(&publisher),
+        );
+
+        let root = svc.get_folder_settings("s1", "my-api", "");
+        assert!(
+            matches!(&root, Err(DomainError::InvalidInput(m)) if m.contains("get_collection_settings")),
+            "{root:?}"
+        );
+        assert!(matches!(
+            svc.get_folder_settings("s1", "my-api", "nope"),
+            Err(DomainError::NotFound(_))
+        ));
+        assert!(matches!(
+            svc.get_folder_settings("s1", "my-api", "../auth"),
+            Err(DomainError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            svc.get_folder_settings("s1", "other-api", "auth"),
+            Err(DomainError::NotFound(_))
+        ));
+        assert!(
+            !publisher
+                .events()
+                .iter()
+                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+            "a refused call must not publish an audit event"
         );
     }
 }

@@ -245,6 +245,57 @@ impl MaskedFolderSettings {
     }
 }
 
+/// One direct child of a folder, by the name the other tools expect.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FolderChildView {
+    pub name: String,
+    /// `folder` or `request`.
+    pub kind: &'static str,
+}
+
+/// What `get_folder_settings` returns: the folder's own masked settings and
+/// its direct children, so the agent can move on to a request or subfolder.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FolderView {
+    pub collection: String,
+    pub path: String,
+    pub settings: MaskedFolderSettings,
+    pub children: Vec<FolderChildView>,
+}
+
+/// The folder at `path` (directory names, `/` separated) in a summary tree.
+pub(crate) fn find_folder<'a>(root: &'a Folder, path: &str) -> Option<&'a Folder> {
+    let mut folder = root;
+    for segment in path.split('/').filter(|s| !s.is_empty()) {
+        folder = folder.items.iter().find_map(|item| match item {
+            CollectionItem::Folder(sub) if folder_dir_name(sub) == segment => Some(sub),
+            _ => None,
+        })?;
+    }
+    Some(folder)
+}
+
+/// Direct subfolders and requests of a folder. Other item kinds are skipped.
+pub(crate) fn folder_children(folder: &Folder) -> Vec<FolderChildView> {
+    folder
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            CollectionItem::Folder(sub) => Some(FolderChildView {
+                name: folder_dir_name(sub).to_string(),
+                kind: "folder",
+            }),
+            CollectionItem::Summary(summary) => {
+                summary.file_name.clone().map(|name| FolderChildView {
+                    name,
+                    kind: "request",
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// An environment: variable names with non-secret values, and its
 /// RocketVault references as `alias.secretName` names.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
