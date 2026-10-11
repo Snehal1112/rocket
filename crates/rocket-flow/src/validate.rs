@@ -3,6 +3,7 @@
 //! violation, `validate` returns the first one, so the same file always
 //! yields the same error.
 
+use crate::describe::exits_text;
 use crate::flow::{Flow, FlowEdge, FlowNode};
 use crate::graph::{reachable_from, topological_sort, FlowGraphError};
 use crate::handle;
@@ -100,8 +101,10 @@ fn collect_errors(flow: &Flow) -> (Vec<FlowGraphError>, Option<Vec<String>>) {
         let into_request = matches!(target, FlowNodeKind::Request { .. });
         (edge.target_field == handle::AUTH && !(from_auth && into_request)).then(|| {
             format!(
-                "an '{}' wire must go from an Auth node into a Request node",
-                handle::AUTH
+                "an '{}' wire must go from an Auth node into a Request node, not from {} to {}",
+                handle::AUTH,
+                kind_name(source),
+                kind_name(target)
             )
         })
     });
@@ -128,8 +131,13 @@ fn collect_errors(flow: &Flow) -> (Vec<FlowGraphError>, Option<Vec<String>>) {
             })
     });
     check_edges(flow, &kinds, &mut errors, |edge, _, source| {
-        (!source_handle_exists(source, &edge.source_handle))
-            .then(|| format!("the source node has no exit named '{}'", edge.source_handle))
+        (!source_handle_exists(source, &edge.source_handle)).then(|| {
+            format!(
+                "the source node has no exit named '{}'; {}",
+                edge.source_handle,
+                exits_text(source)
+            )
+        })
     });
     check_switch_cases(flow, &mut errors, |cases| {
         first_duplicate(cases.iter().map(|c| c.id.as_str()))
@@ -2137,5 +2145,72 @@ edges:
             vec![edge("e1", "out", handle::RESULT, "b", "url")],
         );
         assert_eq!(invalid_edge_id(validate(&f)), "e1");
+    }
+
+    #[test]
+    fn v5_unknown_exit_reason_lists_the_valid_exits() {
+        let mut if_flow = valid_if_flow();
+        if_flow.edges[1].source_handle = "bogus".to_string();
+        assert_eq!(
+            invalid_edge_reason(validate(&if_flow)),
+            "the source node has no exit named 'bogus'; its exits are 'true' and 'false'"
+        );
+        let request_flow = flow(
+            vec![request("a"), request("b")],
+            vec![edge("e1", "a", handle::TRUE, "b", "url")],
+        );
+        assert_eq!(
+            invalid_edge_reason(validate(&request_flow)),
+            "the source node has no exit named 'true'; its only exit is 'result'"
+        );
+        let output_flow = flow(
+            vec![output("out"), request("b")],
+            vec![edge("e1", "out", handle::RESULT, "b", "url")],
+        );
+        assert_eq!(
+            invalid_edge_reason(validate(&output_flow)),
+            "the source node has no exit named 'result'; an Output node has no exits"
+        );
+        let switch_flow = flow(
+            vec![
+                request("a"),
+                switch_node("sw1", vec![("c1", "x"), ("c2", "y")]),
+                request("b"),
+            ],
+            vec![
+                edge("e1", "a", handle::RESULT, "sw1", handle::INPUT),
+                edge(
+                    "e2",
+                    "sw1",
+                    &handle::case_handle("gone"),
+                    "b",
+                    handle::TRIGGER,
+                ),
+            ],
+        );
+        assert_eq!(
+            invalid_edge_reason(validate(&switch_flow)),
+            "the source node has no exit named 'case:gone'; its exits are 'default' and the case exits 'c1', 'c2'"
+        );
+    }
+
+    #[test]
+    fn an_auth_wire_reason_names_what_it_connected() {
+        let from_request = flow(
+            vec![request("a"), request("b")],
+            vec![edge("e1", "a", handle::RESULT, "b", handle::AUTH)],
+        );
+        assert_eq!(
+            invalid_edge_reason(validate(&from_request)),
+            "an 'auth' wire must go from an Auth node into a Request node, not from Request to Request"
+        );
+        let into_output = flow(
+            vec![auth_node("a", bearer(), true), output("o")],
+            vec![edge("e1", "a", handle::RESULT, "o", handle::AUTH)],
+        );
+        assert_eq!(
+            invalid_edge_reason(validate(&into_output)),
+            "an 'auth' wire must go from an Auth node into a Request node, not from Auth to Output"
+        );
     }
 }

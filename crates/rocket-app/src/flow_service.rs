@@ -1,7 +1,11 @@
 use crate::flow_lint_context::{CollectionLintContext, LintEnvironment, LintSources};
+use rocket_flow::describe::{display_label, wire_ends};
 use rocket_flow::lint::{graph_error_lints, validate_with_warnings, FlowLint, NoLintContext};
-use rocket_flow::{validate, Flow, FlowGraphError, FlowRepository};
+use rocket_flow::{
+    validate_report, Flow, FlowGraphError, FlowNode, FlowRepository, ValidationReport,
+};
 use rocket_shared::error::{DomainError, DomainResult};
+use std::collections::HashSet;
 
 pub struct FlowService {
     flow_repo: Box<dyn FlowRepository>,
@@ -59,7 +63,12 @@ impl FlowService {
     }
 
     pub fn save(&self, collection: &str, flow: Flow) -> DomainResult<()> {
-        validate(&flow).map_err(|e| DomainError::InvalidInput(graph_error_message(e)))?;
+        let report = validate_report(&flow);
+        if !report.errors.is_empty() {
+            return Err(DomainError::InvalidInput(graph_errors_message(
+                &flow, &report,
+            )));
+        }
         self.flow_repo.save(collection, &flow)
     }
 
@@ -68,9 +77,10 @@ impl FlowService {
         self.lint_with_environment(collection, flow, LintEnvironment::default())
     }
 
-    /// Lints `flow` as given, not the saved file, and never fails. A
+    /// Lints `flow` as given, not the saved file, and never fails. Every
     /// structural `validate` failure comes first, as `invalid_graph` error
-    /// lints that carry its node or edge ids. Then come the warnings of
+    /// lints that carry their node or edge ids, in the order `validate_all`
+    /// found them. Then come the warnings of
     /// `validate_with_warnings`, which ask a context built from `env`. Without
     /// lint sources the context knows nothing and those rules stay silent.
     /// Lints never block save or run.
@@ -80,10 +90,11 @@ impl FlowService {
         flow: &Flow,
         env: LintEnvironment<'_>,
     ) -> Vec<FlowLint> {
-        let mut lints = match validate(flow) {
-            Ok(_) => Vec::new(),
-            Err(error) => graph_error_lints(flow, &error),
-        };
+        let mut lints: Vec<FlowLint> = validate_report(flow)
+            .errors
+            .iter()
+            .flat_map(|error| graph_error_lints(flow, error))
+            .collect();
         match &self.lint_sources {
             Some(sources) => {
                 let ctx = CollectionLintContext::new(sources, collection, env, flow);
@@ -95,32 +106,177 @@ impl FlowService {
     }
 }
 
-/// Builds the save-error text. Every message that names graph elements ends
-/// with "node(s): <ids>; edge(s): <ids>", which the canvas parses to
-/// highlight them in red.
-fn graph_error_message(error: FlowGraphError) -> String {
+/// Most characters of a label or id that go into a save message.
+const MAX_MESSAGE_CHARS: usize = 60;
+
+/// Text from the flow file, made safe to put in the save message. It drops
+/// what could break a `[nodes ...; edges ...]` tag or fake the final
+/// `node(s):` list, and it cuts long text.
+fn message_safe(text: &str) -> String {
+    let kept: String = text
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, ';' | '[' | ']'))
+        .collect();
+    kept.replace("(s):", "(s)")
+        .chars()
+        .take(MAX_MESSAGE_CHARS)
+        .collect()
+}
+
+/// One problem: its sentence and the ids the canvas should mark.
+struct Problem {
+    text: String,
+    node_ids: Vec<String>,
+    edge_ids: Vec<String>,
+}
+
+fn node_by_id<'a>(flow: &'a Flow, node_id: &str) -> Option<&'a FlowNode> {
+    flow.nodes.iter().find(|n| n.id == node_id)
+}
+
+fn describe_problem(flow: &Flow, error: &FlowGraphError) -> Problem {
+    match error {
+        FlowGraphError::Cycle { node_ids, edge_ids } => Problem {
+            text: "flow contains a cycle".to_string(),
+            node_ids: node_ids.clone(),
+            edge_ids: edge_ids.clone(),
+        },
+        FlowGraphError::UnknownNode { node_id } => Problem {
+            text: format!("edge references unknown node: {}", message_safe(node_id)),
+            node_ids: Vec::new(),
+            edge_ids: flow
+                .edges
+                .iter()
+                .filter(|e| e.source_node_id == *node_id || e.target_node_id == *node_id)
+                .map(|e| e.id.clone())
+                .collect(),
+        },
+        FlowGraphError::DuplicateNode { node_id } => Problem {
+            text: format!(
+                "flow has more than one node with id: {}",
+                message_safe(node_id)
+            ),
+            node_ids: vec![node_id.clone()],
+            edge_ids: Vec::new(),
+        },
+        FlowGraphError::DuplicateEdge { edge_id } => Problem {
+            text: format!(
+                "flow has more than one wire with id: {}",
+                message_safe(edge_id)
+            ),
+            node_ids: Vec::new(),
+            edge_ids: vec![edge_id.clone()],
+        },
+        FlowGraphError::InvalidNode { node_id, reason } => {
+            let label = node_by_id(flow, node_id)
+                .map(|n| message_safe(display_label(n)))
+                .unwrap_or_else(|| message_safe(node_id));
+            Problem {
+                text: format!("'{label}': {reason}"),
+                node_ids: vec![node_id.clone()],
+                edge_ids: Vec::new(),
+            }
+        }
+        FlowGraphError::InvalidEdge { edge_id, reason } => {
+            let text = match wire_ends(flow, edge_id) {
+                Some((from, to)) => format!(
+                    "wire from '{}' to '{}': {reason}",
+                    message_safe(from),
+                    message_safe(to)
+                ),
+                None => reason.clone(),
+            };
+            Problem {
+                text,
+                node_ids: Vec::new(),
+                edge_ids: vec![edge_id.clone()],
+            }
+        }
+    }
+}
+
+/// The text of a flow with exactly one problem. This is the older shape.
+fn single_problem_message(flow: &Flow, error: &FlowGraphError) -> String {
+    let problem = describe_problem(flow, error);
     match error {
         FlowGraphError::Cycle { node_ids, edge_ids } => format!(
             "flow contains a cycle through node(s): {}; edge(s): {}",
             node_ids.join(", "),
             edge_ids.join(", ")
         ),
-        FlowGraphError::UnknownNode { node_id } => {
-            format!("edge references unknown node: {node_id}")
+        FlowGraphError::UnknownNode { .. } | FlowGraphError::DuplicateNode { .. } => problem.text,
+        FlowGraphError::DuplicateEdge { edge_id } => {
+            format!("{} — node(s): ; edge(s): {edge_id}", problem.text)
         }
-        FlowGraphError::DuplicateNode { node_id } => {
-            format!("flow has more than one node with id: {node_id}")
+        FlowGraphError::InvalidNode { node_id, .. } => {
+            format!(
+                "flow is invalid: {} — node(s): {node_id}; edge(s): ",
+                problem.text
+            )
         }
-        FlowGraphError::DuplicateEdge { edge_id } => format!(
-            "flow has more than one wire with id: {edge_id} — node(s): ; edge(s): {edge_id}"
-        ),
-        FlowGraphError::InvalidNode { node_id, reason } => {
-            format!("flow is invalid: {reason} — node(s): {node_id}; edge(s): ")
-        }
-        FlowGraphError::InvalidEdge { edge_id, reason } => {
-            format!("flow is invalid: {reason} — node(s): ; edge(s): {edge_id}")
+        FlowGraphError::InvalidEdge { edge_id, .. } => {
+            format!(
+                "flow is invalid: {} — node(s): ; edge(s): {edge_id}",
+                problem.text
+            )
         }
     }
+}
+
+/// Builds the save-error text. Every message that names graph elements ends
+/// with "node(s): <ids>; edge(s): <ids>", which the canvas parses to
+/// highlight them in red. A flow with several problems lists each one as
+/// "<text> [nodes <ids>; edges <ids>]." after a "flow has N problems" header,
+/// so the canvas can mark each problem on its own node or wire. The final
+/// "node(s):" list holds the ids of every listed problem, once each.
+fn graph_errors_message(flow: &Flow, report: &ValidationReport) -> String {
+    if let ([only], 0) = (report.errors.as_slice(), report.omitted) {
+        return single_problem_message(flow, only);
+    }
+    let problems: Vec<Problem> = report
+        .errors
+        .iter()
+        .map(|error| describe_problem(flow, error))
+        .collect();
+    let total = problems.len() + report.omitted;
+    let mut message = if report.omitted == 0 {
+        format!("flow has {total} problems:")
+    } else {
+        format!(
+            "flow has {total} problems, showing the first {}:",
+            problems.len()
+        )
+    };
+    let mut all_nodes: Vec<&str> = Vec::new();
+    let mut all_edges: Vec<&str> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for problem in &problems {
+        message.push_str(&format!(
+            " {} [nodes {}; edges {}].",
+            problem.text,
+            problem.node_ids.join(", "),
+            problem.edge_ids.join(", ")
+        ));
+        for id in &problem.node_ids {
+            if seen.insert(id.as_str()) {
+                all_nodes.push(id);
+            }
+        }
+    }
+    seen.clear();
+    for problem in &problems {
+        for id in &problem.edge_ids {
+            if seen.insert(id.as_str()) {
+                all_edges.push(id);
+            }
+        }
+    }
+    message.push_str(&format!(
+        " — node(s): {}; edge(s): {}",
+        all_nodes.join(", "),
+        all_edges.join(", ")
+    ));
+    message
 }
 
 #[cfg(test)]
@@ -247,22 +403,31 @@ mod tests {
         assert!(svc.get("demo", "Login Then Fetch").is_err());
     }
 
+    /// A Request, so that the loop below breaks only the cycle rule. An Output
+    /// has no exits and needs a value wire, which would add more problems.
+    fn loop_request_kind(label: &str) -> FlowNodeKind {
+        FlowNodeKind::Request {
+            debug: false,
+            repeat_until: None,
+            label: label.to_string(),
+            source: rocket_flow::RequestSource::Saved {
+                request_path: format!("{label}.yml"),
+            },
+        }
+    }
+
     fn cyclic_flow() -> Flow {
         Flow {
             name: "Cyclic".to_string(),
             nodes: vec![
                 FlowNode {
                     id: "a".to_string(),
-                    kind: FlowNodeKind::Output {
-                        label: "A".to_string(),
-                    },
+                    kind: loop_request_kind("A"),
                     position: NodePosition { x: 0.0, y: 0.0 },
                 },
                 FlowNode {
                     id: "b".to_string(),
-                    kind: FlowNodeKind::Output {
-                        label: "B".to_string(),
-                    },
+                    kind: loop_request_kind("B"),
                     position: NodePosition { x: 100.0, y: 0.0 },
                 },
             ],
@@ -400,15 +565,29 @@ mod tests {
         };
         let flow = Flow {
             name: "Bad Edge".to_string(),
-            nodes: vec![output("a"), output("b")],
-            edges: vec![FlowEdge {
-                id: "e9".to_string(),
-                source_node_id: "a".to_string(),
-                target_node_id: "b".to_string(),
-                target_field: "value".to_string(),
-                expression: "response.body".to_string(),
-                source_handle: rocket_flow::handle::RESULT.to_string(),
-            }],
+            // The Input feeds `a`, so only the wire out of `a` is invalid.
+            nodes: vec![
+                node_of(
+                    "in",
+                    FlowNodeKind::Input {
+                        label: "Seed".to_string(),
+                        value: rocket_shared::VariableValue::simple("x"),
+                    },
+                ),
+                output("a"),
+                output("b"),
+            ],
+            edges: vec![
+                wire("e8", "in", rocket_flow::handle::RESULT, "a", "value"),
+                FlowEdge {
+                    id: "e9".to_string(),
+                    source_node_id: "a".to_string(),
+                    target_node_id: "b".to_string(),
+                    target_field: "value".to_string(),
+                    expression: "response.body".to_string(),
+                    source_handle: rocket_flow::handle::RESULT.to_string(),
+                },
+            ],
             callback_host: None,
         };
         let message = svc
@@ -491,7 +670,18 @@ mod tests {
         };
         let flow = Flow {
             name: "Twin Wires".to_string(),
-            nodes: vec![out("a"), out("b"), out("c")],
+            // `a` is an Input, so the repeated id is the only problem.
+            nodes: vec![
+                node_of(
+                    "a",
+                    FlowNodeKind::Input {
+                        label: "Seed".to_string(),
+                        value: rocket_shared::VariableValue::simple("x"),
+                    },
+                ),
+                out("b"),
+                out("c"),
+            ],
             edges: vec![wire_to("b"), wire_to("c")],
             callback_host: None,
         };
@@ -535,6 +725,128 @@ mod tests {
             message.ends_with("node(s): out; edge(s): "),
             "got: {message}"
         );
+    }
+
+    fn login_request() -> FlowNode {
+        node_of(
+            "login",
+            FlowNodeKind::Request {
+                debug: false,
+                repeat_until: None,
+                label: "Login".to_string(),
+                source: rocket_flow::RequestSource::Saved {
+                    request_path: "login.yml".to_string(),
+                },
+            },
+        )
+    }
+
+    fn if_without_input(id: &str, label: &str) -> FlowNode {
+        node_of(
+            id,
+            FlowNodeKind::If {
+                label: label.to_string(),
+                condition: "response.status === 200".to_string(),
+            },
+        )
+    }
+
+    /// Two problems: `if1` has no input, and `e9` leaves an exit that `login` lacks.
+    /// The Output has no value wire to count, so it is fed by `e9` only.
+    fn two_problem_flow() -> Flow {
+        Flow {
+            name: "Two Problems".to_string(),
+            nodes: vec![
+                login_request(),
+                node_of(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: "Result".to_string(),
+                    },
+                ),
+                if_without_input("if1", "Logged in?"),
+            ],
+            edges: vec![wire("e9", "login", "true", "out", "value")],
+            callback_host: None,
+        }
+    }
+
+    #[test]
+    fn save_reports_every_problem_in_one_message() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let message = svc
+            .save("demo", two_problem_flow())
+            .expect_err("an invalid flow must be rejected")
+            .to_string();
+        assert_eq!(
+            message,
+            "Invalid input: flow has 2 problems: \
+             'Logged in?': the If node needs exactly one input wire, found 0 [nodes if1; edges ]. \
+             wire from 'Login' to 'Result': the source node has no exit named 'true'; its only exit is 'result' [nodes ; edges e9]. \
+             — node(s): if1; edge(s): e9"
+        );
+    }
+
+    #[test]
+    fn a_hostile_label_cannot_forge_the_id_tail() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let flow = Flow {
+            name: "Hostile".to_string(),
+            nodes: vec![if_without_input("if1", "oops; node(s): evil [x]")],
+            edges: vec![],
+            callback_host: None,
+        };
+        let message = svc
+            .save("demo", flow)
+            .expect_err("an invalid flow must be rejected")
+            .to_string();
+        assert_eq!(message.matches("node(s):").count(), 1, "got: {message}");
+        assert!(
+            message.ends_with("node(s): if1; edge(s): "),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn a_long_error_list_is_cut_and_the_message_says_how_many() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let flow = Flow {
+            name: "Many".to_string(),
+            nodes: (0..60)
+                .map(|i| if_without_input(&format!("if{i}"), "Check"))
+                .collect(),
+            edges: vec![],
+            callback_host: None,
+        };
+        let message = svc
+            .save("demo", flow)
+            .expect_err("an invalid flow must be rejected")
+            .to_string();
+        assert!(
+            message.starts_with("Invalid input: flow has 60 problems, showing the first 50:"),
+            "got: {message}"
+        );
+        let tail = message
+            .rsplit("node(s): ")
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        let node_list = tail.split(';').next().unwrap_or_default();
+        assert_eq!(node_list.split(", ").count(), 50, "got: {message}");
+    }
+
+    #[test]
+    fn lint_reports_every_structural_error_by_label() {
+        let svc = FlowService::new(Box::new(UntouchedRepo));
+        let lints = svc.lint("demo", &two_problem_flow());
+        let errors: Vec<&FlowLint> = lints.iter().filter(|l| l.code == INVALID_GRAPH).collect();
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].node_id.as_deref(), Some("if1"));
+        assert!(errors[0].message.starts_with("'Logged in?': "));
+        assert_eq!(errors[1].edge_id.as_deref(), Some("e9"));
+        assert!(errors[1]
+            .message
+            .starts_with("Wire from 'Login' to 'Result': "));
     }
 
     fn named_flow(name: &str) -> Flow {
@@ -707,6 +1019,23 @@ mod tests {
                 value: rocket_shared::VariableValue::simple("x"),
             },
         ));
+        // A wired Output makes the flow have one, so the lonely Input warns.
+        // It adds no structural error because `z` has its one value wire.
+        flow.nodes.push(node_of(
+            "z",
+            FlowNodeKind::Output {
+                label: "Done".to_string(),
+            },
+        ));
+        flow.nodes.push(node_of(
+            "d",
+            FlowNodeKind::Input {
+                label: "Feed".to_string(),
+                value: rocket_shared::VariableValue::simple("x"),
+            },
+        ));
+        flow.edges
+            .push(wire("e3", "d", rocket_flow::handle::RESULT, "z", "value"));
         let lints = svc.lint("demo", &flow);
         assert_eq!(
             lint_keys(&lints),
@@ -715,11 +1044,15 @@ mod tests {
                 (Some("b"), None, INVALID_GRAPH),
                 (None, Some("e1"), INVALID_GRAPH),
                 (None, Some("e2"), INVALID_GRAPH),
+                (Some("a"), None, NO_PATH_TO_OUTPUT),
+                (Some("b"), None, NO_PATH_TO_OUTPUT),
                 (Some("c"), None, NO_PATH_TO_OUTPUT),
             ]
         );
         assert!(lints[..4].iter().all(|l| l.severity == LintSeverity::Error));
-        assert_eq!(lints[4].severity, LintSeverity::Warning);
+        assert!(lints[4..]
+            .iter()
+            .all(|l| l.severity == LintSeverity::Warning));
         assert_eq!(svc.lint("demo", &flow), lints);
     }
 

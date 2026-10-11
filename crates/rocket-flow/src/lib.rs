@@ -1,3 +1,4 @@
+pub mod describe;
 pub mod flow;
 pub mod graph;
 pub mod handle;

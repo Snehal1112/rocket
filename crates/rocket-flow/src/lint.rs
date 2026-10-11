@@ -6,11 +6,12 @@
 //! environment come through `LintContext`, which the app layer provides.
 //! Results are deterministic: nodes in file order, rules in a fixed order.
 
+use crate::describe::{display_label, exits_text, source_kind, wire_ends};
 use crate::flow::{Flow, FlowEdge, FlowNode};
 use crate::graph::FlowGraphError;
 use crate::handle;
 use crate::node::{FlowNodeKind, RequestSource};
-use crate::validate::{kind_name, OUTPUT_WIRE_TAIL};
+use crate::validate::OUTPUT_WIRE_TAIL;
 use std::collections::{HashMap, HashSet};
 
 /// A structural `validate` failure, reported as an error lint.
@@ -223,25 +224,6 @@ impl<'a> GraphIndex<'a> {
         self.wired_exits
             .get(node_id)
             .is_some_and(|exits| exits.contains(exit))
-    }
-}
-
-/// The node's label, or its kind name when the label is blank.
-fn display_label(node: &FlowNode) -> &str {
-    let label = match &node.kind {
-        FlowNodeKind::Request { label, .. }
-        | FlowNodeKind::Input { label, .. }
-        | FlowNodeKind::Output { label, .. }
-        | FlowNodeKind::If { label, .. }
-        | FlowNodeKind::Switch { label, .. }
-        | FlowNodeKind::WaitForCallback { label, .. }
-        | FlowNodeKind::Transform { label, .. }
-        | FlowNodeKind::Auth { label, .. } => label.trim(),
-    };
-    if label.is_empty() {
-        kind_name(&node.kind)
-    } else {
-        label
     }
 }
 
@@ -752,7 +734,8 @@ pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
             vec![lint(Some(node_id.as_str()), None, message, FIX)]
         }
         FlowGraphError::InvalidEdge { edge_id, reason } => {
-            vec![lint(None, Some(edge_id.as_str()), sentence(reason), FIX)]
+            let message = edge_message(flow, edge_id, reason);
+            vec![lint(None, Some(edge_id.as_str()), message, FIX)]
         }
     }
 }
@@ -761,12 +744,11 @@ pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
 const ROUTED_KINDS: [&str; 3] = ["If", "Switch", "Transform"];
 
 /// Reasons of `validate` that hold no user text, matched exactly.
-const FIXED_REASONS: [&str; 12] = [
+const FIXED_REASONS: [&str; 11] = [
     "only If, Switch and Transform nodes have an 'input' input",
     "only Request, Output and Wait for callback nodes have a 'trigger' input",
     "Input nodes cannot receive wires",
     "Auth nodes cannot receive wires",
-    "an 'auth' wire must go from an Auth node into a Request node",
     "a Request node can take only one 'auth' wire",
     "Wait for callback nodes only have a 'trigger' input",
     "the repeat-until condition is empty",
@@ -797,6 +779,8 @@ fn sentence(reason: &str) -> String {
         Some("Two cases of this Switch have the same id.".to_string())
     } else if reason.starts_with("the source node has no exit named") {
         Some("The wire leaves an exit that the source node does not have.".to_string())
+    } else if reason.starts_with("an 'auth' wire must go from an Auth node into a Request node") {
+        Some("An 'auth' wire must go from an Auth node into a Request node.".to_string())
     } else if reason.starts_with("the Wait for callback name") {
         Some("The Wait for callback name must use only letters, digits and _.".to_string())
     } else if reason.starts_with("more than one Wait for callback node is named") {
@@ -816,6 +800,25 @@ fn sentence(reason: &str) -> String {
         routed_reason(reason).or_else(|| known_reason(reason))
     };
     fixed.unwrap_or_else(|| "The flow has a structural problem.".to_string())
+}
+
+/// The start of the reason `validate` gives for an exit that does not exist.
+const NO_EXIT: &str = "the source node has no exit named";
+
+/// The message of an invalid wire. It names both ends by label when the wire
+/// and its nodes are known. It never quotes the wire's own exit name, and it
+/// lists the exits the source node does have.
+fn edge_message(flow: &Flow, edge_id: &str, reason: &str) -> String {
+    let Some((from, to)) = wire_ends(flow, edge_id) else {
+        return sentence(reason);
+    };
+    let body = match source_kind(flow, edge_id) {
+        Some(kind) if reason.trim().starts_with(NO_EXIT) => {
+            format!("'{from}' does not have that exit; {}.", exits_text(kind))
+        }
+        _ => sentence(reason),
+    };
+    format!("Wire from '{from}' to '{to}': {body}")
 }
 
 /// The count in a V17 reason, when `reason` is one. The label between the
@@ -1161,7 +1164,7 @@ mod tests {
         assert!(exits[0].message.contains("'First'"));
     }
 
-    use crate::validate::validate;
+    use crate::validate::{validate, validate_all};
 
     fn auth(id: &str, apply_to_inherit: bool) -> FlowNode {
         node(
@@ -1859,6 +1862,65 @@ mod tests {
         assert!(lints[0].message.ends_with('.'));
     }
 
+    /// One lint per error, for every error `validate_all` found.
+    fn all_graph_lints(f: &Flow) -> Vec<FlowLint> {
+        validate_all(f)
+            .iter()
+            .flat_map(|error| graph_error_lints(f, error))
+            .collect()
+    }
+
+    #[test]
+    fn every_structural_error_becomes_its_own_lint() {
+        let f = flow(
+            vec![request("a"), request("b"), if_node("if1", "Check")],
+            vec![edge("e1", "a", handle::RESULT, "b", handle::AUTH)],
+        );
+        let lints = all_graph_lints(&f);
+        assert_eq!(
+            keys(&lints),
+            vec![
+                (Some("if1"), None, INVALID_GRAPH),
+                (None, Some("e1"), INVALID_GRAPH),
+            ]
+        );
+        assert_eq!(
+            lints[0].message,
+            "'Check': The If node needs exactly one input wire, found 0."
+        );
+    }
+
+    #[test]
+    fn a_wire_error_names_both_ends_by_label() {
+        let f = flow(
+            vec![request("a"), request("b")],
+            vec![edge("e1", "a", handle::RESULT, "b", handle::AUTH)],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(
+            lints[0].message,
+            "Wire from 'a' to 'b': An 'auth' wire must go from an Auth node into a Request node."
+        );
+    }
+
+    #[test]
+    fn an_unknown_exit_lint_lists_the_valid_exits_and_hides_the_bad_name() {
+        let f = flow(
+            vec![input("in1"), if_node("if1", "Check"), output("out")],
+            vec![
+                edge("e0", "in1", handle::RESULT, "if1", handle::INPUT),
+                edge("e1", "if1", CANARY, "out", "value"),
+            ],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(keys(&lints), vec![(None, Some("e1"), INVALID_GRAPH)]);
+        assert_eq!(
+            lints[0].message,
+            "Wire from 'Check' to 'out': 'Check' does not have that exit; its exits are 'true' and 'false'."
+        );
+        assert_no_canary(&lints);
+    }
+
     #[test]
     fn an_unknown_node_is_reported_on_the_wire_that_names_it() {
         let f = flow(
@@ -1981,7 +2043,7 @@ mod tests {
         assert_no_canary(&graph);
         assert_eq!(
             graph[0].message,
-            "A wire targets a field that the Request node does not have."
+            "Wire from 'in1' to 'req': A wire targets a field that the Request node does not have."
         );
     }
 
@@ -2182,8 +2244,12 @@ mod tests {
             ("Input nodes cannot receive wires", "Input nodes cannot receive wires."),
             ("Auth nodes cannot receive wires", "Auth nodes cannot receive wires."),
             (
-                "an 'auth' wire must go from an Auth node into a Request node",
+                "an 'auth' wire must go from an Auth node into a Request node, not from Request to Output",
                 "An 'auth' wire must go from an Auth node into a Request node.",
+            ),
+            (
+                "the source node has no exit named 'x'; its exits are 'true' and 'false'",
+                "The wire leaves an exit that the source node does not have.",
             ),
             (
                 "a Request node can take only one 'auth' wire",
