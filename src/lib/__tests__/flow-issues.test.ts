@@ -122,6 +122,27 @@ describe('computeFlowIssues: expressions and inputs', () => {
       'output-no-value',
     ]);
   });
+
+  it('adds no second line for the real save text with the node label prefix', () => {
+    const backend =
+      "Invalid input: flow is invalid: 'out1': the Output node 'out1' needs exactly one value wire (Run when wires do not count), found 0 \u2014 node(s): out1; edge(s): ";
+    const issues = computeFlowIssues([output('out1')], [], {
+      save: { nodeIds: ['out1'], edgeIds: [], message: backend },
+    });
+    expect(issues.filter((i) => i.nodeId === 'out1').map((i) => i.code)).toEqual([
+      'output-no-value',
+    ]);
+  });
+
+  it('adds no second line for a prefixed repeat-until save error', () => {
+    const base: RepeatUntil = { condition: ' ', intervalMs: 1000, maxAttempts: 10, timeoutMs: 60000 };
+    const backend =
+      "Invalid input: flow is invalid: 'r1': the repeat-until condition is empty \u2014 node(s): r1; edge(s): ";
+    const issues = computeFlowIssues([inlineRequest('r1', 'https://x.test', base)], [], {
+      save: { nodeIds: ['r1'], edgeIds: [], message: backend },
+    });
+    expect(issues.filter((i) => i.code === 'save')).toEqual([]);
+  });
 });
 
 describe('computeFlowIssues: Request nodes', () => {

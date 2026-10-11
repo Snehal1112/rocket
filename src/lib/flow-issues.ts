@@ -342,8 +342,13 @@ const normalizedMessage = (message: string) =>
     .replace(/[.!?]+$/, '')
     .toLowerCase();
 
-const issueSpot = (i: FlowIssue) =>
-  `${i.nodeId ?? ''}|${i.edgeId ?? ''}|${normalizedMessage(i.message)}`;
+// The save text leads with the node label or the wire ends. The client issue has neither.
+const SAVE_PREFIX = /^(?:'[^']*'|wire from '[^']*' to '[^']*'):\s+/;
+
+const issueSpot = (i: FlowIssue) => {
+  const text = i.code === 'save' ? i.message.replace(SAVE_PREFIX, '') : i.message;
+  return `${i.nodeId ?? ''}|${i.edgeId ?? ''}|${normalizedMessage(text)}`;
+};
 
 // A save issue that says what another issue on the same node or wire already says adds nothing.
 function dropRepeatedSaveIssues(issues: FlowIssue[]): FlowIssue[] {
