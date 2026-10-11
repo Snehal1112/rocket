@@ -555,6 +555,8 @@ mod tests {
         let cfg_service = Arc::new(AgentConfigService::new(
             Box::new(FakeAgentConfigRepo(Mutex::new(vec![bad]))),
             secret_manager,
+            Arc::new(rocket_environment::secret_store::NullSecretStore),
+            crate::process_env_reader(),
         ));
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
@@ -764,7 +766,12 @@ mod tests {
             Arc::new(fetcher),
         ));
         let repo = FakeAgentConfigRepo(Mutex::new(vec![sample_config()]));
-        Arc::new(AgentConfigService::new(Box::new(repo), secret_manager))
+        Arc::new(AgentConfigService::new(
+            Box::new(repo),
+            secret_manager,
+            Arc::new(rocket_environment::secret_store::NullSecretStore),
+            crate::process_env_reader(),
+        ))
     }
 
     struct FakeSessionClient {

@@ -482,6 +482,9 @@ pub fn run() {
                     data_dir.join("agent_configs.yml"),
                 )),
                 agent_config_secret_manager,
+                // Replaced in plan 01 task 3.
+                Arc::new(rocket_environment::NullSecretStore),
+                rocket_app::process_env_reader(),
             );
 
             // A dedicated SecretManagerService + AgentConfigService pair for
@@ -500,6 +503,9 @@ pub fn run() {
                     data_dir.join("agent_configs.yml"),
                 )),
                 acp_agent_config_secret_manager,
+                // Replaced in plan 01 task 3.
+                Arc::new(rocket_environment::NullSecretStore),
+                rocket_app::process_env_reader(),
             ));
 
             // Reads agent_autonomy_enabled for the session's collection. This

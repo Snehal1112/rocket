@@ -155,6 +155,8 @@ fn agent_config_service() -> Arc<rocket_app::AgentConfigService> {
     Arc::new(rocket_app::AgentConfigService::new(
         Box::new(FakeAgentConfigRepo(config)),
         secret_manager,
+        Arc::new(rocket_environment::NullSecretStore),
+        rocket_app::process_env_reader(),
     ))
 }
 
