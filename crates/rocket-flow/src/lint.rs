@@ -714,12 +714,18 @@ pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
             }))
             .collect(),
         FlowGraphError::UnknownNode { node_id } => {
-            let wire = flow
+            let message = "This wire is connected to a node that does not exist.";
+            let lints: Vec<FlowLint> = flow
                 .edges
                 .iter()
-                .find(|e| e.source_node_id == *node_id || e.target_node_id == *node_id);
-            let message = "This wire is connected to a node that does not exist.".to_string();
-            vec![lint(None, wire.map(|e| e.id.as_str()), message, FIX)]
+                .filter(|e| e.source_node_id == *node_id || e.target_node_id == *node_id)
+                .map(|e| lint(None, Some(e.id.as_str()), message.to_string(), FIX))
+                .collect();
+            if lints.is_empty() {
+                vec![lint(None, None, message.to_string(), FIX)]
+            } else {
+                lints
+            }
         }
         FlowGraphError::DuplicateNode { node_id } => {
             let message = "More than one node has the same id.".to_string();
@@ -2112,6 +2118,44 @@ mod tests {
             vec![edge("e1", "in1", CANARY, "out", "value")],
         );
         assert_no_canary(&graph_lints(&g));
+    }
+
+    /// A chain of Ifs where the first has no input wire, so the flow is invalid.
+    fn headless_chain_flow(n: usize) -> Flow {
+        let mut f = chain_flow(n);
+        f.edges.retain(|e| e.id != "e-in");
+        f
+    }
+
+    #[test]
+    fn every_wire_to_a_missing_node_gets_a_lint() {
+        let f = flow(
+            vec![input("in1")],
+            vec![
+                edge("e1", "in1", handle::RESULT, "ghost", "value"),
+                edge("e2", "in1", handle::RESULT, "ghost", "value"),
+            ],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(
+            keys(&lints),
+            vec![
+                (None, Some("e1"), INVALID_GRAPH),
+                (None, Some("e2"), INVALID_GRAPH)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_huge_invalid_flow_validates_and_lints_in_linear_time() {
+        let f = headless_chain_flow(20_000);
+        let error = validate(&f).expect_err("the first If has no input");
+        assert!(!graph_error_lints(&f, &error).is_empty());
+        assert_linear(headless_chain_flow, |f| {
+            if let Err(error) = validate(f) {
+                let _ = graph_error_lints(f, &error);
+            }
+        });
     }
 
     #[test]

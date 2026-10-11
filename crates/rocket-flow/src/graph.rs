@@ -209,19 +209,36 @@ fn cycle_nodes_and_edges(
 /// (exclusive) — a plain BFS. Used to compute which nodes must be skipped
 /// when `start_node_id` fails during execution.
 pub fn reachable_from(flow: &Flow, start_node_id: &str) -> Vec<String> {
-    let mut visited: HashSet<String> = HashSet::new();
+    reachable_in(&outgoing_targets(flow), start_node_id)
+}
+
+/// The target node ids of the edges that leave each node, built in one pass.
+pub fn outgoing_targets(flow: &Flow) -> HashMap<&str, Vec<&str>> {
+    let mut outgoing: HashMap<&str, Vec<&str>> = HashMap::new();
+    for edge in &flow.edges {
+        outgoing
+            .entry(edge.source_node_id.as_str())
+            .or_default()
+            .push(edge.target_node_id.as_str());
+    }
+    outgoing
+}
+
+/// Like `reachable_from`, over an adjacency map from `outgoing_targets`.
+pub fn reachable_in(outgoing: &HashMap<&str, Vec<&str>>, start_node_id: &str) -> Vec<String> {
+    let mut visited: HashSet<&str> = HashSet::new();
     let mut queue: VecDeque<&str> = VecDeque::new();
     queue.push_back(start_node_id);
 
     while let Some(current) = queue.pop_front() {
-        for edge in flow.edges.iter().filter(|e| e.source_node_id == current) {
-            if visited.insert(edge.target_node_id.clone()) {
-                queue.push_back(&edge.target_node_id);
+        for target in outgoing.get(current).into_iter().flatten() {
+            if visited.insert(target) {
+                queue.push_back(target);
             }
         }
     }
 
-    visited.into_iter().collect()
+    visited.into_iter().map(str::to_string).collect()
 }
 
 #[cfg(test)]

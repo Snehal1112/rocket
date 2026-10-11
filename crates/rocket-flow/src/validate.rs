@@ -5,7 +5,7 @@
 
 use crate::describe::exits_text;
 use crate::flow::{Flow, FlowEdge, FlowNode};
-use crate::graph::{reachable_from, topological_sort, FlowGraphError};
+use crate::graph::{outgoing_targets, reachable_in, topological_sort, FlowGraphError};
 use crate::handle;
 use crate::node::{FlowNodeKind, RequestSource, CALLBACK_MAX_TIMEOUT_MS, CALLBACK_MIN_TIMEOUT_MS};
 use std::collections::{HashMap, HashSet};
@@ -225,14 +225,20 @@ fn invalid_node(node: &FlowNode, reason: String) -> FlowGraphError {
 
 /// V1: an If, Switch or Transform node has exactly one incoming edge, into `input`.
 fn check_routing_inputs(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
+    // One pass over the wires, so a large flow stays linear.
+    let mut incoming_by_target: HashMap<&str, Vec<&FlowEdge>> = HashMap::new();
+    for edge in &flow.edges {
+        incoming_by_target
+            .entry(edge.target_node_id.as_str())
+            .or_default()
+            .push(edge);
+    }
     for node in flow.nodes.iter().filter(|n| takes_input(&n.kind)) {
-        let incoming: Vec<&FlowEdge> = flow
-            .edges
-            .iter()
-            .filter(|e| e.target_node_id == node.id)
-            .collect();
+        let incoming: &[&FlowEdge] = incoming_by_target
+            .get(node.id.as_str())
+            .map_or(&[], Vec::as_slice);
         let name = kind_name(&node.kind);
-        match incoming.as_slice() {
+        match incoming {
             [edge] if edge.target_field == handle::INPUT => {}
             [edge] => errors.push(invalid_node(
                 node,
@@ -520,6 +526,7 @@ fn check_wait_nodes(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
 /// `callback_not_wired` lint in `lint.rs` covers them. Values fed in through
 /// wired fields are skipped.
 fn check_callback_order(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
+    let outgoing = outgoing_targets(flow);
     for wait in &flow.nodes {
         let FlowNodeKind::WaitForCallback { name, .. } = &wait.kind else {
             continue;
@@ -543,7 +550,7 @@ fn check_callback_order(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
             if !texts.into_iter().any(|t| mentions_callback(t, name)) {
                 continue;
             }
-            if !reachable_from(flow, &node.id).contains(&wait.id) {
+            if !reachable_in(&outgoing, &node.id).contains(&wait.id) {
                 errors.push(invalid_node(
                     wait,
                     format!(
