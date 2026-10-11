@@ -74,4 +74,34 @@ describe('FlowIssuesButton', () => {
     expect(within(list).getAllByRole('button')).toHaveLength(2);
     expect(list).toHaveTextContent('Bad wire.');
   });
+
+  it('lists an auth wire lint under the request and selects the request', async () => {
+    const authNodes: FlowNode[] = [
+      {
+        id: 'req',
+        position: { x: 0, y: 0 },
+        kind: {
+          kind: 'Request',
+          label: 'Get orders',
+          source: { type: 'Saved', requestPath: 'o.yml' },
+        },
+      },
+    ];
+    const lints: FlowIssue[] = [
+      {
+        code: 'auth_wire_overrides_auth',
+        severity: 'warning',
+        nodeId: 'req',
+        edgeId: 'e1',
+        message: "The credential of 'Sign in' replaces the own auth of 'Get orders'.",
+      },
+    ];
+    const onSelectNode = vi.fn();
+    render(<FlowIssuesButton issues={lints} nodes={authNodes} onSelectNode={onSelectNode} />);
+    await userEvent.click(screen.getByRole('button', { name: '1 warning' }));
+    const list = await screen.findByRole('list', { name: 'Flow issues' });
+    expect(list).toHaveTextContent('replaces the own auth');
+    await userEvent.click(within(list).getByRole('button'));
+    await waitFor(() => expect(onSelectNode).toHaveBeenCalledWith('req'));
+  });
 });

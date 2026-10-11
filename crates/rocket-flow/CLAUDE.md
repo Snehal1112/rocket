@@ -80,10 +80,23 @@ do what its author meant. It never blocks save or run, works on invalid
 graphs too, and is linear in graph size (one `GraphIndex` per call). Rules:
 `exit_without_edge` (If exits and Switch cases with no wire, one lint per
 node), `switch_without_default`, `no_path_to_output` (only when the flow has
-an Output; an Auth node with `apply_to_inherit` is exempt).
+an Output; an Auth node with `apply_to_inherit` is exempt),
+`auth_no_effect` (an Auth node with no `auth` wire that applies to no Request:
+not applying, or applying while every Request has an `auth` wire or explicit
+saved auth; a saved request the context cannot read counts as taking it),
+`auth_wire_overrides_auth` (an `auth` wire into a saved request whose own auth
+is explicit; the wire wins at run time and replaces it; one lint per wire, with
+`edge_id`), `callback_not_wired` (a saved request sends `{{callback.<name>}}`
+but has no path to the Wait named `<name>`, the V15 direction; inline requests
+stay with V15; scripts and auth fields are not scanned).
 `graph_error_lints` turns a `validate` failure into `invalid_graph` error
 lints, one per named node or wire. Output order is fixed: node file order,
 then rule order. Messages name nodes by label and never quote values,
 expressions, match values or auth fields. `LintContext` is the seam for
 facts that need I/O (saved requests, known variables): the app layer answers
-yes, no or `None`, and `None` never warns. No rule uses it yet (F-21, F-22).
+yes, no or `None`, and `None` never warns. The methods in use are
+`saved_request_exists` (F-21), `variable_is_known` (F-22),
+`saved_request_auth_is_explicit` (F-24) and `saved_request_callbacks` (F-25).
+The app layer computes the saved-request facts in `rocket-app`
+`flow_lint_facts.rs`; effective auth is `runtime_auth` else `auth`, and
+disabled fields are not scanned.

@@ -190,6 +190,29 @@ describe('computeFlowIssues: rules the backend owns', () => {
     expect(codes).not.toContain('exit-unwired');
     expect(codes).not.toContain('no-path-to-output');
   });
+
+  it('does not report the auth and callback rules on the client', () => {
+    const nodes = [
+      node('a', {
+        kind: 'Auth',
+        label: 'Sign in',
+        auth: { authType: 'bearer', token: 't' },
+        applyToInherit: false,
+      }),
+      node('r', {
+        kind: 'Request',
+        label: 'Get',
+        source: { type: 'Saved', requestPath: 'get.yml' },
+      }),
+      node('w', { kind: 'WaitForCallback', label: 'Hook', name: 'hook', timeoutMs: 60000 }),
+      output('out'),
+    ];
+    const edges = [wire('e1', 'a', 'r', 'auth'), wire('e2', 'w', 'out', 'value')];
+    const codes = computeFlowIssues(nodes, edges).map((i) => i.code);
+    for (const code of ['auth_no_effect', 'auth_wire_overrides_auth', 'callback_not_wired']) {
+      expect(codes).not.toContain(code);
+    }
+  });
 });
 
 describe('computeFlowIssues: save errors', () => {

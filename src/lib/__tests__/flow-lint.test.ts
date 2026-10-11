@@ -132,3 +132,54 @@ describe('the F-21 and F-22 codes', () => {
     ).toEqual({ code: 'unknown_variable', severity: 'warning', nodeId: 'n', message: 'm' });
   });
 });
+
+describe('the F-24 and F-25 codes', () => {
+  it('are owned by the backend', () => {
+    expect(BACKEND_LINT_CODES).toEqual(
+      expect.arrayContaining(['auth_no_effect', 'auth_wire_overrides_auth', 'callback_not_wired']),
+    );
+  });
+
+  it('keeps an edge-bound auth lint and a node lint on the same request apart', () => {
+    const overrides = issue({
+      code: 'auth_wire_overrides_auth',
+      nodeId: 'req',
+      edgeId: 'e1',
+      message: 'The credential of Sign in replaces the own auth of Get.',
+    });
+    const secondWire = issue({ ...overrides, edgeId: 'e2' });
+    const callback = issue({ code: 'callback_not_wired', nodeId: 'req', message: 'Get sends it.' });
+    const present = { nodeIds: new Set(['req']), edgeIds: new Set(['e1', 'e2']) };
+    expect(mergeFlowIssues([], [overrides, secondWire, callback], present)).toEqual([
+      overrides,
+      secondWire,
+      callback,
+    ]);
+  });
+
+  it('drops an auth wire lint once its wire is deleted', () => {
+    const overrides = issue({ code: 'auth_wire_overrides_auth', nodeId: 'req', edgeId: 'e1' });
+    const present = { nodeIds: new Set(['req']), edgeIds: new Set<string>() };
+    expect(mergeFlowIssues([], [overrides], present)).toEqual([]);
+  });
+
+  it('maps a backend auth wire lint without loss', () => {
+    expect(
+      toFlowIssue({
+        code: 'auth_wire_overrides_auth',
+        severity: 'warning',
+        nodeId: 'req',
+        edgeId: 'e1',
+        message: 'm',
+        hint: 'h',
+      }),
+    ).toEqual({
+      code: 'auth_wire_overrides_auth',
+      severity: 'warning',
+      nodeId: 'req',
+      edgeId: 'e1',
+      message: 'm',
+      hint: 'h',
+    });
+  });
+});
