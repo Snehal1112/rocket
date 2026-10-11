@@ -1,12 +1,15 @@
 import { invoke } from '@tauri-apps/api/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearAgentCredential,
   FOLDER_SETTINGS_SAVED_EVENT,
   type FolderSettings,
   getFolderSettings,
+  hasAgentCredential,
   isGitSshTrustFailure,
   parseGitNetworkError,
   saveFolderSettings,
+  setAgentCredential,
 } from '../tauri-api';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -149,5 +152,26 @@ describe('folder settings bindings', () => {
   it('FOLDER_SETTINGS_SAVED_EVENT matches the Rust event tag', () => {
     // Must equal the tag asserted in folder_settings_saved_wire_shape (rocket-shared).
     expect(FOLDER_SETTINGS_SAVED_EVENT).toBe('folderSettingsSaved');
+  });
+});
+
+describe('agent credential bindings', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it('calls the agent credential commands with a configId and returns only a boolean', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    await setAgentCredential('agent-1', 'fake-value');
+    expect(invoke).toHaveBeenLastCalledWith('set_agent_credential', {
+      configId: 'agent-1',
+      value: 'fake-value',
+    });
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    await clearAgentCredential('agent-1');
+    expect(invoke).toHaveBeenLastCalledWith('clear_agent_credential', { configId: 'agent-1' });
+    vi.mocked(invoke).mockResolvedValueOnce(true);
+    await expect(hasAgentCredential('agent-1')).resolves.toBe(true);
+    expect(invoke).toHaveBeenLastCalledWith('has_agent_credential', { configId: 'agent-1' });
   });
 });

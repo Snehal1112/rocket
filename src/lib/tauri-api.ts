@@ -441,6 +441,8 @@ export interface Environment {
   description?: unknown;
 }
 
+export type AgentCredentialSource = 'vault' | 'env' | 'keychain';
+
 export interface AgentConfig {
   id: string;
   label: string;
@@ -454,6 +456,10 @@ export interface AgentConfig {
   vaultName: string;
   vaultSecretId: string;
   vaultSecretName: string;
+  // Where the credential comes from. A missing value means 'vault'.
+  credentialSource?: AgentCredentialSource;
+  // For the 'env' source: the name of the variable Rocket reads from its own environment.
+  sourceEnvVar?: string;
 }
 
 export interface AgentEnvPair {
@@ -2168,6 +2174,16 @@ export const saveAgentConfig = (config: AgentConfig) =>
 export const deleteAgentConfig = (id: string) => invoke<void>('delete_agent_config', { id });
 
 export const testAgentConfig = (id: string) => invoke<void>('test_agent_config', { id });
+
+// The value goes in and never comes back. `hasAgentCredential` returns a boolean only.
+export const setAgentCredential = (configId: string, value: string) =>
+  invoke<void>('set_agent_credential', { configId, value });
+
+export const clearAgentCredential = (configId: string) =>
+  invoke<void>('clear_agent_credential', { configId });
+
+export const hasAgentCredential = (configId: string) =>
+  invoke<boolean>('has_agent_credential', { configId });
 
 // ============================================================
 // Flow (visual workflow builder)
