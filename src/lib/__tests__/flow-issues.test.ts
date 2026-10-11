@@ -323,6 +323,14 @@ describe('cleanSaveMessage', () => {
     expect(cleaned).toBe('More than one case matches value hidden.');
   });
 
+  it('words a duplicate wire id rejection without the id lists', () => {
+    expect(
+      cleanSaveMessage(
+        'Invalid input: flow has more than one wire with id: e7 — node(s): ; edge(s): e7',
+      ),
+    ).toBe('Flow has more than one wire with id: e7.');
+  });
+
   it('hides a double-quoted value in the middle of a sentence', () => {
     const cleaned = cleanSaveMessage('switch case "secret-token" is duplicated');
     expect(cleaned).not.toContain('secret-token');

@@ -1023,6 +1023,10 @@ mod tests {
             reason: "unknown exit".to_string(),
         };
         assert_eq!(edge_err.to_string(), "invalid edge e1: unknown exit");
+        let dup_edge = FlowGraphError::DuplicateEdge {
+            edge_id: "e1".to_string(),
+        };
+        assert_eq!(dup_edge.to_string(), "duplicate edge id: e1");
     }
 
     fn polling_request(id: &str, repeat: crate::node::RepeatUntil) -> FlowNode {
@@ -1496,6 +1500,23 @@ mod tests {
             ],
         );
         assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn validate_reports_a_duplicate_edge_id() {
+        let f = flow(
+            vec![input("in"), output("a"), output("b")],
+            vec![
+                edge("e1", "in", handle::RESULT, "a", "value"),
+                edge("e1", "in", handle::RESULT, "b", "value"),
+            ],
+        );
+        assert_eq!(
+            validate(&f),
+            Err(FlowGraphError::DuplicateEdge {
+                edge_id: "e1".to_string()
+            })
+        );
     }
 
     fn invalid_edge_reason(result: Result<Vec<String>, FlowGraphError>) -> String {

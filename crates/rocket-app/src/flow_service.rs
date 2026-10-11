@@ -111,6 +111,9 @@ fn graph_error_message(error: FlowGraphError) -> String {
         FlowGraphError::DuplicateNode { node_id } => {
             format!("flow has more than one node with id: {node_id}")
         }
+        FlowGraphError::DuplicateEdge { edge_id } => format!(
+            "flow has more than one wire with id: {edge_id} — node(s): ; edge(s): {edge_id}"
+        ),
         FlowGraphError::InvalidNode { node_id, reason } => {
             format!("flow is invalid: {reason} — node(s): {node_id}; edge(s): ")
         }
@@ -446,6 +449,45 @@ mod tests {
         );
         assert!(
             message.ends_with("node(s): ; edge(s): e5"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn save_rejects_a_duplicate_edge_id_and_names_it_in_the_tail() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let out = |id: &str| {
+            node_of(
+                id,
+                FlowNodeKind::Output {
+                    label: id.to_string(),
+                },
+            )
+        };
+        let wire_to = |to: &str| FlowEdge {
+            id: "e7".to_string(),
+            source_node_id: "a".to_string(),
+            target_node_id: to.to_string(),
+            target_field: "value".to_string(),
+            expression: "response.body".to_string(),
+            source_handle: rocket_flow::handle::RESULT.to_string(),
+        };
+        let flow = Flow {
+            name: "Twin Wires".to_string(),
+            nodes: vec![out("a"), out("b"), out("c")],
+            edges: vec![wire_to("b"), wire_to("c")],
+            callback_host: None,
+        };
+        let message = svc
+            .save("demo", flow)
+            .expect_err("a repeated edge id must be rejected")
+            .to_string();
+        assert!(
+            message.contains("more than one wire with id: e7"),
+            "got: {message}"
+        );
+        assert!(
+            message.ends_with("node(s): ; edge(s): e7"),
             "got: {message}"
         );
     }

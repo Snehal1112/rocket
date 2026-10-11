@@ -16,6 +16,9 @@ pub enum FlowGraphError {
     /// Two nodes in `flow.nodes` share the same id.
     #[error("duplicate node id: {node_id}")]
     DuplicateNode { node_id: String },
+    /// Two edges in `flow.edges` share the same id.
+    #[error("duplicate edge id: {edge_id}")]
+    DuplicateEdge { edge_id: String },
     /// A node breaks a structural rule, e.g. an If node without an input wire.
     #[error("invalid node {node_id}: {reason}")]
     InvalidNode { node_id: String, reason: String },
@@ -29,14 +32,23 @@ pub enum FlowGraphError {
 /// that has an edge pointing *into* it). Independent nodes/branches may
 /// appear in either relative order.
 ///
-/// Duplicate node ids and edges to unknown nodes are rejected before any
-/// sorting starts.
+/// Duplicate node ids, duplicate edge ids and edges to unknown nodes are
+/// rejected, in that order, before any sorting starts.
 pub fn topological_sort(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     let mut node_ids: HashSet<&str> = HashSet::with_capacity(flow.nodes.len());
     for node in &flow.nodes {
         if !node_ids.insert(node.id.as_str()) {
             return Err(FlowGraphError::DuplicateNode {
                 node_id: node.id.clone(),
+            });
+        }
+    }
+
+    let mut seen_edges: HashSet<&str> = HashSet::with_capacity(flow.edges.len());
+    for edge in &flow.edges {
+        if !seen_edges.insert(edge.id.as_str()) {
+            return Err(FlowGraphError::DuplicateEdge {
+                edge_id: edge.id.clone(),
             });
         }
     }
@@ -301,6 +313,42 @@ mod tests {
         assert!(pos("a") < pos("c"));
         assert!(pos("b") < pos("d"));
         assert!(pos("c") < pos("d"));
+    }
+
+    #[test]
+    fn duplicate_edge_ids_are_rejected_and_name_the_id() {
+        let flow = Flow {
+            name: "dup-edge".to_string(),
+            nodes: vec![node("a"), node("b"), node("c")],
+            edges: vec![
+                edge("e1", "a", "b"),
+                edge("e2", "b", "c"),
+                edge("e1", "a", "c"),
+            ],
+            callback_host: None,
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Err(FlowGraphError::DuplicateEdge {
+                edge_id: "e1".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn a_duplicate_edge_id_is_reported_before_an_unknown_node() {
+        let flow = Flow {
+            name: "dup-then-ghost".to_string(),
+            nodes: vec![node("a"), node("b")],
+            edges: vec![edge("e1", "a", "ghost"), edge("e1", "a", "b")],
+            callback_host: None,
+        };
+        assert_eq!(
+            topological_sort(&flow),
+            Err(FlowGraphError::DuplicateEdge {
+                edge_id: "e1".to_string()
+            })
+        );
     }
 
     #[test]

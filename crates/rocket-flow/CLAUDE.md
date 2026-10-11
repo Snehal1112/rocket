@@ -75,7 +75,7 @@ are persisted in plaintext in the flow yml, as with collection auth; use
 
 ## Hard wire and graph rules
 
-After V1-V15, `validate` rejects: V16 (an edge rule) a wire into a Request node whose `target_field` is not `url`, `body`, `trigger`, `auth` or `headers[<index or name>].value`. `is_request_wire_field` is the one spelling of that list, and a `rocket-app` test pins it against `apply_wired_overrides`. Other node kinds keep their own field rules (V1-V4); Output fields are not policed. `rocket-flow` cannot read a saved request, so a `body` wire into a saved form or binary body is still only caught at run time. Inline bodies are always JSON text, so they cannot hit that case.
+After V1-V15, `validate` rejects: V16 (an edge rule) a wire into a Request node whose `target_field` is not `url`, `body`, `trigger`, `auth` or `headers[<index or name>].value`. `is_request_wire_field` is the one spelling of that list, and a `rocket-app` test pins it against `apply_wired_overrides`. Other node kinds keep their own field rules (V1-V4); Output fields are not policed. `rocket-flow` cannot read a saved request, so a `body` wire into a saved form or binary body is still only caught at run time. Inline bodies are always JSON text, so they cannot hit that case. `topological_sort` rejects, in order, duplicate node ids, duplicate edge ids (`FlowGraphError::DuplicateEdge`) and edges to unknown nodes.
 
 ## Lint tier (`lint.rs`)
 

@@ -270,6 +270,12 @@ describe('parseGraphErrorMessage', () => {
     expect(parseGraphErrorMessage(message)).toEqual({ nodeIds: [], edgeIds: ['e3'] });
   });
 
+  it('parses a duplicate wire id rejection', () => {
+    const message =
+      'Invalid input: flow has more than one wire with id: e7 — node(s): ; edge(s): e7';
+    expect(parseGraphErrorMessage(message)).toEqual({ nodeIds: [], edgeIds: ['e7'] });
+  });
+
   it('returns null for an unrelated error message', () => {
     expect(parseGraphErrorMessage('Invalid input: flow name is empty')).toBeNull();
   });

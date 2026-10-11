@@ -743,6 +743,10 @@ pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
             let message = "More than one node has the same id.".to_string();
             vec![lint(Some(node_id.as_str()), None, message, FIX)]
         }
+        FlowGraphError::DuplicateEdge { edge_id } => {
+            let message = "More than one wire has the same id.".to_string();
+            vec![lint(None, Some(edge_id.as_str()), message, FIX)]
+        }
         FlowGraphError::InvalidNode { node_id, reason } => {
             let message = format!("{}: {}", label_of(node_id.as_str()), sentence(reason));
             vec![lint(Some(node_id.as_str()), None, message, FIX)]
@@ -1861,6 +1865,21 @@ mod tests {
         let f = flow(vec![output("a"), output("a")], vec![]);
         let lints = graph_lints(&f);
         assert_eq!(keys(&lints), vec![(Some("a"), None, INVALID_GRAPH)]);
+    }
+
+    #[test]
+    fn a_duplicate_edge_id_is_reported_on_that_wire() {
+        let f = flow(
+            vec![input("in1"), output("a"), output("b")],
+            vec![
+                edge("e1", "in1", handle::RESULT, "a", "value"),
+                edge("e1", "in1", handle::RESULT, "b", "value"),
+            ],
+        );
+        let lints = graph_lints(&f);
+        assert_eq!(keys(&lints), vec![(None, Some("e1"), INVALID_GRAPH)]);
+        assert_eq!(lints[0].message, "More than one wire has the same id.");
+        assert!(lints[0].hint.is_some());
     }
 
     const CANARY: &str = "sk-live-canary-9f3a";
