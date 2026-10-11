@@ -870,6 +870,21 @@ struct PreparedPartial {
     plan: PartialPlan,
 }
 
+/// The most nodes one run may execute. A run visits each node at most once,
+/// because the graph is acyclic and `repeat_until` retries stay inside their
+/// node, so this caps the node count. Real flows have tens of nodes.
+pub const MAX_RUN_STEPS: usize = 10_000;
+
+/// Refuses a flow with more nodes than a run may execute.
+fn check_step_budget(flow_name: &str, node_count: usize, limit: usize) -> DomainResult<()> {
+    if node_count > limit {
+        return Err(DomainError::InvalidInput(format!(
+            "flow '{flow_name}' has {node_count} nodes, more than the limit of {limit} a run may execute"
+        )));
+    }
+    Ok(())
+}
+
 /// Orchestrates one Flow run: loads the graph, walks it in dependency order,
 /// and dispatches each node using the building blocks in this same module
 /// (`build_execute_request_input`, `apply_wired_overrides`,
@@ -946,13 +961,16 @@ impl FlowExecutionService {
     /// Loads the named flow and validates it into a dependency-ordered node id
     /// list. A structurally invalid or cyclic graph is rejected here (defense
     /// in depth — saving should already have refused it) rather than ever
-    /// starting a run against it.
+    /// starting a run against it. A flow with more than `MAX_RUN_STEPS` nodes
+    /// is rejected too.
     fn load_ordered_nodes(
         &self,
         collection: &str,
         flow_name: &str,
     ) -> DomainResult<(rocket_flow::Flow, Vec<String>)> {
         let flow = self.flow_repo.get(collection, flow_name)?;
+        // Checked before the graph work, so an oversized file costs nothing more.
+        check_step_budget(flow_name, flow.nodes.len(), MAX_RUN_STEPS)?;
         let order = rocket_flow::validate(&flow).map_err(|e| {
             DomainError::InvalidInput(format!("flow '{flow_name}' is not runnable: {e}"))
         })?;
@@ -3249,6 +3267,64 @@ mod tests {
             .expect("valid flow must load and sort");
         assert_eq!(flow.name, "auth-flow");
         assert_eq!(order, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn step_budget_accepts_the_limit_and_refuses_one_more() {
+        assert!(check_step_budget("f", 3, 3).is_ok());
+        let err = check_step_budget("f", 4, 3).expect_err("one over the limit");
+        match err {
+            DomainError::InvalidInput(message) => {
+                assert!(message.contains("flow 'f' has 4 nodes"), "{message}");
+                assert!(message.contains("limit of 3"), "{message}");
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    fn flow_of_input_nodes(count: usize) -> Flow {
+        Flow {
+            name: "wide".to_string(),
+            nodes: (0..count)
+                .map(|i| input_node_with(&format!("n{i}"), "x"))
+                .collect(),
+            edges: Vec::new(),
+            callback_host: None,
+        }
+    }
+
+    #[test]
+    fn a_flow_with_more_than_max_run_steps_nodes_is_refused_before_it_is_ordered() {
+        let service = service_with_flow(flow_of_input_nodes(MAX_RUN_STEPS + 1));
+        let err = service
+            .load_ordered_nodes("my-api", "wide")
+            .expect_err("over the limit");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn a_flow_with_exactly_max_run_steps_nodes_is_still_accepted() {
+        let service = service_with_flow(flow_of_input_nodes(MAX_RUN_STEPS));
+        let (_flow, order) = service
+            .load_ordered_nodes("my-api", "wide")
+            .expect("exactly the limit loads");
+        assert_eq!(order.len(), MAX_RUN_STEPS);
+    }
+
+    #[tokio::test]
+    async fn a_run_over_the_limit_fails_with_a_readable_error_and_publishes_nothing() {
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(flow_of_input_nodes(MAX_RUN_STEPS + 1), &publisher);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let err = service
+            .run(&exec, run_input("wide"))
+            .await
+            .expect_err("over the limit");
+
+        assert!(err.to_string().contains("more than the limit"), "{err}");
+        assert!(publisher.events().is_empty());
     }
 
     #[tokio::test]
