@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Select,
   SelectContent,
@@ -21,6 +22,7 @@ import {
 import { useSecretManagerConnections } from '@/lib/queries/secret-manager-queries';
 import {
   type AgentConfig,
+  type AgentCredentialSource,
   type ExternalSecretRef,
   fetchExternalSecretNames,
 } from '@/lib/tauri-api';
@@ -72,6 +74,18 @@ function validateCredentialEnvVar(value: string): string | null {
   return validateEnvName(text);
 }
 
+const SOURCE_ENV_SECRET_MESSAGE =
+  'This looks like a secret value. This field takes only the name of the environment variable that holds it, for example CLAUDE_CODE_OAUTH_TOKEN. If this is a real key, treat it as exposed and revoke it.';
+
+// An empty value is not flagged here. The save handler reports it as required.
+// The message never repeats the entered text.
+function validateSourceEnvVar(value: string): string | null {
+  const text = value.trim();
+  if (text.length === 0) return null;
+  if (looksLikeSecret(text)) return SOURCE_ENV_SECRET_MESSAGE;
+  return validateEnvName(text);
+}
+
 function validateEnvRows(rows: EnvRow[], credentialEnvVar: string): (string | null)[] {
   const credential = credentialEnvVar.trim().toLowerCase();
   return rows.map((row, index) => {
@@ -96,6 +110,8 @@ const emptyForm = {
   args: '',
   workingDir: '',
   credentialEnvVar: '',
+  credentialSource: 'vault' as AgentCredentialSource,
+  sourceEnvVar: '',
   vaultConnectionId: '',
   vaultName: '',
   vaultSecretId: '',
@@ -159,6 +175,8 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       args: c.args.join(', '),
       workingDir: c.workingDir ?? '',
       credentialEnvVar: c.credentialEnvVar,
+      credentialSource: c.credentialSource ?? 'vault',
+      sourceEnvVar: c.sourceEnvVar ?? '',
       extraEnv: (c.extraEnv ?? []).map((p) => ({ key: crypto.randomUUID(), ...p })),
       vaultConnectionId: c.vaultConnectionId,
       vaultName: c.vaultName,
@@ -199,7 +217,12 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
 
   const envErrors = editing ? validateEnvRows(editing.extraEnv, editing.credentialEnvVar) : [];
   const credentialError = editing ? validateCredentialEnvVar(editing.credentialEnvVar) : null;
-  const envInvalid = envErrors.some((e) => e !== null) || credentialError !== null;
+  const sourceEnvError =
+    editing && editing.credentialSource === 'env'
+      ? validateSourceEnvVar(editing.sourceEnvVar)
+      : null;
+  const envInvalid =
+    envErrors.some((e) => e !== null) || credentialError !== null || sourceEnvError !== null;
 
   const updateEnvRow = (key: string, patch: Partial<Pick<EnvRow, 'name' | 'value'>>) => {
     if (!editing) return;
@@ -211,16 +234,24 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
 
   const handleSave = async () => {
     if (!editing || envInvalid) return;
+    const source = editing.credentialSource;
+    const missingVault =
+      source === 'vault' &&
+      (!editing.vaultConnectionId || !editing.vaultName.trim() || !editing.vaultSecretId);
+    const missingEnv = source === 'env' && !editing.sourceEnvVar.trim();
     if (
       !editing.label.trim() ||
       !editing.command.trim() ||
       !editing.credentialEnvVar.trim() ||
-      !editing.vaultConnectionId ||
-      !editing.vaultName.trim() ||
-      !editing.vaultSecretId
+      missingVault ||
+      missingEnv
     ) {
       toast.error(
-        'Label, command, credential env var, vault connection, vault name, and secret are required.',
+        source === 'vault'
+          ? 'Label, command, credential env var, vault connection, vault name, and secret are required.'
+          : source === 'env'
+            ? 'Label, command, credential env var, and the environment variable name are required.'
+            : 'Label, command, and credential env var are required.',
       );
       return;
     }
@@ -235,10 +266,12 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       workingDir: editing.workingDir.trim() || undefined,
       credentialEnvVar: editing.credentialEnvVar.trim(),
       extraEnv: editing.extraEnv.map(({ name, value }) => ({ name, value })),
-      vaultConnectionId: editing.vaultConnectionId,
-      vaultName: editing.vaultName.trim(),
-      vaultSecretId: editing.vaultSecretId,
-      vaultSecretName: editing.vaultSecretName,
+      credentialSource: source,
+      sourceEnvVar: source === 'env' ? editing.sourceEnvVar.trim() : undefined,
+      vaultConnectionId: source === 'vault' ? editing.vaultConnectionId : '',
+      vaultName: source === 'vault' ? editing.vaultName.trim() : '',
+      vaultSecretId: source === 'vault' ? editing.vaultSecretId : '',
+      vaultSecretName: source === 'vault' ? editing.vaultSecretName : '',
     };
     try {
       await saveMutation.mutateAsync(config);
@@ -275,276 +308,331 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         </DialogHeader>
 
         {editing ? (
-          connectionsLoading ? (
-            <div className='flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground'>
-              <Loader2 className='h-4 w-4 animate-spin' />
-              Loading vault connections…
+          <div className='space-y-3'>
+            <div>
+              <Label htmlFor='ac-label' className='text-sm'>
+                Label
+              </Label>
+              <Input
+                id='ac-label'
+                value={editing.label}
+                onChange={(e) => setEditing({ ...editing, label: e.target.value })}
+                className='h-8 text-sm'
+              />
             </div>
-          ) : connectionsError || connections.length === 0 ? (
-            <div className='space-y-3'>
-              <p className='text-sm text-muted-foreground'>
-                {connectionsError
-                  ? 'Could not load RocketVault connections. Check the Secret Manager connections dialog, then try again.'
-                  : "No RocketVault connections configured yet. Add a Secret Manager connection first, then come back to configure an agent's credential."}
+            <div>
+              <Label htmlFor='ac-command' className='text-sm'>
+                Command
+              </Label>
+              <Input
+                id='ac-command'
+                value={editing.command}
+                onChange={(e) => setEditing({ ...editing, command: e.target.value })}
+                placeholder='claude-agent-acp'
+                className='h-8 text-sm'
+              />
+            </div>
+            <div>
+              <Label htmlFor='ac-args' className='text-sm'>
+                Args <span className='text-muted-foreground'>(comma-separated)</span>
+              </Label>
+              <Input
+                id='ac-args'
+                value={editing.args}
+                onChange={(e) => setEditing({ ...editing, args: e.target.value })}
+                placeholder='--stdio'
+                className='h-8 text-sm'
+              />
+            </div>
+            <div>
+              <Label htmlFor='ac-working-dir' className='text-sm'>
+                Working Directory <span className='text-muted-foreground'>(optional)</span>
+              </Label>
+              <Input
+                id='ac-working-dir'
+                value={editing.workingDir}
+                onChange={(e) => setEditing({ ...editing, workingDir: e.target.value })}
+                className='h-8 text-sm'
+              />
+            </div>
+            <div>
+              <Label htmlFor='ac-credential-env-var' className='text-sm'>
+                Credential Env Var
+              </Label>
+              <Input
+                id='ac-credential-env-var'
+                value={editing.credentialEnvVar}
+                onChange={(e) => setEditing({ ...editing, credentialEnvVar: e.target.value })}
+                placeholder='ANTHROPIC_API_KEY'
+                className='h-8 text-sm'
+                aria-invalid={credentialError !== null}
+                autoComplete='off'
+                spellCheck={false}
+              />
+              {credentialError && (
+                <p role='alert' className='mt-1 text-xs text-destructive'>
+                  {credentialError}
+                </p>
+              )}
+              <p className='mt-1 text-xs text-muted-foreground'>
+                The NAME of the environment variable the agent reads its key from, for example
+                ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. The secret itself comes from the
+                credential source below.
               </p>
-              <Button variant='outline' size='sm' onClick={cancelEdit}>
-                Cancel
+              <p className='mt-1 text-xs text-muted-foreground'>
+                If the vault secret is a short-lived token (e.g. an OAuth access token) rather than
+                a static API key, sessions may need to be restarted after it expires — the value is
+                only re-fetched when a new agent session starts.
+              </p>
+            </div>
+            <div className='space-y-2'>
+              <Label className='text-sm'>Environment variables</Label>
+              <p className='text-xs text-muted-foreground'>
+                Values are stored as plain text. Put secrets in the RocketVault credential, not
+                here.
+              </p>
+              <p className='text-xs text-muted-foreground'>
+                A variable such as ANTHROPIC_BASE_URL can send the credential to another host.
+              </p>
+              {editing.extraEnv.map((row, index) => (
+                <div key={row.key} className='space-y-1'>
+                  <div className='flex items-center gap-2'>
+                    <Input
+                      aria-label={`Variable name ${index + 1}`}
+                      aria-invalid={envErrors[index] !== null}
+                      value={row.name}
+                      onChange={(e) => updateEnvRow(row.key, { name: e.target.value })}
+                      placeholder='NAME'
+                      className='h-8 flex-1 text-sm'
+                    />
+                    <Input
+                      aria-label={`Variable value ${index + 1}`}
+                      value={row.value}
+                      onChange={(e) => updateEnvRow(row.key, { value: e.target.value })}
+                      placeholder='value'
+                      className='h-8 flex-1 text-sm'
+                    />
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      aria-label={`Remove variable ${index + 1}`}
+                      onClick={() =>
+                        setEditing({
+                          ...editing,
+                          extraEnv: editing.extraEnv.filter((r) => r.key !== row.key),
+                        })
+                      }
+                    >
+                      <X className='h-3.5 w-3.5' aria-hidden='true' />
+                    </Button>
+                  </div>
+                  {envErrors[index] && (
+                    <p role='alert' className='text-xs text-destructive'>
+                      {envErrors[index]}
+                    </p>
+                  )}
+                </div>
+              ))}
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() =>
+                  setEditing({
+                    ...editing,
+                    extraEnv: [
+                      ...editing.extraEnv,
+                      { key: crypto.randomUUID(), name: '', value: '' },
+                    ],
+                  })
+                }
+              >
+                <Plus className='mr-1.5 h-3.5 w-3.5' aria-hidden='true' />
+                Add variable
               </Button>
             </div>
-          ) : (
-            <div className='space-y-3'>
+            <div>
+              <Label className='text-sm'>Credential source</Label>
+              <RadioGroup
+                value={editing.credentialSource}
+                onValueChange={(value) =>
+                  setEditing({ ...editing, credentialSource: value as AgentCredentialSource })
+                }
+                className='mt-1 space-y-1'
+              >
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='vault' id='ac-source-vault' />
+                  <Label htmlFor='ac-source-vault' className='text-sm font-normal'>
+                    RocketVault secret
+                  </Label>
+                </div>
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='env' id='ac-source-env' />
+                  <Label htmlFor='ac-source-env' className='text-sm font-normal'>
+                    Rocket environment variable
+                  </Label>
+                </div>
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='keychain' id='ac-source-keychain' />
+                  <Label htmlFor='ac-source-keychain' className='text-sm font-normal'>
+                    Keychain
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+            {editing.credentialSource === 'env' && (
               <div>
-                <Label htmlFor='ac-label' className='text-sm'>
-                  Label
+                <Label htmlFor='ac-source-env-var' className='text-sm'>
+                  Environment variable name
                 </Label>
                 <Input
-                  id='ac-label'
-                  value={editing.label}
-                  onChange={(e) => setEditing({ ...editing, label: e.target.value })}
+                  id='ac-source-env-var'
+                  value={editing.sourceEnvVar}
+                  onChange={(e) => setEditing({ ...editing, sourceEnvVar: e.target.value })}
+                  placeholder='CLAUDE_CODE_OAUTH_TOKEN'
                   className='h-8 text-sm'
-                />
-              </div>
-              <div>
-                <Label htmlFor='ac-command' className='text-sm'>
-                  Command
-                </Label>
-                <Input
-                  id='ac-command'
-                  value={editing.command}
-                  onChange={(e) => setEditing({ ...editing, command: e.target.value })}
-                  placeholder='claude-agent-acp'
-                  className='h-8 text-sm'
-                />
-              </div>
-              <div>
-                <Label htmlFor='ac-args' className='text-sm'>
-                  Args <span className='text-muted-foreground'>(comma-separated)</span>
-                </Label>
-                <Input
-                  id='ac-args'
-                  value={editing.args}
-                  onChange={(e) => setEditing({ ...editing, args: e.target.value })}
-                  placeholder='--stdio'
-                  className='h-8 text-sm'
-                />
-              </div>
-              <div>
-                <Label htmlFor='ac-working-dir' className='text-sm'>
-                  Working Directory <span className='text-muted-foreground'>(optional)</span>
-                </Label>
-                <Input
-                  id='ac-working-dir'
-                  value={editing.workingDir}
-                  onChange={(e) => setEditing({ ...editing, workingDir: e.target.value })}
-                  className='h-8 text-sm'
-                />
-              </div>
-              <div>
-                <Label htmlFor='ac-credential-env-var' className='text-sm'>
-                  Credential Env Var
-                </Label>
-                <Input
-                  id='ac-credential-env-var'
-                  value={editing.credentialEnvVar}
-                  onChange={(e) => setEditing({ ...editing, credentialEnvVar: e.target.value })}
-                  placeholder='ANTHROPIC_API_KEY'
-                  className='h-8 text-sm'
-                  aria-invalid={credentialError !== null}
+                  aria-invalid={sourceEnvError !== null}
                   autoComplete='off'
                   spellCheck={false}
                 />
-                {credentialError && (
+                {sourceEnvError ? (
                   <p role='alert' className='mt-1 text-xs text-destructive'>
-                    {credentialError}
+                    {sourceEnvError}
+                  </p>
+                ) : (
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    Rocket reads this variable when a session starts, so it must be exported in the
+                    shell Rocket was started from. An app started from a desktop icon may not see
+                    it.
                   </p>
                 )}
-                <p className='mt-1 text-xs text-muted-foreground'>
-                  The NAME of the environment variable the agent reads its key from, for example
-                  ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN. The key itself comes from the
-                  RocketVault secret below.
-                </p>
-                <p className='mt-1 text-xs text-muted-foreground'>
-                  If the vault secret is a short-lived token (e.g. an OAuth access token) rather
-                  than a static API key, sessions may need to be restarted after it expires — the
-                  value is only re-fetched when a new agent session starts.
-                </p>
               </div>
-              <div className='space-y-2'>
-                <Label className='text-sm'>Environment variables</Label>
-                <p className='text-xs text-muted-foreground'>
-                  Values are stored as plain text. Put secrets in the RocketVault credential, not
-                  here.
+            )}
+            {editing.credentialSource === 'vault' &&
+              (connectionsLoading ? (
+                <div className='flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground'>
+                  <Loader2 className='h-4 w-4 animate-spin' />
+                  Loading vault connections…
+                </div>
+              ) : connectionsError || connections.length === 0 ? (
+                <p className='text-sm text-muted-foreground'>
+                  {connectionsError
+                    ? 'Could not load RocketVault connections. Check the Secret Manager connections dialog, then try again.'
+                    : "No RocketVault connections configured yet. Add a Secret Manager connection first, then come back to configure an agent's credential."}
                 </p>
-                <p className='text-xs text-muted-foreground'>
-                  A variable such as ANTHROPIC_BASE_URL can send the credential to another host.
-                </p>
-                {editing.extraEnv.map((row, index) => (
-                  <div key={row.key} className='space-y-1'>
-                    <div className='flex items-center gap-2'>
+              ) : (
+                <>
+                  <div>
+                    <Label className='text-sm'>Vault Connection</Label>
+                    <Select
+                      value={editing.vaultConnectionId}
+                      onValueChange={(value) => {
+                        // Secrets fetched for the previous connection no longer apply.
+                        resetVaultSecrets();
+                        setEditing({
+                          ...editing,
+                          vaultConnectionId: value,
+                          vaultSecretId: '',
+                          vaultSecretName: '',
+                        });
+                      }}
+                    >
+                      <SelectTrigger className='h-8 text-sm'>
+                        <SelectValue placeholder='Select a connection…' />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {connections.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className='flex items-end gap-2'>
+                    <div className='flex-1'>
+                      <Label htmlFor='ac-vault-name' className='text-sm'>
+                        Vault Name
+                      </Label>
                       <Input
-                        aria-label={`Variable name ${index + 1}`}
-                        aria-invalid={envErrors[index] !== null}
-                        value={row.name}
-                        onChange={(e) => updateEnvRow(row.key, { name: e.target.value })}
-                        placeholder='NAME'
-                        className='h-8 flex-1 text-sm'
-                      />
-                      <Input
-                        aria-label={`Variable value ${index + 1}`}
-                        value={row.value}
-                        onChange={(e) => updateEnvRow(row.key, { value: e.target.value })}
-                        placeholder='value'
-                        className='h-8 flex-1 text-sm'
-                      />
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        aria-label={`Remove variable ${index + 1}`}
-                        onClick={() =>
+                        id='ac-vault-name'
+                        value={editing.vaultName}
+                        onChange={(e) => {
+                          // Secrets fetched for the previous vault no longer apply.
+                          resetVaultSecrets();
                           setEditing({
                             ...editing,
-                            extraEnv: editing.extraEnv.filter((r) => r.key !== row.key),
-                          })
-                        }
-                      >
-                        <X className='h-3.5 w-3.5' aria-hidden='true' />
-                      </Button>
+                            vaultName: e.target.value,
+                            vaultSecretId: '',
+                            vaultSecretName: '',
+                          });
+                        }}
+                        placeholder='prod-vault'
+                        className='h-8 text-sm'
+                      />
                     </div>
-                    {envErrors[index] && (
-                      <p role='alert' className='text-xs text-destructive'>
-                        {envErrors[index]}
-                      </p>
-                    )}
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={() => void handleFetchSecrets()}
+                      disabled={fetchingSecrets}
+                    >
+                      {fetchingSecrets && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
+                      Fetch Secrets
+                    </Button>
                   </div>
-                ))}
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() =>
-                    setEditing({
-                      ...editing,
-                      extraEnv: [
-                        ...editing.extraEnv,
-                        { key: crypto.randomUUID(), name: '', value: '' },
-                      ],
-                    })
-                  }
-                >
-                  <Plus className='mr-1.5 h-3.5 w-3.5' aria-hidden='true' />
-                  Add variable
-                </Button>
-              </div>
-              <div>
-                <Label className='text-sm'>Vault Connection</Label>
-                <Select
-                  value={editing.vaultConnectionId}
-                  onValueChange={(value) => {
-                    // Secrets fetched for the previous connection no longer apply.
-                    resetVaultSecrets();
-                    setEditing({
-                      ...editing,
-                      vaultConnectionId: value,
-                      vaultSecretId: '',
-                      vaultSecretName: '',
-                    });
-                  }}
-                >
-                  <SelectTrigger className='h-8 text-sm'>
-                    <SelectValue placeholder='Select a connection…' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {connections.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className='flex items-end gap-2'>
-                <div className='flex-1'>
-                  <Label htmlFor='ac-vault-name' className='text-sm'>
-                    Vault Name
-                  </Label>
-                  <Input
-                    id='ac-vault-name'
-                    value={editing.vaultName}
-                    onChange={(e) => {
-                      // Secrets fetched for the previous vault no longer apply.
-                      resetVaultSecrets();
-                      setEditing({
-                        ...editing,
-                        vaultName: e.target.value,
-                        vaultSecretId: '',
-                        vaultSecretName: '',
-                      });
-                    }}
-                    placeholder='prod-vault'
-                    className='h-8 text-sm'
-                  />
-                </div>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => void handleFetchSecrets()}
-                  disabled={fetchingSecrets}
-                >
-                  {fetchingSecrets && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
-                  Fetch Secrets
-                </Button>
-              </div>
-              {vaultSecrets.length === 0 && editing.vaultSecretId && (
-                <p className='text-xs text-muted-foreground'>
-                  Current secret:{' '}
-                  <span className='font-medium text-foreground'>
-                    {editing.vaultSecretName || editing.vaultSecretId}
-                  </span>
-                  . Fetch secrets to pick a different one.
-                </p>
-              )}
-              {vaultSecrets.length > 0 && (
-                <div>
-                  <Label className='text-sm'>Secret</Label>
-                  <Select
-                    value={editing.vaultSecretId}
-                    onValueChange={(value) => {
-                      const picked = vaultSecrets.find((s) => s.secretId === value);
-                      setEditing({
-                        ...editing,
-                        vaultSecretId: value,
-                        vaultSecretName: picked?.name ?? '',
-                      });
-                    }}
-                  >
-                    <SelectTrigger className='h-8 text-sm'>
-                      <SelectValue placeholder='Select a secret…' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {vaultSecrets.map((s) => (
-                        <SelectItem key={s.secretId} value={s.secretId}>
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className='flex gap-2'>
-                <Button variant='outline' size='sm' onClick={cancelEdit}>
-                  Cancel
-                </Button>
-                <Button
-                  size='sm'
-                  onClick={() => void handleSave()}
-                  disabled={saveMutation.isPending || envInvalid}
-                  aria-busy={saveMutation.isPending}
-                >
-                  {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
-                  Save
-                </Button>
-              </div>
+                  {vaultSecrets.length === 0 && editing.vaultSecretId && (
+                    <p className='text-xs text-muted-foreground'>
+                      Current secret:{' '}
+                      <span className='font-medium text-foreground'>
+                        {editing.vaultSecretName || editing.vaultSecretId}
+                      </span>
+                      . Fetch secrets to pick a different one.
+                    </p>
+                  )}
+                  {vaultSecrets.length > 0 && (
+                    <div>
+                      <Label className='text-sm'>Secret</Label>
+                      <Select
+                        value={editing.vaultSecretId}
+                        onValueChange={(value) => {
+                          const picked = vaultSecrets.find((s) => s.secretId === value);
+                          setEditing({
+                            ...editing,
+                            vaultSecretId: value,
+                            vaultSecretName: picked?.name ?? '',
+                          });
+                        }}
+                      >
+                        <SelectTrigger className='h-8 text-sm'>
+                          <SelectValue placeholder='Select a secret…' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {vaultSecrets.map((s) => (
+                            <SelectItem key={s.secretId} value={s.secretId}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>
+              ))}
+            <div className='flex gap-2'>
+              <Button variant='outline' size='sm' onClick={cancelEdit}>
+                Cancel
+              </Button>
+              <Button
+                size='sm'
+                onClick={() => void handleSave()}
+                disabled={saveMutation.isPending || envInvalid}
+                aria-busy={saveMutation.isPending}
+              >
+                {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
+                Save
+              </Button>
             </div>
-          )
+          </div>
         ) : (
           <div className='space-y-3'>
             {isLoading ? (

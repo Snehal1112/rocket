@@ -14,6 +14,9 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   testAgentConfig: vi.fn(),
   fetchExternalSecretNames: vi.fn(),
   listSecretManagerConnections: vi.fn(),
+  setAgentCredential: vi.fn(),
+  clearAgentCredential: vi.fn(),
+  hasAgentCredential: vi.fn(),
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -54,6 +57,7 @@ describe('AgentConfigsDialog', () => {
     vi.mocked(api.saveAgentConfig).mockResolvedValue(undefined);
     vi.mocked(api.deleteAgentConfig).mockResolvedValue(undefined);
     vi.mocked(api.testAgentConfig).mockResolvedValue(undefined);
+    vi.mocked(api.hasAgentCredential).mockResolvedValue(false);
     vi.mocked(api.listSecretManagerConnections).mockResolvedValue([
       { id: 'conn-1', label: 'Vault one' } as api.SecretManagerConnection,
     ]);
@@ -81,7 +85,11 @@ describe('AgentConfigsDialog', () => {
     await userEvent.type(label, '  Claude Code  ');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
-    expect(api.saveAgentConfig).toHaveBeenCalledWith({ ...claude, label: 'Claude Code' });
+    expect(api.saveAgentConfig).toHaveBeenCalledWith({
+      ...claude,
+      credentialSource: 'vault',
+      label: 'Claude Code',
+    });
   });
 
   async function openEdit() {
@@ -106,6 +114,7 @@ describe('AgentConfigsDialog', () => {
     await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
     expect(api.saveAgentConfig).toHaveBeenCalledWith({
       ...claude,
+      credentialSource: 'vault',
       extraEnv: [
         { name: 'ANTHROPIC_BASE_URL', value: 'https://proxy.example' },
         { name: 'HTTPS_PROXY', value: 'http://p:8080' },
@@ -131,6 +140,7 @@ describe('AgentConfigsDialog', () => {
     await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
     expect(api.saveAgentConfig).toHaveBeenCalledWith({
       ...claude,
+      credentialSource: 'vault',
       extraEnv: [{ name: 'B', value: '2' }],
     });
   });
@@ -168,7 +178,11 @@ describe('AgentConfigsDialog', () => {
     expect(screen.queryByLabelText(/Variable name/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
-    expect(api.saveAgentConfig).toHaveBeenCalledWith({ ...claude, extraEnv: [] });
+    expect(api.saveAgentConfig).toHaveBeenCalledWith({
+      ...claude,
+      credentialSource: 'vault',
+      extraEnv: [],
+    });
   });
 
   it('rejects an empty command', async () => {
@@ -206,6 +220,7 @@ describe('AgentConfigsDialog', () => {
       await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
       expect(api.saveAgentConfig).toHaveBeenCalledWith({
         ...claude,
+        credentialSource: 'vault',
         credentialEnvVar: 'CLAUDE_CODE_OAUTH_TOKEN',
       });
     });
@@ -302,5 +317,61 @@ describe('AgentConfigsDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(api.deleteAgentConfig).not.toHaveBeenCalled();
     expect(screen.getByText('Claude')).toBeInTheDocument();
+  });
+
+  it('lets a user with no vault connection add an environment variable agent', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    vi.mocked(api.listSecretManagerConnections).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: /add agent/i }));
+    await user.type(await screen.findByLabelText('Label'), 'Claude');
+    await user.type(screen.getByLabelText('Command'), 'claude-agent-acp');
+    await user.type(screen.getByLabelText('Credential Env Var'), 'CLAUDE_CODE_OAUTH_TOKEN');
+    await user.click(screen.getByRole('radio', { name: /rocket environment variable/i }));
+    await user.type(screen.getByLabelText('Environment variable name'), 'MY_CLAUDE_TOKEN');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({
+      credentialSource: 'env',
+      sourceEnvVar: 'MY_CLAUDE_TOKEN',
+      credentialEnvVar: 'CLAUDE_CODE_OAUTH_TOKEN',
+      vaultConnectionId: '',
+      vaultName: '',
+      vaultSecretId: '',
+    });
+  });
+
+  it('flags a token-looking environment variable name without repeating it', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: /add agent/i }));
+    await user.type(await screen.findByLabelText('Label'), 'Claude');
+    await user.type(screen.getByLabelText('Command'), 'claude-agent-acp');
+    await user.type(screen.getByLabelText('Credential Env Var'), 'CLAUDE_CODE_OAUTH_TOKEN');
+    await user.click(screen.getByRole('radio', { name: /rocket environment variable/i }));
+    await user.type(screen.getByLabelText('Environment variable name'), 'sk-ant-oat01-FAKE');
+
+    expect(await screen.findByText(/looks like a secret value/i)).toBeInTheDocument();
+    expect(screen.getByText(/looks like a secret value/i).textContent).not.toContain('sk-ant');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(api.saveAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('keeps the vault fields and sends credentialSource vault for a vault agent', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    expect(await screen.findByLabelText('Vault Name')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /rocketvault secret/i })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({
+        credentialSource: 'vault',
+        vaultConnectionId: 'conn-1',
+      }),
+    );
   });
 });
