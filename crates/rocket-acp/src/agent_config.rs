@@ -26,10 +26,24 @@ impl fmt::Debug for EnvPair {
     }
 }
 
+/// Where an agent's credential value comes from. It never holds the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CredentialSource {
+    /// A RocketVault secret named by the `vault_*` fields.
+    #[default]
+    Vault,
+    /// A variable in Rocket's own process environment, named by `source_env_var`.
+    Env,
+    /// An entry in the OS keychain, keyed by the config id.
+    Keychain,
+}
+
 /// One registered ACP agent binary/command and where to find its API key.
-/// The credential *value* never lives on this struct — only a reference to
-/// where RocketVault holds it (`vault_connection_id`/`vault_name`/
-/// `vault_secret_id`), resolved on demand by `AgentConfigService`.
+/// The credential *value* never lives on this struct for any source. It holds
+/// only a reference: the `vault_*` fields for a RocketVault secret, or
+/// `source_env_var` for an environment variable. The value is resolved on
+/// demand by `AgentConfigService`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub id: String,
@@ -44,6 +58,13 @@ pub struct AgentConfig {
     /// Old files without this field load as an empty list.
     #[serde(default)]
     pub extra_env: Vec<EnvPair>,
+    /// Where the credential comes from. Old files without it load as `vault`.
+    #[serde(default)]
+    pub credential_source: CredentialSource,
+    /// For the `env` source: the name of the variable Rocket reads from its
+    /// own environment.
+    #[serde(default)]
+    pub source_env_var: Option<String>,
     pub vault_connection_id: String,
     pub vault_name: String,
     pub vault_secret_id: String,
@@ -96,6 +117,46 @@ pub fn validate_env_config(credential_env_var: &str, extra_env: &[EnvPair]) -> R
     Ok(())
 }
 
+/// Checks the fields that depend on the credential source. The vault fields
+/// are required only for `vault`; `source_env_var` is required only for `env`
+/// and must be absent otherwise. The error is a short reason and never
+/// contains a value.
+pub fn validate_credential_source(config: &AgentConfig) -> Result<(), String> {
+    let has_env_name = config
+        .source_env_var
+        .as_deref()
+        .is_some_and(|name| !name.is_empty());
+    match config.credential_source {
+        CredentialSource::Vault => {
+            let required = [
+                ("vault_connection_id", &config.vault_connection_id),
+                ("vault_name", &config.vault_name),
+                ("vault_secret_id", &config.vault_secret_id),
+            ];
+            for (field, value) in required {
+                if value.trim().is_empty() {
+                    return Err(format!("{field} must not be empty"));
+                }
+            }
+            if has_env_name {
+                return Err("source_env_var is only used by the env source".to_string());
+            }
+        }
+        CredentialSource::Env => {
+            let Some(name) = config.source_env_var.as_deref().filter(|n| !n.is_empty()) else {
+                return Err("source_env_var must not be empty for the env source".to_string());
+            };
+            validate_env_var_name(name).map_err(|why| format!("source_env_var {why}"))?;
+        }
+        CredentialSource::Keychain => {
+            if has_env_name {
+                return Err("source_env_var is only used by the env source".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Persistence boundary for `AgentConfig`. No I/O in this crate —
 /// `rocket-infra`'s `FsAgentConfigRepo` (Plan 02) implements this.
 ///
@@ -126,6 +187,8 @@ mod tests {
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
             extra_env: Vec::new(),
+            credential_source: CredentialSource::Vault,
+            source_env_var: None,
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
@@ -352,5 +415,70 @@ mod tests {
     fn trait_is_object_safe() {
         let repo: Box<dyn AgentConfigRepository> = Box::new(FakeRepo::new());
         assert!(repo.list().expect("list via trait object").is_empty());
+    }
+
+    #[test]
+    fn credential_source_uses_lowercase_wire_names_and_defaults_to_vault() {
+        assert_eq!(
+            serde_json::to_string(&CredentialSource::Env).expect("json"),
+            "\"env\""
+        );
+        assert_eq!(
+            serde_json::from_str::<CredentialSource>("\"keychain\"").expect("parse"),
+            CredentialSource::Keychain
+        );
+        assert_eq!(CredentialSource::default(), CredentialSource::Vault);
+    }
+
+    #[test]
+    fn a_config_without_the_new_fields_deserializes_as_vault() {
+        let json = serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "credential_env_var": "ANTHROPIC_API_KEY",
+            "vault_connection_id": "v", "vault_name": "n", "vault_secret_id": "s",
+            "vault_secret_name": "sn"
+        });
+        let config: AgentConfig = serde_json::from_value(json).expect("old shape");
+        assert_eq!(config.credential_source, CredentialSource::Vault);
+        assert_eq!(config.source_env_var, None);
+    }
+
+    #[test]
+    fn validate_credential_source_checks_each_source() {
+        let mut vault = sample();
+        assert!(validate_credential_source(&vault).is_ok());
+        vault.vault_secret_id = String::new();
+        assert!(validate_credential_source(&vault).is_err());
+
+        let mut env = sample();
+        env.credential_source = CredentialSource::Env;
+        env.vault_connection_id = String::new();
+        env.vault_name = String::new();
+        env.vault_secret_id = String::new();
+        env.source_env_var = Some("CLAUDE_CODE_OAUTH_TOKEN".into());
+        assert!(
+            validate_credential_source(&env).is_ok(),
+            "vault fields may be empty"
+        );
+        for bad in [
+            None,
+            Some(String::new()),
+            Some("1BAD".to_string()),
+            Some("sk-ant-oat01-abc".to_string()),
+            Some("CLAUDE_CONFIG_DIR".to_string()),
+        ] {
+            env.source_env_var = bad.clone();
+            let err = validate_credential_source(&env).expect_err("bad env name");
+            assert!(!err.contains("sk-ant-oat01-abc"), "{err}");
+        }
+
+        let mut keychain = sample();
+        keychain.credential_source = CredentialSource::Keychain;
+        keychain.vault_connection_id = String::new();
+        assert!(validate_credential_source(&keychain).is_ok());
+        keychain.source_env_var = Some("SOMETHING".into());
+        assert!(
+            validate_credential_source(&keychain).is_err(),
+            "env name only for env"
+        );
     }
 }

@@ -1,4 +1,4 @@
-use rocket_acp::{AgentConfig, EnvPair};
+use rocket_acp::{AgentConfig, CredentialSource, EnvPair};
 use rocket_app::AgentConfigService;
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,11 @@ pub struct AgentConfigDto {
     // Old callers may omit it.
     #[serde(default)]
     pub extra_env: Vec<EnvPairDto>,
+    // Old callers may omit it.
+    #[serde(default)]
+    pub credential_source: CredentialSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_env_var: Option<String>,
     pub vault_connection_id: String,
     pub vault_name: String,
     pub vault_secret_id: String,
@@ -58,6 +63,8 @@ impl From<AgentConfig> for AgentConfigDto {
                     value: p.value,
                 })
                 .collect(),
+            credential_source: c.credential_source,
+            source_env_var: c.source_env_var,
             vault_connection_id: c.vault_connection_id,
             vault_name: c.vault_name,
             vault_secret_id: c.vault_secret_id,
@@ -83,6 +90,8 @@ impl From<AgentConfigDto> for AgentConfig {
                     value: p.value,
                 })
                 .collect(),
+            credential_source: dto.credential_source,
+            source_env_var: dto.source_env_var,
             vault_connection_id: dto.vault_connection_id,
             vault_name: dto.vault_name,
             vault_secret_id: dto.vault_secret_id,
@@ -138,11 +147,32 @@ mod tests {
                 name: "HTTPS_PROXY".to_string(),
                 value: "http://proxy:3128".to_string(),
             }],
+            credential_source: CredentialSource::Vault,
+            source_env_var: None,
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "secret-id-1".to_string(),
             vault_secret_name: "anthropic-api-key".to_string(),
         }
+    }
+
+    #[test]
+    fn dto_carries_the_credential_source_in_camel_case() {
+        let mut config = sample_domain();
+        config.credential_source = CredentialSource::Env;
+        config.source_env_var = Some("CLAUDE_CODE_OAUTH_TOKEN".to_string());
+        let json = serde_json::to_value(AgentConfigDto::from(config)).expect("serialize");
+        assert_eq!(json["credentialSource"], "env");
+        assert_eq!(json["sourceEnvVar"], "CLAUDE_CODE_OAUTH_TOKEN");
+        let old: AgentConfigDto = serde_json::from_value(serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "args": [], "credentialEnvVar": "K",
+            "vaultConnectionId": "v", "vaultName": "n", "vaultSecretId": "s", "vaultSecretName": "sn"
+        }))
+        .expect("old caller");
+        assert_eq!(
+            AgentConfig::from(old).credential_source,
+            CredentialSource::Vault
+        );
     }
 
     #[test]

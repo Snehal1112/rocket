@@ -263,6 +263,8 @@ mod tests {
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
             extra_env: Vec::new(),
+            credential_source: rocket_acp::CredentialSource::Vault,
+            source_env_var: None,
             vault_connection_id: vault_connection_id.to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "secret-id-1".to_string(),

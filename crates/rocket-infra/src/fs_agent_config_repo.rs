@@ -74,6 +74,7 @@ impl AgentConfigRepository for FsAgentConfigRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_acp::CredentialSource;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, FsAgentConfigRepo) {
@@ -91,11 +92,36 @@ mod tests {
             working_dir: None,
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
             extra_env: Vec::new(),
+            credential_source: CredentialSource::Vault,
+            source_env_var: None,
             vault_connection_id: "conn-1".to_string(),
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
             vault_secret_name: "anthropic-api-key".to_string(),
         }
+    }
+
+    #[test]
+    fn an_old_file_without_the_new_fields_loads_as_vault() {
+        let (dir, repo) = setup();
+        std::fs::write(
+            dir.path().join("agent_configs.yml"),
+            "- id: a\n  label: A\n  command: c\n  credential_env_var: K\n  vault_connection_id: v\n  vault_name: n\n  vault_secret_id: s\n  vault_secret_name: sn\n",
+        )
+        .expect("write old file");
+        let loaded = repo.list().expect("list");
+        assert_eq!(loaded[0].credential_source, CredentialSource::Vault);
+        assert_eq!(loaded[0].source_env_var, None);
+    }
+
+    #[test]
+    fn a_local_source_round_trips() {
+        let (_dir, repo) = setup();
+        let mut config = sample("a");
+        config.credential_source = CredentialSource::Env;
+        config.source_env_var = Some("CLAUDE_CODE_OAUTH_TOKEN".to_string());
+        repo.save(&config).expect("save");
+        assert_eq!(repo.get("a").expect("get"), Some(config));
     }
 
     #[test]
@@ -256,6 +282,8 @@ mod tests {
             "working_dir",
             "credential_env_var",
             "extra_env",
+            "credential_source",
+            "source_env_var",
             "vault_connection_id",
             "vault_name",
             "vault_secret_id",

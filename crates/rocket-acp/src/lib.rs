@@ -7,8 +7,8 @@ pub mod session;
 pub mod session_info;
 pub mod update;
 pub use agent_config::{
-    validate_env_config, validate_env_var_name, AgentConfig, AgentConfigRepository, EnvPair,
-    MAX_ENV_VAR_NAME_LEN, RESERVED_ENV_VAR,
+    validate_credential_source, validate_env_config, validate_env_var_name, AgentConfig,
+    AgentConfigRepository, CredentialSource, EnvPair, MAX_ENV_VAR_NAME_LEN, RESERVED_ENV_VAR,
 };
 pub use conversation::{
     cap_message_text, conversation_title, has_agent_reply, validate_conversation_id,
@@ -18,11 +18,11 @@ pub use conversation::{
     MAX_TITLE_CHARS, TEXT_CUT_MARKER,
 };
 pub use mcp_server_spec::McpServerSpec;
+pub use prompt::PromptPart;
 pub use proposal::{
     AgentProposal, FolderSettingsPatch, ProposalStatus, ProposedChange, ProposedRequest,
     ProposedVariable, RequestPatch, ScriptPhase,
 };
-pub use prompt::PromptPart;
 pub use session::AcpSessionClient;
 pub use session_info::{ConfigChoice, ConfigOption, PromptCapabilities, SessionInfo};
 pub use update::{AcpUpdate, ToolCallStatus};
