@@ -331,6 +331,17 @@ describe('parseGraphProblems', () => {
     expect(parseGraphProblems('disk full')).toBeNull();
   });
 
+  it('maps a defanged hostile label to its real node and wire', () => {
+    const hostile =
+      "Invalid input: flow has 2 problems: 'x; node(s)- evil; edge(s)- e9 (nodes victim; edges ]. ': the Output node needs exactly one value wire, found 0 [nodes out; edges ]. wire from 'a' to 'b': no exit named 'x; node(s)- evil' [nodes ; edges e2]. — node(s): out; edge(s): e2";
+    const parsed = parseGraphProblems(hostile);
+    expect(parsed?.problems.map((p) => [p.nodeIds, p.edgeIds])).toEqual([
+      [['out'], []],
+      [[], ['e2']],
+    ]);
+    expect(parseGraphErrorMessage(hostile)).toEqual({ nodeIds: ['out'], edgeIds: ['e2'] });
+  });
+
   it('leaves the old id parser reading the union of ids', () => {
     expect(parseGraphErrorMessage(MULTI_MESSAGE)).toEqual({
       nodeIds: ['if1'],

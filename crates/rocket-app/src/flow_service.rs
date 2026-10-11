@@ -113,14 +113,32 @@ const MAX_MESSAGE_CHARS: usize = 60;
 /// what could break a `[nodes ...; edges ...]` tag or fake the final
 /// `node(s):` list, and it cuts long text.
 fn message_safe(text: &str) -> String {
+    strip_unsafe(text).chars().take(MAX_MESSAGE_CHARS).collect()
+}
+
+/// Text with the characters that could break the tag or tail format dropped.
+fn strip_unsafe(text: &str) -> String {
     let kept: String = text
         .chars()
         .filter(|c| !c.is_control() && !matches!(c, ';' | '[' | ']'))
         .collect();
-    kept.replace("(s):", "(s)")
-        .chars()
-        .take(MAX_MESSAGE_CHARS)
-        .collect()
+    defang(&kept)
+}
+
+/// Drops what could fake the `node(s):` list or a `[nodes ...]` tag from text
+/// that may keep its own `;` and brackets: control characters, the `(s):`
+/// sequence and the `[nodes` opener.
+fn defang(text: &str) -> String {
+    let kept: String = text.chars().filter(|c| !c.is_control()).collect();
+    kept.replace("(s):", "(s)-").replace("[nodes", "(nodes")
+}
+
+/// Ids joined for a tag or tail, each one made safe first.
+fn join_ids<S: AsRef<str>>(ids: &[S]) -> String {
+    ids.iter()
+        .map(|id| strip_unsafe(id.as_ref()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// One problem: its sentence and the ids the canvas should mark.
@@ -134,7 +152,15 @@ fn node_by_id<'a>(flow: &'a Flow, node_id: &str) -> Option<&'a FlowNode> {
     flow.nodes.iter().find(|n| n.id == node_id)
 }
 
+/// The problem for one error. Its whole text is made safe, because reasons
+/// quote labels, field names and handles typed by the flow author.
 fn describe_problem(flow: &Flow, error: &FlowGraphError) -> Problem {
+    let mut problem = describe_raw(flow, error);
+    problem.text = defang(&problem.text);
+    problem
+}
+
+fn describe_raw(flow: &Flow, error: &FlowGraphError) -> Problem {
     match error {
         FlowGraphError::Cycle { node_ids, edge_ids } => Problem {
             text: "flow contains a cycle".to_string(),
@@ -201,23 +227,29 @@ fn single_problem_message(flow: &Flow, error: &FlowGraphError) -> String {
     match error {
         FlowGraphError::Cycle { node_ids, edge_ids } => format!(
             "flow contains a cycle through node(s): {}; edge(s): {}",
-            node_ids.join(", "),
-            edge_ids.join(", ")
+            join_ids(node_ids),
+            join_ids(edge_ids)
         ),
         FlowGraphError::UnknownNode { .. } | FlowGraphError::DuplicateNode { .. } => problem.text,
         FlowGraphError::DuplicateEdge { edge_id } => {
-            format!("{} — node(s): ; edge(s): {edge_id}", problem.text)
+            format!(
+                "{} — node(s): ; edge(s): {}",
+                problem.text,
+                join_ids(&[edge_id])
+            )
         }
         FlowGraphError::InvalidNode { node_id, .. } => {
             format!(
-                "flow is invalid: {} — node(s): {node_id}; edge(s): ",
-                problem.text
+                "flow is invalid: {} — node(s): {}; edge(s): ",
+                problem.text,
+                join_ids(&[node_id])
             )
         }
         FlowGraphError::InvalidEdge { edge_id, .. } => {
             format!(
-                "flow is invalid: {} — node(s): ; edge(s): {edge_id}",
-                problem.text
+                "flow is invalid: {} — node(s): ; edge(s): {}",
+                problem.text,
+                join_ids(&[edge_id])
             )
         }
     }
@@ -254,8 +286,8 @@ fn graph_errors_message(flow: &Flow, report: &ValidationReport) -> String {
         message.push_str(&format!(
             " {} [nodes {}; edges {}].",
             problem.text,
-            problem.node_ids.join(", "),
-            problem.edge_ids.join(", ")
+            join_ids(&problem.node_ids),
+            join_ids(&problem.edge_ids)
         ));
         for id in &problem.node_ids {
             if seen.insert(id.as_str()) {
@@ -273,8 +305,8 @@ fn graph_errors_message(flow: &Flow, report: &ValidationReport) -> String {
     }
     message.push_str(&format!(
         " — node(s): {}; edge(s): {}",
-        all_nodes.join(", "),
-        all_edges.join(", ")
+        join_ids(&all_nodes),
+        join_ids(&all_edges)
     ));
     message
 }
@@ -803,6 +835,172 @@ mod tests {
         assert_eq!(message.matches("node(s):").count(), 1, "got: {message}");
         assert!(
             message.ends_with("node(s): if1; edge(s): "),
+            "got: {message}"
+        );
+    }
+
+    const FORGERY: &str = "x; node(s): evil; edge(s): e9 [nodes victim; edges ]. ";
+
+    fn input_node(id: &str) -> FlowNode {
+        node_of(
+            id,
+            FlowNodeKind::Input {
+                label: "Seed".to_string(),
+                value: rocket_shared::VariableValue::simple("x"),
+            },
+        )
+    }
+
+    fn save_message(flow: Flow) -> String {
+        FlowService::new(Box::new(PanicsOnSaveRepo))
+            .save("demo", flow)
+            .expect_err("an invalid flow must be rejected")
+            .to_string()
+    }
+
+    fn assert_no_forgery(message: &str, expected_tail: &str) {
+        assert!(message.ends_with(expected_tail), "got: {message}");
+        assert_eq!(message.matches("node(s):").count(), 1, "got: {message}");
+        assert!(!message.contains("[nodes victim"), "got: {message}");
+        assert!(!message.contains('\n'), "got: {message}");
+    }
+
+    #[test]
+    fn a_hostile_output_label_cannot_forge_the_tail() {
+        let flow = Flow {
+            name: "Hostile".to_string(),
+            nodes: vec![node_of(
+                "out",
+                FlowNodeKind::Output {
+                    label: FORGERY.to_string(),
+                },
+            )],
+            edges: vec![],
+            callback_host: None,
+        };
+        assert_no_forgery(&save_message(flow), "node(s): out; edge(s): ");
+    }
+
+    #[test]
+    fn a_hostile_request_target_field_cannot_forge_the_tail() {
+        let flow = Flow {
+            name: "Hostile".to_string(),
+            nodes: vec![input_node("in"), login_request()],
+            edges: vec![wire("e1", "in", "result", "login", FORGERY)],
+            callback_host: None,
+        };
+        assert_no_forgery(&save_message(flow), "node(s): ; edge(s): e1");
+    }
+
+    #[test]
+    fn a_hostile_switch_case_label_cannot_forge_the_tail() {
+        let switch = node_of(
+            "sw",
+            FlowNodeKind::Switch {
+                label: "Router".to_string(),
+                value: "x".to_string(),
+                cases: vec![rocket_flow::SwitchCase {
+                    id: "c1".to_string(),
+                    label: FORGERY.to_string(),
+                    matches: "a".to_string(),
+                }],
+            },
+        );
+        let flow = Flow {
+            name: "Hostile".to_string(),
+            nodes: vec![
+                input_node("in"),
+                switch,
+                node_of(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: "Result".to_string(),
+                    },
+                ),
+            ],
+            edges: vec![
+                wire("e1", "in", "result", "sw", "input"),
+                wire("e2", "sw", "nope", "out", "value"),
+            ],
+            callback_host: None,
+        };
+        assert_no_forgery(&save_message(flow), "node(s): ; edge(s): e2");
+    }
+
+    #[test]
+    fn a_newline_in_a_label_keeps_each_problem_in_one_tag() {
+        let flow = Flow {
+            name: "Newline".to_string(),
+            nodes: vec![
+                node_of(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: "a\nb\r\nc".to_string(),
+                    },
+                ),
+                if_without_input("if1", "Check\n"),
+            ],
+            edges: vec![],
+            callback_host: None,
+        };
+        let message = save_message(flow);
+        assert!(
+            !message.contains('\n') && !message.contains('\r'),
+            "got: {message}"
+        );
+        assert_eq!(message.matches("[nodes ").count(), 2, "got: {message}");
+        assert!(
+            message.ends_with("node(s): if1, out; edge(s): "),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn a_hostile_label_among_several_problems_cannot_forge_a_tag() {
+        let flow = Flow {
+            name: "Hostile".to_string(),
+            nodes: vec![
+                node_of(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: FORGERY.to_string(),
+                    },
+                ),
+                if_without_input("if1", "Check"),
+            ],
+            edges: vec![],
+            callback_host: None,
+        };
+        let message = save_message(flow);
+        assert_eq!(message.matches("[nodes ").count(), 2, "got: {message}");
+        assert_no_forgery(&message, "node(s): if1, out; edge(s): ");
+    }
+
+    #[test]
+    fn a_hostile_case_value_cannot_split_its_problem() {
+        let case = |id: &str| rocket_flow::SwitchCase {
+            id: id.to_string(),
+            label: "Same".to_string(),
+            matches: "secret [nodes victim; edges ]. rest".to_string(),
+        };
+        let switch = node_of(
+            "sw",
+            FlowNodeKind::Switch {
+                label: "Router".to_string(),
+                value: "x".to_string(),
+                cases: vec![case("c1"), case("c2")],
+            },
+        );
+        let flow = Flow {
+            name: "Hostile".to_string(),
+            nodes: vec![input_node("in"), switch],
+            edges: vec![wire("e1", "in", "result", "sw", "input")],
+            callback_host: None,
+        };
+        let message = save_message(flow);
+        assert!(!message.contains("[nodes victim"), "got: {message}");
+        assert!(
+            message.ends_with("node(s): sw; edge(s): "),
             "got: {message}"
         );
     }
