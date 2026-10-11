@@ -133,14 +133,31 @@ mod tests {
     fn sample_flow() -> Flow {
         Flow {
             name: "Login Then Fetch".to_string(),
-            nodes: vec![FlowNode {
-                id: "n1".to_string(),
-                kind: FlowNodeKind::Output {
-                    label: "Result".to_string(),
+            nodes: vec![
+                FlowNode {
+                    id: "n0".to_string(),
+                    kind: FlowNodeKind::Input {
+                        label: "Seed".to_string(),
+                        value: rocket_shared::VariableValue::simple("x"),
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
                 },
-                position: NodePosition { x: 0.0, y: 0.0 },
+                FlowNode {
+                    id: "n1".to_string(),
+                    kind: FlowNodeKind::Output {
+                        label: "Result".to_string(),
+                    },
+                    position: NodePosition { x: 100.0, y: 0.0 },
+                },
+            ],
+            edges: vec![FlowEdge {
+                id: "e0".to_string(),
+                source_node_id: "n0".to_string(),
+                target_node_id: "n1".to_string(),
+                target_field: "value".to_string(),
+                expression: "response.body".to_string(),
+                source_handle: rocket_flow::handle::RESULT.to_string(),
             }],
-            edges: vec![],
             callback_host: None,
         }
     }
@@ -488,6 +505,34 @@ mod tests {
         );
         assert!(
             message.ends_with("node(s): ; edge(s): e7"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn save_rejects_an_output_without_a_value_wire_and_names_it_in_the_tail() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let flow = Flow {
+            name: "Lonely".to_string(),
+            nodes: vec![node_of(
+                "out",
+                FlowNodeKind::Output {
+                    label: "Result".to_string(),
+                },
+            )],
+            edges: vec![],
+            callback_host: None,
+        };
+        let message = svc
+            .save("demo", flow)
+            .expect_err("an unwired Output must be rejected")
+            .to_string();
+        assert!(
+            message.contains("the Output node 'Result' needs exactly one value wire"),
+            "got: {message}"
+        );
+        assert!(
+            message.ends_with("node(s): out; edge(s): "),
             "got: {message}"
         );
     }

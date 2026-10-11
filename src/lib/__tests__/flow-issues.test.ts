@@ -84,13 +84,42 @@ describe('computeFlowIssues: expressions and inputs', () => {
     expect(only(computeFlowIssues(nodes, [wire('e1', 'in1', 'n1', 'input')]), 'input-missing')).toEqual([]);
   });
 
-  it('warns for an Output without a value wire, even with a Run when wire', () => {
+  it('errors for an Output without a value wire, even with a Run when wire', () => {
     const nodes = [input('in1'), output('out1')];
     const trigger = [wire('e1', 'in1', 'out1', 'trigger')];
-    const warned = only(computeFlowIssues(nodes, trigger), 'output-no-value');
-    expect(warned).toHaveLength(1);
-    expect(warned[0]).toMatchObject({ severity: 'warning', nodeId: 'out1' });
-    expect(only(computeFlowIssues(nodes, [wire('e2', 'in1', 'out1', 'value')]), 'output-no-value')).toEqual([]);
+    const found = only(computeFlowIssues(nodes, trigger), 'output-no-value');
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ severity: 'error', nodeId: 'out1' });
+    expect(found[0].message).toBe(
+      "The Output node 'out1' needs exactly one value wire (Run when wires do not count), found 0.",
+    );
+    expect(
+      only(computeFlowIssues(nodes, [wire('e2', 'in1', 'out1', 'value')]), 'output-no-value'),
+    ).toEqual([]);
+  });
+
+  it('errors for an Output with more than one value wire', () => {
+    const nodes = [input('in1'), input('in2'), output('out1')];
+    const edges = [
+      wire('e1', 'in1', 'out1', 'value'),
+      wire('e2', 'in2', 'out1', 'value'),
+      wire('e3', 'in1', 'out1', 'trigger'),
+    ];
+    const found = only(computeFlowIssues(nodes, edges), 'output-many-values');
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ severity: 'error', nodeId: 'out1' });
+    expect(found[0].message).toContain('found 2');
+  });
+
+  it('words the Output error like the save error, so a rejected save adds no second line', () => {
+    const backend =
+      "Invalid input: flow is invalid: the Output node 'out1' needs exactly one value wire (Run when wires do not count), found 0 — node(s): out1; edge(s): ";
+    const issues = computeFlowIssues([output('out1')], [], {
+      save: { nodeIds: ['out1'], edgeIds: [], message: backend },
+    });
+    expect(issues.filter((i) => i.nodeId === 'out1').map((i) => i.code)).toEqual([
+      'output-no-value',
+    ]);
   });
 });
 

@@ -3,7 +3,7 @@ import {
   MAX_CALLBACK_TIMEOUT_MS,
   MIN_CALLBACK_TIMEOUT_MS,
 } from '@/lib/flow-callback';
-import { takesSingleInput } from '@/lib/flow-handles';
+import { TRIGGER_HANDLE, takesSingleInput } from '@/lib/flow-handles';
 import type { FlowEdge, FlowNode, FlowNodeKind, RepeatUntil } from '@/lib/tauri-api';
 
 export type IssueSeverity = 'error' | 'warning';
@@ -101,17 +101,37 @@ function inputIssues(node: FlowNode, edges: FlowEdge[]): FlowIssue[] {
   ];
 }
 
+// Wires into an Output that carry a value. A "Run when" trigger wire carries none.
+const valueWireCount = (edges: FlowEdge[], nodeId: string) =>
+  edges.filter((e) => e.targetNodeId === nodeId && e.targetField !== TRIGGER_HANDLE).length;
+
+// Mirrors rule V17 of rocket_flow::validate, with the same wording as its
+// reason, so a rejected save does not add a second line to the node.
 function outputIssues(node: FlowNode, edges: FlowEdge[]): FlowIssue[] {
-  if (node.kind.kind !== 'Output' || hasWire(edges, node.id, 'value')) return [];
-  return [
-    issue(
-      'output-no-value',
-      'warning',
-      node,
-      'No value is wired into this Output.',
-      'Wire a node into the value field to show a result.',
-    ),
-  ];
+  const { kind } = node;
+  if (kind.kind !== 'Output') return [];
+  const found = valueWireCount(edges, node.id);
+  if (found === 1) return [];
+  const message = `The Output node '${kind.label}' needs exactly one value wire (Run when wires do not count), found ${found}.`;
+  return found === 0
+    ? [
+        issue(
+          'output-no-value',
+          'error',
+          node,
+          message,
+          'Wire a node into the value field to show a result.',
+        ),
+      ]
+    : [
+        issue(
+          'output-many-values',
+          'error',
+          node,
+          message,
+          'Remove the extra wires so only one feeds the value field.',
+        ),
+      ];
 }
 
 function repeatReason(r: RepeatUntil): string | null {

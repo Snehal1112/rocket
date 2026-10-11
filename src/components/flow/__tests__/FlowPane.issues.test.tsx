@@ -187,8 +187,11 @@ describe('FlowPane issues', () => {
     await screen.findByRole('button', { name: '2 errors, 2 warnings' });
     expect(screen.getByTestId('output-node-card').className).toContain('ring-destructive');
 
+    // Redraw the wire under a new id, so the Output keeps its one value wire.
     act(() => {
-      usePaneStore.getState().updateFlowEdges(tabId, []);
+      usePaneStore
+        .getState()
+        .updateFlowEdges(tabId, [{ ...baseTab.edges[0], id: 'e1-redrawn' }]);
     });
     await waitFor(() =>
       expect(screen.getByTestId('output-node-card').className).not.toContain('ring-destructive'),

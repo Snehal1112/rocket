@@ -183,8 +183,24 @@ describe('FlowPane save', () => {
     tabType: 'flow',
     collectionName: 'demo',
     flowName: 'my-flow',
-    nodes: [outputNode('a'), outputNode('b'), outputNode('c')],
-    edges: [],
+    nodes: [
+      {
+        id: 'src',
+        kind: { kind: 'Input' as const, label: 'Seed', value: 'x' },
+        position: { x: 0, y: 0 },
+      },
+      outputNode('a'),
+      outputNode('b'),
+      outputNode('c'),
+    ],
+    // Every Output needs one value wire, or the client flags it as an error.
+    edges: ['a', 'b', 'c'].map((id) => ({
+      id: `w-${id}`,
+      sourceNodeId: 'src',
+      targetNodeId: id,
+      targetField: 'value',
+      expression: 'response.body',
+    })),
     nodeStatus: {},
     runState: 'idle',
   };
@@ -314,7 +330,7 @@ describe('FlowPane save', () => {
     expect(vi.mocked(saveFlow).mock.calls[0][1]).toEqual({
       name: 'my-flow',
       nodes: flowTab.nodes,
-      edges: [],
+      edges: flowTab.edges,
     });
   });
 

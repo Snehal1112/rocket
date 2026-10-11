@@ -4306,11 +4306,14 @@ mod tests {
                 if_node("check", "response.body === 'acme'"),
                 output_node_named("yes"),
                 output_node_named("no"),
+                input_node_with("seed", "x"),
             ],
             edges: vec![
                 input_edge("e1", "in", "check"),
                 trigger_edge("e2", "check", handle::TRUE, "yes"),
                 trigger_edge("e3", "check", handle::FALSE, "no"),
+                edge_from("e4", "seed", handle::RESULT, "yes", "value", ""),
+                edge_from("e5", "seed", handle::RESULT, "no", "value", ""),
             ],
             callback_host: None,
         };
@@ -5111,7 +5114,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn output_node_with_two_incoming_wires_fails_instead_of_dropping_one() {
+    async fn output_node_with_two_incoming_wires_is_refused_before_the_run() {
         let input_node = |id: &str, v: &str| FlowNode {
             id: id.to_string(),
             kind: FlowNodeKind::Input {
@@ -5149,18 +5152,13 @@ mod tests {
         let executor = RecordingExecutor::new();
         let exec = recording_exec(&executor, fixed_wire("1"));
 
-        let summary = service
+        let err = service
             .run(&exec, run_input("two-into-output"))
             .await
-            .expect("run");
-
-        assert_eq!(status_of(&summary, "out"), FlowNodeStatus::Failed);
+            .expect_err("a second value wire is refused before the run starts");
         assert!(
-            step_of(&summary, "out")
-                .error
-                .as_deref()
-                .is_some_and(|e| e.contains("(edges e1, e2)")),
-            "the error lists both wires"
+            err.to_string().contains("needs exactly one value wire"),
+            "got {err}"
         );
     }
 
@@ -7008,11 +7006,14 @@ mod tests {
                 if_node("check", "response.body === 'acme'"),
                 output_node_named("yes"),
                 output_node_named("no"),
+                input_node_with("seed", "x"),
             ],
             edges: vec![
                 input_edge("e1", "in", "check"),
                 trigger_edge("e2", "check", handle::TRUE, "yes"),
                 trigger_edge("e3", "check", handle::FALSE, "no"),
+                edge_from("e4", "seed", handle::RESULT, "yes", "value", ""),
+                edge_from("e5", "seed", handle::RESULT, "no", "value", ""),
             ],
             callback_host: None,
         };

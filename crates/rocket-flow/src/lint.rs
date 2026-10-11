@@ -10,7 +10,7 @@ use crate::flow::{Flow, FlowEdge, FlowNode};
 use crate::graph::FlowGraphError;
 use crate::handle;
 use crate::node::{FlowNodeKind, RequestSource};
-use crate::validate::kind_name;
+use crate::validate::{kind_name, OUTPUT_WIRE_TAIL};
 use std::collections::{HashMap, HashSet};
 
 /// A structural `validate` failure, reported as an error lint.
@@ -808,10 +808,23 @@ fn sentence(reason: &str) -> String {
         )
     } else if reason.starts_with("the Request node '") && reason.contains("' has no field '") {
         Some("A wire targets a field that the Request node does not have.".to_string())
+    } else if let Some(count) = output_wire_count(reason) {
+        Some(format!(
+            "The Output node needs exactly one value wire, found {count}."
+        ))
     } else {
         routed_reason(reason).or_else(|| known_reason(reason))
     };
     fixed.unwrap_or_else(|| "The flow has a structural problem.".to_string())
+}
+
+/// The count in a V17 reason, when `reason` is one. The label between the
+/// quotes is user text, so only the digits are passed on.
+fn output_wire_count(reason: &str) -> Option<&str> {
+    let rest = reason.strip_prefix("the Output node '")?;
+    let (head, count) = rest.rsplit_once(", found ")?;
+    let plain = !count.is_empty() && count.chars().all(|c| c.is_ascii_digit());
+    (plain && head.ends_with(OUTPUT_WIRE_TAIL)).then_some(count)
 }
 
 /// Reasons about the wire or the field of an If, Switch or Transform node.
@@ -1880,6 +1893,52 @@ mod tests {
         assert_eq!(keys(&lints), vec![(None, Some("e1"), INVALID_GRAPH)]);
         assert_eq!(lints[0].message, "More than one wire has the same id.");
         assert!(lints[0].hint.is_some());
+    }
+
+    #[test]
+    fn an_output_without_a_value_wire_is_linted_with_its_label_once() {
+        let f = flow(
+            vec![
+                input("in1"),
+                node(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: "Final".to_string(),
+                    },
+                ),
+            ],
+            vec![],
+        );
+        let graph = graph_lints(&f);
+        assert_eq!(keys(&graph), vec![(Some("out"), None, INVALID_GRAPH)]);
+        assert_eq!(
+            graph[0].message,
+            "'Final': The Output node needs exactly one value wire, found 0."
+        );
+    }
+
+    #[test]
+    fn an_output_label_that_imitates_the_count_cannot_change_the_sentence() {
+        let f = flow(
+            vec![
+                input("in1"),
+                node(
+                    "out",
+                    FlowNodeKind::Output {
+                        label: "x', found 9".to_string(),
+                    },
+                ),
+            ],
+            vec![],
+        );
+        let graph = graph_lints(&f);
+        assert!(
+            graph[0]
+                .message
+                .ends_with("The Output node needs exactly one value wire, found 0."),
+            "{}",
+            graph[0].message
+        );
     }
 
     const CANARY: &str = "sk-live-canary-9f3a";

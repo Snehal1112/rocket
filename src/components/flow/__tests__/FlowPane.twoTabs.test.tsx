@@ -75,8 +75,20 @@ const flowTab = (id: string): FlowTab => ({
   isDirty: false,
   collectionName: 'demo',
   flowName: 'shared',
-  nodes: [{ id: 'out1', position: { x: 0, y: 0 }, kind: { kind: 'Output', label: 'Result' } }],
-  edges: [],
+  nodes: [
+    { id: 'in1', position: { x: 0, y: 0 }, kind: { kind: 'Input', label: 'Seed', value: 'x' } },
+    { id: 'out1', position: { x: 0, y: 0 }, kind: { kind: 'Output', label: 'Result' } },
+  ],
+  // The Output needs one value wire, or the client flags it as an error.
+  edges: [
+    {
+      id: 'w1',
+      sourceNodeId: 'in1',
+      targetNodeId: 'out1',
+      targetField: 'value',
+      expression: 'response.body',
+    },
+  ],
   nodeStatus: {},
   runState: 'idle',
 });

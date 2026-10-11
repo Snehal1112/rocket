@@ -97,6 +97,7 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
     check_wait_nodes(flow)?;
     check_callback_order(flow)?;
     check_auth_nodes(flow)?;
+    check_output_wires(flow)?;
 
     Ok(order)
 }
@@ -326,6 +327,39 @@ fn check_repeat_until(flow: &Flow) -> Result<(), FlowGraphError> {
         };
         if let Some(reason) = reason {
             return Err(invalid_node(node, reason));
+        }
+    }
+    Ok(())
+}
+
+/// The part of a V17 reason after the label. `lint.rs` matches it to word the
+/// lint without the label, so keep both in step.
+pub(crate) const OUTPUT_WIRE_TAIL: &str =
+    "' needs exactly one value wire (Run when wires do not count)";
+
+/// V17: an Output node has exactly one value wire (spec section 6). A
+/// `trigger` wire carries no value, so it does not count. This is the rule the
+/// engine applies: it feeds an Output only its non-trigger wires. It runs
+/// last, so a flow that breaks an edge rule keeps that error.
+fn check_output_wires(flow: &Flow) -> Result<(), FlowGraphError> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for edge in flow
+        .edges
+        .iter()
+        .filter(|e| e.target_field != handle::TRIGGER)
+    {
+        *counts.entry(edge.target_node_id.as_str()).or_insert(0) += 1;
+    }
+    for node in &flow.nodes {
+        let FlowNodeKind::Output { label } = &node.kind else {
+            continue;
+        };
+        let found = counts.get(node.id.as_str()).copied().unwrap_or(0);
+        if found != 1 {
+            return Err(invalid_node(
+                node,
+                format!("the Output node '{label}{OUTPUT_WIRE_TAIL}, found {found}"),
+            ));
         }
     }
     Ok(())
@@ -813,9 +847,10 @@ mod tests {
             vec![
                 edge("e1", "a", handle::RESULT, "b", handle::TRIGGER),
                 edge("e2", "a", handle::RESULT, "out", handle::TRIGGER),
+                edge("e3", "b", handle::RESULT, "out", "value"),
             ],
         );
-        assert!(validate(&f).is_ok());
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
     }
 
     #[test]
@@ -1663,5 +1698,83 @@ edges:
         let f: Flow = serde_yaml::from_str(WIRED_FLOW_YAML).expect("fixture parses");
         assert_eq!(f.edges.len(), 6);
         validate(&f).expect("the fixture must stay valid");
+    }
+
+    fn labelled_output(id: &str, label: &str) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Output {
+                label: label.to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn v17_output_without_a_value_wire_is_rejected_with_its_label() {
+        let f = flow(
+            vec![input("in"), labelled_output("out", "Final answer")],
+            vec![],
+        );
+        let result = validate(&f);
+        let reason = invalid_node_reason(result.clone());
+        assert_eq!(
+            reason,
+            "the Output node 'Final answer' needs exactly one value wire (Run when wires do not count), found 0"
+        );
+        assert_eq!(invalid_node_id(result), "out");
+    }
+
+    #[test]
+    fn v17_a_run_when_wire_is_not_a_value_wire() {
+        let f = flow(
+            vec![input("in"), output("out")],
+            vec![edge("e1", "in", handle::RESULT, "out", handle::TRIGGER)],
+        );
+        let reason = invalid_node_reason(validate(&f));
+        assert!(reason.ends_with("found 0"), "{reason}");
+    }
+
+    #[test]
+    fn v17_two_value_wires_are_rejected() {
+        let f = flow(
+            vec![
+                input("a"),
+                input("b"),
+                labelled_output("out", "Final answer"),
+            ],
+            vec![
+                edge("e1", "a", handle::RESULT, "out", "value"),
+                edge("e2", "b", handle::RESULT, "out", "value"),
+            ],
+        );
+        let result = validate(&f);
+        let reason = invalid_node_reason(result.clone());
+        assert!(reason.contains("'Final answer'"), "{reason}");
+        assert!(reason.ends_with("found 2"), "{reason}");
+        assert_eq!(invalid_node_id(result), "out");
+    }
+
+    #[test]
+    fn v17_one_value_wire_with_several_run_when_wires_is_valid() {
+        let f = flow(
+            vec![input("a"), request("r1"), request("r2"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "out", "value"),
+                edge("e2", "r1", handle::RESULT, "out", handle::TRIGGER),
+                edge("e3", "r2", handle::RESULT, "out", handle::TRIGGER),
+            ],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn v17_runs_after_the_edge_rules() {
+        // The V5 error stays even though `out` has no incoming wire, because
+        // V17 is the last rule.
+        let f = flow(
+            vec![output("out"), request("b")],
+            vec![edge("e1", "out", handle::RESULT, "b", "url")],
+        );
+        assert_eq!(invalid_edge_id(validate(&f)), "e1");
     }
 }
