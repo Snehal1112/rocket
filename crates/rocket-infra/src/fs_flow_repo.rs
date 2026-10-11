@@ -102,9 +102,53 @@ fn not_found(collection: &str, name: &str) -> DomainError {
     DomainError::NotFound(format!("Flow '{name}' in collection '{collection}'"))
 }
 
-/// Replaces every double-quoted segment with `"..."`. serde_yaml puts the
-/// offending file value in double quotes, and that value must not reach the UI.
+/// Removes file values from a serde_yaml message. Double-quoted segments become
+/// `"..."`. Backtick segments (unknown variant, invalid value and similar)
+/// are cut after the first backtick, except a plain `missing field` name.
+/// Only the error class and the trailing line and column survive.
 fn redact_quoted(message: &str) -> String {
+    redact_backticks(&redact_double_quoted(message))
+}
+
+fn redact_backticks(message: &str) -> String {
+    let Some(first) = message.find('`') else {
+        return message.to_string();
+    };
+    if is_plain_missing_field(message) {
+        return message.to_string();
+    }
+    let suffix = message
+        .rfind(" at line ")
+        .filter(|at| *at > first)
+        .map(|at| &message[at..])
+        .unwrap_or_default();
+    format!("{}`...`{suffix}", &message[..first])
+}
+
+/// True for `<prefix>missing field `name`<suffix>` where the name is a plain identifier.
+fn is_plain_missing_field(message: &str) -> bool {
+    const MARK: &str = "missing field `";
+    let Some(start) = message.find(MARK) else {
+        return false;
+    };
+    if message[..start].contains('`') {
+        return false;
+    }
+    let rest = &message[start + MARK.len()..];
+    let Some(end) = rest.find('`') else {
+        return false;
+    };
+    let ident_ok = !rest[..end].is_empty()
+        && rest[..end]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let tail = &rest[end + 1..];
+    ident_ok && !tail.contains('`') && (tail.is_empty() || tail.starts_with(" at line "))
+}
+
+/// Replaces every double-quoted segment with `"..."`. serde_yaml puts a
+/// string value from the file in double quotes, and it must not reach the UI.
+fn redact_double_quoted(message: &str) -> String {
     let mut out = String::with_capacity(message.len());
     let mut in_quote = false;
     let mut escaped = false;
@@ -198,6 +242,10 @@ impl FlowRepository for FsFlowRepo {
         let mut entries = Vec::new();
         for entry in fs::read_dir(&dir).map_err(|e| DomainError::Io(e.to_string()))? {
             let entry = entry.map_err(|e| DomainError::Io(e.to_string()))?;
+            // Only regular files count. A directory, symlink or FIFO is not a flow.
+            if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
             let path = entry.path();
             if path.extension().is_none_or(|ext| ext != "yml") {
                 continue;
@@ -244,11 +292,19 @@ impl FlowRepository for FsFlowRepo {
         let path = self.file_path(collection, &flow.name)?;
         // Refuse to overwrite a different flow whose name maps to the same file.
         if path.exists() {
-            if let Ok(existing) = Self::read_flow(&path) {
-                if existing.name != flow.name {
+            match Self::read_flow(&path) {
+                Ok(existing) if existing.name != flow.name => {
                     return Err(DomainError::Conflict(format!(
                         "Flow name '{}' collides with existing flow '{}' in collection '{collection}'",
                         flow.name, existing.name
+                    )));
+                }
+                Ok(_) => {}
+                // An unreadable file may be someone's work, so it is never overwritten.
+                Err(_) => {
+                    return Err(DomainError::Conflict(format!(
+                        "Flow name '{}' collides with a flow file that cannot be read in collection '{collection}'. Delete the broken file first.",
+                        flow.name
                     )));
                 }
             }
@@ -1332,5 +1388,94 @@ edges:
             }
             other => panic!("expected InvalidInput, got {other:?}"),
         }
+    }
+
+    fn corrupt_message_for(content: &str) -> String {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "hostile.yml", content);
+        let entries = repo.list_entries("acme").expect("list_entries");
+        assert_eq!(entries.len(), 1);
+        entries[0].error.clone().expect("message")
+    }
+
+    #[test]
+    fn corrupt_message_hides_a_hostile_unknown_variant_value() {
+        let message = corrupt_message_for(
+            "name: Hostile\nnodes:\n- id: a\n  kind:\n    kind: sk-secret-777\n  position:\n    x: 0.0\n    y: 0.0\nedges: []\n",
+        );
+        assert!(!message.contains("sk-secret-777"), "leaked: {message}");
+        assert!(message.contains("line"), "position lost: {message}");
+    }
+
+    #[test]
+    fn corrupt_message_hides_a_hostile_integer_value() {
+        let message = corrupt_message_for("name: Hostile\nnodes: 99123\nedges: []\n");
+        assert!(!message.contains("99123"), "leaked: {message}");
+    }
+
+    #[test]
+    fn corrupt_message_hides_a_hostile_duplicate_field() {
+        let message = corrupt_message_for("name: A\nname: sk-dup-555\nnodes: []\nedges: []\n");
+        assert!(!message.contains("sk-dup-555"), "leaked: {message}");
+    }
+
+    #[test]
+    fn redact_quoted_hides_backtick_values_but_keeps_missing_field_names() {
+        let out =
+            redact_quoted("unknown variant `sk-1`, expected one of `a`, `b` at line 3 column 5");
+        assert!(!out.contains("sk-1"), "{out}");
+        assert!(out.ends_with(" at line 3 column 5"), "{out}");
+        assert_eq!(
+            redact_quoted("missing field `nodes`"),
+            "missing field `nodes`"
+        );
+        assert_eq!(
+            redact_quoted("missing field `nodes` at line 1 column 1"),
+            "missing field `nodes` at line 1 column 1"
+        );
+    }
+
+    #[test]
+    fn save_refuses_to_overwrite_an_unparseable_file_with_a_colliding_name() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+
+        for name in ["Broken", "broken!"] {
+            let err = repo
+                .save("acme", &sample(name))
+                .expect_err("must not overwrite a corrupt file");
+            match err {
+                DomainError::Conflict(message) => {
+                    assert!(!message.contains("not: valid"), "{message}");
+                }
+                other => panic!("expected Conflict, got {other:?}"),
+            }
+        }
+        let raw = fs::read_to_string(dir.path().join("acme").join("flows").join("broken.yml"))
+            .expect("read file");
+        assert_eq!(raw, "not: valid: yaml: [");
+    }
+
+    #[test]
+    fn save_still_works_after_a_corrupt_file_is_deleted() {
+        let (dir, repo) = setup();
+        write_flow_file(&dir, "broken.yml", "not: valid: yaml: [");
+        repo.delete("acme", "broken").expect("delete corrupt");
+        repo.save("acme", &sample("Broken")).expect("recreate");
+        repo.save("acme", &sample("Broken"))
+            .expect("save over own file");
+    }
+
+    #[test]
+    fn list_entries_ignores_directories_named_like_flow_files() {
+        let (dir, repo) = setup();
+        let flows_dir = dir.path().join("acme").join("flows");
+        fs::create_dir_all(flows_dir.join("x.yml")).expect("create dir");
+        repo.save("acme", &sample("Good Flow")).expect("save");
+
+        assert_eq!(
+            repo.list_entries("acme").expect("list_entries"),
+            vec![FlowListEntry::healthy("Good Flow")]
+        );
     }
 }

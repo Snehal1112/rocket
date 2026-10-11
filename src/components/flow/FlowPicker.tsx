@@ -103,7 +103,12 @@ export function FlowPicker({ tab, groupId }: { tab: FlowTab; groupId: string }) 
         </SelectTrigger>
         <SelectContent>
           {flows.map((flow) => (
-            <SelectItem key={flow.name} value={flow.name} disabled={!!flow.error}>
+            <SelectItem
+              key={flow.name}
+              value={flow.name}
+              disabled={!!flow.error}
+              title={flow.error}
+            >
               {flow.error ? `${flow.name} (corrupt)` : flow.name}
             </SelectItem>
           ))}

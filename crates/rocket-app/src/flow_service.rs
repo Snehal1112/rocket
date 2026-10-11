@@ -1469,4 +1469,27 @@ mod tests {
             "a saved request may set variables at run time"
         );
     }
+
+    #[test]
+    fn save_does_not_overwrite_a_corrupt_file_with_a_colliding_name() {
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        let flows_dir = dir.path().join("demo").join("flows");
+        std::fs::create_dir_all(&flows_dir).expect("create flows dir");
+        std::fs::write(flows_dir.join("broken.yml"), "not: valid: yaml: [")
+            .expect("write corrupt file");
+        let svc = FlowService::new(Box::new(rocket_infra::FsFlowRepo::new(
+            dir.path().to_path_buf(),
+        )));
+
+        let err = svc
+            .save("demo", named_flow("Broken"))
+            .expect_err("must refuse");
+
+        assert!(matches!(
+            err,
+            rocket_shared::error::DomainError::Conflict(_)
+        ));
+        let raw = std::fs::read_to_string(flows_dir.join("broken.yml")).expect("read file");
+        assert_eq!(raw, "not: valid: yaml: [");
+    }
 }
