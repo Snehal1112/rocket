@@ -635,4 +635,64 @@ mod tests {
         };
         assert_eq!(svc.lint_with_environment("demo", &flow, env), svc.lint("demo", &flow));
     }
+
+    fn lint_sources_with_nothing_saved() -> crate::flow_lint_context::LintSources {
+        use crate::test_doubles::{ConfigurableCollectionRepo, NullEnvRepo, SharedCollectionRepo};
+        struct NoEnvs;
+        impl rocket_environment::EnvironmentRepositoryFactory for NoEnvs {
+            fn for_collection(
+                &self,
+                _collection: &str,
+            ) -> Box<dyn rocket_environment::EnvironmentRepository> {
+                Box::new(NullEnvRepo)
+            }
+        }
+        crate::flow_lint_context::LintSources {
+            collection_repo: Box::new(SharedCollectionRepo(ConfigurableCollectionRepo::new())),
+            env_factory: Box::new(NoEnvs),
+            global_env_repo: Box::new(NullEnvRepo),
+        }
+    }
+
+    fn flow_with_saved_request() -> Flow {
+        Flow {
+            name: "Dangling".to_string(),
+            nodes: vec![node_of(
+                "req",
+                FlowNodeKind::Request {
+                    label: "Log in".to_string(),
+                    source: rocket_flow::RequestSource::Saved {
+                        request_path: "auth/login.yml".to_string(),
+                    },
+                    debug: false,
+                    repeat_until: None,
+                },
+            )],
+            edges: vec![],
+            callback_host: None,
+        }
+    }
+
+    #[test]
+    fn lint_reports_a_saved_request_that_is_gone() {
+        let svc = FlowService::new(Box::new(UntouchedRepo))
+            .with_lint_sources(lint_sources_with_nothing_saved());
+        let lints = svc.lint("demo", &flow_with_saved_request());
+        assert_eq!(
+            lint_keys(&lints),
+            vec![(Some("req"), None, rocket_flow::lint::DANGLING_SAVED_REQUEST)]
+        );
+        assert_eq!(lints[0].severity, LintSeverity::Error);
+    }
+
+    #[test]
+    fn a_flow_with_a_dangling_request_still_saves() {
+        let svc = FlowService::new(Box::new(FakeFlowRepo::new()))
+            .with_lint_sources(lint_sources_with_nothing_saved());
+        let flow = flow_with_saved_request();
+        assert!(!svc.lint("demo", &flow).is_empty());
+        svc.save("demo", flow.clone())
+            .expect("a flow with a dangling request must still save");
+        assert_eq!(svc.get("demo", "Dangling").expect("get"), flow);
+    }
 }

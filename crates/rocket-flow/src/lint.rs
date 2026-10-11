@@ -9,7 +9,7 @@
 use crate::flow::{Flow, FlowNode};
 use crate::graph::FlowGraphError;
 use crate::handle;
-use crate::node::FlowNodeKind;
+use crate::node::{FlowNodeKind, RequestSource};
 use crate::validate::kind_name;
 use std::collections::{HashMap, HashSet};
 
@@ -21,6 +21,8 @@ pub const EXIT_WITHOUT_EDGE: &str = "exit_without_edge";
 pub const SWITCH_WITHOUT_DEFAULT: &str = "switch_without_default";
 /// A node has no path to any Output, in a flow that has an Output.
 pub const NO_PATH_TO_OUTPUT: &str = "no_path_to_output";
+/// A Request node uses a saved request that is no longer in the collection.
+pub const DANGLING_SAVED_REQUEST: &str = "dangling_saved_request";
 
 /// How serious a lint is. Neither severity blocks save or run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,8 +69,6 @@ impl LintContext for NoLintContext {}
 /// Lints `flow` without blocking anything. Works on any graph, valid or
 /// not, and never panics on unknown ids or cycles.
 pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLint> {
-    // No rule asks the context yet. F-21 and F-22 add the rules that do.
-    let _ = ctx;
     let index = GraphIndex::new(flow);
     let mut seen: HashSet<&str> = HashSet::with_capacity(flow.nodes.len());
     let mut lints = Vec::new();
@@ -79,6 +79,7 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
         }
         lints.extend(exit_lints(node, &index));
         lints.extend(no_path_lint(node, &index));
+        lints.extend(dangling_request_lint(node, ctx));
     }
     lints
 }
@@ -132,15 +133,52 @@ fn display_label(node: &FlowNode) -> &str {
     }
 }
 
-fn warning(code: &str, node: &FlowNode, message: String, hint: &str) -> FlowLint {
+fn node_lint(
+    severity: LintSeverity,
+    code: &str,
+    node: &FlowNode,
+    message: String,
+    hint: &str,
+) -> FlowLint {
     FlowLint {
         code: code.to_string(),
-        severity: LintSeverity::Warning,
+        severity,
         node_id: Some(node.id.clone()),
         edge_id: None,
         message,
         hint: Some(hint.to_string()),
     }
+}
+
+fn warning(code: &str, node: &FlowNode, message: String, hint: &str) -> FlowLint {
+    node_lint(LintSeverity::Warning, code, node, message, hint)
+}
+
+/// A Request node whose saved request the context says is gone. A run that
+/// reaches the node reads the same file and fails there, so this is an error
+/// lint. A node the context cannot answer for is skipped. The path is not
+/// quoted.
+fn dangling_request_lint(node: &FlowNode, ctx: &dyn LintContext) -> Option<FlowLint> {
+    let FlowNodeKind::Request {
+        source: RequestSource::Saved { request_path },
+        ..
+    } = &node.kind
+    else {
+        return None;
+    };
+    if ctx.saved_request_exists(request_path) != Some(false) {
+        return None;
+    }
+    Some(node_lint(
+        LintSeverity::Error,
+        DANGLING_SAVED_REQUEST,
+        node,
+        format!(
+            "'{}' uses a saved request that no longer exists in this collection.",
+            display_label(node)
+        ),
+        "Pick another saved request in the node's properties, or restore the request file. A run that reaches this node fails there.",
+    ))
 }
 
 /// The routing exits of a node as `(handle, name shown to the user)`. The
@@ -445,7 +483,7 @@ fn known_reason(reason: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::flow::FlowEdge;
-    use crate::node::{NodePosition, RequestSource, SwitchCase};
+    use crate::node::{InlineHeader, InlineRequestData, NodePosition, RequestSource, SwitchCase};
 
     fn node(id: &str, kind: FlowNodeKind) -> FlowNode {
         FlowNode {
@@ -1356,5 +1394,207 @@ mod tests {
             generic
         );
         assert_eq!(sentence("the Foo node's condition is empty"), generic);
+    }
+
+    /// Answers from fixed lists. Anything not listed gets `None`.
+    struct FakeContext {
+        requests: Vec<(&'static str, bool)>,
+        variables: Vec<(&'static str, bool)>,
+    }
+
+    impl LintContext for FakeContext {
+        fn saved_request_exists(&self, request_path: &str) -> Option<bool> {
+            self.requests
+                .iter()
+                .find(|(path, _)| *path == request_path)
+                .map(|(_, exists)| *exists)
+        }
+
+        fn variable_is_known(&self, name: &str) -> Option<bool> {
+            self.variables
+                .iter()
+                .find(|(known, _)| *known == name)
+                .map(|(_, answer)| *answer)
+        }
+    }
+
+    /// Says every saved request is missing and every variable is unknown.
+    struct EverythingMissing;
+
+    impl LintContext for EverythingMissing {
+        fn saved_request_exists(&self, _request_path: &str) -> Option<bool> {
+            Some(false)
+        }
+
+        fn variable_is_known(&self, _name: &str) -> Option<bool> {
+            Some(false)
+        }
+    }
+
+    /// Counts the questions, to prove how often a rule asks.
+    #[derive(Default)]
+    struct Counting {
+        requests: std::cell::Cell<usize>,
+        variables: std::cell::Cell<usize>,
+    }
+
+    impl LintContext for Counting {
+        fn saved_request_exists(&self, _request_path: &str) -> Option<bool> {
+            self.requests.set(self.requests.get() + 1);
+            Some(true)
+        }
+
+        fn variable_is_known(&self, _name: &str) -> Option<bool> {
+            self.variables.set(self.variables.get() + 1);
+            Some(true)
+        }
+    }
+
+    fn saved_request(id: &str, label: &str, path: &str) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Request {
+                label: label.to_string(),
+                source: RequestSource::Saved {
+                    request_path: path.to_string(),
+                },
+                debug: false,
+                repeat_until: None,
+            },
+        )
+    }
+
+    fn missing(path: &'static str) -> FakeContext {
+        FakeContext {
+            requests: vec![(path, false)],
+            variables: vec![],
+        }
+    }
+
+    #[test]
+    fn a_missing_saved_request_is_an_error_naming_the_node() {
+        let f = flow(vec![saved_request("n1", "Log in", "auth/login.yml")], vec![]);
+        let lints = validate_with_warnings(&f, &missing("auth/login.yml"));
+        let found = only(&lints, DANGLING_SAVED_REQUEST);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].severity, LintSeverity::Error);
+        assert_eq!(found[0].node_id.as_deref(), Some("n1"));
+        assert_eq!(found[0].edge_id, None);
+        assert_eq!(
+            found[0].message,
+            "'Log in' uses a saved request that no longer exists in this collection."
+        );
+        let hint = found[0].hint.as_deref().expect("a hint");
+        assert!(hint.starts_with("Pick another saved request"), "got: {hint}");
+    }
+
+    #[test]
+    fn the_message_never_quotes_the_path() {
+        let f = flow(vec![saved_request("n1", "Log in", "private/s3cr3t-dir/login.yml")], vec![]);
+        let lints = validate_with_warnings(&f, &missing("private/s3cr3t-dir/login.yml"));
+        for l in &lints {
+            let text = format!("{} {}", l.message, l.hint.as_deref().unwrap_or(""));
+            assert!(!text.contains("s3cr3t"), "leaked in: {text}");
+            assert!(!text.contains("login.yml"), "leaked in: {text}");
+        }
+    }
+
+    #[test]
+    fn an_existing_or_unanswered_request_has_no_lint() {
+        let f = flow(
+            vec![
+                saved_request("a", "A", "a.yml"),
+                saved_request("b", "B", "b.yml"),
+                saved_request("c", "C", "c.yml"),
+            ],
+            vec![],
+        );
+        let ctx = FakeContext {
+            requests: vec![("a.yml", true), ("b.yml", true)],
+            variables: vec![],
+        };
+        // `c.yml` is not listed, so the context cannot tell and the rule is skipped.
+        assert!(only(&validate_with_warnings(&f, &ctx), DANGLING_SAVED_REQUEST).is_empty());
+        assert!(only(&lint(&f), DANGLING_SAVED_REQUEST).is_empty());
+    }
+
+    #[test]
+    fn an_inline_request_is_never_checked() {
+        let f = flow(vec![inline_request("a", "A", "https://x.test", &[], None)], vec![]);
+        let counting = Counting::default();
+        let lints = validate_with_warnings(&f, &counting);
+        assert!(only(&lints, DANGLING_SAVED_REQUEST).is_empty());
+        assert_eq!(counting.requests.get(), 0);
+    }
+
+    #[test]
+    fn lints_follow_node_order_and_each_node_asks_once() {
+        let f = flow(
+            vec![
+                saved_request("z", "Zed", "z.yml"),
+                saved_request("a", "Aye", "a.yml"),
+            ],
+            vec![],
+        );
+        let lints = validate_with_warnings(&f, &EverythingMissing);
+        let ids: Vec<_> = only(&lints, DANGLING_SAVED_REQUEST)
+            .iter()
+            .map(|l| l.node_id.as_deref())
+            .collect();
+        assert_eq!(ids, vec![Some("z"), Some("a")]);
+        let counting = Counting::default();
+        let _ = validate_with_warnings(&f, &counting);
+        assert_eq!(counting.requests.get(), 2);
+    }
+
+    /// n saved Request nodes and no wires.
+    fn saved_requests(n: usize) -> Flow {
+        flow(
+            (0..n)
+                .map(|i| saved_request(&format!("n{i}"), &format!("Req {i}"), &format!("r{i}.yml")))
+                .collect(),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn saved_request_rule_is_linear() {
+        let lints = validate_with_warnings(&saved_requests(20_000), &EverythingMissing);
+        assert_eq!(only(&lints, DANGLING_SAVED_REQUEST).len(), 20_000);
+        assert_linear(saved_requests, |f| {
+            let _ = validate_with_warnings(f, &EverythingMissing);
+        });
+    }
+
+    /// An inline Request. Header pairs are `(name, value)`.
+    fn inline_request(
+        id: &str,
+        label: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Option<&str>,
+    ) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Request {
+                label: label.to_string(),
+                source: RequestSource::Inline {
+                    request: InlineRequestData {
+                        method: "GET".to_string(),
+                        url: url.to_string(),
+                        headers: headers
+                            .iter()
+                            .map(|(name, value)| InlineHeader {
+                                name: name.to_string(),
+                                value: value.to_string(),
+                            })
+                            .collect(),
+                        body: body.map(str::to_string),
+                    },
+                },
+                debug: false,
+                repeat_until: None,
+            },
+        )
     }
 }
