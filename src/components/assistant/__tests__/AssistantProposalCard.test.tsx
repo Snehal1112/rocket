@@ -1,10 +1,13 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
 import { createDefaultRequest } from '@/lib/pane-utils';
+import { setQueryClient } from '@/lib/query-client';
 import * as api from '@/lib/tauri-api';
 import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
+import { folderEditKey, useFolderEditStore } from '@/stores/folder-edit-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { makeProposal, makeRequest } from '@/test/assistant-fixtures';
 import { createDeferred } from '@/test/deferred';
@@ -43,6 +46,13 @@ vi.mock('@/components/collections/MarkdownRenderer', () => ({
   MarkdownRenderer: ({ children }: { children: string }) => <pre>{children}</pre>,
 }));
 
+const folderChange: AgentProposal['change'] = {
+  op: 'updateFolderSettings',
+  collection: 'orders',
+  folderPath: 'auth/v2',
+  patch: { preRequestScript: 'new();' },
+};
+
 // Renders the card from the store, the way the chat view does.
 function StoreCard() {
   const proposal = useAssistantStore((s) => s.proposals[0]);
@@ -58,6 +68,7 @@ describe('AssistantProposalCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     usePaneStore.getState().reset();
+    useFolderEditStore.setState({ dirty: {}, reloads: {} });
     useAssistantStore.getState().reset();
     const token = useAssistantStore.getState().beginSession('agent-1', 'edit');
     useAssistantStore.getState().activateSession(token, 's1', []);
@@ -261,5 +272,25 @@ describe('AssistantProposalCard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
     expect(await screen.findByText('The action failed. Try again.')).toBeInTheDocument();
     expect(screen.queryByText('session ended')).not.toBeInTheDocument();
+  });
+
+  it('blocks Accept while the folder has unsaved edits in its settings tab', () => {
+    useFolderEditStore.getState().setDirty(folderEditKey('orders', 'auth/v2'), true);
+    showProposal(makeProposal({ change: folderChange }));
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    expect(screen.getByText(/unsaved edits in its Folder Settings tab/i)).toBeInTheDocument();
+  });
+
+  it('asks a clean folder tab to reload after an accepted folder update', async () => {
+    // The accept path invalidates queries, so it needs a client.
+    setQueryClient(new QueryClient());
+    const proposal = makeProposal({ change: folderChange });
+    vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...proposal, status: 'accepted' });
+    showProposal(proposal);
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(await screen.findByText('Accepted')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(useFolderEditStore.getState().reloads[folderEditKey('orders', 'auth/v2')]).toBe(1),
+    );
   });
 });

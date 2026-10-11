@@ -27,6 +27,7 @@ import {
 } from '@/lib/assistant/proposal-view';
 import type { AgentProposal } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { folderEditKey, useFolderEditStore } from '@/stores/folder-edit-store';
 import { usePaneStore } from '@/stores/pane-store';
 
 const ProposalDiffEditor = lazy(() =>
@@ -69,7 +70,12 @@ export function AssistantProposalCard({
   const dirtyPlace = usePaneStore((s) =>
     proposal.status === 'pending' ? dirtyAffectedTabPlace(s, proposal.change) : undefined,
   );
-  const blockedByEdits = dirtyPlace !== undefined;
+  const folderTabDirty = useFolderEditStore((s) =>
+    proposal.status === 'pending' && proposal.change.op === 'updateFolderSettings'
+      ? s.dirty[folderEditKey(proposal.change.collection, proposal.change.folderPath)] === true
+      : false,
+  );
+  const blockedByEdits = dirtyPlace !== undefined || folderTabDirty;
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -273,9 +279,11 @@ export function AssistantProposalCard({
         <>
           {blockedByEdits && (
             <p className='text-xs text-muted-foreground'>
-              {dirtyPlace?.startsWith('parked:')
-                ? `This request has unsaved edits in a parked tab of collection ${dirtyPlace.slice('parked:'.length)}. Save or discard them before accepting.`
-                : 'This request has unsaved edits in an open tab. Save or discard them before accepting.'}
+              {folderTabDirty
+                ? 'This folder has unsaved edits in its Folder Settings tab. Save or discard them before accepting.'
+                : dirtyPlace?.startsWith('parked:')
+                  ? `This request has unsaved edits in a parked tab of collection ${dirtyPlace.slice('parked:'.length)}. Save or discard them before accepting.`
+                  : 'This request has unsaved edits in an open tab. Save or discard them before accepting.'}
             </p>
           )}
           <div className='flex justify-end gap-2'>

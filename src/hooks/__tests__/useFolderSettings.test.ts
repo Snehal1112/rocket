@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FolderSettings } from '@/lib/tauri-api';
+import { folderEditKey, useFolderEditStore } from '@/stores/folder-edit-store';
 import { createDeferred } from '@/test/deferred';
 import { useFolderSettings } from '../useFolderSettings';
 
@@ -26,6 +27,7 @@ function load(collection = 'col', folderPath = 'a/b') {
 }
 
 beforeEach(() => {
+  useFolderEditStore.setState({ dirty: {}, reloads: {} });
   mockGet.mockReset();
   mockSave.mockReset();
   mockToastError.mockReset();
@@ -34,6 +36,37 @@ beforeEach(() => {
 });
 
 describe('useFolderSettings', () => {
+  it('reports its dirty flag to the folder edit store and clears it on unmount', async () => {
+    const { result, unmount } = load('col', 'a/b');
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    const key = folderEditKey('col', 'a/b');
+    expect(useFolderEditStore.getState().dirty[key]).toBeUndefined();
+    act(() => result.current.setSettings((s) => ({ ...s, docs: 'edited' })));
+    expect(useFolderEditStore.getState().dirty[key]).toBe(true);
+    unmount();
+    expect(useFolderEditStore.getState().dirty[key]).toBeUndefined();
+  });
+
+  it('reloads a clean tab when a reload is requested', async () => {
+    const { result } = load('col', 'a/b');
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    mockGet.mockResolvedValue({ ...base, docs: 'from the assistant' });
+    act(() => useFolderEditStore.getState().requestReload(folderEditKey('col', 'a/b')));
+    await waitFor(() => expect(result.current.settings.docs).toBe('from the assistant'));
+    expect(result.current.isDirty).toBe(false);
+  });
+
+  it('keeps the edits of a dirty tab when a reload is requested', async () => {
+    const { result } = load('col', 'a/b');
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+    act(() => result.current.setSettings((s) => ({ ...s, docs: 'my edit' })));
+    mockGet.mockResolvedValue({ ...base, docs: 'from the assistant' });
+    act(() => useFolderEditStore.getState().requestReload(folderEditKey('col', 'a/b')));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.current.settings.docs).toBe('my edit');
+    expect(result.current.isDirty).toBe(true);
+  });
+
   it('loads the settings on mount', async () => {
     const { result } = load();
     expect(result.current.isLoaded).toBe(false);

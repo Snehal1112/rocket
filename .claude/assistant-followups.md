@@ -42,6 +42,12 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 - `create_request_exclusive` uses `hard_link`, which fails on FAT, exFAT and some SMB mounts. There is no `create_new` fallback (`crates/rocket-infra/src/fs_collection/requests.rs` ~172).
 - Fixture names `GatedEnvFactory`, `GatedEnvFactory2` and `GatedEnvRepoOwned` are confusing (`proposal_service.rs` ~1341-1351). The JoinError mapping is repeated in `crates/rocket-app/src/tool_server.rs` ~947 and ~969.
 - `forget_session` and the proposal `clear_session` are separate calls. No test checks that both run on every end path.
+- Folder auth edits are not offered to the assistant. This needs a security decision first.
+- A header replaced by an `UpdateFolderSettings` patch loses its description.
+- A folder patch replaces whole sections. There is no per-item merge.
+- The folder diff's before side can show the value of a secret-flagged variable. Mask it as the request diff does.
+- gRPC requests do not inherit folder settings.
+- Closing a Folder Settings tab with unsaved edits still does not warn.
 
 ### Dead code and small items
 

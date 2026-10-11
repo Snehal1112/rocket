@@ -8,6 +8,7 @@ import {
   rejectAgentProposal,
 } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
+import { folderEditKey, useFolderEditStore } from '@/stores/folder-edit-store';
 import { type PaneState, usePaneStore } from '@/stores/pane-store';
 import { isRequestTab, type RequestTab, type Tab } from '@/types/pane-types';
 import { proposalTarget } from './proposal-view';
@@ -124,6 +125,13 @@ async function syncTabsAfterAccept(change: Change): Promise<string | undefined> 
         }
         return undefined;
       }
+      case 'updateFolderSettings':
+        // An open clean Folder Settings tab reads the file again. A dirty one
+        // keeps its edits, and the card blocked Accept before that happened.
+        useFolderEditStore
+          .getState()
+          .requestReload(folderEditKey(change.collection, change.folderPath));
+        return undefined;
       default:
         return undefined;
     }

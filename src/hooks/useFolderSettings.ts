@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { SaveButtonState } from '@/hooks/use-save-button';
 import { type FolderSettings, getFolderSettings, saveFolderSettings } from '@/lib/tauri-api';
+import { useFolderEditStore } from '@/stores/folder-edit-store';
 
 const EMPTY_FOLDER_SETTINGS: FolderSettings = { headers: [], variables: [] };
 
@@ -65,6 +66,33 @@ export function useFolderSettings(collection: string, folderPath: string): UseFo
   collectionRef.current = collection;
   const folderPathRef = useRef(folderPath);
   folderPathRef.current = folderPath;
+
+  // Tell the assistant panel whether this folder has unsaved edits.
+  useEffect(() => {
+    useFolderEditStore.getState().setDirty(key, isDirty);
+  }, [key, isDirty]);
+  useEffect(
+    () => () => {
+      useFolderEditStore.getState().setDirty(key, false);
+    },
+    [key],
+  );
+
+  // An accepted assistant proposal asks open clean tabs to read the file again.
+  const reloadNonce = useFolderEditStore((s) => s.reloads[key] ?? 0);
+  useEffect(() => {
+    if (reloadNonce === 0 || !loadedRef.current || dirtyRef.current) return;
+    const reloadKey = keyRef.current;
+    getFolderSettings(collectionRef.current, folderPathRef.current)
+      .then((loaded) => {
+        // Drop the answer when the tab moved on or the user started editing.
+        if (!mountedRef.current || keyRef.current !== reloadKey || dirtyRef.current) return;
+        settingsRef.current = loaded;
+        baselineRef.current = loaded;
+        setSettingsState(loaded);
+      })
+      .catch((err) => console.error('[useFolderSettings] reload failed', err));
+  }, [reloadNonce]);
 
   useEffect(() => {
     mountedRef.current = true;

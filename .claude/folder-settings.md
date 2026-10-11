@@ -30,6 +30,14 @@ Design: `docs/superpowers/specs/2026-10-07-folder-settings-design.md`. Plans and
 - The Folder Settings save is read-then-patch: it re-reads the baseline and applies only the edited fields. The hook does not listen to `folderSettingsSaved`. A future listener must ignore its own saves and must not reload while the tab is dirty.
 - Scripts that use `bru.*` stay non-portable. There is no `bru` alias, parity goes in the `rok` namespace.
 
+### Assistant edits
+
+- The assistant proposes `UpdateFolderSettings` (a patch of whole sections; there is no auth field).
+- The save is read-then-patch through `save_folder_settings`, so fields the patch does not name are kept.
+- `folder-edit-store` carries the tab's dirty flag and reload requests. `useFolderSettings` reports its dirty flag there. The proposal card blocks Accept while the tab is dirty, and an accepted update asks open clean tabs to reload.
+- Only a mounted tab takes part. An unmounted tab already drops its edits, so there is nothing to protect.
+- A header replaced by a proposal loses its description.
+
 ## Known gaps
 
 These were found in review and left on purpose. Check them before building on the area.
