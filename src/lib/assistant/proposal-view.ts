@@ -1,4 +1,4 @@
-import { type AgentProposal, getRequest } from '@/lib/tauri-api';
+import { type AgentProposal, getFolderSettings, getRequest } from '@/lib/tauri-api';
 
 type Change = AgentProposal['change'];
 
@@ -52,6 +52,8 @@ export function proposalTarget(change: Change): ProposalTarget {
     case 'updateRequest':
     case 'editScript':
       return { collection: change.collection, path: change.requestPath };
+    case 'updateFolderSettings':
+      return { collection: change.collection, path: change.folderPath };
     case 'moveItem':
       return { collection: change.collection, path: change.fromPath };
     case 'renameItem':
@@ -66,6 +68,7 @@ export function proposalPreview(change: Change): ProposalPreview {
   switch (change.op) {
     case 'updateRequest':
     case 'editScript':
+    case 'updateFolderSettings':
       return { kind: 'diff' };
     case 'createRequest':
       return { kind: 'definition', text: JSON.stringify(change.request, null, 2) };
@@ -97,6 +100,23 @@ export function proposalFailure(proposal: AgentProposal): string | undefined {
  */
 export async function loadProposalDiff(proposal: AgentProposal): Promise<ProposalDiff | null> {
   const { change } = proposal;
+  if (change.op === 'updateFolderSettings') {
+    const current = await getFolderSettings(change.collection, change.folderPath);
+    const patch = asRecord(change.patch);
+    const keys = Object.keys(patch).filter((key) => patch[key] !== undefined);
+    // Variables are shown as key, value and enabled only, like the proposal.
+    const before = { ...asRecord(current) };
+    before.variables = current.variables.map(({ key, value, enabled }) => ({
+      key,
+      value,
+      enabled,
+    }));
+    return {
+      before: stringifyPicked(before, keys),
+      after: stringifyPicked(patch, keys),
+      language: 'json',
+    };
+  }
   if (change.op !== 'updateRequest' && change.op !== 'editScript') return null;
   const language = change.op === 'editScript' ? 'javascript' : 'json';
 

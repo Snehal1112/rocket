@@ -20,6 +20,8 @@ type TabSource = Pick<PaneState, 'root' | 'collectionTabState'>;
 function affectedAmong(tabs: Tab[], change: Change): RequestTab[] {
   if (change.op === 'createFolder' || change.op === 'createRequest') return [];
   if (change.op === 'setEnvVar') return [];
+  // A folder settings change rewrites no request tab.
+  if (change.op === 'updateFolderSettings') return [];
   const target = proposalTarget(change);
   const targetPath = target.path;
   if (!targetPath) return [];

@@ -15,6 +15,7 @@ vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   acceptAgentProposal: vi.fn(),
   rejectAgentProposal: vi.fn(),
   getRequest: vi.fn(),
+  getFolderSettings: vi.fn(),
 }));
 
 vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn(), cancelAutoSave: vi.fn() }));
@@ -102,6 +103,33 @@ describe('AssistantProposalCard', () => {
     expect(diff.dataset.modified).toBe("rok.test('status', () => {});");
     expect(diff.dataset.language).toBe('javascript');
     expect(screen.getByText('orders / get.yml')).toBeInTheDocument();
+  });
+
+  it('shows a JSON diff of a folder settings update', async () => {
+    vi.mocked(api.getFolderSettings).mockResolvedValue({
+      headers: [],
+      variables: [],
+      preRequestScript: 'old();',
+    });
+    showProposal(
+      makeProposal({
+        change: {
+          op: 'updateFolderSettings',
+          collection: 'orders',
+          folderPath: 'auth/v2',
+          patch: {
+            preRequestScript: 'new();',
+            variables: [{ key: 'HOST', value: 'api.test', enabled: true }],
+          },
+        },
+        summary: "Update pre-request script, variables of folder 'auth/v2' in orders",
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Show changes' }));
+    const diff = await screen.findByTestId('proposal-diff');
+    expect(api.getFolderSettings).toHaveBeenCalledWith('orders', 'auth/v2');
+    expect(diff.dataset.language).toBe('json');
+    expect(diff.dataset.modified).toContain('new();');
   });
 
   it('accepts and shows the accepted state', async () => {

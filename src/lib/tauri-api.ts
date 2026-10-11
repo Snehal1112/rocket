@@ -2885,10 +2885,26 @@ export interface AgentRequestPatch {
   docs?: string;
 }
 
+/** Only the sections the patch sets are present. */
+export interface AgentFolderSettingsPatch {
+  headers?: Header[];
+  variables?: { key: string; value: string; enabled: boolean }[];
+  preRequestScript?: string;
+  postResponseScript?: string;
+  testsScript?: string;
+  docs?: string;
+}
+
 export type AgentProposedChange =
   | { op: 'createFolder'; collection: string; parentPath: string; name: string }
   | { op: 'createRequest'; collection: string; folderPath: string; request: AgentProposedRequest }
   | { op: 'updateRequest'; collection: string; requestPath: string; patch: AgentRequestPatch }
+  | {
+      op: 'updateFolderSettings';
+      collection: string;
+      folderPath: string;
+      patch: AgentFolderSettingsPatch;
+    }
   | {
       op: 'editScript';
       collection: string;

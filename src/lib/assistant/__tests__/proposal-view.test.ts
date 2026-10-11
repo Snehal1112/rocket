@@ -11,6 +11,7 @@ import {
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
   getRequest: vi.fn(),
+  getFolderSettings: vi.fn(),
 }));
 
 describe('proposal-view', () => {
@@ -134,5 +135,43 @@ describe('proposal-view', () => {
       proposalFailure(makeProposal({ status: 'failed', statusMessage: 'name taken' })),
     ).toBe('name taken');
     expect(proposalFailure(makeProposal())).toBeUndefined();
+  });
+
+  describe('folder settings update', () => {
+    const change = {
+      op: 'updateFolderSettings' as const,
+      collection: 'orders',
+      folderPath: 'auth/v2',
+      patch: {
+        preRequestScript: 'new();',
+        variables: [{ key: 'HOST', value: 'api.test', enabled: true }],
+      },
+    };
+
+    it('targets the folder and previews a diff', () => {
+      expect(proposalTarget(change)).toEqual({ collection: 'orders', path: 'auth/v2' });
+      expect(proposalPreview(change)).toEqual({ kind: 'diff' });
+    });
+
+    it('diffs only the changed sections against the stored folder', async () => {
+      vi.mocked(api.getFolderSettings).mockResolvedValue({
+        headers: [{ key: 'X-Old', value: 'old', enabled: true }],
+        variables: [
+          { key: 'HOST', value: 'old.test', initialValue: '', enabled: true, secret: false },
+        ],
+        preRequestScript: 'old();',
+        docs: 'untouched',
+      });
+      const diff = await loadProposalDiff(makeProposal({ change }));
+      expect(api.getFolderSettings).toHaveBeenCalledWith('orders', 'auth/v2');
+      expect(diff?.language).toBe('json');
+      const before = JSON.parse(diff?.before ?? '{}');
+      const after = JSON.parse(diff?.after ?? '{}');
+      expect(Object.keys(after).sort()).toEqual(['preRequestScript', 'variables']);
+      expect(before.preRequestScript).toBe('old();');
+      expect(before.variables).toEqual([{ key: 'HOST', value: 'old.test', enabled: true }]);
+      expect(after.variables).toEqual([{ key: 'HOST', value: 'api.test', enabled: true }]);
+      expect(diff?.before).not.toContain('untouched');
+    });
   });
 });
