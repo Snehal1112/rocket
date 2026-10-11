@@ -159,6 +159,14 @@ impl LintContext for CollectionLintContext<'_> {
         }
         self.names_complete.then_some(false)
     }
+
+    fn saved_request_auth_is_explicit(&self, request_path: &str) -> Option<bool> {
+        crate::flow_lint_facts::saved_request_auth_is_explicit(
+            self.repo,
+            self.collection,
+            request_path,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -306,6 +314,23 @@ mod tests {
         // A read error that is not "missing" must not read as "missing".
         repo.fail_request_reads();
         assert_eq!(ctx.saved_request_exists("auth/other.yml"), None);
+    }
+
+    #[test]
+    fn the_context_answers_explicit_auth_from_the_collection() {
+        use rocket_shared::types::Auth;
+
+        let repo = ConfigurableCollectionRepo::new();
+        let mut explicit = Request::new("a", HttpMethod::Get, "https://example.test/x");
+        explicit.auth = Auth::Bearer {
+            token: "t".to_string(),
+        };
+        repo.with_request("demo", "a.yml", explicit);
+        let src = sources(&repo, None, None);
+        let flow = flow_of(vec![inline_node("a")]);
+        let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
+        assert_eq!(ctx.saved_request_auth_is_explicit("a.yml"), Some(true));
+        assert_eq!(ctx.saved_request_auth_is_explicit("gone.yml"), None);
     }
 
     #[test]

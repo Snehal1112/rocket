@@ -33,6 +33,7 @@ pub(crate) mod flow_cancel;
 pub(crate) mod flow_debug;
 pub mod flow_execution_service;
 pub mod flow_lint_context;
+pub(crate) mod flow_lint_facts;
 pub(crate) mod flow_partial;
 pub(crate) mod flow_poll;
 mod flow_references;

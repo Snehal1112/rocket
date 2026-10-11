@@ -6,7 +6,7 @@
 //! environment come through `LintContext`, which the app layer provides.
 //! Results are deterministic: nodes in file order, rules in a fixed order.
 
-use crate::flow::{Flow, FlowNode};
+use crate::flow::{Flow, FlowEdge, FlowNode};
 use crate::graph::FlowGraphError;
 use crate::handle;
 use crate::node::{FlowNodeKind, RequestSource};
@@ -26,6 +26,10 @@ pub const DANGLING_SAVED_REQUEST: &str = "dangling_saved_request";
 /// An inline Request or an Input node sends `{{name}}` as literal text,
 /// because no variable has that name.
 pub const UNKNOWN_VARIABLE: &str = "unknown_variable";
+/// An Auth node that no Request can take its credential from.
+pub const AUTH_NO_EFFECT: &str = "auth_no_effect";
+/// An `auth` wire into a saved request that already has its own explicit auth.
+pub const AUTH_WIRE_OVERRIDES_AUTH: &str = "auth_wire_overrides_auth";
 
 /// Longest variable name the variable rule lints.
 const MAX_NAME_LEN: usize = 64;
@@ -67,6 +71,19 @@ pub trait LintContext {
     fn variable_is_known(&self, _name: &str) -> Option<bool> {
         None
     }
+
+    /// Whether the saved request at `request_path` has its own auth, meaning
+    /// an auth other than none and inherit.
+    fn saved_request_auth_is_explicit(&self, _request_path: &str) -> Option<bool> {
+        None
+    }
+
+    /// Which of the Wait for callback `names` the saved request at
+    /// `request_path` sends as `{{callback.<name>}}`. The answer holds only
+    /// names from `names`, never request text. `None` when it cannot tell.
+    fn saved_request_callbacks(&self, _request_path: &str, _names: &[&str]) -> Option<Vec<String>> {
+        None
+    }
 }
 
 /// A context that knows nothing about the collection or the environment.
@@ -89,6 +106,8 @@ pub fn validate_with_warnings(flow: &Flow, ctx: &dyn LintContext) -> Vec<FlowLin
         lints.extend(no_path_lint(node, &index));
         lints.extend(dangling_request_lint(node, ctx));
         lints.extend(unknown_variable_lint(node, &index, ctx));
+        lints.extend(auth_no_effect_lint(node, flow, &index, ctx));
+        lints.extend(auth_wire_lints(node, &index, ctx));
     }
     lints
 }
@@ -101,6 +120,16 @@ struct GraphIndex<'a> {
     wired_fields: HashMap<&'a str, WiredFields>,
     /// Ids with a path to an Output, or `None` when the flow has no Output.
     reaching_output: Option<HashSet<&'a str>>,
+    /// The first node of each id.
+    nodes_by_id: HashMap<&'a str, &'a FlowNode>,
+    /// The `auth` wires into each node.
+    auth_wires_into: HashMap<&'a str, Vec<&'a FlowEdge>>,
+    /// Ids of nodes with at least one outgoing `auth` wire.
+    auth_sources: HashSet<&'a str>,
+    /// The nodes each node has a wire to, of any kind.
+    successors: HashMap<&'a str, Vec<&'a str>>,
+    /// `(name, node)` of each Wait for callback node, first of a name wins.
+    waits: Vec<(&'a str, &'a FlowNode)>,
 }
 
 /// Which fields of a node a wire replaces.
@@ -117,11 +146,25 @@ impl<'a> GraphIndex<'a> {
     fn new(flow: &'a Flow) -> Self {
         let mut wired_exits: HashMap<&'a str, HashSet<&'a str>> = HashMap::new();
         let mut wired_fields: HashMap<&'a str, WiredFields> = HashMap::new();
+        let mut auth_wires_into: HashMap<&'a str, Vec<&'a FlowEdge>> = HashMap::new();
+        let mut auth_sources: HashSet<&'a str> = HashSet::new();
+        let mut successors: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
         for edge in &flow.edges {
             wired_exits
                 .entry(edge.source_node_id.as_str())
                 .or_default()
                 .insert(edge.source_handle.as_str());
+            successors
+                .entry(edge.source_node_id.as_str())
+                .or_default()
+                .push(edge.target_node_id.as_str());
+            if edge.target_field == handle::AUTH {
+                auth_wires_into
+                    .entry(edge.target_node_id.as_str())
+                    .or_default()
+                    .push(edge);
+                auth_sources.insert(edge.source_node_id.as_str());
+            }
             let fields = wired_fields.entry(edge.target_node_id.as_str()).or_default();
             match edge.target_field.as_str() {
                 "url" => fields.url = true,
@@ -130,11 +173,43 @@ impl<'a> GraphIndex<'a> {
                 _ => {}
             }
         }
+        let mut nodes_by_id: HashMap<&'a str, &'a FlowNode> =
+            HashMap::with_capacity(flow.nodes.len());
+        let mut waits: Vec<(&'a str, &'a FlowNode)> = Vec::new();
+        let mut wait_names: HashSet<&'a str> = HashSet::new();
+        for node in &flow.nodes {
+            nodes_by_id.entry(node.id.as_str()).or_insert(node);
+            if let FlowNodeKind::WaitForCallback { name, .. } = &node.kind {
+                if !name.is_empty() && wait_names.insert(name.as_str()) {
+                    waits.push((name.as_str(), node));
+                }
+            }
+        }
         Self {
             wired_exits,
             wired_fields,
             reaching_output: nodes_reaching_output(flow),
+            nodes_by_id,
+            auth_wires_into,
+            auth_sources,
+            successors,
+            waits,
         }
+    }
+
+    /// Every id reachable by following wires forward from `start`. The
+    /// visited set makes a cycle safe.
+    fn downstream_of(&self, start: &str) -> HashSet<&'a str> {
+        let mut seen: HashSet<&'a str> = HashSet::new();
+        let mut stack: Vec<&str> = vec![start];
+        while let Some(id) = stack.pop() {
+            for &next in self.successors.get(id).into_iter().flatten() {
+                if seen.insert(next) {
+                    stack.push(next);
+                }
+            }
+        }
+        seen
     }
 
     fn wired_fields(&self, node_id: &str) -> WiredFields {
@@ -319,6 +394,112 @@ fn unknown_variable_lint(
         ),
         "Define the variable in the collection variables or in the active environment, or correct the name in the node.",
     ))
+}
+
+/// An Auth node that nothing uses. It is used when it has an `auth` wire, or
+/// when it applies to inherited auth and some Request might take it. A
+/// Request might take it when no `auth` wire sets its auth and it is inline,
+/// or a saved request that does not have explicit auth, or one the context
+/// cannot read. So the lint fires only when it is certain that no Request does.
+fn auth_no_effect_lint(
+    node: &FlowNode,
+    flow: &Flow,
+    index: &GraphIndex<'_>,
+    ctx: &dyn LintContext,
+) -> Option<FlowLint> {
+    let FlowNodeKind::Auth {
+        apply_to_inherit, ..
+    } = &node.kind
+    else {
+        return None;
+    };
+    if index.auth_sources.contains(node.id.as_str()) {
+        return None;
+    }
+    if *apply_to_inherit && inherited_auth_may_apply(flow, index, ctx) {
+        return None;
+    }
+    let label = display_label(node);
+    if *apply_to_inherit {
+        Some(warning(
+            AUTH_NO_EFFECT,
+            node,
+            format!("No Request in this flow takes the credential of '{label}'."),
+            "Every Request has its own auth or an 'auth' wire, or the flow has no Request. Remove the node, or let a request inherit auth.",
+        ))
+    } else {
+        Some(warning(
+            AUTH_NO_EFFECT,
+            node,
+            format!(
+                "'{label}' is not wired to any Request and does not apply to inherited auth, so no request uses its credential."
+            ),
+            "Wire its result into a Request's 'auth' input, or let it apply to requests that inherit auth.",
+        ))
+    }
+}
+
+/// False only when no Request can take the inherited credential.
+fn inherited_auth_may_apply(flow: &Flow, index: &GraphIndex<'_>, ctx: &dyn LintContext) -> bool {
+    flow.nodes.iter().any(|n| {
+        let FlowNodeKind::Request { source, .. } = &n.kind else {
+            return false;
+        };
+        // An `auth` wire sets the auth after the inherited credential, so it wins.
+        if index.auth_wires_into.contains_key(n.id.as_str()) {
+            return false;
+        }
+        match source {
+            RequestSource::Inline { .. } => true,
+            RequestSource::Saved { request_path } => {
+                ctx.saved_request_auth_is_explicit(request_path) != Some(true)
+            }
+        }
+    })
+}
+
+/// One lint per `auth` wire from an Auth node into a saved request that has
+/// its own explicit auth. At run time the wire wins, so the request's own
+/// auth is replaced. Inline requests have no auth of their own.
+fn auth_wire_lints(
+    node: &FlowNode,
+    index: &GraphIndex<'_>,
+    ctx: &dyn LintContext,
+) -> Vec<FlowLint> {
+    let FlowNodeKind::Request {
+        source: RequestSource::Saved { request_path },
+        ..
+    } = &node.kind
+    else {
+        return Vec::new();
+    };
+    let Some(wires) = index.auth_wires_into.get(node.id.as_str()) else {
+        return Vec::new();
+    };
+    if ctx.saved_request_auth_is_explicit(request_path) != Some(true) {
+        return Vec::new();
+    }
+    wires
+        .iter()
+        .filter_map(|edge| {
+            let source = index.nodes_by_id.get(edge.source_node_id.as_str())?;
+            if !matches!(source.kind, FlowNodeKind::Auth { .. }) {
+                return None;
+            }
+            let mut lint = warning(
+                AUTH_WIRE_OVERRIDES_AUTH,
+                node,
+                format!(
+                    "The credential of '{}' replaces the own auth of '{}'.",
+                    display_label(source),
+                    display_label(node)
+                ),
+                "The wire wins at run time. Set the request's auth to inherit, or remove the wire.",
+            );
+            lint.edge_id = Some(edge.id.clone());
+            Some(lint)
+        })
+        .collect()
 }
 
 /// The routing exits of a node as `(handle, name shown to the user)`. The
@@ -920,6 +1101,205 @@ mod tests {
         )
     }
 
+    /// A context that answers from maps, so a test controls every fact.
+    #[derive(Default)]
+    struct AuthCallbackContext {
+        explicit_auth: HashMap<String, bool>,
+        callbacks: HashMap<String, Vec<String>>,
+    }
+
+    impl LintContext for AuthCallbackContext {
+        fn saved_request_auth_is_explicit(&self, request_path: &str) -> Option<bool> {
+            self.explicit_auth.get(request_path).copied()
+        }
+
+        fn saved_request_callbacks(
+            &self,
+            request_path: &str,
+            names: &[&str],
+        ) -> Option<Vec<String>> {
+            self.callbacks.get(request_path).map(|used| {
+                used.iter()
+                    .filter(|name| names.contains(&name.as_str()))
+                    .cloned()
+                    .collect()
+            })
+        }
+    }
+
+    fn explicit(paths: &[(&str, bool)]) -> AuthCallbackContext {
+        AuthCallbackContext {
+            explicit_auth: paths.iter().map(|(p, v)| (p.to_string(), *v)).collect(),
+            ..AuthCallbackContext::default()
+        }
+    }
+
+    fn lint_with(f: &Flow, ctx: &dyn LintContext) -> Vec<FlowLint> {
+        validate_with_warnings(f, ctx)
+    }
+
+    fn inline_req(id: &str) -> FlowNode {
+        inline_request(id, id, "https://example.test/x", &[], None)
+    }
+
+    #[test]
+    fn an_auth_node_that_applies_to_an_inline_request_is_not_flagged() {
+        let f = flow(
+            vec![auth("a", true), inline_req("r"), output("out")],
+            vec![edge("e1", "r", handle::RESULT, "out", "value")],
+        );
+        assert!(only(&lint(&f), AUTH_NO_EFFECT).is_empty());
+    }
+
+    #[test]
+    fn an_idle_auth_node_with_no_wire_is_one_warning_naming_the_label() {
+        let f = flow(
+            vec![auth("a", false), request("r"), output("out")],
+            vec![edge("e1", "r", handle::RESULT, "out", "value")],
+        );
+        let lints = lint(&f);
+        let found = only(&lints, AUTH_NO_EFFECT);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].node_id.as_deref(), Some("a"));
+        assert_eq!(found[0].edge_id, None);
+        assert_eq!(found[0].severity, LintSeverity::Warning);
+        assert!(found[0].message.contains("'a'"), "{}", found[0].message);
+        assert!(found[0].hint.is_some());
+    }
+
+    #[test]
+    fn an_auth_node_with_an_auth_wire_has_an_effect_even_when_not_applied() {
+        let f = flow(
+            vec![auth("a", false), request("r"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        assert!(only(&lint(&f), AUTH_NO_EFFECT).is_empty());
+    }
+
+    #[test]
+    fn an_applying_auth_node_in_a_flow_without_requests_is_flagged() {
+        let f = flow(vec![auth("a", true), input("in"), output("out")], Vec::new());
+        assert_eq!(only(&lint(&f), AUTH_NO_EFFECT).len(), 1);
+    }
+
+    #[test]
+    fn an_applying_auth_node_is_flagged_when_every_saved_request_has_explicit_auth() {
+        let f = flow(
+            vec![auth("a", true), request("r1"), request("r2"), output("out")],
+            vec![edge("e1", "r1", handle::RESULT, "out", "value")],
+        );
+        let ctx = explicit(&[("r1.yml", true), ("r2.yml", true)]);
+        assert_eq!(only(&lint_with(&f, &ctx), AUTH_NO_EFFECT).len(), 1);
+    }
+
+    #[test]
+    fn an_applying_auth_node_is_not_flagged_when_one_saved_request_inherits() {
+        let f = flow(
+            vec![auth("a", true), request("r1"), request("r2"), output("out")],
+            vec![edge("e1", "r1", handle::RESULT, "out", "value")],
+        );
+        let ctx = explicit(&[("r1.yml", true), ("r2.yml", false)]);
+        assert!(only(&lint_with(&f, &ctx), AUTH_NO_EFFECT).is_empty());
+    }
+
+    #[test]
+    fn an_unknown_saved_request_never_causes_an_auth_no_effect_lint() {
+        let f = flow(
+            vec![auth("a", true), request("r1"), request("r2"), output("out")],
+            vec![edge("e1", "r1", handle::RESULT, "out", "value")],
+        );
+        // The second request is unknown to the context, so it might inherit.
+        let ctx = explicit(&[("r1.yml", true)]);
+        assert!(only(&lint_with(&f, &ctx), AUTH_NO_EFFECT).is_empty());
+        assert!(only(&lint(&f), AUTH_NO_EFFECT).is_empty());
+    }
+
+    #[test]
+    fn a_request_taking_another_auth_wire_does_not_use_the_inherited_credential() {
+        let f = flow(
+            vec![auth("a1", true), auth("a2", false), inline_req("r"), output("out")],
+            vec![
+                edge("e1", "a2", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        let lints = lint(&f);
+        let found = only(&lints, AUTH_NO_EFFECT);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].node_id.as_deref(), Some("a1"));
+    }
+
+    #[test]
+    fn an_auth_wire_into_a_saved_request_with_explicit_auth_is_one_edge_warning() {
+        let f = flow(
+            vec![auth("a", false), request("r"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        let ctx = explicit(&[("r.yml", true)]);
+        let lints = lint_with(&f, &ctx);
+        let found = only(&lints, AUTH_WIRE_OVERRIDES_AUTH);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].node_id.as_deref(), Some("r"));
+        assert_eq!(found[0].edge_id.as_deref(), Some("e1"));
+        assert_eq!(found[0].severity, LintSeverity::Warning);
+        assert!(found[0].message.contains("'a'") && found[0].message.contains("'r'"));
+        assert!(found[0].message.contains("replaces"), "{}", found[0].message);
+    }
+
+    #[test]
+    fn an_auth_wire_is_silent_when_the_request_inherits_or_is_unknown_or_inline() {
+        let saved = flow(
+            vec![auth("a", false), request("r"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        assert!(only(
+            &lint_with(&saved, &explicit(&[("r.yml", false)])),
+            AUTH_WIRE_OVERRIDES_AUTH
+        )
+        .is_empty());
+        assert!(only(&lint(&saved), AUTH_WIRE_OVERRIDES_AUTH).is_empty());
+        let inline = flow(
+            vec![auth("a", false), inline_req("r"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        assert!(only(
+            &lint_with(&inline, &explicit(&[("r", true)])),
+            AUTH_WIRE_OVERRIDES_AUTH
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn auth_lints_never_quote_the_credential() {
+        let f = flow(
+            vec![auth("a", false), request("r"), output("out")],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "r", handle::RESULT, "out", "value"),
+            ],
+        );
+        let idle = flow(vec![auth("a", false), request("r")], Vec::new());
+        let mut all = lint_with(&f, &explicit(&[("r.yml", true)]));
+        all.extend(lint(&idle));
+        assert!(!all.is_empty());
+        for l in &all {
+            let text = format!("{} {}", l.message, l.hint.as_deref().unwrap_or(""));
+            assert!(!text.contains("{{token}}"), "leaked in: {text}");
+        }
+    }
+
     fn keys(lints: &[FlowLint]) -> Vec<(Option<&str>, Option<&str>, &str)> {
         lints
             .iter()
@@ -988,10 +1368,11 @@ mod tests {
             vec![auth("a1", false), request("r1"), output("out")],
             vec![edge("e1", "r1", handle::RESULT, "out", "value")],
         );
-        assert_eq!(
-            keys(&lint(&idle)),
-            vec![(Some("a1"), None, NO_PATH_TO_OUTPUT)]
-        );
+        let no_path: Vec<FlowLint> = lint(&idle)
+            .into_iter()
+            .filter(|l| l.code == NO_PATH_TO_OUTPUT)
+            .collect();
+        assert_eq!(keys(&no_path), vec![(Some("a1"), None, NO_PATH_TO_OUTPUT)]);
     }
 
     #[test]
