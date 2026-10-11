@@ -18,4 +18,6 @@ pub use node::{
     SwitchCase, CALLBACK_DEFAULT_TIMEOUT_MS, CALLBACK_MAX_TIMEOUT_MS, CALLBACK_MIN_TIMEOUT_MS,
     CALLBACK_VAR_PREFIX, TRANSFORM_DEFAULT_SCRIPT,
 };
-pub use validate::validate;
+pub use validate::{
+    validate, validate_all, validate_report, ValidationReport, MAX_VALIDATION_ERRORS,
+};

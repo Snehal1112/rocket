@@ -1,6 +1,7 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V17). Rules run in table order and the first violation found
-//! is returned, so the same file always yields the same error.
+//! §7 (rules V1-V17). Rules run in table order. `validate_all` collects every
+//! violation, `validate` returns the first one, so the same file always
+//! yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
 use crate::graph::{reachable_from, topological_sort, FlowGraphError};
@@ -8,25 +9,71 @@ use crate::handle;
 use crate::node::{FlowNodeKind, RequestSource, CALLBACK_MAX_TIMEOUT_MS, CALLBACK_MIN_TIMEOUT_MS};
 use std::collections::{HashMap, HashSet};
 
-/// Validates `flow` and returns its node ids in topological order.
-pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
-    let order = topological_sort(flow)?;
-    let kinds: HashMap<&str, &FlowNodeKind> = flow
-        .nodes
-        .iter()
-        .map(|n| (n.id.as_str(), &n.kind))
-        .collect();
+/// The most errors `validate_all` returns. A longer list is cut and counted.
+pub const MAX_VALIDATION_ERRORS: usize = 50;
 
-    check_routing_inputs(flow)?;
-    check_edges(flow, &kinds, |edge, target, _| {
+/// Every error found in a flow, cut at `MAX_VALIDATION_ERRORS`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidationReport {
+    pub errors: Vec<FlowGraphError>,
+    /// How many errors were found beyond the limit and left out.
+    pub omitted: usize,
+}
+
+/// Validates `flow` and returns its node ids in topological order. The error
+/// is the first one `validate_all` would report.
+pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
+    let (errors, order) = collect_errors(flow);
+    match (errors.into_iter().next(), order) {
+        (Some(first), _) => Err(first),
+        (None, Some(order)) => Ok(order),
+        (None, None) => topological_sort(flow),
+    }
+}
+
+/// Every error in `flow`, in a fixed order, at most `MAX_VALIDATION_ERRORS`.
+pub fn validate_all(flow: &Flow) -> Vec<FlowGraphError> {
+    validate_report(flow).errors
+}
+
+/// Like `validate_all`, and also says how many errors were cut.
+pub fn validate_report(flow: &Flow) -> ValidationReport {
+    let (mut errors, _) = collect_errors(flow);
+    let omitted = errors.len().saturating_sub(MAX_VALIDATION_ERRORS);
+    errors.truncate(MAX_VALIDATION_ERRORS);
+    ValidationReport { errors, omitted }
+}
+
+/// Runs every rule and returns all errors, plus the topological order when
+/// the graph has no id or cycle error. Ids come first because the later
+/// rules look nodes up by id. They cannot panic on a bad id, so they still
+/// run: an edge with an unknown end is skipped, and a repeated id means the
+/// first node with that id is the one the rules see.
+fn collect_errors(flow: &Flow) -> (Vec<FlowGraphError>, Option<Vec<String>>) {
+    let mut errors = reference_errors(flow);
+    let mut order = None;
+    // A cycle is only looked for on a graph whose ids are sound.
+    if errors.is_empty() {
+        match topological_sort(flow) {
+            Ok(sorted) => order = Some(sorted),
+            Err(error) => errors.push(error),
+        }
+    }
+    let mut kinds: HashMap<&str, &FlowNodeKind> = HashMap::with_capacity(flow.nodes.len());
+    for node in &flow.nodes {
+        kinds.entry(node.id.as_str()).or_insert(&node.kind);
+    }
+
+    check_routing_inputs(flow, &mut errors);
+    check_edges(flow, &kinds, &mut errors, |edge, target, _| {
         (edge.target_field == handle::INPUT && !takes_input(target)).then(|| {
             format!(
                 "only If, Switch and Transform nodes have an '{}' input",
                 handle::INPUT
             )
         })
-    })?;
-    check_edges(flow, &kinds, |edge, target, _| {
+    });
+    check_edges(flow, &kinds, &mut errors, |edge, target, _| {
         let accepts_trigger = matches!(
             target,
             FlowNodeKind::Request { .. }
@@ -39,16 +86,16 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
                 handle::TRIGGER
             )
         })
-    })?;
-    check_edges(flow, &kinds, |_, target, _| {
+    });
+    check_edges(flow, &kinds, &mut errors, |_, target, _| {
         matches!(target, FlowNodeKind::Input { .. })
             .then(|| "Input nodes cannot receive wires".to_string())
-    })?;
-    check_edges(flow, &kinds, |_, target, _| {
+    });
+    check_edges(flow, &kinds, &mut errors, |_, target, _| {
         matches!(target, FlowNodeKind::Auth { .. })
             .then(|| "Auth nodes cannot receive wires".to_string())
-    })?;
-    check_edges(flow, &kinds, |edge, target, source| {
+    });
+    check_edges(flow, &kinds, &mut errors, |edge, target, source| {
         let from_auth = matches!(source, FlowNodeKind::Auth { .. });
         let into_request = matches!(target, FlowNodeKind::Request { .. });
         (edge.target_field == handle::AUTH && !(from_auth && into_request)).then(|| {
@@ -57,9 +104,9 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
                 handle::AUTH
             )
         })
-    })?;
-    check_single_auth_wire(flow)?;
-    check_edges(flow, &kinds, |edge, target, _| {
+    });
+    check_single_auth_wire(flow, &mut errors);
+    check_edges(flow, &kinds, &mut errors, |edge, target, _| {
         let FlowNodeKind::Request { label, .. } = target else {
             return None;
         };
@@ -69,8 +116,8 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
                 edge.target_field
             )
         })
-    })?;
-    check_edges(flow, &kinds, |edge, target, _| {
+    });
+    check_edges(flow, &kinds, &mut errors, |edge, target, _| {
         (matches!(target, FlowNodeKind::WaitForCallback { .. })
             && edge.target_field != handle::TRIGGER)
             .then(|| {
@@ -79,27 +126,63 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
                     handle::TRIGGER
                 )
             })
-    })?;
-    check_edges(flow, &kinds, |edge, _, source| {
+    });
+    check_edges(flow, &kinds, &mut errors, |edge, _, source| {
         (!source_handle_exists(source, &edge.source_handle))
             .then(|| format!("the source node has no exit named '{}'", edge.source_handle))
-    })?;
-    check_switch_cases(flow, |cases| {
+    });
+    check_switch_cases(flow, &mut errors, |cases| {
         first_duplicate(cases.iter().map(|c| c.id.as_str()))
             .map(|id| format!("more than one case has id '{id}'"))
-    })?;
-    check_switch_cases(flow, |cases| {
+    });
+    check_switch_cases(flow, &mut errors, |cases| {
         first_duplicate(cases.iter().map(|c| c.matches.as_str()))
             .map(|m| format!("more than one case matches '{m}'"))
-    })?;
-    check_expressions(flow)?;
-    check_repeat_until(flow)?;
-    check_wait_nodes(flow)?;
-    check_callback_order(flow)?;
-    check_auth_nodes(flow)?;
-    check_output_wires(flow)?;
+    });
+    check_expressions(flow, &mut errors);
+    check_repeat_until(flow, &mut errors);
+    check_wait_nodes(flow, &mut errors);
+    check_callback_order(flow, &mut errors);
+    check_auth_nodes(flow, &mut errors);
+    check_output_wires(flow, &mut errors);
 
-    Ok(order)
+    (errors, order)
+}
+
+/// A node id used twice, an edge id used twice, then an edge end that names
+/// no node. Each id is reported once, in the order `topological_sort` checks
+/// them.
+fn reference_errors(flow: &Flow) -> Vec<FlowGraphError> {
+    let mut errors = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::with_capacity(flow.nodes.len());
+    let mut repeated: HashSet<&str> = HashSet::new();
+    for node in &flow.nodes {
+        if !seen.insert(node.id.as_str()) && repeated.insert(node.id.as_str()) {
+            errors.push(FlowGraphError::DuplicateNode {
+                node_id: node.id.clone(),
+            });
+        }
+    }
+    let mut seen_edges: HashSet<&str> = HashSet::with_capacity(flow.edges.len());
+    let mut repeated_edges: HashSet<&str> = HashSet::new();
+    for edge in &flow.edges {
+        if !seen_edges.insert(edge.id.as_str()) && repeated_edges.insert(edge.id.as_str()) {
+            errors.push(FlowGraphError::DuplicateEdge {
+                edge_id: edge.id.clone(),
+            });
+        }
+    }
+    let mut missing: HashSet<&str> = HashSet::new();
+    for edge in &flow.edges {
+        for id in [edge.source_node_id.as_str(), edge.target_node_id.as_str()] {
+            if !seen.contains(id) && missing.insert(id) {
+                errors.push(FlowGraphError::UnknownNode {
+                    node_id: id.to_string(),
+                });
+            }
+        }
+    }
+    errors
 }
 
 fn is_routing(kind: &FlowNodeKind) -> bool {
@@ -133,7 +216,7 @@ fn invalid_node(node: &FlowNode, reason: String) -> FlowGraphError {
 }
 
 /// V1: an If, Switch or Transform node has exactly one incoming edge, into `input`.
-fn check_routing_inputs(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_routing_inputs(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     for node in flow.nodes.iter().filter(|n| takes_input(&n.kind)) {
         let incoming: Vec<&FlowEdge> = flow
             .edges
@@ -143,67 +226,65 @@ fn check_routing_inputs(flow: &Flow) -> Result<(), FlowGraphError> {
         let name = kind_name(&node.kind);
         match incoming.as_slice() {
             [edge] if edge.target_field == handle::INPUT => {}
-            [edge] => {
-                return Err(invalid_node(
-                    node,
-                    format!(
-                        "the {name} node's wire must target '{}', not '{}'",
-                        handle::INPUT,
-                        edge.target_field
-                    ),
-                ))
-            }
-            _ => {
-                return Err(invalid_node(
-                    node,
-                    format!(
-                        "the {name} node needs exactly one input wire, found {}",
-                        incoming.len()
-                    ),
-                ))
-            }
+            [edge] => errors.push(invalid_node(
+                node,
+                format!(
+                    "the {name} node's wire must target '{}', not '{}'",
+                    handle::INPUT,
+                    edge.target_field
+                ),
+            )),
+            _ => errors.push(invalid_node(
+                node,
+                format!(
+                    "the {name} node needs exactly one input wire, found {}",
+                    incoming.len()
+                ),
+            )),
         }
     }
-    Ok(())
 }
 
 /// Runs one edge rule over every edge in file order. `rule` receives the
 /// edge, its target kind and its source kind, and returns a reason when the
-/// edge breaks the rule.
+/// edge breaks the rule. An edge with an unknown end is skipped, because
+/// `reference_errors` already reported it.
 fn check_edges<F>(
     flow: &Flow,
     kinds: &HashMap<&str, &FlowNodeKind>,
+    errors: &mut Vec<FlowGraphError>,
     rule: F,
-) -> Result<(), FlowGraphError>
-where
+) where
     F: Fn(&FlowEdge, &FlowNodeKind, &FlowNodeKind) -> Option<String>,
 {
     for edge in &flow.edges {
-        let target = kind_of(kinds, &edge.target_node_id)?;
-        let source = kind_of(kinds, &edge.source_node_id)?;
+        let (Some(target), Some(source)) = (
+            kinds.get(edge.target_node_id.as_str()).copied(),
+            kinds.get(edge.source_node_id.as_str()).copied(),
+        ) else {
+            continue;
+        };
         if let Some(reason) = rule(edge, target, source) {
-            return Err(FlowGraphError::InvalidEdge {
+            errors.push(FlowGraphError::InvalidEdge {
                 edge_id: edge.id.clone(),
                 reason,
             });
         }
     }
-    Ok(())
 }
 
-/// V14: a Request node has at most one incoming `auth` wire. The later edge in
-/// file order is the one reported.
-fn check_single_auth_wire(flow: &Flow) -> Result<(), FlowGraphError> {
+/// V14: a Request node has at most one incoming `auth` wire. Every later
+/// edge in file order is reported.
+fn check_single_auth_wire(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     let mut seen: HashSet<&str> = HashSet::new();
     for edge in flow.edges.iter().filter(|e| e.target_field == handle::AUTH) {
         if !seen.insert(edge.target_node_id.as_str()) {
-            return Err(FlowGraphError::InvalidEdge {
+            errors.push(FlowGraphError::InvalidEdge {
                 edge_id: edge.id.clone(),
                 reason: format!("a Request node can take only one '{}' wire", handle::AUTH),
             });
         }
     }
-    Ok(())
 }
 
 /// The Request fields a wire can target, besides `headers[...]`.
@@ -219,20 +300,6 @@ pub fn is_request_wire_field(field: &str) -> bool {
             .strip_prefix("headers[")
             .and_then(|rest| rest.strip_suffix("].value"))
             .is_some_and(|selector| !selector.trim().is_empty())
-}
-
-/// `topological_sort` already rejected unknown ids, so this only fails if
-/// that guarantee is ever broken.
-fn kind_of<'a>(
-    kinds: &HashMap<&str, &'a FlowNodeKind>,
-    node_id: &str,
-) -> Result<&'a FlowNodeKind, FlowGraphError> {
-    kinds
-        .get(node_id)
-        .copied()
-        .ok_or_else(|| FlowGraphError::UnknownNode {
-            node_id: node_id.to_string(),
-        })
 }
 
 /// V5: the exits each node kind has.
@@ -254,18 +321,17 @@ fn source_handle_exists(source: &FlowNodeKind, source_handle: &str) -> bool {
 }
 
 /// Runs one Switch-case rule (V6 or V7) over every Switch node in file order.
-fn check_switch_cases<F>(flow: &Flow, rule: F) -> Result<(), FlowGraphError>
+fn check_switch_cases<F>(flow: &Flow, errors: &mut Vec<FlowGraphError>, rule: F)
 where
     F: Fn(&[crate::node::SwitchCase]) -> Option<String>,
 {
     for node in &flow.nodes {
         if let FlowNodeKind::Switch { cases, .. } = &node.kind {
             if let Some(reason) = rule(cases) {
-                return Err(invalid_node(node, reason));
+                errors.push(invalid_node(node, reason));
             }
         }
     }
-    Ok(())
 }
 
 fn first_duplicate<'a>(values: impl Iterator<Item = &'a str>) -> Option<&'a str> {
@@ -274,7 +340,7 @@ fn first_duplicate<'a>(values: impl Iterator<Item = &'a str>) -> Option<&'a str>
 }
 
 /// V8: an If condition, a Switch value and a Transform script must not be blank.
-fn check_expressions(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_expressions(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     for node in &flow.nodes {
         let (expression, field) = match &node.kind {
             FlowNodeKind::If { condition, .. } => (condition, "condition"),
@@ -283,17 +349,16 @@ fn check_expressions(flow: &Flow) -> Result<(), FlowGraphError> {
             _ => continue,
         };
         if expression.trim().is_empty() {
-            return Err(invalid_node(
+            errors.push(invalid_node(
                 node,
                 format!("the {} node's {field} is empty", kind_name(&node.kind)),
             ));
         }
     }
-    Ok(())
 }
 
 /// V9: a Request node's `repeat_until` settings are within their limits.
-fn check_repeat_until(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_repeat_until(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     use crate::node::RepeatUntil;
     for node in &flow.nodes {
         let FlowNodeKind::Request {
@@ -326,10 +391,9 @@ fn check_repeat_until(flow: &Flow) -> Result<(), FlowGraphError> {
             None
         };
         if let Some(reason) = reason {
-            return Err(invalid_node(node, reason));
+            errors.push(invalid_node(node, reason));
         }
     }
-    Ok(())
 }
 
 /// The part of a V17 reason after the label. `lint.rs` matches it to word the
@@ -341,7 +405,7 @@ pub(crate) const OUTPUT_WIRE_TAIL: &str =
 /// `trigger` wire carries no value, so it does not count. This is the rule the
 /// engine applies: it feeds an Output only its non-trigger wires. It runs
 /// last, so a flow that breaks an edge rule keeps that error.
-fn check_output_wires(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_output_wires(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for edge in flow
         .edges
@@ -356,18 +420,17 @@ fn check_output_wires(flow: &Flow) -> Result<(), FlowGraphError> {
         };
         let found = counts.get(node.id.as_str()).copied().unwrap_or(0);
         if found != 1 {
-            return Err(invalid_node(
+            errors.push(invalid_node(
                 node,
                 format!("the Output node '{label}{OUTPUT_WIRE_TAIL}, found {found}"),
             ));
         }
     }
-    Ok(())
 }
 
 /// V13: an Auth node holds a concrete auth type, and at most one Auth node
 /// applies to inherited auth.
-fn check_auth_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_auth_nodes(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     use rocket_shared::types::Auth;
     let mut applying = false;
     for node in &flow.nodes {
@@ -380,14 +443,14 @@ fn check_auth_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
             continue;
         };
         if matches!(auth, Auth::None | Auth::Inherit) {
-            return Err(invalid_node(
+            errors.push(invalid_node(
                 node,
                 "the Auth node needs an auth type other than none or inherit".to_string(),
             ));
         }
         if *apply_to_inherit {
             if applying {
-                return Err(invalid_node(
+                errors.push(invalid_node(
                     node,
                     "only one Auth node can apply to inherited auth; turn this one or the other off"
                         .to_string(),
@@ -396,12 +459,11 @@ fn check_auth_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
             applying = true;
         }
     }
-    Ok(())
 }
 
 /// V10: a Wait for callback node has a usable, unique name, a timeout in
 /// range, and no blank `accept_when`.
-fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_wait_nodes(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     let mut seen = HashSet::new();
     for node in &flow.nodes {
         let FlowNodeKind::WaitForCallback {
@@ -416,19 +478,18 @@ fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
         let valid_name =
             !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
         if !valid_name {
-            return Err(invalid_node(
+            errors.push(invalid_node(
                 node,
                 format!("the Wait for callback name '{name}' must use only letters, digits and _"),
             ));
-        }
-        if !seen.insert(name.as_str()) {
-            return Err(invalid_node(
+        } else if !seen.insert(name.as_str()) {
+            errors.push(invalid_node(
                 node,
                 format!("more than one Wait for callback node is named '{name}'"),
             ));
         }
         if !(CALLBACK_MIN_TIMEOUT_MS..=CALLBACK_MAX_TIMEOUT_MS).contains(timeout_ms) {
-            return Err(invalid_node(
+            errors.push(invalid_node(
                 node,
                 format!(
                     "the Wait for callback timeout must be between {CALLBACK_MIN_TIMEOUT_MS} and {CALLBACK_MAX_TIMEOUT_MS} ms"
@@ -436,13 +497,12 @@ fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
             ));
         }
         if accept_when.as_deref().is_some_and(|s| s.trim().is_empty()) {
-            return Err(invalid_node(
+            errors.push(invalid_node(
                 node,
                 "the Wait for callback node's accept_when is empty".to_string(),
             ));
         }
     }
-    Ok(())
 }
 
 /// V15: every inline Request that sends `{{callback.<name>}}` must run before
@@ -451,7 +511,7 @@ fn check_wait_nodes(flow: &Flow) -> Result<(), FlowGraphError> {
 /// Saved requests cannot be read in this pure crate, so the
 /// `callback_not_wired` lint in `lint.rs` covers them. Values fed in through
 /// wired fields are skipped.
-fn check_callback_order(flow: &Flow) -> Result<(), FlowGraphError> {
+fn check_callback_order(flow: &Flow, errors: &mut Vec<FlowGraphError>) {
     for wait in &flow.nodes {
         let FlowNodeKind::WaitForCallback { name, .. } = &wait.kind else {
             continue;
@@ -476,7 +536,7 @@ fn check_callback_order(flow: &Flow) -> Result<(), FlowGraphError> {
                 continue;
             }
             if !reachable_from(flow, &node.id).contains(&wait.id) {
-                return Err(invalid_node(
+                errors.push(invalid_node(
                     wait,
                     format!(
                         "Request '{}' sends {{{{callback.{name}}}}} but is not wired before this Wait for callback node; wire its '{}' exit into this node's '{}' input",
@@ -488,7 +548,6 @@ fn check_callback_order(flow: &Flow) -> Result<(), FlowGraphError> {
             }
         }
     }
-    Ok(())
 }
 
 /// True when `text` holds the variable `{{callback.<name>}}`, spaces allowed.
@@ -1062,6 +1121,308 @@ mod tests {
             edge_id: "e1".to_string(),
         };
         assert_eq!(dup_edge.to_string(), "duplicate edge id: e1");
+    }
+
+    /// Short tags such as `node:if1` or `edge:e1`, to compare error lists.
+    fn tags(errors: &[FlowGraphError]) -> Vec<String> {
+        errors
+            .iter()
+            .map(|e| match e {
+                FlowGraphError::Cycle { .. } => "cycle".to_string(),
+                FlowGraphError::UnknownNode { node_id } => format!("unknown:{node_id}"),
+                FlowGraphError::DuplicateNode { node_id } => format!("dup:{node_id}"),
+                FlowGraphError::DuplicateEdge { edge_id } => format!("dupedge:{edge_id}"),
+                FlowGraphError::InvalidNode { node_id, .. } => format!("node:{node_id}"),
+                FlowGraphError::InvalidEdge { edge_id, .. } => format!("edge:{edge_id}"),
+            })
+            .collect()
+    }
+
+    /// One flow per rule family. Each must be invalid.
+    fn invalid_fixtures() -> Vec<(&'static str, Flow)> {
+        let mut blank_condition = valid_if_flow();
+        blank_condition.nodes[1] = if_node("if1", "   ");
+        let mut unknown_exit = valid_if_flow();
+        unknown_exit.edges[1].source_handle = "bogus".to_string();
+        vec![
+            (
+                "cycle",
+                flow(
+                    vec![request("a"), request("b")],
+                    vec![
+                        edge("e1", "a", handle::RESULT, "b", "url"),
+                        edge("e2", "b", handle::RESULT, "a", "url"),
+                    ],
+                ),
+            ),
+            (
+                "if without input",
+                flow(vec![if_node("if1", "true")], vec![]),
+            ),
+            (
+                "switch with two inputs",
+                flow(
+                    vec![
+                        request("a"),
+                        request("b"),
+                        switch_node("sw1", vec![("c1", "x")]),
+                    ],
+                    vec![
+                        edge("e1", "a", handle::RESULT, "sw1", handle::INPUT),
+                        edge("e2", "b", handle::RESULT, "sw1", handle::INPUT),
+                    ],
+                ),
+            ),
+            (
+                "input field on a request",
+                flow(
+                    vec![request("a"), request("b")],
+                    vec![edge("e1", "a", handle::RESULT, "b", handle::INPUT)],
+                ),
+            ),
+            (
+                "wire into an input node",
+                flow(
+                    vec![request("a"), input("in1")],
+                    vec![edge("e1", "a", handle::RESULT, "in1", handle::TRIGGER)],
+                ),
+            ),
+            ("unknown exit", unknown_exit),
+            (
+                "duplicate case ids",
+                flow(
+                    vec![
+                        request("a"),
+                        switch_node("sw1", vec![("c1", "x"), ("c1", "y")]),
+                    ],
+                    vec![edge("e1", "a", handle::RESULT, "sw1", handle::INPUT)],
+                ),
+            ),
+            ("blank condition", blank_condition),
+            (
+                "repeat-until interval",
+                flow(
+                    vec![polling_request(
+                        "p",
+                        crate::node::RepeatUntil {
+                            interval_ms: 99,
+                            ..Default::default()
+                        },
+                    )],
+                    vec![],
+                ),
+            ),
+            (
+                "wait name",
+                flow(vec![wait_node("w", "pay ment", 60_000)], vec![]),
+            ),
+            (
+                "two auth wires",
+                flow(
+                    vec![
+                        auth_node("a", bearer(), true),
+                        auth_node("b", bearer(), false),
+                        request("r"),
+                    ],
+                    vec![
+                        edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                        edge("e2", "b", handle::RESULT, "r", handle::AUTH),
+                    ],
+                ),
+            ),
+            (
+                "auth type none",
+                flow(
+                    vec![auth_node("a", rocket_shared::types::Auth::None, false)],
+                    vec![],
+                ),
+            ),
+            (
+                "callback order",
+                flow(
+                    vec![
+                        input("i"),
+                        wait_node("w", "pay", 60_000),
+                        inline_request("r", "https://x.test?cb={{callback.pay}}"),
+                    ],
+                    vec![edge("e1", "i", handle::RESULT, "r", "url")],
+                ),
+            ),
+            (
+                "unknown request field",
+                flow(
+                    vec![input("i"), request("r")],
+                    vec![edge("e1", "i", handle::RESULT, "r", "colour")],
+                ),
+            ),
+            ("output without a wire", flow(vec![output("out")], vec![])),
+            (
+                "earlier rule and later rule",
+                flow(
+                    vec![request("a"), request("b"), if_node("if1", "")],
+                    vec![
+                        edge("e1", "a", handle::RESULT, "b", handle::INPUT),
+                        edge("e2", "a", handle::RESULT, "if1", handle::INPUT),
+                    ],
+                ),
+            ),
+            (
+                "duplicate edge",
+                flow(
+                    vec![input("in"), output("a"), output("b")],
+                    vec![
+                        edge("e1", "in", handle::RESULT, "a", "value"),
+                        edge("e1", "in", handle::RESULT, "b", "value"),
+                    ],
+                ),
+            ),
+            (
+                "duplicate node",
+                flow(vec![output("a"), output("a")], vec![]),
+            ),
+            (
+                "unknown node",
+                flow(
+                    vec![request("a")],
+                    vec![edge("e1", "a", handle::RESULT, "ghost", "url")],
+                ),
+            ),
+        ]
+    }
+
+    #[test]
+    fn validate_is_the_first_error_of_validate_all() {
+        for (name, f) in invalid_fixtures() {
+            let all = validate_all(&f);
+            assert!(!all.is_empty(), "{name}: validate_all found nothing");
+            assert_eq!(validate(&f), Err(all[0].clone()), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_valid_flow_has_no_errors_and_keeps_its_order() {
+        for f in [valid_if_flow(), valid_transform_flow()] {
+            assert!(validate_all(&f).is_empty());
+            assert_eq!(validate(&f).map(|o| o.len()), Ok(f.nodes.len()));
+        }
+    }
+
+    #[test]
+    fn validate_all_returns_every_error_in_rule_order() {
+        // if1 has no input (V1) and a blank condition (V8). e1 wires into an
+        // Input node, e2 leaves an exit that does not exist, and sw1 repeats a
+        // case id.
+        let f = flow(
+            vec![
+                request("a"),
+                request("b"),
+                input("in1"),
+                if_node("if1", ""),
+                switch_node("sw1", vec![("c1", "x"), ("c1", "y")]),
+            ],
+            vec![
+                edge("e1", "a", handle::RESULT, "in1", "value"),
+                edge("e2", "a", "bogus", "b", "url"),
+                edge("e3", "a", handle::RESULT, "sw1", handle::INPUT),
+            ],
+        );
+        assert_eq!(
+            tags(&validate_all(&f)),
+            vec!["node:if1", "edge:e1", "edge:e2", "node:sw1", "node:if1"]
+        );
+    }
+
+    #[test]
+    fn the_request_field_and_output_wire_rules_are_collected_in_order() {
+        // V16 flags e1. V17 flags `out`, which has no value wire.
+        let f = flow(
+            vec![input("i"), request("r"), output("out")],
+            vec![edge("e1", "i", handle::RESULT, "r", "colour")],
+        );
+        assert_eq!(tags(&validate_all(&f)), vec!["edge:e1", "node:out"]);
+    }
+
+    #[test]
+    fn a_duplicate_edge_id_is_reported_once_with_the_other_id_errors() {
+        let f = flow(
+            vec![input("in"), request("r")],
+            vec![
+                edge("e1", "in", handle::RESULT, "r", "url"),
+                edge("e1", "in", handle::RESULT, "r", "body"),
+                edge("e1", "in", handle::RESULT, "ghost", "url"),
+            ],
+        );
+        assert_eq!(tags(&validate_all(&f)), vec!["dupedge:e1", "unknown:ghost"]);
+    }
+
+    #[test]
+    fn a_cycle_does_not_hide_the_other_errors() {
+        let f = flow(
+            vec![request("a"), request("b"), if_node("if1", "")],
+            vec![
+                edge("e1", "a", handle::RESULT, "b", "url"),
+                edge("e2", "b", handle::RESULT, "a", "url"),
+            ],
+        );
+        assert_eq!(
+            tags(&validate_all(&f)),
+            vec!["cycle", "node:if1", "node:if1"]
+        );
+    }
+
+    #[test]
+    fn every_bad_wire_of_one_rule_is_reported() {
+        let f = flow(
+            vec![request("a"), request("b"), request("c")],
+            vec![
+                edge("e1", "a", handle::RESULT, "b", "url"),
+                edge("e2", "a", "bogus", "b", "body"),
+                edge("e3", "a", "bogus", "c", "body"),
+            ],
+        );
+        assert_eq!(tags(&validate_all(&f)), vec!["edge:e2", "edge:e3"]);
+    }
+
+    #[test]
+    fn every_extra_auth_wire_is_reported() {
+        let f = flow(
+            vec![
+                auth_node("a", bearer(), true),
+                auth_node("b", bearer(), false),
+                auth_node("c", bearer(), false),
+                request("r"),
+            ],
+            vec![
+                edge("e1", "a", handle::RESULT, "r", handle::AUTH),
+                edge("e2", "b", handle::RESULT, "r", handle::AUTH),
+                edge("e3", "c", handle::RESULT, "r", handle::AUTH),
+            ],
+        );
+        assert_eq!(tags(&validate_all(&f)), vec!["edge:e2", "edge:e3"]);
+    }
+
+    #[test]
+    fn duplicate_and_unknown_ids_are_reported_once_and_skip_their_wires() {
+        let f = flow(
+            vec![request("a"), request("a"), request("a")],
+            vec![edge("e1", "a", handle::RESULT, "ghost", "url")],
+        );
+        assert_eq!(tags(&validate_all(&f)), vec!["dup:a", "unknown:ghost"]);
+    }
+
+    #[test]
+    fn the_error_list_is_cut_at_the_limit_and_the_cut_is_counted() {
+        let nodes: Vec<FlowNode> = (0..60)
+            .map(|i| if_node(&format!("if{i}"), "true"))
+            .collect();
+        let f = flow(nodes, vec![]);
+        let report = validate_report(&f);
+        assert_eq!(report.errors.len(), MAX_VALIDATION_ERRORS);
+        assert_eq!(report.omitted, 10);
+        assert_eq!(validate_all(&f), report.errors);
+        assert_eq!(validate(&f), Err(report.errors[0].clone()));
+        let small = validate_report(&invalid_fixtures().remove(1).1);
+        assert_eq!(small.omitted, 0);
     }
 
     fn polling_request(id: &str, repeat: crate::node::RepeatUntil) -> FlowNode {
