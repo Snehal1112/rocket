@@ -374,4 +374,116 @@ describe('AgentConfigsDialog', () => {
       }),
     );
   });
+
+  const FAKE = 'sk-ant-oat01-FAKE-VALUE-FOR-TESTS';
+
+  async function openKeychainForm(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole('button', { name: /add agent/i }));
+    await user.type(await screen.findByLabelText('Label'), 'Claude');
+    await user.type(screen.getByLabelText('Command'), 'claude-agent-acp');
+    await user.type(screen.getByLabelText('Credential Env Var'), 'CLAUDE_CODE_OAUTH_TOKEN');
+    await user.click(screen.getByRole('radio', { name: /^keychain$/i }));
+  }
+
+  it('saves the config first and then the typed keychain credential, and clears the field', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    vi.mocked(api.setAgentCredential).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderDialog();
+    await openKeychainForm(user);
+    await user.type(screen.getByLabelText('Keychain credential'), FAKE);
+    expect(screen.getByLabelText('Keychain credential')).toHaveAttribute('type', 'password');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(api.setAgentCredential).toHaveBeenCalledTimes(1));
+    const savedConfig = vi.mocked(api.saveAgentConfig).mock.calls[0][0];
+    expect(savedConfig.credentialSource).toBe('keychain');
+    expect(vi.mocked(api.setAgentCredential).mock.calls[0]).toEqual([savedConfig.id, FAKE]);
+    expect(vi.mocked(api.saveAgentConfig).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(api.setAgentCredential).mock.invocationCallOrder[0],
+    );
+    expect(JSON.stringify(vi.mocked(api.saveAgentConfig).mock.calls)).not.toContain(FAKE);
+  });
+
+  it('keeps the dialog open and hides the value when the credential cannot be saved', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    vi.mocked(api.setAgentCredential).mockRejectedValue(
+      new Error('the keychain could not be read'),
+    );
+    const user = userEvent.setup();
+    renderDialog();
+    await openKeychainForm(user);
+    await user.type(screen.getByLabelText('Keychain credential'), FAKE);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(JSON.stringify(vi.mocked(toast.error).mock.calls)).not.toContain(FAKE);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Keychain credential')).toHaveValue('');
+  });
+
+  it('blocks a new keychain agent with an empty credential', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openKeychainForm(user);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/enter the credential/i));
+    expect(api.saveAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('shows a saved credential as saved, keeps it on a blank field, and can remove it', async () => {
+    const keychainAgent: api.AgentConfig = {
+      ...claude,
+      credentialSource: 'keychain',
+      vaultConnectionId: '',
+      vaultName: '',
+      vaultSecretId: '',
+      vaultSecretName: '',
+    };
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([keychainAgent]);
+    vi.mocked(api.hasAgentCredential).mockResolvedValue(true);
+    vi.mocked(api.clearAgentCredential).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    expect(await screen.findByText(/saved in the keychain/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(api.setAgentCredential).not.toHaveBeenCalled();
+    expect(api.clearAgentCredential).not.toHaveBeenCalled();
+  });
+
+  it('removes the saved credential when Remove is used and the agent is saved', async () => {
+    const keychainAgent: api.AgentConfig = { ...claude, credentialSource: 'keychain' };
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([keychainAgent]);
+    vi.mocked(api.hasAgentCredential).mockResolvedValue(true);
+    vi.mocked(api.clearAgentCredential).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await user.click(await screen.findByRole('button', { name: /remove saved credential/i }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.clearAgentCredential).toHaveBeenCalledWith('agent-1'));
+  });
+
+  it('does not save a typed credential after the source is switched away from the keychain', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await openKeychainForm(user);
+    await user.type(screen.getByLabelText('Keychain credential'), FAKE);
+    await user.click(screen.getByRole('radio', { name: /rocket environment variable/i }));
+    await user.type(screen.getByLabelText('Environment variable name'), 'MY_CLAUDE_TOKEN');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(api.setAgentCredential).not.toHaveBeenCalled();
+  });
+
+  it('describes every credential source in the secrets help text', async () => {
+    await openEdit();
+    expect(document.body.textContent).not.toContain('RocketVault credential, not');
+    expect(document.body.textContent).not.toContain('the vault secret');
+  });
 });

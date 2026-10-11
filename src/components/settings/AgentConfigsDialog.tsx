@@ -23,8 +23,11 @@ import { useSecretManagerConnections } from '@/lib/queries/secret-manager-querie
 import {
   type AgentConfig,
   type AgentCredentialSource,
+  clearAgentCredential,
   type ExternalSecretRef,
   fetchExternalSecretNames,
+  hasAgentCredential,
+  setAgentCredential,
 } from '@/lib/tauri-api';
 
 interface AgentConfigsDialogProps {
@@ -112,6 +115,8 @@ const emptyForm = {
   credentialEnvVar: '',
   credentialSource: 'vault' as AgentCredentialSource,
   sourceEnvVar: '',
+  localCredential: '',
+  removeSavedCredential: false,
   vaultConnectionId: '',
   vaultName: '',
   vaultSecretId: '',
@@ -142,6 +147,9 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   const [vaultSecrets, setVaultSecrets] = useState<ExternalSecretRef[]>([]);
   const [fetchingSecrets, setFetchingSecrets] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [hasSavedCredential, setHasSavedCredential] = useState(false);
+  // Id of the agent whose saved-credential check is current. A late answer for another id is dropped.
+  const credentialCheckId = useRef<string | null>(null);
   // Bumped whenever the fetched secret list becomes stale. A fetch that resolves
   // after a bump is dropped, so it cannot leak into another edit session.
   const fetchGeneration = useRef(0);
@@ -159,15 +167,31 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       setVaultSecrets([]);
       setFetchingSecrets(false);
       setDeletingId(null);
+      credentialCheckId.current = null;
+      setHasSavedCredential(false);
     }
   }, [open]);
 
   const startAdd = () => {
     resetVaultSecrets();
+    credentialCheckId.current = null;
+    setHasSavedCredential(false);
     setEditing({ ...emptyForm, id: crypto.randomUUID(), isNew: true });
   };
   const startEdit = (c: AgentConfig) => {
     resetVaultSecrets();
+    credentialCheckId.current = c.id;
+    setHasSavedCredential(false);
+    if (c.credentialSource === 'keychain') {
+      hasAgentCredential(c.id).then(
+        (saved) => {
+          if (credentialCheckId.current === c.id) setHasSavedCredential(saved);
+        },
+        () => {
+          if (credentialCheckId.current === c.id) setHasSavedCredential(false);
+        },
+      );
+    }
     setEditing({
       id: c.id,
       label: c.label,
@@ -177,6 +201,8 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       credentialEnvVar: c.credentialEnvVar,
       credentialSource: c.credentialSource ?? 'vault',
       sourceEnvVar: c.sourceEnvVar ?? '',
+      localCredential: '',
+      removeSavedCredential: false,
       extraEnv: (c.extraEnv ?? []).map((p) => ({ key: crypto.randomUUID(), ...p })),
       vaultConnectionId: c.vaultConnectionId,
       vaultName: c.vaultName,
@@ -187,6 +213,8 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   };
   const cancelEdit = () => {
     resetVaultSecrets();
+    credentialCheckId.current = null;
+    setHasSavedCredential(false);
     setEditing(null);
   };
 
@@ -255,6 +283,10 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       );
       return;
     }
+    if (source === 'keychain' && editing.isNew && !editing.localCredential.trim()) {
+      toast.error('Enter the credential to save in the keychain.');
+      return;
+    }
     const config: AgentConfig = {
       id: editing.id,
       label: editing.label.trim(),
@@ -275,6 +307,20 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     };
     try {
       await saveMutation.mutateAsync(config);
+      if (source === 'keychain') {
+        const typed = editing.localCredential.trim();
+        try {
+          if (typed) await setAgentCredential(config.id, typed);
+          else if (editing.removeSavedCredential) await clearAgentCredential(config.id);
+        } catch (e) {
+          // The agent is saved. Stay in the form so the user can try again.
+          setEditing((current) =>
+            current ? { ...current, isNew: false, localCredential: '' } : current,
+          );
+          toast.error(`The agent was saved, but its credential was not: ${String(e)}`);
+          return;
+        }
+      }
       cancelEdit();
     } catch (e) {
       toast.error(saveErrorMessage(e));
@@ -380,16 +426,15 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 credential source below.
               </p>
               <p className='mt-1 text-xs text-muted-foreground'>
-                If the vault secret is a short-lived token (e.g. an OAuth access token) rather than
-                a static API key, sessions may need to be restarted after it expires — the value is
-                only re-fetched when a new agent session starts.
+                If the saved credential is a short-lived token (e.g. an OAuth access token) rather
+                than a static API key, sessions may need to be restarted after it expires — the
+                value is only read again when a new agent session starts.
               </p>
             </div>
             <div className='space-y-2'>
               <Label className='text-sm'>Environment variables</Label>
               <p className='text-xs text-muted-foreground'>
-                Values are stored as plain text. Put secrets in the RocketVault credential, not
-                here.
+                Values are stored as plain text. Put secrets in the credential source, not here.
               </p>
               <p className='text-xs text-muted-foreground'>
                 A variable such as ANTHROPIC_BASE_URL can send the credential to another host.
@@ -455,7 +500,13 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
               <RadioGroup
                 value={editing.credentialSource}
                 onValueChange={(value) =>
-                  setEditing({ ...editing, credentialSource: value as AgentCredentialSource })
+                  setEditing({
+                    ...editing,
+                    credentialSource: value as AgentCredentialSource,
+                    ...(value === 'keychain'
+                      ? {}
+                      : { localCredential: '', removeSavedCredential: false }),
+                  })
                 }
                 className='mt-1 space-y-1'
               >
@@ -505,6 +556,50 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                     it.
                   </p>
                 )}
+              </div>
+            )}
+            {editing.credentialSource === 'keychain' && (
+              <div>
+                <Label htmlFor='ac-local-credential' className='text-sm'>
+                  Keychain credential
+                </Label>
+                <div className='flex items-center gap-2'>
+                  <Input
+                    id='ac-local-credential'
+                    type='password'
+                    autoComplete='off'
+                    value={editing.localCredential}
+                    onChange={(e) => setEditing({ ...editing, localCredential: e.target.value })}
+                    placeholder={
+                      hasSavedCredential && !editing.removeSavedCredential
+                        ? 'Saved in the keychain. Type to replace.'
+                        : 'Paste the token'
+                    }
+                    className='h-8 text-sm'
+                  />
+                  {hasSavedCredential && (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      aria-label='Remove saved credential'
+                      aria-pressed={editing.removeSavedCredential}
+                      onClick={() =>
+                        setEditing({
+                          ...editing,
+                          removeSavedCredential: !editing.removeSavedCredential,
+                          localCredential: '',
+                        })
+                      }
+                    >
+                      <Trash2 className='h-3.5 w-3.5' aria-hidden='true' />
+                    </Button>
+                  )}
+                </div>
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  {hasSavedCredential && !editing.removeSavedCredential
+                    ? 'Saved in the keychain. Leave the field empty to keep it.'
+                    : 'Stored in the OS keychain on this computer. It is never written to a file and never shown again.'}
+                </p>
               </div>
             )}
             {editing.credentialSource === 'vault' &&

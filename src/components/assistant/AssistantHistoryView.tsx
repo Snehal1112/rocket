@@ -30,7 +30,7 @@ import { useWorkspaceStore } from '@/stores/workspace-store';
 import { AssistantConversationView } from './AssistantConversationView';
 
 export const HISTORY_PRIVACY_NOTICE =
-  'Conversations are stored on this computer, inside this workspace, and are never committed to git. Secret variable values are masked. A secret you paste into a prompt is stored as typed. Vault values and collections linked from outside the workspace are not scrubbed. Delete and Clear all remove the stored conversations.';
+  'Conversations are stored on this computer, inside this workspace, and are never committed to git. Secret variable values are masked. A secret you paste into a prompt is stored as typed. Vault values, agent credentials and collections linked from outside the workspace are not scrubbed. Delete and Clear all remove the stored conversations.';
 
 export const HISTORY_EMPTY_TEXT = 'No saved conversations in this workspace yet.';
 
