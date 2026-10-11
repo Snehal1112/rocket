@@ -741,6 +741,7 @@ edges:
         let loaded = repo.get("acme", "Legacy Flow").expect("load legacy file");
         let parsed: Flow = serde_yaml::from_str(LEGACY_FLOW_YAML).expect("parse");
         assert_eq!(loaded, parsed);
+        rocket_flow::validate(&loaded).expect("a legacy flow stays valid");
         repo.save("acme", &loaded).expect("re-save");
         assert_eq!(repo.get("acme", "Legacy Flow").expect("reload"), loaded);
     }

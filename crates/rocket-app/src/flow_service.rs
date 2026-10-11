@@ -401,6 +401,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn save_rejects_an_unknown_request_field_and_names_the_wire_in_the_tail() {
+        let svc = FlowService::new(Box::new(PanicsOnSaveRepo));
+        let flow = Flow {
+            name: "Bad Field".to_string(),
+            nodes: vec![
+                node_of(
+                    "in",
+                    FlowNodeKind::Input {
+                        label: "Seed".to_string(),
+                        value: rocket_shared::VariableValue::simple("x"),
+                    },
+                ),
+                node_of(
+                    "req",
+                    FlowNodeKind::Request {
+                        label: "Get user".to_string(),
+                        source: rocket_flow::RequestSource::Saved {
+                            request_path: "users/get.yml".to_string(),
+                        },
+                        debug: false,
+                        repeat_until: None,
+                    },
+                ),
+            ],
+            edges: vec![FlowEdge {
+                id: "e5".to_string(),
+                source_node_id: "in".to_string(),
+                target_node_id: "req".to_string(),
+                target_field: "payload".to_string(),
+                expression: "response.body".to_string(),
+                source_handle: rocket_flow::handle::RESULT.to_string(),
+            }],
+            callback_host: None,
+        };
+        let message = svc
+            .save("demo", flow)
+            .expect_err("an unknown Request field must be rejected")
+            .to_string();
+        assert!(
+            message.contains("the Request node 'Get user' has no field 'payload'"),
+            "got: {message}"
+        );
+        assert!(
+            message.ends_with("node(s): ; edge(s): e5"),
+            "got: {message}"
+        );
+    }
+
     fn named_flow(name: &str) -> Flow {
         Flow {
             name: name.to_string(),

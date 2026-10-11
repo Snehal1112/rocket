@@ -802,6 +802,8 @@ fn sentence(reason: &str) -> String {
             "A Request uses a callback value but is not wired before this Wait for callback node."
                 .to_string(),
         )
+    } else if reason.starts_with("the Request node '") && reason.contains("' has no field '") {
+        Some("A wire targets a field that the Request node does not have.".to_string())
     } else {
         routed_reason(reason).or_else(|| known_reason(reason))
     };
@@ -1888,6 +1890,21 @@ mod tests {
             "'Route': Two cases of this Switch have the same match value."
         );
         assert_no_canary(&lint(&f));
+    }
+
+    #[test]
+    fn a_bad_request_field_is_linted_without_echoing_the_field() {
+        let f = flow(
+            vec![input("in1"), request("req")],
+            vec![edge("e1", "in1", handle::RESULT, "req", CANARY)],
+        );
+        let graph = graph_lints(&f);
+        assert_eq!(keys(&graph), vec![(None, Some("e1"), INVALID_GRAPH)]);
+        assert_no_canary(&graph);
+        assert_eq!(
+            graph[0].message,
+            "A wire targets a field that the Request node does not have."
+        );
     }
 
     #[test]

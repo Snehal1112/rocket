@@ -31,7 +31,7 @@ cargo test -p rocket-flow -j4
 | `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch/WaitForCallback/Transform/Auth), `SwitchCase`, `RepeatUntil`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
 | `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait |
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
-| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V15 (spec §7, listed in the file header) |
+| `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V17 (spec §7, listed in the file header), and `is_request_wire_field` |
 | `lint.rs` | Non-blocking lint tier: `validate_with_warnings(flow, ctx)`, `graph_error_lints`, `FlowLint`, `LintSeverity`, `LintContext` |
 | `request_refs.rs` | Rewrites Saved request paths in a flow after a move (whole path segments, folder prefix) and finds flows that use a path |
 
@@ -72,6 +72,10 @@ V13 and V14 are labelled in the code; the other wire rules are inline
 Secrets typed literally into an Auth node (client secret, password, token)
 are persisted in plaintext in the flow yml, as with collection auth; use
 `{{vars}}` or RocketVault references.
+
+## Hard wire and graph rules
+
+After V1-V15, `validate` rejects: V16 (an edge rule) a wire into a Request node whose `target_field` is not `url`, `body`, `trigger`, `auth` or `headers[<index or name>].value`. `is_request_wire_field` is the one spelling of that list, and a `rocket-app` test pins it against `apply_wired_overrides`. Other node kinds keep their own field rules (V1-V4); Output fields are not policed. `rocket-flow` cannot read a saved request, so a `body` wire into a saved form or binary body is still only caught at run time. Inline bodies are always JSON text, so they cannot hit that case.
 
 ## Lint tier (`lint.rs`)
 

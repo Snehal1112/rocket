@@ -3077,6 +3077,35 @@ mod tests {
         assert!(matches!(err, DomainError::InvalidInput(_)));
     }
 
+    #[test]
+    fn the_validator_and_the_engine_agree_on_request_wire_fields() {
+        // `auth` and `trigger` never reach `apply_wired_overrides`, so they are not listed.
+        for field in [
+            "url",
+            "body",
+            "headers[0].value",
+            "headers[X-Id].value",
+            "headers[ x-y ].value",
+            "headers",
+            "headers[].value",
+            "headers[ ].value",
+            "payload",
+            "value",
+            "Url",
+            "auth.token",
+        ] {
+            let mut input = sample_execute_input();
+            let mut resolved = HashMap::new();
+            resolved.insert("e1".to_string(), "v".to_string());
+            let applied = apply_wired_overrides(&mut input, &resolved, &[edge("e1", "n2", field)]);
+            assert_eq!(
+                applied.is_ok(),
+                rocket_flow::validate::is_request_wire_field(field),
+                "field {field:?}"
+            );
+        }
+    }
+
     use rocket_flow::{Flow, FlowRepository};
 
     struct FakeFlowRepository {

@@ -1,5 +1,5 @@
 //! Save-time and load-time structural validation of a Flow graph. See spec
-//! §7 (rules V1-V15). Rules run in table order and the first violation found
+//! §7 (rules V1-V17). Rules run in table order and the first violation found
 //! is returned, so the same file always yields the same error.
 
 use crate::flow::{Flow, FlowEdge, FlowNode};
@@ -59,6 +59,17 @@ pub fn validate(flow: &Flow) -> Result<Vec<String>, FlowGraphError> {
         })
     })?;
     check_single_auth_wire(flow)?;
+    check_edges(flow, &kinds, |edge, target, _| {
+        let FlowNodeKind::Request { label, .. } = target else {
+            return None;
+        };
+        (!is_request_wire_field(&edge.target_field)).then(|| {
+            format!(
+                "the Request node '{label}' has no field '{}' to wire into; use url, body, headers[Name].value, auth or trigger",
+                edge.target_field
+            )
+        })
+    })?;
     check_edges(flow, &kinds, |edge, target, _| {
         (matches!(target, FlowNodeKind::WaitForCallback { .. })
             && edge.target_field != handle::TRIGGER)
@@ -192,6 +203,21 @@ fn check_single_auth_wire(flow: &Flow) -> Result<(), FlowGraphError> {
         }
     }
     Ok(())
+}
+
+/// The Request fields a wire can target, besides `headers[...]`.
+const REQUEST_FIELDS: [&str; 4] = ["url", "body", handle::TRIGGER, handle::AUTH];
+
+/// V16: true when a wire into a Request node may target `field`. These are the
+/// fields the editor offers and `apply_wired_overrides` applies: `url`,
+/// `body`, `trigger`, `auth`, and `headers[<index or name>].value` with a
+/// non-blank selector. Anything else would fail at run time, or do nothing.
+pub fn is_request_wire_field(field: &str) -> bool {
+    REQUEST_FIELDS.contains(&field)
+        || field
+            .strip_prefix("headers[")
+            .and_then(|rest| rest.strip_suffix("].value"))
+            .is_some_and(|selector| !selector.trim().is_empty())
 }
 
 /// `topological_sort` already rejected unknown ids, so this only fails if
@@ -1470,5 +1496,151 @@ mod tests {
             ],
         );
         assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    fn invalid_edge_reason(result: Result<Vec<String>, FlowGraphError>) -> String {
+        match result {
+            Err(FlowGraphError::InvalidEdge { reason, .. }) => reason,
+            other => panic!("expected InvalidEdge, got {other:?}"),
+        }
+    }
+
+    fn labelled_request(id: &str, label: &str) -> FlowNode {
+        node(
+            id,
+            FlowNodeKind::Request {
+                debug: false,
+                repeat_until: None,
+                label: label.to_string(),
+                source: RequestSource::Saved {
+                    request_path: format!("{id}.yml"),
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn v16_unknown_request_field_is_rejected_naming_the_label_and_the_field() {
+        let f = flow(
+            vec![input("in"), labelled_request("req", "Get user")],
+            vec![edge("e1", "in", handle::RESULT, "req", "payload")],
+        );
+        let result = validate(&f);
+        let reason = invalid_edge_reason(result.clone());
+        assert!(reason.contains("'Get user'"), "{reason}");
+        assert!(reason.contains("'payload'"), "{reason}");
+        assert_eq!(invalid_edge_id(result), "e1");
+    }
+
+    #[test]
+    fn v16_rejects_fields_the_engine_cannot_apply() {
+        for field in [
+            "headers",
+            "headers[].value",
+            "headers[ ].value",
+            "headers[X].v",
+            "value",
+            "Url",
+            "auth.token",
+            "",
+        ] {
+            let f = flow(
+                vec![input("in"), request("req")],
+                vec![edge("e1", "in", handle::RESULT, "req", field)],
+            );
+            assert_eq!(invalid_edge_id(validate(&f)), "e1", "field {field:?}");
+        }
+    }
+
+    #[test]
+    fn v16_accepts_every_field_the_engine_applies() {
+        for field in [
+            "url",
+            "body",
+            handle::TRIGGER,
+            "headers[0].value",
+            "headers[Authorization].value",
+            "headers[X-Request Id].value",
+        ] {
+            let f = flow(
+                vec![input("in"), request("req")],
+                vec![edge("e1", "in", handle::RESULT, "req", field)],
+            );
+            assert!(validate(&f).is_ok(), "field {field:?}: {:?}", validate(&f));
+        }
+    }
+
+    #[test]
+    fn v16_allows_a_body_wire_into_an_inline_request() {
+        // An inline body is always sent as JSON text, so a body wire cannot
+        // hit a form or binary body here. Saved requests are not inspected.
+        let f = flow(
+            vec![input("in"), inline_request("req", "https://x.test")],
+            vec![edge("e1", "in", handle::RESULT, "req", "body")],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    #[test]
+    fn v16_leaves_the_fields_of_other_node_kinds_alone() {
+        let f = flow(
+            vec![input("in"), output("out")],
+            vec![edge("e1", "in", handle::RESULT, "out", "payload")],
+        );
+        assert!(validate(&f).is_ok(), "{:?}", validate(&f));
+    }
+
+    /// A flow file as the editor writes it today: Saved and Inline requests,
+    /// every wireable Request field, a Run when wire and one Output value wire.
+    const WIRED_FLOW_YAML: &str = r"
+name: Wired Flow
+nodes:
+- id: in1
+  kind:
+    kind: Input
+    label: Token
+    value: abc
+  position: {x: 0.0, y: 0.0}
+- id: login
+  kind:
+    kind: Request
+    label: Login
+    source:
+      type: Saved
+      request_path: auth/login.yml
+  position: {x: 200.0, y: 0.0}
+- id: create
+  kind:
+    kind: Request
+    label: Create item
+    source:
+      type: Inline
+      request:
+        method: POST
+        url: https://api.example.com/items
+        headers:
+        - name: X-Token
+          value: old
+        body: '{}'
+  position: {x: 400.0, y: 0.0}
+- id: out1
+  kind:
+    kind: Output
+    label: Result
+  position: {x: 600.0, y: 0.0}
+edges:
+- {id: e1, source_node_id: in1, target_node_id: login, target_field: url, expression: response.body}
+- {id: e2, source_node_id: in1, target_node_id: login, target_field: 'headers[X-Token].value', expression: response.body}
+- {id: e3, source_node_id: in1, target_node_id: login, target_field: 'headers[0].value', expression: response.body}
+- {id: e4, source_node_id: in1, target_node_id: login, target_field: body, expression: response.body}
+- {id: e5, source_node_id: login, target_node_id: create, target_field: trigger, expression: ''}
+- {id: e6, source_node_id: create, target_node_id: out1, target_field: value, expression: response.body}
+";
+
+    #[test]
+    fn a_flow_file_using_every_editor_field_stays_valid() {
+        let f: Flow = serde_yaml::from_str(WIRED_FLOW_YAML).expect("fixture parses");
+        assert_eq!(f.edges.len(), 6);
+        validate(&f).expect("the fixture must stay valid");
     }
 }
