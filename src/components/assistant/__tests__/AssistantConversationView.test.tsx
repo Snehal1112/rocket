@@ -22,7 +22,8 @@ if (!Element.prototype.scrollIntoView) {
 vi.mock('@/lib/assistant/assistant-session', () => ({
   CONTINUE_WORKSPACE_MISMATCH: 'Another workspace.',
   canContinueHere: vi.fn(() => true),
-  continueConversation: vi.fn(),
+  // The real function is async, so the default mock returns a promise too.
+  continueConversation: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@/lib/queries/agent-config-queries', () => ({
@@ -48,7 +49,10 @@ const record: ConversationRecord = {
 };
 
 describe('AssistantConversationView Continue', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(continueConversation).mockImplementation(() => Promise.resolve());
+  });
 
   it('continues with the stored agent and leaves the history', async () => {
     const onContinued = vi.fn();
