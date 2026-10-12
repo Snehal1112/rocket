@@ -88,8 +88,10 @@ agent_case() {
   [ "$(fm "$file" name)" = "$name" ] && pass "agent $name: name matches file" || fail "agent $name: name matches file"
   [ "$(fm "$file" model)" = "$model" ] && pass "agent $name: model is $model" || fail "agent $name: model is $model"
   [ -n "$(fm "$file" description)" ] && pass "agent $name: has a description" || fail "agent $name: has a description"
+  if fm "$file" description | grep -qF ': '; then fail "agent $name: description has no colon-space"; else pass "agent $name: description has no colon-space"; fi
   case "$kind" in
     read-only)
+      [ "$(fm "$file" tools)" = "Read, Grep, Glob" ] && pass "agent $name: tools are exactly Read, Grep, Glob" || fail "agent $name: tools are exactly Read, Grep, Glob"
       if fm "$file" tools | grep -Eq 'Bash|Write|Edit'; then fail "agent $name: read-only tools"; else pass "agent $name: read-only tools"; fi
       ;;
     writer)

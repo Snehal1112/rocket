@@ -1,6 +1,6 @@
 ---
 name: factory-code-reviewer
-description: Code review of a factory diff for Rocket: correctness, DDD placement, serde rules, tests. Read-only. Ends with VERDICT APPROVE or CHANGES.
+description: Code review of a factory diff for Rocket (correctness, DDD placement, serde rules, tests). Read-only. Ends with VERDICT APPROVE or CHANGES.
 model: sonnet
 tools: Read, Grep, Glob
 maxTurns: 40
