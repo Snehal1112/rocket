@@ -47,9 +47,49 @@ pub enum AgentKind {
     /// Claude Code through its ACP adapter. Isolation travels in `_meta`.
     #[default]
     Claude,
+    /// Gemini CLI in ACP mode. Isolation travels in files and env: a private
+    /// home with a lockdown settings file, and a `GEMINI.md` in the cwd.
+    Gemini,
     /// Any other ACP agent. Rocket sets no isolation: the agent keeps its own
     /// tools and settings, and gets the Rocket instructions in its first prompt.
     Generic,
+}
+
+impl AgentKind {
+    /// Environment variable names Rocket sets for this kind. A config of this
+    /// kind may not claim them, as a credential name or as extra env.
+    pub fn reserved_env_vars(self) -> &'static [&'static str] {
+        match self {
+            AgentKind::Claude | AgentKind::Generic => &[],
+            AgentKind::Gemini => &[
+                "GEMINI_CLI_HOME",
+                "GEMINI_CLI_TRUST_WORKSPACE",
+                "GEMINI_CLI_IDE_WORKSPACE_PATH",
+            ],
+        }
+    }
+}
+
+/// Checks the credential variable name and every extra variable name against
+/// the names Rocket sets for `kind`. `CLAUDE_CONFIG_DIR` is checked for every
+/// kind by `validate_env_var_name`. The error is a short reason and never
+/// contains a value.
+pub fn validate_kind_env(
+    kind: AgentKind,
+    credential_env_var: &str,
+    extra_env: &[EnvPair],
+) -> Result<(), String> {
+    let reserved = kind.reserved_env_vars();
+    let is_reserved = |name: &str| reserved.iter().any(|r| name.eq_ignore_ascii_case(r));
+    if is_reserved(credential_env_var) {
+        return Err("credential_env_var is reserved by Rocket".to_string());
+    }
+    for (i, pair) in extra_env.iter().enumerate() {
+        if is_reserved(&pair.name) {
+            return Err(format!("extra_env #{} name is reserved by Rocket", i + 1));
+        }
+    }
+    Ok(())
 }
 
 /// One registered ACP agent binary/command and where to find its API key.
@@ -288,6 +328,46 @@ mod tests {
         assert!(json.contains("\"kind\":\"generic\""), "got: {json}");
         let back: AgentConfig = serde_json::from_str(&json).expect("deserialize AgentConfig");
         assert_eq!(back.kind, AgentKind::Generic);
+    }
+
+    #[test]
+    fn gemini_kind_uses_its_lowercase_wire_name() {
+        assert_eq!(
+            serde_json::to_string(&AgentKind::Gemini).expect("json"),
+            "\"gemini\""
+        );
+    }
+
+    #[test]
+    fn kind_env_check_refuses_the_reserved_names_of_that_kind_only() {
+        let pair = |name: &str| EnvPair {
+            name: name.to_string(),
+            value: "v".to_string(),
+        };
+        let err = validate_kind_env(AgentKind::Gemini, "KEY", &[pair("GEMINI_CLI_HOME")])
+            .expect_err("reserved extra env");
+        assert!(
+            err.contains("extra_env #1") && err.contains("reserved"),
+            "{err}"
+        );
+        assert!(
+            validate_kind_env(AgentKind::Gemini, "gemini_cli_trust_workspace", &[]).is_err(),
+            "the credential name is checked too, in any case"
+        );
+        assert!(validate_kind_env(
+            AgentKind::Gemini,
+            "KEY",
+            &[pair("GEMINI_CLI_IDE_WORKSPACE_PATH")]
+        )
+        .is_err());
+        assert!(
+            validate_kind_env(AgentKind::Gemini, "GEMINI_API_KEY", &[pair("HTTPS_PROXY")]).is_ok()
+        );
+        assert!(validate_kind_env(AgentKind::Claude, "KEY", &[pair("GEMINI_CLI_HOME")]).is_ok());
+        assert!(validate_kind_env(AgentKind::Generic, "KEY", &[pair("GEMINI_CLI_HOME")]).is_ok());
+        let err = validate_kind_env(AgentKind::Gemini, "GEMINI_CLI_HOME", &[pair("X")])
+            .expect_err("reserved credential name");
+        assert!(!err.contains('/'), "never echoes a value: {err}");
     }
 
     fn pair(name: &str, value: &str) -> EnvPair {

@@ -157,6 +157,8 @@ impl AcpSessionService {
         // A hand-edited agent_configs.yml skips the save-time check.
         rocket_acp::validate_env_config(&config.credential_env_var, &config.extra_env)
             .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
+        rocket_acp::validate_kind_env(config.kind, &config.credential_env_var, &config.extra_env)
+            .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
         let credential = self
             .agent_config_service
             .resolve_credential(agent_config_id)
@@ -576,6 +578,39 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("extra_env #1"), "got: {msg}");
         assert!(!msg.contains("top-secret-value"));
+    }
+
+    #[tokio::test]
+    async fn start_workspace_session_refuses_a_persisted_gemini_config_that_claims_a_reserved_name() {
+        let mut bad = sample_config();
+        bad.kind = rocket_acp::AgentKind::Gemini;
+        bad.extra_env = vec![env_pair("GEMINI_CLI_HOME", "/evil")];
+        let sm_repo = FakeSecretManagerRepo(Mutex::new(vec![sample_connection()]));
+        let secret_manager = Arc::new(crate::secret_manager_service::SecretManagerService::new(
+            Box::new(sm_repo),
+            Arc::new(FakeSecretStore),
+            Arc::new(FakeVaultFetcher::default()),
+        ));
+        let cfg_service = Arc::new(AgentConfigService::new(
+            Box::new(FakeAgentConfigRepo(Mutex::new(vec![bad]))),
+            secret_manager,
+            Arc::new(rocket_environment::secret_store::NullSecretStore),
+            crate::process_env_reader(),
+        ));
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
+            noop_cleanup(),
+            cfg_service,
+        );
+        let err = service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect_err("a reserved name must not start");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        let msg = err.to_string();
+        assert!(msg.contains("extra_env #1") && msg.contains("reserved"), "got: {msg}");
+        assert!(!msg.contains("/evil"));
     }
 
     #[test]

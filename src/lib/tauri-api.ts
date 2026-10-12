@@ -444,7 +444,7 @@ export interface Environment {
 export type AgentCredentialSource = 'vault' | 'env' | 'keychain';
 
 // Which ACP agent a config runs. A missing value means 'claude'.
-export type AgentKind = 'claude' | 'generic';
+export type AgentKind = 'claude' | 'gemini' | 'generic';
 
 export interface AgentConfig {
   id: string;

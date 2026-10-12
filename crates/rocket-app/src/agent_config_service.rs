@@ -254,6 +254,8 @@ fn validate_config(config: &AgentConfig) -> DomainResult<()> {
         .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
     rocket_acp::validate_env_config(&config.credential_env_var, &config.extra_env)
         .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
+    rocket_acp::validate_kind_env(config.kind, &config.credential_env_var, &config.extra_env)
+        .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
     Ok(())
 }
 
@@ -578,6 +580,20 @@ mod tests {
             "locked is not a miss: {locked:?}"
         );
         assert!(!locked.to_string().contains(FAKE_TOKEN));
+    }
+
+    #[test]
+    fn validate_config_refuses_a_gemini_reserved_env_name_and_only_for_gemini() {
+        let mut config = sample_config("a", "conn-1");
+        config.extra_env = vec![rocket_acp::EnvPair {
+            name: "GEMINI_CLI_HOME".to_string(),
+            value: "/x".to_string(),
+        }];
+        assert!(validate_config(&config).is_ok(), "fine for a Claude config");
+        config.kind = rocket_acp::AgentKind::Gemini;
+        let err = validate_config(&config).expect_err("reserved for Gemini");
+        assert!(err.to_string().contains("reserved"), "{err}");
+        assert!(!err.to_string().contains("/x"));
     }
 
     #[test]

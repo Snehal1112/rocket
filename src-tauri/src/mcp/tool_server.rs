@@ -1671,6 +1671,27 @@ mod tests {
         assert!(!server.tool_router.has_route("set_env_var"));
     }
 
+    #[test]
+    fn the_exported_tool_names_match_the_registered_tools() {
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
+        let mut registered: Vec<String> = server
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        registered.sort();
+        let exported: Vec<String> = rocket_app::ROCKET_MCP_TOOL_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        assert_eq!(
+            registered, exported,
+            "update ROCKET_MCP_TOOL_NAMES in crates/rocket-app/src/session_plan.rs"
+        );
+    }
+
     fn parse_one(change: serde_json::Value) -> ProposedChangeParams {
         let params: ProposeChangesParams =
             serde_json::from_value(serde_json::json!({ "changes": [change] })).expect("parse");
