@@ -6,9 +6,9 @@ Run the plans in order, one at a time. Each plan has at most 3 tasks.
 
 | Plan | File | Delivers | Status |
 |---|---|---|---|
-| 01 | [2026-10-13-software-factory-plan-01-agents-hooks-command.md](2026-10-13-software-factory-plan-01-agents-hooks-command.md) | Event logger hook, 7 factory agents, `factory-ctl` helper, `/factory` command | written |
-| 02 | [2026-10-13-software-factory-plan-02-rust-server.md](2026-10-13-software-factory-plan-02-rust-server.md) | `tools/factory-server/` (Rust): tails `events.jsonl`, reads `board.json`, serves `/api/state` | written |
-| 03 | [2026-10-13-software-factory-plan-03-dashboard.md](2026-10-13-software-factory-plan-03-dashboard.md) | Dashboard page (stage board, review chips, live agent detail, live feed), smoke test, docs | written |
+| 01 | [2026-10-13-software-factory-plan-01-agents-hooks-command.md](2026-10-13-software-factory-plan-01-agents-hooks-command.md) | Event logger hook, 7 factory agents, `factory-ctl` helper, `/factory` command | done |
+| 02 | [2026-10-13-software-factory-plan-02-rust-server.md](2026-10-13-software-factory-plan-02-rust-server.md) | `tools/factory-server/` (Rust): tails `events.jsonl`, reads `board.json`, serves `/api/state` | done |
+| 03 | [2026-10-13-software-factory-plan-03-dashboard.md](2026-10-13-software-factory-plan-03-dashboard.md) | Dashboard page (stage board, review chips, live agent detail, live feed), smoke test, docs | done |
 
 Plan 02 starts with a gate: it reads the probe results from plan 01 task 1. If tool events carry no `agent_id`, the server still works but the cards show agent start and stop without the live tool line.
 

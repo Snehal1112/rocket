@@ -1,6 +1,6 @@
 # Software Factory for Rocket
 
-Status: design only, nothing built yet. Pipeline taken from the user's chart (2026-10-12) and fitted to Rocket's rules on 2026-10-13. The user is still checking the subagent setup, so do not create `.claude/agents/` or edit `.claude/settings.json` until they confirm.
+Status: built (plans 01 to 03 in `docs/superpowers/plans/2026-10-13-software-factory/`). Run the dashboard with `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root "$PWD"` and use `/factory <feature>` in an interactive session. Pipeline from the user's chart (2026-10-12), fitted to Rocket's rules on 2026-10-13.
 
 ## Pipeline
 
