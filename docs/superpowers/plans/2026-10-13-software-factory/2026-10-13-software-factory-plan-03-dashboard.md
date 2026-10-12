@@ -496,6 +496,33 @@ And add three arms to the `match path` in `route`, before `"/healthz"`:
         "/app.js" => asset("text/javascript; charset=utf-8", APP_JS),
 ```
 
+- [ ] **Step 2b: Add security headers (added after the plan 02 review)**
+
+The plan 02 review asked for these headers once the real page exists. First add this test inside the existing `mod tests` in `server.rs` and watch it fail:
+
+```rust
+    #[test]
+    fn replies_carry_security_headers() -> TestResult {
+        let (_dir, app) = app_with_board(Some(JOB))?;
+        let server = tiny_http::Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
+        let port = server.server_addr().to_ip().ok_or("no ip address")?.port();
+        let served = Arc::clone(&app);
+        std::thread::spawn(move || serve(server, served, port));
+        let reply = http_get(port, "/", &format!("127.0.0.1:{port}"))?.to_lowercase();
+        assert!(reply.contains("x-content-type-options: nosniff"), "got: {reply}");
+        assert!(reply.contains("frame-ancestors 'none'"), "got: {reply}");
+        assert!(reply.contains("default-src 'self'"), "got: {reply}");
+        Ok(())
+    }
+```
+
+Then in `serve`, next to the `Cache-Control` header, add three more headers the same way (each `if let Ok(header) = tiny_http::Header::from_bytes(...) { response.add_header(header); }`):
+- `X-Content-Type-Options: nosniff`
+- `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'`
+- `Referrer-Policy: no-referrer`
+
+The page loads only its own scripts and stylesheet and uses no inline script or inline style, so this policy does not break it. If the page ever needs an inline style, change the page rather than the policy. Run `cargo test -j4 --manifest-path tools/factory-server/Cargo.toml` and `cargo fmt --check --manifest-path tools/factory-server/Cargo.toml`.
+
 - [ ] **Step 3: Write the page**
 
 Replace `tools/factory-server/static/dashboard.html`:
@@ -757,7 +784,7 @@ Run:
 - `node --test tools/factory-server/tests/`
 - `cargo test -j4 --manifest-path tools/factory-server/Cargo.toml`
 
-Expected: all Node tests and all 26 Rust tests pass.
+Expected: all Node tests and every Rust test passes (the count is whatever `cargo test` reports).
 
 - [ ] **Step 8: Check it visually**
 
