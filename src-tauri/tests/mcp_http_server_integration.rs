@@ -200,10 +200,70 @@ async fn the_initialize_reply_has_no_sse_priming_event() {
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let body = response.text().await.expect("read the reply");
 
-    assert!(!body.contains("retry:"), "no priming event: {body:?}");
+    assert!(!body.contains("retry:") && !body.contains("id: 0"), "no priming event: {body:?}");
     assert!(
         body.contains("\"jsonrpc\""),
         "the JSON-RPC reply is present: {body:?}"
+    );
+    handle.shutdown();
+}
+
+/// The session manager has its own `sse_retry`, which primes every reply to a
+/// request after `initialize`. Gemini CLI drops such a reply, so `tools/list`
+/// must come back without a priming event too.
+#[tokio::test]
+async fn the_tools_list_reply_has_no_sse_priming_event() {
+    let (handle, _app_handle, _tmp) = spawn_test_server("session-http-priming-2").await;
+    let client = Client::new();
+    let secs = std::time::Duration::from_secs;
+
+    let init = client
+        .post(mcp_url(handle.port))
+        .bearer_auth(&handle.token)
+        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
+        .json(&initialize_body(1))
+        .send()
+        .await
+        .expect("send initialize");
+    let mcp_session_id = init
+        .headers()
+        .get("mcp-session-id")
+        .expect("initialize response carries mcp-session-id")
+        .to_str()
+        .expect("ascii session id")
+        .to_string();
+    let _ = tokio::time::timeout(secs(2), init.bytes()).await;
+
+    let initialized = client
+        .post(mcp_url(handle.port))
+        .bearer_auth(&handle.token)
+        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
+        .header("mcp-session-id", &mcp_session_id)
+        .json(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        .send()
+        .await
+        .expect("send initialized notification");
+    assert!(initialized.status().is_success());
+
+    let list = client
+        .post(mcp_url(handle.port))
+        .bearer_auth(&handle.token)
+        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
+        .header("mcp-session-id", &mcp_session_id)
+        .json(&serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
+        .send()
+        .await
+        .expect("send tools/list");
+    assert_eq!(list.status(), reqwest::StatusCode::OK);
+    let body = tokio::time::timeout(secs(3), list.text())
+        .await
+        .expect("the tools/list reply ends")
+        .expect("read the reply");
+
+    assert!(!body.contains("retry:"), "no priming event: {body:?}");
+    assert!(
+        body.contains("propose_changes"),
+        "the tool list is present: {body:?}"
     );
     handle.shutdown();
 }

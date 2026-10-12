@@ -1197,15 +1197,19 @@ pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
     // The default config keeps `rmcp`'s loopback-only `Host` allowlist, which
     // guards against DNS rebinding. Only the cancellation token is replaced,
     // so `shutdown()` also ends live MCP sessions (see its doc comment).
-    // `sse_retry` is turned off: with it on, every SSE reply starts with an
-    // empty "priming" event, and Gemini CLI's MCP client then registers no
-    // tool from this server.
+    // `sse_retry` is turned off in both places: with it on, an SSE reply
+    // starts with an empty "priming" event, and Gemini CLI's MCP client then
+    // registers no tool from this server. The config covers the replies to
+    // `initialize` and the standalone stream; the session manager has its own
+    // setting for the replies to every later request.
     let config = StreamableHttpServerConfig::default()
         .with_cancellation_token(shutdown.clone())
         .with_sse_retry(None);
+    let mut session_manager = LocalSessionManager::default();
+    session_manager.session_config.sse_retry = None;
     let service = StreamableHttpService::new(
         move || Ok(tool_server.clone()),
-        LocalSessionManager::default().into(),
+        session_manager.into(),
         config,
     );
     let router = axum::Router::new()
