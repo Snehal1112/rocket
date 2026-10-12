@@ -187,7 +187,14 @@ pub fn run() {
 
     let env_filter = EnvFilter::try_from_env("ROCKET_LOG")
         .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
-        .unwrap_or_else(|_| EnvFilter::new("info,git2=warn,reqwest=warn,hyper=warn"))
+        // The rmcp tower target warns when a client resumes a reply that is
+        // already delivered. rmcp answers with an empty stream, so it is quiet by default.
+        .unwrap_or_else(|_| {
+            EnvFilter::new(
+                "info,git2=warn,reqwest=warn,hyper=warn,\
+                 rmcp::transport::streamable_http_server::tower=error",
+            )
+        })
         // agent-client-protocol logs raw JSON-RPC messages (including the MCP
         // bearer token) at debug/trace. Cap this target at info regardless of
         // RUST_LOG/ROCKET_LOG so raising verbosity elsewhere never leaks it.
