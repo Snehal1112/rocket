@@ -2096,6 +2096,10 @@ mod digest_tests {
 }
 
 #[cfg(test)]
+#[path = "reqwest_executor_mtls_handshake.rs"]
+mod mtls_handshake;
+
+#[cfg(test)]
 mod mtls_tests {
     use super::*;
     use rocket_shared::types::HttpMethod;
