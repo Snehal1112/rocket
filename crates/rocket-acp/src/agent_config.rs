@@ -96,6 +96,20 @@ pub fn validate_kind_env(
 pub const MIN_IDLE_TIMEOUT_SECS: u32 = 30;
 pub const MAX_IDLE_TIMEOUT_SECS: u32 = 1800;
 
+/// Longest accepted pinned model name, in bytes.
+pub const MAX_MODEL_NAME_LEN: usize = 128;
+
+/// How hard the agent should reason. Rocket maps it to each agent's own
+/// control: Claude's `effort` option, Gemini's thinking settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningLevel {
+    Low,
+    Medium,
+    #[default]
+    High,
+}
+
 /// Per-agent knobs that tune how a session runs. Old files without this
 /// struct load with every field at its default.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -105,6 +119,13 @@ pub struct AgentTuning {
     /// slow model may need more.
     #[serde(default)]
     pub idle_timeout_secs: Option<u32>,
+    /// How hard the agent should reason. Old files without it load as `high`.
+    #[serde(default)]
+    pub reasoning: ReasoningLevel,
+    /// A model name to pin, written into a Gemini agent's settings. `None`
+    /// keeps the agent's own choice.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl AgentTuning {
@@ -114,6 +135,14 @@ impl AgentTuning {
             if !(MIN_IDLE_TIMEOUT_SECS..=MAX_IDLE_TIMEOUT_SECS).contains(&secs) {
                 return Err(format!(
                     "tuning idle_timeout_secs must be between {MIN_IDLE_TIMEOUT_SECS} and {MAX_IDLE_TIMEOUT_SECS}"
+                ));
+            }
+        }
+        if let Some(model) = &self.model {
+            let plain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/');
+            if model.is_empty() || model.len() > MAX_MODEL_NAME_LEN || !model.chars().all(plain) {
+                return Err(format!(
+                    "tuning model must be 1 to {MAX_MODEL_NAME_LEN} characters: letters, digits and . _ - : /"
                 ));
             }
         }
@@ -302,6 +331,7 @@ mod tests {
     fn the_idle_timeout_must_stay_between_30_and_1800_seconds() {
         let tuning = |secs: Option<u32>| AgentTuning {
             idle_timeout_secs: secs,
+            ..AgentTuning::default()
         };
         assert!(tuning(None).validate().is_ok());
         assert!(tuning(Some(MIN_IDLE_TIMEOUT_SECS)).validate().is_ok());
@@ -310,6 +340,47 @@ mod tests {
             let err = tuning(Some(bad)).validate().expect_err("out of range");
             assert!(err.contains("idle_timeout_secs"), "{err}");
         }
+    }
+
+    #[test]
+    fn reasoning_defaults_to_high_and_uses_lowercase_wire_names() {
+        assert_eq!(ReasoningLevel::default(), ReasoningLevel::High);
+        assert_eq!(
+            serde_json::to_string(&ReasoningLevel::Medium).expect("json"),
+            "\"medium\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ReasoningLevel>("\"low\"").expect("parse"),
+            ReasoningLevel::Low
+        );
+    }
+
+    #[test]
+    fn a_tuning_saved_before_reasoning_existed_loads_as_high_with_no_model() {
+        let tuning: AgentTuning =
+            serde_json::from_value(serde_json::json!({ "idle_timeout_secs": 300 })).expect("old");
+        assert_eq!(tuning.reasoning, ReasoningLevel::High);
+        assert_eq!(tuning.model, None);
+        assert_eq!(tuning.idle_timeout_secs, Some(300));
+    }
+
+    #[test]
+    fn a_pinned_model_must_be_a_plain_model_name() {
+        let with_model = |m: &str| AgentTuning {
+            model: Some(m.to_string()),
+            ..AgentTuning::default()
+        };
+        for good in ["gemini-2.5-pro", "gemini-3-pro-preview", "models/gemini-2.5-flash", "a_b:c.d"] {
+            assert!(with_model(good).validate().is_ok(), "{good}");
+        }
+        for bad in ["", "   ", "has space", "quote\"d", "new\nline", "back\\slash", "{x}"] {
+            let err = with_model(bad).validate().expect_err(bad);
+            assert!(err.contains("tuning model"), "{err}");
+            assert!(!err.contains(bad.trim()) || bad.trim().is_empty(), "never echoes the value: {err}");
+        }
+        let too_long = "a".repeat(MAX_MODEL_NAME_LEN + 1);
+        assert!(with_model(&too_long).validate().is_err());
+        assert!(with_model(&"a".repeat(MAX_MODEL_NAME_LEN)).validate().is_ok());
     }
 
     #[test]

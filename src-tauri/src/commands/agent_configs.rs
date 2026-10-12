@@ -27,6 +27,10 @@ impl std::fmt::Debug for EnvPairDto {
 pub struct AgentTuningDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_timeout_secs: Option<u32>,
+    #[serde(default)]
+    pub reasoning: rocket_acp::ReasoningLevel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +72,8 @@ impl From<AgentConfig> for AgentConfigDto {
             kind: c.kind,
             tuning: AgentTuningDto {
                 idle_timeout_secs: c.tuning.idle_timeout_secs,
+                reasoning: c.tuning.reasoning,
+                model: c.tuning.model,
             },
             command: c.command,
             args: c.args,
@@ -99,6 +105,8 @@ impl From<AgentConfigDto> for AgentConfig {
             kind: dto.kind,
             tuning: rocket_acp::AgentTuning {
                 idle_timeout_secs: dto.tuning.idle_timeout_secs,
+                reasoning: dto.tuning.reasoning,
+                model: dto.tuning.model,
             },
             command: dto.command,
             args: dto.args,
@@ -181,6 +189,31 @@ pub async fn has_agent_credential(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dto_carries_reasoning_and_model_and_old_callers_get_high() {
+        let mut domain = sample_domain();
+        domain.tuning.reasoning = rocket_acp::ReasoningLevel::Low;
+        domain.tuning.model = Some("gemini-2.5-pro".to_string());
+        let json = serde_json::to_value(AgentConfigDto::from(domain)).expect("json");
+        assert_eq!(json["tuning"]["reasoning"], "low");
+        assert_eq!(json["tuning"]["model"], "gemini-2.5-pro");
+        let back: AgentConfig = serde_json::from_value::<AgentConfigDto>(json)
+            .expect("dto")
+            .into();
+        assert_eq!(back.tuning.reasoning, rocket_acp::ReasoningLevel::Low);
+        assert_eq!(back.tuning.model.as_deref(), Some("gemini-2.5-pro"));
+
+        let old = serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "args": [],
+            "credentialEnvVar": "K", "vaultConnectionId": "", "vaultName": "",
+            "vaultSecretId": "", "vaultSecretName": ""
+        });
+        let dto: AgentConfigDto = serde_json::from_value(old).expect("old caller");
+        let config = AgentConfig::from(dto);
+        assert_eq!(config.tuning.reasoning, rocket_acp::ReasoningLevel::High);
+        assert_eq!(config.tuning.model, None);
+    }
 
     fn sample_domain() -> AgentConfig {
         AgentConfig {

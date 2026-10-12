@@ -9,7 +9,8 @@ pub mod update;
 pub use agent_config::{
     validate_credential_source, validate_env_config, validate_env_var_name, validate_kind_env,
     AgentConfig, AgentConfigRepository, AgentKind, AgentTuning, CredentialSource, EnvPair,
-    MAX_ENV_VAR_NAME_LEN, MAX_IDLE_TIMEOUT_SECS, MIN_IDLE_TIMEOUT_SECS, RESERVED_ENV_VAR,
+    ReasoningLevel, MAX_ENV_VAR_NAME_LEN, MAX_IDLE_TIMEOUT_SECS, MAX_MODEL_NAME_LEN,
+    MIN_IDLE_TIMEOUT_SECS, RESERVED_ENV_VAR,
 };
 pub use conversation::{
     cap_message_text, conversation_title, has_agent_reply, validate_conversation_id,

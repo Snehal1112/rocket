@@ -446,10 +446,17 @@ export type AgentCredentialSource = 'vault' | 'env' | 'keychain';
 // Which ACP agent a config runs. A missing value means 'claude'.
 export type AgentKind = 'claude' | 'gemini' | 'generic';
 
+// How hard the agent should reason. Claude's effort and Gemini's thinking follow it.
+export type ReasoningLevel = 'low' | 'medium' | 'high';
+
 // Per-agent session tuning. A missing value means the default.
 export interface AgentTuning {
   // Seconds a prompt turn may stay silent before the session ends. 30 to 1800.
   idleTimeoutSecs?: number;
+  // Defaults to 'high'.
+  reasoning?: ReasoningLevel;
+  // A model name to pin. Used by Gemini agents.
+  model?: string;
 }
 
 export interface AgentConfig {
