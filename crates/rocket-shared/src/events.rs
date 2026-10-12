@@ -537,6 +537,11 @@ pub enum DomainEvent {
         session_id: String,
         text: String,
     },
+    /// Emitted per streamed reasoning chunk while a prompt is being answered.
+    AcpThoughtChunk {
+        session_id: String,
+        text: String,
+    },
     /// Emitted once a prompt's turn ends. `stop_reason` is the raw ACP
     /// `stopReason` string (`end_turn`, `max_tokens`, `max_turn_requests`,
     /// `refusal`, `cancelled`, or an agent-specific custom reason) — kept as
@@ -1645,6 +1650,19 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"acpSessionChunk","session_id":"sess-1","text":"Hello, "}"#
+        );
+    }
+
+    #[test]
+    fn acp_thought_chunk_wire_shape() {
+        let event = DomainEvent::AcpThoughtChunk {
+            session_id: "sess-1".into(),
+            text: "Checking the auth header. ".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"acpThoughtChunk","session_id":"sess-1","text":"Checking the auth header. "}"#
         );
     }
 

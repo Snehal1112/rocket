@@ -304,6 +304,7 @@ impl AcpSessionService {
         let session_id = session_id.to_string();
         let event = match update {
             AcpUpdate::Text { text } => DomainEvent::AcpSessionChunk { session_id, text },
+            AcpUpdate::Thought { text } => DomainEvent::AcpThoughtChunk { session_id, text },
             AcpUpdate::ToolCall {
                 call_id,
                 title,
@@ -1511,6 +1512,78 @@ mod tests {
         assert_eq!(info.session_id, "session-1");
         assert_eq!(info.config_options, vec![sample_option("model", "default")]);
         assert!(info.prompt_capabilities.embedded_context);
+    }
+
+    #[tokio::test]
+    async fn thought_updates_are_published_in_order_before_the_reply_and_the_finish() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![
+                AcpUpdate::Thought {
+                    text: "checking auth ".to_string(),
+                },
+                AcpUpdate::Thought {
+                    text: "then docs".to_string(),
+                },
+                AcpUpdate::Text {
+                    text: "answer".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("send_prompt");
+
+        let events = publisher.events.lock().expect("lock");
+        let thoughts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::AcpThoughtChunk { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(thoughts, vec!["checking auth ", "then docs"]);
+        let last_thought = events
+            .iter()
+            .rposition(|e| matches!(e, DomainEvent::AcpThoughtChunk { .. }))
+            .expect("a thought event");
+        let first_text = events
+            .iter()
+            .position(|e| matches!(e, DomainEvent::AcpSessionChunk { .. }))
+            .expect("a text event");
+        assert!(last_thought < first_text);
+        assert!(matches!(
+            events.last(),
+            Some(DomainEvent::AcpSessionFinished { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_only_thinks_is_not_cut_off_while_thoughts_keep_arriving() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        // Six thoughts, 40 ms apart: 240 ms in total, longer than the 150 ms
+        // idle limit, but no single gap reaches it.
+        let client = FakeSessionClient {
+            prompt_updates: (0..6)
+                .map(|i| AcpUpdate::Thought {
+                    text: format!("step {i} "),
+                })
+                .collect(),
+            update_interval: Duration::from_millis(40),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_millis(150));
+
+        let stop = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("a thinking turn must keep its session");
+
+        assert_eq!(stop, "end_turn");
     }
 
     #[tokio::test]

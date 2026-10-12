@@ -6,6 +6,9 @@ use crate::session_info::ConfigOption;
 pub enum AcpUpdate {
     /// A chunk of the agent's reply text.
     Text { text: String },
+    /// A chunk of the agent's reasoning text. It is shown apart from the
+    /// reply, and like any update it restarts the idle limit.
+    Thought { text: String },
     /// The agent started a tool call. `kind` is the ACP tool kind in
     /// snake_case, for example `read`, `execute` or `other`.
     ToolCall {
@@ -54,6 +57,26 @@ impl ToolCallStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thought_updates_compare_by_value() {
+        assert_eq!(
+            AcpUpdate::Thought {
+                text: "a".to_string()
+            },
+            AcpUpdate::Thought {
+                text: "a".to_string()
+            }
+        );
+        assert_ne!(
+            AcpUpdate::Thought {
+                text: "a".to_string()
+            },
+            AcpUpdate::Text {
+                text: "a".to_string()
+            }
+        );
+    }
 
     #[test]
     fn tool_call_status_has_snake_case_wire_names() {

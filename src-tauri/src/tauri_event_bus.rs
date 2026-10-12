@@ -49,6 +49,7 @@ pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
         // Runner events above: each variant gets its own frontend channel.
         DomainEvent::AcpSessionStarted { .. } => "agent-session-started",
         DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
+        DomainEvent::AcpThoughtChunk { .. } => "agent-session-thought",
         DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
         DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
         // gRPC session events — each variant gets its own channel, like the ACP and Flow events.

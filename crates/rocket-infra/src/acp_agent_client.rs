@@ -738,12 +738,16 @@ fn select_mcp_servers_for_agent(
 }
 
 /// Maps one `session/update` to Rocket's typed update. Kinds Rocket does not
-/// model (thoughts, user echoes, plans, modes, commands, session info) and
+/// model (user echoes, plans, modes, commands, session info) and
 /// non-text message chunks yield `None` and are dropped.
 fn session_update_to_acp(update: SessionUpdate) -> Option<AcpUpdate> {
     match update {
         SessionUpdate::AgentMessageChunk(chunk) => match chunk.content {
             ContentBlock::Text(text) => Some(AcpUpdate::Text { text: text.text }),
+            _ => None,
+        },
+        SessionUpdate::AgentThoughtChunk(chunk) => match chunk.content {
+            ContentBlock::Text(text) => Some(AcpUpdate::Thought { text: text.text }),
             _ => None,
         },
         SessionUpdate::ToolCall(call) => Some(AcpUpdate::ToolCall {
@@ -942,14 +946,25 @@ mod tests {
     }
 
     #[test]
+    fn thought_chunks_become_thought_updates_and_non_text_thoughts_are_dropped() {
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::AgentThoughtChunk(text_chunk("checking auth"))),
+            Some(AcpUpdate::Thought {
+                text: "checking auth".to_string()
+            })
+        );
+        let image = ContentChunk::new(ContentBlock::Image(ImageContent::new("aGk=", "image/png")));
+        assert_eq!(
+            session_update_to_acp(SessionUpdate::AgentThoughtChunk(image)),
+            None
+        );
+    }
+
+    #[test]
     fn non_text_chunks_and_unmodelled_updates_are_dropped() {
         let image = ContentChunk::new(ContentBlock::Image(ImageContent::new("aGk=", "image/png")));
         assert_eq!(
             session_update_to_acp(SessionUpdate::AgentMessageChunk(image)),
-            None
-        );
-        assert_eq!(
-            session_update_to_acp(SessionUpdate::AgentThoughtChunk(text_chunk("thinking"))),
             None
         );
         assert_eq!(
