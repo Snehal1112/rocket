@@ -1,6 +1,6 @@
 # Software Factory for Rocket
 
-Status: built (plans 01 to 03 in `docs/superpowers/plans/2026-10-13-software-factory/`). Run the dashboard with `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root "$PWD"` and use `/factory <feature>` in an interactive session. Pipeline from the user's chart (2026-10-12), fitted to Rocket's rules on 2026-10-13.
+Status: built (plans 01 to 03 in `docs/superpowers/plans/2026-10-13-software-factory/`). Run the dashboard with `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root "$(python3 .claude/factory/factory-ctl root)"` and use `/factory <feature>` in an interactive session. Pipeline from the user's chart (2026-10-12), fitted to Rocket's rules on 2026-10-13.
 
 ## Pipeline
 
@@ -95,22 +95,25 @@ Yes, it tracks every job stage by stage. It lives outside the Rocket app so it i
 
 ```
 Claude Code hooks (async) -> .superpowers/factory/events.jsonl -> factory-server (Rust, localhost) -> dashboard.html
-                              ^ also watched: .superpowers/factory/board.json and sdd ledgers
+                              ^ also watched: .superpowers/factory/board.json
 ```
 
 Hooks append to a local JSONL file instead of POSTing, so a stopped server can never affect an agent. Plans: `docs/superpowers/plans/2026-10-13-software-factory/`.
 
 - Columns: `Spec`, `Build`, `Review` (sec, ux, ui, code), `Approve`, `Merged`, `Needs human`.
 - Card: job id and slug, feature text, branch, builder round 0 to 2, four review chips (pending, running, pass, changes, skipped), time in stage.
-- Live detail on a card: current tool, elapsed time, last message. Hook events are matched to a job by the `cwd` of the worktree.
+- Live detail on a card: current tool and tool count, last message. Hook events are matched to a job by the `cwd` of the worktree.
 - Stage comes from `board.json`. Live detail comes from `SubagentStart`, `SubagentStop`, `PostToolUse`. No cost tracking in v1.
 - Location `tools/factory-server/`: own Cargo workspace, not in the root `members`, own target dir. Rust only, no banned unwrap pattern.
+- The log is never rotated. To rotate, move or truncate `.superpowers/factory/events.jsonl` (the server notices a replaced file).
 - Hooks are async and the server may be down. An agent must never be blocked by the dashboard.
 
 ## Open items
 
-- Check that `PostToolUse` inside a subagent carries `agent_id` and `agent_type`. The docs only imply it.
-- Check that `Skill` works inside a subagent, so the builder can call the git-commit skill. If not, the orchestrator commits.
-- Check that an unreachable http hook does not stall or fail a tool call.
+- Settled: `PostToolUse` inside a subagent carries `agent_id` and `agent_type` (probe done 2026-10-13).
+- Settled: no http hook is used, so there is nothing to check.
+- `Skill` inside a subagent is only reported by the subagent itself. The builder calls the git-commit skill; if it cannot, the orchestrator commits.
+- Confirm in the first real run that the Agent tool id matches the hook `agent_id`.
+- The dashboard look has not been checked in a browser.
 - Older ledgers are inconsistent. The server parses only the strict `Task N:` lines and ignores the rest.
 - `/verify-rocket` conflicts with the harness guard. Fix separately.

@@ -39,7 +39,7 @@ This is the stage spec case: the job was created but the spec writer did not fin
 1. First run (no builder id on the board): dispatch `factory-builder` with the absolute job directory, `plan.md` path and the job branch name. Right after the dispatch returns, run `ctl set-stage <id> build --builder-id <agent id>` before you wait on any output. Resume (builder id set): use SendMessage to that builder with the path of `changes-r<round>.md` (the current round, already incremented by the review stage) or `rework-note.md`. If SendMessage to the recorded builder fails, dispatch a NEW `factory-builder` with a prompt saying: resume branch `<branch>`, the old worktree is `<worktree>`, fix `<findings file>`. Then record its id as above.
 2. `ctl ledger <id> "Task <n>: dispatched (BASE <sha>, opus, agent <id>)"` for the first run.
 3. Read the last four lines of the reply: `WORKTREE:`, `BRANCH:`, `BASE:`, `HEAD:`. If any is missing, `ctl set-stage <id> needs-human --reason "builder gave no handoff lines"` and stop. If `HEAD` equals `BASE`, `ctl set-stage <id> needs-human --reason "builder made no commits"` and stop.
-4. `ctl set-stage <id> review --worktree <path> --builder-id <agent id> --base <sha> --head <sha> --reset-reviews`, then `ctl ledger <id> "Head round <round>: <sha>"` with the new head sha.
+4. `ctl set-stage <id> review --worktree <path> --builder-id <agent id> --head <sha> --reset-reviews`, and add `--base <sha>` (from the BASE line) ONLY when `base` is still null in `board.json` (the first run). On any resume or builder fallback keep the board's existing base and ignore the BASE line, so the approve diff always covers the whole job. Then `ctl ledger <id> "Head round <round>: <sha>"` with the new head sha.
 
 ### stage `review`
 

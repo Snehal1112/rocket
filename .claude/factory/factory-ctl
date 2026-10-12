@@ -142,6 +142,8 @@ def cmd_set_stage(args):
         job["reviews"] = {role: "pending" for role in ROLES}
     for role, state in reviews:
         job["reviews"][role] = state
+    if args.base is not None and job.get("base") and args.base != job["base"] and not args.force_base:
+        die(f"job already has base {job['base']}, refusing to change it to {args.base} without --force-base")
     for field in ("worktree", "builder_id", "base", "head"):
         value = getattr(args, field)
         if value is not None:
@@ -253,6 +255,7 @@ def build_parser():
     set_stage.add_argument("--worktree")
     set_stage.add_argument("--builder-id", dest="builder_id")
     set_stage.add_argument("--base")
+    set_stage.add_argument("--force-base", dest="force_base", action="store_true")
     set_stage.add_argument("--head")
     set_stage.add_argument("--reason")
     set_stage.set_defaults(func=cmd_set_stage)

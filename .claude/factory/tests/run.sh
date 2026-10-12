@@ -36,9 +36,22 @@ run_logger "{\"hook_event_name\":\"PostToolUse\",\"agent_id\":\"a1\",\"tool_name
 check "logger: trims a long command to 80 chars" jq -e 'select(.tool_name=="Bash" and (.tool_target | length) == 80)' "$log"
 check "logger: never stores tool_response" bash -c "! grep -q SECRET-OUTPUT '$log'"
 
+before_lines="$(wc -l <"$log")"
+run_logger '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"cwd":"/x"}'
+check "logger: an orchestrator PostToolUse (no agent_id) writes no line" test "$(wc -l <"$log")" -eq "$before_lines"
+run_logger '{"hook_event_name":"PostToolUse","agent_id":"a1","tool_name":"WebFetch","tool_input":{"url":"https://x.example/p?token=SECRETQ#frag"},"cwd":"/x"}'
+check "logger: a url target is logged without query and fragment" \
+  jq -e 'select(.tool_target=="https://x.example/p")' "$log"
+check "logger: a url query never reaches the log" bash -c "! grep -q SECRETQ '$log'"
+tailmsg="$(python3 -c 'print("a" * 200 + "b" * 300)')"
+run_logger "{\"hook_event_name\":\"SubagentStop\",\"agent_id\":\"a1\",\"last_assistant_message\":\"$tailmsg\",\"cwd\":\"/x\"}"
+check "logger: last_message keeps the tail of a long message" \
+  jq -e 'select(.last_message != null and (.last_message | length) == 300 and (.last_message | test("^b+$")))' "$log"
+n_before="$(wc -l <"$log")"
+
 printf 'not json' | FACTORY_EVENT_LOG="$log" python3 "$logger"
 rc=$?
-if [ "$rc" -eq 0 ] && [ "$(wc -l <"$log")" -eq 2 ]; then
+if [ "$rc" -eq 0 ] && [ "$(wc -l <"$log")" -eq "$n_before" ]; then
   pass "logger: invalid JSON exits 0 and writes nothing"
 else
   fail "logger: invalid JSON exits 0 and writes nothing (rc=$rc)"
@@ -178,6 +191,14 @@ git -C "$fr" -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
 head="$(git -C "$fr" rev-parse HEAD)"
 base="$(git -C "$fr" rev-parse main)"
 python3 "$ctl" set-stage 1 approve --base "$base" --head "$head" >/dev/null
+board_before="$(cat "$board")"
+check "ctl: changing an existing base without --force-base fails" \
+  bash -c "! python3 '$ctl' set-stage 1 approve --base deadbeef"
+check "ctl: a refused base change leaves the board unchanged" test "$board_before" = "$(cat "$board")"
+check "ctl: the same base value is accepted" python3 "$ctl" set-stage 1 approve --base "$base"
+check "ctl: --force-base changes an existing base" python3 "$ctl" set-stage 1 approve --base deadbeef --force-base
+check "ctl: the forced base is stored" jq -e '.jobs[0] | select(.base=="deadbeef")' "$board"
+python3 "$ctl" set-stage 1 approve --base "$base" --force-base >/dev/null
 out="$(python3 "$ctl" is-merged 1 2>/dev/null)"; rc=$?
 check "ctl: is-merged says exactly 'not merged' with exit 1 before the merge" test "$out" = "not merged" -a "$rc" -eq 1
 git -C "$fr" switch -q main

@@ -49,6 +49,8 @@ def tool_target(tool_input):
     for key in ("file_path", "path", "pattern", "url"):
         value = tool_input.get(key)
         if isinstance(value, str):
+            if key == "url":
+                value = value.split("?", 1)[0].split("#", 1)[0]
             return value[:MAX_TEXT]
     command = tool_input.get("command")
     if isinstance(command, str):
@@ -66,7 +68,7 @@ def build_event(payload):
         event["tool_target"] = target
     message = payload.get("last_assistant_message")
     if isinstance(message, str):
-        event["last_message"] = message[:MAX_TEXT]
+        event["last_message"] = message[-MAX_TEXT:]
     return event
 
 
@@ -84,6 +86,8 @@ def main():
     try:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
+            return
+        if payload.get("hook_event_name") == "PostToolUse" and not payload.get("agent_id"):
             return
         path = log_path(payload.get("cwd") or os.getcwd())
         if not path:
