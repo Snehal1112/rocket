@@ -37,6 +37,7 @@ function activate(sessionId = 's1'): void {
 describe('assistant session flows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     resetStaleSweepForTests();
     store().reset();
     vi.mocked(api.endStaleAssistantSessions).mockResolvedValue(0);
@@ -66,7 +67,7 @@ describe('assistant session flows', () => {
     activate('s1');
     await continueConversation(stored, 'agent-1');
     expect(api.endAgentSession).toHaveBeenCalledWith('s1');
-    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'ask', undefined);
+    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'ask', undefined, undefined);
     expect(store().session).toMatchObject({ sessionId: 's2', status: 'active', mode: 'ask' });
     expect(store().replay).toMatchObject({ fromId: stored.id, sent: false });
 
@@ -121,6 +122,14 @@ describe('assistant session flows', () => {
       stopSaver();
       vi.useRealTimers();
     }
+  });
+
+  it('passes the remembered model and effort of the agent to the start', async () => {
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    localStorage.setItem('rocket-api:assistant-model:agent-1', 'opus');
+    localStorage.setItem('rocket-api:assistant-effort:agent-1', 'max');
+    await startAssistant('agent-1', 'edit');
+    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', 'opus', 'max');
   });
 
   it('keeps the preface when the first send fails', async () => {
@@ -179,7 +188,7 @@ describe('assistant session flows', () => {
       ],
     });
     await startAssistant('agent-1');
-    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined);
+    expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined, undefined);
     expect(store().session).toMatchObject({ status: 'active', sessionId: 's1', mode: 'edit' });
     expect(store().session?.configOptions[0].currentValue).toBe('opus');
   });

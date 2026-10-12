@@ -1,4 +1,4 @@
-import { loadRememberedModel } from '@/lib/assistant/model-memory';
+import { loadRememberedEffort, loadRememberedModel } from '@/lib/assistant/model-memory';
 import { buildReplayPreface } from '@/lib/assistant/replay-preface';
 import {
   type ConversationRecord,
@@ -72,6 +72,7 @@ export async function startAssistant(
       agentConfigId,
       mode,
       loadRememberedModel(agentConfigId),
+      loadRememberedEffort(agentConfigId),
     );
     const applied = useAssistantStore
       .getState()

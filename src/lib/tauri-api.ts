@@ -2765,11 +2765,13 @@ export const startWorkspaceAssistant = (
   agentConfigId: string,
   mode: AssistantMode,
   model?: string,
+  effort?: string,
 ) =>
   invoke<AgentSessionStarted>('start_workspace_assistant', {
     agentConfigId,
     mode,
     model: model ?? null,
+    effort: effort ?? null,
   });
 
 /**

@@ -38,6 +38,44 @@ pub const ROCKET_MCP_TOOL_NAMES: [&str; 11] = [
 pub const GEMINI_FIRST_PROMPT_REMINDER: &str = "Reminder: use only the mcp_rocket_* tools. \
 Do not read or write files. To change anything, call mcp_rocket_propose_changes.";
 
+/// Gemini 3 and later models take a thinking level.
+const GEMINI_LEVEL_MODELS: [&str; 5] = [
+    "gemini-3-pro-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+];
+
+/// Gemini 2.5 models take a thinking budget in tokens.
+const GEMINI_BUDGET_MODELS: [&str; 2] = ["gemini-2.5-pro", "gemini-2.5-flash"];
+
+fn gemini_thinking_level(level: rocket_acp::ReasoningLevel) -> &'static str {
+    match level {
+        rocket_acp::ReasoningLevel::Low => "LOW",
+        // Gemini 3 models offer two levels, so medium and high both ask for HIGH.
+        rocket_acp::ReasoningLevel::Medium | rocket_acp::ReasoningLevel::High => "HIGH",
+    }
+}
+
+fn gemini_thinking_budget(level: rocket_acp::ReasoningLevel) -> u32 {
+    match level {
+        rocket_acp::ReasoningLevel::Low => 1024,
+        rocket_acp::ReasoningLevel::Medium => 8192,
+        rocket_acp::ReasoningLevel::High => 24576,
+    }
+}
+
+/// One `modelConfigs` override that sets the thinking of one concrete model.
+/// `includeThoughts` stays on, or the Reasoning block would stay empty.
+fn thinking_override(model: &str, mut thinking: serde_json::Value) -> serde_json::Value {
+    thinking["includeThoughts"] = serde_json::Value::Bool(true);
+    serde_json::json!({
+        "match": { "model": model },
+        "modelConfig": { "generateContentConfig": { "thinkingConfig": thinking } }
+    })
+}
+
 /// One file to create before the agent starts. The path is relative to the
 /// session's scratch root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +110,10 @@ pub struct PlanInput<'a> {
     pub config_dir: &'a str,
     /// The Rocket assistant instructions.
     pub instructions: &'a str,
+    /// How hard the agent should reason. Only Gemini reads it from the plan.
+    pub reasoning: rocket_acp::ReasoningLevel,
+    /// A model name to pin. Only Gemini reads it from the plan.
+    pub model: Option<&'a str>,
 }
 
 /// Builds the plan for one session.
@@ -118,12 +160,26 @@ fn gemini_plan(input: &PlanInput<'_>) -> SessionPlan {
         .collect();
     // Written to the user settings file of the private home: Gemini ignores
     // a system settings file that is not root-owned.
-    let settings = serde_json::json!({
+    let mut settings = serde_json::json!({
         "tools": { "core": tool_names },
         "skills": { "enabled": false },
         "hooksConfig": { "enabled": false },
         "mcp": { "allowed": [ROCKET_MCP_SERVER_NAME] }
     });
+    let level = gemini_thinking_level(input.reasoning);
+    let budget = gemini_thinking_budget(input.reasoning);
+    let overrides: Vec<serde_json::Value> =
+        GEMINI_LEVEL_MODELS
+            .iter()
+            .map(|model| thinking_override(model, serde_json::json!({ "thinkingLevel": level })))
+            .chain(GEMINI_BUDGET_MODELS.iter().map(|model| {
+                thinking_override(model, serde_json::json!({ "thinkingBudget": budget }))
+            }))
+            .collect();
+    settings["modelConfigs"] = serde_json::json!({ "overrides": overrides });
+    if let Some(model) = input.model {
+        settings["model"] = serde_json::json!({ "name": model });
+    }
     let guide = format!(
         "{}\n\n{NON_CLAUDE_TOOL_NOTICE}\n\nIn this session the Rocket tools are named \
 mcp_{ROCKET_MCP_SERVER_NAME}_<tool>, for example mcp_{ROCKET_MCP_SERVER_NAME}_propose_changes.\n",
@@ -170,6 +226,7 @@ fn generic_plan(input: &PlanInput<'_>) -> SessionPlan {
 mod tests {
     use super::*;
     use crate::agent_isolation::isolation_meta;
+    use rocket_acp::ReasoningLevel;
 
     fn input(kind: AgentKind) -> PlanInput<'static> {
         PlanInput {
@@ -178,6 +235,8 @@ mod tests {
             cwd: "/scratch/cwd",
             config_dir: "/scratch/config",
             instructions: "Be the workspace assistant.",
+            reasoning: ReasoningLevel::High,
+            model: None,
         }
     }
 
@@ -229,6 +288,8 @@ mod tests {
             cwd: "/scratch/cwd",
             config_dir: "/scratch/config",
             instructions: "Be the workspace assistant.",
+            reasoning: ReasoningLevel::High,
+            model: None,
         }
     }
 
@@ -315,6 +376,111 @@ mod tests {
             "the reminder stays short"
         );
         assert_eq!(plan.files.len(), 2);
+    }
+
+    fn gemini_with(reasoning: ReasoningLevel, model: Option<&str>) -> SessionPlan {
+        session_plan(&PlanInput {
+            kind: AgentKind::Gemini,
+            config_args: &[],
+            cwd: "/scratch/cwd",
+            config_dir: "/scratch/config",
+            instructions: "Be the workspace assistant.",
+            reasoning,
+            model,
+        })
+    }
+
+    fn gemini_settings(plan: &SessionPlan) -> serde_json::Value {
+        serde_json::from_str(&file(plan, "config/.gemini/settings.json").contents)
+            .expect("settings are JSON")
+    }
+
+    fn thinking_of(settings: &serde_json::Value, model: &str) -> serde_json::Value {
+        settings["modelConfigs"]["overrides"]
+            .as_array()
+            .expect("overrides list")
+            .iter()
+            .find(|o| o["match"]["model"] == model)
+            .unwrap_or_else(|| panic!("no override for {model}"))["modelConfig"]
+            ["generateContentConfig"]["thinkingConfig"]
+            .clone()
+    }
+
+    #[test]
+    fn gemini_thinking_follows_the_reasoning_level_per_model_family() {
+        let high = gemini_settings(&gemini_with(ReasoningLevel::High, None));
+        assert_eq!(
+            thinking_of(&high, "gemini-3-pro-preview")["thinkingLevel"],
+            "HIGH"
+        );
+        assert_eq!(
+            thinking_of(&high, "gemini-2.5-pro")["thinkingBudget"],
+            24576
+        );
+
+        let medium = gemini_settings(&gemini_with(ReasoningLevel::Medium, None));
+        assert_eq!(
+            thinking_of(&medium, "gemini-3-flash-preview")["thinkingLevel"],
+            "HIGH"
+        );
+        assert_eq!(
+            thinking_of(&medium, "gemini-2.5-flash")["thinkingBudget"],
+            8192
+        );
+
+        let low = gemini_settings(&gemini_with(ReasoningLevel::Low, None));
+        assert_eq!(
+            thinking_of(&low, "gemini-3-pro-preview")["thinkingLevel"],
+            "LOW"
+        );
+        assert_eq!(thinking_of(&low, "gemini-2.5-pro")["thinkingBudget"], 1024);
+    }
+
+    #[test]
+    fn every_gemini_override_keeps_thoughts_on() {
+        for level in [
+            ReasoningLevel::Low,
+            ReasoningLevel::Medium,
+            ReasoningLevel::High,
+        ] {
+            let settings = gemini_settings(&gemini_with(level, None));
+            let overrides = settings["modelConfigs"]["overrides"]
+                .as_array()
+                .expect("overrides");
+            assert!(!overrides.is_empty());
+            for entry in overrides {
+                assert_eq!(
+                    entry["modelConfig"]["generateContentConfig"]["thinkingConfig"]
+                        ["includeThoughts"],
+                    true,
+                    "{entry}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pinned_gemini_model_is_written_and_no_model_means_no_key() {
+        let pinned = gemini_settings(&gemini_with(ReasoningLevel::High, Some("gemini-2.5-pro")));
+        assert_eq!(pinned["model"]["name"], "gemini-2.5-pro");
+        let free = gemini_settings(&gemini_with(ReasoningLevel::High, None));
+        assert!(free.get("model").is_none(), "{free}");
+    }
+
+    #[test]
+    fn the_reasoning_level_does_not_change_the_claude_plan() {
+        let claude = |reasoning| {
+            session_plan(&PlanInput {
+                kind: AgentKind::Claude,
+                config_args: &[],
+                cwd: "/scratch/cwd",
+                config_dir: "/scratch/config",
+                instructions: "Be the workspace assistant.",
+                reasoning,
+                model: None,
+            })
+        };
+        assert_eq!(claude(ReasoningLevel::Low), claude(ReasoningLevel::High));
     }
 
     #[test]

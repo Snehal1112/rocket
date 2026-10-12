@@ -107,6 +107,37 @@ fn model_to_apply<'a>(options: &[ConfigOption], requested: Option<&'a str>) -> O
     (offered && option.current_value != requested).then_some(requested)
 }
 
+/// The ACP config option id the adapter uses for the effort (thinking) level.
+const EFFORT_CONFIG_ID: &str = "effort";
+
+/// The effort value that matches a reasoning level.
+fn effort_value(level: rocket_acp::ReasoningLevel) -> &'static str {
+    match level {
+        rocket_acp::ReasoningLevel::Low => "low",
+        rocket_acp::ReasoningLevel::Medium => "medium",
+        rocket_acp::ReasoningLevel::High => "high",
+    }
+}
+
+/// The effort value to send right after start, or `None` when nothing should
+/// be sent: the agent has no `effort` option (a model without effort
+/// support, or an agent that does not offer one), the wanted value is not
+/// among its choices, or it is already current. The user's remembered choice
+/// wins when the option still offers it. Otherwise the configured level
+/// decides.
+fn effort_to_apply(
+    options: &[ConfigOption],
+    requested: Option<&str>,
+    level: rocket_acp::ReasoningLevel,
+) -> Option<String> {
+    let option = options.iter().find(|o| o.id == EFFORT_CONFIG_ID)?;
+    let offered = |value: &str| option.choices.iter().any(|choice| choice.value == value);
+    let wanted = requested
+        .filter(|value| offered(value))
+        .unwrap_or_else(|| effort_value(level));
+    (offered(wanted) && option.current_value != wanted).then(|| wanted.to_string())
+}
+
 /// Starts the workspace assistant for the active workspace. The frontend
 /// sends no path: every tool resolves the active workspace itself.
 #[tauri::command]
@@ -115,6 +146,7 @@ pub async fn start_workspace_assistant(
     agent_config_id: String,
     mode: AssistantMode,
     model: Option<String>,
+    effort: Option<String>,
     app_handle: tauri::AppHandle,
     registry: State<'_, Arc<McpServerRegistry>>,
     mcp_tool_svc: State<'_, Arc<McpToolService>>,
@@ -126,6 +158,7 @@ pub async fn start_workspace_assistant(
         agent_config_id,
         mode,
         model,
+        effort,
         app_handle,
         &registry,
         &mcp_tool_svc,
@@ -150,6 +183,7 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
     agent_config_id: String,
     mode: AssistantMode,
     model: Option<String>,
+    effort: Option<String>,
     app_handle: tauri::AppHandle<R>,
     registry: &McpServerRegistry,
     mcp_tool_svc: &McpToolService,
@@ -174,6 +208,8 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
         cwd: &cwd,
         config_dir: &config_dir,
         instructions: WORKSPACE_ASSISTANT_INSTRUCTIONS,
+        reasoning: config.tuning.reasoning,
+        model: config.tuning.model.as_deref(),
     });
     scratch.write_files(&plan.files).map_err(|e| {
         DomainError::Internal(format!("failed to write the agent scratch files: {e}"))
@@ -246,6 +282,18 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
             config_options = updated;
         }
     }
+    // Effort comes after the model, because a model change can add or remove
+    // the effort option. A failed change keeps the agent's default.
+    if let Some(value) =
+        effort_to_apply(&config_options, effort.as_deref(), config.tuning.reasoning)
+    {
+        if let Ok(updated) = svc
+            .set_config_option(&info.session_id, EFFORT_CONFIG_ID, &value)
+            .await
+        {
+            config_options = updated;
+        }
+    }
 
     Ok(AgentSessionStartedDto {
         session_id: info.session_id,
@@ -288,6 +336,73 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn effort_option(current: &str, choices: &[&str]) -> ConfigOption {
+        ConfigOption {
+            id: EFFORT_CONFIG_ID.to_string(),
+            name: "Effort".to_string(),
+            category: Some("thought_level".to_string()),
+            current_value: current.to_string(),
+            choices: choices
+                .iter()
+                .map(|value| ConfigChoice {
+                    value: value.to_string(),
+                    name: value.to_string(),
+                    description: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn effort_follows_the_configured_level_when_the_agent_offers_it() {
+        let options = vec![effort_option("medium", &["low", "medium", "high", "max"])];
+        assert_eq!(
+            effort_to_apply(&options, None, rocket_acp::ReasoningLevel::High).as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            effort_to_apply(&options, None, rocket_acp::ReasoningLevel::Low).as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            effort_to_apply(&options, None, rocket_acp::ReasoningLevel::Medium),
+            None,
+            "already current"
+        );
+    }
+
+    #[test]
+    fn a_remembered_effort_beats_the_default_and_falls_back_when_not_offered() {
+        let options = vec![effort_option("medium", &["low", "medium", "high", "max"])];
+        assert_eq!(
+            effort_to_apply(&options, Some("max"), rocket_acp::ReasoningLevel::High).as_deref(),
+            Some("max")
+        );
+        assert_eq!(
+            effort_to_apply(&options, Some("xhigh"), rocket_acp::ReasoningLevel::High).as_deref(),
+            Some("high"),
+            "a remembered value the option no longer offers falls back to the level"
+        );
+    }
+
+    #[test]
+    fn no_effort_is_sent_when_the_agent_has_no_effort_option_or_no_matching_value() {
+        assert_eq!(
+            effort_to_apply(&[], None, rocket_acp::ReasoningLevel::High),
+            None
+        );
+        let only_model = vec![model_option("default", &["default"])];
+        assert_eq!(
+            effort_to_apply(&only_model, None, rocket_acp::ReasoningLevel::High),
+            None
+        );
+        let no_high = vec![effort_option("low", &["low", "default"])];
+        assert_eq!(
+            effort_to_apply(&no_high, None, rocket_acp::ReasoningLevel::High),
+            None
+        );
     }
 
     #[test]

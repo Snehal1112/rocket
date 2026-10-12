@@ -354,6 +354,7 @@ async fn start(
         "agent-1".to_string(),
         AssistantMode::Edit,
         None,
+        None,
         fx.app_handle.clone(),
         &fx.registry,
         &fx.mcp_tool_svc,

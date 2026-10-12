@@ -1046,6 +1046,8 @@ mod tests {
             cwd: "/tmp",
             config_dir: "/scratch/config",
             instructions: "rocket",
+            reasoning: rocket_acp::ReasoningLevel::High,
+            model: None,
         })
     }
 
@@ -2349,6 +2351,8 @@ mod tests {
             cwd: "/tmp/scratch-cwd",
             config_dir: "/tmp/scratch-config",
             instructions: "rocket",
+            reasoning: rocket_acp::ReasoningLevel::High,
+            model: None,
         });
 
         let info = service
