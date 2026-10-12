@@ -124,6 +124,73 @@ done
 grep -qxF 'DECISION: APPROVE' "$agents/factory-approver.md" && grep -qxF 'DECISION: ESCALATE' "$agents/factory-approver.md" \
   && pass "agent approver: decision lines" || fail "agent approver: decision lines"
 
+# ---- factory-ctl ----
+ctl="$factory/factory-ctl"
+fr="$tmp/fr"
+git init -q -b main "$fr"
+git -C "$fr" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+export FACTORY_ROOT="$fr"
+board="$fr/.superpowers/factory/board.json"
+
+name="$(python3 "$ctl" new-job "Fix the import bug" --date 2026-10-13)"
+check "ctl: new-job names the folder with the date" test "$name" = "2026-10-13-001-fix-the-import-bug"
+check "ctl: new-job creates the ledger" test -f "$fr/.superpowers/sdd/$name/progress.md"
+name2="$(python3 "$ctl" new-job "Second one" --date 2026-10-13)"
+check "ctl: second job gets id 002" test "$name2" = "2026-10-13-002-second-one"
+name3="$(python3 "$ctl" new-job "Third one" --date 2026-10-13)"
+
+python3 "$ctl" set-stage 1 build --round 1 --review security=pass --review ux=skipped --worktree /w --builder-id agent-9 >/dev/null
+check "ctl: set-stage stores stage, round, reviews and ids" \
+  jq -e '.jobs[0] | select(.stage=="build" and .round==1 and .reviews.security=="pass" and .reviews.ux=="skipped" and .builder_id=="agent-9" and .worktree=="/w")' "$board"
+check "ctl: set-stage rejects an unknown stage" bash -c "! python3 '$ctl' set-stage 1 nonsense"
+check "ctl: set-stage rejects an unknown review state" bash -c "! python3 '$ctl' set-stage 1 build --review code=maybe"
+before="$(cat "$board")"
+check "ctl: a non-numeric job id fails" bash -c "! python3 '$ctl' set-stage abc build"
+check "ctl: an unknown job id fails" bash -c "! python3 '$ctl' set-stage 99 build"
+check "ctl: failed calls leave the board unchanged" test "$before" = "$(cat "$board")"
+python3 "$ctl" set-stage 1 review --reset-reviews >/dev/null
+check "ctl: --reset-reviews sets every review to pending" \
+  jq -e '.jobs[0].reviews | [.security,.ux,.ui,.code] | all(. == "pending")' "$board"
+
+python3 "$ctl" ledger 1 "Task 1: dispatched (BASE abc, opus)" >/dev/null
+check "ctl: ledger appends a line" grep -q '^Task 1: dispatched' "$fr/.superpowers/sdd/$name/progress.md"
+
+plan="$fr/.superpowers/sdd/$name/plan.md"
+ledger="$fr/.superpowers/sdd/$name/progress.md"
+printf '%s\n' '# Plan' '- [ ] Task 1: first' '- [ ] Task 2: second' 'text - [ ] Task 3: not a task line' >"$plan"
+python3 "$ctl" tick-plan 1 --merge abc123 >/dev/null
+check "ctl: tick-plan checks every task line" \
+  bash -c "grep -q '^- \[x\] Task 1: first' '$plan' && grep -q '^- \[x\] Task 2: second' '$plan'"
+check "ctl: tick-plan leaves other text alone" grep -q 'text - \[ \] Task 3' "$plan"
+check "ctl: tick-plan writes ledger lines" grep -q '^Task 2: complete (merge abc123)' "$ledger"
+python3 "$ctl" tick-plan 1 --merge abc123 >/dev/null
+check "ctl: tick-plan twice does not duplicate ledger lines" test "$(grep -c '^Task 1: complete' "$ledger")" -eq 1
+
+git -C "$fr" switch -q -c factory/001-fix-the-import-bug
+git -C "$fr" -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
+head="$(git -C "$fr" rev-parse HEAD)"
+base="$(git -C "$fr" rev-parse main)"
+python3 "$ctl" set-stage 1 approve --base "$base" --head "$head" >/dev/null
+check "ctl: is-merged says no before the merge" bash -c "! python3 '$ctl' is-merged 1"
+git -C "$fr" switch -q main
+git -C "$fr" -c user.email=t@t -c user.name=t merge -q --no-ff -m merge factory/001-fix-the-import-bug
+check "ctl: is-merged says yes after a manual merge" python3 "$ctl" is-merged 1
+git -C "$fr" branch -q -D factory/001-fix-the-import-bug
+check "ctl: is-merged still works after the branch is deleted" python3 "$ctl" is-merged 1
+python3 "$ctl" set-stage 2 approve --base "$base" --head "$base" >/dev/null
+check "ctl: is-merged refuses a job with no commits" bash -c "! python3 '$ctl' is-merged 2"
+check "ctl: is-merged refuses a job with no recorded head" bash -c "! python3 '$ctl' is-merged 3"
+check "ctl: status lists every job" test "$(python3 "$ctl" status | wc -l)" -eq 3
+unset FACTORY_ROOT
+
+# ---- /factory command ----
+cmd="$repo/.claude/commands/factory.md"
+for word in 'new-job' 'set-stage' 'tick-plan' 'is-merged' 'status' 'next' 'approve' 'rework' \
+  'factory-spec-writer' 'factory-builder' 'factory-security-reviewer' 'factory-ux-reviewer' \
+  'factory-ui-reviewer' 'factory-code-reviewer' 'factory-approver' 'no VERDICT line' 'main busy'; do
+  grep -qF -- "$word" "$cmd" && pass "command mentions: $word" || fail "command mentions: $word"
+done
+
 # ---- summary ----
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; fi
 exit $((fails > 0))
