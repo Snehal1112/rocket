@@ -141,7 +141,7 @@ pub struct MaskedBody {
 }
 
 /// The full definition of one HTTP request, with credentials masked.
-/// Scripts are returned in full.
+/// Scripts and docs are returned in full.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct MaskedRequest {
     pub path: String,
@@ -157,6 +157,9 @@ pub struct MaskedRequest {
     pub pre_request_script: Option<String>,
     pub post_response_script: Option<String>,
     pub tests: Option<String>,
+    /// The request's documentation text, as stored. Typed docs lose their
+    /// content type here: the agent only needs the text.
+    pub docs: Option<String>,
 }
 
 impl MaskedRequest {
@@ -178,6 +181,11 @@ impl MaskedRequest {
             pre_request_script: request.pre_request_script.clone(),
             post_response_script: request.post_response_script.clone(),
             tests: request.tests.clone(),
+            docs: request
+                .docs
+                .as_ref()
+                .and_then(|docs| docs.content())
+                .map(str::to_string),
         }
     }
 }
@@ -1109,6 +1117,28 @@ mod tests {
         };
         let expected = format!("client_secret={REDACTED}&grant_type=client_credentials");
         assert_eq!(mask_body(&encoded).content.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn a_request_view_carries_the_docs_text_in_every_documentation_shape() {
+        let mut request = Request::new("Login", HttpMethod::Post, "https://api.test/login");
+
+        request.docs = Some(rocket_shared::Documentation::text("# Login\nReturns a token."));
+        let view = MaskedRequest::from_request("auth/login.yml", &request);
+        assert_eq!(view.docs.as_deref(), Some("# Login\nReturns a token."));
+
+        request.docs = Some(rocket_shared::Documentation::typed(
+            "Typed *docs*",
+            "text/markdown",
+        ));
+        let view = MaskedRequest::from_request("auth/login.yml", &request);
+        assert_eq!(view.docs.as_deref(), Some("Typed *docs*"));
+
+        request.docs = None;
+        let view = MaskedRequest::from_request("auth/login.yml", &request);
+        assert_eq!(view.docs, None);
+        let json = serde_json::to_value(&view).expect("json");
+        assert!(json["docs"].is_null(), "{json}");
     }
 
     #[test]

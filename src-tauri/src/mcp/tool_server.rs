@@ -932,7 +932,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 
     #[tool(
-        description = "Read one request's full definition (URL, headers, params, body, auth, scripts). Literal credentials are masked; {{variable}} references are kept."
+        description = "Read one request's full definition (URL, headers, params, body, auth, scripts and docs). Literal credentials are masked; {{variable}} references are kept."
     )]
     async fn get_request(
         &self,
@@ -1264,6 +1264,21 @@ mod tests {
         assert!(description.contains("Nothing is written until the user accepts"));
         assert!(description.contains("never auth"));
         assert!(description.contains("Not available in Ask mode"));
+    }
+
+    #[test]
+    fn the_get_request_description_says_it_returns_the_docs() {
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
+        let tool = server
+            .tool_router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "get_request")
+            .expect("get_request is registered");
+        let description = tool.description.as_deref().unwrap_or_default();
+        assert!(description.contains("docs"), "{description}");
+        assert!(description.contains("masked"), "it keeps its masking note: {description}");
     }
 
     #[test]
