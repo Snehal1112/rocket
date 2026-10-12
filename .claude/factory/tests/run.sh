@@ -165,6 +165,13 @@ check "ctl: tick-plan leaves other text alone" grep -q 'text - \[ \] Task 3' "$p
 check "ctl: tick-plan writes ledger lines" grep -q '^Task 2: complete (merge abc123)' "$ledger"
 python3 "$ctl" tick-plan 1 --merge abc123 >/dev/null
 check "ctl: tick-plan twice does not duplicate ledger lines" test "$(grep -c '^Task 1: complete' "$ledger")" -eq 1
+check "ctl: tick-plan twice does not duplicate Task 2 either" test "$(grep -c '^Task 2: complete' "$ledger")" -eq 1
+printf '%s\n' '# SDD ledger' >"$ledger"
+printf '%s\n' '# Plan' '- [x] Task 1: first' '- [x] Task 2: second' >"$plan"
+python3 "$ctl" tick-plan 1 --merge def456 >/dev/null
+python3 "$ctl" tick-plan 1 --merge def456 >/dev/null
+check "ctl: tick-plan backfills the ledger for a hand-ticked plan" \
+  bash -c "test \"\$(grep -c '^Task 1: complete' '$ledger')\" -eq 1 && test \"\$(grep -c '^Task 2: complete' '$ledger')\" -eq 1"
 
 git -C "$fr" switch -q -c factory/001-fix-the-import-bug
 git -C "$fr" -c user.email=t@t -c user.name=t commit -q --allow-empty -m work

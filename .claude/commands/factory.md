@@ -33,11 +33,11 @@ Take the oldest job whose stage is not `merged` or `needs-human` (see `ctl statu
 1. First run (no builder id on the board): dispatch `factory-builder` with the absolute job directory, `plan.md` path and the job branch name. Resume (builder id set): use SendMessage to that builder with the path of `changes-r<round>.md` or `rework-note.md`.
 2. `ctl ledger <id> "Task <n>: dispatched (BASE <sha>, opus, agent <id>)"` for the first run.
 3. Read the last four lines of the reply: `WORKTREE:`, `BRANCH:`, `BASE:`, `HEAD:`. If any is missing, `ctl set-stage <id> needs-human --reason "builder gave no handoff lines"` and stop.
-4. `ctl set-stage <id> review --worktree <path> --builder-id <agent id> --base <sha> --head <sha> --reset-reviews`.
+4. `ctl set-stage <id> review --worktree <path> --builder-id <agent id> --base <sha> --head <sha> --reset-reviews`, then `ctl ledger <id> "Head round <round>: <sha>"` with the new head sha.
 
 ### stage `review`
 
-1. Write the diff: for round 0 use `git -C <worktree> diff <base>..<head>`, for later rounds only the fix commits since the previous head. Save it as `review-<base7>..<head7>.diff` in the job directory.
+1. Write the diff: for round 0 use `git -C <worktree> diff <base>..<head>`, for later rounds only the fix commits since the previous head, using `git -C <worktree> diff <previous head>..<head>`. The previous head is the sha on the last `Head round` line of the job's `progress.md`. Save it as `review-<base7>..<head7>.diff` in the job directory.
 2. UX and UI reviewers run only if the diff has a line starting `diff --git a/src/`. Otherwise `ctl set-stage <id> review --review ux=skipped --review ui=skipped`.
 3. Mark the reviewers you dispatch with `--review <role>=running`, then dispatch them in one message, in parallel: `factory-security-reviewer`, `factory-ux-reviewer`, `factory-ui-reviewer`, `factory-code-reviewer`. Give each the diff path, `spec.md` path and worktree path. Reviewers never run cargo or yarn.
 4. Save each full reply as `review-<role>-r<round>.md`. The verdict is the last line. A reply with no `VERDICT:` line, or any line other than the two allowed values, counts as CHANGES with the finding "no VERDICT line". Never treat it as a pass.
@@ -63,7 +63,7 @@ Only for a job in `needs-human`. Save the note as `rework-note.md` in the job di
 
 ## Merge step
 
-1. `ctl is-merged <id>`. If it prints `merged <sha>`, the user already merged it: skip to step 4 with that sha. If the job has no commits or no recorded head, stop and tell the user.
+1. `ctl is-merged <id>`. Exit 0 with `merged <sha>` means the user already merged it: skip to step 4 with that sha. Output `not merged` means continue to step 2. Any other output (the "no commits" or "no recorded head" error, printed on stderr) means stop and tell the user.
 2. The main checkout must be on `main` with no tracked changes (`git branch --show-current`, `git status --porcelain --untracked-files=no`). If not, `ctl set-stage <id> needs-human --reason "main busy"` and stop. Tell the user they can merge by hand and run `/factory approve <id>` again.
 3. `git merge --no-ff <branch> -m "chore(factory): merge job <id> <slug>"`. On a conflict run `git merge --abort`, then `ctl set-stage <id> needs-human --reason "merge conflict"` and stop. Never push. Never rebase or rewrite history.
 4. `ctl tick-plan <id> --merge <sha of main HEAD>`, then `ctl set-stage <id> merged`.

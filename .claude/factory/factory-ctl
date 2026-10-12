@@ -166,22 +166,38 @@ def cmd_tick_plan(args):
             text = handle.read()
     except FileNotFoundError:
         die("plan.md is missing")
+    ledger_path = os.path.join(base, "progress.md")
+    try:
+        with open(ledger_path, encoding="utf-8") as handle:
+            ledger = handle.read()
+    except FileNotFoundError:
+        ledger = ""
     ticked = []
 
-    def tick(match):
-        ticked.append(match.group(2))
-        return f"- [x] {match.group(1)}"
-
-    updated = re.sub(r"^- \[ \] (Task (\d+):)", tick, text, flags=re.MULTILINE)
-    if not ticked:
+    updated = re.sub(r"^- \[ \] ((?:Task (\d+):).*)$", lambda m: _tick(m, ticked), text, flags=re.MULTILINE)
+    numbers = re.findall(r"^- \[[ x]\] Task (\d+):", updated, flags=re.MULTILINE)
+    missing = [
+        n for n in numbers
+        if not re.search(rf"^Task {n}: complete", ledger, flags=re.MULTILINE)
+    ]
+    if missing:
+        with open(ledger_path, "a", encoding="utf-8") as handle:
+            for number in missing:
+                handle.write(f"Task {number}: complete (merge {args.merge})\n")
+    if ticked:
+        fd, tmp = tempfile.mkstemp(dir=base, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+        os.replace(tmp, plan_path)
+    if not ticked and not missing:
         print("nothing to tick")
         return
-    with open(plan_path, "w", encoding="utf-8") as handle:
-        handle.write(updated)
-    with open(os.path.join(base, "progress.md"), "a", encoding="utf-8") as handle:
-        for number in ticked:
-            handle.write(f"Task {number}: complete (merge {args.merge})\n")
-    print("ticked task " + ", ".join(ticked))
+    print("ticked task " + ", ".join(missing or ticked))
+
+
+def _tick(match, ticked):
+    ticked.append(match.group(2))
+    return f"- [x] {match.group(1)}"
 
 
 def cmd_is_merged(args):
