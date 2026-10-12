@@ -12,16 +12,20 @@ export function ReasoningBlock() {
   if (!reasoning) return null;
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className='rounded-md border bg-muted/30'>
+    <Collapsible open={open} onOpenChange={setOpen} className='min-w-0'>
       <CollapsibleTrigger asChild>
-        <Button variant='ghost' size='sm' className='h-7 w-full justify-start gap-1 px-2 text-xs'>
+        <Button
+          variant='ghost'
+          size='sm'
+          className='h-7 justify-start gap-1.5 px-1.5 text-xs font-normal text-muted-foreground'
+        >
           <Chevron className='h-3 w-3' />
           <Brain className='h-3 w-3' />
           {running ? 'Reasoning (live)' : 'Reasoning'}
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className='max-h-48 overflow-auto whitespace-pre-wrap px-2 pb-2 text-xs text-muted-foreground'>
+        <p className='max-h-48 overflow-auto whitespace-pre-wrap py-1 pl-6 text-xs text-muted-foreground'>
           {reasoning}
         </p>
       </CollapsibleContent>

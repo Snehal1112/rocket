@@ -1,46 +1,16 @@
-import { Check, Loader2, X } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { buildTimeline } from '@/lib/assistant/timeline';
-import { cn } from '@/lib/utils';
-import {
-  type AssistantMessage,
-  type ToolActivityStatus,
-  useAssistantStore,
-} from '@/stores/assistant-store';
+import { buildTimeline, groupToolRuns } from '@/lib/assistant/timeline';
+import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
 import { AssistantProposalCard } from './AssistantProposalCard';
 import { ReasoningBlock } from './ReasoningBlock';
+import { ToolRun } from './ToolRun';
 import { WaitingNotice } from './WaitingNotice';
 
 /** How close to the bottom, in pixels, still counts as following the chat. */
 const PIN_THRESHOLD_PX = 48;
-
-const TOOL_STATUS_LABEL: Record<ToolActivityStatus, string> = {
-  pending: 'waiting',
-  in_progress: 'running',
-  completed: 'done',
-  failed: 'failed',
-};
-
-function ToolActivityLine({ title, status }: { title: string; status: ToolActivityStatus }) {
-  const Icon = status === 'completed' ? Check : status === 'failed' ? X : Loader2;
-  const busy = status === 'pending' || status === 'in_progress';
-  return (
-    <div className='flex items-center gap-1.5 text-xs text-muted-foreground'>
-      <Icon
-        className={cn(
-          'h-3 w-3 shrink-0',
-          busy && 'animate-spin',
-          status === 'failed' && 'text-destructive',
-        )}
-        aria-hidden='true'
-      />
-      <span className='truncate'>{title}</span>
-      <span className='sr-only'>{TOOL_STATUS_LABEL[status]}</span>
-    </div>
-  );
-}
 
 export function ChatItem({
   message,
@@ -52,9 +22,9 @@ export function ChatItem({
   switch (message.kind) {
     case 'user':
       return (
-        <div className='text-sm'>
-          <div className='mb-1 text-xs font-semibold text-muted-foreground'>You</div>
-          <p className='whitespace-pre-wrap'>{message.text}</p>
+        <div className='min-w-0 whitespace-pre-wrap break-words rounded-lg bg-muted/60 px-3 py-2 text-sm'>
+          <span className='sr-only'>You: </span>
+          {message.text}
         </div>
       );
     case 'agent': {
@@ -63,8 +33,8 @@ export function ChatItem({
       // A reply segment that got no text before a tool call adds nothing.
       if (!message.text && !message.error && !waiting) return null;
       return (
-        <div className='text-sm'>
-          <div className='mb-1 text-xs font-semibold text-muted-foreground'>Assistant</div>
+        <div className='min-w-0 break-words text-sm leading-relaxed'>
+          <span className='sr-only'>Assistant: </span>
           {message.text && <MarkdownRenderer restricted>{message.text}</MarkdownRenderer>}
           {waiting && (
             <Loader2
@@ -77,7 +47,8 @@ export function ChatItem({
       );
     }
     case 'tool':
-      return <ToolActivityLine title={message.title} status={message.status} />;
+      // A single tool message is shown as a run of one.
+      return <ToolRun tools={[message]} />;
     case 'notice':
       return <p className='text-xs italic text-muted-foreground'>{message.text}</p>;
   }
@@ -92,10 +63,12 @@ export function AssistantChatView() {
   const pending = useMemo(() => proposals.filter((p) => p.status === 'pending'), [proposals]);
   const timeline = useMemo(
     () =>
-      buildTimeline(
-        messages,
-        proposals.filter((p) => p.status !== 'pending'),
-        anchors,
+      groupToolRuns(
+        buildTimeline(
+          messages,
+          proposals.filter((p) => p.status !== 'pending'),
+          anchors,
+        ),
       ),
     [messages, proposals, anchors],
   );
@@ -139,18 +112,22 @@ export function AssistantChatView() {
   }
   return (
     <ScrollArea className='min-h-0 flex-1'>
-      <div className='flex flex-col gap-3 p-3'>
-        {timeline.map((entry) =>
-          entry.type === 'message' ? (
+      <div className='flex min-w-0 flex-col gap-5 px-4 py-4'>
+        {timeline.map((entry) => {
+          if (entry.type === 'tools') return <ToolRun key={entry.id} tools={entry.tools} />;
+          if (entry.type === 'proposal') {
+            return (
+              <AssistantProposalCard key={entry.proposal.id} proposal={entry.proposal} inline />
+            );
+          }
+          return (
             <ChatItem
               key={entry.message.id}
               message={entry.message}
               isLastStreaming={entry.message.id === lastStreamingId}
             />
-          ) : (
-            <AssistantProposalCard key={entry.proposal.id} proposal={entry.proposal} inline />
-          ),
-        )}
+          );
+        })}
         <ReasoningBlock />
         <WaitingNotice />
         {pending.length > 0 && (

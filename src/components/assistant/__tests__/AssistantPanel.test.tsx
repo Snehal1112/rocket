@@ -131,7 +131,7 @@ describe('AssistantPanel', () => {
     expect(alert).toHaveClass('whitespace-pre-wrap', 'overflow-y-auto', 'max-h-40');
   });
 
-  it('renders replies and one muted line per tool call', () => {
+  it('renders replies and one collapsed summary per tool run', () => {
     activate();
     store().appendUserMessage('Why does login fail?');
     store().appendChunk('s1', 'Checking.');
@@ -143,8 +143,8 @@ describe('AssistantPanel', () => {
     render(<AssistantPanel />);
     expect(screen.getByText('Why does login fail?')).toBeInTheDocument();
     expect(screen.getByText('Checking.')).toBeInTheDocument();
-    expect(screen.getByText('Reading GET /orders')).toBeInTheDocument();
-    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getByText('Working: Reading GET /orders')).toBeInTheDocument();
+    expect(screen.queryByText('running')).toBeNull();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
   });
 

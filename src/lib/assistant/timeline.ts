@@ -1,5 +1,7 @@
 import type { AgentProposal } from '@/lib/tauri-api';
-import type { AssistantMessage } from '@/stores/assistant-store';
+import type { AssistantMessage, ToolActivityMessage } from '@/stores/assistant-store';
+
+export type ToolMessage = ToolActivityMessage;
 
 export type TimelineEntry =
   | { type: 'message'; message: AssistantMessage }
@@ -32,4 +34,24 @@ export function buildTimeline(
   }
   entries.push(...place('__end__'));
   return entries;
+}
+
+export type GroupedEntry = TimelineEntry | { type: 'tools'; id: string; tools: ToolMessage[] };
+
+/** Folds each run of consecutive tool messages into one entry. */
+export function groupToolRuns(entries: TimelineEntry[]): GroupedEntry[] {
+  const out: GroupedEntry[] = [];
+  for (const entry of entries) {
+    if (entry.type === 'message' && entry.message.kind === 'tool') {
+      const last = out[out.length - 1];
+      if (last?.type === 'tools') {
+        last.tools.push(entry.message);
+      } else {
+        out.push({ type: 'tools', id: entry.message.id, tools: [entry.message] });
+      }
+    } else {
+      out.push(entry);
+    }
+  }
+  return out;
 }

@@ -15,10 +15,12 @@ import {
   canContinueHere,
   continueConversation,
 } from '@/lib/assistant/assistant-session';
+import { groupToolRuns, type TimelineEntry, type ToolMessage } from '@/lib/assistant/timeline';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import type { AgentProposalStatus, ConversationRecord, StoredMessage } from '@/lib/tauri-api';
 import type { AssistantMessage } from '@/stores/assistant-store';
 import { ChatItem } from './AssistantChatView';
+import { ToolRun } from './ToolRun';
 
 const PROPOSAL_STATUS_LABEL: Record<AgentProposalStatus, string> = {
   pending: 'not decided',
@@ -43,6 +45,39 @@ export function toChatMessage(message: StoredMessage, index: number): AssistantM
     case 'proposal':
       return undefined;
   }
+}
+
+type StoredItem =
+  | { type: 'tools'; id: string; tools: ToolMessage[] }
+  | { type: 'line'; key: string; text: string }
+  | { type: 'chat'; key: string; chat: AssistantMessage };
+
+/** Stored messages as replay items, with tool runs folded like the live chat. */
+function groupStored(messages: StoredMessage[]): StoredItem[] {
+  const out: StoredItem[] = [];
+  // Tool runs are folded between proposal lines, which are not timeline entries.
+  let segment: TimelineEntry[] = [];
+  const flush = () => {
+    for (const entry of groupToolRuns(segment)) {
+      if (entry.type === 'tools') out.push(entry);
+      else if (entry.type === 'message') {
+        out.push({ type: 'chat', key: entry.message.id, chat: entry.message });
+      }
+    }
+    segment = [];
+  };
+  messages.forEach((message, index) => {
+    if (message.kind === 'proposal') {
+      flush();
+      const text = `Proposal: ${message.summary} (${PROPOSAL_STATUS_LABEL[message.status]})`;
+      out.push({ type: 'line', key: `stored-${index}`, text });
+      return;
+    }
+    const chat = toChatMessage(message, index);
+    if (chat) segment.push({ type: 'message', message: chat });
+  });
+  flush();
+  return out;
 }
 
 export const CONTINUE_HINT =
@@ -139,18 +174,17 @@ export function AssistantConversationView({
         </div>
       </div>
       <ScrollArea className='min-h-0 flex-1'>
-        <div className='flex flex-col gap-3 p-3'>
-          {record.messages.map((message, index) => {
-            const key = `stored-${index}`;
-            if (message.kind === 'proposal') {
+        <div className='flex min-w-0 flex-col gap-5 px-4 py-4'>
+          {groupStored(record.messages).map((item) => {
+            if (item.type === 'tools') return <ToolRun key={item.id} tools={item.tools} />;
+            if (item.type === 'line') {
               return (
-                <p key={key} className='text-xs text-muted-foreground'>
-                  {`Proposal: ${message.summary} (${PROPOSAL_STATUS_LABEL[message.status]})`}
+                <p key={item.key} className='text-xs text-muted-foreground'>
+                  {item.text}
                 </p>
               );
             }
-            const chat = toChatMessage(message, index);
-            return chat ? <ChatItem key={key} message={chat} isLastStreaming={false} /> : null;
+            return <ChatItem key={item.key} message={item.chat} isLastStreaming={false} />;
           })}
         </div>
       </ScrollArea>

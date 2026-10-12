@@ -22,7 +22,7 @@ export function WaitingNotice() {
   const quietFor = Math.floor((now - lastActivityAt) / 1000);
   if (quietFor < QUIET_AFTER_SECONDS) return null;
   return (
-    <p className='flex items-center gap-1 text-xs text-muted-foreground' role='status'>
+    <p className='flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground' role='status'>
       <Clock className='h-3 w-3' />
       Still working: {quietFor}s since the last update. Deep reasoning can take a few minutes. Use
       Stop to cancel.

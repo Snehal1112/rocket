@@ -99,7 +99,7 @@ describe('AssistantHistoryView', () => {
     render(<AssistantHistoryView />);
     await userEvent.click(await screen.findByText('Why does login return 401?'));
     expect(await screen.findByText('The token expired.')).toBeInTheDocument();
-    expect(screen.getByText('get_request: login')).toBeInTheDocument();
+    expect(screen.getByText('Used 1 tool')).toBeInTheDocument();
     expect(screen.getByText('Proposal: Refresh the token (not decided)')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /accept|reject/i })).toBeNull();
     expect(api.getConversation).toHaveBeenCalledWith('c1');
@@ -267,8 +267,10 @@ describe('AssistantHistoryView', () => {
     render(<AssistantHistoryView />);
     await userEvent.click(await screen.findByText('Why does login return 401?'));
     await screen.findByText('The token expired.');
+    // The collapsed tool summary is a toggle, not an action.
     const buttons = screen.getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Back to the history']);
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Back to the history', null]);
+    expect(buttons[1]).toHaveTextContent('Used 1 tool');
     expect(within(document.body).queryByRole('textbox')).toBeNull();
   });
 
