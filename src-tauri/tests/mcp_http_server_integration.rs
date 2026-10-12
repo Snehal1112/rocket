@@ -208,58 +208,38 @@ async fn the_initialize_reply_has_no_sse_priming_event() {
     handle.shutdown();
 }
 
-/// The session manager has its own `sse_retry`, which primes every reply to a
-/// request after `initialize`. Gemini CLI drops such a reply, so `tools/list`
-/// must come back without a priming event too.
+/// Gemini CLI drops a reply that starts with an empty "priming" event, so
+/// `tools/list` must come back as a plain reply. The server is stateless, so
+/// the call needs no `initialize` first and no session id.
 #[tokio::test]
-async fn the_tools_list_reply_has_no_sse_priming_event() {
+async fn the_tools_list_reply_is_plain_json_without_a_session() {
     let (handle, _app_handle, _tmp) = spawn_test_server("session-http-priming-2").await;
-    let client = Client::new();
     let secs = std::time::Duration::from_secs;
 
-    let init = client
+    let list = Client::new()
         .post(mcp_url(handle.port))
         .bearer_auth(&handle.token)
         .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
-        .json(&initialize_body(1))
-        .send()
-        .await
-        .expect("send initialize");
-    let mcp_session_id = init
-        .headers()
-        .get("mcp-session-id")
-        .expect("initialize response carries mcp-session-id")
-        .to_str()
-        .expect("ascii session id")
-        .to_string();
-    let _ = tokio::time::timeout(secs(2), init.bytes()).await;
-
-    let initialized = client
-        .post(mcp_url(handle.port))
-        .bearer_auth(&handle.token)
-        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
-        .header("mcp-session-id", &mcp_session_id)
-        .json(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-        .send()
-        .await
-        .expect("send initialized notification");
-    assert!(initialized.status().is_success());
-
-    let list = client
-        .post(mcp_url(handle.port))
-        .bearer_auth(&handle.token)
-        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
-        .header("mcp-session-id", &mcp_session_id)
         .json(&serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
         .send()
         .await
         .expect("send tools/list");
     assert_eq!(list.status(), reqwest::StatusCode::OK);
+    let content_type = list
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
     let body = tokio::time::timeout(secs(3), list.text())
         .await
         .expect("the tools/list reply ends")
         .expect("read the reply");
 
+    assert!(
+        content_type.starts_with("application/json"),
+        "a plain JSON reply: {content_type}"
+    );
     assert!(!body.contains("retry:"), "no priming event: {body:?}");
     assert!(
         body.contains("propose_changes"),
@@ -524,15 +504,13 @@ async fn real_mcp_client_lists_and_calls_tools_over_http() {
     handle.shutdown();
 }
 
-/// An agent keeps a `GET /mcp` SSE stream open for server-initiated
-/// messages. `shutdown()` must end that stream. Before this was fixed,
-/// graceful shutdown only stopped accepting new connections and then waited
-/// forever for this one to close.
+/// Session mode makes Gemini CLI park one idle GET stream per tool call, so
+/// the server runs stateless: no session id and no standalone stream. A GET
+/// is refused with 405, which Gemini tolerates.
 #[tokio::test]
-async fn shutdown_ends_an_open_sse_stream() {
+async fn the_server_is_stateless_and_offers_no_standalone_stream() {
     let (handle, _app_handle, _tmp) = spawn_test_server("session-http-8").await;
     let client = Client::new();
-    let secs = std::time::Duration::from_secs;
 
     let init = client
         .post(mcp_url(handle.port))
@@ -543,45 +521,19 @@ async fn shutdown_ends_an_open_sse_stream() {
         .await
         .expect("send initialize");
     assert_eq!(init.status(), reqwest::StatusCode::OK);
-    let mcp_session_id = init
-        .headers()
-        .get("mcp-session-id")
-        .expect("initialize response carries mcp-session-id")
-        .to_str()
-        .expect("ascii session id")
-        .to_string();
-    let _ = tokio::time::timeout(secs(2), init.bytes()).await;
+    assert!(
+        init.headers().get("mcp-session-id").is_none(),
+        "a stateless reply carries no session id"
+    );
 
-    let initialized = client
-        .post(mcp_url(handle.port))
-        .bearer_auth(&handle.token)
-        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
-        .header("mcp-session-id", &mcp_session_id)
-        .json(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-        .send()
-        .await
-        .expect("send initialized notification");
-    assert!(initialized.status().is_success());
-
-    let mut sse = client
+    let get = client
         .get(mcp_url(handle.port))
         .bearer_auth(&handle.token)
         .header("accept", "text/event-stream")
-        .header("mcp-session-id", &mcp_session_id)
         .send()
         .await
-        .expect("open standalone SSE stream");
-    assert_eq!(sse.status(), reqwest::StatusCode::OK);
-    // The server sends no priming event, so the stream stays quiet until a
-    // keep-alive ping. Its open status is enough to show it is live.
+        .expect("send GET");
+    assert_eq!(get.status(), reqwest::StatusCode::METHOD_NOT_ALLOWED);
 
     handle.shutdown();
-
-    // Keep-alive pings arrive every 15 s, so a stream that is still open
-    // after 5 s was not ended by shutdown.
-    let ended = tokio::time::timeout(secs(5), async {
-        while let Ok(Some(_)) = sse.chunk().await {}
-    })
-    .await;
-    assert!(ended.is_ok(), "shutdown must end the open SSE stream");
 }

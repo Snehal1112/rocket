@@ -1202,9 +1202,19 @@ pub async fn spawn_mcp_http_server<R: tauri::Runtime>(
     // registers no tool from this server. The config covers the replies to
     // `initialize` and the standalone stream; the session manager has its own
     // setting for the replies to every later request.
+    //
+    // The server also runs stateless with plain JSON replies. In session mode
+    // every reply stream carries event ids, so Gemini's client resumes each
+    // finished reply and parks one more idle GET stream per tool call. Past
+    // 32 of them rmcp warns and churns. Rocket's tools push no notifications,
+    // and the session binding does not depend on the HTTP session, so nothing
+    // needs the stream. A handler that does emit a notification still gets an
+    // SSE reply for that call.
     let config = StreamableHttpServerConfig::default()
         .with_cancellation_token(shutdown.clone())
-        .with_sse_retry(None);
+        .with_sse_retry(None)
+        .with_legacy_session_mode(false)
+        .with_json_response(true);
     let mut session_manager = LocalSessionManager::default();
     session_manager.session_config.sse_retry = None;
     let service = StreamableHttpService::new(
