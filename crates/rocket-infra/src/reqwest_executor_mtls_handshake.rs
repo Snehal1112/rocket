@@ -217,3 +217,42 @@ async fn mutual_tls_in_process_does_not_present_a_certificate_for_another_domain
     );
     assert_eq!(recorded(&seen), None);
 }
+
+/// Sends a GET through a token client from `ReqwestTokenClientProvider`, within 5 seconds.
+async fn send_with_token_client(
+    port: u16,
+    certificates: &[ResolvedClientCertificate],
+) -> Result<u16, String> {
+    use rocket_http::TokenClientProvider;
+    let url = format!("https://127.0.0.1:{port}/token");
+    // The server certificate is self-signed, so verification is off.
+    let client = ReqwestTokenClientProvider::new()
+        .client_for(&url, false, certificates)
+        .map_err(|e| e.to_string())?;
+    tokio::time::timeout(Duration::from_secs(5), client.get(&url).send())
+        .await
+        .expect("token request finishes within 5 seconds")
+        .map(|response| response.status().as_u16())
+        .map_err(|e| e.to_string())
+}
+
+#[tokio::test]
+async fn mutual_tls_in_process_token_client_presents_the_certificate() {
+    let (port, seen) = start_mtls_server().await;
+    let status = send_with_token_client(port, &[p12("127.0.0.1")])
+        .await
+        .expect("token client identity accepted");
+    assert_eq!(status, 200);
+    assert_eq!(recorded(&seen), Some(client_cert_der()));
+}
+
+#[tokio::test]
+async fn mutual_tls_in_process_token_client_without_a_matching_certificate_is_rejected() {
+    let (port, seen) = start_mtls_server().await;
+    let result = send_with_token_client(port, &[p12("other.example.com")]).await;
+    assert!(
+        result.is_err(),
+        "a certificate for another domain must not be sent: {result:?}"
+    );
+    assert_eq!(recorded(&seen), None);
+}
