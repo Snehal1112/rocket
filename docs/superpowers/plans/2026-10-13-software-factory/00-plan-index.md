@@ -21,3 +21,12 @@ Plan 02 starts with a gate: it reads the probe results from plan 01 task 1. If t
 - Ruling: the server polls files (500 ms) and the page polls the API (1 s) instead of using a file-watcher crate, SSE or WebSockets — cost if wrong: up to a second of delay, and a few more requests on localhost.
 - Ruling: the dashboard is plain HTML, CSS and vanilla JavaScript embedded in the Rust binary, not React and TypeScript — cost if wrong: it does not follow the usual frontend stack, but it needs no build step and is not part of the Rocket app.
 - Ruling: agents are attached to jobs by builder id, then worktree path, then stage and start time, because read-only agents run in the main checkout — cost if wrong: if two jobs sit in the same stage, an agent can attach to the older one.
+
+## Probe results
+
+Probed 2026-10-13 with a headless `claude -p --model haiku` run started inside the worktree, because hooks added to `.claude/settings.json` on a branch are not loaded by an already-running session.
+
+- `PostToolUse` inside a subagent carried `agent_id` and `agent_type` (`general-purpose`). The orchestrator's own `PostToolUse` carried neither. `SubagentStart` and `SubagentStop` carried both. Plan 02 can rely on `agent_id` for live tool detail.
+- A haiku subagent reported that a `Skill` tool is in its tool list (the subagent's own statement, so indicative only).
+- The log is written to the main checkout's `.superpowers/factory/events.jsonl`, even when the hook runs inside a worktree.
+- The `SubagentHandback` tool shows up as a `PostToolUse` event with the agent's id. Harmless, but it counts as a tool call in the live view.
