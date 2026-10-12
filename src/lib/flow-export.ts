@@ -27,7 +27,7 @@ const JSON_PAIR = new RegExp(String.raw`("${KEY_NAME}"\s*:\s*")((?:[^"\\]|\\.)*)
 const PARAM = new RegExp(String.raw`(^|[?&;\s])(${KEY_NAME})(=)([^&\s"'#]*)`, 'gi');
 
 const SENSITIVE_HEADER = new RegExp(
-  String.raw`^(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|${KEY_NAME})$`,
+  `^(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|${KEY_NAME})$`,
   'i',
 );
 const SENSITIVE_LABEL = /secret|password|passwd|token|api[\s_-]?key|credential/i;
