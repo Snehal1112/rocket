@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { sendAssistantMessage, stopAssistantTurn } from '@/lib/assistant/assistant-session';
 import { tryChipResource } from '@/lib/assistant/chip-resources';
-import { rememberModel } from '@/lib/assistant/model-memory';
+import { rememberEffort, rememberModel } from '@/lib/assistant/model-memory';
 import {
   appendPromptHistory,
   loadPromptHistory,
@@ -21,7 +21,12 @@ import { selectTurnRunning, useAssistantStore } from '@/stores/assistant-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { ComposerChips } from './ComposerChips';
-import { type AssistantModeValue, ComposerToolbar, MODEL_OPTION_ID } from './ComposerToolbar';
+import {
+  type AssistantModeValue,
+  ComposerToolbar,
+  EFFORT_OPTION_ID,
+  MODEL_OPTION_ID,
+} from './ComposerToolbar';
 import { addChip, type ComposerChip, chipKey, MAX_CHIPS, removeChip } from './chips';
 import { PromptEditor } from './PromptEditor';
 import { matchTrigger } from './prompt-triggers';
@@ -207,6 +212,7 @@ export function Composer() {
       const options = await setAgentConfigOption(sessionId, configId, value);
       setConfigOptions(sessionId, options);
       if (configId === MODEL_OPTION_ID && agentConfigId) rememberModel(agentConfigId, value);
+      if (configId === EFFORT_OPTION_ID && agentConfigId) rememberEffort(agentConfigId, value);
     } catch (err) {
       toast.error(`Could not change the ${configId}: ${String(err)}`);
     } finally {

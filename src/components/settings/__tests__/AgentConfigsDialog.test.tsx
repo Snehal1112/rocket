@@ -615,4 +615,63 @@ describe('AgentConfigsDialog', () => {
     expect(document.body.textContent).not.toContain('RocketVault credential, not');
     expect(document.body.textContent).not.toContain('the vault secret');
   });
+
+  it('shows High as the reasoning level of an agent that has none stored', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    expect(screen.getByRole('radio', { name: /^high/i })).toBeChecked();
+  });
+
+  it('saves a lower reasoning level under tuning and omits the default', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.click(screen.getByRole('radio', { name: /^medium/i }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({
+      tuning: { reasoning: 'medium' },
+    });
+  });
+
+  it('shows a stored reasoning level', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([
+      { ...claude, tuning: { reasoning: 'low' } },
+    ]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    expect(screen.getByRole('radio', { name: /^low/i })).toBeChecked();
+  });
+
+  it('offers a model field for Gemini agents only and saves it under tuning', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([{ ...claude, kind: 'gemini' }]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.type(screen.getByLabelText(/Gemini model/), 'gemini-2.5-pro');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({
+      kind: 'gemini',
+      tuning: { model: 'gemini-2.5-pro' },
+    });
+  });
+
+  it('hides the model field for a Claude agent and refuses a model name with spaces', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    expect(screen.queryByLabelText(/Gemini model/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /^gemini cli/i }));
+    await user.type(screen.getByLabelText(/Gemini model/), 'gemini 2.5');
+    expect(screen.getByRole('alert')).toHaveTextContent(/letters, digits/i);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
 });

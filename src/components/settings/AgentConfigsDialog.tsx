@@ -28,6 +28,7 @@ import {
   type ExternalSecretRef,
   fetchExternalSecretNames,
   hasAgentCredential,
+  type ReasoningLevel,
   setAgentCredential,
 } from '@/lib/tauri-api';
 
@@ -148,6 +149,23 @@ function validateIdleSeconds(text: string): string | null {
   return null;
 }
 
+const MODEL_NAME_PATTERN = /^[A-Za-z0-9._:/-]{1,128}$/;
+
+// An empty field means no pinned model. The backend stays the authority.
+function validateModelName(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  return MODEL_NAME_PATTERN.test(trimmed)
+    ? null
+    : 'Use letters, digits and . _ - : / only, at most 128 characters.';
+}
+
+const REASONING_LEVELS: Array<{ value: ReasoningLevel; label: string; hint: string }> = [
+  { value: 'low', label: 'Low', hint: 'Fast answers, little deliberation.' },
+  { value: 'medium', label: 'Medium', hint: 'Balanced.' },
+  { value: 'high', label: 'High', hint: 'Deepest reasoning. Best for guiding and correcting.' },
+];
+
 const emptyForm = {
   extraEnv: [] as EnvRow[],
   id: '',
@@ -157,6 +175,8 @@ const emptyForm = {
   args: '',
   workingDir: '',
   idleTimeoutSecs: '',
+  reasoning: 'high' as ReasoningLevel,
+  model: '',
   credentialEnvVar: '',
   credentialSource: 'vault' as AgentCredentialSource,
   sourceEnvVar: '',
@@ -245,6 +265,8 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       args: c.args.join(', '),
       workingDir: c.workingDir ?? '',
       idleTimeoutSecs: c.tuning?.idleTimeoutSecs ? String(c.tuning.idleTimeoutSecs) : '',
+      reasoning: c.tuning?.reasoning ?? 'high',
+      model: c.tuning?.model ?? '',
       credentialEnvVar: c.credentialEnvVar,
       credentialSource: c.credentialSource ?? 'vault',
       sourceEnvVar: c.sourceEnvVar ?? '',
@@ -297,11 +319,13 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       ? validateSourceEnvVar(editing.sourceEnvVar)
       : null;
   const idleError = editing ? validateIdleSeconds(editing.idleTimeoutSecs) : null;
+  const modelError = editing && editing.kind === 'gemini' ? validateModelName(editing.model) : null;
   const envInvalid =
     envErrors.some((e) => e !== null) ||
     credentialError !== null ||
     sourceEnvError !== null ||
-    idleError !== null;
+    idleError !== null ||
+    modelError !== null;
 
   const updateEnvRow = (key: string, patch: Partial<Pick<EnvRow, 'name' | 'value'>>) => {
     if (!editing) return;
@@ -342,10 +366,20 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       id: editing.id,
       label: editing.label.trim(),
       kind: editing.kind === 'claude' ? undefined : editing.kind,
-      tuning:
-        editing.idleTimeoutSecs.trim() === ''
+      tuning: (() => {
+        const idleTimeoutSecs =
+          editing.idleTimeoutSecs.trim() === ''
+            ? undefined
+            : Number(editing.idleTimeoutSecs.trim());
+        const reasoning = editing.reasoning === 'high' ? undefined : editing.reasoning;
+        const model =
+          editing.kind === 'gemini' && editing.model.trim() !== ''
+            ? editing.model.trim()
+            : undefined;
+        return idleTimeoutSecs === undefined && reasoning === undefined && model === undefined
           ? undefined
-          : { idleTimeoutSecs: Number(editing.idleTimeoutSecs.trim()) },
+          : { idleTimeoutSecs, reasoning, model };
+      })(),
       command: editing.command.trim(),
       args: editing.args
         .split(',')
@@ -522,6 +556,55 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 </p>
               )}
             </div>
+            <div>
+              <Label className='text-sm'>Reasoning</Label>
+              <RadioGroup
+                value={editing.reasoning}
+                onValueChange={(value) =>
+                  setEditing({ ...editing, reasoning: value as ReasoningLevel })
+                }
+                className='mt-1 gap-1'
+              >
+                {REASONING_LEVELS.map((level) => (
+                  <div key={level.value} className='flex items-center gap-2'>
+                    <RadioGroupItem value={level.value} id={`ac-reasoning-${level.value}`} />
+                    <Label htmlFor={`ac-reasoning-${level.value}`} className='text-sm font-normal'>
+                      {level.label} <span className='text-muted-foreground'>({level.hint})</span>
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
+              <p className='mt-1 text-xs text-muted-foreground'>
+                Claude uses its effort setting, Gemini its thinking budget. You can still change
+                Claude's effort in the chat toolbar.
+              </p>
+            </div>
+            {editing.kind === 'gemini' && (
+              <div>
+                <Label htmlFor='ac-gemini-model' className='text-sm'>
+                  Gemini model <span className='text-muted-foreground'>(optional)</span>
+                </Label>
+                <Input
+                  id='ac-gemini-model'
+                  value={editing.model}
+                  onChange={(e) => setEditing({ ...editing, model: e.target.value })}
+                  placeholder='auto'
+                  className='h-8 text-sm'
+                  aria-invalid={modelError !== null}
+                  autoComplete='off'
+                  spellCheck={false}
+                />
+                {modelError ? (
+                  <p role='alert' className='mt-1 text-xs text-destructive'>
+                    {modelError}
+                  </p>
+                ) : (
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    Leave empty to let Gemini choose. Example: gemini-2.5-pro.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <Label htmlFor='ac-credential-env-var' className='text-sm'>
                 Credential Env Var

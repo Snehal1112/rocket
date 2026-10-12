@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadRememberedModel } from '@/lib/assistant/model-memory';
+import { loadRememberedEffort, loadRememberedModel } from '@/lib/assistant/model-memory';
 import { loadPromptHistory } from '@/lib/assistant/prompt-history';
 import { replaySizeHint } from '@/lib/assistant/replay-preface';
 import { createDefaultLeaf } from '@/lib/pane-utils';
@@ -266,6 +266,38 @@ describe('Composer', () => {
     expect(await screen.findByRole('button', { name: 'Effort: High' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Model: Opus' })).toBeInTheDocument();
     expect(loadRememberedModel('a1')).toBe('opus');
+  });
+
+  it('remembers the effort the user picks, apart from the model', async () => {
+    const effort = {
+      id: 'effort',
+      name: 'Effort',
+      currentValue: 'medium',
+      choices: [
+        { value: 'medium', name: 'Medium' },
+        { value: 'max', name: 'Max' },
+      ],
+    } as ConfigOption;
+    useAssistantStore.setState({
+      session: {
+        sessionId: 's1',
+        agentConfigId: 'a1',
+        status: 'active',
+        configOptions: [MODEL, effort],
+        mode: 'ask',
+      },
+    });
+    vi.mocked(setAgentConfigOption).mockResolvedValue([
+      MODEL,
+      { ...effort, currentValue: 'max' },
+    ]);
+    const { user } = renderComposer();
+    await user.click(screen.getByRole('button', { name: 'Effort: Medium' }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Max/ }));
+    expect(setAgentConfigOption).toHaveBeenCalledWith('s1', 'effort', 'max');
+    expect(await screen.findByRole('button', { name: 'Effort: Max' })).toBeInTheDocument();
+    expect(loadRememberedEffort('a1')).toBe('max');
+    expect(loadRememberedModel('a1')).toBeUndefined();
   });
 
   it('switches the mode in the backend and the store', async () => {
