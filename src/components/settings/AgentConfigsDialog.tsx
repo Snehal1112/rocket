@@ -134,6 +134,20 @@ function withKind<
   };
 }
 
+const MIN_IDLE_SECONDS = 30;
+const MAX_IDLE_SECONDS = 1800;
+
+// An empty field means the default. The backend stays the authority.
+function validateIdleSeconds(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < MIN_IDLE_SECONDS || value > MAX_IDLE_SECONDS) {
+    return `Use a whole number between ${MIN_IDLE_SECONDS} and ${MAX_IDLE_SECONDS}.`;
+  }
+  return null;
+}
+
 const emptyForm = {
   extraEnv: [] as EnvRow[],
   id: '',
@@ -142,6 +156,7 @@ const emptyForm = {
   command: '',
   args: '',
   workingDir: '',
+  idleTimeoutSecs: '',
   credentialEnvVar: '',
   credentialSource: 'vault' as AgentCredentialSource,
   sourceEnvVar: '',
@@ -229,6 +244,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       command: c.command,
       args: c.args.join(', '),
       workingDir: c.workingDir ?? '',
+      idleTimeoutSecs: c.tuning?.idleTimeoutSecs ? String(c.tuning.idleTimeoutSecs) : '',
       credentialEnvVar: c.credentialEnvVar,
       credentialSource: c.credentialSource ?? 'vault',
       sourceEnvVar: c.sourceEnvVar ?? '',
@@ -280,8 +296,12 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     editing && editing.credentialSource === 'env'
       ? validateSourceEnvVar(editing.sourceEnvVar)
       : null;
+  const idleError = editing ? validateIdleSeconds(editing.idleTimeoutSecs) : null;
   const envInvalid =
-    envErrors.some((e) => e !== null) || credentialError !== null || sourceEnvError !== null;
+    envErrors.some((e) => e !== null) ||
+    credentialError !== null ||
+    sourceEnvError !== null ||
+    idleError !== null;
 
   const updateEnvRow = (key: string, patch: Partial<Pick<EnvRow, 'name' | 'value'>>) => {
     if (!editing) return;
@@ -322,6 +342,10 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       id: editing.id,
       label: editing.label.trim(),
       kind: editing.kind === 'claude' ? undefined : editing.kind,
+      tuning:
+        editing.idleTimeoutSecs.trim() === ''
+          ? undefined
+          : { idleTimeoutSecs: Number(editing.idleTimeoutSecs.trim()) },
       command: editing.command.trim(),
       args: editing.args
         .split(',')
@@ -471,6 +495,32 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 onChange={(e) => setEditing({ ...editing, workingDir: e.target.value })}
                 className='h-8 text-sm'
               />
+            </div>
+            <div>
+              <Label htmlFor='ac-idle-timeout' className='text-sm'>
+                Idle timeout <span className='text-muted-foreground'>(seconds, optional)</span>
+              </Label>
+              <Input
+                id='ac-idle-timeout'
+                type='number'
+                min={MIN_IDLE_SECONDS}
+                max={MAX_IDLE_SECONDS}
+                value={editing.idleTimeoutSecs}
+                onChange={(e) => setEditing({ ...editing, idleTimeoutSecs: e.target.value })}
+                placeholder='120'
+                className='h-8 text-sm'
+                aria-invalid={idleError !== null}
+              />
+              {idleError ? (
+                <p role='alert' className='mt-1 text-xs text-destructive'>
+                  {idleError}
+                </p>
+              ) : (
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  How long a turn may stay silent before the session ends. Raise it for deep
+                  reasoning on a slow model.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor='ac-credential-env-var' className='text-sm'>

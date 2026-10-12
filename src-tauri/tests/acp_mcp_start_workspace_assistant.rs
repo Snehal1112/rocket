@@ -141,6 +141,7 @@ fn agent_config_service_for(kind: rocket_acp::AgentKind) -> Arc<rocket_app::Agen
         id: "agent-1".to_string(),
         label: "Test Agent".to_string(),
         kind,
+        tuning: rocket_acp::AgentTuning::default(),
         command: "test-agent-acp".to_string(),
         args: Vec::new(),
         working_dir: None,

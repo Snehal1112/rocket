@@ -256,6 +256,10 @@ fn validate_config(config: &AgentConfig) -> DomainResult<()> {
         .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
     rocket_acp::validate_kind_env(config.kind, &config.credential_env_var, &config.extra_env)
         .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
+    config
+        .tuning
+        .validate()
+        .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
     Ok(())
 }
 
@@ -398,6 +402,7 @@ mod tests {
             id: id.to_string(),
             label: "Claude Agent".to_string(),
             kind: rocket_acp::AgentKind::default(),
+            tuning: rocket_acp::AgentTuning::default(),
             command: "claude-agent-acp".to_string(),
             args: Vec::new(),
             working_dir: None,
@@ -594,6 +599,16 @@ mod tests {
         let err = validate_config(&config).expect_err("reserved for Gemini");
         assert!(err.to_string().contains("reserved"), "{err}");
         assert!(!err.to_string().contains("/x"));
+    }
+
+    #[test]
+    fn validate_config_refuses_an_idle_timeout_out_of_range() {
+        let mut config = sample_config("a", "conn-1");
+        config.tuning.idle_timeout_secs = Some(5);
+        let err = validate_config(&config).expect_err("too short");
+        assert!(err.to_string().contains("idle_timeout_secs"), "{err}");
+        config.tuning.idle_timeout_secs = Some(300);
+        assert!(validate_config(&config).is_ok());
     }
 
     #[test]

@@ -92,6 +92,35 @@ pub fn validate_kind_env(
     Ok(())
 }
 
+/// Shortest and longest accepted idle limit, in seconds.
+pub const MIN_IDLE_TIMEOUT_SECS: u32 = 30;
+pub const MAX_IDLE_TIMEOUT_SECS: u32 = 1800;
+
+/// Per-agent knobs that tune how a session runs. Old files without this
+/// struct load with every field at its default.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AgentTuning {
+    /// Seconds a prompt turn may stay silent before the session is ended.
+    /// `None` keeps the built-in 120 seconds. A deep reasoning turn on a
+    /// slow model may need more.
+    #[serde(default)]
+    pub idle_timeout_secs: Option<u32>,
+}
+
+impl AgentTuning {
+    /// Checks every field. The error is a short reason and never contains a value.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(secs) = self.idle_timeout_secs {
+            if !(MIN_IDLE_TIMEOUT_SECS..=MAX_IDLE_TIMEOUT_SECS).contains(&secs) {
+                return Err(format!(
+                    "tuning idle_timeout_secs must be between {MIN_IDLE_TIMEOUT_SECS} and {MAX_IDLE_TIMEOUT_SECS}"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One registered ACP agent binary/command and where to find its API key.
 /// The credential *value* never lives on this struct for any source. It holds
 /// only a reference: the `vault_*` fields for a RocketVault secret, or
@@ -104,6 +133,9 @@ pub struct AgentConfig {
     /// The agent family. Old files without this field load as `claude`.
     #[serde(default)]
     pub kind: AgentKind,
+    /// Per-agent session tuning. Old files without it load with the defaults.
+    #[serde(default)]
+    pub tuning: AgentTuning,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -250,7 +282,44 @@ mod tests {
             vault_name: "prod-vault".to_string(),
             vault_secret_id: "b6f1c2e0-1234-4a5b-9abc-000000000001".to_string(),
             vault_secret_name: "anthropic-api-key".to_string(),
+            tuning: AgentTuning::default(),
         }
+    }
+
+    #[test]
+    fn a_config_without_tuning_loads_with_the_defaults() {
+        let json = serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "credential_env_var": "K",
+            "vault_connection_id": "v", "vault_name": "n", "vault_secret_id": "s",
+            "vault_secret_name": "sn"
+        });
+        let config: AgentConfig = serde_json::from_value(json).expect("old shape");
+        assert_eq!(config.tuning, AgentTuning::default());
+        assert_eq!(config.tuning.idle_timeout_secs, None);
+    }
+
+    #[test]
+    fn the_idle_timeout_must_stay_between_30_and_1800_seconds() {
+        let tuning = |secs: Option<u32>| AgentTuning {
+            idle_timeout_secs: secs,
+        };
+        assert!(tuning(None).validate().is_ok());
+        assert!(tuning(Some(MIN_IDLE_TIMEOUT_SECS)).validate().is_ok());
+        assert!(tuning(Some(MAX_IDLE_TIMEOUT_SECS)).validate().is_ok());
+        for bad in [0, 5, 29, 1801, 99_999] {
+            let err = tuning(Some(bad)).validate().expect_err("out of range");
+            assert!(err.contains("idle_timeout_secs"), "{err}");
+        }
+    }
+
+    #[test]
+    fn tuning_roundtrips_in_snake_case() {
+        let mut c = sample();
+        c.tuning.idle_timeout_secs = Some(300);
+        let json = serde_json::to_string(&c).expect("serialize AgentConfig");
+        assert!(json.contains("\"idle_timeout_secs\":300"), "got: {json}");
+        let back: AgentConfig = serde_json::from_str(&json).expect("deserialize AgentConfig");
+        assert_eq!(back.tuning.idle_timeout_secs, Some(300));
     }
 
     #[test]

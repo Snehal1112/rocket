@@ -92,6 +92,49 @@ describe('AgentConfigsDialog', () => {
     });
   });
 
+  it('saves an idle timeout in seconds under tuning', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.type(screen.getByLabelText(/Idle timeout/), '300');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({
+      tuning: { idleTimeoutSecs: 300 },
+    });
+  });
+
+  it('sends no tuning when the idle timeout is left empty', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0].tuning).toBeUndefined();
+  });
+
+  it('refuses an idle timeout outside 30 to 1800 seconds', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.type(screen.getByLabelText(/Idle timeout/), '5');
+    expect(screen.getByRole('alert')).toHaveTextContent(/between 30 and 1800/i);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('shows a stored idle timeout', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([
+      { ...claude, tuning: { idleTimeoutSecs: 600 } },
+    ]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    expect(await screen.findByLabelText(/Idle timeout/)).toHaveValue(600);
+  });
+
   async function openEdit() {
     renderDialog();
     await userEvent.click(await screen.findByRole('button', { name: 'Edit agent' }));

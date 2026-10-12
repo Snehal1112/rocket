@@ -446,10 +446,17 @@ export type AgentCredentialSource = 'vault' | 'env' | 'keychain';
 // Which ACP agent a config runs. A missing value means 'claude'.
 export type AgentKind = 'claude' | 'gemini' | 'generic';
 
+// Per-agent session tuning. A missing value means the default.
+export interface AgentTuning {
+  // Seconds a prompt turn may stay silent before the session ends. 30 to 1800.
+  idleTimeoutSecs?: number;
+}
+
 export interface AgentConfig {
   id: string;
   label: string;
   kind?: AgentKind;
+  tuning?: AgentTuning;
   command: string;
   args: string[];
   workingDir?: string;

@@ -88,6 +88,7 @@ mod tests {
             id: id.to_string(),
             label: "Claude Agent".to_string(),
             kind: rocket_acp::AgentKind::default(),
+            tuning: rocket_acp::AgentTuning::default(),
             command: "claude-agent-acp".to_string(),
             args: vec!["--stdio".to_string()],
             working_dir: None,
@@ -278,6 +279,8 @@ mod tests {
         let mut expected = vec![
             "id",
             "label",
+            "kind",
+            "tuning",
             "command",
             "args",
             "working_dir",

@@ -47,11 +47,13 @@ pub struct AcpSessionService {
     shutting_down: AtomicBool,
     agent_config_service: Arc<AgentConfigService>,
     prompt_idle_timeout: Duration,
+    /// Idle limits of sessions whose agent config sets one.
+    session_idle: Mutex<HashMap<String, Duration>>,
 }
 
 /// Fixed idle limit for one prompt turn, from the spec. Every update from the
 /// agent restarts it, so a long turn that keeps making progress is never cut
-/// off. It is not user-configurable.
+/// off. An agent config can raise or lower it with `tuning.idle_timeout_secs`.
 const DEFAULT_PROMPT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Last known title and status of each tool call in one prompt turn. A tool
@@ -104,7 +106,34 @@ impl AcpSessionService {
             shutting_down: AtomicBool::new(false),
             agent_config_service,
             prompt_idle_timeout,
+            session_idle: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The idle limit of one session: its agent's configured value, or the
+    /// service default.
+    fn idle_timeout_for(&self, session_id: &str) -> Duration {
+        self.session_idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(session_id)
+            .copied()
+            .unwrap_or(self.prompt_idle_timeout)
+    }
+
+    fn forget_idle(&self, session_id: &str) {
+        self.session_idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(session_id);
+    }
+
+    #[cfg(test)]
+    fn set_session_idle_for_test(&self, session_id: &str, idle: Duration) {
+        self.session_idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(session_id.to_string(), idle);
     }
 
     /// Starts owning a started session, so every end path runs its cleanup.
@@ -128,6 +157,7 @@ impl AcpSessionService {
     /// Forgets a tracked session and runs its cleanup. Only the first caller
     /// for an id finds it tracked, so cleanup runs exactly once per session.
     fn release(&self, session_id: &str) {
+        self.forget_idle(session_id);
         let was_tracked = self
             .live_sessions
             .lock()
@@ -159,6 +189,10 @@ impl AcpSessionService {
             .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
         rocket_acp::validate_kind_env(config.kind, &config.credential_env_var, &config.extra_env)
             .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
+        config
+            .tuning
+            .validate()
+            .map_err(|why| DomainError::InvalidInput(format!("agent config {why}")))?;
         let credential = self
             .agent_config_service
             .resolve_credential(agent_config_id)
@@ -171,6 +205,15 @@ impl AcpSessionService {
             .session_client
             .start_session(&config.command, &args, cwd, &env, &mcp_servers, plan.meta)
             .await?;
+        if let Some(secs) = config.tuning.idle_timeout_secs {
+            self.session_idle
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(
+                    info.session_id.clone(),
+                    Duration::from_secs(u64::from(secs)),
+                );
+        }
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
@@ -211,6 +254,7 @@ impl AcpSessionService {
         session_id: &str,
         parts: Vec<PromptPart>,
     ) -> DomainResult<String> {
+        let idle = self.idle_timeout_for(session_id);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpUpdate>();
         let mut send = self.session_client.send_prompt(session_id, parts, tx);
         let mut outcome: Option<DomainResult<String>> = None;
@@ -225,7 +269,7 @@ impl AcpSessionService {
                     None => channel_open = false,
                 },
                 result = &mut send, if outcome.is_none() => outcome = Some(result),
-                () = tokio::time::sleep(self.prompt_idle_timeout) => {
+                () = tokio::time::sleep(idle) => {
                     // The client already finished, but another sender clone
                     // keeps the channel open. The turn is done, so finish
                     // with its outcome instead of killing the session.
@@ -235,7 +279,7 @@ impl AcpSessionService {
                     // Drop the pending prompt first, so the client releases
                     // the turn before the session is killed.
                     drop(send);
-                    return Err(self.end_idle_session(session_id).await);
+                    return Err(self.end_idle_session(session_id, idle).await);
                 }
             }
         }
@@ -362,13 +406,10 @@ impl AcpSessionService {
     /// `AcpSessionFailed`, and returns the error for the caller. The kill
     /// result is ignored on purpose: the timeout is the error the caller must
     /// see, and a session that already crashed changes nothing.
-    async fn end_idle_session(&self, session_id: &str) -> DomainError {
+    async fn end_idle_session(&self, session_id: &str, idle: Duration) -> DomainError {
         let _ = self.session_client.end_session(session_id).await;
         self.release(session_id);
-        let message = format!(
-            "agent sent no update for {}s",
-            self.prompt_idle_timeout.as_secs()
-        );
+        let message = format!("agent sent no update for {}s", idle.as_secs());
         self.event_publisher.publish(DomainEvent::AcpSessionFailed {
             session_id: session_id.to_string(),
             error: message.clone(),
@@ -380,6 +421,7 @@ impl AcpSessionService {
     /// cleanup once. For an id that was never tracked. No event is published.
     pub async fn end_untracked(&self, session_id: &str) -> DomainResult<()> {
         let result = self.session_client.end_session(session_id).await;
+        self.forget_idle(session_id);
         self.cleanup.on_session_ended(session_id);
         result
     }
@@ -405,6 +447,10 @@ impl AcpSessionService {
             self.shutting_down.store(true, Ordering::SeqCst);
             live.drain().collect()
         };
+        self.session_idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         let result = self.session_client.end_all_sessions().await;
         for session_id in &ended {
             self.cleanup.on_session_ended(session_id);
@@ -779,6 +825,7 @@ mod tests {
             id: "agent-1".to_string(),
             label: "Claude Agent".to_string(),
             kind: rocket_acp::AgentKind::default(),
+            tuning: rocket_acp::AgentTuning::default(),
             command: "claude-agent-acp".to_string(),
             args: Vec::new(),
             working_dir: None,
@@ -1494,6 +1541,115 @@ mod tests {
             agent_config_service(),
             idle,
         )
+    }
+
+    fn service_with_config(config: AgentConfig, idle: Duration) -> AcpSessionService {
+        let sm_repo = FakeSecretManagerRepo(Mutex::new(vec![sample_connection()]));
+        let secret_manager = Arc::new(crate::secret_manager_service::SecretManagerService::new(
+            Box::new(sm_repo),
+            Arc::new(FakeSecretStore),
+            Arc::new(FakeVaultFetcher::default()),
+        ));
+        let cfg_service = Arc::new(AgentConfigService::new(
+            Box::new(FakeAgentConfigRepo(Mutex::new(vec![config]))),
+            secret_manager,
+            Arc::new(rocket_environment::secret_store::NullSecretStore),
+            crate::process_env_reader(),
+        ));
+        AcpSessionService::with_prompt_idle_timeout(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
+            noop_cleanup(),
+            cfg_service,
+            idle,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_configured_idle_timeout_applies_to_the_session_it_started() {
+        let mut config = sample_config();
+        config.tuning.idle_timeout_secs = Some(300);
+        let service = service_with_config(config, Duration::from_secs(120));
+
+        service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect("start");
+
+        assert_eq!(
+            service.idle_timeout_for("session-1"),
+            Duration::from_secs(300)
+        );
+        assert_eq!(
+            service.idle_timeout_for("another-session"),
+            Duration::from_secs(120),
+            "other sessions keep the default"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_workspace_session_refuses_a_hand_edited_idle_timeout_out_of_range() {
+        let mut config = sample_config();
+        config.tuning.idle_timeout_secs = Some(5);
+        let service = service_with_config(config, Duration::from_secs(120));
+        let err = service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect_err("out of range must not start");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(err.to_string().contains("idle_timeout_secs"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_agent_without_a_configured_idle_timeout_uses_the_default() {
+        let service = service_with_config(sample_config(), Duration::from_secs(120));
+        service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect("start");
+        assert_eq!(
+            service.idle_timeout_for("session-1"),
+            Duration::from_secs(120)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_idle_override_keeps_a_slow_turn_alive_and_the_default_still_kills_others() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let slow = FakeSessionClient {
+            prompt_delay: Duration::from_millis(150),
+            ..Default::default()
+        };
+        let service = service_with(slow, &publisher, Duration::from_millis(30));
+        service.set_session_idle_for_test("session-1", Duration::from_millis(500));
+
+        service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("the override lets the slow turn finish");
+
+        let err = service
+            .send_prompt("session-2", hi())
+            .await
+            .expect_err("the default limit still applies to another session");
+        assert!(matches!(err, DomainError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn ending_a_session_forgets_its_idle_override() {
+        let mut config = sample_config();
+        config.tuning.idle_timeout_secs = Some(300);
+        let service = service_with_config(config, Duration::from_secs(120));
+        service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
+            .await
+            .expect("start");
+        assert!(service.track("session-1"));
+        let _ = service.end_session("session-1").await;
+        assert_eq!(
+            service.idle_timeout_for("session-1"),
+            Duration::from_secs(120)
+        );
     }
 
     #[tokio::test]

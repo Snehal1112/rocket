@@ -21,6 +21,14 @@ impl std::fmt::Debug for EnvPairDto {
     }
 }
 
+/// Per-agent tuning on the wire.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTuningDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_secs: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfigDto {
@@ -29,6 +37,9 @@ pub struct AgentConfigDto {
     // Old callers may omit it.
     #[serde(default)]
     pub kind: rocket_acp::AgentKind,
+    // Old callers may omit it.
+    #[serde(default)]
+    pub tuning: AgentTuningDto,
     pub command: String,
     pub args: Vec<String>,
     // Omitted when unset, to match the frontend's optional `workingDir?: string`.
@@ -55,6 +66,9 @@ impl From<AgentConfig> for AgentConfigDto {
             id: c.id,
             label: c.label,
             kind: c.kind,
+            tuning: AgentTuningDto {
+                idle_timeout_secs: c.tuning.idle_timeout_secs,
+            },
             command: c.command,
             args: c.args,
             working_dir: c.working_dir,
@@ -83,6 +97,9 @@ impl From<AgentConfigDto> for AgentConfig {
             id: dto.id,
             label: dto.label,
             kind: dto.kind,
+            tuning: rocket_acp::AgentTuning {
+                idle_timeout_secs: dto.tuning.idle_timeout_secs,
+            },
             command: dto.command,
             args: dto.args,
             working_dir: dto.working_dir,
@@ -172,6 +189,7 @@ mod tests {
             command: "claude-agent-acp".to_string(),
             args: vec!["--stdio".to_string()],
             kind: rocket_acp::AgentKind::default(),
+            tuning: rocket_acp::AgentTuning::default(),
             working_dir: Some("/home/user/project".to_string()),
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
             extra_env: vec![EnvPair {
@@ -206,6 +224,22 @@ mod tests {
         });
         let dto: AgentConfigDto = serde_json::from_value(old).expect("old caller");
         assert_eq!(AgentConfig::from(dto).kind, rocket_acp::AgentKind::Claude);
+    }
+
+    #[test]
+    fn the_dto_carries_tuning_in_camel_case_and_old_callers_get_the_defaults() {
+        let mut domain = sample_domain();
+        domain.tuning.idle_timeout_secs = Some(300);
+        let json = serde_json::to_value(AgentConfigDto::from(domain)).expect("json");
+        assert_eq!(json["tuning"]["idleTimeoutSecs"], 300);
+
+        let old = serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "args": [],
+            "credentialEnvVar": "K", "vaultConnectionId": "", "vaultName": "",
+            "vaultSecretId": "", "vaultSecretName": ""
+        });
+        let dto: AgentConfigDto = serde_json::from_value(old).expect("old caller");
+        assert_eq!(AgentConfig::from(dto).tuning.idle_timeout_secs, None);
     }
 
     #[test]
