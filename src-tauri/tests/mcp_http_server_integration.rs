@@ -181,6 +181,33 @@ async fn correct_token_reaches_the_tool_router_over_real_http() {
     handle.shutdown();
 }
 
+/// Gemini CLI's MCP client does not register any tool when the first SSE event
+/// of a reply is an empty "priming" event (`data:` with an `id` and a `retry`).
+/// The reply must go straight to the JSON-RPC message.
+#[tokio::test]
+async fn the_initialize_reply_has_no_sse_priming_event() {
+    let (handle, _app_handle, _tmp) = spawn_test_server("session-http-priming").await;
+
+    let response = Client::new()
+        .post(mcp_url(handle.port))
+        .bearer_auth(&handle.token)
+        .header("content-type", "application/json")
+        .header("accept", ACCEPT_JSON_AND_EVENT_STREAM)
+        .json(&initialize_body(1))
+        .send()
+        .await
+        .expect("send request");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body = response.text().await.expect("read the reply");
+
+    assert!(!body.contains("retry:"), "no priming event: {body:?}");
+    assert!(
+        body.contains("\"jsonrpc\""),
+        "the JSON-RPC reply is present: {body:?}"
+    );
+    handle.shutdown();
+}
+
 #[tokio::test]
 async fn missing_token_is_rejected_over_real_http() {
     let (handle, _app_handle, _tmp) = spawn_test_server("session-http-2").await;
@@ -375,6 +402,7 @@ async fn real_mcp_client_lists_and_calls_tools_over_http() {
         vec![
             "get_collection_settings",
             "get_environment",
+            "get_folder_settings",
             "get_history",
             "get_request",
             "get_test_results",
@@ -484,14 +512,8 @@ async fn shutdown_ends_an_open_sse_stream() {
         .await
         .expect("open standalone SSE stream");
     assert_eq!(sse.status(), reqwest::StatusCode::OK);
-    let priming = tokio::time::timeout(secs(2), sse.chunk())
-        .await
-        .expect("priming event arrives")
-        .expect("read priming event");
-    assert!(
-        priming.is_some(),
-        "SSE stream should be live before shutdown"
-    );
+    // The server sends no priming event, so the stream stays quiet until a
+    // keep-alive ping. Its open status is enough to show it is live.
 
     handle.shutdown();
 
