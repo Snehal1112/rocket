@@ -178,7 +178,8 @@ git -C "$fr" -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
 head="$(git -C "$fr" rev-parse HEAD)"
 base="$(git -C "$fr" rev-parse main)"
 python3 "$ctl" set-stage 1 approve --base "$base" --head "$head" >/dev/null
-check "ctl: is-merged says no before the merge" bash -c "! python3 '$ctl' is-merged 1"
+out="$(python3 "$ctl" is-merged 1 2>/dev/null)"; rc=$?
+check "ctl: is-merged says exactly 'not merged' with exit 1 before the merge" test "$out" = "not merged" -a "$rc" -eq 1
 git -C "$fr" switch -q main
 git -C "$fr" -c user.email=t@t -c user.name=t merge -q --no-ff -m merge factory/001-fix-the-import-bug
 check "ctl: is-merged says yes after a manual merge" python3 "$ctl" is-merged 1
@@ -188,13 +189,17 @@ python3 "$ctl" set-stage 2 approve --base "$base" --head "$base" >/dev/null
 check "ctl: is-merged refuses a job with no commits" bash -c "! python3 '$ctl' is-merged 2"
 check "ctl: is-merged refuses a job with no recorded head" bash -c "! python3 '$ctl' is-merged 3"
 check "ctl: status lists every job" test "$(python3 "$ctl" status | wc -l)" -eq 3
+check "ctl: root prints FACTORY_ROOT when set" test "$(python3 "$ctl" root)" = "$fr"
 unset FACTORY_ROOT
+real_root="$(cd "$repo" && python3 "$ctl" root)"
+check "ctl: root without FACTORY_ROOT is a checkout with a .git entry" test -d "$real_root" -a -e "$real_root/.git"
 
 # ---- /factory command ----
 cmd="$repo/.claude/commands/factory.md"
 for word in 'new-job' 'set-stage' 'tick-plan' 'is-merged' 'status' 'next' 'approve' 'rework' \
   'factory-spec-writer' 'factory-builder' 'factory-security-reviewer' 'factory-ux-reviewer' \
-  'factory-ui-reviewer' 'factory-code-reviewer' 'factory-approver' 'no VERDICT line' 'main busy'; do
+  'factory-ui-reviewer' 'factory-code-reviewer' 'factory-approver' 'no VERDICT line' 'main busy' \
+  'Head round' 'is-ancestor' 'root' 'stage spec' 'changes-r'; do
   grep -qF -- "$word" "$cmd" && pass "command mentions: $word" || fail "command mentions: $word"
 done
 

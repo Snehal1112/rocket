@@ -16,7 +16,7 @@ Decide ESCALATE if any of these is true, otherwise APPROVE:
 - the diff changes the Tauri IPC surface or adds or changes `DomainEvent` variants
 - the diff changes `Cargo.toml`, `package.json`, `tauri.conf.json`, the CSP, or the harness hooks
 - a reviewer reported CHANGES that was not fixed
-- any review report has no `VERDICT:` line
+- any report of the final review round (`review-*-r<final round>.md`) has no `VERDICT:` line. Older rounds were already handled, so ignore them for this rule.
 - the spec's acceptance criteria are not all covered by the diff and its tests
 
 Write a short reasoned summary: which rules you checked and what you found, with `file:line` for anything that triggered ESCALATE. When you ESCALATE, the first line of the summary is a one-line reason.

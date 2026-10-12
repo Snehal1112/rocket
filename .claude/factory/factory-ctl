@@ -217,6 +217,10 @@ def cmd_is_merged(args):
     die(result.stderr.strip() or "git merge-base failed")
 
 
+def cmd_root(_args):
+    print(repo_root())
+
+
 def cmd_status(_args):
     board = load_board(repo_root())
     if not board["jobs"]:
@@ -266,6 +270,9 @@ def build_parser():
     merged = sub.add_parser("is-merged")
     merged.add_argument("id")
     merged.set_defaults(func=cmd_is_merged)
+
+    root = sub.add_parser("root")
+    root.set_defaults(func=cmd_root)
 
     status = sub.add_parser("status")
     status.set_defaults(func=cmd_status)
