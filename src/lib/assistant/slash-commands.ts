@@ -27,7 +27,19 @@ export const SLASH_COMMANDS: readonly SlashCommandItem[] = [
     name: 'doc',
     description: 'Write documentation for a request',
     template:
-      'Write short Markdown documentation for this request: what it does, its parameters and an example response: ',
+      'Write Markdown documentation for this request with the sections Purpose, Authentication, Parameters, Request body, Responses and errors, and Example. Use only what the request, its folder settings and its tests show, and write "Not documented" where you do not know: ',
+  },
+  {
+    name: 'review',
+    description: 'Review a request for mistakes and say how to fix them',
+    template:
+      'Review this request for mistakes. Check its URL, auth, headers, parameters, body, scripts and tests against its docs and its folder settings, explain what is wrong and why, and propose the smallest fixes: ',
+  },
+  {
+    name: 'howto',
+    description: 'Explain how to call an endpoint correctly',
+    template:
+      'Explain step by step how to call this endpoint correctly: which variables, auth and headers I need, and what to check if it fails: ',
   },
 ];
 

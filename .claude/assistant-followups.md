@@ -119,3 +119,14 @@ Open follow-ups:
 - `GEMINI.md` and the first-prompt reminder are ordinary history in Gemini 0.63 and may be summarised in a very long session. Only `GEMINI_SYSTEM_MD` is compaction-proof, but it replaces Gemini's whole system prompt.
 - The permission card plan (`docs/superpowers/plans/2026-10-12-acp-permission-card.md`) is still needed for `Generic` agents, whose permission requests Rocket denies today.
 - Other agents, one plan each: Qwen, Codex (no single no-built-ins switch, no SSE), OpenCode (merges global config), Goose (developer built-in on by default), Copilot, Cursor (cannot remove built-ins).
+
+## Reasoning and guidance (2026-10-12)
+
+Plans 4 to 6 in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md` cover thinking visibility, reasoning level and guidance. What is deliberately left as it is:
+
+- Stored conversation messages stay capped at 16 KiB each. A docs proposal is applied from the proposal card, so only the saved chat copy is shortened.
+- The agent still has no response history. `get_history` returns briefs only. A live response needs Agent mode, the collection's run switch and the local trust confirmation, or the user attaching the last response with `#`. The instructions now say so.
+- `run_request` returns an 8 KB masked response body at most. Raising it needs a security review of the masking.
+- Claude often sends empty thinking text on recent models, so the Reasoning block can stay empty for Claude. A summarized-thinking option in the adapter `_meta` is untested.
+- Gemini returns its models in the older `models` field and no config options, so the composer shows no model picker for Gemini. The agent dialog's Gemini model field covers it.
+- The model setting for Claude (the composer's Model picker) is still remembered per agent only.
