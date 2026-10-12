@@ -29,6 +29,7 @@ import type { AgentProposal } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { folderEditKey, useFolderEditStore } from '@/stores/folder-edit-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { ProposalDocsPreview } from './ProposalDocsPreview';
 
 const ProposalDiffEditor = lazy(() =>
   import('./ProposalDiffEditor').then((m) => ({ default: m.ProposalDiffEditor })),
@@ -136,13 +137,30 @@ export function AssistantProposalCard({
   const diffContent = (
     <>
       {diff ? (
-        <Suspense fallback={<EditorSkeleton />}>
-          <ProposalDiffEditor
-            original={diff.before}
-            modified={diff.after}
-            language={diff.language}
-          />
-        </Suspense>
+        <div className='space-y-2'>
+          {diff.before !== diff.after && (
+            <Suspense fallback={<EditorSkeleton />}>
+              <ProposalDiffEditor
+                original={diff.before}
+                modified={diff.after}
+                language={diff.language}
+              />
+            </Suspense>
+          )}
+          {diff.docs && (
+            <div className='space-y-2'>
+              <p className='text-xs font-semibold text-muted-foreground'>Docs change</p>
+              <Suspense fallback={<EditorSkeleton />}>
+                <ProposalDiffEditor
+                  original={diff.docs.before}
+                  modified={diff.docs.after}
+                  language='markdown'
+                />
+              </Suspense>
+              <ProposalDocsPreview markdown={diff.docs.after} />
+            </div>
+          )}
+        </div>
       ) : diffFailed ? (
         <div className='flex items-center gap-2 text-xs text-destructive'>
           <span>Could not load the current version.</span>
@@ -166,9 +184,12 @@ export function AssistantProposalCard({
   const textPreview = (
     <>
       {preview.kind === 'definition' && (
-        <pre className='max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs'>
-          {preview.text}
-        </pre>
+        <div className='space-y-2'>
+          <pre className='max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs'>
+            {preview.text}
+          </pre>
+          {preview.docs && <ProposalDocsPreview markdown={preview.docs} />}
+        </div>
       )}
       {preview.kind === 'line' && (
         <p className='whitespace-pre-wrap break-all font-mono text-xs'>{preview.text}</p>

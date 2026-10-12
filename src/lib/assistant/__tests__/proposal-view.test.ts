@@ -19,6 +19,96 @@ describe('proposal-view', () => {
     vi.clearAllMocks();
   });
 
+  it('shows a docs change apart from the JSON diff of the other fields', async () => {
+    vi.mocked(api.getRequest).mockResolvedValue(
+      makeRequest({ url: 'https://api.test/orders/1', docs: '# Old\nline' }),
+    );
+    const proposal = makeProposal({
+      change: {
+        op: 'updateRequest',
+        collection: 'orders',
+        requestPath: 'get.yml',
+        patch: { url: 'https://api.test/orders/2', docs: '# New\nline' },
+      },
+    });
+    const diff = await loadProposalDiff(proposal);
+    expect(diff?.docs).toEqual({ before: '# Old\nline', after: '# New\nline' });
+    expect(JSON.parse(diff?.before ?? '{}')).toEqual({ url: 'https://api.test/orders/1' });
+    expect(JSON.parse(diff?.after ?? '{}')).toEqual({ url: 'https://api.test/orders/2' });
+  });
+
+  it('gives a docs-only update an empty JSON part and the docs diff', async () => {
+    vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ docs: null }));
+    const proposal = makeProposal({
+      change: {
+        op: 'updateRequest',
+        collection: 'orders',
+        requestPath: 'get.yml',
+        patch: { docs: '# Orders\nLists orders.' },
+      },
+    });
+    const diff = await loadProposalDiff(proposal);
+    expect(diff?.docs).toEqual({ before: '', after: '# Orders\nLists orders.' });
+    expect(diff?.before).toBe(diff?.after);
+    expect(JSON.parse(diff?.before ?? 'x')).toEqual({});
+  });
+
+  it('shows folder docs apart from the other folder settings', async () => {
+    vi.mocked(api.getFolderSettings).mockResolvedValue({
+      headers: [],
+      variables: [],
+      docs: 'old folder docs',
+    } as unknown as Awaited<ReturnType<typeof api.getFolderSettings>>);
+    const proposal = makeProposal({
+      change: {
+        op: 'updateFolderSettings',
+        collection: 'orders',
+        folderPath: 'v2',
+        patch: { docs: 'new folder docs' },
+      },
+    });
+    const diff = await loadProposalDiff(proposal);
+    expect(diff?.docs).toEqual({ before: 'old folder docs', after: 'new folder docs' });
+  });
+
+  it('leaves a diff without a docs change unchanged', async () => {
+    vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ url: 'https://old.test' }));
+    const proposal = makeProposal({
+      change: {
+        op: 'updateRequest',
+        collection: 'orders',
+        requestPath: 'get.yml',
+        patch: { url: 'https://new.test' },
+      },
+    });
+    const diff = await loadProposalDiff(proposal);
+    expect(diff?.docs).toBeUndefined();
+  });
+
+  it('previews the docs of a new request as Markdown and keeps them out of the JSON', () => {
+    const proposal = makeProposal({
+      change: {
+        op: 'createRequest',
+        collection: 'orders',
+        folderPath: '',
+        request: {
+          name: 'List orders',
+          method: 'GET',
+          url: 'https://api.test/orders',
+          headers: [],
+          queryParams: [],
+          docs: '# Orders\nLists orders.',
+        },
+      },
+    });
+    const preview = proposalPreview(proposal.change);
+    expect(preview.kind).toBe('definition');
+    if (preview.kind !== 'definition') return;
+    expect(preview.docs).toBe('# Orders\nLists orders.');
+    expect(preview.text).not.toContain('Lists orders');
+    expect(JSON.parse(preview.text)).toMatchObject({ name: 'List orders' });
+  });
+
   it('diffs a script edit against the stored script of that phase', async () => {
     vi.mocked(api.getRequest).mockResolvedValue(
       makeRequest({ postResponseScript: 'old();', tests: 'other();' }),

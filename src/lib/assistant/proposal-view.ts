@@ -9,13 +9,15 @@ export interface ProposalTarget {
 
 export type ProposalPreview =
   | { kind: 'diff' }
-  | { kind: 'definition'; text: string }
+  | { kind: 'definition'; text: string; docs?: string }
   | { kind: 'line'; text: string };
 
 export interface ProposalDiff {
   before: string;
   after: string;
   language: string;
+  /** The docs change, shown as Markdown apart from the JSON. Present only when docs change. */
+  docs?: { before: string; after: string };
 }
 
 type ScriptPhase = Extract<Change, { op: 'editScript' }>['phase'];
@@ -40,6 +42,21 @@ function stringifyPicked(source: Record<string, unknown>, keys: string[]): strin
   const picked: Record<string, unknown> = {};
   for (const key of keys) picked[key] = source[key] ?? null;
   return JSON.stringify(picked, null, 2);
+}
+
+// The text of a docs value. A missing or non-text value counts as empty.
+function docsText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+// The keys of a patch that go into the JSON diff, and the docs change when there is one.
+function splitDocs(
+  patch: Record<string, unknown>,
+  currentDocs: unknown,
+): { keys: string[]; docs?: { before: string; after: string } } {
+  const keys = Object.keys(patch).filter((key) => patch[key] !== undefined && key !== 'docs');
+  if (typeof patch.docs !== 'string') return { keys };
+  return { keys, docs: { before: docsText(currentDocs), after: patch.docs } };
 }
 
 /** Where the change lands, for the card header and the open-tab checks. */
@@ -70,8 +87,14 @@ export function proposalPreview(change: Change): ProposalPreview {
     case 'editScript':
     case 'updateFolderSettings':
       return { kind: 'diff' };
-    case 'createRequest':
-      return { kind: 'definition', text: JSON.stringify(change.request, null, 2) };
+    case 'createRequest': {
+      const { docs, ...rest } = change.request;
+      return {
+        kind: 'definition',
+        text: JSON.stringify(rest, null, 2),
+        ...(typeof docs === 'string' && docs !== '' ? { docs } : {}),
+      };
+    }
     case 'createFolder':
       return { kind: 'line', text: `New folder ${joinPath(change.parentPath, change.name)}` };
     case 'moveItem':
@@ -103,7 +126,7 @@ export async function loadProposalDiff(proposal: AgentProposal): Promise<Proposa
   if (change.op === 'updateFolderSettings') {
     const current = await getFolderSettings(change.collection, change.folderPath);
     const patch = asRecord(change.patch);
-    const keys = Object.keys(patch).filter((key) => patch[key] !== undefined);
+    const { keys, docs } = splitDocs(patch, current.docs);
     // Variables are shown as key, value and enabled only, like the proposal.
     const before = { ...asRecord(current) };
     before.variables = current.variables.map(({ key, value, enabled }) => ({
@@ -115,6 +138,7 @@ export async function loadProposalDiff(proposal: AgentProposal): Promise<Proposa
       before: stringifyPicked(before, keys),
       after: stringifyPicked(patch, keys),
       language: 'json',
+      ...(docs ? { docs } : {}),
     };
   }
   if (change.op !== 'updateRequest' && change.op !== 'editScript') return null;
@@ -127,10 +151,11 @@ export async function loadProposalDiff(proposal: AgentProposal): Promise<Proposa
   }
 
   const patch = asRecord(change.patch);
-  const keys = Object.keys(patch).filter((key) => patch[key] !== undefined);
+  const { keys, docs } = splitDocs(patch, current.docs);
   return {
     before: stringifyPicked(asRecord(current), keys),
     after: stringifyPicked(patch, keys),
     language,
+    ...(docs ? { docs } : {}),
   };
 }
