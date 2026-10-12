@@ -25,7 +25,8 @@
 use std::io;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, ErrorData, ListToolsResult, PaginatedRequestParams,
+    CallToolRequestParams, CallToolResponse, ErrorData, Implementation, ListToolsResult,
+    PaginatedRequestParams, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleClient, RoleServer, RunningService};
 use rmcp::transport::io::stdio;
@@ -33,6 +34,15 @@ use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
 use rmcp::{ServerHandler, ServiceExt};
+
+/// What the bridge tells an MCP client when it connects. The tools capability
+/// matters: a client that finds none (for example Gemini CLI) lists no tools
+/// from this server, so the agent would see an empty tool set.
+fn bridge_server_info() -> ServerConfig {
+    ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
+        Implementation::new("rocket-mcp-stdio-bridge", env!("CARGO_PKG_VERSION")),
+    )
+}
 
 /// Forwards every incoming tool-call to the already-connected HTTP client.
 /// Holding the connected client (rather than the raw port/token) means the
@@ -43,6 +53,10 @@ struct ForwardingHandler {
 }
 
 impl ServerHandler for ForwardingHandler {
+    fn get_info(&self) -> ServerConfig {
+        bridge_server_info()
+    }
+
     async fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,
@@ -120,6 +134,16 @@ pub async fn run_stdio_bridge() -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_bridge_reports_the_tools_capability_and_its_own_identity() {
+        let info = bridge_server_info();
+        assert!(
+            info.capabilities.tools.is_some(),
+            "a client that sees no tools capability asks for no tools"
+        );
+        assert_eq!(info.server_info.name, "rocket-mcp-stdio-bridge");
+    }
+
     use tokio::sync::Mutex;
 
     use super::*;
