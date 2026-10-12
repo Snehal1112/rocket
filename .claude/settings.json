@@ -32,6 +32,42 @@
 					}
 				]
 			}
+		],
+		"SubagentStart": [
+			{
+				"matcher": "",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "h=\"$(git rev-parse --show-toplevel 2>/dev/null)/.claude/factory/hooks/log-event\"; if [ -f \"$h\" ]; then python3 \"$h\"; fi",
+						"async": true
+					}
+				]
+			}
+		],
+		"SubagentStop": [
+			{
+				"matcher": "",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "h=\"$(git rev-parse --show-toplevel 2>/dev/null)/.claude/factory/hooks/log-event\"; if [ -f \"$h\" ]; then python3 \"$h\"; fi",
+						"async": true
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "h=\"$(git rev-parse --show-toplevel 2>/dev/null)/.claude/factory/hooks/log-event\"; if [ -f \"$h\" ]; then python3 \"$h\"; fi",
+						"async": true
+					}
+				]
+			}
 		]
 	},
 	"permissions": {
