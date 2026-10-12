@@ -107,7 +107,7 @@ describe('AssistantPanel', () => {
     render(<AssistantPanel />);
     await userEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() =>
-      expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined),
+      expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'edit', undefined, undefined),
     );
     expect(
       await screen.findByRole('textbox', { name: 'Message the AI assistant' }),
