@@ -39,6 +39,19 @@ pub enum CredentialSource {
     Keychain,
 }
 
+/// Which ACP agent a config runs. It decides how Rocket isolates and
+/// instructs the assistant session. Old files without it load as `Claude`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentKind {
+    /// Claude Code through its ACP adapter. Isolation travels in `_meta`.
+    #[default]
+    Claude,
+    /// Any other ACP agent. Rocket sets no isolation: the agent keeps its own
+    /// tools and settings, and gets the Rocket instructions in its first prompt.
+    Generic,
+}
+
 /// One registered ACP agent binary/command and where to find its API key.
 /// The credential *value* never lives on this struct for any source. It holds
 /// only a reference: the `vault_*` fields for a RocketVault secret, or
@@ -48,6 +61,9 @@ pub enum CredentialSource {
 pub struct AgentConfig {
     pub id: String,
     pub label: String,
+    /// The agent family. Old files without this field load as `claude`.
+    #[serde(default)]
+    pub kind: AgentKind,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -182,6 +198,7 @@ mod tests {
         AgentConfig {
             id: "agent-1".to_string(),
             label: "Claude Agent".to_string(),
+            kind: AgentKind::default(),
             command: "claude-agent-acp".to_string(),
             args: vec!["--stdio".to_string()],
             working_dir: None,
@@ -237,6 +254,40 @@ mod tests {
         let c: AgentConfig = serde_json::from_str(json).expect("deserialize minimal AgentConfig");
         assert_eq!(c.working_dir, None);
         assert!(c.args.is_empty());
+    }
+
+    #[test]
+    fn agent_kind_defaults_to_claude_and_uses_lowercase_wire_names() {
+        assert_eq!(AgentKind::default(), AgentKind::Claude);
+        assert_eq!(
+            serde_json::to_string(&AgentKind::Generic).expect("json"),
+            "\"generic\""
+        );
+        assert_eq!(
+            serde_json::from_str::<AgentKind>("\"claude\"").expect("parse"),
+            AgentKind::Claude
+        );
+    }
+
+    #[test]
+    fn a_config_without_kind_loads_as_claude() {
+        let json = serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "credential_env_var": "ANTHROPIC_API_KEY",
+            "vault_connection_id": "v", "vault_name": "n", "vault_secret_id": "s",
+            "vault_secret_name": "sn"
+        });
+        let config: AgentConfig = serde_json::from_value(json).expect("old shape");
+        assert_eq!(config.kind, AgentKind::Claude);
+    }
+
+    #[test]
+    fn kind_roundtrips_in_snake_case_config_json() {
+        let mut c = sample();
+        c.kind = AgentKind::Generic;
+        let json = serde_json::to_string(&c).expect("serialize AgentConfig");
+        assert!(json.contains("\"kind\":\"generic\""), "got: {json}");
+        let back: AgentConfig = serde_json::from_str(&json).expect("deserialize AgentConfig");
+        assert_eq!(back.kind, AgentKind::Generic);
     }
 
     fn pair(name: &str, value: &str) -> EnvPair {

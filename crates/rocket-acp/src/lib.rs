@@ -8,7 +8,8 @@ pub mod session_info;
 pub mod update;
 pub use agent_config::{
     validate_credential_source, validate_env_config, validate_env_var_name, AgentConfig,
-    AgentConfigRepository, CredentialSource, EnvPair, MAX_ENV_VAR_NAME_LEN, RESERVED_ENV_VAR,
+    AgentConfigRepository, AgentKind, CredentialSource, EnvPair, MAX_ENV_VAR_NAME_LEN,
+    RESERVED_ENV_VAR,
 };
 pub use conversation::{
     cap_message_text, conversation_title, has_agent_reply, validate_conversation_id,

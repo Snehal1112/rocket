@@ -87,6 +87,7 @@ mod tests {
         AgentConfig {
             id: id.to_string(),
             label: "Claude Agent".to_string(),
+            kind: rocket_acp::AgentKind::default(),
             command: "claude-agent-acp".to_string(),
             args: vec!["--stdio".to_string()],
             working_dir: None,

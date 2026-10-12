@@ -26,6 +26,9 @@ impl std::fmt::Debug for EnvPairDto {
 pub struct AgentConfigDto {
     pub id: String,
     pub label: String,
+    // Old callers may omit it.
+    #[serde(default)]
+    pub kind: rocket_acp::AgentKind,
     pub command: String,
     pub args: Vec<String>,
     // Omitted when unset, to match the frontend's optional `workingDir?: string`.
@@ -51,6 +54,7 @@ impl From<AgentConfig> for AgentConfigDto {
         Self {
             id: c.id,
             label: c.label,
+            kind: c.kind,
             command: c.command,
             args: c.args,
             working_dir: c.working_dir,
@@ -78,6 +82,7 @@ impl From<AgentConfigDto> for AgentConfig {
         Self {
             id: dto.id,
             label: dto.label,
+            kind: dto.kind,
             command: dto.command,
             args: dto.args,
             working_dir: dto.working_dir,
@@ -166,6 +171,7 @@ mod tests {
             label: "Claude Agent".to_string(),
             command: "claude-agent-acp".to_string(),
             args: vec!["--stdio".to_string()],
+            kind: rocket_acp::AgentKind::default(),
             working_dir: Some("/home/user/project".to_string()),
             credential_env_var: "ANTHROPIC_API_KEY".to_string(),
             extra_env: vec![EnvPair {
@@ -179,6 +185,27 @@ mod tests {
             vault_secret_id: "secret-id-1".to_string(),
             vault_secret_name: "anthropic-api-key".to_string(),
         }
+    }
+
+    #[test]
+    fn the_dto_carries_kind_in_camel_case_json_and_defaults_to_claude() {
+        let mut domain = sample_domain();
+        domain.kind = rocket_acp::AgentKind::Generic;
+        let dto = AgentConfigDto::from(domain);
+        let json = serde_json::to_value(&dto).expect("json");
+        assert_eq!(json["kind"], "generic");
+        let back: AgentConfig = serde_json::from_value::<AgentConfigDto>(json)
+            .expect("dto")
+            .into();
+        assert_eq!(back.kind, rocket_acp::AgentKind::Generic);
+
+        let old = serde_json::json!({
+            "id": "a", "label": "A", "command": "c", "args": [],
+            "credentialEnvVar": "K", "vaultConnectionId": "", "vaultName": "",
+            "vaultSecretId": "", "vaultSecretName": ""
+        });
+        let dto: AgentConfigDto = serde_json::from_value(old).expect("old caller");
+        assert_eq!(AgentConfig::from(dto).kind, rocket_acp::AgentKind::Claude);
     }
 
     #[test]

@@ -140,6 +140,7 @@ fn agent_config_service() -> Arc<rocket_app::AgentConfigService> {
     let config = AgentConfig {
         id: "agent-1".to_string(),
         label: "Test Agent".to_string(),
+        kind: rocket_acp::AgentKind::default(),
         command: "test-agent-acp".to_string(),
         args: Vec::new(),
         working_dir: None,

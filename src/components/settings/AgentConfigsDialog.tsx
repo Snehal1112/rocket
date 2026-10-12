@@ -23,6 +23,7 @@ import { useSecretManagerConnections } from '@/lib/queries/secret-manager-querie
 import {
   type AgentConfig,
   type AgentCredentialSource,
+  type AgentKind,
   clearAgentCredential,
   type ExternalSecretRef,
   fetchExternalSecretNames,
@@ -109,6 +110,7 @@ const emptyForm = {
   extraEnv: [] as EnvRow[],
   id: '',
   label: '',
+  kind: 'claude' as AgentKind,
   command: '',
   args: '',
   workingDir: '',
@@ -195,6 +197,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     setEditing({
       id: c.id,
       label: c.label,
+      kind: c.kind ?? 'claude',
       command: c.command,
       args: c.args.join(', '),
       workingDir: c.workingDir ?? '',
@@ -290,6 +293,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     const config: AgentConfig = {
       id: editing.id,
       label: editing.label.trim(),
+      kind: editing.kind === 'claude' ? undefined : editing.kind,
       command: editing.command.trim(),
       args: editing.args
         .split(',')
@@ -365,6 +369,33 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 onChange={(e) => setEditing({ ...editing, label: e.target.value })}
                 className='h-8 text-sm'
               />
+            </div>
+            <div>
+              <Label className='text-sm'>Agent type</Label>
+              <RadioGroup
+                value={editing.kind}
+                onValueChange={(value) => setEditing({ ...editing, kind: value as AgentKind })}
+                className='mt-1 gap-1'
+              >
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='claude' id='ac-kind-claude' />
+                  <Label htmlFor='ac-kind-claude' className='text-sm font-normal'>
+                    Claude Code
+                  </Label>
+                </div>
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='generic' id='ac-kind-generic' />
+                  <Label htmlFor='ac-kind-generic' className='text-sm font-normal'>
+                    Generic ACP agent
+                  </Label>
+                </div>
+              </RadioGroup>
+              {editing.kind === 'generic' && (
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  Rocket sets no isolation for a generic agent. It keeps its own tools and settings,
+                  so configure it to use only the Rocket tools.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor='ac-command' className='text-sm'>

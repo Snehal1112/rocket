@@ -481,6 +481,37 @@ describe('AgentConfigsDialog', () => {
     expect(api.setAgentCredential).not.toHaveBeenCalled();
   });
 
+  it('shows a stored Claude agent as Claude Code and saves no kind override', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    expect(screen.getByRole('radio', { name: /^claude code/i })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0].kind).toBeUndefined();
+  });
+
+  it('saves the chosen agent type', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.click(screen.getByRole('radio', { name: /^generic/i }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({ kind: 'generic' });
+  });
+
+  it('opens a stored generic agent as generic', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([{ ...claude, kind: 'generic' }]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    expect(screen.getByRole('radio', { name: /^generic/i })).toBeChecked();
+  });
+
   it('describes every credential source in the secrets help text', async () => {
     await openEdit();
     expect(document.body.textContent).not.toContain('RocketVault credential, not');
