@@ -77,6 +77,8 @@ export interface ToolActivity {
   status: ToolActivityStatus;
 }
 
+export const MAX_REASONING_CHARS = 20_000;
+
 export interface AssistantState {
   session?: AssistantSession;
   messages: AssistantMessage[];
@@ -85,6 +87,10 @@ export interface AssistantState {
    *  arrived, or null for the start. Kept apart from the wire DTO. */
   proposalAnchors: Record<string, string | null>;
   usage?: AssistantUsage;
+  /** The agent's reasoning for the current turn. Cleared at the next user message. */
+  reasoning: string;
+  /** When the active session last sent anything (text, thought, tool or usage). */
+  lastActivityAt?: number;
   focus?: AssistantFocus;
   panelOpen: boolean;
   /** The stored conversation's id. Made at the first user message of a session. */
@@ -105,6 +111,10 @@ export interface AssistantState {
    *  there is no active session or a turn is already running. */
   appendUserMessage: (text: string) => boolean;
   appendChunk: (sessionId: string, text: string) => void;
+  /** Adds reasoning text. Keeps only the newest MAX_REASONING_CHARS characters. */
+  appendReasoning: (sessionId: string, text: string) => void;
+  /** Marks that the session sent something, for the quiet-agent notice. */
+  touchActivity: (sessionId: string) => void;
   completeMessage: (sessionId: string) => void;
   /** A fatal failure ends the session. A non-fatal one only fails the turn. */
   failMessage: (sessionId: string, error: string, fatal?: boolean) => void;
@@ -160,6 +170,7 @@ function settleStreaming(messages: AssistantMessage[], error?: string): Assistan
 export const useAssistantStore = create<AssistantState>()((set, get) => ({
   session: undefined,
   messages: [],
+  reasoning: '',
   proposals: [],
   proposalAnchors: {},
   usage: undefined,
@@ -190,7 +201,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   activateSession(token, sessionId, configOptions) {
     const { session } = get();
     if (token !== currentStartToken || session?.status !== 'starting') return false;
-    set({ session: { ...session, sessionId, configOptions, status: 'active' } });
+    set({ session: { ...session, sessionId, configOptions, status: 'active' }, reasoning: '' });
     return true;
   },
 
@@ -207,6 +218,8 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     const agentId = crypto.randomUUID();
     set({
       conversationId: state.conversationId ?? crypto.randomUUID(),
+      reasoning: '',
+      lastActivityAt: Date.now(),
       messages: [
         ...state.messages,
         { kind: 'user', id: userId, text },
@@ -214,6 +227,22 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       ],
     });
     return true;
+  },
+
+  appendReasoning(sessionId, text) {
+    set((state) => {
+      if (!text || !isCurrent(state, sessionId)) return state;
+      const next = state.reasoning + text;
+      const kept =
+        next.length > MAX_REASONING_CHARS
+          ? `…${next.slice(next.length - MAX_REASONING_CHARS)}`
+          : next;
+      return { reasoning: kept, lastActivityAt: Date.now() };
+    });
+  },
+
+  touchActivity(sessionId) {
+    set((state) => (isCurrent(state, sessionId) ? { lastActivityAt: Date.now() } : state));
   },
 
   appendChunk(sessionId, text) {
@@ -368,6 +397,8 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       proposals: [],
       proposalAnchors: {},
       usage: undefined,
+      reasoning: '',
+      lastActivityAt: undefined,
       conversationId: undefined,
       replay: undefined,
     });

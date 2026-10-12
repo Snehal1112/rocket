@@ -15,6 +15,7 @@ import {
   onAgentSessionChunk,
   onAgentSessionFailed,
   onAgentSessionFinished,
+  onAgentSessionThought,
   onAgentToolActivity,
   onAgentToolInvoked,
   onAgentUsage,
@@ -70,18 +71,28 @@ export function useAssistantEventBridge(): void {
       (event: T) => {
         if (!disposed) handler(event);
       };
+    // Every event that proves the agent is alive also refreshes the activity time.
+    const alive =
+      <T extends { session_id: string }>(handler: (event: T) => void) =>
+      (event: T) => {
+        store().touchActivity(event.session_id);
+        handler(event);
+      };
 
     const registrations = [
-      onAgentSessionChunk(guard((e) => store().appendChunk(e.session_id, e.text))),
+      onAgentSessionChunk(guard(alive((e) => store().appendChunk(e.session_id, e.text)))),
+      onAgentSessionThought(guard(alive((e) => store().appendReasoning(e.session_id, e.text)))),
       onAgentSessionFinished(guard((e) => store().completeMessage(e.session_id))),
       onAgentSessionFailed(guard((e) => store().failMessage(e.session_id, e.error))),
       onAgentToolActivity(
-        guard((e) =>
-          store().upsertToolActivity(e.session_id, {
-            callId: e.call_id,
-            title: e.title,
-            status: e.status,
-          }),
+        guard(
+          alive((e) =>
+            store().upsertToolActivity(e.session_id, {
+              callId: e.call_id,
+              title: e.title,
+              status: e.status,
+            }),
+          ),
         ),
       ),
       // The backend already masked the summary. It goes to the Console as an info line.
@@ -102,12 +113,14 @@ export function useAssistantEventBridge(): void {
         guard((e) => store().setConfigOptions(e.session_id, configOptionsFromEvent(e.options))),
       ),
       onAgentUsage(
-        guard((e) =>
-          store().setUsage(e.session_id, {
-            used: e.used,
-            size: e.size,
-            costUsd: e.cost_usd ?? undefined,
-          }),
+        guard(
+          alive((e) =>
+            store().setUsage(e.session_id, {
+              used: e.used,
+              size: e.size,
+              costUsd: e.cost_usd ?? undefined,
+            }),
+          ),
         ),
       ),
       onAgentProposalCreated(

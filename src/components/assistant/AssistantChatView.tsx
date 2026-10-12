@@ -10,6 +10,8 @@ import {
   useAssistantStore,
 } from '@/stores/assistant-store';
 import { AssistantProposalCard } from './AssistantProposalCard';
+import { ReasoningBlock } from './ReasoningBlock';
+import { WaitingNotice } from './WaitingNotice';
 
 /** How close to the bottom, in pixels, still counts as following the chat. */
 const PIN_THRESHOLD_PX = 48;
@@ -149,6 +151,8 @@ export function AssistantChatView() {
             <AssistantProposalCard key={entry.proposal.id} proposal={entry.proposal} inline />
           ),
         )}
+        <ReasoningBlock />
+        <WaitingNotice />
         {pending.length > 0 && (
           <section aria-label='Proposals' className='flex flex-col gap-2'>
             {pending.map((p) => (

@@ -99,6 +99,22 @@ describe('ACP chat session tauri-api bindings', () => {
     expect(handler).toHaveBeenCalledWith(payload);
   });
 
+  it('onAgentSessionThought subscribes to agent-session-thought and unwraps the payload', async () => {
+    const payload = { type: 'acpThoughtChunk', session_id: 'session-1', text: 'checking auth' };
+    vi.mocked(listen).mockImplementation(((
+      _event: string,
+      cb: (e: { payload: unknown }) => void,
+    ) => {
+      cb({ payload });
+      return Promise.resolve(() => undefined);
+    }) as typeof listen);
+    const { onAgentSessionThought } = await import('@/lib/tauri-api');
+    const handler = vi.fn();
+    await onAgentSessionThought(handler);
+    expect(listen).toHaveBeenCalledWith('agent-session-thought', expect.any(Function));
+    expect(handler).toHaveBeenCalledWith(payload);
+  });
+
   it('onAgentSessionFinished subscribes to agent-session-finished and unwraps the payload', async () => {
     const payload = {
       type: 'acpSessionFinished',

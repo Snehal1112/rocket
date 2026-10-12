@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     handlers,
     api: {
       onAgentSessionChunk: listener('chunk'),
+      onAgentSessionThought: listener('thought'),
       onAgentSessionFinished: listener('finished'),
       onAgentSessionFailed: listener('failed'),
       onAgentToolActivity: listener('toolActivity'),
@@ -80,6 +81,24 @@ describe('useAssistantEventBridge', () => {
     useWorkspaceStore.setState({ activeWorkspaceId: '' });
     mocks.api.endStaleAssistantSessions.mockResolvedValue(0);
     mocks.api.endAgentSession.mockResolvedValue(undefined);
+  });
+
+  it('shows thought chunks as reasoning and counts every agent event as activity', async () => {
+    activate();
+    store().appendUserMessage('hi');
+    await mountBridge();
+    useAssistantStore.setState({ lastActivityAt: 1 });
+    emit('thought', { session_id: 's1', text: 'Checking the folder auth. ' });
+    expect(store().reasoning).toBe('Checking the folder auth. ');
+    expect(store().lastActivityAt).toBeGreaterThan(1);
+
+    useAssistantStore.setState({ lastActivityAt: 1 });
+    emit('toolActivity', { session_id: 's1', call_id: 'c1', title: 'Read', status: 'in_progress' });
+    expect(store().lastActivityAt).toBeGreaterThan(1);
+
+    useAssistantStore.setState({ lastActivityAt: 1 });
+    emit('chunk', { session_id: 's1', text: 'Hello' });
+    expect(store().lastActivityAt).toBeGreaterThan(1);
   });
 
   it('streams chunks and finishes the turn of the active session', async () => {

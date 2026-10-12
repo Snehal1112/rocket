@@ -2789,6 +2789,17 @@ export const onAgentSessionChunk = (
 ): Promise<UnlistenFn> =>
   listen<AgentSessionChunkEvent>('agent-session-chunk', (e) => handler(e.payload));
 
+export interface AgentSessionThoughtEvent {
+  type: 'acpThoughtChunk';
+  session_id: string;
+  text: string;
+}
+
+export const onAgentSessionThought = (
+  handler: (event: AgentSessionThoughtEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentSessionThoughtEvent>('agent-session-thought', (e) => handler(e.payload));
+
 export interface AgentSessionFinishedEvent {
   type: 'acpSessionFinished';
   session_id: string;

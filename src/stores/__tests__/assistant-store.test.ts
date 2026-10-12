@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { makeProposal } from '@/test/assistant-fixtures';
-import { type AssistantMessage, selectTurnRunning, useAssistantStore } from '../assistant-store';
+import {
+  type AssistantMessage,
+  MAX_REASONING_CHARS,
+  selectTurnRunning,
+  useAssistantStore,
+} from '../assistant-store';
 
 const store = () => useAssistantStore.getState();
 
@@ -32,6 +37,59 @@ describe('assistant-store', () => {
     store().endSession();
     activate('s2');
     expect(store().conversationId).toBeUndefined();
+  });
+
+  it('collects the reasoning of the current turn and clears it at the next user message', () => {
+    activate();
+    store().appendUserMessage('why does login fail?');
+    store().appendReasoning('s1', 'Checking the auth header. ');
+    store().appendReasoning('s1', 'The token variable is empty.');
+    expect(store().reasoning).toBe('Checking the auth header. The token variable is empty.');
+    store().completeMessage('s1');
+    expect(store().reasoning).not.toBe('');
+    store().appendUserMessage('and now?');
+    expect(store().reasoning).toBe('');
+  });
+
+  it('ignores reasoning for another session and empty chunks', () => {
+    activate();
+    store().appendUserMessage('hi');
+    store().appendReasoning('other', 'secret thoughts');
+    store().appendReasoning('s1', '');
+    expect(store().reasoning).toBe('');
+  });
+
+  it('keeps only the newest part of a very long reasoning stream', () => {
+    activate();
+    store().appendUserMessage('think hard');
+    store().appendReasoning('s1', 'a'.repeat(MAX_REASONING_CHARS));
+    store().appendReasoning('s1', 'END');
+    const text = store().reasoning;
+    expect(text.length).toBeLessThanOrEqual(MAX_REASONING_CHARS + 1);
+    expect(text.startsWith('…')).toBe(true);
+    expect(text.endsWith('END')).toBe(true);
+  });
+
+  it('clears the reasoning on reset and when a new session starts', () => {
+    activate();
+    store().appendUserMessage('hi');
+    store().appendReasoning('s1', 'thinking');
+    store().reset();
+    expect(store().reasoning).toBe('');
+    activate('s2');
+    expect(store().reasoning).toBe('');
+  });
+
+  it('records the time of the last activity of the active session only', () => {
+    activate();
+    store().appendUserMessage('hi');
+    const started = store().lastActivityAt;
+    expect(started).toBeTypeOf('number');
+    useAssistantStore.setState({ lastActivityAt: 1 });
+    store().touchActivity('other');
+    expect(store().lastActivityAt).toBe(1);
+    store().touchActivity('s1');
+    expect(store().lastActivityAt).toBeGreaterThan(1);
   });
 
   it('opens and closes the panel and keeps the focus', () => {
