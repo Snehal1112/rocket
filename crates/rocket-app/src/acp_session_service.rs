@@ -10,7 +10,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::agent_config_service::AgentConfigService;
-use crate::agent_isolation::{SessionIsolation, ROCKET_MCP_SERVER_NAME};
+use crate::agent_isolation::ROCKET_MCP_SERVER_NAME;
+use crate::session_plan::SessionPlan;
 
 /// Releases per-session resources that live outside this crate, such as the
 /// MCP tool server, its caches and the session's scratch directories.
@@ -140,8 +141,8 @@ impl AcpSessionService {
     /// Starts a workspace assistant session in `cwd`, which should be an
     /// empty scratch directory. The tool server is always attached: the
     /// workspace assistant's tools check the workspace scope, the mode and
-    /// the run switch on every call. `isolation` adds `CLAUDE_CONFIG_DIR` to
-    /// the environment and supplies the `_meta`. Config lookup and credential
+    /// the run switch on every call. `plan` supplies the isolation env, the
+    /// `_meta` and extra args. Config lookup and credential
     /// errors propagate unchanged. The session is not tracked yet: the
     /// command layer registers the session's resources and then calls
     /// `track`. Publishes `AcpSessionStarted` on success, nothing on failure.
@@ -150,7 +151,7 @@ impl AcpSessionService {
         agent_config_id: &str,
         cwd: &str,
         mcp_http: McpHttpServerCredentials,
-        isolation: SessionIsolation,
+        plan: SessionPlan,
     ) -> DomainResult<SessionInfo> {
         let config = self.agent_config_service.get(agent_config_id)?;
         // A hand-edited agent_configs.yml skips the save-time check.
@@ -160,24 +161,25 @@ impl AcpSessionService {
             .agent_config_service
             .resolve_credential(agent_config_id)
             .await?;
-        let env = session_env(&config, credential, isolation.env_entry());
+        let env = session_env(&config, credential, &plan.env);
         let mcp_servers = mcp_server_specs(mcp_http)?;
+        let mut args = config.args.clone();
+        args.extend(plan.args.iter().cloned());
         let info = self
             .session_client
-            .start_session(
-                &config.command,
-                &config.args,
-                cwd,
-                &env,
-                &mcp_servers,
-                Some(isolation.meta()),
-            )
+            .start_session(&config.command, &args, cwd, &env, &mcp_servers, plan.meta)
             .await?;
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
             });
         Ok(info)
+    }
+
+    /// The stored config of an agent. The command layer reads its kind and
+    /// args to build the session plan before the session starts.
+    pub fn agent_config(&self, agent_config_id: &str) -> DomainResult<AgentConfig> {
+        self.agent_config_service.get(agent_config_id)
     }
 
     /// Sends one prompt turn and returns the agent's stop reason string.
@@ -459,25 +461,27 @@ fn mcp_server_specs(
 
 /// Builds the agent process environment. Order matters because a later
 /// entry overrides an earlier one: the extra variables come first, then the
-/// credential, then Rocket's isolation entry. An extra variable that names
-/// the credential or the isolation variable is dropped, so Rocket's settings
+/// credential, then Rocket's isolation entries. An extra variable that names
+/// the credential or an isolation variable is dropped, so Rocket's settings
 /// win even if the config did not pass validation.
 fn session_env(
     config: &AgentConfig,
     credential: String,
-    isolation_entry: (String, String),
+    isolation_env: &[(String, String)],
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = config
         .extra_env
         .iter()
         .filter(|p| {
             !p.name.eq_ignore_ascii_case(&config.credential_env_var)
-                && !p.name.eq_ignore_ascii_case(&isolation_entry.0)
+                && !isolation_env
+                    .iter()
+                    .any(|(name, _)| p.name.eq_ignore_ascii_case(name))
         })
         .map(|p| (p.name.clone(), p.value.clone()))
         .collect();
     env.push((config.credential_env_var.clone(), credential));
-    env.push(isolation_entry);
+    env.extend(isolation_env.iter().cloned());
     env
 }
 
@@ -508,7 +512,7 @@ mod tests {
         let env = session_env(
             &config,
             "cred".to_string(),
-            ("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string()),
+            &[("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string())],
         );
         assert_eq!(
             pairs(&env),
@@ -531,7 +535,7 @@ mod tests {
         let env = session_env(
             &config,
             "cred".to_string(),
-            ("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string()),
+            &[("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string())],
         );
         assert_eq!(
             pairs(&env),
@@ -585,7 +589,7 @@ mod tests {
         let env = session_env(
             &config,
             "cred".to_string(),
-            ("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string()),
+            &[("CLAUDE_CONFIG_DIR".to_string(), "/scratch".to_string())],
         );
         assert_eq!(
             pairs(&env),
@@ -603,8 +607,6 @@ mod tests {
     use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
     use rocket_shared::events::NullEventPublisher;
     use tokio::sync::mpsc::UnboundedSender;
-
-    use crate::agent_isolation::SessionIsolation;
 
     struct FakeAgentConfigRepo(Mutex<Vec<AgentConfig>>);
     impl AgentConfigRepository for FakeAgentConfigRepo {
@@ -954,8 +956,14 @@ mod tests {
         }
     }
 
-    fn test_isolation() -> SessionIsolation {
-        SessionIsolation::new("/scratch/config")
+    fn test_isolation() -> crate::session_plan::SessionPlan {
+        crate::session_plan::session_plan(&crate::session_plan::PlanInput {
+            kind: rocket_acp::AgentKind::Claude,
+            config_args: &[],
+            cwd: "/tmp",
+            config_dir: "/scratch/config",
+            instructions: "rocket",
+        })
     }
 
     fn noop_cleanup() -> Arc<dyn SessionCleanup> {
@@ -1265,18 +1273,20 @@ mod tests {
         captured_servers: Arc<Mutex<Vec<rocket_acp::McpServerSpec>>>,
         captured_env: Arc<Mutex<Vec<(String, String)>>>,
         captured_meta: Arc<Mutex<Option<serde_json::Value>>>,
+        captured_args: Arc<Mutex<Vec<String>>>,
     }
     #[async_trait::async_trait]
     impl AcpSessionClient for CapturingSessionClient {
         async fn start_session(
             &self,
             _command: &str,
-            _args: &[String],
+            args: &[String],
             _cwd: &str,
             env: &[(String, String)],
             mcp_servers: &[rocket_acp::McpServerSpec],
             meta: Option<serde_json::Value>,
         ) -> DomainResult<SessionInfo> {
+            *self.captured_args.lock().expect("lock") = args.to_vec();
             *self.captured_env.lock().expect("lock") = env.to_vec();
             *self.captured_meta.lock().expect("lock") = meta;
             *self.captured_servers.lock().expect("lock") = mcp_servers.to_vec();
@@ -1311,6 +1321,61 @@ mod tests {
         async fn end_all_sessions(&self) -> DomainResult<()> {
             unreachable!("not exercised by this test")
         }
+    }
+
+    #[tokio::test]
+    async fn a_plan_without_meta_or_env_reaches_the_agent_as_given_and_its_args_follow_the_config()
+    {
+        let captured_args: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_env: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_meta: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let client = CapturingSessionClient {
+            captured_args: Arc::clone(&captured_args),
+            captured_env: Arc::clone(&captured_env),
+            captured_meta: Arc::clone(&captured_meta),
+            ..Default::default()
+        };
+        let service = AcpSessionService::new(
+            Box::new(client),
+            Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
+            noop_cleanup(),
+            agent_config_service(),
+        );
+        let plan = crate::session_plan::SessionPlan {
+            args: vec!["-e".to_string(), "none".to_string()],
+            env: vec![("X_HOME".to_string(), "/home/x".to_string())],
+            meta: None,
+            files: Vec::new(),
+            first_prompt_prefix: None,
+        };
+
+        service
+            .start_workspace_session("agent-1", "/tmp", test_creds(), plan)
+            .await
+            .expect("start_workspace_session");
+
+        let args = captured_args.lock().expect("lock").clone();
+        assert!(
+            args.ends_with(&["-e".to_string(), "none".to_string()]),
+            "{args:?}"
+        );
+        assert_eq!(*captured_meta.lock().expect("lock"), None);
+        let env = captured_env.lock().expect("lock").clone();
+        assert!(env.iter().any(|(k, v)| k == "X_HOME" && v == "/home/x"));
+        assert!(!env.iter().any(|(k, _)| k == "CLAUDE_CONFIG_DIR"));
+    }
+
+    #[tokio::test]
+    async fn agent_config_returns_the_stored_config_and_refuses_an_unknown_id() {
+        let service = AcpSessionService::new(
+            Box::new(FakeSessionClient::default()),
+            Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
+            noop_cleanup(),
+            agent_config_service(),
+        );
+        let config = service.agent_config("agent-1").expect("known id");
+        assert_eq!(config.kind, rocket_acp::AgentKind::Claude);
+        assert!(service.agent_config("no-such-agent").is_err());
     }
 
     #[tokio::test]
@@ -2014,10 +2079,13 @@ mod tests {
             cleanup.clone(),
             agent_config_service(),
         );
-        let isolation = SessionIsolation {
-            config_dir: "/tmp/scratch-config".to_string(),
-            system_prompt_append: "rocket".to_string(),
-        };
+        let isolation = crate::session_plan::session_plan(&crate::session_plan::PlanInput {
+            kind: rocket_acp::AgentKind::Claude,
+            config_args: &[],
+            cwd: "/tmp/scratch-cwd",
+            config_dir: "/tmp/scratch-config",
+            instructions: "rocket",
+        });
 
         let info = service
             .start_workspace_session(
@@ -2041,7 +2109,7 @@ mod tests {
                 .iter()
                 .any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v == "/tmp/scratch-config"));
             assert!(capture.env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
-            assert_eq!(capture.meta, Some(isolation.meta()));
+            assert_eq!(capture.meta, isolation.meta);
         }
         {
             let events = publisher.events.lock().expect("lock");

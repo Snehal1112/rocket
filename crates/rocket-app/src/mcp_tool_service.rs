@@ -128,6 +128,9 @@ struct PendingOutline {
     text: String,
     /// Whether the agent accepts embedded resources (ACP `embeddedContext`).
     embedded_context: bool,
+    /// Rocket instructions to put in front of the outline, for an agent that
+    /// cannot take a system prompt addition.
+    instructions: Option<String>,
 }
 
 /// Orchestrates the workspace assistant's MCP tools. Holds no I/O of its
@@ -406,6 +409,18 @@ impl McpToolService {
         mode: AssistantMode,
         embedded_context: bool,
     ) {
+        self.begin_assistant_session_with(session_id, mode, embedded_context, None);
+    }
+
+    /// Like `begin_assistant_session`, and also stores `instructions` to go in
+    /// front of the outline in the session's first prompt.
+    pub fn begin_assistant_session_with(
+        &self,
+        session_id: &str,
+        mode: AssistantMode,
+        embedded_context: bool,
+        instructions: Option<String>,
+    ) {
         self.open_session(session_id, mode);
         // Built without a tool event: the agent has not called the tool.
         let text = self
@@ -420,6 +435,7 @@ impl McpToolService {
                 PendingOutline {
                     text,
                     embedded_context,
+                    instructions,
                 },
             );
     }
@@ -441,8 +457,13 @@ impl McpToolService {
         let pending = self.pending_outlines.lock().unwrap_or_else(|e| e.into_inner());
         let pending = pending.get(session_id)?;
         let mode = self.mode(session_id);
+        let head = pending
+            .instructions
+            .as_deref()
+            .map(|instructions| format!("{instructions}\n\n"))
+            .unwrap_or_default();
         let text = format!(
-            "Assistant mode: {}. {}\n\n{}",
+            "{head}Assistant mode: {}. {}\n\n{}",
             mode.label(),
             mode.summary(),
             pending.text
@@ -2443,6 +2464,58 @@ mod tests {
         repo.set_autonomy("my-api", true);
         repo.with_summaries("my-api", two_level_tree());
         service_with(repo, FakeEnvRepoFactory::new(), RecordingPublisher::new())
+    }
+
+    #[test]
+    fn instructions_go_in_front_of_the_outline_in_the_first_preamble_only() {
+        let svc = outline_ready_service();
+        svc.begin_assistant_session_with(
+            "a1",
+            AssistantMode::Edit,
+            false,
+            Some("Use only the rocket tools.".to_string()),
+        );
+
+        match svc.take_outline_preamble("a1") {
+            Some(rocket_acp::PromptPart::Text(text)) => {
+                assert!(text.starts_with("Use only the rocket tools."), "{text}");
+                assert!(text.contains("Assistant mode: Edit."), "{text}");
+                assert!(text.contains("POST login.yml"), "{text}");
+            }
+            _ => panic!("expected a text part"),
+        }
+        assert!(svc.take_outline_preamble("a1").is_none());
+    }
+
+    #[test]
+    fn without_instructions_the_preamble_is_unchanged() {
+        let svc = outline_ready_service();
+        svc.begin_assistant_session("a1", AssistantMode::Edit, true);
+        match svc.take_outline_preamble("a1") {
+            Some(rocket_acp::PromptPart::Resource { text, .. }) => {
+                assert!(text.starts_with("Assistant mode: Edit."), "{text}");
+            }
+            _ => panic!("expected an embedded resource part"),
+        }
+    }
+
+    #[test]
+    fn peeked_instructions_stay_until_the_outline_is_discarded() {
+        let svc = outline_ready_service();
+        svc.begin_assistant_session_with(
+            "a1",
+            AssistantMode::Ask,
+            false,
+            Some("Rocket rules.".to_string()),
+        );
+        for _ in 0..2 {
+            match svc.peek_outline_preamble("a1") {
+                Some(rocket_acp::PromptPart::Text(text)) => {
+                    assert!(text.starts_with("Rocket rules."), "{text}");
+                }
+                _ => panic!("expected a text part"),
+            }
+        }
     }
 
     #[test]

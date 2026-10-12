@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use rocket_acp::ConfigOption;
 use rocket_app::{
-    AcpSessionService, AssistantMode, ConversationService, McpHttpServerCredentials, McpToolService,
-    SessionIsolation, WORKSPACE_ASSISTANT_INSTRUCTIONS,
+    session_plan, AcpSessionService, AssistantMode, ConversationService, McpHttpServerCredentials,
+    McpToolService, PlanInput, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 use rocket_shared::error::DomainError;
 use tauri::State;
@@ -100,7 +100,10 @@ const MODEL_CONFIG_ID: &str = "model";
 fn model_to_apply<'a>(options: &[ConfigOption], requested: Option<&'a str>) -> Option<&'a str> {
     let requested = requested?;
     let option = options.iter().find(|o| o.id == MODEL_CONFIG_ID)?;
-    let offered = option.choices.iter().any(|choice| choice.value == requested);
+    let offered = option
+        .choices
+        .iter()
+        .any(|choice| choice.value == requested);
     (offered && option.current_value != requested).then_some(requested)
 }
 
@@ -154,30 +157,39 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
     conversations: &ConversationService,
     svc: &AcpSessionService,
 ) -> Result<AgentSessionStartedDto, DomainError> {
-    // An empty working directory and an empty CLAUDE_CONFIG_DIR, created
-    // before the MCP server, so a failure here leaves nothing bound.
+    // An empty working directory and an empty config directory (the agent's
+    // CLAUDE_CONFIG_DIR or private home), created before the MCP server, so a
+    // failure here leaves nothing bound.
     let scratch = SessionScratch::create().map_err(|e| {
         DomainError::Internal(format!("failed to create the agent scratch directory: {e}"))
     })?;
-    let (cwd, isolation) = scratch.isolation()?;
-    // The workspace assistant's own instructions replace the default
-    // Rocket prompt; the config dir stays the scratch one.
-    let isolation = SessionIsolation {
-        system_prompt_append: WORKSPACE_ASSISTANT_INSTRUCTIONS.to_string(),
-        ..isolation
-    };
+    let (cwd, config_dir) = scratch.paths()?;
+    // The config and its kind are read before the tool server starts, so an
+    // unknown agent leaves nothing bound. The workspace assistant's own
+    // instructions replace the default Rocket prompt.
+    let config = svc.agent_config(&agent_config_id)?;
+    let plan = session_plan(&PlanInput {
+        kind: config.kind,
+        config_args: &config.args,
+        cwd: &cwd,
+        config_dir: &config_dir,
+        instructions: WORKSPACE_ASSISTANT_INSTRUCTIONS,
+    });
+    scratch.write_files(&plan.files).map_err(|e| {
+        DomainError::Internal(format!("failed to write the agent scratch files: {e}"))
+    })?;
     let provisional_id = uuid::Uuid::new_v4().to_string();
-    let handle =
-        crate::mcp::tool_server::spawn_mcp_http_server(app_handle, provisional_id.clone())
-            .await
-            .map_err(|e| DomainError::Internal(format!("failed to start MCP tool server: {e}")))?;
+    let handle = crate::mcp::tool_server::spawn_mcp_http_server(app_handle, provisional_id.clone())
+        .await
+        .map_err(|e| DomainError::Internal(format!("failed to start MCP tool server: {e}")))?;
     let credentials = McpHttpServerCredentials {
         port: handle.port,
         token: handle.token.clone(),
     };
 
+    let first_prompt_prefix = plan.first_prompt_prefix.clone();
     let info = match svc
-        .start_workspace_session(&agent_config_id, &cwd, credentials, isolation)
+        .start_workspace_session(&agent_config_id, &cwd, credentials, plan)
         .await
     {
         Ok(info) => info,
@@ -191,10 +203,11 @@ pub async fn start_workspace_assistant_inner<R: tauri::Runtime>(
 
     // Mode and workspace pin come first, so no tool call can run under the
     // real id without them.
-    mcp_tool_svc.begin_assistant_session(
+    mcp_tool_svc.begin_assistant_session_with(
         &info.session_id,
         mode,
         info.prompt_capabilities.embedded_context,
+        first_prompt_prefix,
     );
     // The same moment as the tool pin, so the conversation of this session
     // is saved into the workspace it started in, even after a switch.
@@ -282,7 +295,11 @@ mod tests {
         let options = vec![model_option("default", &["default", "opus", "sonnet"])];
 
         assert_eq!(model_to_apply(&options, Some("opus")), Some("opus"));
-        assert_eq!(model_to_apply(&options, Some("default")), None, "already current");
+        assert_eq!(
+            model_to_apply(&options, Some("default")),
+            None,
+            "already current"
+        );
         assert_eq!(
             model_to_apply(&options, Some("retired-model")),
             None,

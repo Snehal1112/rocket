@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rocket_app::SessionIsolation;
+use rocket_app::{PlannedFile, SessionIsolation};
 use rocket_shared::error::DomainError;
 
 /// The directory name that holds every session's scratch, inside a per-user
@@ -41,7 +41,10 @@ impl SessionScratch {
             config_dir: root.join("config"),
             root,
         };
-        std::fs::write(scratch.root.join(OWNER_MARKER), std::process::id().to_string())?;
+        std::fs::write(
+            scratch.root.join(OWNER_MARKER),
+            std::process::id().to_string(),
+        )?;
         create_private_dir(&scratch.cwd)?;
         create_private_dir(&scratch.config_dir)?;
         Ok(scratch)
@@ -65,6 +68,48 @@ impl SessionScratch {
         let cwd = path_to_string(&self.cwd)?;
         let config_dir = path_to_string(&self.config_dir)?;
         Ok((cwd, SessionIsolation::new(config_dir)))
+    }
+
+    /// The cwd and the config directory as strings, for `session/new` and the
+    /// session plan.
+    pub fn paths(&self) -> Result<(String, String), DomainError> {
+        Ok((
+            path_to_string(&self.cwd)?,
+            path_to_string(&self.config_dir)?,
+        ))
+    }
+
+    /// Writes the planned files under the root, before the agent starts. A
+    /// path must be non-empty and made only of plain names (no `..`, no `.`,
+    /// no root or prefix), so nothing can leave the root. Missing directories
+    /// are created with mode 0700 and each file with mode 0600. An existing
+    /// file is never overwritten.
+    pub fn write_files(&self, files: &[PlannedFile]) -> std::io::Result<()> {
+        for file in files {
+            let rel = Path::new(&file.rel_path);
+            // `Path::components` drops an inner `.`, so the raw segments are
+            // checked as well.
+            let safe = !file.rel_path.is_empty()
+                && file
+                    .rel_path
+                    .split('/')
+                    .all(|seg| !matches!(seg, "" | "." | ".."))
+                && rel
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)));
+            if !safe {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "a planned scratch file path must be relative and contain only plain names",
+                ));
+            }
+            let target = self.root.join(rel);
+            if let Some(parent) = target.parent() {
+                create_private_dir_all(parent)?;
+            }
+            write_new_private_file(&target, file.contents.as_bytes())?;
+        }
+        Ok(())
     }
 }
 
@@ -142,7 +187,10 @@ pub fn sweep_stale_scratch_in(parent: &Path) -> usize {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return 0,
         Err(e) => {
-            tracing::warn!("cannot read the agent scratch parent {}: {e}", parent.display());
+            tracing::warn!(
+                "cannot read the agent scratch parent {}: {e}",
+                parent.display()
+            );
             return 0;
         }
     };
@@ -232,6 +280,31 @@ fn current_uid() -> std::io::Result<u32> {
     uid
 }
 
+fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
+/// Creates `path` for writing and fails when it already exists, including as
+/// a symlink. The mode is 0600 on Unix.
+fn write_new_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(contents)
+}
+
 fn create_private_dir(path: &Path) -> std::io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
@@ -277,9 +350,14 @@ mod tests {
         assert!(scratch.cwd().is_dir());
         assert!(scratch.config_dir().is_dir());
         assert_ne!(scratch.cwd(), scratch.config_dir());
-        assert_eq!(std::fs::read_dir(scratch.cwd()).expect("read cwd").count(), 0);
         assert_eq!(
-            std::fs::read_dir(scratch.config_dir()).expect("read config").count(),
+            std::fs::read_dir(scratch.cwd()).expect("read cwd").count(),
+            0
+        );
+        assert_eq!(
+            std::fs::read_dir(scratch.config_dir())
+                .expect("read config")
+                .count(),
             0
         );
     }
@@ -314,7 +392,11 @@ mod tests {
         let parent = private_tempdir();
         let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
         for dir in [scratch.root(), scratch.cwd(), scratch.config_dir()] {
-            let mode = std::fs::metadata(dir).expect("metadata").permissions().mode() & 0o777;
+            let mode = std::fs::metadata(dir)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
             assert_eq!(mode, 0o700, "{} must be 0700", dir.display());
         }
     }
@@ -329,7 +411,9 @@ mod tests {
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777))
             .expect("chmod parent");
 
-        let err = SessionScratch::create_in(&parent).err().expect("must be rejected");
+        let err = SessionScratch::create_in(&parent)
+            .err()
+            .expect("must be rejected");
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
@@ -342,8 +426,102 @@ mod tests {
         let link = base.path().join("link");
         std::os::unix::fs::symlink(&target, &link).expect("symlink");
 
-        let err = SessionScratch::create_in(&link).err().expect("must be rejected");
+        let err = SessionScratch::create_in(&link)
+            .err()
+            .expect("must be rejected");
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn paths_returns_the_cwd_and_the_config_dir() {
+        let parent = private_tempdir();
+        let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
+        let (cwd, config_dir) = scratch.paths().expect("utf-8 paths");
+        assert_eq!(Path::new(&cwd), scratch.cwd());
+        assert_eq!(Path::new(&config_dir), scratch.config_dir());
+    }
+
+    fn planned(rel_path: &str, contents: &str) -> rocket_app::PlannedFile {
+        rocket_app::PlannedFile {
+            rel_path: rel_path.to_string(),
+            contents: contents.to_string(),
+        }
+    }
+
+    #[test]
+    fn write_files_creates_nested_files_under_the_root() {
+        let parent = private_tempdir();
+        let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
+        scratch
+            .write_files(&[
+                planned("config/.gemini/settings.json", "{}"),
+                planned("cwd/GEMINI.md", "rules"),
+            ])
+            .expect("write files");
+        assert_eq!(
+            std::fs::read_to_string(scratch.root().join("config/.gemini/settings.json"))
+                .expect("settings"),
+            "{}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(scratch.cwd().join("GEMINI.md")).expect("md"),
+            "rules"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn written_files_and_new_dirs_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = private_tempdir();
+        let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
+        scratch
+            .write_files(&[planned("config/.gemini/settings.json", "{}")])
+            .expect("write files");
+        let file = scratch.root().join("config/.gemini/settings.json");
+        let dir = scratch.root().join("config/.gemini");
+        let mode = |p: &Path| std::fs::metadata(p).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(&dir), 0o700);
+    }
+
+    #[test]
+    fn write_files_refuses_unsafe_paths_and_writes_nothing_outside_the_root() {
+        let parent = private_tempdir();
+        let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
+        for bad in [
+            "",
+            "/abs/path",
+            "../escape",
+            "cwd/../../escape",
+            "cwd/./x",
+            "./x",
+        ] {
+            let err = scratch.write_files(&[planned(bad, "x")]).expect_err(bad);
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{bad:?}");
+        }
+        assert!(!parent.path().join("escape").exists());
+        assert_eq!(
+            std::fs::read_dir(scratch.cwd()).expect("read cwd").count(),
+            0
+        );
+    }
+
+    #[test]
+    fn write_files_never_overwrites_an_existing_file() {
+        let parent = private_tempdir();
+        let scratch = SessionScratch::create_in(parent.path()).expect("create scratch");
+        scratch
+            .write_files(&[planned("cwd/a.txt", "first")])
+            .expect("first write");
+        let err = scratch
+            .write_files(&[planned("cwd/a.txt", "second")])
+            .expect_err("second write");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read_to_string(scratch.cwd().join("a.txt")).expect("read"),
+            "first"
+        );
     }
 
     #[test]
@@ -407,7 +585,9 @@ mod tests {
         std::fs::write(stale.join("config/.claude.json"), "{}").expect("stale file");
         let other_dir = parent.path().join("not-a-uuid");
         std::fs::create_dir(&other_dir).expect("other dir");
-        let uuid_named_file = parent.path().join(uuid::Uuid::new_v4().to_string() + ".txt");
+        let uuid_named_file = parent
+            .path()
+            .join(uuid::Uuid::new_v4().to_string() + ".txt");
         std::fs::write(&uuid_named_file, "x").expect("other file");
         let file_named_like_uuid = parent.path().join(uuid::Uuid::new_v4().to_string());
         std::fs::write(&file_named_like_uuid, "x").expect("uuid-named file");

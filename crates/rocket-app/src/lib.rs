@@ -3,6 +3,7 @@
 pub mod acp_session_service;
 pub mod agent_config_service;
 pub mod agent_isolation;
+mod session_plan;
 pub mod assertion_evaluator;
 pub mod callback_listener;
 pub(crate) mod client_certificates;
@@ -61,6 +62,9 @@ pub use acp_session_service::{
     AcpSessionService, McpHttpServerCredentials, NoopSessionCleanup, SessionCleanup,
 };
 pub use agent_config_service::{process_env_reader, AgentConfigService, EnvReader};
+pub use session_plan::{
+    session_plan, PlanInput, PlannedFile, SessionPlan, NON_CLAUDE_TOOL_NOTICE,
+};
 pub use agent_isolation::{
     isolation_meta, SessionIsolation, ISOLATION_ENV_CONFIG_DIR, ROCKET_ASSISTANT_SYSTEM_PROMPT,
 };

@@ -17,25 +17,25 @@ use rocket_acp::{
     PromptCapabilities, PromptPart, SessionInfo,
 };
 use rocket_app::{
-    isolation_meta, AcpSessionService, AssistantMode, ConversationService, McpToolService, SessionCleanup,
-    ISOLATION_ENV_CONFIG_DIR, WORKSPACE_ASSISTANT_INSTRUCTIONS,
+    isolation_meta, AcpSessionService, AssistantMode, ConversationService, McpToolService,
+    SessionCleanup, ISOLATION_ENV_CONFIG_DIR, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 use rocket_collection::CollectionRepository;
 use rocket_environment::external_secret::ExternalSecretRef;
 use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerRepository};
 use rocket_environment::secret_store::SecretStore;
 use rocket_environment::vault_secret_fetcher::VaultSecretFetcher;
-use rocket_lib::agent_session::cleanup::{SessionResourceRegistry, TauriSessionCleanup};
+use rocket_environment::{NullSecretStore, NullVaultSecretFetcher};
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_infra::{
     FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsSecretManagerRepo,
     FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo, SharedPathConversationRepo,
 };
+use rocket_lib::agent_session::cleanup::{SessionResourceRegistry, TauriSessionCleanup};
 use rocket_lib::commands::acp_sessions::start_workspace_assistant_inner;
 use rocket_lib::mcp::registry::McpServerRegistry;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::NullEventPublisher;
-use rocket_environment::{NullSecretStore, NullVaultSecretFetcher};
 use tempfile::TempDir;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -121,7 +121,7 @@ impl VaultSecretFetcher for FakeVaultFetcher {
     }
 }
 
-fn agent_config_service() -> Arc<rocket_app::AgentConfigService> {
+fn agent_config_service_for(kind: rocket_acp::AgentKind) -> Arc<rocket_app::AgentConfigService> {
     let connection = SecretManagerConnection {
         id: "conn-1".to_string(),
         label: "Test Vault".to_string(),
@@ -140,7 +140,7 @@ fn agent_config_service() -> Arc<rocket_app::AgentConfigService> {
     let config = AgentConfig {
         id: "agent-1".to_string(),
         label: "Test Agent".to_string(),
-        kind: rocket_acp::AgentKind::default(),
+        kind,
         command: "test-agent-acp".to_string(),
         args: Vec::new(),
         working_dir: None,
@@ -259,7 +259,7 @@ struct Fixture {
 /// `McpServerRegistry`, and an `AcpSessionService` wired to `client`. The
 /// `TempDir` is kept alive for the workspace files, and the mock
 /// `AppHandle` is what `spawn_mcp_http_server` needs.
-fn build_fixture(client: FakeSessionClient) -> Fixture {
+fn build_fixture_for(client: FakeSessionClient, kind: rocket_acp::AgentKind) -> Fixture {
     let tmp = TempDir::new().expect("tempdir");
     let ws_path = Arc::new(Mutex::new(tmp.path().to_path_buf()));
     let collections_dir = tmp.path().join("collections");
@@ -299,7 +299,7 @@ fn build_fixture(client: FakeSessionClient) -> Fixture {
         Box::new(client),
         Box::new(NullEventPublisher),
         Arc::new(rocket_app::NoopSessionCleanup),
-        agent_config_service(),
+        agent_config_service_for(kind),
     );
 
     let conversation_svc = ConversationService::new(
@@ -324,6 +324,10 @@ fn build_fixture(client: FakeSessionClient) -> Fixture {
     }
 }
 
+fn build_fixture(client: FakeSessionClient) -> Fixture {
+    build_fixture_for(client, rocket_acp::AgentKind::Claude)
+}
+
 type ClientParts = (
     FakeSessionClient,
     Arc<Mutex<Vec<McpServerSpec>>>,
@@ -342,7 +346,9 @@ fn client(should_fail: bool, session_id: &str) -> ClientParts {
     (client, servers, start)
 }
 
-async fn start(fx: &Fixture) -> DomainResult<rocket_lib::commands::acp_session_dto::AgentSessionStartedDto> {
+async fn start(
+    fx: &Fixture,
+) -> DomainResult<rocket_lib::commands::acp_session_dto::AgentSessionStartedDto> {
     start_workspace_assistant_inner(
         "agent-1".to_string(),
         AssistantMode::Edit,
@@ -402,6 +408,36 @@ async fn session_start_failure_propagates_and_registers_nothing() {
     // The HTTP server was already bound, so the function must have shut it
     // down itself. It was never registered, as no real session id existed.
     assert!(fx.resources.is_empty());
+}
+
+#[tokio::test]
+async fn a_generic_agent_gets_no_claude_isolation_and_the_instructions_in_its_first_prompt() {
+    let (client, _, captured_start) = client(false, "acp-real-session-generic");
+    let fx = build_fixture_for(client, rocket_acp::AgentKind::Generic);
+
+    let session_id = start(&fx)
+        .await
+        .expect("start_workspace_assistant_inner should succeed")
+        .session_id;
+
+    let start = captured_start
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("the client's start_session must have been called");
+    assert_eq!(start.meta, None, "a generic agent gets no Claude _meta");
+    assert!(
+        !start.env.iter().any(|(k, _)| k == ISOLATION_ENV_CONFIG_DIR),
+        "a generic agent gets no CLAUDE_CONFIG_DIR"
+    );
+    match fx.mcp_tool_svc.peek_outline_preamble(&session_id) {
+        Some(rocket_acp::PromptPart::Resource { text, .. })
+        | Some(rocket_acp::PromptPart::Text(text)) => {
+            assert!(text.starts_with(WORKSPACE_ASSISTANT_INSTRUCTIONS), "{text}");
+            assert!(text.contains("propose_changes"), "{text}");
+        }
+        None => panic!("the first prompt must carry the instructions"),
+    }
 }
 
 #[tokio::test]
@@ -472,7 +508,10 @@ async fn session_start_failure_removes_the_scratch_directories() {
         .find(|(k, _)| k == ISOLATION_ENV_CONFIG_DIR)
         .map(|(_, v)| PathBuf::from(v))
         .expect("CLAUDE_CONFIG_DIR must be set");
-    assert!(!config_dir.exists(), "the scratch config dir must be removed");
+    assert!(
+        !config_dir.exists(),
+        "the scratch config dir must be removed"
+    );
     assert!(fx.resources.is_empty());
 }
 
@@ -494,7 +533,9 @@ async fn a_started_session_can_save_its_conversation_into_its_workspace() {
                 collections: vec!["demo".into()],
                 messages: vec![
                     rocket_acp::StoredMessage::User { text: "hi".into() },
-                    rocket_acp::StoredMessage::Agent { text: "hello".into() },
+                    rocket_acp::StoredMessage::Agent {
+                        text: "hello".into(),
+                    },
                 ],
                 continued_from: None,
             },
