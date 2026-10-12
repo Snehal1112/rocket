@@ -1024,7 +1024,7 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     }
 
     #[tool(
-        description = "Propose workspace changes for the user to review: create_folder, create_request, update_request, edit_script, move_item, rename_item, set_env_var (non-secret only) or update_folder_settings (a folder's default headers, variables, scripts and docs; never auth). Nothing is written until the user accepts each proposal. Returns the new proposal ids. Not available in Ask mode."
+        description = "Propose workspace changes for the user to review: create_folder, create_request, update_request (method, url, headers, query params, body and the request's docs), edit_script, move_item, rename_item, set_env_var (non-secret only) or update_folder_settings (a folder's default headers, variables, scripts and docs; never auth). Nothing is written until the user accepts each proposal. Returns the new proposal ids. Not available in Ask mode."
     )]
     async fn propose_changes(
         &self,
@@ -1247,6 +1247,23 @@ mod tests {
             .expect("build mock tauri app")
             .handle()
             .clone()
+    }
+
+    #[test]
+    fn the_propose_changes_description_names_request_docs_and_keeps_its_limits() {
+        let server: RocketMcpToolServer<tauri::test::MockRuntime> =
+            RocketMcpToolServer::new(test_app_handle(), "session-1".to_string());
+        let tool = server
+            .tool_router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "propose_changes")
+            .expect("propose_changes is registered");
+        let description = tool.description.as_deref().unwrap_or_default();
+        assert!(description.contains("the request's docs"), "{description}");
+        assert!(description.contains("Nothing is written until the user accepts"));
+        assert!(description.contains("never auth"));
+        assert!(description.contains("Not available in Ask mode"));
     }
 
     #[test]

@@ -103,3 +103,19 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 - Exclusive creates only catch exact-name collisions on case-sensitive Linux. Case and Unicode variants rely on the `path_exists` checks at propose and accept time.
 - The assistant uses only environment-supplied credentials. It does not use a stored Claude login. This is deliberate.
 - Cookies and others are unaffected.
+
+## Multi-agent support (2026-10-12)
+
+Design and verified Gemini facts: `.claude/acp-multi-agent-support.md`. Plans: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
+
+Open follow-ups:
+
+- Gemini Google login (OAuth): needs `oauth_creds.json` copied into the private home with mode 0600. Not built; needs a security review first.
+- The Plan 2 real-key run showed Google accepts the `propose_changes` schema, so no Gemini-only flattened schema is needed.
+- A failed or empty agent turn shows nothing in the UI (seen with Gemini). Rocket should show the stop reason or the error.
+- Gemini advertises its models in the `models` field of `session/new` and changes model with `session/set_model`, not through `configOptions`. The composer model picker therefore shows nothing for Gemini until Rocket reads `models`.
+- rmcp has two `sse_retry` settings (server config and `LocalSessionManager.session_config`). Both are off, because the priming event hides the tools from Gemini CLI. Keep both off when upgrading rmcp.
+- `real_mcp_client_lists_and_calls_tools_over_http` fails at `run_request` because the collection run trust is not confirmed in its fixture.
+- `GEMINI.md` and the first-prompt reminder are ordinary history in Gemini 0.63 and may be summarised in a very long session. Only `GEMINI_SYSTEM_MD` is compaction-proof, but it replaces Gemini's whole system prompt.
+- The permission card plan (`docs/superpowers/plans/2026-10-12-acp-permission-card.md`) is still needed for `Generic` agents, whose permission requests Rocket denies today.
+- Other agents, one plan each: Qwen, Codex (no single no-built-ins switch, no SSE), OpenCode (merges global config), Goose (developer built-in on by default), Copilot, Cursor (cannot remove built-ins).

@@ -65,6 +65,7 @@ See `.claude/assistant-conversations.md` for stored assistant conversations (sto
 See `.claude/collection-trust.md` for the collection trust gate (requested vs allowed access, `{{process.env}}` gate).
 See `.claude/software-factory.md` for the software factory (`/factory` command, agents, live dashboard in `tools/factory-server/`).
 See `.claude/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
+See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
 See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.

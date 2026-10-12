@@ -29,7 +29,7 @@ cargo test -p rocket-acp -j4
 
 | Module | Responsibility |
 |---|---|
-| `agent_config.rs` | `AgentConfig` struct + `AgentConfigRepository` trait |
+| `agent_config.rs` | `AgentConfig` struct + `AgentKind` (Claude, Gemini, Generic; per-kind reserved env names and `validate_kind_env`) + `AgentConfigRepository` trait |
 | `session.rs` | `AcpSessionClient` trait (`start_session`, `send_prompt`, `cancel`, `set_config_option`, `end_session`, `end_all_sessions`) |
 | `session_info.rs` | `SessionInfo`, `PromptCapabilities`; re-exports `ConfigOption`/`ConfigChoice` from `rocket_shared::acp` |
 | `update.rs` | `AcpUpdate` (typed agent updates) and `ToolCallStatus` |
@@ -40,6 +40,7 @@ cargo test -p rocket-acp -j4
 
 ### Key Design Points
 
+- `AgentKind` is persisted on `AgentConfig` with `#[serde(default)]` (old files load as Claude). It decides how `rocket-app`'s `session_plan` isolates and instructs a session. It carries no behavior itself.
 - `AgentConfig` never holds a credential *value*. It holds `credential_source`
   (vault, keychain or env) and `source_env_var`. The vault source keeps only
   `vault_connection_id`/`vault_name`/`vault_secret_id`, resolved on demand by
