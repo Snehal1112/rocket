@@ -512,6 +512,61 @@ describe('AgentConfigsDialog', () => {
     expect(screen.getByRole('radio', { name: /^generic/i })).toBeChecked();
   });
 
+  it('prefills a new Gemini agent with the Gemini command, args and key name', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: /add agent/i }));
+    await screen.findByLabelText('Label');
+    await user.click(screen.getByRole('radio', { name: /^gemini cli/i }));
+    expect(screen.getByLabelText('Command')).toHaveValue('gemini');
+    expect(screen.getByLabelText(/Args/)).toHaveValue('--acp');
+    expect(screen.getByLabelText('Credential Env Var')).toHaveValue('GEMINI_API_KEY');
+  });
+
+  it('keeps what the user already typed when Gemini is chosen', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: /add agent/i }));
+    await user.type(await screen.findByLabelText('Command'), '/opt/gemini');
+    await user.click(screen.getByRole('radio', { name: /^gemini cli/i }));
+    expect(screen.getByLabelText('Command')).toHaveValue('/opt/gemini');
+    expect(screen.getByLabelText(/Args/)).toHaveValue('--acp');
+  });
+
+  it('does not change the fields of a stored agent when its type is switched', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+    await screen.findByLabelText('Label');
+    await user.click(screen.getByRole('radio', { name: /^gemini cli/i }));
+    expect(screen.getByLabelText('Command')).toHaveValue('claude-agent-acp');
+    expect(screen.getByLabelText('Credential Env Var')).toHaveValue('ANTHROPIC_API_KEY');
+  });
+
+  it('saves a Gemini agent with kind gemini', async () => {
+    vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+    vi.mocked(api.listSecretManagerConnections).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByRole('button', { name: /add agent/i }));
+    await user.type(await screen.findByLabelText('Label'), 'Gemini');
+    await user.click(screen.getByRole('radio', { name: /^gemini cli/i }));
+    await user.click(screen.getByRole('radio', { name: /rocket environment variable/i }));
+    await user.type(screen.getByLabelText('Environment variable name'), 'GEMINI_API_KEY');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.saveAgentConfig).mock.calls[0][0]).toMatchObject({
+      kind: 'gemini',
+      command: 'gemini',
+      args: ['--acp'],
+      credentialEnvVar: 'GEMINI_API_KEY',
+      credentialSource: 'env',
+      sourceEnvVar: 'GEMINI_API_KEY',
+    });
+  });
+
   it('describes every credential source in the secrets help text', async () => {
     await openEdit();
     expect(document.body.textContent).not.toContain('RocketVault credential, not');

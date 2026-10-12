@@ -106,6 +106,34 @@ function validateEnvRows(rows: EnvRow[], credentialEnvVar: string): (string | nu
   });
 }
 
+// Defaults for a new agent of a kind. They fill only fields the user left empty.
+const KIND_PRESETS: Partial<
+  Record<AgentKind, { command: string; args: string; credentialEnvVar: string }>
+> = {
+  gemini: { command: 'gemini', args: '--acp', credentialEnvVar: 'GEMINI_API_KEY' },
+};
+
+function withKind<
+  T extends {
+    isNew: boolean;
+    command: string;
+    args: string;
+    credentialEnvVar: string;
+    kind: AgentKind;
+  },
+>(form: T, kind: AgentKind): T {
+  const preset = form.isNew ? KIND_PRESETS[kind] : undefined;
+  if (!preset) return { ...form, kind };
+  return {
+    ...form,
+    kind,
+    command: form.command.trim() === '' ? preset.command : form.command,
+    args: form.args.trim() === '' ? preset.args : form.args,
+    credentialEnvVar:
+      form.credentialEnvVar.trim() === '' ? preset.credentialEnvVar : form.credentialEnvVar,
+  };
+}
+
 const emptyForm = {
   extraEnv: [] as EnvRow[],
   id: '',
@@ -374,7 +402,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
               <Label className='text-sm'>Agent type</Label>
               <RadioGroup
                 value={editing.kind}
-                onValueChange={(value) => setEditing({ ...editing, kind: value as AgentKind })}
+                onValueChange={(value) => setEditing(withKind(editing, value as AgentKind))}
                 className='mt-1 gap-1'
               >
                 <div className='flex items-center gap-2'>
@@ -384,12 +412,24 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                   </Label>
                 </div>
                 <div className='flex items-center gap-2'>
+                  <RadioGroupItem value='gemini' id='ac-kind-gemini' />
+                  <Label htmlFor='ac-kind-gemini' className='text-sm font-normal'>
+                    Gemini CLI
+                  </Label>
+                </div>
+                <div className='flex items-center gap-2'>
                   <RadioGroupItem value='generic' id='ac-kind-generic' />
                   <Label htmlFor='ac-kind-generic' className='text-sm font-normal'>
                     Generic ACP agent
                   </Label>
                 </div>
               </RadioGroup>
+              {editing.kind === 'gemini' && (
+                <p className='mt-1 text-xs text-muted-foreground'>
+                  Rocket runs Gemini in a private home with only the Rocket tools. Use a Gemini API
+                  key: a Google login is not available inside a Rocket session.
+                </p>
+              )}
               {editing.kind === 'generic' && (
                 <p className='mt-1 text-xs text-muted-foreground'>
                   Rocket sets no isolation for a generic agent. It keeps its own tools and settings,
@@ -405,7 +445,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 id='ac-command'
                 value={editing.command}
                 onChange={(e) => setEditing({ ...editing, command: e.target.value })}
-                placeholder='claude-agent-acp'
+                placeholder={editing.kind === 'gemini' ? 'gemini' : 'claude-agent-acp'}
                 className='h-8 text-sm'
               />
             </div>
@@ -440,7 +480,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
                 id='ac-credential-env-var'
                 value={editing.credentialEnvVar}
                 onChange={(e) => setEditing({ ...editing, credentialEnvVar: e.target.value })}
-                placeholder='ANTHROPIC_API_KEY'
+                placeholder={editing.kind === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY'}
                 className='h-8 text-sm'
                 aria-invalid={credentialError !== null}
                 autoComplete='off'
