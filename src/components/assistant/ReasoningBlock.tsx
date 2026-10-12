@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { selectTurnRunning, useAssistantStore } from '@/stores/assistant-store';
 
-/** The agent's reasoning for the current turn. Collapsed until the user opens it. */
+/** The agent's thinking while a turn runs. Collapsed until opened, hidden once the reply is done. */
 export function ReasoningBlock() {
   const reasoning = useAssistantStore((s) => s.reasoning);
   const running = useAssistantStore(selectTurnRunning);
   const [open, setOpen] = useState(false);
-  if (!reasoning) return null;
+  if (!reasoning || !running) return null;
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <Collapsible open={open} onOpenChange={setOpen} className='min-w-0'>
@@ -21,7 +21,7 @@ export function ReasoningBlock() {
         >
           <Chevron className='h-3 w-3' />
           <Brain className='h-3 w-3' />
-          {running ? 'Reasoning (live)' : 'Reasoning'}
+          Agent's thinking (live)
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
