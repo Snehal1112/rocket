@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use git2::build::CheckoutBuilder;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -233,13 +234,52 @@ pub(super) fn push(
         refspec
     };
 
-    let (callbacks, verification) = build_callbacks(creds, &remote_url, known_hosts_path);
+    let (mut callbacks, verification) = build_callbacks(creds, &remote_url, known_hosts_path);
+    // libgit2 returns Ok from `push` even when the server refuses a ref, so
+    // the per-ref status must be collected here and checked afterwards.
+    let rejections: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let rejection_slot = Arc::clone(&rejections);
+    callbacks.push_update_reference(move |reference, status| {
+        if let Some(reason) = status {
+            if let Ok(mut slot) = rejection_slot.lock() {
+                slot.push(format!("{reference}: {reason}"));
+            }
+        }
+        Ok(())
+    });
+    // Hosts explain a rejection in `remote:` sideband text (the failed rule,
+    // a hook's output). Keep it so the error can say why, not only that.
+    let remote_messages: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let message_slot = Arc::clone(&remote_messages);
+    callbacks.sideband_progress(move |data| {
+        if let Ok(mut slot) = message_slot.lock() {
+            slot.push_str(&String::from_utf8_lossy(data));
+        }
+        true
+    });
     let mut push_opts = git2::PushOptions::new();
     push_opts.remote_callbacks(callbacks);
 
     remote_obj
         .push(&[&refspec], Some(&mut push_opts))
         .map_err(|error| verification.map_error(error))?;
+
+    let rejected = rejections
+        .lock()
+        .map(|slot| slot.clone())
+        .unwrap_or_default();
+    if !rejected.is_empty() {
+        let details = remote_messages
+            .lock()
+            .map(|slot| slot.trim().to_owned())
+            .unwrap_or_default();
+        let mut message = format!("Push rejected by the remote: {}", rejected.join("; "));
+        if !details.is_empty() {
+            message.push_str("\n\nMessage from the remote:\n");
+            message.push_str(&details);
+        }
+        return Err(DomainError::Internal(message));
+    }
     Ok(())
 }
 

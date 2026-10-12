@@ -16,7 +16,7 @@ export function GitErrorBanner({ message, onDismiss, className }: GitErrorBanner
   return (
     <Alert variant='destructive' className={className}>
       <AlertCircle className='h-3.5 w-3.5 shrink-0 mt-0.5' />
-      <span className='flex-1 wrap-break-word'>{message}</span>
+      <span className='flex-1 wrap-break-word whitespace-pre-line'>{message}</span>
       {onDismiss && (
         <Button
           variant='ghost'
