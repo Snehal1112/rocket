@@ -6,7 +6,7 @@ Status: draft for review, 2026-10-13. Builds on `.claude/software-factory.md` (v
 
 v1 works end to end. Job 001 (issue 21, mTLS test) went from spec to merge with no review rounds. But a seven-part investigation (real run evidence, orchestrator flow, agent prompts, server and hook, multi-plan support, harness conflicts) found gaps. The real run needed three manual interventions and scored about 6 out of 10: usable, not autonomous.
 
-This spec lists every confirmed gap, groups them into seven plans of at most three tasks, and fixes the interfaces between plans so that each plan can be written and built on its own.
+This spec lists every confirmed gap, groups them into eight plans of at most three tasks, and fixes the interfaces between plans so that each plan can be written and built on its own.
 
 ## Evidence rules
 
@@ -86,7 +86,7 @@ This spec lists every confirmed gap, groups them into seven plans of at most thr
 | E11 | `/verify-rocket` runs `cargo check` without `-j4` and `cargo test --workspace --no-run`. The harness guard denies both. `CLAUDE.md` also shows a bare `cargo check`. | read |
 | E12 | Deferred v1 minors in the three plan ledgers (log-event URL query strings, tool_target tests, verdict lint, `new-job` argument validation, board.json mode, corrupt board traceback, smoke test polling, and others). | ledger |
 
-### F. Token efficiency (plan 07)
+### F. Token efficiency (plans 07 and 08)
 
 Measured on job 001 (about 12.75M tokens, 11.76M of them cache reads; fresh input plus cache creation plus output is about 0.99M). The review is in the conversation that produced this spec. Evidence tags as above.
 
@@ -115,13 +115,19 @@ Already fine (do not re-open): model tiers (Opus only for spec writer, builder, 
 7. **The merge and sync commit messages are fixed conventional templates, written by the orchestrator with no skill call and no helper agents.** The commit skill spawns at least 2 helper agents per commit, and in job 001 the merge commit alone cost 9 helpers (about 700k tokens) for a diff that had nothing to analyze. Template: `chore(factory): merge job NNN <slug>`. Builder task commits still go through `dev-workflow-skills:1-git-commit` (decision 11 trims its ceremony).
 8. **Ledger writes go through ctl only.** Builders and reviewers never write the ledger.
 9. **Agents use the superpowers skills** (added after review). v1 only names `dev-workflow-skills:1-git-commit`, and the spec writer has no `Skill` tool at all.
-   - Spec writer (plan 04): `superpowers:brainstorming` without questions (it picks the recommended option and records each choice under "Assumptions" in `spec.md`) and `superpowers:writing-plans`, saving into the job directory. Its `tools:` line gains `Skill`.
+   - Spec writer (plan 04, used in `full` mode only; in `lean` mode the orchestrator runs the same two skills itself, see decision 12): `superpowers:brainstorming` without questions (it picks the recommended option and records each choice under "Assumptions" in `spec.md`) and `superpowers:writing-plans`, saving into the job directory. Its `tools:` line gains `Skill`.
    - Builder (plans 02 and 04): `superpowers:executing-plans` for the plan, `superpowers:test-driven-development` per task, `superpowers:systematic-debugging` on a failing check, `superpowers:verification-before-completion` before the `CHECKS:` block, and `superpowers:receiving-code-review` on a resume. It does not use `using-git-worktrees`, `finishing-a-development-branch`, `requesting-code-review`, `brainstorming` or `writing-plans`, because the harness or the orchestrator owns those steps.
    - Reviewers and approver stay read-only without `Skill`. Their checklists already encode the review rules, and a skill call would add turns for no new evidence.
    - Every skill rule has an inline fallback, so a missing Skill tool never fails a job.
 10. **Docs stay under `.claude/`.** The design doc `.claude/software-factory.md` is updated by each plan, and `CLAUDE.md` stays small.
 
 11. **Token efficiency is a requirement** (added after the token review). Rules: (a) the orchestrator writes diffs to files by redirect and never holds a diff in its context; (b) reviewers page large diffs with offset and limit, and a diff over the size cap goes to `needs-human` with "split the plan"; (c) the approver gets the diff stat plus the review reports and reads hunks only for paths its risk rules flag; (d) the security reviewer is skipped for doc-only diffs; (e) the builder commits with the skill but runs its git commands inline, with no helper agents and no amend steps, and may spawn at most 2 helper agents per task; (f) agents do not re-read files that are already auto-loaded; (g) every job has a soft token budget with a warning at 80 percent and a stop at 100 percent; (h) usage is logged per agent and shown on the dashboard.
+
+12. **Lean mode is the default, the full pipeline is opt-in** (added after the token review, by user decision). Job 001 cost 12.75M raw tokens with 9 agent runs plus 11 helpers. A plain superpowers flow does the same core work with far fewer agents.
+   - **Lean (default):** the orchestrator itself runs `superpowers:brainstorming` (it may ask the user questions) and `superpowers:writing-plans` in the main session and saves spec and plans into the job directory. No spec-writer agent. One `factory-builder` per plan runs `superpowers:executing-plans`. One combined `factory-code-reviewer` (Sonnet) reviews the diff and also checks the hard rules (shadcn, lucide, editors, Zustand, serde, no unwrap, no git CLI). No approver agent: the orchestrator merges when `ctl can-auto-merge` passes (all checks `PASS`, reviewer verdict `APPROVE`, diff class not `risky`, budget not stopped).
+   - **Risk escalation:** when the diff class is `risky`, the job runs the v1 review set instead: security (Opus), UX and UI when `src/` changed, code, then the approver. Risky means the diff touches the collection trust gate, auth, secrets or `{{process.env}}`, persistence formats (`.yml` schemas, serde persistence structs), the IPC surface (`src-tauri/`) or `DomainEvent`, `Cargo.toml`, `Cargo.lock`, `package.json`, `tauri.conf.json`, CSP, or the harness hooks. The path list lives in `.claude/factory/config.json` (`risk_paths`).
+   - **Full (opt-in, `/factory --full <feature>`):** the v1 pipeline, with the spec-writer agent (decision 9 skills) for unattended runs, and every reviewer and the approver on every job.
+   - Board field `mode` is `lean` or `full`. A lean job that turns out risky keeps `mode: lean` and records the escalation in the ledger.
 
 ## Interfaces between plans
 
@@ -135,11 +141,12 @@ Later plans rely on these names. Each plan produces its own and may use only the
 | 04 | Board field `series` with `id`, `index` (1-based), `total`, `next_plan`. `ctl new-job --series <id> --plan-file <path>`, `ctl series-start`, `ctl check-series`, `ctl next-plan <id>` (prints the next plan path or `none`). `/factory series <job-id>` recovers a crash between a merge and the next plan. Plan files end with a `Next plan:` line. |
 | 05 | Board field `stage_history` (list of stage and timestamp). Server state exposes `skipped_lines`, `series` and per-stage durations. |
 | 06 | No interfaces. |
-| 07 | `ctl classify-diff`, `ctl tokens <id>`, `ctl budget-check <id>`, config file `.claude/factory/config.json` (budget, diff cap). Hook adds a `tokens` field at `SubagentStop`. |
+| 07 | Board field `mode` (`lean` default, `full`). `ctl new-job --mode`. `/factory --full <feature>`. `.claude/factory/config.json` with `risk_paths`. `ctl classify-diff --names-file <path>` prints `doc-only`, `normal` or `risky`. `ctl route <id> --names-file <path>` prints the reviewer roles to run (lean and not risky: `code`; lean and risky, or full: the v1 set minus roles the v1 rules skip). `ctl can-auto-merge <id>` exits 0 only when `checks.md` has no `FAIL`, the latest code verdict is `APPROVE`, the class is not `risky` and the budget is not `stop`. Lean spec and plan flow in `factory.md`. Combined reviewer checklist. |
+| 08 | `ctl diff-size`, `ctl tokens <id>`, `ctl budget-check <id>`, config keys `diff_cap_lines`, `budget_weighted`. Hook adds a `tokens` field at `SubagentStop`. |
 
 ## Plan series
 
-Folder `docs/superpowers/plans/2026-10-13-software-factory-v2/`. Seven plans. Each plan has at most 3 tasks, ends with a `Next plan:` line, and is meant for a builder subagent running `superpowers:executing-plans`. The order is the build order.
+Folder `docs/superpowers/plans/2026-10-13-software-factory-v2/`. Eight plans. Each plan has at most 3 tasks, ends with a `Next plan:` line, and is meant for a builder subagent running `superpowers:executing-plans`. The order is the build order.
 
 | Plan | File | Delivers | Gaps |
 |---|---|---|---|
@@ -149,12 +156,13 @@ Folder `docs/superpowers/plans/2026-10-13-software-factory-v2/`. Seven plans. Ea
 | 04 | `plan-04-multi-plan-series.md` | Nesting probe, spec writer emits N plans with next pointers, series in ctl, orchestrator chains plans, builder uses `executing-plans` | D1-D5 (server chip in plan 05) |
 | 05 | `plan-05-dashboard-server-hook.md` | Hook redaction and stop-event handling, stage history, attribution, log rotation, `skipped_lines`, series chip, page fixes | E1-E9 |
 | 06 | `plan-06-harness-and-cleanup.md` | `/verify-rocket` and `CLAUDE.md` fixes, v1 minors triage, browser check of the dashboard, doc sync, roadmap entry | E10-E12 |
-| 07 | `plan-07-token-efficiency.md` | Diff and context hygiene, commit ceremony and helper cap, token logging and budget | F1-F9 |
+| 07 | `plan-07-lean-mode.md` | Lean default mode: orchestrator brainstorms and writes plans with the skills, one combined reviewer, risk classification and escalation, auto-merge rule, `--full` opt-in | F1, F4, F5, F7 |
+| 08 | `plan-08-token-efficiency.md` | Diff and context hygiene, commit ceremony and helper cap, token logging and budget | F1-F9 |
 
 ## Out of scope
 
 - Approve or rework buttons that act on the board (needs an authenticated POST and a path into the orchestrator session). Plan 05 adds copy-to-clipboard chips only.
-- Money cost in currency. Plan 07 logs token counts and a soft budget only.
+- Money cost in currency. Plan 08 logs token counts and a soft budget only.
 - Parallel jobs.
 - Pushing to a remote. The factory still never pushes.
 

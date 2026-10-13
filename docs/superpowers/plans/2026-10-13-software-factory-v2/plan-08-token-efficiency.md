@@ -1,16 +1,16 @@
-# Software Factory v2 Plan 07: Token Efficiency
+# Software Factory v2 Plan 08: Token Efficiency
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans, executed by a `factory-builder` subagent. Skip that skill's final whole-branch review and its ledger scripts, because the factory's reviewers and `ctl` do those. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Plans 01 to 06 of this series must be finished and merged first.** This plan edits files those plans already changed (`factory-ctl`, `tests/run.sh`, `.claude/commands/factory.md`, the agent prompts, `hooks/log-event`, the factory-server crate and `.claude/software-factory.md`). Later plans moved wording and line numbers, so every edit below is found by its anchor text. Re-read each file before you edit it, and apply an edit by its meaning if an earlier plan reworded the anchor. Plan 01 added `ctl show` and the stage guard, plan 02 added `record-checks`, the `prompt_has` test helper, the `UNCOMMITTED:` line and the reviewer finding tags, plan 03 added the board lock and the Sync flow, plan 05 added `stage_history` to the board and the attribution fixes to the server.
+> **Plans 01 to 07 of this series must be finished and merged first.** Plan 07 is the lean mode plan. This plan edits files those plans already changed (`factory-ctl`, `tests/run.sh`, `.claude/commands/factory.md`, the agent prompts, `hooks/log-event`, `.claude/factory/config.json`, the factory-server crate and `.claude/software-factory.md`). Later plans moved wording and line numbers, so every edit below is found by its anchor text. Re-read each file before you edit it, and apply an edit by its meaning if an earlier plan reworded the anchor. Plan 01 added `ctl show` and the stage guard, plan 02 added `record-checks`, the `prompt_has` test helper, the `UNCOMMITTED:` line and the reviewer finding tags, plan 03 added the board lock and the Sync flow, plan 05 added `stage_history` to the board and the attribution fixes to the server. Plan 07 added the board field `mode`, `.claude/factory/config.json` (key `risk_paths`), `ctl classify-diff`, `ctl route` and `ctl can-auto-merge`. This plan uses those and never recreates them.
 
 **Goal:** Cut the token cost of a factory job by keeping diffs out of the orchestrator context, trimming commit and prompt overhead, and by logging and budgeting weighted tokens per job.
 
-**Architecture:** The orchestrator writes diffs to files by shell redirect and `ctl classify-diff` and `ctl diff-size` decide from small side files (`.names`, `.stat`). Reviewers and the approver page the diff with `offset` and `limit`. The builder commits with the skill but runs the git commands inline. The `log-event` hook adds a `tokens` object to every `SubagentStop` event by streaming the agent transcript. `ctl tokens` and `ctl budget-check` read the event log and `.claude/factory/config.json`. The dashboard shows the per-job total.
+**Architecture:** The orchestrator writes diffs to files by shell redirect, and `ctl diff-size` (this plan) and `ctl classify-diff` (plan 07) decide from small side files (`.names`, `.stat`). Reviewers and the approver page the diff with `offset` and `limit`. The builder commits with the skill but runs the git commands inline. The `log-event` hook adds a `tokens` object to every `SubagentStop` event by streaming the agent transcript. `ctl tokens` and `ctl budget-check` read the event log and the limits in `.claude/factory/config.json`, and plan 07's `ctl can-auto-merge` refuses when `ctl budget-check` says `stop`. The dashboard shows the per-job total.
 
 **Tech Stack:** Python 3 stdlib (`factory-ctl`, `log-event`), bash plus `jq` tests, Claude Code agent and command markdown, Rust (`tools/factory-server`), plain JavaScript page code with `node --test`.
 
-**Spec:** `docs/superpowers/specs/2026-10-13-software-factory-v2-design.md`, section F (gaps F1 to F9), decisions 7 and 11, and the "Interfaces between plans" row for plan 07. Design doc: `.claude/software-factory.md`.
+**Spec:** `docs/superpowers/specs/2026-10-13-software-factory-v2-design.md`, section F (gaps F1 to F9), decisions 11 and 12, and the "Interfaces between plans" rows for plans 07 and 08. Design doc: `.claude/software-factory.md`.
 
 ## Context: what job 001 measured
 
@@ -20,7 +20,7 @@
 - The commit skill spawns 2 or more helper agents per commit (about 80k tokens per helper). The merge commit alone used 9 helpers.
 - The builder slept 60 s and 45 s for helpers that were done in 10 s. Each sleep is a turn that re-reads the whole context.
 - The same diff is read 5 times in a clean round (4 reviewers and the approver). `Read` stops at 2000 lines, so a long diff can be half-read without a warning. The diff of job 001 was only 23 KB.
-- Defaults chosen from this: job budget 3,000,000 weighted tokens, warning at 80 percent, stop at 100 percent, diff cap 4000 changed lines. Both live in the new file `.claude/factory/config.json`, read by `ctl`.
+- Defaults chosen from this: job budget 3,000,000 weighted tokens, warning at 80 percent, stop at 100 percent, diff cap 4000 changed lines. Both live in `.claude/factory/config.json` (created by plan 07) as `diff_cap_lines` and `budget_weighted`, read by `ctl`. The warning line at 80 percent is a constant in `factory-ctl`. In lean mode most jobs run one code reviewer and no approver, so the budget and cap matter most for `full` and risky jobs.
 - Attribution of usage to a job is approximate. The hook sees only subagent transcripts, so the orchestrator's own tokens are not in the total. The doc says so.
 
 ## Global Constraints
@@ -28,7 +28,7 @@
 - One plan at a time, one builder at a time. No parallel builders in one worktree.
 - Ledger writes go through `ctl` only (decision 8). Builders and reviewers never write the ledger.
 - Docs stay under `.claude/`. `.claude/software-factory.md` is updated by this plan, `CLAUDE.md` stays small.
-- Plan 07 produces exactly these interface names: `ctl classify-diff --names-file <path>` (prints `doc-only` or `code`), `ctl diff-size --stat-file <path>`, `ctl tokens <id>`, `ctl budget-check <id>` (prints `ok`, `warn` or `stop`), the file `.claude/factory/config.json` (keys `job_budget_weighted`, `budget_warn_percent`, `diff_cap_changed_lines`) and the `tokens` object on `SubagentStop` events (`input`, `cache_read`, `cache_creation`, `output`, `weighted`).
+- Plan 08 produces exactly these interface names: `ctl diff-size --stat-file <path>`, `ctl tokens <id>`, `ctl budget-check <id>` (prints `ok`, `warn` or `stop`), the config keys `diff_cap_lines` and `budget_weighted` (merged into the existing `.claude/factory/config.json`, never replacing it) and the `tokens` object on `SubagentStop` events (`input`, `cache_read`, `cache_creation`, `output`, `weighted`). Plan 07 owns `.claude/factory/config.json` and `risk_paths`, `ctl classify-diff` (prints `doc-only`, `normal` or `risky`), `ctl route`, `ctl can-auto-merge`, the `mode` field and lean routing. This plan uses plan 07's versions and creates or duplicates none of them. It only adds the `budget stop` refusal to `ctl can-auto-merge`.
 - All `cargo` commands pass `-j4`. Never `cargo test --workspace` or `--all`. Server tasks use `--manifest-path tools/factory-server/Cargo.toml`, and also run `cargo check -j4 --manifest-path tools/factory-server/Cargo.toml`. Rust production code has no `unwrap`.
 - Commits use a pathspec: `git add <paths> && git commit --only -m "..." -- <paths>`. Invoke the skill `dev-workflow-skills:1-git-commit` for the message, but run its git commands inline with no helper agents and no amend step (decision 11). Never `git add -A`, `--all` or `.`. Never set `HARNESS_GATE=0`. Never push.
 - Code comments are short full sentences that end with a period. No emojis.
@@ -37,60 +37,38 @@
 
 ## Review Focus
 
-- A diff that mixes a doc with a hook, `Cargo.toml`, `package.json`, `tauri.conf.json` or a settings file must classify as `code`, and an empty names file must classify as `code`, so the security reviewer is never skipped by mistake. Tested in Task 1.
-- A security reviewer whose last verdict was CHANGES must not be skipped because the fix diff is doc-only, because skipping clears the CHANGES. Pinned in the command text and its lint in Task 1.
+- The doc-only skip of the security reviewer exists here only for `full` mode jobs and uses plan 07's `ctl classify-diff`. In lean jobs plan 07's `ctl route` owns the skip, and this plan adds nothing there. Pinned in the command text and its lint in Task 1.
+- A reviewer whose last verdict was CHANGES must not be skipped because the fix diff is doc-only, because skipping clears the CHANGES. Pinned in the command text and its lint in Task 1.
+- A job whose budget check says `stop` must never be auto-merged. `ctl can-auto-merge` refuses it. Tested in Task 3.
 - Streaming transcripts repeat a message id with growing usage, and a resumed builder stops more than once with a cumulative total. Neither may be counted twice. Tested in Task 3.
-- A missing, garbage, empty or oversized transcript, a missing event log, and a missing or invalid `config.json` (zero, negative, text) must never fail the hook or `ctl`: the hook exits 0 and writes the event without `tokens`, and `ctl` uses the defaults. Tested in Task 3 (and Task 1 for the diff cap).
-- A job stopped for "token budget" stays stopped after `rework` until the user raises the budget in `config.json`. The command text says so, so the user is not left in a loop. Pinned in Task 3.
+- A missing, garbage, empty or oversized transcript, a missing event log, and a missing or invalid limit in `config.json` (zero, negative, text) must never fail the hook or `ctl`: the hook exits 0 and writes the event without `tokens`, and `ctl` uses the defaults. Tested in Task 3 (and Task 1 for the diff cap).
+- A job stopped for "token budget" stays stopped after `rework` until the user raises `budget_weighted` in `config.json`. The command text says so, so the user is not left in a loop. Pinned in Task 3.
 
 ---
 
 ### Task 1: Diff and context hygiene
 
 **Files:**
-- Create: `.claude/factory/config.json`
-- Modify: `.claude/factory/factory-ctl` (config loader, `classify-diff`, `diff-size`)
+- Modify: `.claude/factory/config.json` (merge in `diff_cap_lines`)
+- Modify: `.claude/factory/factory-ctl` (limits loader, `diff-size`)
 - Modify: `.claude/factory/tests/run.sh`
 - Modify: `.claude/commands/factory.md` (diff files by redirect, review and approve stages, hygiene section)
 - Modify: `.claude/agents/factory-security-reviewer.md`, `factory-ux-reviewer.md`, `factory-ui-reviewer.md`, `factory-code-reviewer.md`, `factory-approver.md`
 
 **Interfaces:**
-- Consumes: from plan 01, `ctl diff-range <id>` and the review stage text. From plan 02, the `prompt_has` helper, the reviewer finding-tag paragraph that starts `Start every finding with its severity tag`, and the approver prompt.
-- Produces: `load_config() -> dict` with the three keys (defaults 3000000, 80, 4000), `is_doc_path(path) -> bool`, `cmd_classify_diff`, `cmd_diff_size`. CLI `ctl classify-diff --names-file <path>` prints `doc-only` or `code`. CLI `ctl diff-size --stat-file <path>` prints `ok <n>` (exit 0) or `too-large <n> <cap>` (exit 1), where `<n>` is the insertions plus deletions from the last line of a `git diff --stat` file. The environment variable `FACTORY_CONFIG` overrides the config path (tests only).
+- Consumes: from plan 01, `ctl diff-range <id>` and the review stage text. From plan 02, the `prompt_has` helper, the reviewer finding-tag paragraph that starts `Start every finding with its severity tag`, and the approver prompt. From plan 07, `.claude/factory/config.json` (with `risk_paths`), `ctl classify-diff --names-file <path>` (prints `doc-only`, `normal` or `risky`), `ctl route`, and the board field `mode` (`lean` or `full`). This plan never creates or changes those. It only reads `ctl classify-diff` for the `full` mode skip below.
+- Produces: `LIMITS_DEFAULTS`, `load_limits() -> dict` (keys `diff_cap_lines` and `budget_weighted`, defaults 4000 and 3000000) and `cmd_diff_size`. CLI `ctl diff-size --stat-file <path>` prints `ok <n>` (exit 0) or `too-large <n> <cap>` (exit 1), where `<n>` is the insertions plus deletions from the last line of a `git diff --stat` file. `load_limits` reads the same file as plan 07, which is the path in the environment variable `FACTORY_CONFIG` when it is set (tests only) and `config.json` next to `factory-ctl` otherwise. If plan 07's code uses another variable name for that override, use its name in `load_limits` and in the tests below.
 
 - [ ] **Step 1: Write the failing ctl tests**
 
 In `.claude/factory/tests/run.sh`, insert this block directly before the line `# ---- /factory command ----`:
 
 ```bash
-# ---- diff hygiene: classify-diff, diff-size and config ----
-names="$tmp/names.txt"
-classify() { python3 "$ctl" classify-diff --names-file "$names"; }
-printf '%s\n' 'docs/superpowers/plans/x.md' '.claude/commands/factory.md' 'README.md' '.claude/software-factory.md' >"$names"
-check "ctl: classify-diff says doc-only for docs, .claude and markdown" test "$(classify)" = "doc-only"
-printf '%s\n' 'docs/a.md' 'crates/rocket-http/src/lib.rs' >"$names"
-check "ctl: classify-diff says code when one path is source" test "$(classify)" = "code"
-printf '%s\n' 'docs/a.md' 'Cargo.toml' >"$names"
-check "ctl: classify-diff says code for Cargo.toml" test "$(classify)" = "code"
-printf '%s\n' '.claude/notes.md' 'package.json' >"$names"
-check "ctl: classify-diff says code for package.json" test "$(classify)" = "code"
-printf '%s\n' '.claude/notes.md' 'src-tauri/tauri.conf.json' >"$names"
-check "ctl: classify-diff says code for tauri.conf.json" test "$(classify)" = "code"
-printf '%s\n' '.claude/notes.md' '.claude/factory/hooks/log-event' >"$names"
-check "ctl: classify-diff says code for a hooks path" test "$(classify)" = "code"
-printf '%s\n' '.claude/harness/hooks/bash-guard' >"$names"
-check "ctl: classify-diff says code for a harness hook" test "$(classify)" = "code"
-printf '%s\n' '.claude/notes.md' '.claude/settings.json' >"$names"
-check "ctl: classify-diff says code for a settings file" test "$(classify)" = "code"
-: >"$names"
-check "ctl: classify-diff says code for an empty names file" test "$(classify)" = "code"
-check "ctl: classify-diff rejects a missing names file" \
-  bash -c "! python3 '$ctl' classify-diff --names-file '$tmp/nope.txt'"
-
+# ---- diff hygiene: diff-size and the diff cap ----
 cfg="$tmp/config.json"
 stat="$tmp/diff.stat"
 size() { FACTORY_CONFIG="$cfg" python3 "$ctl" diff-size --stat-file "$stat"; }
-printf '%s\n' '{"diff_cap_changed_lines": 10}' >"$cfg"
+jq '. + {diff_cap_lines: 10}' "$factory/config.json" >"$cfg"
 printf '%s\n' ' a.rs | 8 ++++++++' ' b.rs | 3 +++' ' 2 files changed, 6 insertions(+), 4 deletions(-)' >"$stat"
 check "ctl: diff-size says ok at exactly the cap" test "$(size)" = "ok 10"
 printf '%s\n' ' a.rs | 8 ++++++++' ' 1 file changed, 6 insertions(+), 5 deletions(-)' >"$stat"
@@ -102,15 +80,15 @@ check "ctl: diff-size counts a deletions-only diff" test "$(size)" = "ok 3"
 check "ctl: diff-size treats an empty stat file as zero lines" test "$(size)" = "ok 0"
 check "ctl: diff-size rejects a missing stat file" \
   bash -c "! FACTORY_CONFIG='$cfg' python3 '$ctl' diff-size --stat-file '$tmp/nope.stat'"
-printf '%s\n' '{"diff_cap_changed_lines": -5}' >"$cfg"
+jq '. + {diff_cap_lines: -5}' "$factory/config.json" >"$cfg"
 printf '%s\n' ' 1 file changed, 3000 insertions(+)' >"$stat"
 check "ctl: a negative diff cap falls back to the default 4000" test "$(size)" = "ok 3000"
 printf 'not json' >"$cfg"
 printf '%s\n' ' 1 file changed, 4001 insertions(+)' >"$stat"
 out="$(size)"; rc=$?
 check "ctl: an invalid config file falls back to the default cap" test "$out" = "too-large 4001 4000" -a "$rc" -eq 1
-check "config: the shipped diff cap is a positive integer" \
-  jq -e '.diff_cap_changed_lines | (type == "number" and . > 0)' "$factory/config.json"
+check "config: the shipped diff cap is a positive integer and risk_paths is kept" \
+  jq -e '(.diff_cap_lines | (type == "number" and . > 0)) and (.risk_paths | type == "array")' "$factory/config.json"
 ```
 
 Then, in the prompt-rules block (the lines that call `prompt_has`, which plan 02 put before `# ---- factory-ctl ----`), insert this block directly before the line `# ---- factory-ctl ----`:
@@ -124,11 +102,13 @@ prompt_lacks() {
 for role in security ux ui code; do
   prompt_has "factory-$role-reviewer" 'offset and limit 1500'
   prompt_has "factory-$role-reviewer" 'at most 60 lines'
+  prompt_has "factory-$role-reviewer" 'in lean mode'
 done
 prompt_has factory-approver '.stat'
 prompt_has factory-approver 'offset and limit 1500'
 prompt_has factory-approver 'only for the paths'
 prompt_has factory-approver 'at most 60 lines'
+prompt_has factory-approver 'in lean mode'
 ```
 
 Then, in the `# ---- /factory command ----` section, insert this block directly before the line `# ---- summary ----`:
@@ -136,7 +116,7 @@ Then, in the `# ---- /factory command ----` section, insert this block directly 
 ```bash
 for word in 'classify-diff' 'diff-size' 'doc-only' 'diff too large, split the plan' 'never by capturing output' \
   'review-<from7>..<to7>.stat' 'security=skipped' 'offset and limit 1500' 'at most 60 lines' \
-  'never skipped over an open CHANGES'; do
+  'never skipped over an open CHANGES' 'mode is `full`'; do
   grep -qF -- "$word" "$cmd" && pass "command mentions: $word" || fail "command mentions: $word"
 done
 ```
@@ -144,73 +124,55 @@ done
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `bash .claude/factory/tests/run.sh | grep -E '^FAIL' | head -60`
-Expected: `FAIL:` lines for every new `ctl: classify-diff`, `ctl: diff-size`, `config:`, `prompt` (reviewers and approver) and `command mentions` check, and a final `N failed`.
+Expected: `FAIL:` lines for every new `ctl: diff-size`, `config:`, `prompt` (reviewers and approver) and `command mentions` check, and a final `N failed`. The `ctl: classify-diff` checks of plan 07 are not touched and still pass.
 
-- [ ] **Step 3: Create the config file**
+- [ ] **Step 3: Merge the diff cap into the config file**
 
-Create `.claude/factory/config.json` with exactly:
+Plan 07 created `.claude/factory/config.json`. Never replace the file. Merge the key in with `jq`:
 
-```json
-{
-  "diff_cap_changed_lines": 4000
-}
+```bash
+jq '. + {diff_cap_lines: 4000}' .claude/factory/config.json > .claude/factory/config.json.tmp && mv .claude/factory/config.json.tmp .claude/factory/config.json
 ```
+
+Then confirm that `risk_paths` is still there: `jq -e '.risk_paths | type == "array"' .claude/factory/config.json` prints `true`.
 
 - [ ] **Step 4: Implement the ctl changes**
 
-Edit `.claude/factory/factory-ctl`.
+Edit `.claude/factory/factory-ctl`. Re-read it first. Plan 07 added a config reader and `classify-diff`. Leave both alone.
 
 4a. Directly after the line `REVIEW_STATES = (...)` (and after any constants that earlier plans put there) add:
 
 ```python
-CONFIG_DEFAULTS = {
-    "job_budget_weighted": 3000000,
-    "budget_warn_percent": 80,
-    "diff_cap_changed_lines": 4000,
+LIMITS_DEFAULTS = {
+    "diff_cap_lines": 4000,
+    "budget_weighted": 3000000,
 }
-# A path with one of these file names is never treated as a doc, wherever it lives.
-CODE_FILE_NAMES = (
-    "Cargo.toml",
-    "package.json",
-    "tauri.conf.json",
-    "settings.json",
-    "settings.local.json",
-)
-DOC_DIRS = ("docs", ".claude")
 ```
 
 4b. Directly before `def build_parser():` add:
 
 ```python
-def config_path():
+def limits_path():
     override = os.environ.get("FACTORY_CONFIG")
     if override:
         return override
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 
-def load_config():
-    """Return the factory settings. A missing file, bad JSON or a bad value gives the default."""
-    config = dict(CONFIG_DEFAULTS)
+def load_limits():
+    """Return the size and budget limits. A missing file, bad JSON or a bad value gives the default."""
+    limits = dict(LIMITS_DEFAULTS)
     try:
-        with open(config_path(), encoding="utf-8") as handle:
+        with open(limits_path(), encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError):
-        return config
+        return limits
     if isinstance(data, dict):
-        for key, default in CONFIG_DEFAULTS.items():
+        for key, default in LIMITS_DEFAULTS.items():
             value = data.get(key, default)
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                config[key] = value
-    return config
-
-
-def is_doc_path(path):
-    """A doc path is markdown, or lives under docs/ or .claude/, and is not a code-like file."""
-    parts = path.split("/")
-    if "hooks" in parts[:-1] or parts[-1] in CODE_FILE_NAMES:
-        return False
-    return path.endswith(".md") or parts[0] in DOC_DIRS
+                limits[key] = value
+    return limits
 
 
 def read_text(path):
@@ -221,31 +183,23 @@ def read_text(path):
         die(f"cannot read {path}: {err.strerror}")
 
 
-def cmd_classify_diff(args):
-    paths = [line.strip() for line in read_text(args.names_file).splitlines() if line.strip()]
-    # An empty list is never doc-only, so an empty diff cannot skip the security review.
-    print("doc-only" if paths and all(is_doc_path(path) for path in paths) else "code")
-
-
 def cmd_diff_size(args):
     lines = [line for line in read_text(args.stat_file).splitlines() if line.strip()]
     changed = 0
     if lines:
         changed = sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", lines[-1]))
-    cap = load_config()["diff_cap_changed_lines"]
+    cap = load_limits()["diff_cap_lines"]
     if changed > cap:
         print(f"too-large {changed} {cap}")
         sys.exit(1)
     print(f"ok {changed}")
 ```
 
+If plan 07 already defined a `read_text` helper with this behavior, reuse it and drop the copy above.
+
 4c. In `build_parser`, directly before `return parser` add:
 
 ```python
-    classify = sub.add_parser("classify-diff")
-    classify.add_argument("--names-file", dest="names_file", required=True)
-    classify.set_defaults(func=cmd_classify_diff)
-
     diff_size = sub.add_parser("diff-size")
     diff_size.add_argument("--stat-file", dest="stat_file", required=True)
     diff_size.set_defaults(func=cmd_diff_size)
@@ -256,7 +210,7 @@ def cmd_diff_size(args):
 In each of `.claude/agents/factory-security-reviewer.md`, `factory-ux-reviewer.md`, `factory-ui-reviewer.md` and `factory-code-reviewer.md`, insert the paragraph below, followed by a blank line, directly before the paragraph that starts `Start every finding with its severity tag` (plan 02 added it).
 
 ```
-Reading the diff: `Read` returns at most 2000 lines per call, so a long diff can be half-read without a warning. Read the diff file in pages with offset and limit 1500 (offset 1, then 1501, then 3001, and so on) until a call returns fewer than 1500 lines. Never judge a diff you only partly read. Keep your reply to at most 60 lines: list findings only, with no summary of the diff and no praise.
+Reading the diff: `Read` returns at most 2000 lines per call, so a long diff can be half-read without a warning. Read the diff file in pages with offset and limit 1500 (offset 1, then 1501, then 3001, and so on) until a call returns fewer than 1500 lines. Never judge a diff you only partly read. Keep your reply to at most 60 lines: list findings only, with no summary of the diff and no praise. Which reviewers run depends on the job mode: in lean mode a single code reviewer runs for a normal diff, and the security, UX and UI reviewers run only for a risky diff. In full mode all of them run. Review your own area whichever mode you run in.
 ```
 
 - [ ] **Step 6: Update the approver prompt**
@@ -264,12 +218,12 @@ Reading the diff: `Read` returns at most 2000 lines per call, so a long diff can
 In `.claude/agents/factory-approver.md`, change the `Input:` paragraph so that it also lists the diff stat file: after the words `the full diff file path,` insert `the diff stat file path (\`review-*.stat\`, one line per changed path with its line count),`. Then insert this paragraph, followed by a blank line, directly before the line that starts `Decide ESCALATE if any of these is true`:
 
 ```
-Reading the diff: start with the `.stat` file and the review reports. Open the diff file only for the paths that a risk rule below flags: `Cargo.toml`, `package.json`, `tauri.conf.json`, `.yml` files, hook files, `src-tauri/`, and any path whose name suggests the trust gate, auth, secrets, `env`, events, DTOs, models or schemas. When you are unsure whether a path is flagged, read it. Read hunks only for the paths that matter, and use offset and limit 1500 per `Read` call, because `Read` stops at 2000 lines. Docs, plans and test-only paths never need hunks. Keep your reply to at most 60 lines.
+Reading the diff: start with the `.stat` file and the review reports. Open the diff file only for the paths that a risk rule below flags: `Cargo.toml`, `package.json`, `tauri.conf.json`, `.yml` files, hook files, `src-tauri/`, and any path whose name suggests the trust gate, auth, secrets, `env`, events, DTOs, models or schemas. When you are unsure whether a path is flagged, read it. Read hunks only for the paths that matter, and use offset and limit 1500 per `Read` call, because `Read` stops at 2000 lines. Docs, plans and test-only paths never need hunks. You run in full mode and, in lean mode, only when the diff is risky. In lean mode a single code reviewer ran for a normal diff and you were not called. Keep your reply to at most 60 lines.
 ```
 
 - [ ] **Step 7: Edit the command text**
 
-Edit `.claude/commands/factory.md`. Earlier plans reworded these places, so find each by the quoted start and keep their other additions.
+Edit `.claude/commands/factory.md`. Plans 01 to 07 reworded these places (plan 07 added lean routing), so find each by the quoted start and keep their other additions.
 
 (a) Add this section directly above `## status`:
 
@@ -279,16 +233,16 @@ Edit `.claude/commands/factory.md`. Earlier plans reworded these places, so find
 Every diff is written to a file by a shell redirect (`git -C "<main>" diff <range> > <file>`), never by capturing output, and the orchestrator never Reads, prints or pastes a diff. Reviewers and the approver read the files. This applies to the review, approve and Sync flows alike: a diff that `ctl` prints (for example `ctl sync-diff`) is also saved by redirect. Only the small `.names` and `.stat` side files are used to decide.
 ```
 
-(b) In stage `review`, step 1 (the step that starts `Run \`ctl diff-range <id>\``). Replace the sentence that starts ``Write `git -C "<main>" diff <from>..<to>` to the job directory as`` (up to the end of that step) with:
+(b) In stage `review`, step 1 (the step that starts `Run \`ctl diff-range <id>\``). Replace the sentence that starts ``Write `git -C "<main>" diff <from>..<to>` to the job directory as`` (and the doc-only skip sentences, if an earlier plan added any) with the text below. Keep plan 07's routing text around it: the reviewer set still comes from `ctl route` for every job.
 
 ```
-Write three files in the job directory by redirect, never by capturing output: `git -C "<main>" diff <from>..<to> > review-<from7>..<to7>.diff`, `git -C "<main>" diff --stat <from>..<to> > review-<from7>..<to7>.stat` and `git -C "<main>" diff --name-only <from>..<to> > review-<from7>..<to7>.names`, where `<from7>` and `<to7>` are the first 7 characters of each sha. Never Read or print the diff. Run `ctl diff-size --stat-file <job dir>/review-<from7>..<to7>.stat`. If it exits 1 (`too-large`), run `ctl set-stage <id> needs-human --reason "diff too large, split the plan"` and stop. Then run `ctl classify-diff --names-file <job dir>/review-<from7>..<to7>.names`. If it prints `doc-only`, the security reviewer is skipped: `ctl set-stage <id> review --review security=skipped`. A skipped reviewer counts as pass. The security reviewer is never skipped over an open CHANGES: if the newest `review-security-r<n>.md` (by modification time) ends with `VERDICT: CHANGES`, it runs even for a doc-only diff, because skipping would clear the CHANGES without a re-check.
+Write three files in the job directory by redirect, never by capturing output: `git -C "<main>" diff <from>..<to> > review-<from7>..<to7>.diff`, `git -C "<main>" diff --stat <from>..<to> > review-<from7>..<to7>.stat` and `git -C "<main>" diff --name-only <from>..<to> > review-<from7>..<to7>.names`, where `<from7>` and `<to7>` are the first 7 characters of each sha. Never Read or print the diff. Run `ctl diff-size --stat-file <job dir>/review-<from7>..<to7>.stat`. If it exits 1 (`too-large`), run `ctl set-stage <id> needs-human --reason "diff too large, split the plan"` and stop. In a lean job the skip of the security reviewer for a doc-only diff is already part of `ctl route`, so do nothing more here. Only when the job mode is `full`, run `ctl classify-diff --names-file <job dir>/review-<from7>..<to7>.names`. If it prints `doc-only`, the security reviewer is skipped: `ctl set-stage <id> review --review security=skipped`. A skipped reviewer counts as pass. The security reviewer is never skipped over an open CHANGES: if the newest `review-security-r<n>.md` (by modification time) ends with `VERDICT: CHANGES`, it runs even for a doc-only diff, because skipping would clear the CHANGES without a re-check. The same rule holds for any reviewer whose last verdict was CHANGES.
 ```
 
 (c) In stage `review`, the step that dispatches the reviewers (it ends `Reviewers never run cargo or yarn.`). Append:
 
 ```
-Tell each reviewer to read the diff in pages with offset and limit 1500 and to keep its reply at most 60 lines. Do not dispatch the security reviewer when step 1 recorded it as skipped.
+Tell each reviewer to read the diff in pages with offset and limit 1500 and to keep its reply at most 60 lines. Dispatch only the roles that `ctl route` listed, and do not dispatch the security reviewer when step 1 recorded it as skipped.
 ```
 
 (d) In stage `approve`, the sentence that starts `Only then write the full diff` (plan 01) writes the full diff. Replace the part from `write the full diff` up to the next sentence that starts `Dispatch` with:
@@ -297,7 +251,7 @@ Tell each reviewer to read the diff in pages with offset and limit 1500 and to k
 write the full job diff by redirect, never by capturing output: `git -C "<main>" diff <base>..<final head> > review-<base7>..<head7>.diff`, the same range with `--stat` to `review-<base7>..<head7>.stat` and with `--name-only` to `review-<base7>..<head7>.names`. Never Read or print the diff. Run `ctl diff-size --stat-file <job dir>/review-<base7>..<head7>.stat`. If it exits 1, run `ctl set-stage <id> needs-human --reason "diff too large, split the plan"` and stop.
 ```
 
-Then find the sentence that starts ``Dispatch `factory-approver` `` and add this sentence directly after it:
+Then find the sentence that starts ``Dispatch `factory-approver` `` and add this sentence directly after it. The approver runs in full mode and for risky lean jobs only (plan 07 decides that), so this applies to those jobs:
 
 ```
 Also give it the path of the `.stat` file and tell it: read the stat file and the review reports first, open the diff only for the paths its risk rules flag, with offset and limit 1500, and keep the reply at most 60 lines.
@@ -356,7 +310,7 @@ prompt_has factory-ui-reviewer 'already in your context'
 In the `# ---- /factory command ----` section, insert this block directly before the line `# ---- summary ----`:
 
 ```bash
-for word in '## Context hygiene' 'fresh or lean session' 'last lines of an agent reply' 'Never paste a diff' \
+for word in '## Context hygiene' 'fresh, short session' 'last lines of an agent reply' 'Never paste a diff' \
   'no events for 10 minutes' 'Edit and Write tools'; do
   grep -qF -- "$word" "$cmd" && pass "command mentions: $word" || fail "command mentions: $word"
 done
@@ -415,7 +369,7 @@ In `.claude/commands/factory.md`, add this section directly above `## status` (b
 
 The orchestrator session re-reads its whole context every turn, so keep it small.
 
-- Run `/factory` in a fresh or lean session. An old, long session carries all of its baggage into every dispatch decision.
+- Run `/factory` in a fresh, short session. An old, long session carries all of its baggage into every dispatch decision.
 - Act on the last lines of an agent reply: the `VERDICT:` line, the `DECISION:` line, the `CHECKS:` block and the four handoff lines. Do not repeat a reply in your own text.
 - Never paste a diff, never Read a diff file, never print a log. See "Diff hygiene".
 - Use the Edit and Write tools to change files. Never use a heredoc append (`cat >> file <<EOF`) or `cd` out of the working directory in Bash: the sandbox refuses both and each refusal costs a turn.
@@ -442,7 +396,7 @@ git add .claude/agents/factory-builder.md .claude/agents/factory-spec-writer.md 
 **Files:**
 - Modify: `.claude/factory/hooks/log-event`
 - Modify: `.claude/factory/factory-ctl` (`tokens`, `budget-check`, status column)
-- Modify: `.claude/factory/config.json` (budget keys)
+- Modify: `.claude/factory/config.json` (merge in `budget_weighted`)
 - Modify: `.claude/factory/tests/run.sh`
 - Modify: `.claude/commands/factory.md` (budget check before each dispatch)
 - Modify: `tools/factory-server/src/model.rs`, `events.rs`, `state.rs`
@@ -451,8 +405,8 @@ git add .claude/agents/factory-builder.md .claude/agents/factory-spec-writer.md 
 - Modify: `.claude/software-factory.md`
 
 **Interfaces:**
-- Consumes: from Task 1, `load_config()` and `CONFIG_DEFAULTS` in `factory-ctl`. From plan 05, the board field `stage_history` (list of `{"stage", "ts"}`), the hook's `KEEP` list and `build_event`, the server attribution in `build_state`. From plan 03, `ctl` mutating calls run under the board lock. The two new subcommands only read, so they stay out of the lock set.
-- Produces: the `tokens` object `{"input", "cache_read", "cache_creation", "output", "weighted"}` on `SubagentStop` events with a readable transcript. `ctl tokens <id>` prints an integer. `ctl budget-check <id>` prints `ok`, `warn` or `stop` (details on stderr). The server fields `AgentState.weighted_tokens: u64` and `JobView.tokens: u64`. JS `FactoryBoard.formatTokens(n)` and `FactoryBoard.tokensLine(job)`.
+- Consumes: from Task 1, `load_limits()` and `LIMITS_DEFAULTS` in `factory-ctl`. From plan 07, `ctl can-auto-merge` and `.claude/factory/config.json`. From plan 05, the board field `stage_history` (list of `{"stage", "ts"}`), the hook's `KEEP` list and `build_event`, the server attribution in `build_state`. From plan 03, `ctl` mutating calls run under the board lock. The two new subcommands only read, so they stay out of the lock set.
+- Produces: the `tokens` object `{"input", "cache_read", "cache_creation", "output", "weighted"}` on `SubagentStop` events with a readable transcript. `ctl tokens <id>` prints an integer. `ctl budget-check <id>` prints `ok`, `warn` or `stop` (details on stderr). `ctl can-auto-merge` exits 1 when the budget check says `stop`. The server fields `AgentState.weighted_tokens: u64` and `JobView.tokens: u64`. JS `FactoryBoard.formatTokens(n)` and `FactoryBoard.tokensLine(job)`.
 
 #### Part A: the hook
 
@@ -600,7 +554,7 @@ git -C "$tr" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 tl() { FACTORY_ROOT="$tr" FACTORY_CONFIG="$tmp/budget.json" python3 "$ctl" "$@"; }
 tboard="$tr/.superpowers/factory/board.json"
 tevents="$tr/.superpowers/factory/events.jsonl"
-printf '%s\n' '{"job_budget_weighted": 10000, "budget_warn_percent": 80}' >"$tmp/budget.json"
+jq '. + {budget_weighted: 10000}' "$factory/config.json" >"$tmp/budget.json"
 tl new-job "Token job" --date 2026-10-13 >/dev/null
 tl set-stage 1 build --worktree /wt/agent-x --builder-id agent-b >/dev/null
 jq '.jobs[0].stage_history = [{"stage":"spec","ts":100},{"stage":"build","ts":200},{"stage":"review","ts":300}] | .jobs[0].stage = "review"' \
@@ -627,22 +581,33 @@ check "ctl: tokens is 0 when there is no event log" \
   bash -c "mv '$tevents' '$tevents.off'; test \"\$(FACTORY_ROOT='$tr' python3 '$ctl' tokens 1)\" = 0; mv '$tevents.off' '$tevents'"
 check "ctl: status shows the tokens" bash -c "FACTORY_ROOT='$tr' FACTORY_CONFIG='$tmp/budget.json' python3 '$ctl' status | grep -q 'tokens 2k'"
 check "ctl: budget-check says ok below the warning line" test "$(tl budget-check 1 2>/dev/null)" = "ok"
+# A job that plan 07's can-auto-merge accepts: checks all PASS and an APPROVE code verdict.
+# If plan 07's passing test case sets the job up with other files, mirror its setup here.
+jdir="$tr/.superpowers/sdd/$(jq -r '.jobs[0].dir' "$tboard")"
+mkdir -p "$jdir"
+printf '%s\n' 'cargo check -j4: PASS' >"$jdir/checks.md"
+printf '%s\n' 'No findings.' 'VERDICT: APPROVE' >"$jdir/review-code-r1.md"
+check "ctl: can-auto-merge accepts the job while the budget is ok" bash -c "FACTORY_ROOT='$tr' FACTORY_CONFIG='$tmp/budget.json' python3 '$ctl' can-auto-merge 1"
+
 stopline 360 h2 general-purpose /wt/agent-x 5600 >>"$tevents"
 check "ctl: budget-check says warn at 80 percent" test "$(tl budget-check 1 2>/dev/null)" = "warn"
 stopline 370 h3 general-purpose /wt/agent-x 2000 >>"$tevents"
 check "ctl: budget-check says stop at 100 percent" test "$(tl budget-check 1 2>/dev/null)" = "stop"
+check "ctl: can-auto-merge refuses the same job when the budget says stop" \
+  bash -c "! FACTORY_ROOT='$tr' FACTORY_CONFIG='$tmp/budget.json' python3 '$ctl' can-auto-merge 1"
+
 check "ctl: budget-check puts the numbers on stderr" \
   bash -c "FACTORY_ROOT='$tr' FACTORY_CONFIG='$tmp/budget.json' python3 '$ctl' budget-check 1 2>&1 >/dev/null | grep -q 'used 10000 of 10000'"
-printf '%s\n' '{"job_budget_weighted": 0, "budget_warn_percent": "high"}' >"$tmp/budget.json"
+jq '. + {budget_weighted: 0}' "$factory/config.json" >"$tmp/budget.json"
 check "ctl: a bad budget config falls back to the default budget" test "$(tl budget-check 1 2>/dev/null)" = "ok"
-check "config: the shipped budget is 3000000 weighted with a warning at 80 percent" \
-  jq -e '.job_budget_weighted == 3000000 and .budget_warn_percent == 80' "$factory/config.json"
+check "config: the shipped budget is 3000000 weighted and risk_paths is kept" \
+  jq -e '.budget_weighted == 3000000 and (.risk_paths | type == "array")' "$factory/config.json"
 ```
 
 In the `# ---- /factory command ----` section, insert this block directly before the line `# ---- summary ----`:
 
 ```bash
-for word in 'budget-check' '`ctl tokens' 'token budget' 'config.json' 'job_budget_weighted'; do
+for word in 'budget-check' '`ctl tokens' 'token budget' 'config.json' 'budget_weighted' 'also refuses when the budget check says'; do
   grep -qF -- "$word" "$cmd" && pass "command mentions: $word" || fail "command mentions: $word"
 done
 ```
@@ -650,15 +615,16 @@ done
 - [ ] **Step 6: Run the tests to verify they fail**
 
 Run: `bash .claude/factory/tests/run.sh | grep -E '^FAIL' | head -30`
-Expected: `FAIL:` for the `ctl: tokens`, `ctl: status shows the tokens`, `ctl: budget-check`, `config: the shipped budget` and the five new `command mentions` checks.
+Expected: `FAIL:` for the `ctl: tokens`, `ctl: status shows the tokens`, `ctl: budget-check`, `ctl: can-auto-merge refuses`, `config: the shipped budget` and the six new `command mentions` checks.
 
 - [ ] **Step 7: Implement ctl tokens, budget-check and the status column**
 
 Edit `.claude/factory/factory-ctl`.
 
-7a. Directly after the `DOC_DIRS = ...` constant (from Task 1) add:
+7a. Directly after the `LIMITS_DEFAULTS` constant (from Task 1) add:
 
 ```python
+BUDGET_WARN_PERCENT = 80
 # Agents that run from the orchestrator checkout, not from the builder worktree.
 OUTER_STAGES = ("spec", "review", "approve")
 OUTER_AGENTS = (
@@ -778,13 +744,18 @@ def cmd_tokens(args):
     print(job_tokens(root, job, load_events(root)))
 
 
+def job_budget(root, job):
+    """Return (state, used, budget) for a job. The state is ok, warn or stop."""
+    used = job_tokens(root, job, load_events(root))
+    budget = load_limits()["budget_weighted"]
+    return budget_state(used, budget, BUDGET_WARN_PERCENT), used, budget
+
+
 def cmd_budget_check(args):
     root = repo_root()
     job = find_job(load_board(root), args.id)
-    config = load_config()
-    used = job_tokens(root, job, load_events(root))
-    budget = config["job_budget_weighted"]
-    print(budget_state(used, budget, config["budget_warn_percent"]))
+    state, used, budget = job_budget(root, job)
+    print(state)
     print(f"used {used} of {budget} weighted tokens ({used * 100 // budget} percent)", file=sys.stderr)
 ```
 
@@ -817,22 +788,35 @@ If plan 01 or 04 changed the status line so that `line` is not a variable, build
 
 These two commands only read the board, so do not add them to the `MUTATING` set that plan 03 created.
 
-7e. Replace `.claude/factory/config.json` with:
+7e. Merge the budget into `.claude/factory/config.json`. Never replace the file, because plan 07 keeps `risk_paths` in it:
 
-```json
-{
-  "job_budget_weighted": 3000000,
-  "budget_warn_percent": 80,
-  "diff_cap_changed_lines": 4000
-}
+```bash
+jq '. + {budget_weighted: 3000000}' .claude/factory/config.json > .claude/factory/config.json.tmp && mv .claude/factory/config.json.tmp .claude/factory/config.json
 ```
+
+7f. Replace plan 07's budget placeholder with the real budget. Plan 07 left a function `budget_state(_root, _job)` in `factory-ctl` that reads the test seam `FACTORY_BUDGET_STATE`, and `cmd_can_auto_merge` calls it. This plan defines a different helper that is also named `budget_state` (with arguments `used, budget, warn_percent`), so do this in order:
+
+1. Delete plan 07's placeholder function `def budget_state(_root, _job):` and its three lines.
+2. In `cmd_can_auto_merge`, find the call to the placeholder (`budget_state(` with the root and job as arguments) and replace the lines that use its result with:
+
+```python
+    state, used, budget = job_budget(root, job)
+    if state == "stop":
+        print(f"budget stop: used {used} of {budget} weighted tokens", file=sys.stderr)
+        sys.exit(1)
+```
+
+   Use the local names plan 07 used for the repo root and the job. Keep every other plan 07 rule and its position.
+3. In `.claude/factory/tests/run.sh`, find the plan 07 checks that set `FACTORY_BUDGET_STATE` (they say `budget warn` or `budget stop`). Rewrite each to build its budget the way the tests below do, with a `FACTORY_CONFIG` file whose `budget_weighted` is small and a job with logged tokens, then keep the same expected results (warn still merges, stop refuses). Delete any check that only tested the env seam. Then run `bash .claude/factory/tests/run.sh 2>&1 | grep -E 'can-auto-merge|failed|all passed'` and make it pass.
+
+`can-auto-merge` keeps every plan 07 rule. This only adds the real reason to refuse, so a job over its budget is never merged without a human.
 
 - [ ] **Step 8: Add the budget check to the command**
 
 In `.claude/commands/factory.md`, in the `## next` section, directly after the paragraph that starts `Take the oldest job whose stage is not`, add:
 
 ```
-Before you dispatch any agent in a stage (the builder, a reviewer, the approver, a sync), run `ctl budget-check <id>`. It prints `ok`, `warn` or `stop`. On `ok`, go on. On `warn`, go on and tell the user the weighted total from `ctl tokens <id>`. On `stop`, run `ctl set-stage <id> needs-human --reason "token budget"` and stop. The budget and its warning line are `job_budget_weighted` and `budget_warn_percent` in `.claude/factory/config.json`, and the total counts weighted tokens of the job's subagents only (input plus cache creation plus output plus cache reads divided by 10). A job stopped for the token budget stays stopped after `/factory rework` until the user raises `job_budget_weighted` in that file, so say that in your report.
+Before you dispatch any agent in a stage (the builder, a reviewer, the approver, a sync), run `ctl budget-check <id>`. It prints `ok`, `warn` or `stop`. On `ok`, go on. On `warn`, go on and tell the user the weighted total from `ctl tokens <id>`. On `stop`, run `ctl set-stage <id> needs-human --reason "token budget"` and stop. The budget is `budget_weighted` in `.claude/factory/config.json` (the warning line is 80 percent of it), and the total counts weighted tokens of the job's subagents only (input plus cache creation plus output plus cache reads divided by 10). `ctl can-auto-merge` also refuses when the budget check says `stop`, so a job over its budget is never merged without a human. A job stopped for the token budget stays stopped after `/factory rework` until the user raises `budget_weighted` in that file, so say that in your report.
 ```
 
 - [ ] **Step 9: Run the tests to verify they pass**
@@ -1080,19 +1064,19 @@ In `.claude/software-factory.md`:
 (a) Insert this section directly above the line `## Open items`:
 
 ```markdown
-## Token efficiency (plan 07)
+## Token efficiency (plan 08)
 
 Job 001 used about 12.75M tokens, 11.76M of them cache reads. Weighted tokens are `input + cache_creation + output + cache_read / 10`, and job 001 was about 2.17M weighted. The orchestrator session was 53.6 percent of the job. The rules below came out of that measurement.
 
 - Diffs stay out of the orchestrator. It writes each diff by shell redirect, together with a `.stat` file (`git diff --stat`) and a `.names` file (`git diff --name-only`), and never Reads or pastes the diff.
-- `factory-ctl diff-size --stat-file <file>` compares insertions plus deletions with `diff_cap_changed_lines` (default 4000). Over the cap the job goes to `needs-human` with "diff too large, split the plan".
-- `factory-ctl classify-diff --names-file <file>` prints `doc-only` when every path is markdown or under `docs/` or `.claude/`, and none is `Cargo.toml`, `package.json`, `tauri.conf.json`, a `settings.json` file or under a `hooks` folder. An empty list is `code`. For a doc-only diff the security reviewer is recorded as `skipped` (which counts as pass), unless its last verdict was CHANGES.
+- `factory-ctl diff-size --stat-file <file>` compares insertions plus deletions with `diff_cap_lines` (default 4000). Over the cap the job goes to `needs-human` with "diff too large, split the plan".
+- In lean mode (plan 07) `ctl route` already skips the security reviewer for doc-only diffs. In `full` mode the orchestrator runs plan 07's `factory-ctl classify-diff` on the `.names` file, and for `doc-only` it records the security reviewer as `skipped` (which counts as pass). A reviewer whose last verdict was CHANGES is never skipped. In lean mode a single code reviewer runs for a normal diff, and the approver runs only for risky jobs.
 - Reviewers page the diff with offset and limit 1500, because `Read` stops at 2000 lines, and keep replies at most 60 lines. The approver reads the `.stat` file and the review reports, and opens hunks only for the paths its risk rules flag.
 - The builder commits with the commit skill but runs its git commands inline. No helper agents, no amend step (one commit per task is one logical change), and a plain conventional message if the skill insists on helpers. At most 2 helper agents per task and none for a commit. The builder never uses `cd` out of its worktree or heredoc appends in Bash (the sandbox refuses them), and uses the Edit and Write tools.
 - The spec writer, code reviewer and UI reviewer no longer read `CLAUDE.md` and the rule files, which are already in their context (about 5.5k tokens each). Crate `CLAUDE.md` files are not preloaded and are still read.
 - Orchestrator hygiene: run `/factory` in a fresh or lean session, act on the last lines of agent replies, never paste a diff, and when a background builder has had no events for 10 minutes, ask the user.
 - The `log-event` hook adds a `tokens` object (`input`, `cache_read`, `cache_creation`, `output`, `weighted`) to every `SubagentStop` event by streaming `agent_transcript_path`, one usage per unique message id. It reads at most 20 MB, exits 0 on any error and never blocks.
-- `factory-ctl tokens <id>` sums the weighted tokens of the agents of a job (largest total per agent id, because a resumed agent reports a cumulative total). `factory-ctl budget-check <id>` prints `ok`, `warn` (80 percent) or `stop` (100 percent) against `job_budget_weighted` (default 3,000,000). `/factory` runs it before each dispatch and parks the job in `needs-human` with "token budget" on `stop`. `factory-ctl status` and the dashboard card show the total. All numbers are in `.claude/factory/config.json`.
+- `factory-ctl tokens <id>` sums the weighted tokens of the agents of a job (largest total per agent id, because a resumed agent reports a cumulative total). `factory-ctl budget-check <id>` prints `ok`, `warn` (80 percent) or `stop` (100 percent) against `budget_weighted` (default 3,000,000). `/factory` runs it before each dispatch and parks the job in `needs-human` with "token budget" on `stop`, and `factory-ctl can-auto-merge` refuses a job whose budget check says `stop`. `factory-ctl status` and the dashboard card show the total. The limits `diff_cap_lines` and `budget_weighted` live in `.claude/factory/config.json` next to plan 07's `risk_paths`. The 80 percent warning line is a constant in `factory-ctl`.
 - The attribution is approximate. An event belongs to a job when its cwd is under the job worktree, when it is the recorded builder, or when a factory agent that runs from the checkout (spec writer, reviewers, approver) stopped while the job sat in the spec, review or approve stage. The orchestrator's own tokens are not counted, because only subagents write `SubagentStop` events. The dashboard attributes agents with its own rules, so the two totals can differ a little.
 ```
 
@@ -1110,7 +1094,7 @@ python3 -m py_compile .claude/factory/factory-ctl .claude/factory/hooks/log-even
 cargo test -j4 --manifest-path tools/factory-server/Cargo.toml
 cargo check -j4 --manifest-path tools/factory-server/Cargo.toml
 node --test tools/factory-server/tests/board.test.js
-jq -e '.job_budget_weighted == 3000000 and .budget_warn_percent == 80 and .diff_cap_changed_lines == 4000' .claude/factory/config.json
+jq -e '.budget_weighted == 3000000 and .diff_cap_lines == 4000 and (.risk_paths | type == "array")' .claude/factory/config.json
 git status --short
 ```
 
@@ -1118,7 +1102,7 @@ Expected: `all passed`; `compiled`; all Rust tests pass; `cargo check` has no er
 
 - [ ] **Step 22: Spec coverage check**
 
-Confirm by reading the files that each gap has its fix, and fix any miss inline before the commit. F1: the `## Diff hygiene` and `## Context hygiene` sections of `factory.md`. F2: builder commit bullet. F3: plan 02 already bans sleeping, and the stall note covers the orchestrator side. F4: redirect, `diff-size` cap, paging text in the four reviewers and the approver. F5: `classify-diff` and `security=skipped`. F6: the trimmed read lists. F7: plan 02 and plan 04 handle the builder skill text, and this plan's token logging makes the cost visible. F8: `tokens`, `budget-check`, the helper cap and the stall note (the builder `maxTurns` came from plan 02). F9: the `cd` and heredoc rule in the builder prompt and in `factory.md`. Decision 11 items (a) to (h) map to the same places.
+Confirm by reading the files that each gap has its fix, and fix any miss inline before the commit. F1: the `## Diff hygiene` and `## Context hygiene` sections of `factory.md`. F2: builder commit bullet. F3: plan 02 already bans sleeping, and the stall note covers the orchestrator side. F4: redirect, `diff-size` cap, paging text in the four reviewers and the approver. F5: the `full` mode skip with plan 07's `classify-diff` and `security=skipped` (lean mode skips through plan 07's `ctl route`). F6: the trimmed read lists. F7: plan 02 and plan 04 handle the builder skill text, and this plan's token logging makes the cost visible. F8: `tokens`, `budget-check`, the helper cap and the stall note (the builder `maxTurns` came from plan 02). F9: the `cd` and heredoc rule in the builder prompt and in `factory.md`. Decision 11 items (a) to (h) map to the same places.
 
 - [ ] **Step 23: Commit the doc**
 
@@ -1132,8 +1116,8 @@ git add .claude/software-factory.md && git commit --only -m "<message from the s
 
 ## Self-review notes
 
-- Spec section F: F1 (Task 1 and 2 hygiene text), F2 (Task 2 builder bullet), F3 (stall note in Task 2, ban from plan 02), F4 (Task 1 redirect, cap, paging), F5 (Task 1 classify and skip), F6 (Task 2 trims), F7 (visibility through Task 3 logging, the skill trimming itself lives in plans 02 and 04), F8 (Task 3 tokens and budget, Task 2 helper cap), F9 (Task 2 `cd` and heredoc rule). Decision 11 (a) to (h) are all covered.
-- Names used across tasks: `load_config`, `CONFIG_DEFAULTS`, `classify-diff`, `diff-size`, `tokens`, `budget-check`, `job_budget_weighted`, `budget_warn_percent`, `diff_cap_changed_lines`, `weighted_tokens` (agent), `tokens` (job view and event), `formatTokens`, `tokensLine`, `FACTORY_CONFIG`, `prompt_lacks`.
+- Spec section F: F1 (Task 1 and 2 hygiene text), F2 (Task 2 builder bullet), F3 (stall note in Task 2, ban from plan 02), F4 (Task 1 redirect, cap, paging), F5 (Task 1 `full` mode skip, lean skip is plan 07), F6 (Task 2 trims), F7 (visibility through Task 3 logging, the skill trimming itself lives in plans 02 and 04), F8 (Task 3 tokens and budget, Task 2 helper cap), F9 (Task 2 `cd` and heredoc rule). Decision 11 (a) to (h) are all covered.
+- Names used across tasks: `load_limits`, `LIMITS_DEFAULTS`, `BUDGET_WARN_PERCENT`, `job_budget`, `diff-size`, `tokens`, `budget-check`, `budget_weighted`, `diff_cap_lines`, plan 07's `classify-diff`, `route`, `can-auto-merge` and `risk_paths`, `weighted_tokens` (agent), `tokens` (job view and event), `formatTokens`, `tokensLine`, `FACTORY_CONFIG`, `prompt_lacks`.
 - The attribution and the missing orchestrator tokens are stated as approximate in the context, in Task 3's docstring and in the doc.
 
 Next plan: none (series complete)
