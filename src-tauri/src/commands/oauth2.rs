@@ -282,7 +282,7 @@ pub async fn oauth2_refresh_token(
 ///
 /// - client_credentials / password: delegates directly to OAuth2Service.
 /// - authorization_code: opens webview or system browser, gets code, exchanges via service.
-/// - implicit: not yet implemented.
+/// - implicit: unsupported by design (removed in OAuth 2.1); use authorization code with PKCE.
 #[tauri::command]
 pub async fn oauth2_get_token(
     app: AppHandle,

@@ -356,7 +356,8 @@ export async function resolveRequestFieldsForPath(
       : undefined;
     if (folderAuth) {
       // An OAuth2 folder auth without a usable token stays `inherit`. The backend then
-      // resolves the same folder from folder.yml, and fetches a client-credentials token.
+      // resolves the same folder from folder.yml. It fetches a client-credentials or
+      // password token, and fails the send for an interactive grant.
       const { auth } = folderAuth;
       if (auth.authType !== 'oauth2' || auth.oauth2?.accessToken) authToResolve = auth;
     } else {

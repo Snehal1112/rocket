@@ -37,16 +37,20 @@ pub(crate) struct VaultCertificateAccess<'a> {
 }
 
 /// The URLs a send may present a certificate to: the request URL, and the token URL of an
-/// OAuth2 client-credentials auth, which the executor fetches inside the same send with the
-/// request's certificates.
+/// OAuth2 client-credentials or password-grant auth, which the executor fetches inside the
+/// same send with the request's certificates.
 pub(crate) fn certificate_urls(request: &HttpRequest) -> Vec<&str> {
     let mut urls = vec![request.url.as_str()];
     if let Auth::OAuth2(flow) = &request.auth {
-        if let OAuth2Flow::ClientCredentials {
-            access_token_url, ..
-        } = flow.as_ref()
-        {
-            urls.push(access_token_url.as_str());
+        match flow.as_ref() {
+            OAuth2Flow::ClientCredentials {
+                access_token_url, ..
+            }
+            | OAuth2Flow::ResourceOwnerPassword {
+                access_token_url, ..
+            } => urls.push(access_token_url.as_str()),
+            // Interactive grants fetch no token inside a send.
+            OAuth2Flow::AuthorizationCode { .. } | OAuth2Flow::Implicit { .. } => {}
         }
     }
     urls
@@ -550,6 +554,27 @@ mod tests {
                 "credentials": { "clientId": "id", "clientSecret": "s" }
             }))
             .expect("client credentials flow"),
+        ));
+        assert_eq!(
+            certificate_urls(&request),
+            vec![
+                "https://api.example.com/v1",
+                "https://idp.example.com/token"
+            ]
+        );
+    }
+
+    #[test]
+    fn certificate_urls_adds_the_password_grant_token_url() {
+        let mut request = HttpRequest::new(HttpMethod::Get, "https://api.example.com/v1");
+        request.auth = Auth::OAuth2(Box::new(
+            serde_json::from_value(serde_json::json!({
+                "flow": "resource_owner_password_credentials",
+                "accessTokenUrl": "https://idp.example.com/token",
+                "credentials": { "clientId": "id", "clientSecret": "s" },
+                "resourceOwner": { "username": "u", "password": "p" }
+            }))
+            .expect("password flow"),
         ));
         assert_eq!(
             certificate_urls(&request),
