@@ -69,6 +69,8 @@ pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
         DomainEvent::AcpToolActivity { .. } => "agent-session-tool-activity",
         DomainEvent::AcpConfigOptionsChanged { .. } => "agent-session-config-options",
         DomainEvent::AcpUsage { .. } => "agent-session-usage",
+        DomainEvent::AcpPermissionRequested { .. } => "agent-permission-requested",
+        DomainEvent::AcpPermissionResolved { .. } => "agent-permission-resolved",
         // Stored assistant conversations. The payloads hold ids only.
         DomainEvent::AssistantConversationSaved { .. } => "assistant-conversation-saved",
         DomainEvent::AssistantConversationDeleted { .. } => "assistant-conversation-deleted",

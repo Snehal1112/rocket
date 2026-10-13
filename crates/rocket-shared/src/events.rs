@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::acp::ConfigOption;
+use crate::acp::{ConfigOption, PermissionOption};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -605,6 +605,25 @@ pub enum DomainEvent {
         used: u64,
         size: u64,
         cost_usd: Option<f64>,
+    },
+    /// Emitted when the agent asks the user to approve something. The turn
+    /// waits for the answer. `kind` is the ACP tool kind in snake_case;
+    /// `summary` is short, masked text about the call.
+    AcpPermissionRequested {
+        session_id: String,
+        request_id: String,
+        call_id: String,
+        title: String,
+        kind: String,
+        summary: String,
+        options: Vec<PermissionOption>,
+    },
+    /// Emitted when a permission request was answered. `option_id` is the
+    /// chosen option, or `None` when the request was cancelled.
+    AcpPermissionResolved {
+        session_id: String,
+        request_id: String,
+        option_id: Option<String>,
     },
     /// Emitted after an assistant conversation was saved. Carries the id
     /// only, never message text.
@@ -2093,6 +2112,37 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&without_cost).expect("serialize"),
             r#"{"type":"acpUsage","session_id":"sess-1","used":1,"size":2,"cost_usd":null}"#
+        );
+    }
+
+    #[test]
+    fn acp_permission_events_wire_shape() {
+        use crate::acp::{PermissionOption, PermissionOptionKind};
+        let requested = DomainEvent::AcpPermissionRequested {
+            session_id: "sess-1".into(),
+            request_id: "perm-1".into(),
+            call_id: "call-1".into(),
+            title: "propose_changes".into(),
+            kind: "other".into(),
+            summary: "{}".into(),
+            options: vec![PermissionOption {
+                id: "proceed_once".into(),
+                name: "Allow once".into(),
+                kind: PermissionOptionKind::AllowOnce,
+            }],
+        };
+        assert_eq!(
+            serde_json::to_string(&requested).expect("serialize"),
+            r#"{"type":"acpPermissionRequested","session_id":"sess-1","request_id":"perm-1","call_id":"call-1","title":"propose_changes","kind":"other","summary":"{}","options":[{"id":"proceed_once","name":"Allow once","kind":"allow_once"}]}"#
+        );
+        let resolved = DomainEvent::AcpPermissionResolved {
+            session_id: "sess-1".into(),
+            request_id: "perm-1".into(),
+            option_id: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&resolved).expect("serialize"),
+            r#"{"type":"acpPermissionResolved","session_id":"sess-1","request_id":"perm-1","option_id":null}"#
         );
     }
 }

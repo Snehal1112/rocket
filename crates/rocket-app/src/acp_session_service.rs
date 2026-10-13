@@ -247,6 +247,7 @@ impl AcpSessionService {
     /// Idle timeout: the limit restarts after every update. When it runs out,
     /// the pending prompt is dropped and the session is force-killed via
     /// `end_session`, because a hung agent process is still running.
+    /// The limit does not run while a permission request is open.
     ///
     /// A failed prompt also ends the session, unless the error is InvalidInput.
     pub async fn send_prompt(
@@ -260,16 +261,30 @@ impl AcpSessionService {
         let mut outcome: Option<DomainResult<String>> = None;
         let mut channel_open = true;
         let mut tool_calls = ToolCallStates::new();
+        let mut open_permissions: HashSet<String> = HashSet::new();
 
         while outcome.is_none() || channel_open {
             tokio::select! {
                 biased;
                 update = rx.recv(), if channel_open => match update {
-                    Some(update) => self.publish_update(session_id, update, &mut tool_calls),
+                    Some(update) => {
+                        match &update {
+                            AcpUpdate::PermissionRequest { request_id, .. } => {
+                                open_permissions.insert(request_id.clone());
+                            }
+                            AcpUpdate::PermissionResolved { request_id, .. } => {
+                                open_permissions.remove(request_id);
+                            }
+                            _ => {}
+                        }
+                        self.publish_update(session_id, update, &mut tool_calls);
+                    }
                     None => channel_open = false,
                 },
                 result = &mut send, if outcome.is_none() => outcome = Some(result),
-                () = tokio::time::sleep(idle) => {
+                // A turn waiting for the user's answer is not idle. The clock
+                // starts again when the answer arrives.
+                () = tokio::time::sleep(idle), if open_permissions.is_empty() => {
                     // The client already finished, but another sender clone
                     // keeps the channel open. The turn is done, so finish
                     // with its outcome instead of killing the session.
@@ -318,6 +333,21 @@ impl AcpSessionService {
     /// and the session stays open. No event is published here.
     pub async fn cancel(&self, session_id: &str) -> DomainResult<()> {
         self.session_client.cancel(session_id).await
+    }
+
+    /// Answers a permission request the agent opened during a turn.
+    /// `option_id` must be one of the options the request offered; `None`
+    /// cancels it. No event is published here: the client reports the
+    /// answer on the turn's channel, which `send_prompt` publishes.
+    pub async fn respond_permission(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        option_id: Option<&str>,
+    ) -> DomainResult<()> {
+        self.session_client
+            .resolve_permission(session_id, request_id, option_id)
+            .await
     }
 
     /// Changes one session option, such as the model, and returns the
@@ -398,8 +428,30 @@ impl AcpSessionService {
                 size,
                 cost_usd,
             },
-            // Task 3 maps these two to events.
-            AcpUpdate::PermissionRequest { .. } | AcpUpdate::PermissionResolved { .. } => return,
+            AcpUpdate::PermissionRequest {
+                request_id,
+                call_id,
+                title,
+                kind,
+                summary,
+                options,
+            } => DomainEvent::AcpPermissionRequested {
+                session_id,
+                request_id,
+                call_id,
+                title: cap_title(title),
+                kind,
+                summary,
+                options,
+            },
+            AcpUpdate::PermissionResolved {
+                request_id,
+                option_id,
+            } => DomainEvent::AcpPermissionResolved {
+                session_id,
+                request_id,
+                option_id,
+            },
         };
         self.event_publisher.publish(event);
     }
@@ -534,6 +586,18 @@ fn session_env(
     env.push((config.credential_env_var.clone(), credential));
     env.extend(isolation_env.iter().cloned());
     env
+}
+
+/// Longest permission title sent to the UI, in characters.
+const MAX_TITLE_CHARS: usize = 200;
+
+/// Cuts a title to `MAX_TITLE_CHARS` characters and marks the cut with an
+/// ellipsis. The cut always falls on a character boundary.
+fn cap_title(title: String) -> String {
+    match title.char_indices().nth(MAX_TITLE_CHARS) {
+        Some((cut, _)) => format!("{}\u{2026}", &title[..cut]),
+        None => title,
+    }
 }
 
 #[cfg(test)]
@@ -878,6 +942,8 @@ mod tests {
         start_ids: Arc<Mutex<VecDeque<String>>>,
         /// When set, each prompt parks a clone of its update sender here.
         held_update_tx: Option<Arc<Mutex<Vec<UnboundedSender<AcpUpdate>>>>>,
+        /// Pause after the first update of a prompt, to leave a quiet gap.
+        pause_after_first_update: Duration,
     }
     impl Default for FakeSessionClient {
         fn default() -> Self {
@@ -898,6 +964,7 @@ mod tests {
                 prompt_invalid_input: false,
                 start_ids: Arc::new(Mutex::new(VecDeque::new())),
                 held_update_tx: None,
+                pause_after_first_update: Duration::ZERO,
             }
         }
     }
@@ -953,9 +1020,12 @@ mod tests {
                     .push(update_tx.clone());
             }
             tokio::time::sleep(self.prompt_delay).await;
-            for update in &self.prompt_updates {
+            for (index, update) in self.prompt_updates.iter().enumerate() {
                 tokio::time::sleep(self.update_interval).await;
                 let _ = update_tx.send(update.clone());
+                if index == 0 {
+                    tokio::time::sleep(self.pause_after_first_update).await;
+                }
             }
             if self.prompt_should_fail {
                 Err(DomainError::Internal("agent crashed".to_string()))
@@ -1545,6 +1615,149 @@ mod tests {
             agent_config_service(),
             idle,
         )
+    }
+
+    fn permission_request(id: &str) -> AcpUpdate {
+        AcpUpdate::PermissionRequest {
+            request_id: id.to_string(),
+            call_id: "call-1".to_string(),
+            title: "propose_changes".to_string(),
+            kind: "other".to_string(),
+            summary: "{}".to_string(),
+            options: vec![rocket_acp::PermissionOption {
+                id: "proceed_once".to_string(),
+                name: "Allow once".to_string(),
+                kind: rocket_acp::PermissionOptionKind::AllowOnce,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn permission_updates_are_published_as_events() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![
+                permission_request("perm-1"),
+                AcpUpdate::PermissionResolved {
+                    request_id: "perm-1".to_string(),
+                    option_id: Some("proceed_once".to_string()),
+                },
+            ],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        service.send_prompt("session-1", hi()).await.expect("turn");
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::AcpPermissionRequested { request_id, options, .. }
+                if request_id == "perm-1" && options.len() == 1
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::AcpPermissionResolved { request_id, option_id, .. }
+                if request_id == "perm-1" && option_id.as_deref() == Some("proceed_once")
+        )));
+    }
+
+    #[test]
+    fn long_permission_titles_are_capped_on_a_char_boundary() {
+        assert_eq!(cap_title("short".to_string()), "short");
+        let exact = "a".repeat(200);
+        assert_eq!(cap_title(exact.clone()), exact);
+        let long = "\u{e9}".repeat(300);
+        let capped = cap_title(long);
+        assert_eq!(capped.chars().count(), 201);
+        assert!(capped.ends_with('\u{2026}'));
+        assert!(capped.starts_with(&"\u{e9}".repeat(200)));
+    }
+
+    #[tokio::test]
+    async fn a_long_permission_title_is_capped_in_the_event() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let mut request = permission_request("perm-1");
+        if let AcpUpdate::PermissionRequest { title, .. } = &mut request {
+            *title = "x".repeat(500);
+        }
+        let client = FakeSessionClient {
+            prompt_updates: vec![request],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        service.send_prompt("session-1", hi()).await.expect("turn");
+
+        let events = publisher.events.lock().expect("lock");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::AcpPermissionRequested { title, .. } if title.chars().count() == 201
+        )));
+    }
+
+    #[tokio::test]
+    async fn an_open_permission_request_pauses_the_idle_clock() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_updates: vec![
+                permission_request("perm-1"),
+                AcpUpdate::PermissionResolved {
+                    request_id: "perm-1".to_string(),
+                    option_id: Some("proceed_once".to_string()),
+                },
+            ],
+            // The user takes four times the idle limit to answer.
+            pause_after_first_update: Duration::from_millis(400),
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_millis(100));
+
+        let stop_reason = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect("a turn waiting for the user must not time out");
+        assert_eq!(stop_reason, "end_turn");
+        assert!(!end_session_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn the_idle_clock_still_runs_without_an_open_permission_request() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_updates: vec![AcpUpdate::Text {
+                text: "quiet".to_string(),
+            }],
+            pause_after_first_update: Duration::from_millis(400),
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_millis(100));
+
+        service
+            .send_prompt("session-1", hi())
+            .await
+            .expect_err("a silent agent must still time out");
+        assert!(end_session_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn respond_permission_reaches_the_client() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let service = service_with(
+            FakeSessionClient::default(),
+            &publisher,
+            Duration::from_secs(5),
+        );
+        // The fake keeps the trait default, which has no pending requests.
+        let err = service
+            .respond_permission("session-1", "perm-1", Some("proceed_once"))
+            .await
+            .expect_err("no pending request");
+        assert!(matches!(err, DomainError::NotFound(_)));
     }
 
     fn service_with_config(config: AgentConfig, idle: Duration) -> AcpSessionService {
