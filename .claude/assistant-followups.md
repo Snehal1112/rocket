@@ -94,6 +94,9 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 - Prompt history keeps typed secrets in localStorage (`src/lib/assistant/prompt-history.ts`).
 - `fontSize` is a literal `'13px'` in `prompt-editor-theme.ts`.
 - The `variableContext` toggle tooltip has not had a visual check.
+- **Gemini built-in tools stay on.** Permission cards (2026-10-12) let the user approve Gemini's shell and file tools. Claude sessions drop them with `tools: []`; Gemini has no equivalent in `session/new`. Look for a per-session way to disable them (settings file in the isolated config dir, or `--allowed-tools`) so the card is only ever about Rocket's tools.
+- **Permission cards are not saved** in stored conversations. A reloaded conversation shows no record that a tool was approved or denied.
+- **Permission cards, smaller gaps (2026-10-13).** Only the summary is capped at 500 characters in the client, and the service caps the title at 200. Masking uses the env and MCP-token values the client knows, not workspace secrets. An option of an unknown kind is styled neutral while its real id is still forwarded. There is no integration test for two permission requests in one turn (the store test covers the UI side).
 
 ## Known limitations
 
@@ -117,7 +120,7 @@ Open follow-ups:
 - rmcp has two `sse_retry` settings (server config and `LocalSessionManager.session_config`). Both are off, because the priming event hides the tools from Gemini CLI. Keep both off when upgrading rmcp.
 - `real_mcp_client_lists_and_calls_tools_over_http` fails at `run_request` because the collection run trust is not confirmed in its fixture.
 - `GEMINI.md` and the first-prompt reminder are ordinary history in Gemini 0.63 and may be summarised in a very long session. Only `GEMINI_SYSTEM_MD` is compaction-proof, but it replaces Gemini's whole system prompt.
-- The permission card plan (`docs/superpowers/plans/2026-10-12-acp-permission-card.md`) is still needed for `Generic` agents, whose permission requests Rocket denies today.
+- Permission cards are built (`docs/superpowers/plans/2026-10-12-acp-permission-card.md`, 2026-10-13): an agent's permission request shows as a card and the user's choice goes back to the agent. The manual check with a real Gemini session is still open.
 - Other agents, one plan each: Qwen, Codex (no single no-built-ins switch, no SSE), OpenCode (merges global config), Goose (developer built-in on by default), Copilot, Cursor (cannot remove built-ins).
 
 ## Reasoning and guidance (2026-10-12)
