@@ -21,6 +21,7 @@ pub use conversation::{
 };
 pub use mcp_server_spec::McpServerSpec;
 pub use prompt::PromptPart;
+pub use rocket_shared::acp::{PermissionOption, PermissionOptionKind};
 pub use proposal::{
     AgentProposal, FolderSettingsPatch, ProposalStatus, ProposedChange, ProposedRequest,
     ProposedVariable, RequestPatch, ScriptPhase,

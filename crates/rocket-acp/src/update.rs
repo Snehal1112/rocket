@@ -1,4 +1,5 @@
 use crate::session_info::ConfigOption;
+use crate::PermissionOption;
 
 /// One typed update from the agent during a prompt turn. It carries no
 /// `agent-client-protocol` types, so this crate stays protocol-free.
@@ -30,6 +31,23 @@ pub enum AcpUpdate {
         used: u64,
         size: u64,
         cost_usd: Option<f64>,
+    },
+    /// The agent asked the user to approve something, for example to run a
+    /// tool. `kind` is the ACP tool kind in snake_case. `summary` is short,
+    /// masked text about the call. The turn waits for the answer.
+    PermissionRequest {
+        request_id: String,
+        call_id: String,
+        title: String,
+        kind: String,
+        summary: String,
+        options: Vec<PermissionOption>,
+    },
+    /// A permission request was answered. `option_id` is the chosen option,
+    /// or `None` when the request was cancelled.
+    PermissionResolved {
+        request_id: String,
+        option_id: Option<String>,
     },
 }
 

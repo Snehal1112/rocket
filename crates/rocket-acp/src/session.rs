@@ -1,5 +1,5 @@
 use crate::{AcpUpdate, ConfigOption, McpServerSpec, PromptPart, SessionInfo};
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// Protocol-focused contract for driving one ACP agent session: spawning the
@@ -39,6 +39,20 @@ pub trait AcpSessionClient: Send + Sync {
     /// Sends `session/cancel`. It never waits for the running turn, so it
     /// must not take the per-session prompt lock. The session stays open.
     async fn cancel(&self, session_id: &str) -> DomainResult<()>;
+
+    /// Answers a permission request that was sent as
+    /// `AcpUpdate::PermissionRequest`. `option_id` must be an option the
+    /// agent offered; `None` cancels the request. Fails without touching the
+    /// agent when the request is unknown or already answered, or the option
+    /// was not offered. The default has no pending requests.
+    async fn resolve_permission(
+        &self,
+        session_id: &str,
+        _request_id: &str,
+        _option_id: Option<&str>,
+    ) -> DomainResult<()> {
+        Err(DomainError::NotFound(format!("acp session '{session_id}'")))
+    }
 
     /// Sends `session/set_config_option` and returns the agent's new option
     /// list. Changing the model can add or remove other options.
@@ -124,6 +138,15 @@ mod tests {
         async fn end_all_sessions(&self) -> DomainResult<()> {
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn resolve_permission_defaults_to_not_found() {
+        let err = FakeSessionClient
+            .resolve_permission("session-1", "perm-1", Some("allow"))
+            .await
+            .expect_err("the default has no pending request");
+        assert!(matches!(err, DomainError::NotFound(_)));
     }
 
     #[tokio::test]

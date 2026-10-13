@@ -398,6 +398,8 @@ impl AcpSessionService {
                 size,
                 cost_usd,
             },
+            // Task 3 maps these two to events.
+            AcpUpdate::PermissionRequest { .. } | AcpUpdate::PermissionResolved { .. } => return,
         };
         self.event_publisher.publish(event);
     }
