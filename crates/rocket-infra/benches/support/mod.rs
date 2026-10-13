@@ -64,17 +64,20 @@ pub struct Fixture {
 impl Fixture {
     /// Fails loudly when the fixture does not hold what its labels claim.
     pub fn verify(&self) {
-        let tree = self
-            .repo
-            .get_summaries(&self.collection)
-            .expect("summaries of the first collection");
-        assert_eq!(
-            tree.request_count(),
-            self.requests_per_collection,
-            "the request count must match the fixture size"
-        );
         let listed = self.repo.list().expect("list collections");
         assert_eq!(listed.len(), self.collections, "collection count");
+        for c in 0..self.collections {
+            let name = format!("bench-{c}");
+            let tree = self
+                .repo
+                .get_summaries(&name)
+                .expect("summaries of a fixture collection");
+            assert_eq!(
+                tree.request_count(),
+                self.requests_per_collection,
+                "the request count of {name} must match the fixture size"
+            );
+        }
     }
 }
 
@@ -98,6 +101,12 @@ fn build(collections: usize, requests: usize, folders: usize) -> Fixture {
         if c == 0 {
             first_http = http;
         }
+    }
+    let expected_http = (0..requests).filter(|i| i % 10 <= 5).count();
+    assert_eq!(first_http.len(), expected_http, "http request count of bench-0");
+    for path in first_http.iter().take(3).chain(first_http.last()) {
+        repo.get_request("bench-0", path)
+            .expect("a recorded http path must load");
     }
     let fixture = Fixture {
         dir,
