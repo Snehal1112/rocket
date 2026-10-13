@@ -253,5 +253,30 @@ else
   fail "purge deletes harness files"
 fi
 
+# ---- cargo commands written in the docs pass the real guard ----
+for doc in "$repo/.claude/commands/verify-rocket.md" "$repo/CLAUDE.md"; do
+  found=0
+  while IFS= read -r c; do
+    found=$((found + 1))
+    guard_case allow "" "$c"
+  done < <(grep -oE 'cargo (check|test|clippy|build)[^`|]*' "$doc" | sed 's/[[:space:]]*$//')
+  if [ "$found" -gt 0 ]; then pass "doc lint: $found cargo commands in $(basename "$doc")"; else fail "doc lint: no cargo commands in $(basename "$doc")"; fi
+done
+if grep -qE -- '--workspace|cargo [a-z]+ --all' "$repo/.claude/commands/verify-rocket.md"; then
+  fail "doc lint: verify-rocket.md has no --workspace or --all"
+else
+  pass "doc lint: verify-rocket.md has no --workspace or --all"
+fi
+if grep -q 'no Rust crate changed' "$repo/.claude/commands/verify-rocket.md"; then
+  pass "doc lint: verify-rocket.md says what to do when no crate changed"
+else
+  fail "doc lint: verify-rocket.md says what to do when no crate changed"
+fi
+if grep -q 'tools/factory' "$repo/.claude/commands/verify-rocket.md"; then
+  pass "doc lint: verify-rocket.md covers the factory crates"
+else
+  fail "doc lint: verify-rocket.md covers the factory crates"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASSED"; else echo "$fails FAILED"; exit 1; fi

@@ -18,8 +18,8 @@ yarn tsc --noEmit         # TypeScript
 yarn check                # Biome lint + format (read-only)
 yarn lint / yarn format   # auto-fix variants
 yarn test [pattern]       # Vitest
-cargo check               # fast Rust validation
-cargo test -p <crate> <test_name>
+cargo check -j4            # fast Rust validation
+cargo test -j4 -p <crate> <test_name>
 yarn tauri build          # release build
 ```
 
@@ -52,7 +52,7 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 - `rocket-app` holds `Box<dyn Trait>` only; `rocket-infra` wired at startup in `src-tauri/src/lib.rs`.
 - Environment vars override collection vars before HTTP dispatch (`rocket_environment::resolve()`).
 - `DomainEvent` published fire-and-forget; `TauriEventBus` in prod, `NullEventPublisher` in tests.
-- Tests: `tempfile` for fs fixtures, `wiremock` for HTTP mocking. `cargo check` for fast validation.
+- Tests: `tempfile` for fs fixtures, `wiremock` for HTTP mocking. `cargo check -j4` for fast validation.
 
 ## Rules and conventions
 
