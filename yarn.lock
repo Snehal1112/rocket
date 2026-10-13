@@ -2994,10 +2994,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tauri-apps/api@npm:^2.12.0":
-  version: 2.12.1
-  resolution: "@tauri-apps/api@npm:2.12.1"
-  checksum: 10c0/03efa7deb1517e9310367be22b6d980f7bb8e96677d97af868288c322da2e5dc87153e31ef9d585a374b7f6eee584a2dd761328250dd3007d0bbffb8eb597e79
+"@tauri-apps/api@npm:^2.11.0":
+  version: 2.12.3
+  resolution: "@tauri-apps/api@npm:2.12.3"
+  checksum: 10c0/80a2fc50e39960ac0270940f73b9ba81b8bc3c1518355cdd54490d2d906f8da18da9b46d8b31b9b1cfda874c65272a56a1b536ceba0b965cc3a1e547423e82c9
   languageName: node
   linkType: hard
 
@@ -3122,12 +3122,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tauri-apps/plugin-clipboard-manager@npm:^2":
-  version: 2.4.1
-  resolution: "@tauri-apps/plugin-clipboard-manager@npm:2.4.1"
+"@tauri-apps/plugin-clipboard-manager@npm:~2.3.3":
+  version: 2.3.3
+  resolution: "@tauri-apps/plugin-clipboard-manager@npm:2.3.3"
   dependencies:
-    "@tauri-apps/api": "npm:^2.12.0"
-  checksum: 10c0/3b7e9976fce853e9253679a9fd4e43910bc6607b2b95aa4ba4e737a0793694e3018661a9510a4b253303b80173d79733958aef6d876cb7b86ddfe399508c94ac
+    "@tauri-apps/api": "npm:^2.11.0"
+  checksum: 10c0/fcc276db3102e19e2e40c4679ffa5cfd73ab0d36d03befe27dce9d8d9723acbcc0e6a465aafd081a60881a5c941f789ff5ae11dfb1808fb787564d6150bf92f1
   languageName: node
   linkType: hard
 
@@ -7566,7 +7566,7 @@ __metadata:
     "@tanstack/react-query": "npm:^5.100.7"
     "@tauri-apps/api": "npm:2.10.1"
     "@tauri-apps/cli": "npm:2.10.1"
-    "@tauri-apps/plugin-clipboard-manager": "npm:^2"
+    "@tauri-apps/plugin-clipboard-manager": "npm:~2.3.3"
     "@tauri-apps/plugin-dialog": "npm:2.6.0"
     "@tauri-apps/plugin-fs": "npm:^2.5.0"
     "@tauri-apps/plugin-opener": "npm:^2"
