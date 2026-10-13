@@ -1,5 +1,7 @@
 # Software Factory v2 plan series
 
+> SUPERSEDED on 2026-10-13 by `docs/superpowers/plans/2026-10-13-software-factory-v3/`. Do not run these plans. They are kept as a reference for the gap list and for ported rules.
+
 Spec: `docs/superpowers/specs/2026-10-13-software-factory-v2-design.md`
 
 Run the plans one at a time, in order. Each plan has at most 3 tasks, is executed by a `factory-builder` subagent through `superpowers:executing-plans`, and ends with a `Next plan:` line. Do not start a plan before the previous one is merged. Plans 01 to 06 edit the same files (`factory-ctl`, `factory.md`, `run.sh`), so the later plans re-read each file before editing.

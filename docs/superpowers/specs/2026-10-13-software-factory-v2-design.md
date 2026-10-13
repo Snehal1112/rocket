@@ -1,6 +1,6 @@
 # Software Factory v2: closing the gaps
 
-Status: draft for review, 2026-10-13. Builds on `.claude/software-factory.md` (v1, merged) and the plan series `docs/superpowers/plans/2026-10-13-software-factory/`.
+Status: SUPERSEDED on 2026-10-13 by `2026-10-13-software-factory-v3-rust-driver-design.md` (kept for its gap list). Original status: draft for review, 2026-10-13. Builds on `.claude/software-factory.md` (v1, merged) and the plan series `docs/superpowers/plans/2026-10-13-software-factory/`.
 
 ## Why
 
