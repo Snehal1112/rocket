@@ -492,6 +492,13 @@ auth:
   tokenConfig, settings
 ```
 
+**What Rocket's HTTP executor does per flow.** The UI single send turns OAuth2 into a bearer token it already holds. Backend-resolved sends (runner, Flow, `rok.runRequest`, load tests, an `inherit` request whose folder has OAuth2 auth and no cached token) hand the OAuth2 auth to the executor:
+
+- `client_credentials` and `resource_owner_password_credentials` fetch a token per send and send it as `Authorization: Bearer`. Client authentication follows `credentials.placement` (`basic_auth_header` when unset). The token request uses the same client certificate, proxy and `settings.verifySsl` as the send.
+- `authorization_code` and `implicit` fail the send before any network call, with a message to get a token in the Auth tab first. A browser sign-in never runs inside a backend send.
+- `implicit` is unsupported by design (it is removed in OAuth 2.1). Use `authorization_code` with PKCE.
+- The executor does not apply `tokenConfig` or `additionalParameters`, and does not resolve `{{placeholders}}` in OAuth2 fields.
+
 ---
 
 ### 3.13 OAuth 1.0
