@@ -91,6 +91,18 @@ The command matches subcommands by exact shape, so feature text such as `next bu
 
 The baseline: the orchestrator was 53.6 percent of the raw tokens and commit helper agents about 7 percent. The estimate is arithmetic, not a measurement: it removes those two shares and the five extra reviewers (about 39 percent of the baseline remains, 2.2M x 0.39), and it ignores the interactive brainstorming and planning tokens, which the user spends in their own session. Plan 08 measures a real job, and that number replaces the estimate.
 
+## Test coverage of the removed v1 helper
+
+The v1 Python helper and the event hook are deleted. Their behaviors are pinned by Rust tests:
+
+- ids, slugs, board writes, stage moves: `factory-core` (`ids::tests`, `stage::tests`, `board::tests`, `fsutil::tests`).
+- ledger lines and `Task N: complete` at merge: `factory-core` `ledger::tests`, `factory-engine` `tick::tests`.
+- merged check and main root: `factory-git` `is_merged_*`, `open_reports_the_checkout_root_from_a_subdirectory`.
+- review chips on the board: `factory-engine` `review_state_*` and `a_fix_round_resets_the_review_state`.
+- events: `factory-agent` `sink_*` tests, and `tests/privacy.rs` for url query stripping, concurrent appenders and no tool output.
+- job id on each event: `run_series_chains_plans_and_each_job_writes_its_own_job_id_into_events`.
+- agent and command files, settings, cutover: `factory-cli` `tests/agent_lint.rs`.
+
 ## Open items
 
 - The new driver has only run against a fake `claude` in tests. The first real run is the plan 08 dry run.
