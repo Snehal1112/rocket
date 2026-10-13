@@ -71,7 +71,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            lld
 
       - name: Cargo check
         run: cargo check --workspace --all-targets -j4
@@ -105,7 +106,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            lld
 
       # CI runners are not the developer laptop, so the workspace run is fine here.
       # Linking every test binary is memory heavy. Use -j2 to stay inside runner RAM.
