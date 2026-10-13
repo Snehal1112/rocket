@@ -2131,7 +2131,8 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use rocket_collection::{Collection, CollectionRepository, CollectionSettings, Request};
+    use crate::test_doubles::NullCollectionRepo;
+    use rocket_collection::{CollectionSettings, Request};
     use rocket_environment::{Environment, EnvironmentRepository};
     use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
     use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
@@ -2170,13 +2171,13 @@ mod tests {
     }
 
     // ---- Minimal fakes shared by every task in this file ---------------
-    // Only the methods this file's code paths actually call return real
-    // values; everything else is `unimplemented!()` — standard practice for
-    // a narrow test double (this crate's convention is inline, per-module
-    // mocks; see `rocket-app/CLAUDE.md`).
+    // `FakeCollectionRepo` is a small builder. `build` returns a
+    // `NullCollectionRepo::strict()` that answers only the methods this
+    // file's code paths call, and panics on any other method. This crate's
+    // convention is inline, per-module mocks; see `rocket-app/CLAUDE.md`.
 
     struct FakeCollectionRepo {
-        requests: std::sync::Mutex<HashMap<(String, String), Request>>,
+        requests: Arc<std::sync::Mutex<HashMap<(String, String), Request>>>,
         settings: CollectionSettings,
         /// Answered for every request path.
         folder_vars: Vec<rocket_collection::CollectionVariable>,
@@ -2186,7 +2187,7 @@ mod tests {
     impl FakeCollectionRepo {
         fn new() -> Self {
             Self {
-                requests: std::sync::Mutex::new(HashMap::new()),
+                requests: Arc::new(std::sync::Mutex::new(HashMap::new())),
                 settings: CollectionSettings::default(),
                 folder_vars: Vec::new(),
                 request_vars: Vec::new(),
@@ -2212,106 +2213,23 @@ mod tests {
                 .insert((collection.to_string(), path.to_string()), request);
             self
         }
-    }
-    impl CollectionRepository for FakeCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<rocket_collection::CollectionSummary>> {
-            unimplemented!()
-        }
-        fn get(&self, _name: &str) -> DomainResult<Collection> {
-            unimplemented!()
-        }
-        fn get_summaries(&self, _name: &str) -> DomainResult<Collection> {
-            unimplemented!()
-        }
-        fn create(&self, _name: &str) -> DomainResult<Collection> {
-            unimplemented!()
-        }
-        fn delete(&self, _name: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn rename(&self, _old_name: &str, _new_name: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
-            self.requests
-                .lock()
-                .expect("lock FakeCollectionRepo")
-                .get(&(collection.to_string(), path.to_string()))
-                .cloned()
-                .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
-        }
-        fn save_request(&self, _c: &str, _p: &str, _r: &Request) -> DomainResult<String> {
-            unimplemented!()
-        }
-        fn rename_request(&self, _c: &str, _o: &str, _n: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn delete_request(&self, _c: &str, _p: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn create_folder(&self, _c: &str, _p: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn delete_folder(&self, _c: &str, _p: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn move_item(&self, _sc: &str, _sp: &str, _dc: &str, _dp: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn reorder_items(&self, _c: &str, _p: &str, _order: &[String]) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn get_settings(&self, _name: &str) -> DomainResult<CollectionSettings> {
-            Ok(self.settings.clone())
-        }
-        fn save_settings(&self, _name: &str, _settings: &CollectionSettings) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn get_folder_chain_variables(
-            &self,
-            _c: &str,
-            _p: &str,
-        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(self.folder_vars.clone())
-        }
-        fn get_folder_variables(
-            &self,
-            _c: &str,
-            _p: &str,
-        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            unimplemented!()
-        }
-        fn save_folder_variables(
-            &self,
-            _c: &str,
-            _p: &str,
-            _vars: Vec<rocket_collection::CollectionVariable>,
-        ) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn get_request_variables(
-            &self,
-            _c: &str,
-            _p: &str,
-        ) -> DomainResult<Vec<rocket_collection::CollectionVariable>> {
-            Ok(self.request_vars.clone())
-        }
-        fn save_request_variables(
-            &self,
-            _c: &str,
-            _p: &str,
-            _vars: Vec<rocket_collection::CollectionVariable>,
-        ) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn save_request_script(
-            &self,
-            _c: &str,
-            _p: &str,
-            _phase: rocket_collection::RequestScriptPhase,
-            _body: String,
-        ) -> DomainResult<()> {
-            unimplemented!()
+        fn build(self) -> NullCollectionRepo {
+            let requests = self.requests;
+            let settings = self.settings;
+            let folder_vars = self.folder_vars;
+            let request_vars = self.request_vars;
+            NullCollectionRepo::strict()
+                .on_get_request(move |collection, path| {
+                    requests
+                        .lock()
+                        .expect("lock FakeCollectionRepo")
+                        .get(&(collection.to_string(), path.to_string()))
+                        .cloned()
+                        .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
+                })
+                .on_get_settings(move |_| Ok(settings.clone()))
+                .on_get_folder_chain_variables(move |_, _| Ok(folder_vars.clone()))
+                .on_get_request_variables(move |_, _| Ok(request_vars.clone()))
         }
     }
 
@@ -2607,7 +2525,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::new(NullExecutor),
             Box::new(NullHistoryRepo),
-            Box::new(collection_repo),
+            Box::new(collection_repo.build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -2781,7 +2699,7 @@ mod tests {
             "https://api.example.com/login",
         );
         saved.tags = vec!["auth".to_string()];
-        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
+        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved).build();
 
         let node = saved_flow_node("n1", "auth/login.yml");
         let input = build_execute_request_input(&repo, "my-api", Some("dev"), None, &node)
@@ -2805,7 +2723,7 @@ mod tests {
             "https://api.example.com/login",
         );
         saved.runtime_auth = Some(Auth::Inherit);
-        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
+        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved).build();
 
         let input = build_execute_request_input(
             &repo,
@@ -2827,7 +2745,7 @@ mod tests {
             "https://api.example.com/login",
         );
         saved.tags = vec!["auth".to_string()];
-        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved);
+        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved).build();
 
         let node = saved_flow_node("n1", "auth/login.yml");
         let input =
@@ -2845,7 +2763,7 @@ mod tests {
 
     #[test]
     fn saved_source_propagates_not_found_instead_of_defaulting() {
-        let repo = FakeCollectionRepo::new();
+        let repo = FakeCollectionRepo::new().build();
         let node = saved_flow_node("n1", "does/not/exist.yml");
 
         let err = build_execute_request_input(&repo, "my-api", None, None, &node)
@@ -2856,7 +2774,7 @@ mod tests {
 
     #[test]
     fn inline_source_builds_request_from_embedded_fields() {
-        let repo = FakeCollectionRepo::new();
+        let repo = FakeCollectionRepo::new().build();
         let node = inline_flow_node("n2");
 
         let input = build_execute_request_input(&repo, "my-api", None, None, &node)
@@ -2874,7 +2792,7 @@ mod tests {
 
     #[test]
     fn inline_source_with_unparseable_method_is_invalid_input_not_a_panic() {
-        let repo = FakeCollectionRepo::new();
+        let repo = FakeCollectionRepo::new().build();
         let mut node = inline_flow_node("n2");
         if let FlowNodeKind::Request {
             source: RequestSource::Inline { request },
@@ -2892,7 +2810,7 @@ mod tests {
 
     #[test]
     fn non_request_node_is_rejected() {
-        let repo = FakeCollectionRepo::new();
+        let repo = FakeCollectionRepo::new().build();
         let node = FlowNode {
             id: "n3".to_string(),
             kind: FlowNodeKind::Output {
@@ -2919,7 +2837,7 @@ mod tests {
     }
 
     fn sample_execute_input() -> ExecuteRequestInput {
-        let repo = FakeCollectionRepo::new();
+        let repo = FakeCollectionRepo::new().build();
         build_execute_request_input(&repo, "my-api", None, None, &inline_flow_node("n2"))
             .expect("build sample input")
     }
@@ -3177,7 +3095,7 @@ mod tests {
     fn service_with_flow(flow: Flow) -> FlowExecutionService {
         FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullEventPublisher),
         )
     }
@@ -3453,7 +3371,7 @@ mod tests {
                 failing_url: failing_url.to_string(),
             }),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -3470,7 +3388,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::new(FixedResponseExecutor { status }),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -3895,7 +3813,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::new(SharedExecutor(Arc::clone(executor))),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -3937,7 +3855,7 @@ mod tests {
         saved.runtime_auth = Some(request_auth);
         FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved)),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved).build()),
             Box::new(NullEventPublisher),
         )
     }
@@ -3976,7 +3894,7 @@ mod tests {
             Box::new(
                 FakeFlowRepository::new().with_flow("my-api", auth_and_request_flow(true, vec![])),
             ),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved)),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved).build()),
             Box::new(NullEventPublisher),
         );
 
@@ -4003,7 +3921,7 @@ mod tests {
         flow.nodes[1] = request_flow_node("r", "https://api.example.com/x");
         let service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullEventPublisher),
         );
 
@@ -4134,7 +4052,7 @@ mod tests {
             Box::new(StaticEnvRepo(global_env)),
             Arc::new(SharedExecutor(Arc::clone(&executor))),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -4197,7 +4115,7 @@ mod tests {
             Box::new(StaticEnvRepo(env)),
             Arc::new(SharedExecutor(RecordingExecutor::new())),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new().with_settings(settings)),
+            Box::new(FakeCollectionRepo::new().with_settings(settings).build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -4345,7 +4263,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::new(SharedExecutor(Arc::clone(executor))),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -4367,7 +4285,7 @@ mod tests {
     ) -> FlowExecutionService {
         FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(SharedPublisher(Arc::clone(publisher))),
         )
     }
@@ -4508,7 +4426,7 @@ mod tests {
         let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(CancelAfterSteps {
                 cancel_after: 1,
                 seen: Mutex::new(0),
@@ -4560,7 +4478,7 @@ mod tests {
         let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(CancelAfterSteps {
                 cancel_after: 1,
                 seen: Mutex::new(0),
@@ -4605,7 +4523,7 @@ mod tests {
             Arc::new(Mutex::new(HashMap::new()));
         let mut service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(CancelOnStart {
                 node_id,
                 handles: Arc::clone(&handles),
@@ -5236,7 +5154,7 @@ mod tests {
             Box::new(StaticEnvRepo(env)),
             Arc::new(SharedExecutor(Arc::clone(&executor))),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(FakeSecretManagerRepo(connection)),
@@ -5288,7 +5206,7 @@ mod tests {
         let publisher = RecordingPublisher::new();
         let service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(SharedPublisher(Arc::clone(&publisher))),
         );
         let exec = exec_failing_for_url("https://api.example.com/a");
@@ -6178,7 +6096,7 @@ mod tests {
         let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", if_flow("cancel-if"))),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(CancelAfterSteps {
                 cancel_after: 1,
                 seen: Mutex::new(0),
@@ -6750,7 +6668,7 @@ mod tests {
             Box::new(StaticEnvRepo(env)),
             Arc::new(NullExecutor),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -6857,7 +6775,7 @@ mod tests {
             Box::new(StaticEnvRepo(env)),
             Arc::new(SharedExecutor(executor)),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -7240,7 +7158,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::clone(executor) as Arc<dyn HttpExecutor>,
             Box::new(SharedHistoryRepo(Arc::clone(history))),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -7805,7 +7723,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::clone(&executor) as Arc<dyn HttpExecutor>,
             Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(SharedPublisher(Arc::clone(&exec_events))),
             Box::new(EmptySecretManagerRepo),
@@ -7832,7 +7750,7 @@ mod tests {
                     callback_host: None,
                 },
             )),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "job.yml", request)),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "job.yml", request).build()),
             Box::new(NullEventPublisher),
         );
 
@@ -7927,7 +7845,7 @@ mod tests {
         let fake = crate::test_doubles::FakeCallbackListener::new();
         let _service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new()),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullEventPublisher),
         )
         .with_callback_listener(Box::new(Arc::clone(&fake)));
@@ -9497,7 +9415,7 @@ mod tests {
                 "my-api",
                 "req.yml",
                 inherit_saved_request(),
-            )),
+            ).build()),
             Box::new(SharedPublisher(Arc::clone(&publisher))),
         )
         .with_token_fetcher(Box::new(SharedFetcher(Arc::clone(&fetcher))));
@@ -9505,7 +9423,7 @@ mod tests {
             Box::new(NullEnvRepo),
             Arc::new(EchoTokenExecutor),
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -9677,7 +9595,8 @@ mod tests {
             Box::new(
                 FakeCollectionRepo::new()
                     .with_request("my-api", "login.yml", login)
-                    .with_request("my-api", "req.yml", inherit_saved_request()),
+                    .with_request("my-api", "req.yml", inherit_saved_request())
+                    .build(),
             ),
             Box::new(NullEventPublisher),
         )
@@ -9692,7 +9611,7 @@ mod tests {
             Box::new(SharedEnvRepo(Arc::clone(env))),
             Arc::clone(executor) as Arc<dyn HttpExecutor>,
             Box::new(NullHistoryRepo),
-            Box::new(collection_repo),
+            Box::new(collection_repo.build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -9788,7 +9707,7 @@ mod tests {
         let login = Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
         let service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "login.yml", login)),
+            Box::new(FakeCollectionRepo::new().with_request("my-api", "login.yml", login).build()),
             Box::new(NullEventPublisher),
         );
 
@@ -9945,7 +9864,7 @@ mod tests {
             Box::new(SharedEnvRepo(Arc::clone(&env))),
             Arc::clone(&executor) as Arc<dyn HttpExecutor>,
             Box::new(NullHistoryRepo),
-            Box::new(FakeCollectionRepo::new()),
+            Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(FakeSecretManagerRepo(connection)),
