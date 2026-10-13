@@ -5814,6 +5814,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "criterion",
  "dashmap",
  "deno_core",
  "deno_error",
