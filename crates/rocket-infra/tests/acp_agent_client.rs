@@ -6,10 +6,14 @@
 // CARGO_BIN_EXE_<name> environment variable used below for integration test
 // targets, not for unit tests compiled as part of the library target. See
 // the task report for details.
+use std::sync::Arc;
+
 use agent_client_protocol::schema::v1::InitializeRequest;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent as AgentRole, Client, ConnectionTo};
-use rocket_acp::{AcpSessionClient, AcpUpdate, McpServerSpec, PromptPart, ToolCallStatus};
+use rocket_acp::{
+    AcpSessionClient, AcpUpdate, McpServerSpec, PermissionOption, PromptPart, ToolCallStatus,
+};
 use rocket_infra::AcpAgentClient;
 use rocket_shared::error::DomainError;
 use tokio::sync::mpsc;
@@ -1048,34 +1052,160 @@ async fn acp_agent_client_set_config_option_on_unknown_session_id_errors() {
     assert!(matches!(err, DomainError::NotFound(_)));
 }
 
-#[tokio::test]
-async fn acp_agent_client_denies_permission_requests() {
-    let client = AcpAgentClient::new();
+/// Reads updates until the permission request arrives.
+async fn next_permission_request(
+    rx: &mut mpsc::UnboundedReceiver<AcpUpdate>,
+) -> (String, Vec<PermissionOption>) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match rx.recv().await {
+                Some(AcpUpdate::PermissionRequest {
+                    request_id,
+                    options,
+                    ..
+                }) => return (request_id, options),
+                Some(_) => continue,
+                None => panic!("the update channel closed before a permission request"),
+            }
+        }
+    })
+    .await
+    .expect("a permission request must reach the update channel")
+}
+
+/// Starts a `__PERMISSION__` turn and returns the client, the session id,
+/// the update receiver and the running prompt.
+async fn start_permission_turn() -> (
+    Arc<AcpAgentClient>,
+    String,
+    mpsc::UnboundedReceiver<AcpUpdate>,
+    tokio::task::JoinHandle<Result<String, DomainError>>,
+) {
+    let client = Arc::new(AcpAgentClient::new());
     let session_id = client
         .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
         .await
         .expect("start_session")
         .session_id;
+    let (tx, rx) = mpsc::unbounded_channel();
+    let turn_client = Arc::clone(&client);
+    let turn_session = session_id.clone();
+    let prompt = tokio::spawn(async move {
+        turn_client
+            .send_prompt(
+                &turn_session,
+                vec![PromptPart::Text("__PERMISSION__".to_string())],
+                tx,
+            )
+            .await
+    });
+    (client, session_id, rx, prompt)
+}
 
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let stop_reason = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        client.send_prompt(
-            &session_id,
-            vec![PromptPart::Text("__PERMISSION__".to_string())],
-            tx,
-        ),
-    )
-    .await
-    .expect("a permission request must never hang the turn")
-    .expect("send_prompt");
-    assert_eq!(stop_reason, "end_turn");
+#[tokio::test]
+async fn acp_agent_client_permission_request_waits_for_an_allow_answer() {
+    let (client, session_id, mut rx, prompt) = start_permission_turn().await;
+    let (request_id, options) = next_permission_request(&mut rx).await;
     assert_eq!(
-        drain_updates(&mut rx),
-        vec![AcpUpdate::Text {
-            text: "permission:selected:reject-once".to_string()
-        }]
+        options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        vec!["allow-once", "reject-once"]
     );
+
+    client
+        .resolve_permission(&session_id, &request_id, Some("allow-once"))
+        .await
+        .expect("resolve");
+    let stop_reason = tokio::time::timeout(std::time::Duration::from_secs(5), prompt)
+        .await
+        .expect("the turn must finish after the answer")
+        .expect("join")
+        .expect("send_prompt");
+    assert_eq!(stop_reason, "end_turn");
+
+    let updates = drain_updates(&mut rx);
+    assert!(updates.contains(&AcpUpdate::PermissionResolved {
+        request_id,
+        option_id: Some("allow-once".to_string()),
+    }));
+    assert!(updates.contains(&AcpUpdate::Text {
+        text: "permission:selected:allow-once".to_string()
+    }));
+}
+
+#[tokio::test]
+async fn acp_agent_client_permission_request_passes_a_reject_answer_to_the_agent() {
+    let (client, session_id, mut rx, prompt) = start_permission_turn().await;
+    let (request_id, _) = next_permission_request(&mut rx).await;
+    client
+        .resolve_permission(&session_id, &request_id, Some("reject-once"))
+        .await
+        .expect("resolve");
+    tokio::time::timeout(std::time::Duration::from_secs(5), prompt)
+        .await
+        .expect("the turn must finish")
+        .expect("join")
+        .expect("send_prompt");
+    assert!(drain_updates(&mut rx).contains(&AcpUpdate::Text {
+        text: "permission:selected:reject-once".to_string()
+    }));
+}
+
+#[tokio::test]
+async fn acp_agent_client_refuses_an_option_the_agent_did_not_offer() {
+    let (client, session_id, mut rx, prompt) = start_permission_turn().await;
+    let (request_id, _) = next_permission_request(&mut rx).await;
+
+    let err = client
+        .resolve_permission(&session_id, &request_id, Some("allow-forever"))
+        .await
+        .expect_err("an option that was not offered");
+    assert!(matches!(err, DomainError::InvalidInput(_)));
+
+    // The request is still open and can be answered properly.
+    client
+        .resolve_permission(&session_id, &request_id, Some("reject-once"))
+        .await
+        .expect("resolve");
+    tokio::time::timeout(std::time::Duration::from_secs(5), prompt)
+        .await
+        .expect("the turn must finish")
+        .expect("join")
+        .expect("send_prompt");
+
+    let err = client
+        .resolve_permission(&session_id, &request_id, Some("reject-once"))
+        .await
+        .expect_err("an answered request");
+    assert!(matches!(err, DomainError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn acp_agent_client_cancel_answers_an_open_permission_request_as_cancelled() {
+    let (client, session_id, mut rx, prompt) = start_permission_turn().await;
+    let (request_id, _) = next_permission_request(&mut rx).await;
+
+    client.cancel(&session_id).await.expect("cancel");
+    tokio::time::timeout(std::time::Duration::from_secs(5), prompt)
+        .await
+        .expect("a cancelled request must not hang the turn")
+        .expect("join")
+        .expect("send_prompt");
+
+    let updates = drain_updates(&mut rx);
+    assert!(updates.contains(&AcpUpdate::PermissionResolved {
+        request_id: request_id.clone(),
+        option_id: None,
+    }));
+    assert!(updates.contains(&AcpUpdate::Text {
+        text: "permission:cancelled".to_string()
+    }));
+
+    // A cancelled request cannot be granted afterwards.
+    let err = client
+        .resolve_permission(&session_id, &request_id, Some("allow-once"))
+        .await
+        .expect_err("a cancelled request");
+    assert!(matches!(err, DomainError::NotFound(_)));
 }
 
 #[tokio::test]

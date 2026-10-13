@@ -1,4 +1,5 @@
 pub mod acp_agent_client;
+mod acp_permissions;
 mod acp_stderr_tail;
 mod aws_profile;
 mod atomic_write;

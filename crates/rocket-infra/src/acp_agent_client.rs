@@ -17,8 +17,8 @@ use agent_client_protocol::schema::v1::{
     PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigSelectOptions, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, StopReason, TextContent, TextResourceContents,
-    ToolCallStatus as WireToolCallStatus, ToolKind,
+    SetSessionConfigOptionRequest, StopReason, TextContent, TextResourceContents, ToolCallContent,
+    ToolCallStatus as WireToolCallStatus, ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{
@@ -27,13 +27,15 @@ use agent_client_protocol::{
 use async_process::Child;
 use futures_lite::io::AsyncReadExt;
 use rocket_acp::{
-    AcpSessionClient, AcpUpdate, ConfigChoice, ConfigOption, McpServerSpec, PromptCapabilities,
-    PromptPart, SessionInfo, ToolCallStatus,
+    AcpSessionClient, AcpUpdate, ConfigChoice, ConfigOption, McpServerSpec,
+    PermissionOption as AcpPermissionOption, PermissionOptionKind as AcpPermissionOptionKind,
+    PromptCapabilities, PromptPart, SessionInfo, ToolCallStatus,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::acp_permissions::PermissionBroker;
 use crate::acp_stderr_tail::{mask_secrets, with_agent_output, StderrTail};
 
 /// How long the startup handshake (`initialize` and `session/new`) may take.
@@ -74,6 +76,9 @@ struct RunningSession {
     current_update_tx: UpdateSlot,
     /// What the agent accepts in a prompt, from its `initialize` answer.
     prompt_capabilities: PromptCapabilities,
+    /// The permission requests the agent has open. Answered by
+    /// `resolve_permission`, or as cancelled by `cancel` and at turn end.
+    permissions: Arc<PermissionBroker>,
 }
 
 type UpdateSlot = Arc<std::sync::Mutex<Option<UnboundedSender<AcpUpdate>>>>;
@@ -93,6 +98,16 @@ fn terminate_process(process: &SharedProcess) -> std::io::Result<()> {
 /// the guarded value is a plain `Option` that cannot be left half-written.
 fn set_update_sender(slot: &UpdateSlot, sender: Option<UnboundedSender<AcpUpdate>>) {
     *slot.lock().unwrap_or_else(PoisonError::into_inner) = sender;
+}
+
+/// Ends a turn: clears the update sender and answers every open permission
+/// request as cancelled. Both happen under the slot lock, so a permission
+/// request that arrives meanwhile is either drained here or sees no turn
+/// (see `open_permission_request`).
+fn end_turn(slot: &UpdateSlot, permissions: &PermissionBroker) {
+    let mut guard = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    *guard = None;
+    permissions.drain_cancelled();
 }
 
 /// Owns a spawned agent process and the background task that drives its
@@ -283,6 +298,10 @@ impl AcpSessionClient for AcpAgentClient {
 
         let current_update_tx: UpdateSlot = Arc::new(std::sync::Mutex::new(None));
         let notif_update_tx = Arc::clone(&current_update_tx);
+        let permission_broker = Arc::new(PermissionBroker::default());
+        let handler_broker = Arc::clone(&permission_broker);
+        let handler_update_tx = Arc::clone(&current_update_tx);
+        let handler_secrets: Arc<[String]> = secret_values.clone().into();
 
         // See the `RunningSession` doc comment for why this whole connection
         // is driven from a background task instead of directly here. The
@@ -335,18 +354,22 @@ impl AcpSessionClient for AcpAgentClient {
                     },
                     agent_client_protocol::on_receive_notification!(),
                 )
-                // Rocket never grants a permission. Answering at once means a
-                // permission request can never hang a turn. With built-in
-                // tools off and the Rocket tools allowed in advance (Plan 02),
-                // no request is expected.
+                // A permission request becomes a card the user answers. The
+                // wait runs in a spawned task: this callback runs inside the
+                // dispatch loop, and waiting here would block every other
+                // message, including the prompt response and the cancel.
                 .on_receive_request(
                     move |request: RequestPermissionRequest,
                           responder: Responder<RequestPermissionResponse>,
-                          _cx: ConnectionTo<AgentRole>| async move {
-                        tracing::warn!("the agent asked for a permission; Rocket denied it");
-                        responder.respond(RequestPermissionResponse::new(deny_outcome(
-                            &request.options,
-                        )))
+                          cx: ConnectionTo<AgentRole>| {
+                        let broker = Arc::clone(&handler_broker);
+                        let slot = Arc::clone(&handler_update_tx);
+                        let secrets = Arc::clone(&handler_secrets);
+                        async move {
+                            handle_permission_request(
+                                request, responder, &cx, broker, slot, &secrets,
+                            )
+                        }
                     },
                     agent_client_protocol::on_receive_request!(),
                 )
@@ -496,6 +519,7 @@ impl AcpSessionClient for AcpAgentClient {
             prompt_lock: Mutex::new(()),
             current_update_tx,
             prompt_capabilities: info.prompt_capabilities,
+            permissions: permission_broker,
         });
         // The flag is read under the `sessions` lock, which the sweep also
         // takes after setting it. So a session is either stored before the
@@ -542,7 +566,8 @@ impl AcpSessionClient for AcpAgentClient {
             .block_task()
             .await;
 
-        set_update_sender(&running.current_update_tx, None);
+        // A request the agent left open cannot be answered after the turn.
+        end_turn(&running.current_update_tx, &running.permissions);
 
         match result {
             Ok(response) => Ok(stop_reason_to_wire_string(response.stop_reason)),
@@ -557,10 +582,24 @@ impl AcpSessionClient for AcpAgentClient {
         // A notification, sent without the prompt lock: the running turn
         // holds that lock until the agent answers it with `cancelled`.
         let running = self.running(session_id).await?;
+        // ACP: on cancel, open permission requests are answered cancelled.
+        running.permissions.drain_cancelled();
         running
             .connection
             .send_notification(CancelNotification::new(session_id.to_string()))
             .map_err(|e| DomainError::Internal(format!("failed to send cancel: {e}")))
+    }
+
+    async fn resolve_permission(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        option_id: Option<&str>,
+    ) -> DomainResult<()> {
+        self.running(session_id)
+            .await?
+            .permissions
+            .resolve(request_id, option_id)
     }
 
     async fn set_config_option(
@@ -875,6 +914,160 @@ fn deny_outcome(options: &[PermissionOption]) -> RequestPermissionOutcome {
     }
 }
 
+/// Longest `summary` sent for a permission request.
+const PERMISSION_SUMMARY_MAX_CHARS: usize = 500;
+
+fn current_update_sender(slot: &UpdateSlot) -> Option<UnboundedSender<AcpUpdate>> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner).clone()
+}
+
+/// Turns a permission request into a card update, then answers the agent
+/// when the user has chosen. With no turn running nobody could answer, so
+/// the request is denied at once.
+fn handle_permission_request(
+    request: RequestPermissionRequest,
+    responder: Responder<RequestPermissionResponse>,
+    cx: &ConnectionTo<AgentRole>,
+    broker: Arc<PermissionBroker>,
+    slot: UpdateSlot,
+    secrets: &[String],
+) -> Result<(), agent_client_protocol::Error> {
+    let Some((request_id, answer)) = open_permission_request(&request, &broker, &slot, secrets)
+    else {
+        tracing::warn!("the agent asked for a permission outside a turn; Rocket denied it");
+        return responder.respond(RequestPermissionResponse::new(deny_outcome(
+            &request.options,
+        )));
+    };
+    let task_request_id = request_id.clone();
+    let spawned = cx.spawn(async move {
+        // A dropped sender never grants anything: it reads as cancelled.
+        let chosen = answer.await.unwrap_or(None);
+        // The task reads the slot instead of keeping a sender clone, because
+        // a held clone would keep the turn's update channel open.
+        // The UI hears the answer before the agent does, so the card is
+        // closed before the agent can end the turn.
+        if let Some(tx) = current_update_sender(&slot) {
+            let _ = tx.send(AcpUpdate::PermissionResolved {
+                request_id: task_request_id,
+                option_id: chosen.clone(),
+            });
+        }
+        let outcome = match chosen {
+            Some(option_id) => {
+                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id))
+            }
+            None => RequestPermissionOutcome::Cancelled,
+        };
+        // An error here means the connection is closing. It is not returned,
+        // because a failed spawned task shuts the whole connection down.
+        if let Err(e) = responder.respond(RequestPermissionResponse::new(outcome)) {
+            tracing::debug!("could not answer a permission request: {e}");
+        }
+        Ok(())
+    });
+    if let Err(e) = spawned {
+        // The connection is closing, so the request can no longer be answered.
+        let _ = broker.resolve(&request_id, None);
+        tracing::debug!("could not wait for a permission answer: {e}");
+    }
+    Ok(())
+}
+
+/// Registers a permission request and sends its card update to the running
+/// turn. Returns `None` when no turn can show it. The slot lock is held for
+/// the whole step, so `end_turn` either drains this request or runs first.
+fn open_permission_request(
+    request: &RequestPermissionRequest,
+    broker: &PermissionBroker,
+    slot: &UpdateSlot,
+    secrets: &[String],
+) -> Option<(String, oneshot::Receiver<Option<String>>)> {
+    let guard = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    let update_tx = guard.as_ref()?;
+    let options = permission_options_from_wire(&request.options);
+    let (request_id, answer) =
+        broker.register(options.iter().map(|option| option.id.clone()).collect());
+    let secret_refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    let fields = &request.tool_call.fields;
+    let update = AcpUpdate::PermissionRequest {
+        request_id: request_id.clone(),
+        call_id: request.tool_call.tool_call_id.to_string(),
+        title: mask_secrets(fields.title.as_deref().unwrap_or(""), &secret_refs),
+        kind: fields
+            .kind
+            .map(tool_kind_to_wire)
+            .unwrap_or("other")
+            .to_string(),
+        summary: permission_summary(fields, &secret_refs),
+        options,
+    };
+    if update_tx.send(update).is_err() {
+        // The turn's receiver is gone, so no card can be shown.
+        let _ = broker.resolve(&request_id, None);
+        return None;
+    }
+    Some((request_id, answer))
+}
+
+fn permission_options_from_wire(options: &[PermissionOption]) -> Vec<AcpPermissionOption> {
+    options
+        .iter()
+        .map(|option| AcpPermissionOption {
+            id: option.option_id.to_string(),
+            name: option.name.clone(),
+            kind: match option.kind {
+                PermissionOptionKind::AllowOnce => AcpPermissionOptionKind::AllowOnce,
+                PermissionOptionKind::AllowAlways => AcpPermissionOptionKind::AllowAlways,
+                PermissionOptionKind::RejectAlways => AcpPermissionOptionKind::RejectAlways,
+                // Reject is the safe reading of a kind Rocket does not know.
+                _ => AcpPermissionOptionKind::RejectOnce,
+            },
+        })
+        .collect()
+}
+
+/// Short, masked text about the call: the agent's own content text, a diff's
+/// path, or the raw input as a last resort.
+fn permission_summary(fields: &ToolCallUpdateFields, secrets: &[&str]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for item in fields.content.iter().flatten() {
+        match item {
+            ToolCallContent::Content(content) => {
+                if let ContentBlock::Text(text) = &content.content {
+                    parts.push(text.text.clone());
+                }
+            }
+            ToolCallContent::Diff(diff) => parts.push(format!("Edit {}", diff.path.display())),
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        if let Some(raw) = &fields.raw_input {
+            parts.push(raw.to_string());
+        }
+    }
+    // The raw input is JSON text, where a secret with a quote, a backslash
+    // or a control character shows up escaped. Those forms are masked too.
+    let escaped: Vec<String> = secrets
+        .iter()
+        .filter_map(|secret| {
+            let json = serde_json::to_string(secret).ok()?;
+            let inner = json.strip_prefix('"')?.strip_suffix('"')?;
+            (inner != *secret).then(|| inner.to_string())
+        })
+        .collect();
+    let mut forms: Vec<&str> = secrets.to_vec();
+    forms.extend(escaped.iter().map(String::as_str));
+    let masked = mask_secrets(&parts.join("\n"), &forms);
+    if masked.chars().count() > PERMISSION_SUMMARY_MAX_CHARS {
+        let cut: String = masked.chars().take(PERMISSION_SUMMARY_MAX_CHARS).collect();
+        format!("{cut}…")
+    } else {
+        masked
+    }
+}
+
 /// Builds the prompt blocks. A resource is embedded when the agent accepts
 /// embedded context, and sent as labelled plain text otherwise.
 fn prompt_parts_to_wire(parts: Vec<PromptPart>, embedded_context: bool) -> Vec<ContentBlock> {
@@ -928,8 +1121,9 @@ mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
         ConfigOptionUpdate, ContentChunk, Cost, ImageContent, SessionConfigSelectGroup,
-        SessionConfigSelectOption, ToolCall, ToolCallUpdate, ToolCallUpdateFields, UsageUpdate,
+        SessionConfigSelectOption, ToolCall, ToolCallUpdate, UsageUpdate,
     };
+    use tokio::sync::mpsc;
 
     fn text_chunk(text: &str) -> ContentChunk {
         ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
@@ -1118,6 +1312,140 @@ mod tests {
             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("never"))
         );
         assert_eq!(deny_outcome(&[allow]), RequestPermissionOutcome::Cancelled);
+    }
+
+    #[test]
+    fn permission_summary_masks_secrets_and_is_capped() {
+        let fields = ToolCallUpdateFields::new().raw_input(serde_json::json!({
+            "command": "curl -H 'Authorization: tok-secret-123' https://example.com"
+        }));
+        let summary = permission_summary(&fields, &["tok-secret-123"]);
+        assert!(!summary.contains("tok-secret-123"), "{summary}");
+
+        let long = ToolCallUpdateFields::new().raw_input(serde_json::json!("x".repeat(900)));
+        let capped = permission_summary(&long, &[]);
+        assert_eq!(capped.chars().count(), PERMISSION_SUMMARY_MAX_CHARS + 1);
+        assert!(capped.ends_with('…'));
+    }
+
+    #[test]
+    fn permission_summary_masks_a_secret_that_json_escapes() {
+        let secret = r#"pa"ss\word"#;
+        let fields = ToolCallUpdateFields::new().raw_input(serde_json::json!({ "token": secret }));
+        let summary = permission_summary(&fields, &[secret]);
+        assert!(!summary.contains(r#"pa\"ss\\word"#), "{summary}");
+        assert!(summary.contains("***"), "{summary}");
+    }
+
+    #[test]
+    fn permission_summary_prefers_content_text_and_diff_paths() {
+        let fields = ToolCallUpdateFields::new()
+            .content(vec![
+                ToolCallContent::from("run the tests"),
+                ToolCallContent::Diff(agent_client_protocol::schema::v1::Diff::new(
+                    "/tmp/a.txt",
+                    "new",
+                )),
+            ])
+            .raw_input(serde_json::json!({ "ignored": true }));
+        assert_eq!(
+            permission_summary(&fields, &[]),
+            "run the tests\nEdit /tmp/a.txt"
+        );
+    }
+
+    #[test]
+    fn an_unknown_permission_kind_becomes_a_reject_option() {
+        // `PermissionOptionKind` is non-exhaustive, so Rocket reads an
+        // unknown kind as the safe one. This pins the known mappings.
+        let wire = vec![
+            PermissionOption::new("a", "A", PermissionOptionKind::AllowOnce),
+            PermissionOption::new("b", "B", PermissionOptionKind::RejectAlways),
+        ];
+        let mapped = permission_options_from_wire(&wire);
+        assert_eq!(mapped[0].kind, AcpPermissionOptionKind::AllowOnce);
+        assert_eq!(mapped[1].kind, AcpPermissionOptionKind::RejectAlways);
+    }
+
+    fn permission_request(title: &str) -> RequestPermissionRequest {
+        RequestPermissionRequest::new(
+            "session-1",
+            ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .title(title.to_string())
+                    .kind(ToolKind::Execute),
+            ),
+            vec![
+                PermissionOption::new("allow-once", "Allow", PermissionOptionKind::AllowOnce),
+                PermissionOption::new("reject-once", "Reject", PermissionOptionKind::RejectOnce),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_permission_request_outside_a_turn_is_not_registered() {
+        let broker = PermissionBroker::default();
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(None));
+        assert!(open_permission_request(&permission_request("ls"), &broker, &slot, &[]).is_none());
+        let err = broker
+            .resolve("perm-1", Some("allow-once"))
+            .expect_err("nothing was registered");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn a_permission_request_whose_turn_receiver_is_gone_is_not_left_open() {
+        let broker = PermissionBroker::default();
+        let (tx, rx) = mpsc::unbounded_channel();
+        drop(rx);
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
+        assert!(open_permission_request(&permission_request("ls"), &broker, &slot, &[]).is_none());
+        let err = broker
+            .resolve("perm-1", Some("allow-once"))
+            .expect_err("the request was closed");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn a_permission_request_in_a_turn_sends_a_masked_card_and_turn_end_cancels_it() {
+        let broker = PermissionBroker::default();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let secrets = vec!["tok-secret-123".to_string()];
+        let (request_id, answer) = open_permission_request(
+            &permission_request("curl -H tok-secret-123"),
+            &broker,
+            &slot,
+            &secrets,
+        )
+        .expect("a turn is running");
+
+        match rx.try_recv().expect("the card update") {
+            AcpUpdate::PermissionRequest {
+                request_id: sent_id,
+                call_id,
+                title,
+                kind,
+                options,
+                ..
+            } => {
+                assert_eq!(sent_id, request_id);
+                assert_eq!(call_id, "call-1");
+                assert_eq!(title, "curl -H ***");
+                assert_eq!(kind, "execute");
+                assert_eq!(options.len(), 2);
+            }
+            other => panic!("expected a permission request, got {other:?}"),
+        }
+
+        end_turn(&slot, &broker);
+        assert_eq!(answer.await.expect("answer"), None);
+        assert!(current_update_sender(&slot).is_none());
+        let err = broker
+            .resolve(&request_id, Some("allow-once"))
+            .expect_err("a request from an ended turn");
+        assert!(matches!(err, DomainError::NotFound(_)));
     }
 
     #[test]
