@@ -71,6 +71,10 @@
 		]
 	},
 	"permissions": {
+		"allow": [
+			"Bash(tools/factory/target/debug/factory:*)",
+			"Bash(cargo build -j4 --manifest-path tools/factory/Cargo.toml:*)"
+		],
 		"deny": [
 			"Bash(cargo test --workspace:*)",
 			"Bash(git push --force:*)",
