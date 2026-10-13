@@ -99,6 +99,21 @@ Data flow: `factory driver -> .superpowers/factory/{board.json,events.jsonl} -> 
 
 The baseline: the orchestrator was 53.6 percent of the raw tokens and commit helper agents about 7 percent. The estimate is arithmetic, not a measurement: it removes those two shares and the five extra reviewers (about 39 percent of the baseline remains, 2.2M x 0.39), and it ignores the interactive brainstorming and planning tokens, which the user spends in their own session. Plan 08 measures a real job, and that number replaces the estimate.
 
+## Token baseline
+
+Measured on job 001 (v1, LLM orchestrator, full review set): about 12.75M raw tokens, about 2.17M weighted (input + cache creation + output + cache read / 10), orchestrator 53.6 percent of the total, commit helper agents about 7 percent, diff of 23 KB read by 5 reviewers.
+
+`factory tokens <id>` prints the board totals, then raw and weighted totals per agent role and the percent of that weighted baseline. The per-role numbers come from `usage.jsonl` in the job folder, one line per agent run, written by the engine. Compare like with like:
+
+| Measure | Job 001 (v1) | Lean job target |
+|---|---|---|
+| Weighted total for the whole job | about 2.17M | well below, aim under 1.1M for a comparable small job |
+| Orchestrator share | 53.6 percent | not counted: the driver is Rust, the interactive session only plans |
+| Reviewer runs per clean round | 5 | 1 |
+| Commit helper agents | 2 or more per commit | 0 |
+
+The plan-time session (brainstorming and writing plans) is interactive and is not in `factory tokens`. Note it by hand from the session's usage line when comparing totals. The target is a guideline taken from the spec's success check ("well below 2.2M weighted"), not a gate.
+
 ## Test coverage of the removed v1 helper
 
 The v1 Python helper and the event hook are deleted. Their behaviors are pinned by Rust tests:
