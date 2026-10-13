@@ -1011,12 +1011,14 @@ mod tests {
             repository::ContractError,
             types::{ContractParty, ContractPolicy},
         },
-        Collection, CollectionSettings, CollectionSummary, CollectionVariable, Request,
+        Collection, Request,
     };
-    use rocket_shared::error::{DomainError, DomainResult};
+    use rocket_shared::error::DomainError;
     use rocket_shared::types::HttpMethod;
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+
+    use crate::test_doubles::{CollectionMethod, NullCollectionRepo};
 
     /// In-memory mock — keeps rocket-app's layering boundary intact
     /// (no dependency on rocket-infra for tests). Mirrors the inline-mock
@@ -1115,126 +1117,48 @@ mod tests {
         }
     }
 
-    /// In-memory collection mock. Only `get` is exercised by the service;
-    /// the other methods are stubs so we can satisfy the trait without
-    /// pulling in `rocket-infra`. `fail_get` lets tests simulate a
+    /// Builds strict `NullCollectionRepo` doubles. Only `get` and
+    /// `get_summaries` are exercised by the service. `failing` simulates a
     /// collection-load failure to exercise error-propagation paths.
-    struct MockCollectionRepo {
-        collections: Mutex<Vec<Collection>>,
-        fail_get: bool,
-    }
+    struct MockCollectionRepo;
 
     impl MockCollectionRepo {
-        fn with_collection(collection: Collection) -> Self {
-            Self {
-                collections: Mutex::new(vec![collection]),
-                fail_get: false,
-            }
+        fn with_collection(collection: Collection) -> NullCollectionRepo {
+            let collections = Arc::new(Mutex::new(vec![collection]));
+            let for_summaries = collections.clone();
+            let find = |cols: &Mutex<Vec<Collection>>, name: &str| {
+                cols.lock()
+                    .expect("lock")
+                    .iter()
+                    .find(|c| c.name == name)
+                    .cloned()
+                    .ok_or_else(|| DomainError::NotFound(name.into()))
+            };
+            Self::lenient_base()
+                .on_get(move |name| find(&collections, name))
+                .on_get_summaries(move |name| find(&for_summaries, name))
         }
 
-        fn failing() -> Self {
-            Self {
-                collections: Mutex::new(Vec::new()),
-                fail_get: true,
-            }
+        fn failing() -> NullCollectionRepo {
+            Self::lenient_base()
+                .on_get(|name| Err(DomainError::NotFound(name.into())))
+                .on_get_summaries(|name| Err(DomainError::NotFound(name.into())))
         }
-    }
 
-    impl CollectionRepository for MockCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-            Ok(vec![])
-        }
-        fn get(&self, name: &str) -> DomainResult<Collection> {
-            if self.fail_get {
-                return Err(DomainError::NotFound(name.into()));
-            }
-            self.collections
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|c| c.name == name)
-                .cloned()
-                .ok_or_else(|| DomainError::NotFound(name.into()))
-        }
-        fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
-            self.get(name)
-        }
-        fn create(&self, _: &str) -> DomainResult<Collection> {
-            unimplemented!()
-        }
-        fn delete(&self, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn get_request(&self, _: &str, _: &str) -> DomainResult<Request> {
-            unimplemented!()
-        }
-        fn save_request(&self, _: &str, path: &str, _: &Request) -> DomainResult<String> {
-            Ok(path.to_string())
-        }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
-            Ok(CollectionSettings::default())
-        }
-        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_folder_chain_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn save_request_script(
-            &self,
-            _: &str,
-            _: &str,
-            _: rocket_collection::RequestScriptPhase,
-            _: String,
-        ) -> DomainResult<()> {
-            Ok(())
+        fn lenient_base() -> NullCollectionRepo {
+            NullCollectionRepo::strict().lenient_for(&[
+                CollectionMethod::List,
+                CollectionMethod::SaveRequest,
+                CollectionMethod::ReorderItems,
+                CollectionMethod::GetSettings,
+                CollectionMethod::SaveSettings,
+                CollectionMethod::GetFolderChainVariables,
+                CollectionMethod::GetFolderVariables,
+                CollectionMethod::SaveFolderVariables,
+                CollectionMethod::GetRequestVariables,
+                CollectionMethod::SaveRequestVariables,
+                CollectionMethod::SaveRequestScript,
+            ])
         }
     }
 
