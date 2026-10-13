@@ -44,11 +44,8 @@ impl LoadTestService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_doubles::NullCollectionRepo;
     use async_trait::async_trait;
-    use rocket_collection::{
-        Collection, CollectionRepository, CollectionSettings, CollectionSummary,
-        CollectionVariable, Request as CollectionRequest,
-    };
     use rocket_environment::{Environment, EnvironmentRepository, Variable};
     use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
     use rocket_http::{
@@ -199,104 +196,7 @@ mod tests {
             Ok(())
         }
     }
-
     // Empty collection repo. Variable resolution comes from the environment alone.
-    struct StubCollectionRepo;
-
-    impl StubCollectionRepo {
-        fn empty() -> Self {
-            Self
-        }
-    }
-
-    impl CollectionRepository for StubCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-            Ok(vec![])
-        }
-        fn get(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn get_summaries(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn create(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn delete(&self, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
-            Ok(path.to_string())
-        }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
-            Ok(CollectionSettings::default())
-        }
-        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_folder_chain_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn save_request_script(
-            &self,
-            _: &str,
-            _: &str,
-            _: rocket_collection::RequestScriptPhase,
-            _: String,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-    }
 
     #[tokio::test]
     async fn run_resolves_variables_before_firing_load_test() {
@@ -321,7 +221,7 @@ mod tests {
             Box::new(MockEnvRepo::with_env(env)),
             Arc::new(SharedExec(executor)),
             Box::new(MockHistoryRepo::new()),
-            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCollectionRepo::new()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -422,7 +322,7 @@ mod tests {
             Box::new(MockEnvRepo::with_env(Environment::new("none"))),
             Arc::new(Shared(Arc::clone(&flags))),
             Box::new(MockHistoryRepo::new()),
-            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCollectionRepo::new()),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),

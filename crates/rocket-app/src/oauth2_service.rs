@@ -630,10 +630,8 @@ impl OAuth2Service {
 pub(crate) mod tests {
     use super::*;
     use crate::client_certificates::describe_all;
-    use rocket_collection::{
-        Collection, CollectionRepository, CollectionSettings, CollectionSummary,
-        CollectionVariable, Request as CollectionRequest,
-    };
+    use crate::test_doubles::NullCollectionRepo;
+    use rocket_collection::{CollectionRepository, CollectionSettings, CollectionVariable};
     use rocket_environment::{Environment, EnvironmentRepository, Variable};
     use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::{DomainError, DomainResult};
@@ -674,107 +672,16 @@ pub(crate) mod tests {
         }
     }
 
-    struct StubCollectionRepo;
-
-    impl CollectionRepository for StubCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-            Ok(vec![])
-        }
-        fn get(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn get_summaries(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn create(&self, _: &str) -> DomainResult<Collection> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn delete(&self, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn rename(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request(&self, _: &str, _: &str) -> DomainResult<CollectionRequest> {
-            Err(DomainError::NotFound("stub".into()))
-        }
-        fn save_request(&self, _: &str, path: &str, _: &CollectionRequest) -> DomainResult<String> {
-            Ok(path.to_string())
-        }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_request(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
-            Ok(CollectionSettings::default())
-        }
-        fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_folder_chain_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn save_request_script(
-            &self,
-            _: &str,
-            _: &str,
-            _: rocket_collection::RequestScriptPhase,
-            _: String,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-    }
-
     /// A service over empty stub repos. Also used by the Flow Auth real-fetch
     /// tests (`flow_auth.rs`, `flow_execution_service.rs`).
     pub(crate) fn make_service() -> OAuth2Service {
-        OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(StubCollectionRepo))
+        OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(NullCollectionRepo::new()))
     }
 
     fn make_service_with_env(vars: &[(&str, &str)]) -> OAuth2Service {
         OAuth2Service::new(
             Box::new(StubEnvRepo::with_vars(vars)),
-            Box::new(StubCollectionRepo),
+            Box::new(NullCollectionRepo::new()),
         )
     }
 
@@ -1043,7 +950,7 @@ pub(crate) mod tests {
             Box::new(StubEnvRepo {
                 env: Some(env_with_certificates(certs)),
             }),
-            Box::new(StubCollectionRepo),
+            Box::new(NullCollectionRepo::new()),
         )
         .with_token_client_provider(provider.clone())
     }
@@ -1415,7 +1322,7 @@ pub(crate) mod tests {
     fn a_collection_environment_is_used_and_relative_paths_join_its_folder() {
         let provider = CapturingProvider::new();
         // The fixed repo has no certificates, so they can only come from the factory.
-        let svc = OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(StubCollectionRepo))
+        let svc = OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(NullCollectionRepo::new()))
             .with_token_client_provider(provider)
             .with_collection_env_repo_factory(Box::new(DirFactory {
                 env: env_with_certificates(vec![pkcs12("idp.example.com", "certs/client.p12")]),
