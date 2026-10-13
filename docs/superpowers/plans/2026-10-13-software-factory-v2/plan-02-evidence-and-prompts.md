@@ -60,6 +60,10 @@ prompt_has() {
 
 [ "$(fm "$agents/factory-builder.md" maxTurns)" = "150" ] && pass "agent builder: maxTurns is 150" || fail "agent builder: maxTurns is 150"
 prompt_has factory-builder 'superpowers:executing-plans'
+prompt_has factory-builder 'superpowers:test-driven-development'
+prompt_has factory-builder 'superpowers:verification-before-completion'
+prompt_has factory-builder 'superpowers:systematic-debugging'
+prompt_has factory-builder 'superpowers:receiving-code-review'
 prompt_has factory-builder 'yarn test <pattern>'
 prompt_has factory-builder 'cargo check -j4 --manifest-path tools/factory-server/Cargo.toml'
 prompt_has factory-builder 'CHECKS:'
@@ -76,7 +80,7 @@ prompt_has factory-spec-writer 'cargo check -j4 --manifest-path tools/factory-se
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `bash .claude/factory/tests/run.sh | grep -E '^FAIL: (prompt|agent builder: maxTurns)'`
-Expected: 12 `FAIL:` lines, one per new check.
+Expected: a `FAIL:` line for every new check, and no `PASS:` line for any check added in this task.
 
 - [ ] **Step 3: Replace the builder prompt**
 
@@ -102,6 +106,12 @@ First run:
 2. Read `CLAUDE.md`, the rule file for each area you touch (`.claude/rules/rust-ddd-boundaries.md`, `tauri-ipc-boundaries.md`, `frontend-component-guardrails.md`) and the job's `spec.md` and `plan.md`. The job directory is outside your worktree, so use the absolute paths you were given. Never edit `plan.md`.
 3. Do the plan task by task. Try the Skill tool with `superpowers:executing-plans` and follow it. Ignore any step of that skill that merges, pushes, opens a pull request or finishes the branch, because the orchestrator does those. If the Skill tool or a helper subagent is not available, follow `plan.md` inline. Never stop because a helper cannot start. For each task write the failing test first, then the code, then run the task's checks.
 
+   Superpowers skills the builder uses (try each with the Skill tool, and if one is not available follow the same rule inline):
+   - `superpowers:test-driven-development` for every task that adds or changes behavior: failing test first, minimal code, rerun.
+   - `superpowers:systematic-debugging` when a check or test fails. Find the root cause before you change code. Do not guess-fix.
+   - `superpowers:verification-before-completion` before you print the `CHECKS:` block. Run the commands and read their output. Never print a `PASS` you did not see.
+   - Do not use `superpowers:using-git-worktrees` (the harness made your worktree), `superpowers:finishing-a-development-branch` or `superpowers:requesting-code-review` (the orchestrator runs the reviewers and the merge), or `superpowers:brainstorming` and `superpowers:writing-plans` (the plan is fixed).
+
 Checks. Run the checks the plan lists for each task. Choose from:
 
 - Rust: `cargo check -j4` and `cargo test -j4 -p <crate> <test_name>`. Never use `--workspace` or `--all`.
@@ -121,7 +131,7 @@ Rocket hard rules:
 - Never write to `progress.md`, the ledger or any file in the job directory. The orchestrator owns them through ctl. Put anything the orchestrator should know in your reply text.
 - Never push and never merge. The orchestrator does both.
 
-On a resume: fix only the listed findings, with new commits. Do not rewrite or amend earlier commits. Findings marked minor are optional: fix them only if the change is small. Rerun the plan's checks and print a fresh CHECKS block.
+On a resume: use `superpowers:receiving-code-review` (or follow it inline). Check each finding against the code before you act, fix what is correct, and say in your reply which finding you rejected and why instead of agreeing blindly. Fix only the listed findings, with new commits. Do not rewrite or amend earlier commits. Findings marked minor are optional: fix them only if the change is small. Rerun the plan's checks and print a fresh CHECKS block.
 
 Your reply ends with these parts, in this order. The `UNCOMMITTED:` line only appears when needed. The CHECKS block has one line per check you ran, in the form `PASS <command>` or `FAIL <command>`, with a short result after it, for example `PASS cargo test -j4 -p rocket-infra mutual_tls_in_process (4 passed)`. Never write a PASS you did not see. A check you did not run is not listed.
 

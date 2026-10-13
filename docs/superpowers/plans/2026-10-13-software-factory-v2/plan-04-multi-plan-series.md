@@ -397,6 +397,10 @@ for word in 'plans/plan-01' 'Next plan:' 'plans/index.md' 'at most 3 tasks' 'Nex
   grep -qF -- "$word" "$sw" && pass "spec writer mentions: $word" || fail "spec writer mentions: $word"
 done
 if grep -q 'Later plans' "$sw"; then fail "spec writer no longer defers to Later plans"; else pass "spec writer no longer defers to Later plans"; fi
+for word in 'superpowers:brainstorming' 'superpowers:writing-plans' 'job directory'; do
+  grep -qF -- "$word" "$sw" && pass "spec writer skill rule: $word" || fail "spec writer skill rule: $word"
+done
+grep -qE '^tools:.*\bSkill\b' "$sw" && pass "spec writer has the Skill tool" || fail "spec writer has the Skill tool"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -637,6 +641,15 @@ and replace the old step 6 with:
 6. Never put work into a "Later plans" list that nothing reads. If the feature needs more than 6 plans, write the first 6 and list the remaining scope under "Not covered" in `spec.md`.
 ```
 
+Add `Skill` to the frontmatter `tools:` line, so it reads `tools: Read, Grep, Glob, Write, Skill`. Then add this step before the plan-count step, renumbering as needed:
+
+```markdown
+3a. Use the superpowers skills, with the Skill tool:
+   - `superpowers:brainstorming` to explore the request and settle the design. There is no human in this run, so do not ask questions. Pick the recommended option for every open choice, and write each choice and its reason under "Assumptions" in `spec.md`.
+   - `superpowers:writing-plans` to write each plan: header, global constraints, exact files, bite-sized test-first steps with real code, no placeholders, and the self-review. Where the skill says to save under `docs/superpowers/plans/`, save into the job directory instead, as told below. Ignore its execution handoff question, because the orchestrator runs the builder.
+   - If the Skill tool or a skill is not available, follow the same rules inline and note that in `spec.md` under "Assumptions".
+```
+
 Change the Write-scope sentence to: `Write only inside the job directory (spec.md, plan.md, plans/).` and the final message sentence to: `Finish with a short message naming the files you wrote, the plan count and the task titles of each plan.`
 
 - [ ] **Step 6: Run all tests**
@@ -747,7 +760,7 @@ Keep the rest of the prompt (hard rules, commit rule, resume rule, the four clos
 In `.claude/software-factory.md`:
 
 1. Replace the first bullet of "Job model" with: `- One job is one plan of at most 3 tasks. A feature that needs more is written as a series: one spec, several plans (\`plans/plan-NN-<slug>.md\` plus \`plans/index.md\` in the first job's folder). Each plan ends with a \`Next plan: <path|none>\` line. Plans run one after another, never in parallel. The board field \`series\` holds \`id\`, \`index\`, \`total\`, \`next_plan\`. \`ctl series-start\` validates the chain (1 to 3 tasks per plan, files exist, no cycle, no orphan plan) and \`ctl new-job --series <id> --plan-file <path>\` creates the job of a later plan, only after the previous plan is merged.`
-2. In the Agents table, change the `factory-spec-writer` duty cell to mention one spec plus up to 6 plans of at most 3 tasks, and the `factory-builder` duty cell to add "runs the plan with `superpowers:executing-plans` when the Skill tool works, otherwise inline (see Nesting rulings)".
+2. In the Agents table, change the `factory-spec-writer` duty cell to mention one spec plus up to 6 plans of at most 3 tasks and to add "uses `superpowers:brainstorming` (no questions, assumptions recorded) and `superpowers:writing-plans`", and the `factory-builder` duty cell to add "runs the plan with `superpowers:executing-plans` when the Skill tool works, otherwise inline (see Nesting rulings)".
 3. In the Commands section add: `- \`/factory series <job-id>\`: after a merge (or after a stop between a merge and the next plan), run the series step: create the job for the next plan and start its build. The merge step runs it automatically.`
 4. Add a short "## Series chaining" section after "Merge step": after the merge of plan k the orchestrator runs `ctl next-plan`, creates the next job with that plan file, runs its build stage, and stops on `needs-human`. The hand-off always goes through the orchestrator, also when nesting works.
 5. Add `Plan 04 (series) is in docs/superpowers/plans/2026-10-13-software-factory-v2/.` to the Status line.

@@ -44,6 +44,7 @@ This spec lists every confirmed gap, groups them into six plans of at most three
 | B7 | The builder wrote `Task 1-2: dispatched` and `Task N: complete` lines straight into the ledger, before review. The dashboard parser reads strict `Task N:` lines only. Prose lines landed in `progress.md`. | run |
 | B8 | Minor reviewer findings are never carried forward. | read |
 | B9 | The builder was told a worktree path that did not exist (`factory-NNN-<slug>`). The harness made `agent-<id>`. | run |
+| B11 | The agents do not use the superpowers skills. The spec writer cannot call any skill, and the builder follows a hand-rolled procedure and names only the git-commit skill. See decision 9. | read |
 | B10 | The builder used `sleep 60` waiting on helper agents, and ran clippy and cold builds after approval. 31 minutes of builder time for a 258-line test file. | run |
 
 ### C. Main moved, lifecycle and locking (plan 03)
@@ -95,7 +96,12 @@ This spec lists every confirmed gap, groups them into six plans of at most three
 6. **Main moved is recoverable.** The orchestrator merges `main` into the job branch in the job worktree through a new `ctl sync-base` flow, re-runs the checks and one scoped review of the sync. It does not rewrite history.
 7. **The merge commit message goes through the commit skill.** The orchestrator invokes `dev-workflow-skills:1-git-commit` for the merge commit text. If the skill is unavailable it uses a conventional `chore(factory): merge job NNN <slug>` message and notes it in the ledger.
 8. **Ledger writes go through ctl only.** Builders and reviewers never write the ledger.
-9. **Docs stay under `.claude/`.** The design doc `.claude/software-factory.md` is updated by each plan, and `CLAUDE.md` stays small.
+9. **Agents use the superpowers skills** (added after review). v1 only names `dev-workflow-skills:1-git-commit`, and the spec writer has no `Skill` tool at all.
+   - Spec writer (plan 04): `superpowers:brainstorming` without questions (it picks the recommended option and records each choice under "Assumptions" in `spec.md`) and `superpowers:writing-plans`, saving into the job directory. Its `tools:` line gains `Skill`.
+   - Builder (plans 02 and 04): `superpowers:executing-plans` for the plan, `superpowers:test-driven-development` per task, `superpowers:systematic-debugging` on a failing check, `superpowers:verification-before-completion` before the `CHECKS:` block, and `superpowers:receiving-code-review` on a resume. It does not use `using-git-worktrees`, `finishing-a-development-branch`, `requesting-code-review`, `brainstorming` or `writing-plans`, because the harness or the orchestrator owns those steps.
+   - Reviewers and approver stay read-only without `Skill`. Their checklists already encode the review rules, and a skill call would add turns for no new evidence.
+   - Every skill rule has an inline fallback, so a missing Skill tool never fails a job.
+10. **Docs stay under `.claude/`.** The design doc `.claude/software-factory.md` is updated by each plan, and `CLAUDE.md` stays small.
 
 ## Interfaces between plans
 
