@@ -421,14 +421,14 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-3xl p-0 gap-0'>
+      <DialogContent className='max-w-3xl p-0 gap-0 grid-cols-[minmax(0,1fr)]'>
         <DialogHeader className='px-5 py-4 border-b border-border/60'>
           <DialogTitle className='text-sm font-semibold'>Manage Environments</DialogTitle>
           <DialogDescription className='sr-only'>
             Create, edit, and manage environment variables for this collection.
           </DialogDescription>
         </DialogHeader>
-        <div className='flex min-h-[420px] max-h-[560px]'>
+        <div className='flex min-h-[420px] max-h-[560px] min-w-0'>
           <EnvironmentSidebar
             environments={environments}
             selectedName={selectedName}
@@ -446,7 +446,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
               <Tabs
                 value={activeDialogTab}
                 onValueChange={(v) => setActiveDialogTab(v as DialogTab)}
-                className='flex-1 flex flex-col min-h-0'
+                className='flex-1 flex flex-col min-h-0 min-w-0'
               >
                 <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
                   <TabsTrigger value='variables' className='text-xs'>
@@ -459,7 +459,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     Certificates
                   </TabsTrigger>
                 </TabsList>
-                <TabsContent value='variables' className='flex-1 flex flex-col min-h-0 m-0'>
+                <TabsContent value='variables' className='flex-1 flex flex-col min-h-0 min-w-0 m-0'>
                   <VariableTable
                     variables={selectedEnv.variables}
                     onChange={updateVariable}
@@ -471,7 +471,10 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     variableContext={variableContext}
                   />
                 </TabsContent>
-                <TabsContent value='external-secrets' className='flex-1 flex flex-col min-h-0 m-0'>
+                <TabsContent
+                  value='external-secrets'
+                  className='flex-1 flex flex-col min-h-0 min-w-0 m-0'
+                >
                   <ExternalSecretsTab
                     bindings={selectedEnv.externalSecrets}
                     onChange={updateExternalSecret}
@@ -482,7 +485,10 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     saveState={saveState}
                   />
                 </TabsContent>
-                <TabsContent value='certificates' className='flex-1 flex flex-col min-h-0 m-0'>
+                <TabsContent
+                  value='certificates'
+                  className='flex-1 flex flex-col min-h-0 min-w-0 m-0'
+                >
                   <CertificatesTab
                     certificates={selectedEnv.clientCertificates}
                     bindings={selectedEnv.externalSecrets}
