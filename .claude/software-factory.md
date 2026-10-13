@@ -117,3 +117,45 @@ Hooks append to a local JSONL file instead of POSTing, so a stopped server can n
 - The dashboard look has not been checked in a browser.
 - Older ledgers are inconsistent. The server parses only the strict `Task N:` lines and ignores the rest.
 - `/verify-rocket` conflicts with the harness guard. Fix separately.
+
+## claude headless probe (2026-10-13)
+
+Version: `2.1.296 (Claude Code)`. Probed by `tools/factory/crates/factory-agent/examples/probe.rs`: Haiku, `--max-budget-usd 0.05`, temp directory, nine calls, total cost about 0.015 USD.
+
+Raw findings (shortened):
+
+- `--help` lists every flag except `--max-turns`.
+- stream-json without `--verbose`: exit 1, `When using --print, --output-format=stream-json requires --verbose`.
+- stream-json with `--verbose`, prompt on stdin: exit 0, line types `system`, `assistant`, `result`. One session id. The `result` line carries `usage`, `session_id`, `total_cost_usd`, `stop_reason`.
+- `--max-turns 1`: exit 0, so the flag is accepted although it is hidden from `--help`. Enforcement was not tested, because the reply needed one turn. The driver counts turns itself either way.
+- `--append-system-prompt`: exit 0. That run had 2 assistant lines with 1 unique message id, so the same message id does repeat. Dedup by id is required.
+- `--permission-mode acceptEdits` with `--allowedTools Read,Bash`: exit 0, a tool turn ran (`user` lines appeared, 2 unique message ids).
+- `--agent probe` with `.claude/agents/probe.md`: exit 0, no error. The reply text was not inspected, so "loads the agent file" rests on the flag being accepted and the larger prompt.
+- `--resume <id>`: exit 0, and the session id in the stream stayed the same as the original.
+- Stderr carries a warning about `ANTHROPIC_API_KEY` taking precedence over the claude.ai login. It is harmless noise.
+- Not inspected by the probe: whether each assistant line carries `message.usage`. The parser falls back to the `result` usage when none is seen.
+
+| Question | Answer |
+|---|---|
+| `-p` works with the prompt on stdin | yes |
+| `--output-format stream-json` needs `--verbose` | yes |
+| `--agent <name>` loads `.claude/agents/<name>.md` | yes (accepted, reply text not checked) |
+| `--resume <id>` continues, and the session id stays the same | yes |
+| `--permission-mode acceptEdits` and `--allowedTools` accepted | yes |
+| `--model` accepted | yes |
+| `--max-turns` accepted | yes (hidden from `--help`, enforcement not tested) |
+| `--append-system-prompt` accepted | yes |
+| `system/init` line carries `session_id` | yes |
+| Final line has `type:"result"` with `result`, `is_error`, `subtype`, `session_id`, `usage` | yes |
+| Assistant lines carry `message.id` and `message.usage` | `message.id` yes, `message.usage` unknown |
+| One message id appears on several assistant lines | yes |
+
+Fallback rulings, and which apply:
+
+- `--agent` missing: does not apply. `Caps.agent = true`. If it ever disappears, `AgentSpec.agent_prompt` goes through `--append-system-prompt`, then into the stdin prompt.
+- `--max-turns` missing from help: applies only to the docs. It is accepted, so `Caps.max_turns = true`. The driver still counts unique assistant message ids and kills past the limit (`StopReason::TurnLimit`).
+- `--verbose` is required for stream-json: always passed.
+- `--resume` kept the session id here. The driver still takes the latest `session_id` seen, so the engine stores it after every run.
+- `--permission-mode` exists: headless builds are allowed.
+
+`Caps::default()` is `agent: true, max_turns: true, append_system_prompt: true`.
