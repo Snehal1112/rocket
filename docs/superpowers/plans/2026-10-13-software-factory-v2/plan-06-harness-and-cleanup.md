@@ -813,4 +813,4 @@ The reply must contain: the result of each Step 7 command, the screenshot findin
 - Names used across tasks: `check_fails`, `column-unknown`, `seed-demo.sh <dir> [port]`, `screenshots.sh [out-dir]` are defined where first used and used the same way later.
 - Task count is 3, every command uses `-j4` and none uses `--workspace`.
 
-Next plan: none (series complete)
+Next plan: docs/superpowers/plans/2026-10-13-software-factory-v2/plan-07-token-efficiency.md

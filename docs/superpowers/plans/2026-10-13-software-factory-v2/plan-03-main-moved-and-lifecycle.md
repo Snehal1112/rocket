@@ -739,7 +739,7 @@ check "git: the failed merge leaves no merge in progress" bash -c "! git -C '$pr
 check "git: the failed merge has no conflicted paths" test -z "$(gp diff --name-only --diff-filter=U)"
 
 for word in 'merge-preflight' 'MERGE_HEAD' 'verbatim' 'rework-note.md' 'dev-workflow-skills:1-git-commit' \
-  'fell back' 'cancel' 'cleanup' 'lease' 'merge failed' 'HEAD^2'; do
+  'no helper agents' 'cancel' 'cleanup' 'lease' 'merge failed' 'HEAD^2'; do
   grep -qF -- "$word" "$cmdfile" && pass "command mentions: $word" || fail "command mentions: $word"
 done
 ```
@@ -812,7 +812,7 @@ Replace the whole `## Merge step` section (including the one-line paragraph that
 
 ### Commit message
 
-Both the merge commit and the sync commit use this rule. Invoke the skill `dev-workflow-skills:1-git-commit` (Skill tool) with this request: "Draft the commit message for a no-ff merge of job <id> <slug>, commits <base7>..<head7>. Do not commit." Use its subject and body only if the subject matches `type(scope): text` with a type of feat, fix, chore, docs, test or refactor. If the skill is unavailable, fails or returns something else, use `chore(factory): merge job <id> <slug>` (for a sync: `chore(factory): sync job <id> <slug> with main`) and run `ctl ledger <id> "Ruling: merge message fell back to the conventional default (<reason>)"`.
+Both the merge commit and the sync commit use a fixed conventional message that the orchestrator writes itself, with no skill call and no helper agents. The reason is cost: `dev-workflow-skills:1-git-commit` spawns at least 2 helper agents per commit (about 80k tokens each in job 001), and a merge commit has no staged change to analyze. The message still follows the skill's rules (conventional type, subject of 50 characters or less, imperative, no period, body wrapped at 72). Use `chore(factory): merge job <id> <slug>` as the subject for a merge and `chore(factory): sync job <id> <slug> with main` for a sync. The body is one line: `Merge <base7>..<head7> after review.` for a merge, or `Bring the job branch up to date with main.` for a sync. Task commits made by the builder still go through the skill, as the builder prompt says.
 ````
 
 - [ ] **Step 5: Add cancel, cleanup, lease and the rework note rule to the command**

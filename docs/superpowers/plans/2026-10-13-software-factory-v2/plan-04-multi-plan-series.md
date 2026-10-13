@@ -628,7 +628,7 @@ In `.claude/agents/factory-spec-writer.md`, change the description line to `Turn
 
    `- [ ] Task 1: <title>`
 
-   Each task names the exact files, a test-first step, and the checks to run: `cargo check -j4`, `cargo test -j4 -p <crate> <test_name>`, `yarn tsc --noEmit`, `yarn check`. Never use `--workspace`.
+   Each task names the exact files, a test-first step, and the checks to run, chosen from: `cargo check -j4`, `cargo test -j4 -p <crate> <test_name>`, `yarn tsc --noEmit`, `yarn check`, `yarn test <pattern>`. A task that touches `tools/factory-server/` also lists `cargo check -j4 --manifest-path tools/factory-server/Cargo.toml`, because the commit gate does not cover that crate. Never use `--workspace`.
 
    Every plan file in a series ends with a `Next plan:` line as its last line. The path is relative to the main checkout: `.superpowers/sdd/<job folder name>/plans/plan-02-<slug>.md`. The job folder name is the last segment of the job directory you were given. The last plan ends with `Next plan: none`. No other line may start with `Next plan:`.
 

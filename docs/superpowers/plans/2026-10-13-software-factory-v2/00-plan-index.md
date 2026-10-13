@@ -12,6 +12,7 @@ Run the plans one at a time, in order. Each plan has at most 3 tasks, is execute
 | 04 | `plan-04-multi-plan-series.md` | Nesting probe, series in ctl and spec writer, orchestrator chaining, `executing-plans` in the builder | D1-D5 | not started |
 | 05 | `plan-05-dashboard-server-hook.md` | Hook redaction, stage history, attribution, log rotation, series chip, page fixes | E1-E9 | not started |
 | 06 | `plan-06-harness-and-cleanup.md` | `/verify-rocket` and `CLAUDE.md` fixes, v1 minors, browser check, doc sync | E10-E12 | not started |
+| 07 | `plan-07-token-efficiency.md` | Diff and context hygiene, commit ceremony and helper cap, token logging and budget | F1-F9 | not started |
 
 ## Known soft spots (checked in review, accepted)
 

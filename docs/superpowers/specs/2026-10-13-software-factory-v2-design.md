@@ -6,7 +6,7 @@ Status: draft for review, 2026-10-13. Builds on `.claude/software-factory.md` (v
 
 v1 works end to end. Job 001 (issue 21, mTLS test) went from spec to merge with no review rounds. But a seven-part investigation (real run evidence, orchestrator flow, agent prompts, server and hook, multi-plan support, harness conflicts) found gaps. The real run needed three manual interventions and scored about 6 out of 10: usable, not autonomous.
 
-This spec lists every confirmed gap, groups them into six plans of at most three tasks, and fixes the interfaces between plans so that each plan can be written and built on its own.
+This spec lists every confirmed gap, groups them into seven plans of at most three tasks, and fixes the interfaces between plans so that each plan can be written and built on its own.
 
 ## Evidence rules
 
@@ -86,6 +86,24 @@ This spec lists every confirmed gap, groups them into six plans of at most three
 | E11 | `/verify-rocket` runs `cargo check` without `-j4` and `cargo test --workspace --no-run`. The harness guard denies both. `CLAUDE.md` also shows a bare `cargo check`. | read |
 | E12 | Deferred v1 minors in the three plan ledgers (log-event URL query strings, tool_target tests, verdict lint, `new-job` argument validation, board.json mode, corrupt board traceback, smoke test polling, and others). | ledger |
 
+### F. Token efficiency (plan 07)
+
+Measured on job 001 (about 12.75M tokens, 11.76M of them cache reads; fresh input plus cache creation plus output is about 0.99M). The review is in the conversation that produced this spec. Evidence tags as above.
+
+| # | Gap | Source |
+|---|---|---|
+| F1 | The orchestrator session is 53.6 percent of the job (6.83M, largest context 155K re-read each turn). The orchestrator is the interactive session, so part of this is session baggage, not factory design. Part is design: whole diffs and full replies pass through its context. | run, read |
+| F2 | The commit skill spawns 2 or more helper agents per commit. Builder commits cost about 80k tokens per helper pair plus 5.4k tokens of skill text carried for about 20 turns, and the merge commit cost 9 helpers. | run |
+| F3 | The builder polled with `sleep 60` and `sleep 45` for helpers that finished in 10 seconds. Each sleep is a turn that re-reads about 100k tokens. (Plan 02 bans sleeping.) | run |
+| F4 | The same diff is read 5 times in a clean round (4 reviewers plus the approver). There is no size cap, and `Read` truncates at 2000 lines, so a long diff can be silently half-read. | read |
+| F5 | The security reviewer on Opus runs on every diff, including doc-only ones. | read |
+| F6 | Prompts tell the spec writer, builder and code reviewer to read `CLAUDE.md` and rule files that are already auto-loaded (about 5.5k tokens of fixed context per subagent). | read |
+| F7 | The v2 skills add about 9k tokens to the builder and 7k to the spec writer, and `executing-plans` dispatches its own whole-branch review (30 to 60k tokens) and uses ledger scripts that conflict with decision 8. | read, plan review |
+| F8 | No token or time budget, no usage logging (the hook drops usage), no cap on builder helper agents, no stall detector. Only the builder lacks `maxTurns`. | read |
+| F9 | Sandbox-refused Bash calls (cd out of the worktree, heredoc appends) each cost a turn of 40 to 100k cached tokens. | run |
+
+Already fine (do not re-open): model tiers (Opus only for spec writer, builder, security reviewer and approver, with the builder decided by the user), reviewers being read-only, one builder at a time, a cap of 2 review rounds and 3 tasks per plan, cargo output trimmed, no file read twice by the builder.
+
 ## Decisions (rulings for this spec)
 
 1. **One plan at a time, one builder at a time.** Series plans run sequentially. No parallel builders in one worktree.
@@ -94,7 +112,7 @@ This spec lists every confirmed gap, groups them into six plans of at most three
 4. **Checks are evidence.** The builder writes the exact commands and results into a `CHECKS:` block in its reply. The orchestrator saves it as `checks.md` through ctl. The approver escalates when it is missing or any line fails.
 5. **Test-only dev-dependencies do not escalate** unless `Cargo.lock` gains a crate or the dependency is not under `[dev-dependencies]`.
 6. **Main moved is recoverable.** The orchestrator merges `main` into the job branch in the job worktree through a new `ctl sync-base` flow, re-runs the checks and one scoped review of the sync. It does not rewrite history.
-7. **The merge commit message goes through the commit skill.** The orchestrator invokes `dev-workflow-skills:1-git-commit` for the merge commit text. If the skill is unavailable it uses a conventional `chore(factory): merge job NNN <slug>` message and notes it in the ledger.
+7. **The merge and sync commit messages are fixed conventional templates, written by the orchestrator with no skill call and no helper agents.** The commit skill spawns at least 2 helper agents per commit, and in job 001 the merge commit alone cost 9 helpers (about 700k tokens) for a diff that had nothing to analyze. Template: `chore(factory): merge job NNN <slug>`. Builder task commits still go through `dev-workflow-skills:1-git-commit` (decision 11 trims its ceremony).
 8. **Ledger writes go through ctl only.** Builders and reviewers never write the ledger.
 9. **Agents use the superpowers skills** (added after review). v1 only names `dev-workflow-skills:1-git-commit`, and the spec writer has no `Skill` tool at all.
    - Spec writer (plan 04): `superpowers:brainstorming` without questions (it picks the recommended option and records each choice under "Assumptions" in `spec.md`) and `superpowers:writing-plans`, saving into the job directory. Its `tools:` line gains `Skill`.
@@ -102,6 +120,8 @@ This spec lists every confirmed gap, groups them into six plans of at most three
    - Reviewers and approver stay read-only without `Skill`. Their checklists already encode the review rules, and a skill call would add turns for no new evidence.
    - Every skill rule has an inline fallback, so a missing Skill tool never fails a job.
 10. **Docs stay under `.claude/`.** The design doc `.claude/software-factory.md` is updated by each plan, and `CLAUDE.md` stays small.
+
+11. **Token efficiency is a requirement** (added after the token review). Rules: (a) the orchestrator writes diffs to files by redirect and never holds a diff in its context; (b) reviewers page large diffs with offset and limit, and a diff over the size cap goes to `needs-human` with "split the plan"; (c) the approver gets the diff stat plus the review reports and reads hunks only for paths its risk rules flag; (d) the security reviewer is skipped for doc-only diffs; (e) the builder commits with the skill but runs its git commands inline, with no helper agents and no amend steps, and may spawn at most 2 helper agents per task; (f) agents do not re-read files that are already auto-loaded; (g) every job has a soft token budget with a warning at 80 percent and a stop at 100 percent; (h) usage is logged per agent and shown on the dashboard.
 
 ## Interfaces between plans
 
@@ -115,10 +135,11 @@ Later plans rely on these names. Each plan produces its own and may use only the
 | 04 | Board field `series` with `id`, `index` (1-based), `total`, `next_plan`. `ctl new-job --series <id> --plan-file <path>`, `ctl series-start`, `ctl check-series`, `ctl next-plan <id>` (prints the next plan path or `none`). `/factory series <job-id>` recovers a crash between a merge and the next plan. Plan files end with a `Next plan:` line. |
 | 05 | Board field `stage_history` (list of stage and timestamp). Server state exposes `skipped_lines`, `series` and per-stage durations. |
 | 06 | No interfaces. |
+| 07 | `ctl classify-diff`, `ctl tokens <id>`, `ctl budget-check <id>`, config file `.claude/factory/config.json` (budget, diff cap). Hook adds a `tokens` field at `SubagentStop`. |
 
 ## Plan series
 
-Folder `docs/superpowers/plans/2026-10-13-software-factory-v2/`. Each plan has at most 3 tasks, ends with a `Next plan:` line, and is meant for a builder subagent running `superpowers:executing-plans`. The order is the build order.
+Folder `docs/superpowers/plans/2026-10-13-software-factory-v2/`. Seven plans. Each plan has at most 3 tasks, ends with a `Next plan:` line, and is meant for a builder subagent running `superpowers:executing-plans`. The order is the build order.
 
 | Plan | File | Delivers | Gaps |
 |---|---|---|---|
@@ -128,11 +149,12 @@ Folder `docs/superpowers/plans/2026-10-13-software-factory-v2/`. Each plan has a
 | 04 | `plan-04-multi-plan-series.md` | Nesting probe, spec writer emits N plans with next pointers, series in ctl, orchestrator chains plans, builder uses `executing-plans` | D1-D5 (server chip in plan 05) |
 | 05 | `plan-05-dashboard-server-hook.md` | Hook redaction and stop-event handling, stage history, attribution, log rotation, `skipped_lines`, series chip, page fixes | E1-E9 |
 | 06 | `plan-06-harness-and-cleanup.md` | `/verify-rocket` and `CLAUDE.md` fixes, v1 minors triage, browser check of the dashboard, doc sync, roadmap entry | E10-E12 |
+| 07 | `plan-07-token-efficiency.md` | Diff and context hygiene, commit ceremony and helper cap, token logging and budget | F1-F9 |
 
 ## Out of scope
 
 - Approve or rework buttons that act on the board (needs an authenticated POST and a path into the orchestrator session). Plan 05 adds copy-to-clipboard chips only.
-- Cost and token tracking.
+- Money cost in currency. Plan 07 logs token counts and a soft budget only.
 - Parallel jobs.
 - Pushing to a remote. The factory still never pushes.
 

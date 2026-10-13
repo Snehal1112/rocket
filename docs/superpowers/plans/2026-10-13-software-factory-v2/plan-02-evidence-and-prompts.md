@@ -71,6 +71,8 @@ prompt_has factory-builder 'PASS <command>'
 prompt_has factory-builder 'UNCOMMITTED:'
 prompt_has factory-builder 'Never write to `progress.md`'
 prompt_has factory-builder 'Never sleep'
+prompt_has factory-builder 'already in your context'
+prompt_has factory-builder 'final whole-branch code review'
 prompt_has factory-builder 'clippy'
 prompt_has factory-builder 'git rev-parse --show-toplevel'
 prompt_has factory-spec-writer 'yarn test <pattern>'
@@ -103,8 +105,8 @@ Your worktree is created by the harness, so its path is not predictable and neve
 First run:
 
 1. Create the job branch: `git switch -c <branch>`. Note the starting commit as BASE. If the branch already exists, do not create it. If it is checked out in an existing worktree you were told about, work in that worktree. If it exists but is not checked out anywhere, run `git switch <branch>`.
-2. Read `CLAUDE.md`, the rule file for each area you touch (`.claude/rules/rust-ddd-boundaries.md`, `tauri-ipc-boundaries.md`, `frontend-component-guardrails.md`) and the job's `spec.md` and `plan.md`. The job directory is outside your worktree, so use the absolute paths you were given. Never edit `plan.md`.
-3. Do the plan task by task. Try the Skill tool with `superpowers:executing-plans` and follow it. Ignore any step of that skill that merges, pushes, opens a pull request or finishes the branch, because the orchestrator does those. If the Skill tool or a helper subagent is not available, follow `plan.md` inline. Never stop because a helper cannot start. For each task write the failing test first, then the code, then run the task's checks.
+2. `CLAUDE.md` and the files in `.claude/rules/` are already in your context, so do not read them again. Read the `CLAUDE.md` of each crate you touch (`crates/<name>/CLAUDE.md`, these are not preloaded), and the job's `spec.md` and `plan.md`. The job directory is outside your worktree, so use the absolute paths you were given. Never edit `plan.md`.
+3. Do the plan task by task. Try the Skill tool with `superpowers:executing-plans` and follow it. Ignore any step of that skill that merges, pushes, opens a pull request or finishes the branch, because the orchestrator does those. Also skip its final whole-branch code review, its workspace and ledger scripts and its progress file, because the factory's reviewers and ctl do those, and a second review would cost tokens for no new evidence. Do not open the skills' bundled sub-documents unless a check fails and you need them. If the Skill tool or a helper subagent is not available, follow `plan.md` inline. Never stop because a helper cannot start. For each task write the failing test first, then the code, then run the task's checks.
 
    Superpowers skills the builder uses (try each with the Skill tool, and if one is not available follow the same rule inline):
    - `superpowers:test-driven-development` for every task that adds or changes behavior: failing test first, minimal code, rerun.
