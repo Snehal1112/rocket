@@ -10,6 +10,8 @@ import {
   configOptionsFromEvent,
   listAgentProposals,
   onAgentConfigOptions,
+  onAgentPermissionRequested,
+  onAgentPermissionResolved,
   onAgentProposalCreated,
   onAgentProposalResolved,
   onAgentSessionChunk,
@@ -130,6 +132,23 @@ export function useAssistantEventBridge(): void {
       ),
       onAgentProposalResolved(
         guard((e) => store().resolveProposal(e.session_id, e.proposal_id, e.status)),
+      ),
+      onAgentPermissionRequested(
+        guard(
+          alive((e) =>
+            store().addPermission(e.session_id, {
+              requestId: e.request_id,
+              callId: e.call_id,
+              title: e.title,
+              kind: e.kind,
+              summary: e.summary,
+              options: e.options,
+            }),
+          ),
+        ),
+      ),
+      onAgentPermissionResolved(
+        guard(alive((e) => store().resolvePermission(e.session_id, e.request_id, e.option_id))),
       ),
     ];
 

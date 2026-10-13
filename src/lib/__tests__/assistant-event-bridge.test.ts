@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => {
       onAgentUsage: listener('usage'),
       onAgentProposalCreated: listener('proposalCreated'),
       onAgentProposalResolved: listener('proposalResolved'),
+      onAgentPermissionRequested: listener('permissionRequested'),
+      onAgentPermissionResolved: listener('permissionResolved'),
       listAgentProposals: vi.fn(),
       endAgentSession: vi.fn(),
       endStaleAssistantSessions: vi.fn(),
@@ -98,6 +100,34 @@ describe('useAssistantEventBridge', () => {
 
     useAssistantStore.setState({ lastActivityAt: 1 });
     emit('chunk', { session_id: 's1', text: 'Hello' });
+    expect(store().lastActivityAt).toBeGreaterThan(1);
+  });
+
+  it('routes permission events into the store and counts them as activity', async () => {
+    activate();
+    await mountBridge();
+    useAssistantStore.setState({ lastActivityAt: 1 });
+    emit('permissionRequested', {
+      type: 'acpPermissionRequested',
+      session_id: 's1',
+      request_id: 'perm-1',
+      call_id: 'call-1',
+      title: 'propose_changes',
+      kind: 'other',
+      summary: '{}',
+      options: [{ id: 'proceed_once', name: 'Allow once', kind: 'allow_once' }],
+    });
+    expect(store().permissions[0]).toMatchObject({ requestId: 'perm-1', status: 'pending' });
+    expect(store().lastActivityAt).toBeGreaterThan(1);
+
+    useAssistantStore.setState({ lastActivityAt: 1 });
+    emit('permissionResolved', {
+      type: 'acpPermissionResolved',
+      session_id: 's1',
+      request_id: 'perm-1',
+      option_id: 'proceed_once',
+    });
+    expect(store().permissions[0]).toMatchObject({ status: 'answered', chosenName: 'Allow once' });
     expect(store().lastActivityAt).toBeGreaterThan(1);
   });
 

@@ -322,4 +322,95 @@ describe('assistant-store', () => {
     expect(store().messages).toEqual([]);
     expect(store().usage).toBeUndefined();
   });
+
+  describe('permissions', () => {
+    const request = (requestId: string) => ({
+      requestId,
+      callId: 'call-1',
+      title: 'propose_changes',
+      kind: 'other',
+      summary: '{}',
+      options: [
+        {
+          id: 'proceed_always_server',
+          name: 'Allow all server tools for this session',
+          kind: 'allow_always' as const,
+        },
+        { id: 'cancel', name: 'Deny', kind: 'reject_once' as const },
+      ],
+    });
+
+    it('adds a pending request for the current session only', () => {
+      activate('s1');
+      store().addPermission('other', request('perm-1'));
+      expect(store().permissions).toEqual([]);
+      store().addPermission('s1', request('perm-1'));
+      expect(store().permissions).toHaveLength(1);
+      expect(store().permissions[0]).toMatchObject({ requestId: 'perm-1', status: 'pending' });
+    });
+
+    it('keeps parallel requests apart and resolves each by id', () => {
+      activate();
+      store().addPermission('s1', request('perm-1'));
+      store().addPermission('s1', request('perm-2'));
+      store().resolvePermission('s1', 'perm-2', 'cancel');
+      const [first, second] = store().permissions;
+      expect(first.status).toBe('pending');
+      expect(second).toMatchObject({ status: 'answered', chosenName: 'Deny' });
+    });
+
+    it('shows a cancelled request as cancelled', () => {
+      activate();
+      store().addPermission('s1', request('perm-1'));
+      store().resolvePermission('s1', 'perm-1', null);
+      expect(store().permissions[0]).toMatchObject({ status: 'cancelled' });
+      expect(store().permissions[0].chosenName).toBeUndefined();
+    });
+
+    it('ignores a duplicate request id', () => {
+      activate();
+      store().addPermission('s1', request('perm-1'));
+      store().addPermission('s1', request('perm-1'));
+      expect(store().permissions).toHaveLength(1);
+    });
+
+    it('cancels pending requests when the turn finishes or fails', () => {
+      activate();
+      store().appendUserMessage('hi');
+      store().addPermission('s1', request('perm-1'));
+      store().completeMessage('s1');
+      expect(store().permissions[0].status).toBe('cancelled');
+
+      store().appendUserMessage('again');
+      store().addPermission('s1', request('perm-2'));
+      store().failMessage('s1', 'boom', false);
+      expect(store().permissions[1].status).toBe('cancelled');
+    });
+
+    it('does not reopen an answered request when the turn finishes', () => {
+      activate();
+      store().appendUserMessage('hi');
+      store().addPermission('s1', request('perm-1'));
+      store().resolvePermission('s1', 'perm-1', 'proceed_always_server');
+      store().completeMessage('s1');
+      expect(store().permissions[0].status).toBe('answered');
+    });
+
+    it('clears the requests when the session ends, fails fatally or is reset', () => {
+      activate();
+      store().addPermission('s1', request('perm-1'));
+      store().endSession();
+      expect(store().permissions).toEqual([]);
+
+      activate('s2');
+      store().addPermission('s2', request('perm-2'));
+      store().failMessage('s2', 'dead', true);
+      expect(store().permissions).toEqual([]);
+
+      activate('s3');
+      store().addPermission('s3', request('perm-3'));
+      store().reset();
+      expect(store().permissions).toEqual([]);
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  AgentPermissionOption,
   AgentProposal,
   AgentProposalStatus,
   AgentToolCallStatus,
@@ -79,6 +80,23 @@ export interface ToolActivity {
 
 export const MAX_REASONING_CHARS = 20_000;
 
+export interface AgentPermission {
+  requestId: string;
+  callId: string;
+  title: string;
+  kind: string;
+  summary: string;
+  options: AgentPermissionOption[];
+  status: 'pending' | 'answered' | 'cancelled';
+  /** The name of the option the user chose, once answered. */
+  chosenName?: string;
+}
+
+/** A request that is still waiting becomes cancelled; answered ones stay. */
+function cancelPending(permissions: AgentPermission[]): AgentPermission[] {
+  return permissions.map((p) => (p.status === 'pending' ? { ...p, status: 'cancelled' } : p));
+}
+
 export interface AssistantState {
   session?: AssistantSession;
   messages: AssistantMessage[];
@@ -86,6 +104,8 @@ export interface AssistantState {
   /** Where each proposal sits in the chat: the id of the last message when it
    *  arrived, or null for the start. Kept apart from the wire DTO. */
   proposalAnchors: Record<string, string | null>;
+  /** The agent's permission requests for this session, in arrival order. */
+  permissions: AgentPermission[];
   usage?: AssistantUsage;
   /** The agent's reasoning for the current turn. Cleared at the next user message. */
   reasoning: string;
@@ -127,6 +147,11 @@ export interface AssistantState {
   setUsage: (sessionId: string, usage: AssistantUsage) => void;
   upsertProposal: (proposal: AgentProposal) => void;
   resolveProposal: (sessionId: string, proposalId: string, status: ProposalStatus) => void;
+  addPermission: (
+    sessionId: string,
+    permission: Omit<AgentPermission, 'status' | 'chosenName'>,
+  ) => void;
+  resolvePermission: (sessionId: string, requestId: string, optionId: string | null) => void;
   /** Ends the session in the UI, discards its proposals and clears the focus. */
   endSession: (notice?: string) => void;
   /** Clears the session and conversation. Keeps the panel state and focus. */
@@ -173,6 +198,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   reasoning: '',
   proposals: [],
   proposalAnchors: {},
+  permissions: [],
   usage: undefined,
   focus: undefined,
   panelOpen: false,
@@ -191,6 +217,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       messages: [],
       proposals: [],
       proposalAnchors: {},
+      permissions: [],
       usage: undefined,
       conversationId: undefined,
       replay: replay ? { ...replay, sent: false } : undefined,
@@ -265,7 +292,10 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   completeMessage(sessionId) {
     set((state) =>
       isCurrent(state, sessionId) && selectTurnRunning(state)
-        ? { messages: settleStreaming(state.messages) }
+        ? {
+            messages: settleStreaming(state.messages),
+            permissions: cancelPending(state.permissions),
+          }
         : state,
     );
   },
@@ -279,6 +309,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         // A dead session cannot apply anything, so its proposals go too.
         proposals: fatal ? [] : state.proposals,
         proposalAnchors: fatal ? {} : state.proposalAnchors,
+        permissions: fatal ? [] : cancelPending(state.permissions),
         // A fatal failure returns to the Start view, so the context goes too.
         ...(fatal ? { focus: undefined } : {}),
       };
@@ -371,6 +402,28 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
     });
   },
 
+  addPermission(sessionId, permission) {
+    set((state) => {
+      if (!isCurrent(state, sessionId)) return state;
+      if (state.permissions.some((p) => p.requestId === permission.requestId)) return state;
+      return { permissions: [...state.permissions, { ...permission, status: 'pending' }] };
+    });
+  },
+
+  resolvePermission(sessionId, requestId, optionId) {
+    set((state) => {
+      if (!isCurrent(state, sessionId)) return state;
+      return {
+        permissions: state.permissions.map((p) => {
+          if (p.requestId !== requestId || p.status !== 'pending') return p;
+          if (optionId === null) return { ...p, status: 'cancelled' };
+          const chosen = p.options.find((o) => o.id === optionId);
+          return { ...p, status: 'answered', chosenName: chosen?.name ?? optionId };
+        }),
+      };
+    });
+  },
+
   endSession(notice) {
     const { session, messages } = get();
     if (!session || session.status === 'ended') return;
@@ -383,6 +436,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
         : settled,
       proposals: [],
       proposalAnchors: {},
+      permissions: [],
       // A restarted agent must not inherit the stale context. The start itself
       // keeps a focus set just before it, so only the end clears it.
       focus: undefined,
@@ -396,6 +450,7 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
       messages: [],
       proposals: [],
       proposalAnchors: {},
+      permissions: [],
       usage: undefined,
       reasoning: '',
       lastActivityAt: undefined,

@@ -2748,6 +2748,13 @@ export const sendAgentPrompt = (
 export const cancelAgentPrompt = (sessionId: string) =>
   invoke<void>('cancel_agent_prompt', { sessionId });
 
+/** Answers an agent's permission request with an offered option, or null to cancel it. */
+export const respondAgentPermission = (
+  sessionId: string,
+  requestId: string,
+  optionId: string | null,
+) => invoke<void>('respond_agent_permission', { sessionId, requestId, optionId });
+
 /** Changes one session option and resolves with the agent's new option list. */
 export const setAgentConfigOption = (sessionId: string, configId: string, value: string) =>
   invoke<ConfigOption[]>('set_agent_config_option', { sessionId, configId, value });
@@ -3165,6 +3172,46 @@ export interface AgentUsageEvent {
 
 export const onAgentUsage = (handler: (event: AgentUsageEvent) => void): Promise<UnlistenFn> =>
   listen<AgentUsageEvent>('agent-session-usage', (e) => handler(e.payload));
+
+export type AgentPermissionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+
+/** One answer the agent offers to a permission request. */
+export interface AgentPermissionOption {
+  id: string;
+  name: string;
+  kind: AgentPermissionKind;
+}
+
+export interface AgentPermissionRequestedEvent {
+  type: 'acpPermissionRequested';
+  session_id: string;
+  request_id: string;
+  call_id: string;
+  title: string;
+  /** The ACP tool kind in snake_case, for example `execute`, `edit` or `other`. */
+  kind: string;
+  /** Short, masked text about the call. */
+  summary: string;
+  options: AgentPermissionOption[];
+}
+
+export interface AgentPermissionResolvedEvent {
+  type: 'acpPermissionResolved';
+  session_id: string;
+  request_id: string;
+  /** The chosen option id, or null when the request was cancelled. */
+  option_id: string | null;
+}
+
+export const onAgentPermissionRequested = (
+  handler: (event: AgentPermissionRequestedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentPermissionRequestedEvent>('agent-permission-requested', (e) => handler(e.payload));
+
+export const onAgentPermissionResolved = (
+  handler: (event: AgentPermissionResolvedEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<AgentPermissionResolvedEvent>('agent-permission-resolved', (e) => handler(e.payload));
 
 /** Converts the event's options to the camelCase shape the commands return. */
 export function configOptionsFromEvent(options: AgentConfigOptionPayload[]): ConfigOption[] {
