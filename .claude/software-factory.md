@@ -1,161 +1,98 @@
 # Software Factory for Rocket
 
-Status: built (plans 01 to 03 in `docs/superpowers/plans/2026-10-13-software-factory/`). Run the dashboard with `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root "$(python3 .claude/factory/factory-ctl root)"` and use `/factory <feature>` in an interactive session. Pipeline from the user's chart (2026-10-12), fitted to Rocket's rules on 2026-10-13.
+Status: v3, a Rust driver. Design: `docs/superpowers/specs/2026-10-13-software-factory-v3-rust-driver-design.md`. Plans: `docs/superpowers/plans/2026-10-13-software-factory-v3/`. v1 (LLM orchestrator, Python helper) and the v2 plan series are superseded.
+
+The Rust driver does everything mechanical: state, checks, diffs, merge, sync, series, budget and events. The LLM is used only where judgment is needed: design and planning with the user, one builder per plan, one reviewer per diff.
 
 ## Pipeline
 
 ```
-/factory <feature> -> spec-writer (opus) -> builder (opus, own worktree) -> 4 reviewers in parallel -> approver (opus)
-                                                  ^                              |                       |-- APPROVE  -> merge to local main
-                                                  |   any CHANGES (max 2)        |                       |-- ESCALATE -> needs-human
-                                                  +------ orchestrator resumes ---+                           (/factory approve | /factory rework)
-```
+/factory <feature>  (interactive, with the user)
+  superpowers:brainstorming -> spec.md   (staging folder .superpowers/sdd/draft-<slug>/)
+  superpowers:writing-plans -> plan-01-<slug>.md ... (at most 3 tasks each, Next plan: line)
+  factory new <slug> '<feature>' --plans <staging folder>, then factory run <id> --series  (background Bash, session idle)
 
-Reviewers: security (opus), ux (sonnet), ui design (sonnet), code (sonnet). The orchestrator is the interactive session. It dispatches agents, owns the round counter, writes the ledger and the board, and does the merge. It never does builder or reviewer work.
+factory run (no LLM tokens):
+  worktree -> builder (claude -p, Sonnet) -> checks -> reviewer (claude -p, Sonnet)
+                 ^                              |  red: resume builder with trimmed output
+                 |  CHANGES, at most 2 rounds   |
+                 +------------------------------+
+  APPROVE + no risk + under size cap + budget ok -> merge reviewed sha to local main -> next plan
+  otherwise                                      -> needs-human (factory approve | factory rework | factory cancel)
+```
 
 ## Job model
 
-- One job is one plan of at most 3 tasks. A feature that needs more is split into several plans, run one after another, never in parallel.
-- Job id `NNN`, branch `factory/NNN-<slug>`, worktree `.claude/worktrees/factory-NNN-<slug>` (already gitignored, `settings.json` has `worktree.baseRef: head`).
-- The plan folder name starts with the creation date, `YYYY-MM-DD-NNN-<slug>`, as older SDD folders already do. The orchestrator sets it when the job is created and never renames it. The board card shows the date too.
-- Files per job, all under gitignored `.superpowers/`:
-  - `.superpowers/sdd/YYYY-MM-DD-NNN-<slug>/progress.md`: the normal SDD ledger. Lines use the strict form `Task N: dispatched | implementer done | complete`, plus `Ruling:` lines, so `resume-plan` keeps working after `/clear`.
-  - `.superpowers/sdd/YYYY-MM-DD-NNN-<slug>/spec.md`, `plan.md`, `task-N-brief.md`, `review-<base>..<head>.diff`, `review-<role>.md`, `approval.md`.
-  - `plan.md` lists every task as a checkbox line, `- [ ] Task N: <title>`. The spec writer creates them unchecked.
-  - `.superpowers/factory/board.json`: stage per job, written only by the orchestrator, read by the dashboard server.
+- One job is one feature. It holds a series of plans, each of at most 3 tasks, run one after another, never in parallel.
+- Job id `NNN`, branch `factory/NNN-<slug>`, worktree `.claude/worktrees/factory-NNN-<slug>`. The driver creates the worktree with `git2` and starts the builder inside it.
+- Job directory `.superpowers/sdd/YYYY-MM-DD-NNN-<slug>/` (gitignored): `spec.md`, `plan.md` (the current plan), `progress.md` (the ledger), `checks.md`, `review-*.diff`, review replies.
+- `.superpowers/factory/board.json`: stage per job. Stages `spec`, `build`, `review`, `approve`, `merged`, `needs-human`. Same names and fields as v1, so the dashboard keeps working.
+- `.superpowers/factory/events.jsonl`: events written by the driver, each with the job id.
+- Only the driver writes the ledger, board and events. Agents and the `/factory` command never do.
+- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `[[checks]]`).
 
-## Agents (`.claude/agents/factory-*.md`)
+## Modes
 
-| Agent | Model | Tools | Rocket duties |
-|---|---|---|---|
-| `factory-spec-writer` | opus | read-only plus write to the job dir | Writes spec and plan files of at most 3 tasks. Prepends the OpenCollection read line to every task touching yml, collection, environment, auth, variable resolution or the Rust crates named in `CLAUDE.md`. |
-| `factory-builder` | opus | full, `isolation: worktree`, includes `Skill` | One implementer per worktree. Follows the matching rule file (`rust-ddd-boundaries`, `tauri-ipc-boundaries`, `frontend-component-guardrails`). Runs its own checks (see below). Commits with `dev-workflow-skills:1-git-commit` and a pathspec. |
-| `factory-security-reviewer` | opus | read-only | Reads the diff file. Checks the collection trust gate, `{{process.env}}`, secrets and masking, auth, no git CLI, no unwrap calls in production paths, CSP, IPC surface. |
-| `factory-ux-reviewer` | sonnet | read-only | Runs only when the diff touches `src/`. Flows, empty and error states, keyboard use. |
-| `factory-ui-reviewer` | sonnet | read-only | Runs only when the diff touches `src/`. shadcn primitives only (no raw `button`, `input`, `dialog`, `select`, `form`), lucide icons only, `SingleLineEditor` vs Monaco, narrow Zustand selectors. |
-| `factory-code-reviewer` | sonnet | read-only | DDD placement, serde rules (camelCase on IPC DTOs only), error handling, persistence backward compatibility, tests present. |
-| `factory-approver` | opus | read-only | Reads all verdict files and the diff, applies the risk rules, writes `approval.md`. |
+- Default: builder and reviewer run on Sonnet.
+- `/factory <feature> --opus`: this job uses Opus (`factory new --model opus`). The model is never in the agent files, the driver passes it.
 
-Models are fixed in agent frontmatter, so no dispatch can inherit the expensive session model by accident. The user's usual default for builders is Sonnet, but they decided on 2026-10-13 that the builder uses Opus, as in the chart.
+## Agents (`.claude/agents/`)
 
-There is no separate verifier agent, matching the chart. The builder runs the checks before it reports.
+| Agent | Tools | Duties |
+|---|---|---|
+| `factory-builder` | all | Runs headless in the worktree. `superpowers:executing-plans` with an inline fallback (no final review, ledger scripts or progress file), TDD, systematic debugging on a failing check, verification before finishing. One commit per task through `dev-workflow-skills:1-git-commit`, git commands inline, no amend. At most 2 helper agents per task, none for commits. Reports a blocker as `BLOCKED:` in the result text. |
+| `factory-code-reviewer` | Read, Grep, Glob | One combined review: correctness, DDD placement, serde, error handling, persistence compatibility, tests, and the hard rules (shadcn, lucide, SingleLineEditor vs Monaco, Zustand selectors, no unwrap, no git CLI). At most 60 lines, findings tagged `[blocker]` or `[minor]`, last line `VERDICT: APPROVE` or `VERDICT: CHANGES`. |
 
-## Compatibility with Rocket's harness
+There are no spec-writer, security, ux, ui or approver agents. Risky diffs go to the human.
 
-| Rocket rule | How the factory complies |
+## Checks
+
+The driver runs the checks itself, chosen from the changed paths by `config.toml`: `cargo check -j4`, targeted `cargo test -j4 -p <crate>`, `yarn tsc --noEmit`, `yarn check`, `yarn test <pattern>`, and the factory crate checks. A failure resumes the builder with trimmed output. The reviewer never sees a red build. Results go to `checks.md`.
+
+## Budget
+
+Weighted tokens per job: input + cache creation + output + cache read / 10. Defaults: 3,000,000 per job, warn at 80 percent, kill the agent and park the job at 100 percent. Diff cap 4,000 changed lines, 2 fix rounds, a stall limit without events.
+
+## Merge rules
+
+Auto-merge needs all of: no check failure, the latest reviewer verdict is exactly `VERDICT: APPROVE`, the diff is not risky, the diff is within the size cap, the budget is not at stop. Otherwise a fix round (at most 2) or `needs-human`.
+
+Risky means the diff touches any `risk_paths` entry: the collection trust gate, auth, secrets or `{{process.env}}`, persistence formats, `src-tauri/`, `DomainEvent`, `Cargo.toml`, `Cargo.lock`, `package.json`, `tauri.conf.json`, CSP or the harness hooks. A missing or broken config makes every diff risky.
+
+The driver merges the reviewed sha only: it checks the branch tip equals the recorded head, preflights main (on `main`, clean, not mid-merge), makes a no-ff merge commit `chore(factory): merge job NNN <slug>`, and verifies the second parent. If main moved it merges main into the job branch inside the worktree, re-runs checks and the reviewer on the sync diff (at most 2 syncs). A conflict goes to `needs-human`. It never pushes and never rewrites history.
+
+## How to run
+
+Build once: `cargo build -j4 --manifest-path tools/factory/Cargo.toml -p factory-cli`. Binary: `tools/factory/target/debug/factory`.
+
+| Command | Does |
 |---|---|
-| `cargo` must pass `-j4`, no `--workspace` tests | Builder uses `cargo check -j4` and `cargo test -j4 -p <crate> <test>`. It must not use `/verify-rocket` as written, because that command runs `cargo check` without `-j4` and `cargo test --workspace --no-run`, and `bash-guard` would deny both. Fixing that command is a separate small task. |
-| Commit gate runs `yarn tsc --noEmit`, `yarn check`, `cargo check -j4` | Builder commits normally. `HARNESS_GATE=0` is never set by an agent. |
-| Commit gate checks only the root workspace | The factory server lives outside it, so tasks touching `tools/factory-server/` also run `cargo check -j4 --manifest-path tools/factory-server/Cargo.toml`. |
-| No `git add -A`, `--all` or `.`, no bare `git stash` | Pathspec commits only: `git add <paths> && git commit --only -m ... -- <paths>`. |
-| Commits go through `dev-workflow-skills:1-git-commit`, conventional format | Written into the builder prompt, and `Skill` is in its tool list. |
-| One implementer per worktree, reviewers read a diff file | The orchestrator writes `review-<base>..<head>.diff` and passes only that path to the reviewers. |
-| Re-reviews are scoped to fixes since the last review | After a CHANGES round, reviewers get a new diff of only the fix commits. |
-| A worktree gets its own cargo target dir | Never set `CARGO_TARGET_DIR` to the main `target/`. First build in a worktree is slow (V8 link, lld). |
-| Machine is easily overloaded | Only one builder runs at a time. Reviewers are read-only and never run cargo or yarn. |
-| `rust-safety-pretool` blocks the banned unwrap pattern in any Rust write | The server crate is written without it too. |
-| Peer sessions share the main checkout's git state | The merge step (below) refuses to run on a dirty or moved main. |
-| Model must be stated at dispatch | Fixed in each agent file. |
-| Hard rules: shadcn, lucide, Monaco, Zustand, no git CLI, serde | Encoded as reviewer checklists, and as builder instructions. |
+| `/factory <feature> [--opus]` | Brainstorm and plan with the user, then `factory new` and `factory run <id> --series` in the background. |
+| `/factory status` | `factory status`. |
+| `/factory approve <id>` | Release a `needs-human` job to the merge step. |
+| `/factory rework <id> <note>` | Send a `needs-human` job back to the builder with a one-line note. |
+| `/factory cancel <id>` | Stop and park a job. |
+| `/factory cleanup <id>` | Remove the worktree of a finished job. |
 
-## Merge step
+The command matches subcommands by exact shape, so feature text such as `next button for pagination` stays a feature. The session does not poll while the driver runs. The harness notifies it on exit.
 
-Done by the orchestrator, only after the approver says `APPROVE`:
-0. If the branch tip is already an ancestor of `main` (`git merge-base --is-ancestor factory/NNN-<slug> main`), the human merged it by hand. Skip the merge and go straight to step 3, so `/factory approve` can be run again after a manual merge. The orchestrator uses the head of `main` at that moment as the merge reference. `factory-ctl is-merged` checks the recorded job head commit, not the branch name, so it still works if the branch was deleted after a manual merge. A job with no commits is never reported as merged.
-1. Main checkout must be on `main`, clean (`git status` empty for tracked files), and `HEAD` must still be the job's base or an ancestor of the branch tip. Otherwise the job goes to `needs-human` with the reason "main busy". The human can then merge by hand and run `/factory approve` again.
-2. Merge with `git merge --no-ff factory/NNN-<slug>`. Never push, never rebase or rewrite history that is not the job's own.
-3. Record `Task N: complete (commits <range>, review clean)` in the ledger, set the board stage to Merged. The worktree is kept until the user removes it.
+`factory new` validates the plan chain, so the plans are drafted in a staging folder first. The driver cannot ask questions during a run, so plans must be complete. Harness rules the driver keeps: every cargo call has `-j4`, no `--workspace`, no `CARGO_TARGET_DIR`, pathspec commits only, one implementer per worktree.
 
-## Approver risk rules
+## Dashboard
 
-Escalate to a human when the diff touches any of:
-- the collection trust gate, auth, secrets, or `{{process.env}}` handling
-- persistence formats (`.yml` schemas, serde persistence structs)
-- the Tauri IPC surface or `DomainEvent` variants
-- `Cargo.toml`, `package.json`, `tauri.conf.json`, CSP, or the harness hooks
-- any reviewer `CHANGES` that was overridden instead of fixed
+`tools/factory-server/` (own workspace, not shipped) reads `board.json` and `events.jsonl` and serves a local page. It never writes them, and the factory works the same when it is not running. Run it with `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root <main checkout>`. Token display, stage history and series chips come with plan 07 of the v3 series.
 
-It also escalates when round 2 still has `CHANGES`, and when the main checkout was busy at merge time.
+## Token comparison
 
-## Verdict contract
+| | Raw tokens | Weighted tokens | Status |
+|---|---|---|---|
+| Job 001 (v1, Opus builder, orchestrator session, 6 agents) | 12.75M | 2.2M weighted | measured baseline |
+| New design, comparable job | not stated | about 0.9M weighted | estimate |
 
-Every reviewer is read-only and returns its report as its reply. The report is numbered findings with `file:line`, and its last line is exactly `VERDICT: APPROVE` or `VERDICT: CHANGES`. The orchestrator saves the reply as `review-<role>-r<round>.md` and parses only that line. A missing or malformed verdict counts as CHANGES. The approver ends with `DECISION: APPROVE` or `DECISION: ESCALATE`, and anything else counts as ESCALATE. Reviewers skipped because the diff has no `src/` changes are recorded as `SKIPPED`, which counts as pass.
-
-## Commands (`.claude/commands/factory.md`)
-
-- `/factory <feature>`: create a job, run the spec writer.
-- `/factory next`: advance the oldest job one stage.
-- `/factory approve <job-id>`: release a `needs-human` job to the merge step. When the merge succeeds, the orchestrator changes every `- [ ] Task N` line in that job's `plan.md` to `- [x] Task N`, and writes the matching `Task N: complete` ledger lines. If the merge is refused ("main busy"), nothing is checked and the job stays in `needs-human`. The same ticking happens when the approver auto-approves a low-risk job.
-- `/factory rework <job-id> <note>`: send a `needs-human` job back to the builder with the note. Does not reset the round counter.
-- `/factory status`: print the board in the terminal (same data as the dashboard).
-
-## Live tracking dashboard
-
-Yes, it tracks every job stage by stage. It lives outside the Rocket app so it is never shipped.
-
-```
-Claude Code hooks (async) -> .superpowers/factory/events.jsonl -> factory-server (Rust, localhost) -> dashboard.html
-                              ^ also watched: .superpowers/factory/board.json
-```
-
-Hooks append to a local JSONL file instead of POSTing, so a stopped server can never affect an agent. Plans: `docs/superpowers/plans/2026-10-13-software-factory/`.
-
-- Columns: `Spec`, `Build`, `Review` (sec, ux, ui, code), `Approve`, `Merged`, `Needs human`.
-- Card: job id and slug, feature text, branch, builder round 0 to 2, four review chips (pending, running, pass, changes, skipped), time in stage.
-- Live detail on a card: current tool and tool count, last message. Hook events are matched to a job by the `cwd` of the worktree.
-- Stage comes from `board.json`. Live detail comes from `SubagentStart`, `SubagentStop`, `PostToolUse`. No cost tracking in v1.
-- Location `tools/factory-server/`: own Cargo workspace, not in the root `members`, own target dir. Rust only, no banned unwrap pattern.
-- The log is never rotated. To rotate, move or truncate `.superpowers/factory/events.jsonl` (the server notices a replaced file).
-- Hooks are async and the server may be down. An agent must never be blocked by the dashboard.
+The baseline: the orchestrator was 53.6 percent of the raw tokens and commit helper agents about 7 percent. The estimate is arithmetic, not a measurement: it removes those two shares and the five extra reviewers (about 39 percent of the baseline remains, 2.2M x 0.39), and it ignores the interactive brainstorming and planning tokens, which the user spends in their own session. Plan 08 measures a real job, and that number replaces the estimate.
 
 ## Open items
 
-- Settled: `PostToolUse` inside a subagent carries `agent_id` and `agent_type` (probe done 2026-10-13).
-- Settled: no http hook is used, so there is nothing to check.
-- `Skill` inside a subagent is only reported by the subagent itself. The builder calls the git-commit skill; if it cannot, the orchestrator commits.
-- Confirm in the first real run that the Agent tool id matches the hook `agent_id`.
-- The dashboard look has not been checked in a browser.
-- Older ledgers are inconsistent. The server parses only the strict `Task N:` lines and ignores the rest.
-- `/verify-rocket` conflicts with the harness guard. Fix separately.
-
-## claude headless probe (2026-10-13)
-
-Version: `2.1.296 (Claude Code)`. Probed by `tools/factory/crates/factory-agent/examples/probe.rs`: Haiku, `--max-budget-usd 0.05`, temp directory, nine calls, total cost about 0.015 USD.
-
-Raw findings (shortened):
-
-- `--help` lists every flag except `--max-turns`.
-- stream-json without `--verbose`: exit 1, `When using --print, --output-format=stream-json requires --verbose`.
-- stream-json with `--verbose`, prompt on stdin: exit 0, line types `system`, `assistant`, `result`. One session id. The `result` line carries `usage`, `session_id`, `total_cost_usd`, `stop_reason`.
-- `--max-turns 1`: exit 0, so the flag is accepted although it is hidden from `--help`. Enforcement was not tested, because the reply needed one turn. The driver counts turns itself either way.
-- `--append-system-prompt`: exit 0. That run had 2 assistant lines with 1 unique message id, so the same message id does repeat. Dedup by id is required.
-- `--permission-mode acceptEdits` with `--allowedTools Read,Bash`: exit 0, a tool turn ran (`user` lines appeared, 2 unique message ids).
-- `--agent probe` with `.claude/agents/probe.md`: exit 0, no error. The reply text was not inspected, so "loads the agent file" rests on the flag being accepted and the larger prompt.
-- `--resume <id>`: exit 0, and the session id in the stream stayed the same as the original.
-- Stderr carries a warning about `ANTHROPIC_API_KEY` taking precedence over the claude.ai login. It is harmless noise.
-- Not inspected by the probe: whether each assistant line carries `message.usage`. The parser falls back to the `result` usage when none is seen.
-
-| Question | Answer |
-|---|---|
-| `-p` works with the prompt on stdin | yes |
-| `--output-format stream-json` needs `--verbose` | yes |
-| `--agent <name>` loads `.claude/agents/<name>.md` | yes (accepted, reply text not checked) |
-| `--resume <id>` continues, and the session id stays the same | yes |
-| `--permission-mode acceptEdits` and `--allowedTools` accepted | yes |
-| `--model` accepted | yes |
-| `--max-turns` accepted | yes (hidden from `--help`, enforcement not tested) |
-| `--append-system-prompt` accepted | yes |
-| `system/init` line carries `session_id` | yes |
-| Final line has `type:"result"` with `result`, `is_error`, `subtype`, `session_id`, `usage` | yes |
-| Assistant lines carry `message.id` and `message.usage` | `message.id` yes, `message.usage` unknown |
-| One message id appears on several assistant lines | yes |
-
-Fallback rulings, and which apply:
-
-- `--agent` missing: does not apply. `Caps.agent = true`. If it ever disappears, `AgentSpec.agent_prompt` goes through `--append-system-prompt`, then into the stdin prompt.
-- `--max-turns` missing from help: applies only to the docs. It is accepted, so `Caps.max_turns = true`. The driver still counts unique assistant message ids and kills past the limit (`StopReason::TurnLimit`).
-- `--verbose` is required for stream-json: always passed.
-- `--resume` kept the session id here. The driver still takes the latest `session_id` seen, so the engine stores it after every run.
-- `--permission-mode` exists: headless builds are allowed.
-
-`Caps::default()` is `agent: true, max_turns: true, append_system_prompt: true`.
+- The new driver has only run against a fake `claude` in tests. The first real run is the plan 08 dry run.
+- `/verify-rocket` still conflicts with the harness guard. Plan 08 fixes it.
+- The dashboard look was never checked in a browser. Plan 08 checks it.
