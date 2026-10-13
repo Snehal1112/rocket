@@ -4,6 +4,7 @@ import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { buildTimeline, groupToolRuns } from '@/lib/assistant/timeline';
 import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
+import { AssistantPermissionCard } from './AssistantPermissionCard';
 import { AssistantProposalCard } from './AssistantProposalCard';
 import { ReasoningBlock } from './ReasoningBlock';
 import { ToolRun } from './ToolRun';
@@ -59,6 +60,8 @@ export function AssistantChatView() {
   const messages = useAssistantStore((s) => s.messages);
   const proposals = useAssistantStore((s) => s.proposals);
   const anchors = useAssistantStore((s) => s.proposalAnchors);
+  const permissions = useAssistantStore((s) => s.permissions);
+  const sessionId = useAssistantStore((s) => s.session?.sessionId ?? '');
   const endRef = useRef<HTMLDivElement>(null);
   const pending = useMemo(() => proposals.filter((p) => p.status === 'pending'), [proposals]);
   const timeline = useMemo(
@@ -72,7 +75,7 @@ export function AssistantChatView() {
       ),
     [messages, proposals, anchors],
   );
-  const itemCount = timeline.length + pending.length;
+  const itemCount = timeline.length + pending.length + permissions.length;
 
   // Changes when an item is added or the last message grows while streaming.
   const lastMessage = messages[messages.length - 1];
@@ -130,6 +133,13 @@ export function AssistantChatView() {
         })}
         <ReasoningBlock />
         <WaitingNotice />
+        {permissions.length > 0 && (
+          <section aria-label='Permissions' className='flex flex-col gap-2'>
+            {permissions.map((p) => (
+              <AssistantPermissionCard key={p.requestId} sessionId={sessionId} permission={p} />
+            ))}
+          </section>
+        )}
         {pending.length > 0 && (
           <section aria-label='Proposals' className='flex flex-col gap-2'>
             {pending.map((p) => (

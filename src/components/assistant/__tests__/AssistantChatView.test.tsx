@@ -176,3 +176,39 @@ describe('AssistantChatView scrolling', () => {
     expect(scrollIntoView).toHaveBeenCalled();
   });
 });
+
+describe('AssistantChatView permissions', () => {
+  beforeEach(() => {
+    useAssistantStore.getState().reset();
+    startSession();
+  });
+
+  it('renders open and answered permission requests in their own section', () => {
+    useAssistantStore.setState({
+      permissions: [
+        {
+          requestId: 'perm-1',
+          callId: 'c1',
+          title: 'propose_changes',
+          kind: 'other',
+          summary: '{}',
+          status: 'pending',
+          options: [{ id: 'proceed_once', name: 'Allow once', kind: 'allow_once' }],
+        },
+        {
+          requestId: 'perm-2',
+          callId: 'c2',
+          title: 'read_file',
+          kind: 'read',
+          summary: '',
+          status: 'answered',
+          chosenName: 'Allow once',
+          options: [],
+        },
+      ],
+    });
+    render(<AssistantChatView />);
+    expect(screen.getByRole('region', { name: 'Permissions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeInTheDocument();
+  });
+});
