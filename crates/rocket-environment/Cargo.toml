@@ -17,3 +17,13 @@ zeroize = "1"
 [dev-dependencies]
 tokio.workspace = true
 serde_yaml.workspace = true
+criterion = { version = "0.8.2", default-features = false }
+
+# The lib has no benches. Without this, `cargo bench -- --quick` also runs the lib's libtest
+# harness, which rejects the criterion flags.
+[lib]
+bench = false
+
+[[bench]]
+name = "resolve"
+harness = false
