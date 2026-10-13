@@ -150,4 +150,28 @@ mod tests {
         );
         assert_eq!(channel_for(&DomainEvent::HistoryCleared), "history-changed");
     }
+
+    #[test]
+    fn permission_events_have_their_own_channels() {
+        assert_eq!(
+            channel_for(&DomainEvent::AcpPermissionRequested {
+                session_id: "s".into(),
+                request_id: "perm-1".into(),
+                call_id: "c".into(),
+                title: "t".into(),
+                kind: "other".into(),
+                summary: String::new(),
+                options: Vec::new(),
+            }),
+            "agent-permission-requested"
+        );
+        assert_eq!(
+            channel_for(&DomainEvent::AcpPermissionResolved {
+                session_id: "s".into(),
+                request_id: "perm-1".into(),
+                option_id: None,
+            }),
+            "agent-permission-resolved"
+        );
+    }
 }

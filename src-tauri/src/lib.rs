@@ -1085,6 +1085,7 @@ pub fn run() {
             commands::assistant_chips::mask_assistant_response,
             commands::acp_sessions::send_agent_prompt,
             commands::acp_sessions::cancel_agent_prompt,
+            commands::acp_sessions::respond_agent_permission,
             commands::acp_sessions::set_agent_config_option,
             commands::acp_sessions::end_agent_session,
             commands::agent_proposals::list_agent_proposals,

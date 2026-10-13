@@ -54,6 +54,20 @@ pub async fn cancel_agent_prompt(
     svc.cancel(&session_id).await
 }
 
+/// Answers an agent's permission request with one of the options it offered,
+/// or with `None` to cancel it. Fails when the request is unknown, already
+/// answered, or the option was not offered.
+#[tauri::command]
+pub async fn respond_agent_permission(
+    session_id: String,
+    request_id: String,
+    option_id: Option<String>,
+    svc: State<'_, AcpSessionService>,
+) -> Result<(), DomainError> {
+    svc.respond_permission(&session_id, &request_id, option_id.as_deref())
+        .await
+}
+
 /// Changes one session option, such as the model or the effort level, and
 /// returns the agent's new option list.
 #[tauri::command]
