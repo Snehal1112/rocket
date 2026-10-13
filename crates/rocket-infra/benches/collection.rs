@@ -1,64 +1,90 @@
-//! Smoke bench for the fixture generator. Plan 2 replaces this file with the real benches.
+//! Benchmarks for `FsCollectionRepo` reads and for `validate_path`.
 
 mod support;
 
 use std::hint::black_box;
 use std::path::Path;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use rocket_collection::{CollectionRepository, RequestKind};
-use support::{generate, generate_collections, Fixture, Size};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use rocket_collection::CollectionRepository;
+use support::{generate, generate_collections, Size};
 
-/// Counts request files per kind, asking the repository which kind each file holds.
-fn count_kinds(fixture: &Fixture) -> [usize; 4] {
-    let root = fixture.dir.path().join(&fixture.collection);
-    let mut counts = [0usize; 4];
-    let mut stack = vec![root.clone()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).expect("read dir") {
-            let path = entry.expect("dir entry").path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            if !name.starts_with("req-") {
-                continue;
-            }
-            let rel = path.strip_prefix(&root).expect("inside the collection");
-            let kind = fixture
-                .repo
-                .request_kind(&fixture.collection, &rel_to_string(rel))
-                .expect("request kind");
-            let slot = match kind {
-                RequestKind::Http => 0,
-                RequestKind::GraphQl => 1,
-                RequestKind::WebSocket => 2,
-                RequestKind::Grpc => 3,
-            };
-            counts[slot] += 1;
-        }
+fn bench_tree(c: &mut Criterion) {
+    let mut group = c.benchmark_group("collection_tree");
+    // The large size reads 5000 files per iteration, so keep the sample count at criterion's minimum.
+    group.sample_size(10);
+    for size in Size::ALL {
+        let fixture = generate(size);
+
+        // Guard the fixture: a bench that lost requests would report a fast, wrong number.
+        let summaries = fixture.repo.get_summaries(&fixture.collection).expect("summaries");
+        assert_eq!(summaries.request_count(), size.requests(), "get_summaries count");
+        let full = fixture.repo.get(&fixture.collection).expect("full tree");
+        assert_eq!(full.request_count(), size.requests(), "get count");
+
+        group.bench_with_input(
+            BenchmarkId::new("get_summaries", size.label()),
+            &fixture,
+            |b, fx| b.iter(|| black_box(fx.repo.get_summaries(&fx.collection).expect("summaries"))),
+        );
+        group.bench_with_input(BenchmarkId::new("get", size.label()), &fixture, |b, fx| {
+            b.iter(|| black_box(fx.repo.get(&fx.collection).expect("full tree")))
+        });
     }
-    counts
+    group.finish();
 }
 
-fn rel_to_string(rel: &Path) -> String {
-    rel.to_string_lossy().replace('\\', "/")
+fn bench_list(c: &mut Criterion) {
+    let mut group = c.benchmark_group("collection_list");
+    group.sample_size(10);
+    for count in [10usize, 50] {
+        let fixture = generate_collections(count, 5);
+        assert_eq!(fixture.repo.list().expect("list").len(), count, "list count");
+        group.bench_with_input(BenchmarkId::new("list", count), &fixture, |b, fx| {
+            b.iter(|| black_box(fx.repo.list().expect("list")))
+        });
+    }
+    group.finish();
 }
 
-fn fixture_smoke(c: &mut Criterion) {
-    let fixture = generate(Size::Small);
-    let counts = count_kinds(&fixture);
-    assert_eq!(counts.iter().sum::<usize>(), Size::Small.requests());
-    assert!(counts.iter().all(|n| *n > 0), "all four kinds must exist: {counts:?}");
+fn bench_get_request(c: &mut Criterion) {
+    let fixture = generate(Size::Medium);
+    let path = fixture.http_paths[fixture.http_paths.len() / 2].clone();
+    let probe = fixture.repo.get_request(&fixture.collection, &path).expect("get_request");
+    assert!(probe.name.starts_with("Request "), "unexpected request {:?}", probe.name);
 
-    let many = generate_collections(3, 4);
-    assert_eq!(many.repo.list().expect("list").len(), 3);
-
-    c.bench_function("fixture/get_summaries_small", |b| {
-        b.iter(|| black_box(fixture.repo.get_summaries(&fixture.collection)))
+    let mut group = c.benchmark_group("collection_request");
+    group.bench_function("get_request", |b| {
+        b.iter(|| black_box(fixture.repo.get_request(&fixture.collection, &path).expect("get_request")))
     });
+    group.finish();
 }
 
-criterion_group!(benches, fixture_smoke);
+fn bench_validate_path(c: &mut Criterion) {
+    let fixture = generate(Size::Small);
+    let base = fixture
+        .repo
+        .collection_root_path(&fixture.collection)
+        .expect("collection root");
+    let existing = fixture.http_paths[0].clone();
+    // (id, relative path, whether validation must succeed)
+    let cases = [
+        ("existing", existing.as_str(), true),
+        ("new_file", "folder-0/brand-new.yml", true),
+        ("new_nested", "no-such-a/no-such-b/brand-new.yml", true),
+        ("traversal", "../outside.yml", false),
+    ];
+
+    let mut group = c.benchmark_group("collection_paths");
+    for (id, rel, must_pass) in cases {
+        let probe = fixture.repo.validate_path_for_bench(&base, Path::new(rel));
+        assert_eq!(probe.is_ok(), must_pass, "case {id}: {probe:?}");
+        group.bench_function(BenchmarkId::new("validate_path", id), |b| {
+            b.iter(|| black_box(fixture.repo.validate_path_for_bench(&base, Path::new(rel))))
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_tree, bench_list, bench_get_request, bench_validate_path);
 criterion_main!(benches);

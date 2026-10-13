@@ -25,6 +25,10 @@ mod tests;
 
 // Kept in its own group so rustfmt does not sort it before `tests`.
 #[cfg(test)]
+mod bench_hook_tests;
+
+// Kept in its own group so rustfmt does not sort it before `tests`.
+#[cfg(test)]
 mod schema_shape_tests;
 
 pub struct FsCollectionRepo {
@@ -100,6 +104,16 @@ impl FsCollectionRepo {
         }
 
         Ok(canonical_full)
+    }
+
+    /// Benchmark hook. Calls `validate_path` and nothing else. Not part of the public API.
+    #[doc(hidden)]
+    pub fn validate_path_for_bench(
+        &self,
+        base: &Path,
+        path: &Path,
+    ) -> Result<PathBuf, DomainError> {
+        self.validate_path(base, path)
     }
 }
 
