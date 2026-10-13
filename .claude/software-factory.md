@@ -128,6 +128,31 @@ The v1 Python helper and the event hook are deleted. Their behaviors are pinned 
 
 ## Open items
 
-- The new driver has only run against a fake `claude` in tests. The first real run is the plan 08 dry run.
-- `/verify-rocket` still conflicts with the harness guard. Plan 08 fixes it.
-- The dashboard look was never checked in a browser. Plan 08 checks it.
+- Dry run of a two-plan feature through `/factory` has not been run yet. The user runs it, see "Dry run recipe" below.
+- Real-agent behavior (the actual `claude -p` flags, resume, permission mode) is only proven by that dry run. The scenario tests use `FakeRunner`-style scripted runners.
+- Light theme in a headless browser counts as checked only if the screenshot differs from the dark one. In the plan 08 run, headless Chrome stayed on the light scheme for all three shots, so the dark theme is still unchecked by eye. `factory-shots` names the shots dark and light by intent, not by result.
+- `factory-shots` needs a fresh `cargo build` of the server and `google-chrome`, `chromium` or `firefox` on the PATH. It sends a `Host` header, because the server refuses a request without one.
+- `smoke.sh` and `seed-demo.sh` were not reworked in plan 08.
+
+## Rulings
+
+- Ruling (2026-10-13): the dashboard was checked in a headless Google Chrome 155 with `factory-shots` at 1440 px and 400 px. Findings: five stage columns, summary strip, token bar with warn level, review chips with text, the needs-human card with its copy chips and the series chip all render. At 400 px the board scrolls inside its own container and the page does not scroll sideways. The dark and light themes were not told apart by the browser, so only the light look was seen. A human look in a real window is welcome but blocks nothing. The v1 minors are triaged in plan 08 of the v3 series: the Python ctl and hook minors were dropped with the deleted code.
+- Ruling (2026-10-13): `factory-core` writes `stage_history` (`{stage, at}`, unix seconds) and `budget_weighted` to the board, because the dashboard reads both. The engine writes one `usage.jsonl` line per agent run in the job folder for `factory tokens`.
+
+## Dry run recipe (run by the user)
+
+Run this once after plans 01 to 08 are merged. It uses real agents, so it costs real tokens. Pick a small feature that needs two plans, for example "Add a per-request timeout setting and show it in the request tab".
+
+1. In a fresh Claude Code session on `main` with a clean tree, start the dashboard: `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root "$(pwd)" --port 8765`, and open http://127.0.0.1:8765/.
+2. Run `/factory <the feature>`. In the session, brainstorm and approve a spec, then a two-plan series (plans end with `Next plan:` lines). Note the session usage line, this is the interactive cost.
+3. When the command starts `factory run` in the background, leave the session idle and watch the dashboard. Expect, in order:
+   - A job card in build with its worktree and the token counter rising.
+   - A `checks.md` in the job folder (`ls .superpowers/sdd/*/checks.md`) with every check passing, or the builder resumed once after a failure.
+   - One reviewer run, then the stage moves to approve and merged. A diff that touches a risk path (auth, `src-tauri/`, `Cargo.toml` and so on) parks in needs-human instead. Run `factory approve <id>` after reading the diff.
+   - The merge commit has the message `chore(factory): merge job NNN <slug>` and its second parent is the reviewed sha (`git log --merges -1 --format=%P`).
+   - Plan 2 starts by itself as the next job and merges the same way.
+4. Read the cost: `factory tokens 001` and `factory tokens 002`. Each prints runs, raw and weighted tokens per agent role, and the percent of the job 001 weighted baseline. Add the two jobs and the interactive session to compare with the 2.17M weighted of job 001. Check that the reviewer role shows one run per clean round, and that no commit helper agents appear.
+5. Pass criteria (the spec's success check): the interactive session was the only place the user spent tokens by hand and sat idle while the driver worked, the driver built in a worktree, ran the checks, ran one reviewer, merged the reviewed sha and started plan 2, the dashboard showed live stages and per-job tokens, no stage needed manual repair, `git status` is clean in the main checkout, and the logged weighted total is well below 2.17M (aim under 1.1M for a comparable small feature).
+6. Clean up with `factory cleanup <id>` for each job and confirm `git branch --list 'factory/*'` shows nothing left.
+
+If any step needs a manual action, note the step and add a follow-up row to `.claude/roadmap.md`.

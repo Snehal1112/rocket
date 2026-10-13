@@ -129,6 +129,7 @@ Shipped on local main (not pushed). Details in `.claude/collection-trust.md` and
 | R-57 | `yarn test` flakes on 5000 ms timeouts when the whole suite runs in parallel | open | a full run fails 14 to 16 different files each time; every file passes alone or with `--maxWorkers=2` | Raise `testTimeout` in the Vitest config or cap the workers. Small. |
 | R-58 | Agent edits of folder auth | open | deliberately out of scope of R-56 | Needs the user's security decision first. |
 | R-59 | Tidy-ups from the tool reviews: `cargo fmt` once over the workspace, `/kb-refresh rocketapi`, mark follow-up rows in `assistant-followups.md` | open | | Small, separate commits. |
+| R-60 | Software factory v3 series (plans 01 to 08): Rust driver with `git2`, headless agents, checks before review, risk gate, budget, series, dashboard tokens, harness and verification | built on branch `factory-v3/plan-08-verification`; dry run pending (user) | spec `docs/superpowers/specs/2026-10-13-software-factory-v3-rust-driver-design.md`, plans `docs/superpowers/plans/2026-10-13-software-factory-v3/`, design doc `.claude/software-factory.md` | Run the dry run recipe in `.claude/software-factory.md`, compare `factory tokens` with the job 001 baseline, then merge. Open follow-ups are in its open items list. |
 
 ## 9. Probably dropped
 
@@ -153,3 +154,4 @@ See [flow-roadmap.md](flow-roadmap.md). Seven batches B1 to B7, 56 items.
 - Ruling (2026-10-11): an agent config has one explicit credential source (RocketVault, Rocket environment variable or keychain). No fallback chain. A token file and the agent's own CLI login are refused to keep session isolation (R-18).
 - Ruling (2026-10-11): conversation history, folder tools and the earlier assistant UI work were rebased onto main and fast-forwarded into local main at `72e03596`. R-18 is still on its branch. Nothing was pushed.
 - Ruling (2026-10-11): R-18 (local agent credential sources) was fast-forwarded into local main on the user's request. Nothing was pushed.
+- Ruling (2026-10-13): the factory v3 series closes with plan 08. `/verify-rocket` checks changed crates with `-j4` and no workspace command, a harness test lints the cargo commands in its doc and in `CLAUDE.md` through the real guard, and an end-to-end scenario test with a scripted runner covers the merge, resume, fix round, risk, sync and budget paths.
