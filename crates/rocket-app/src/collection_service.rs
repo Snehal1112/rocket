@@ -592,171 +592,112 @@ impl CollectionService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_shared::error::{DomainError, DomainResult};
+    use rocket_shared::error::DomainError;
     use rocket_shared::events::{DomainEvent, EventPublisher, NullEventPublisher};
     use rocket_shared::types::HttpMethod;
     use std::sync::{Arc, Mutex};
 
-    struct MockCollectionRepo {
-        collections: Mutex<Vec<Collection>>,
-        requests: Mutex<Vec<(String, String, Request)>>,
-    }
+    use crate::test_doubles::{CollectionMethod, NullCollectionRepo};
 
-    impl MockCollectionRepo {
-        fn new() -> Self {
-            Self {
-                collections: Mutex::new(Vec::new()),
-                requests: Mutex::new(Vec::new()),
-            }
-        }
-    }
+    /// Builds a strict stateful repo. `rename_request` still panics.
+    fn mock_collection_repo() -> NullCollectionRepo {
+        let collections: Arc<Mutex<Vec<Collection>>> = Arc::new(Mutex::new(Vec::new()));
+        let requests: Arc<Mutex<Vec<(String, String, Request)>>> =
+            Arc::new(Mutex::new(Vec::new()));
 
-    impl CollectionRepository for MockCollectionRepo {
-        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
-            let cols = self.collections.lock().unwrap();
+        let cols = collections.clone();
+        let list = move || {
+            let cols = cols.lock().expect("lock");
             Ok(cols
                 .iter()
                 .map(|c| {
                     CollectionSummary::new(String::new(), &c.name, "", c.request_count(), None)
                 })
                 .collect())
-        }
-
-        fn get(&self, name: &str) -> DomainResult<Collection> {
-            let cols = self.collections.lock().unwrap();
+        };
+        let find = |cols: &Arc<Mutex<Vec<Collection>>>, name: &str| {
+            let cols = cols.lock().expect("lock");
             cols.iter()
                 .find(|c| c.name == name)
                 .cloned()
                 .ok_or_else(|| DomainError::NotFound(name.into()))
-        }
+        };
+        let (cols_get, cols_sum) = (collections.clone(), collections.clone());
+        let cols_create = collections.clone();
+        let cols_delete = collections.clone();
+        let cols_rename = collections;
+        let (reqs_get, reqs_save, reqs_delete) = (requests.clone(), requests.clone(), requests);
 
-        fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
-            self.get(name)
-        }
-
-        fn create(&self, name: &str) -> DomainResult<Collection> {
-            let mut cols = self.collections.lock().unwrap();
-            if cols.iter().any(|c| c.name == name) {
-                return Err(DomainError::AlreadyExists(name.into()));
-            }
-            let col = Collection::new(name);
-            cols.push(col.clone());
-            Ok(col)
-        }
-
-        fn delete(&self, name: &str) -> DomainResult<()> {
-            let mut cols = self.collections.lock().unwrap();
-            cols.retain(|c| c.name != name);
-            Ok(())
-        }
-
-        fn rename(&self, old: &str, new: &str) -> DomainResult<()> {
-            let mut cols = self.collections.lock().unwrap();
-            if let Some(c) = cols.iter_mut().find(|c| c.name == old) {
-                c.name = new.to_string();
+        NullCollectionRepo::strict()
+            .lenient_for(&[
+                CollectionMethod::CreateFolder,
+                CollectionMethod::DeleteFolder,
+                CollectionMethod::MoveItem,
+                CollectionMethod::ReorderItems,
+                CollectionMethod::GetSettings,
+                CollectionMethod::SaveSettings,
+                CollectionMethod::GetFolderChainVariables,
+                CollectionMethod::GetFolderVariables,
+                CollectionMethod::SaveFolderVariables,
+                CollectionMethod::GetRequestVariables,
+                CollectionMethod::SaveRequestVariables,
+                CollectionMethod::SaveRequestScript,
+            ])
+            .on_list(list)
+            .on_get(move |name| find(&cols_get, name))
+            .on_get_summaries(move |name| find(&cols_sum, name))
+            .on_create(move |name| {
+                let mut cols = cols_create.lock().expect("lock");
+                if cols.iter().any(|c| c.name == name) {
+                    return Err(DomainError::AlreadyExists(name.into()));
+                }
+                let col = Collection::new(name);
+                cols.push(col.clone());
+                Ok(col)
+            })
+            .on_delete(move |name| {
+                let mut cols = cols_delete.lock().expect("lock");
+                cols.retain(|c| c.name != name);
                 Ok(())
-            } else {
-                Err(DomainError::NotFound(old.into()))
-            }
-        }
-
-        fn get_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
-            self.requests
-                .lock()
-                .expect("lock")
-                .iter()
-                .find(|(c, p, _)| c == collection && p == path)
-                .map(|(_, _, r)| r.clone())
-                .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
-        }
-        fn save_request(
-            &self,
-            collection: &str,
-            path: &str,
-            request: &Request,
-        ) -> DomainResult<String> {
-            let mut requests = self.requests.lock().expect("lock");
-            requests.retain(|(c, p, _)| !(c == collection && p == path));
-            requests.push((collection.to_string(), path.to_string(), request.clone()));
-            Ok(path.to_string())
-        }
-        fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
-        }
-        fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
-            let mut requests = self.requests.lock().expect("lock");
-            let len_before = requests.len();
-            requests.retain(|(c, p, _)| !(c == collection && p == path));
-            if requests.len() == len_before {
-                return Err(DomainError::NotFound(format!("{collection}/{path}")));
-            }
-            Ok(())
-        }
-        fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
-            Ok(())
-        }
-        fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_settings(&self, _: &str) -> DomainResult<rocket_collection::CollectionSettings> {
-            Ok(rocket_collection::CollectionSettings::default())
-        }
-        fn save_settings(
-            &self,
-            _: &str,
-            _: &rocket_collection::CollectionSettings,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_folder_chain_variables(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_folder_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn get_request_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
-            Ok(vec![])
-        }
-        fn save_request_variables(
-            &self,
-            _: &str,
-            _: &str,
-            _: Vec<CollectionVariable>,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
-        fn save_request_script(
-            &self,
-            _: &str,
-            _: &str,
-            _: rocket_collection::RequestScriptPhase,
-            _: String,
-        ) -> DomainResult<()> {
-            Ok(())
-        }
+            })
+            .on_rename(move |old, new| {
+                let mut cols = cols_rename.lock().expect("lock");
+                if let Some(c) = cols.iter_mut().find(|c| c.name == old) {
+                    c.name = new.to_string();
+                    Ok(())
+                } else {
+                    Err(DomainError::NotFound(old.into()))
+                }
+            })
+            .on_get_request(move |collection, path| {
+                reqs_get
+                    .lock()
+                    .expect("lock")
+                    .iter()
+                    .find(|(c, p, _)| c == collection && p == path)
+                    .map(|(_, _, r)| r.clone())
+                    .ok_or_else(|| DomainError::NotFound(format!("{collection}/{path}")))
+            })
+            .on_save_request(move |collection, path, request| {
+                let mut requests = reqs_save.lock().expect("lock");
+                requests.retain(|(c, p, _)| !(c == collection && p == path));
+                requests.push((collection.to_string(), path.to_string(), request.clone()));
+                Ok(path.to_string())
+            })
+            .on_delete_request(move |collection, path| {
+                let mut requests = reqs_delete.lock().expect("lock");
+                let len_before = requests.len();
+                requests.retain(|(c, p, _)| !(c == collection && p == path));
+                if requests.len() == len_before {
+                    return Err(DomainError::NotFound(format!("{collection}/{path}")));
+                }
+                Ok(())
+            })
     }
 
     fn make_service() -> CollectionService {
         CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(NullEventPublisher),
         )
     }
@@ -861,7 +802,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.create("my-api").expect("create");
@@ -881,7 +822,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.create("temp").expect("create");
@@ -902,7 +843,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.create("old").expect("create");
@@ -923,7 +864,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         let request = Request::new(
@@ -949,7 +890,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         let request = Request::new(
@@ -977,7 +918,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         let result = svc.delete_request("my-api", "ghost.yml");
@@ -994,7 +935,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         let request = Request::new(
@@ -1020,7 +961,7 @@ mod tests {
     #[test]
     fn get_request_returns_the_saved_request() {
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(NullEventPublisher),
         );
         let request = Request::new(
@@ -1039,7 +980,7 @@ mod tests {
     #[test]
     fn get_request_errors_for_missing_request() {
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(NullEventPublisher),
         );
         assert!(svc.get_request("my-api", "ghost.yml").is_err());
@@ -1051,7 +992,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         let request = Request::new(
@@ -1080,7 +1021,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.move_item("my-api", "users.yml", "other-api", "users.yml")
@@ -1104,7 +1045,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.create_folder("my-api", "auth").expect("create_folder");
@@ -1124,7 +1065,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.delete_folder("my-api", "auth").expect("delete_folder");
@@ -1144,7 +1085,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.reorder_items(
@@ -1169,7 +1110,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.save_settings("my-api", &rocket_collection::CollectionSettings::default())
@@ -1191,7 +1132,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.save_folder_variables("my-api", "auth", vec![])
@@ -1212,7 +1153,7 @@ mod tests {
             events: Mutex::new(vec![]),
         });
         let svc = CollectionService::new(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
         );
         svc.save_request_variables("my-api", "users.yml", vec![])
@@ -1249,7 +1190,7 @@ mod tests {
             captured: Mutex::new(vec![]),
         });
         let svc = CollectionService::new_with_audit(
-            Box::new(MockCollectionRepo::new()),
+            Box::new(mock_collection_repo()),
             Box::new(NullEventPublisher),
             publisher.clone(),
         );
