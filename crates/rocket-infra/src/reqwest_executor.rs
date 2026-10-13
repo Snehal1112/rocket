@@ -1095,9 +1095,22 @@ async fn apply_auth(
                     .await?;
                     builder = builder.bearer_auth(&token);
                 }
-                _ => {
-                    // The interactive flows (authorization_code, implicit) require user
-                    // interaction and are not handled here.
+                // Interactive grants need a browser sign-in, which cannot run inside a send.
+                // They fail before any network call instead of sending without auth. The
+                // match has no wildcard arm, so a new flow fails to compile until handled.
+                rocket_shared::oauth2::OAuth2Flow::AuthorizationCode { .. } => {
+                    return Err(DomainError::InvalidInput(
+                        "OAuth2 authorization code needs an interactive sign-in. Get a token in \
+                         the Auth tab of the request or folder first."
+                            .into(),
+                    ));
+                }
+                rocket_shared::oauth2::OAuth2Flow::Implicit { .. } => {
+                    return Err(DomainError::InvalidInput(
+                        "OAuth2 implicit grant is not supported. Use authorization code with \
+                         PKCE, and get a token in the Auth tab of the request or folder first."
+                            .into(),
+                    ));
                 }
             }
         }
@@ -1953,6 +1966,84 @@ mod oauth2_tests {
         let message = err.to_string();
         assert!(message.contains("username and password"), "{message}");
         assert!(!message.contains("ropc-secret"), "{message}");
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert!(requests.is_empty(), "no request may be sent");
+    }
+
+    /// Mounts a token and an API route that would answer, so a skipped check would show up as
+    /// a received request.
+    async fn answering_server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "access_token": "never" })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn authorization_code_without_a_token_fails_before_any_request() {
+        let server = answering_server().await;
+        let auth = Auth::OAuth2(Box::new(OAuth2Flow::AuthorizationCode {
+            authorization_url: format!("{}/authorize", server.uri()),
+            access_token_url: format!("{}/token", server.uri()),
+            refresh_token_url: None,
+            callback_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "code-client-id".into(),
+                client_secret: "code-client-secret".into(),
+                placement: None,
+            },
+            scope: None,
+            state: None,
+            pkce: None,
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        }));
+        let err = ReqwestExecutor::new()
+            .execute(&api_request(&server, auth))
+            .await
+            .expect_err("authorization code fails the send");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains("authorization code"), "{message}");
+        assert!(!message.contains("code-client-id"), "{message}");
+        assert!(!message.contains("code-client-secret"), "{message}");
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert!(requests.is_empty(), "no request may be sent");
+    }
+
+    #[tokio::test]
+    async fn implicit_without_a_token_fails_before_any_request() {
+        let server = answering_server().await;
+        let auth = Auth::OAuth2(Box::new(OAuth2Flow::Implicit {
+            authorization_url: format!("{}/authorize", server.uri()),
+            callback_url: None,
+            client_id: "implicit-client-id".into(),
+            scope: None,
+            state: None,
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        }));
+        let err = ReqwestExecutor::new()
+            .execute(&api_request(&server, auth))
+            .await
+            .expect_err("implicit fails the send");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains("implicit"), "{message}");
+        assert!(!message.contains("implicit-client-id"), "{message}");
         let requests = server.received_requests().await.unwrap_or_default();
         assert!(requests.is_empty(), "no request may be sent");
     }
