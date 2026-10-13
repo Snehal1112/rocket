@@ -465,12 +465,18 @@ impl ConfigurableCollectionRepo {
 
     /// Makes `get_request_variables` fail with `DomainError::Io`.
     pub fn fail_request_variables(&self) {
-        *self.fail_request_vars.lock().expect("lock fail_request_vars") = true;
+        *self
+            .fail_request_vars
+            .lock()
+            .expect("lock fail_request_vars") = true;
     }
 
     /// Makes `get_request` fail with `DomainError::Internal` instead of `NotFound`.
     pub fn fail_request_reads(&self) {
-        *self.fail_request_read.lock().expect("lock fail_request_read") = true;
+        *self
+            .fail_request_read
+            .lock()
+            .expect("lock fail_request_read") = true;
     }
 
     pub fn with_folder_settings(
@@ -504,7 +510,13 @@ impl CollectionRepository for ConfigurableCollectionRepo {
     fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
         let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         names.extend(self.settings.lock().expect("lock settings").keys().cloned());
-        names.extend(self.summaries.lock().expect("lock summaries").keys().cloned());
+        names.extend(
+            self.summaries
+                .lock()
+                .expect("lock summaries")
+                .keys()
+                .cloned(),
+        );
         let requests = self.requests.lock().expect("lock requests");
         names.extend(requests.keys().map(|(collection, _)| collection.clone()));
         Ok(names
@@ -539,7 +551,11 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(())
     }
     fn get_request(&self, collection: &str, path: &str) -> DomainResult<CollectionRequest> {
-        if *self.fail_request_read.lock().expect("lock fail_request_read") {
+        if *self
+            .fail_request_read
+            .lock()
+            .expect("lock fail_request_read")
+        {
             return Err(DomainError::Internal("request read failed".into()));
         }
         self.requests
@@ -620,7 +636,11 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         {
             return Err(DomainError::NotFound("request variables".into()));
         }
-        if *self.fail_request_vars.lock().expect("lock fail_request_vars") {
+        if *self
+            .fail_request_vars
+            .lock()
+            .expect("lock fail_request_vars")
+        {
             return Err(DomainError::Io("request variables read failed".into()));
         }
         Ok(self.request_vars.lock().expect("lock request_vars").clone())
@@ -683,6 +703,353 @@ impl CollectionRepository for ConfigurableCollectionRepo {
                 phase,
                 body,
             ));
+        Ok(())
+    }
+}
+
+/// Required `CollectionRepository` methods, used to opt single methods out of strict mode.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CollectionMethod {
+    List,
+    Get,
+    GetSummaries,
+    Create,
+    Delete,
+    Rename,
+    GetRequest,
+    SaveRequest,
+    RenameRequest,
+    DeleteRequest,
+    CreateFolder,
+    DeleteFolder,
+    MoveItem,
+    ReorderItems,
+    GetSettings,
+    SaveSettings,
+    GetFolderChainVariables,
+    GetFolderVariables,
+    SaveFolderVariables,
+    GetRequestVariables,
+    SaveRequestVariables,
+    SaveRequestScript,
+}
+
+type Hook0<R> = Option<Box<dyn Fn() -> DomainResult<R> + Send + Sync>>;
+type Hook1<R> = Option<Box<dyn Fn(&str) -> DomainResult<R> + Send + Sync>>;
+type Hook2<R> = Option<Box<dyn Fn(&str, &str) -> DomainResult<R> + Send + Sync>>;
+type SaveRequestHook =
+    Option<Box<dyn Fn(&str, &str, &CollectionRequest) -> DomainResult<String> + Send + Sync>>;
+
+/// A `CollectionRepository` that does nothing, with optional per-method hooks.
+///
+/// `new()` is lenient: unhooked methods return a harmless default. `strict()` keeps
+/// the tripwire of tests that used `unimplemented!()` stubs: an unhooked method
+/// panics, unless `lenient_for` opens it. A hook always wins over strict mode.
+pub struct NullCollectionRepo {
+    strict: bool,
+    lenient: std::collections::HashSet<CollectionMethod>,
+    list: Hook0<Vec<CollectionSummary>>,
+    get: Hook1<Collection>,
+    get_summaries: Hook1<Collection>,
+    create: Hook1<Collection>,
+    delete: Hook1<()>,
+    rename: Hook2<()>,
+    get_request: Hook2<CollectionRequest>,
+    save_request: SaveRequestHook,
+    delete_request: Hook2<()>,
+    get_settings: Hook1<CollectionSettings>,
+    get_folder_chain_variables: Hook2<Vec<CollectionVariable>>,
+    get_request_variables: Hook2<Vec<CollectionVariable>>,
+}
+
+impl Default for NullCollectionRepo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Some hooks are only used by later migrations of other test modules.
+#[allow(dead_code)]
+impl NullCollectionRepo {
+    /// Lenient repo: unhooked methods return their harmless default.
+    pub fn new() -> Self {
+        Self {
+            strict: false,
+            lenient: std::collections::HashSet::new(),
+            list: None,
+            get: None,
+            get_summaries: None,
+            create: None,
+            delete: None,
+            rename: None,
+            get_request: None,
+            save_request: None,
+            delete_request: None,
+            get_settings: None,
+            get_folder_chain_variables: None,
+            get_request_variables: None,
+        }
+    }
+
+    /// Strict repo: an unhooked method panics unless `lenient_for` names it.
+    pub fn strict() -> Self {
+        Self {
+            strict: true,
+            ..Self::new()
+        }
+    }
+
+    /// Lets the named methods use their lenient body in strict mode.
+    pub fn lenient_for(mut self, methods: &[CollectionMethod]) -> Self {
+        self.lenient.extend(methods.iter().copied());
+        self
+    }
+
+    /// Panics when strict mode is on and the method is not opted out.
+    fn gate(&self, method: CollectionMethod) {
+        if self.strict && !self.lenient.contains(&method) {
+            unimplemented!("NullCollectionRepo strict: {method:?} has no hook");
+        }
+    }
+
+    pub fn on_list(
+        mut self,
+        f: impl Fn() -> DomainResult<Vec<CollectionSummary>> + Send + Sync + 'static,
+    ) -> Self {
+        self.list = Some(Box::new(f));
+        self
+    }
+    pub fn on_get(
+        mut self,
+        f: impl Fn(&str) -> DomainResult<Collection> + Send + Sync + 'static,
+    ) -> Self {
+        self.get = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_summaries(
+        mut self,
+        f: impl Fn(&str) -> DomainResult<Collection> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_summaries = Some(Box::new(f));
+        self
+    }
+    pub fn on_create(
+        mut self,
+        f: impl Fn(&str) -> DomainResult<Collection> + Send + Sync + 'static,
+    ) -> Self {
+        self.create = Some(Box::new(f));
+        self
+    }
+    pub fn on_delete(
+        mut self,
+        f: impl Fn(&str) -> DomainResult<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.delete = Some(Box::new(f));
+        self
+    }
+    pub fn on_rename(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.rename = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_request(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<CollectionRequest> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_request = Some(Box::new(f));
+        self
+    }
+    pub fn on_save_request(
+        mut self,
+        f: impl Fn(&str, &str, &CollectionRequest) -> DomainResult<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.save_request = Some(Box::new(f));
+        self
+    }
+    pub fn on_delete_request(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.delete_request = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_settings(
+        mut self,
+        f: impl Fn(&str) -> DomainResult<CollectionSettings> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_settings = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_folder_chain_variables(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<Vec<CollectionVariable>> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_folder_chain_variables = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_request_variables(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<Vec<CollectionVariable>> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_request_variables = Some(Box::new(f));
+        self
+    }
+}
+
+impl CollectionRepository for NullCollectionRepo {
+    fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+        if let Some(f) = &self.list {
+            return f();
+        }
+        self.gate(CollectionMethod::List);
+        Ok(vec![])
+    }
+    fn get(&self, name: &str) -> DomainResult<Collection> {
+        if let Some(f) = &self.get {
+            return f(name);
+        }
+        self.gate(CollectionMethod::Get);
+        Err(DomainError::NotFound("stub".into()))
+    }
+    fn get_summaries(&self, name: &str) -> DomainResult<Collection> {
+        if let Some(f) = &self.get_summaries {
+            return f(name);
+        }
+        self.gate(CollectionMethod::GetSummaries);
+        Err(DomainError::NotFound("stub".into()))
+    }
+    fn create(&self, name: &str) -> DomainResult<Collection> {
+        if let Some(f) = &self.create {
+            return f(name);
+        }
+        self.gate(CollectionMethod::Create);
+        Err(DomainError::NotFound("stub".into()))
+    }
+    fn delete(&self, name: &str) -> DomainResult<()> {
+        if let Some(f) = &self.delete {
+            return f(name);
+        }
+        self.gate(CollectionMethod::Delete);
+        Ok(())
+    }
+    fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
+        if let Some(f) = &self.rename {
+            return f(old_name, new_name);
+        }
+        self.gate(CollectionMethod::Rename);
+        Ok(())
+    }
+    fn get_request(&self, collection: &str, path: &str) -> DomainResult<CollectionRequest> {
+        if let Some(f) = &self.get_request {
+            return f(collection, path);
+        }
+        self.gate(CollectionMethod::GetRequest);
+        Err(DomainError::NotFound("stub".into()))
+    }
+    fn save_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &CollectionRequest,
+    ) -> DomainResult<String> {
+        if let Some(f) = &self.save_request {
+            return f(collection, path, request);
+        }
+        self.gate(CollectionMethod::SaveRequest);
+        Ok(path.to_string())
+    }
+    fn rename_request(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        self.gate(CollectionMethod::RenameRequest);
+        Ok(())
+    }
+    fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
+        if let Some(f) = &self.delete_request {
+            return f(collection, path);
+        }
+        self.gate(CollectionMethod::DeleteRequest);
+        Ok(())
+    }
+    fn create_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+        self.gate(CollectionMethod::CreateFolder);
+        Ok(())
+    }
+    fn delete_folder(&self, _: &str, _: &str) -> DomainResult<()> {
+        self.gate(CollectionMethod::DeleteFolder);
+        Ok(())
+    }
+    fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        self.gate(CollectionMethod::MoveItem);
+        Ok(())
+    }
+    fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
+        self.gate(CollectionMethod::ReorderItems);
+        Ok(())
+    }
+    fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
+        if let Some(f) = &self.get_settings {
+            return f(name);
+        }
+        self.gate(CollectionMethod::GetSettings);
+        Ok(CollectionSettings::default())
+    }
+    fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
+        self.gate(CollectionMethod::SaveSettings);
+        Ok(())
+    }
+    fn get_folder_chain_variables(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        if let Some(f) = &self.get_folder_chain_variables {
+            return f(collection, request_path);
+        }
+        self.gate(CollectionMethod::GetFolderChainVariables);
+        Ok(vec![])
+    }
+    fn get_folder_variables(&self, _: &str, _: &str) -> DomainResult<Vec<CollectionVariable>> {
+        self.gate(CollectionMethod::GetFolderVariables);
+        Ok(vec![])
+    }
+    fn save_folder_variables(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.gate(CollectionMethod::SaveFolderVariables);
+        Ok(())
+    }
+    fn get_request_variables(
+        &self,
+        collection: &str,
+        path: &str,
+    ) -> DomainResult<Vec<CollectionVariable>> {
+        if let Some(f) = &self.get_request_variables {
+            return f(collection, path);
+        }
+        self.gate(CollectionMethod::GetRequestVariables);
+        Ok(vec![])
+    }
+    fn save_request_variables(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<CollectionVariable>,
+    ) -> DomainResult<()> {
+        self.gate(CollectionMethod::SaveRequestVariables);
+        Ok(())
+    }
+    fn save_request_script(
+        &self,
+        _: &str,
+        _: &str,
+        _: RequestScriptPhase,
+        _: String,
+    ) -> DomainResult<()> {
+        self.gate(CollectionMethod::SaveRequestScript);
         Ok(())
     }
 }
@@ -1525,5 +1892,110 @@ mod tests {
         assert_eq!(ok.status, 200);
         assert_eq!(boom.status, 500);
         assert_eq!(executor.sent_urls().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod null_collection_repo_tests {
+    use super::*;
+    use rocket_shared::types::HttpMethod;
+
+    fn sample_request() -> CollectionRequest {
+        CollectionRequest::new("r", HttpMethod::Get, "https://x.test")
+    }
+
+    #[test]
+    fn lenient_defaults_match_the_old_stubs() {
+        let repo = NullCollectionRepo::new();
+        assert!(repo.list().expect("list").is_empty());
+        assert!(matches!(repo.get("c"), Err(DomainError::NotFound(_))));
+        assert!(matches!(
+            repo.get_summaries("c"),
+            Err(DomainError::NotFound(_))
+        ));
+        assert!(matches!(repo.create("c"), Err(DomainError::NotFound(_))));
+        assert!(matches!(
+            repo.get_request("c", "p"),
+            Err(DomainError::NotFound(_))
+        ));
+        let request = sample_request();
+        assert_eq!(
+            repo.save_request("c", "p/x", &request).expect("save"),
+            "p/x"
+        );
+        assert_eq!(
+            repo.get_settings("c").expect("settings"),
+            CollectionSettings::default()
+        );
+        assert!(repo
+            .get_folder_chain_variables("c", "p")
+            .expect("v")
+            .is_empty());
+        assert!(repo.get_folder_variables("c", "p").expect("v").is_empty());
+        assert!(repo.get_request_variables("c", "p").expect("v").is_empty());
+        assert!(repo.delete("c").is_ok());
+        assert!(repo.rename("a", "b").is_ok());
+        assert!(repo.rename_request("c", "a", "b").is_ok());
+        assert!(repo.delete_request("c", "p").is_ok());
+        assert!(repo.create_folder("c", "p").is_ok());
+        assert!(repo.delete_folder("c", "p").is_ok());
+        assert!(repo.move_item("a", "p", "b", "q").is_ok());
+        assert!(repo.reorder_items("c", "p", &[]).is_ok());
+        assert!(repo
+            .save_settings("c", &CollectionSettings::default())
+            .is_ok());
+        assert!(repo.save_folder_variables("c", "p", vec![]).is_ok());
+        assert!(repo.save_request_variables("c", "p", vec![]).is_ok());
+        assert!(repo
+            .save_request_script("c", "p", RequestScriptPhase::PreRequest, String::new())
+            .is_ok());
+    }
+
+    #[test]
+    #[should_panic]
+    fn strict_panics_on_unhooked_delete() {
+        let _ = NullCollectionRepo::strict().delete("c");
+    }
+
+    #[test]
+    #[should_panic]
+    fn strict_panics_on_unhooked_get_request() {
+        let _ = NullCollectionRepo::strict().get_request("c", "p");
+    }
+
+    #[test]
+    fn lenient_for_opens_only_the_named_methods() {
+        let repo = NullCollectionRepo::strict().lenient_for(&[CollectionMethod::ReorderItems]);
+        assert!(repo.reorder_items("c", "p", &[]).is_ok());
+    }
+
+    #[test]
+    #[should_panic]
+    fn lenient_for_keeps_other_methods_strict() {
+        let repo = NullCollectionRepo::strict().lenient_for(&[CollectionMethod::ReorderItems]);
+        let _ = repo.move_item("a", "p", "b", "q");
+    }
+
+    #[test]
+    fn hook_wins_over_lenient_and_strict() {
+        for repo in [NullCollectionRepo::new(), NullCollectionRepo::strict()] {
+            let repo = repo.on_get_request(|_, _| Ok(sample_request()));
+            assert!(repo.get_request("c", "p").is_ok());
+        }
+    }
+
+    #[test]
+    fn hook_can_capture_state() {
+        let saved = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = Arc::clone(&saved);
+        let repo = NullCollectionRepo::strict().on_save_request(move |_, path, _| {
+            sink.lock().expect("lock saved").push(path.to_string());
+            Ok(format!("saved/{path}"))
+        });
+        let out = repo
+            .save_request("c", "a/b", &sample_request())
+            .expect("save");
+        assert_eq!(out, "saved/a/b");
+        assert_eq!(*saved.lock().expect("lock saved"), vec!["a/b".to_string()]);
     }
 }
