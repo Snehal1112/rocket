@@ -1069,9 +1069,35 @@ async fn apply_auth(
                     .await?;
                     builder = builder.bearer_auth(&token);
                 }
+                rocket_shared::oauth2::OAuth2Flow::ResourceOwnerPassword {
+                    access_token_url,
+                    credentials,
+                    resource_owner,
+                    scope,
+                    settings,
+                    ..
+                } => {
+                    let resource_owner = resource_owner.as_ref().ok_or_else(|| {
+                        DomainError::InvalidInput(
+                            "OAuth2 password grant needs a username and password.".into(),
+                        )
+                    })?;
+                    let verify_ssl = settings.as_ref().and_then(|s| s.verify_ssl).unwrap_or(true);
+                    let token = fetch_password_grant_token(
+                        access_token_url,
+                        credentials,
+                        resource_owner,
+                        scope.as_deref(),
+                        verify_ssl,
+                        certificates,
+                        proxy.clone(),
+                    )
+                    .await?;
+                    builder = builder.bearer_auth(&token);
+                }
                 _ => {
-                    // Other OAuth2 flows (authorization_code, implicit, resource_owner_password)
-                    // require user interaction and are not yet implemented.
+                    // The interactive flows (authorization_code, implicit) require user
+                    // interaction and are not handled here.
                 }
             }
         }
@@ -1273,6 +1299,56 @@ async fn fetch_client_credentials_token(
     certificates: &[ResolvedClientCertificate],
     proxy: rocket_http::ResolvedProxy,
 ) -> DomainResult<String> {
+    fetch_direct_grant_token(
+        access_token_url,
+        credentials,
+        vec![("grant_type".to_string(), "client_credentials".to_string())],
+        scope,
+        verify_ssl,
+        certificates,
+        proxy,
+    )
+    .await
+}
+
+/// Fetch an access token using the OAuth2 resource owner password grant.
+async fn fetch_password_grant_token(
+    access_token_url: &str,
+    credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
+    resource_owner: &rocket_shared::oauth2::OAuth2ResourceOwner,
+    scope: Option<&str>,
+    verify_ssl: bool,
+    certificates: &[ResolvedClientCertificate],
+    proxy: rocket_http::ResolvedProxy,
+) -> DomainResult<String> {
+    fetch_direct_grant_token(
+        access_token_url,
+        credentials,
+        vec![
+            ("grant_type".to_string(), "password".to_string()),
+            ("username".to_string(), resource_owner.username.clone()),
+            ("password".to_string(), resource_owner.password.clone()),
+        ],
+        scope,
+        verify_ssl,
+        certificates,
+        proxy,
+    )
+    .await
+}
+
+/// Fetch an access token with a grant that needs no user interaction. `grant_params` holds
+/// `grant_type` and the grant's own fields. The client authenticates by its configured
+/// placement, and a public client (empty `client_id`) sends no client credentials.
+async fn fetch_direct_grant_token(
+    access_token_url: &str,
+    credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
+    grant_params: Vec<(String, String)>,
+    scope: Option<&str>,
+    verify_ssl: bool,
+    certificates: &[ResolvedClientCertificate],
+    proxy: rocket_http::ResolvedProxy,
+) -> DomainResult<String> {
     // Build a dedicated client for the token request. SSL setting here is independent
     // from the cached executor client (see get_or_build_client). The certificate is matched
     // against the token URL, which can be a different host than the request.
@@ -1282,7 +1358,7 @@ async fn fetch_client_credentials_token(
     spec.proxy = proxy;
     let client = build_client(spec)
         .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
-    let mut params = vec![("grant_type".to_string(), "client_credentials".to_string())];
+    let mut params = grant_params;
     if let Some(s) = scope {
         params.push(("scope".to_string(), s.to_string()));
     }
@@ -1291,21 +1367,26 @@ async fn fetch_client_credentials_token(
         .placement
         .as_deref()
         .unwrap_or("basic_auth_header");
-    let req = match placement {
-        "body" => {
-            params.push(("client_id".to_string(), credentials.client_id.clone()));
-            params.push((
-                "client_secret".to_string(),
-                credentials.client_secret.clone(),
-            ));
-            client.post(access_token_url).form(&params)
-        }
-        _ => {
-            // Default: Basic Auth header.
-            client
-                .post(access_token_url)
-                .form(&params)
-                .basic_auth(&credentials.client_id, Some(&credentials.client_secret))
+    let req = if credentials.client_id.is_empty() {
+        // A public client has no credentials to send.
+        client.post(access_token_url).form(&params)
+    } else {
+        match placement {
+            "body" => {
+                params.push(("client_id".to_string(), credentials.client_id.clone()));
+                params.push((
+                    "client_secret".to_string(),
+                    credentials.client_secret.clone(),
+                ));
+                client.post(access_token_url).form(&params)
+            }
+            _ => {
+                // Default: Basic Auth header.
+                client
+                    .post(access_token_url)
+                    .form(&params)
+                    .basic_auth(&credentials.client_id, Some(&credentials.client_secret))
+            }
         }
     };
 
@@ -1714,7 +1795,166 @@ mod oauth2_tests {
         .await;
 
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
-        assert_eq!(result.unwrap(), "tok123");
+        assert_eq!(result.expect("token"), "tok123");
+    }
+
+    use rocket_shared::oauth2::{OAuth2Flow, OAuth2ResourceOwner};
+    use rocket_shared::types::HttpMethod;
+    use wiremock::matchers::{body_string_contains, header};
+
+    fn password_auth(
+        server: &MockServer,
+        placement: Option<&str>,
+        resource_owner: Option<OAuth2ResourceOwner>,
+    ) -> Auth {
+        Auth::OAuth2(Box::new(OAuth2Flow::ResourceOwnerPassword {
+            access_token_url: format!("{}/token", server.uri()),
+            refresh_token_url: None,
+            credentials: OAuth2ClientCredentials {
+                client_id: "ropc-client".into(),
+                client_secret: "ropc-secret".into(),
+                placement: placement.map(str::to_string),
+            },
+            resource_owner,
+            scope: Some("read".into()),
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        }))
+    }
+
+    fn alice() -> Option<OAuth2ResourceOwner> {
+        Some(OAuth2ResourceOwner {
+            username: "alice".into(),
+            password: "pa55word".into(),
+        })
+    }
+
+    fn api_request(server: &MockServer, auth: Auth) -> HttpRequest {
+        let mut req = HttpRequest::new(HttpMethod::Get, format!("{}/api", server.uri()));
+        req.auth = auth;
+        req
+    }
+
+    #[tokio::test]
+    async fn resource_owner_password_sends_the_fetched_token_as_bearer() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("grant_type=password"))
+            .and(body_string_contains("username=alice"))
+            .and(body_string_contains("password=pa55word"))
+            .and(body_string_contains("scope=read"))
+            // Base64 of "ropc-client:ropc-secret".
+            .and(header(
+                "Authorization",
+                "Basic cm9wYy1jbGllbnQ6cm9wYy1zZWNyZXQ=",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "access_token": "ropc-token" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api"))
+            .and(header("Authorization", "Bearer ropc-token"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let req = api_request(&server, password_auth(&server, None, alice()));
+        let response = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect("send succeeds");
+        assert_eq!(response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn resource_owner_password_body_placement_sends_client_fields_in_the_form() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("grant_type=password"))
+            .and(body_string_contains("client_id=ropc-client"))
+            .and(body_string_contains("client_secret=ropc-secret"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "access_token": "body-token" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api"))
+            .and(header("Authorization", "Bearer body-token"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let req = api_request(&server, password_auth(&server, Some("body"), alice()));
+        let response = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect("send succeeds");
+        assert_eq!(response.status, 200);
+
+        let requests = server.received_requests().await.unwrap_or_default();
+        let token_request = requests
+            .iter()
+            .find(|r| r.url.path() == "/token")
+            .expect("token request");
+        assert!(
+            !token_request.headers.contains_key("authorization"),
+            "body placement must not send a Basic header"
+        );
+    }
+
+    #[tokio::test]
+    async fn resource_owner_password_token_error_fails_the_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_json(serde_json::json!({ "error": "invalid_grant" })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let req = api_request(&server, password_auth(&server, None, alice()));
+        let err = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect_err("token error fails the send");
+        assert!(matches!(err, DomainError::Http(_)), "{err:?}");
+        assert!(err.to_string().contains("401"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn resource_owner_password_without_resource_owner_is_invalid_input() {
+        let server = MockServer::start().await;
+        let req = api_request(&server, password_auth(&server, None, None));
+        let err = ReqwestExecutor::new()
+            .execute(&req)
+            .await
+            .expect_err("missing resource owner fails the send");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains("username and password"), "{message}");
+        assert!(!message.contains("ropc-secret"), "{message}");
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert!(requests.is_empty(), "no request may be sent");
     }
 }
 
