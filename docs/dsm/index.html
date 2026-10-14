@@ -1326,6 +1326,23 @@ html, body {
 /* ── Saved pill (ui/saved-pill.tsx) ── */
 .c-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
 .c-pill svg { width: 12px; height: 12px; }
+/* ── Form field (ui/form-field.tsx) ── */
+.c-ff { display: flex; flex-direction: column; gap: 6px; width: 320px; max-width: 100%; }
+.c-ff-opt { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
+.c-ff-help { margin: 0; font-size: 12px; line-height: 1.625; color: var(--muted-foreground); overflow-wrap: break-word; }
+.c-ff-err { margin: 0; font-size: 12px; line-height: 1.625; color: var(--destructive); overflow-wrap: break-word; }
+
+/* ── State block (ui/state-block.tsx) ── */
+.c-sb { display: flex; align-items: center; gap: 8px; width: 320px; max-width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.c-sb.is-error { border-color: color-mix(in srgb, var(--destructive) 50%, transparent); }
+.c-sb-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 9999px; background: var(--muted-foreground); }
+.c-sb-dot.is-loading { animation: c-sb-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.c-sb-dot.is-empty { background: color-mix(in srgb, var(--muted-foreground) 50%, transparent); }
+.c-sb-dot.is-error { background: var(--destructive); }
+.c-sb-text { min-width: 0; flex: 1; overflow-wrap: break-word; }
+@keyframes c-sb-pulse { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .c-sb-dot.is-loading { animation: none; } }
+
 /* ─── overlays (DSM sections) ─── */
 /* ─── Overlays fragment (o- prefix). Sizes mirror stock Tailwind v4 in src/components/ui. ─── */
 .o-code { font-family: var(--font-mono); background: var(--muted); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
@@ -1662,6 +1679,10 @@ html, body {
       <div class="nav-section" style="margin-top:10px">Reference</div>
       <a class="nav-item" href="#usage" onclick="scrollTo('usage',this)"><span class="dot"></span> Usage guide</a>
       <a class="nav-item" href="#sync" onclick="scrollTo('sync',this)"><span class="dot"></span> Token sync</a>
+
+      <div class="nav-section" style="margin-top:10px">Form building blocks</div>
+      <a class="nav-item" href="#form-field" onclick="scrollTo('form-field',this)"><span class="dot"></span> Form field</a>
+      <a class="nav-item" href="#state-block" onclick="scrollTo('state-block',this)"><span class="dot"></span> State block</a>
     </nav>
   </aside>
 
@@ -2803,6 +2824,20 @@ node scripts/sync-dsm-tokens.cjs</div>
         </div>
       </section>
 
+
+<section class="dsm-section" id="form-field">
+        <div class="section-title">37 — Form building blocks</div>
+        <div class="section-heading">Form field</div>
+        <p class="section-desc">Label, control, always-visible help and an optional error, wired with <code class="o-code">htmlFor</code>, <code class="o-code">aria-invalid</code> and <code class="o-code">aria-describedby</code>. Pass <code class="o-code">group</code> when the label names a set of controls (a radio set, a row list or a saved secret): the wrapper then becomes a labelled group and the label is a span, not a label element. The <code class="o-code">help</code> prop is required, so a field cannot ship without it. Write the NAME of a variable in capitals when it is a name and not a value.</p>
+<div class="dsm-card"><div class="component-label">Help only, optional hint, and error</div><div class="component-row" style="align-items:flex-start"><div class="c-ff"><label class="c-label" for="ff-a">Label</label><input id="ff-a" class="c-input" type="text" value="My agent" aria-describedby="ff-a-help"><p id="ff-a-help" class="c-ff-help">A name for this agent in lists. Example: Gemini work account.</p></div><div class="c-ff"><label class="c-label" for="ff-b">Idle timeout<span class="c-ff-opt">(seconds, optional)</span></label><input id="ff-b" class="c-input is-invalid" type="text" value="5" aria-invalid="true" aria-describedby="ff-b-help ff-b-error"><p id="ff-b-help" class="c-ff-help">Seconds before an idle session stops. Leave empty for the default.</p><p id="ff-b-error" class="c-ff-err" role="alert">Enter a value between 30 and 1800.</p></div></div><div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Wrapper</td><td>space-y-1.5</td><td>form-field.tsx:51</td></tr><tr><td>Label</td><td>Label primitive (text-sm font-medium leading-none) with htmlFor = id</td><td>form-field.tsx:57</td></tr><tr><td>Optional hint</td><td>ml-1.5 text-xs font-normal text-muted-foreground</td><td>form-field.tsx:45</td></tr><tr><td>Help</td><td>id = {id}-help; break-words text-xs leading-relaxed text-muted-foreground</td><td>form-field.tsx:60</td></tr><tr><td>Error</td><td>id = {id}-error; role="alert"; break-words text-xs text-destructive</td><td>form-field.tsx:64</td></tr><tr><td>Control wiring</td><td>children receives { id, aria-invalid, aria-describedby } (help, plus error when set)</td><td>form-field.tsx:59</td></tr><tr><td>Group mode</td><td>group prop: wrapper gets role="group" and aria-labelledby = {id}-label; the label is a span (block text-sm font-medium leading-none), not a label element. Use it for a radio set, a row list or a saved secret.</td><td>form-field.tsx:51-53</td></tr></tbody></table></div></div>
+      </section>
+
+<section class="dsm-section" id="state-block">
+        <div class="section-title">38 — Form building blocks</div>
+        <div class="section-heading">State block</div>
+        <p class="section-desc">Inline dashed block for a loading, empty or error state inside a form. Loading and empty use <code class="o-code">role="status"</code>, error uses <code class="o-code">role="alert"</code>. An optional action renders an outline small Button, for example Retry.</p>
+<div class="dsm-card"><div class="component-label">Loading, empty and error with action</div><div class="c-stack"><div class="c-sb" role="status"><span class="c-sb-dot is-loading"></span><span class="c-sb-text">Loading secrets.</span></div><div class="c-sb" role="status"><span class="c-sb-dot is-empty"></span><span class="c-sb-text">No secrets in this connection.</span></div><div class="c-sb is-error" role="alert"><span class="c-sb-dot is-error"></span><span class="c-sb-text">Could not list secrets.</span><span class="c-btn c-btn-outline c-btn-sm" style="height:28px">Retry</span></div></div><div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Block</td><td>flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground; error adds border-destructive/50</td><td>state-block.tsx:27</td></tr><tr><td>Dot</td><td>h-2 w-2 shrink-0 rounded-full; loading bg-muted-foreground animate-pulse motion-reduce:animate-none; empty bg-muted-foreground/50; error bg-destructive</td><td>state-block.tsx:13-17</td></tr><tr><td>Message</td><td>min-w-0 flex-1 break-words</td><td>state-block.tsx:36</td></tr><tr><td>Action</td><td>Button outline sm, h-7 shrink-0</td><td>state-block.tsx:38</td></tr></tbody></table></div></div>
+      </section>
 
       <div style="height:48px"></div>
     </div>
