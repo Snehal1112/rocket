@@ -60,7 +60,7 @@ impl AgentConfigService {
                 .any(|c| c.id == config.vault_connection_id);
             if !known_connection {
                 return Err(DomainError::InvalidInput(format!(
-                    "agent '{}': vault_connection_id '{}' does not match any configured RocketVault connection",
+                    "agent '{}': vault_connection_id '{}' does not match any configured secret manager connection",
                     config.label, config.vault_connection_id
                 )));
             }
@@ -102,7 +102,7 @@ impl AgentConfigService {
         self.get_config(id)
     }
 
-    /// Resolves the agent's credential from its source: RocketVault, a
+    /// Resolves the agent's credential from its source: a secret manager, a
     /// variable of Rocket's own environment, or the OS keychain. A missing
     /// credential maps to `NotFound`; connection, keychain, and transport
     /// failures propagate unchanged.
@@ -199,7 +199,7 @@ impl AgentConfigService {
             .await?;
         value.ok_or_else(|| {
             DomainError::NotFound(format!(
-                "agent '{}': credential no longer exists in RocketVault — reconfigure this agent",
+                "agent '{}': credential no longer exists in the secret manager — reconfigure this agent",
                 config.label
             ))
         })
@@ -769,7 +769,17 @@ mod tests {
         let err = service
             .save(sample_config("agent-1", "no-such-conn"))
             .expect_err("must reject unknown vault_connection_id");
-        assert!(matches!(err, DomainError::InvalidInput(_)));
+        let DomainError::InvalidInput(message) = err else {
+            panic!("expected InvalidInput, got {err:?}");
+        };
+        assert!(
+            message.contains("any configured secret manager connection"),
+            "unexpected text: {message}"
+        );
+        assert!(
+            !message.contains("RocketVault"),
+            "the text must be provider neutral: {message}"
+        );
         assert!(
             service.list().expect("list").is_empty(),
             "a rejected save must not persist the config"
@@ -813,7 +823,17 @@ mod tests {
             .await
             .expect_err("stale vault secret must be a hard error");
 
-        assert!(matches!(err, DomainError::NotFound(_)));
+        let DomainError::NotFound(message) = err else {
+            panic!("expected NotFound, got {err:?}");
+        };
+        assert!(
+            message.contains("credential no longer exists in the secret manager"),
+            "unexpected text: {message}"
+        );
+        assert!(
+            !message.contains("RocketVault"),
+            "the text must be provider neutral: {message}"
+        );
     }
 
     #[tokio::test]
@@ -906,7 +926,13 @@ mod tests {
             .resolve_credential("agent-1")
             .await
             .expect_err("a dangling vault_connection_id must error, not panic");
-        assert!(matches!(err, DomainError::NotFound(_)));
+        let DomainError::NotFound(message) = err else {
+            panic!("expected NotFound, got {err:?}");
+        };
+        assert!(
+            message.contains("secret manager connection 'conn-1'"),
+            "unexpected text: {message}"
+        );
     }
 
     #[tokio::test]

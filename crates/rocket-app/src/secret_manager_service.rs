@@ -112,7 +112,9 @@ impl SecretManagerService {
         let connection = self
             .repo
             .get(id)?
-            .ok_or_else(|| DomainError::NotFound(id.to_string()))?;
+            .ok_or_else(|| {
+                DomainError::NotFound(format!("secret manager connection '{id}'"))
+            })?;
         let stored = self.secret_store.get(VAULT_CONNECTION_SCOPE, id)?;
         let secret = match stored {
             Some(secret) => secret,
@@ -692,10 +694,10 @@ mod tests {
             .fetch_secret_names("no-such-conn", "prod-vault")
             .await;
 
-        assert!(
-            matches!(result, Err(DomainError::NotFound(_))),
-            "expected DomainError::NotFound for an unknown connection id, got {result:?}"
-        );
+        let Err(DomainError::NotFound(message)) = result else {
+            panic!("expected DomainError::NotFound for an unknown connection id, got {result:?}");
+        };
+        assert_eq!(message, "secret manager connection 'no-such-conn'");
     }
 
     #[test]
@@ -781,10 +783,10 @@ mod tests {
             .resolve_secret_value("no-such-conn", "prod-vault", "secret-id-1")
             .await;
 
-        assert!(
-            matches!(result, Err(DomainError::NotFound(_))),
-            "expected DomainError::NotFound for an unknown connection id, got {result:?}"
-        );
+        let Err(DomainError::NotFound(message)) = result else {
+            panic!("expected DomainError::NotFound for an unknown connection id, got {result:?}");
+        };
+        assert_eq!(message, "secret manager connection 'no-such-conn'");
     }
 
     #[tokio::test]
