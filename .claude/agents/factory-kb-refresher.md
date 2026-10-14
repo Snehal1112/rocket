@@ -18,7 +18,7 @@ Input: your prompt names the project, the repo path, the KB path, the current ma
 The driver checks these again after you finish.
 
 - Edit only files under the KB path from the prompt. Never change anything in the repository.
-- Never write git state: no add, commit, reset, checkout, stash or push. Read only git commands are fine.
+- Never write git state: no add, commit, reset, checkout, stash or push. Git commands are read only (diff, log, show, rev-parse, merge-base, status), even with `-C`.
 
 ## Reply
 
