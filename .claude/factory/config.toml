@@ -12,6 +12,7 @@ commit_model = "sonnet"
 commit_subagents = false
 commit_budget_weighted = 60000
 # kb_path accepts an absolute path or one starting with ~/. Unset turns the KB off.
+# Turn it on only after one manual `factory kb-refresh --job <id>` run went well.
 # kb_path = "/home/numericlabs/data/rocket/Nl-knowledge-base/rocketapi"
 # kb_model = "sonnet"
 # kb_budget_weighted = 150000

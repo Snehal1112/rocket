@@ -30,7 +30,7 @@ factory run (no LLM tokens):
 - `.superpowers/factory/board.json`: stage per job. Stages `spec`, `build`, `review`, `approve`, `merged`, `needs-human`. Same names and fields as v1, so the dashboard keeps working.
 - `.superpowers/factory/events.jsonl`: events written by the driver, each with the job id.
 - Only the driver writes the ledger, board and events. Agents and the `/factory` command never do.
-- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `kb_path`, `[[checks]]`).
+- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `kb_path`, `kb_model`, `kb_budget_weighted`, `kb_auto_commit`, `[[checks]]`).
 
 ## Modes
 
@@ -74,6 +74,29 @@ There are no spec-writer, security, ux, ui or approver agents. Risky diffs go to
 
 - `kb_path` in `config.toml` is the Rocket KB folder, an absolute path or one that starts with `~/` (expanded with `HOME`). Unset turns the KB off. Builders and the reviewer get the folder as `--add-dir`, because it is outside the job worktree.
 - With it set, the builder (first, per-task and resume) and reviewer prompts get a line: read `README.md` in that folder first, then only the topic pages that apply, treat the KB as read-only, let the source and the spec win on a conflict, say in the reply when a page is stale, and skip it if the folder does not exist. The reviewer keeps `Read,Grep,Glob`. The committer prompt has no KB line.
+
+Whether headless agents can read the KB through `--add-dir` is not proven yet. The first real run verifies it.
+
+### Knowledge base (refresh side)
+
+- Config: `kb_path` (see above), `kb_model` (default `sonnet`), `kb_budget_weighted` (default 150000 per run) and `kb_auto_commit`. `kb_auto_commit` is parsed and reserved. Automatic KB commits are not built, so the KB edits always stay uncommitted in the KB folder.
+- After a merge lands, the driver runs the `factory-kb-refresher` agent. The post-merge refresh runs inside the merge step, so the merge call returns after it. The agent runs in the main checkout with the KB folder as `--add-dir`, runs the `kb-refresh` skill (its own subagents through the Agent tool, never `Workflow`) and replies with the pages changed, one per line, or `No relevant changes`.
+- What it may touch: Edit and Write are not path-scoped. The prompt tells it to edit only the KB folder, and the guard below checks the main checkout. Files the checkout ignores are not covered. Bash is read-only git (`git log`, `diff`, `show`, `rev-parse`, `merge-base`, `status`, and `git -C`) plus `date` and `ls`.
+- The guard: the driver takes a fingerprint of the main checkout before and after the run (tip, status entries and file contents). A difference is `Tampered`, whatever the reply says. The fingerprint can show a false `Tampered` if you edit the main checkout while a refresh runs. It fails closed, and a manual run clears it.
+- The stop marker: `Tampered` writes `.superpowers/factory/kb-stopped`, and automatic refreshes are skipped while it exists (a ledger line says so). Clear it by running `factory kb-refresh --job <id>` after you looked, or delete the file. A manual run clears the marker only when it ends `Refreshed` or `UpToDate`.
+- Failures never park or unmerge a job. A failed, over-budget or blocked run writes a ledger line `kb refresh failed, <reason>`. Success writes `kb refreshed, pages: ...` or `kb up to date`.
+- `factory kb-refresh --job <id>` reruns it by hand for a merged job. `--job` is required, and the command refuses while the job's lease is live. Do not run it while a driver run is live.
+- Tokens: the run is logged with role `kb`, so `factory tokens <id>` shows a `kb` row (and a `message` row for commit messages).
+
+First real run checklist: after merge, set `kb_path = "~/data/rocket/Nl-knowledge-base/rocketapi"` and run `factory kb-refresh --job <a merged job id>` once. Check that:
+
+1. the `kb-refresh` skill loads inside the headless run,
+2. the agent can read and write the KB through `--add-dir`,
+3. the Agent tool fan-out works,
+4. the fingerprint guard stays quiet,
+5. `factory tokens` shows the weighted cost of the `kb` role.
+
+Record that number here, then adjust `kb_budget_weighted`. Measured `kb` cost: not measured yet.
 
 ## Checks
 

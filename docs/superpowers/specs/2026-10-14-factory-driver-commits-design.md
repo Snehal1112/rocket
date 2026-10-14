@@ -55,6 +55,7 @@ Every commit and every merge or sync commit message the factory makes is written
     - The driver checks afterwards that the main checkout of Rocket is unchanged by the run (same tip, clean tree). A change there is a `Ruling:` line and a stop of further KB refreshes until the user looks, because this agent must not touch source.
     - It leaves its edits uncommitted in the KB folder, and the reply lists the pages changed. Whether to commit them automatically is left to the user (see Cost and risks).
     - Usage is tallied with role `kb`.
+    Plan 07 status: the `KbRefresher` port was replaced by `AgentRunner`. `kb_auto_commit` is parsed but automatic KB commits are not built. `factory kb-refresh` requires `--job <id>` and refuses while the job's lease is live. The fingerprint guard covers non-ignored files only.
 
 ## Standing answers
 
