@@ -248,6 +248,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(move |app| {
+            let setup_started = std::time::Instant::now();
             let app_handle = app.handle().clone();
 
             // Activate the Tauri tracing layer now that we have an AppHandle.
@@ -346,15 +347,26 @@ pub fn run() {
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
             // One-time grandfathering of the collections that exist before the trust gate.
-            // It runs before any command is served.
-            let migration = workspace_svc.list().and_then(|workspaces| {
-                let paths: Vec<PathBuf> = workspaces.into_iter().map(|w| w.path).collect();
-                let found = rocket_infra::discover_legacy_collections(
-                    &paths,
-                    &FsWorkspaceConfigRepo::new(),
-                );
-                trust_svc.migrate_legacy(found)
+            // It runs before any command is served. The scan walks every collection, so it
+            // is skipped once the store is marked as migrated.
+            let trust_started = std::time::Instant::now();
+            let migration = trust_store.migrated().and_then(|done| {
+                if done {
+                    return Ok(());
+                }
+                workspace_svc.list().and_then(|workspaces| {
+                    let paths: Vec<PathBuf> = workspaces.into_iter().map(|w| w.path).collect();
+                    let found = rocket_infra::discover_legacy_collections(
+                        &paths,
+                        &FsWorkspaceConfigRepo::new(),
+                    );
+                    trust_svc.migrate_legacy(found)
+                })
             });
+            tracing::info!(
+                elapsed_ms = trust_started.elapsed().as_millis() as u64,
+                "startup: trust migration step"
+            );
             if let Err(e) = migration {
                 // Fail closed: mark the store migrated with nothing grandfathered, so a
                 // later start cannot grandfather collections cloned after the upgrade.
@@ -836,9 +848,14 @@ pub fn run() {
             spawn_exit_signal_listener(app.handle().clone());
 
             // Start filesystem watcher for the collections directory.
+            let watcher_started = std::time::Instant::now();
             let watcher = NotifyFileWatcher::new();
             let _ = watcher.start(collections_dir, watcher_bus.clone());
             app.manage(watcher);
+            tracing::info!(
+                elapsed_ms = watcher_started.elapsed().as_millis() as u64,
+                "startup: file watcher"
+            );
 
             // Share the event bus so commands like watch_collections can reuse it.
             app.manage(watcher_bus);
@@ -872,7 +889,11 @@ pub fn run() {
                 .ok();
             }
 
-            tracing::info!(data_dir = %data_dir.display(), "RocketAPI initialized");
+            tracing::info!(
+                data_dir = %data_dir.display(),
+                setup_ms = setup_started.elapsed().as_millis() as u64,
+                "RocketAPI initialized"
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

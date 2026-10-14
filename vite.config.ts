@@ -80,8 +80,9 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, the Rust build output and the
+      // agent worktrees. They hold many GB and make the watcher slow to start.
+      ignored: ["**/src-tauri/**", "**/target/**", "**/.claude/worktrees/**"],
     },
   },
 }));

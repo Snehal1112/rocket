@@ -8,13 +8,14 @@ use std::sync::{Arc, Mutex};
 use reqwest::Client;
 use rocket_app::{AssistantMode, McpToolService};
 use rocket_collection::{
-    request::Request as CollectionRequest, settings::CollectionSettings, CollectionRepository,
+    request::Request as CollectionRequest, settings::CollectionSettings, CollectionGrant,
+    CollectionRepository, CollectionTrustStore,
 };
 use rocket_environment::{NullSecretStore, NullVaultSecretFetcher};
 use rocket_http::{HttpExecutor, HttpRequest, HttpResponse};
 use rocket_infra::{
-    FsCollectionRepo, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo, FsSecretManagerRepo,
-    FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo,
+    FsCollectionRepo, FsCollectionTrustStore, FsCookieRepo, FsEnvironmentRepo, FsHistoryRepo,
+    FsSecretManagerRepo, FsWorkspaceConfigRepo, SharedCollectionEnvironmentRepo,
 };
 use rocket_lib::mcp::registry::McpServerRegistry;
 use rocket_lib::mcp::tool_server::{spawn_mcp_http_server, McpHttpServerHandle, MCP_HTTP_PATH};
@@ -81,6 +82,22 @@ async fn spawn_test_server(
         )
         .expect("save request");
 
+    // The collection file only asks for agent runs. The user must allow them on this
+    // computer, so the test records that grant the way the app does.
+    let trust_store: Arc<dyn CollectionTrustStore> =
+        Arc::new(FsCollectionTrustStore::new(tmp.path().join("trust.yml")));
+    trust_store
+        .put(
+            &setup_repo
+                .collection_identity("demo")
+                .expect("collection identity"),
+            CollectionGrant {
+                agent_run: true,
+                ..Default::default()
+            },
+        )
+        .expect("grant agent runs");
+
     let exec_svc = rocket_app::RequestExecutionService::new(
         Box::new(FsEnvironmentRepo::new(
             tmp.path().join("global_environments"),
@@ -100,15 +117,18 @@ async fn spawn_test_server(
         &ws_path,
     ))));
 
-    let mcp_tool_svc = Arc::new(McpToolService::new(
-        Arc::new(FsCollectionRepo::new_standalone(collections_dir)),
-        Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
-        Arc::new(exec_svc),
-        Arc::new(NullEventPublisher),
-        Box::new(FsWorkspaceConfigRepo::new()),
-        Arc::clone(&ws_path),
-        Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
-    ));
+    let mcp_tool_svc = Arc::new(
+        McpToolService::new(
+            Arc::new(FsCollectionRepo::new_standalone(collections_dir)),
+            Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
+            Arc::new(exec_svc),
+            Arc::new(NullEventPublisher),
+            Box::new(FsWorkspaceConfigRepo::new()),
+            Arc::clone(&ws_path),
+            Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
+        )
+        .with_trust_store(trust_store),
+    );
 
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
