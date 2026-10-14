@@ -18,6 +18,7 @@ The commit skill asks questions. Answer them like this:
 | Amend target is HEAD | `git commit --amend`. |
 | Amend target is not HEAD | `git commit --fixup` plus `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash <target>~1`. On a conflict: `git rebase --abort` and make a new commit. |
 | Force-push after amending a pushed commit | Never. A pushed commit is not amended in the first place. |
+| The prompt names an issue footer | Add it as the last paragraph of every commit message, exactly as given. |
 | Anything else | Pick the option that makes a new commit and changes no existing commit. |
 
 ## Rules that do not change
