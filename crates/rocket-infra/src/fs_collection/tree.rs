@@ -101,7 +101,7 @@ pub(super) fn build_folder_tree_summaries(current: &Path) -> DomainResult<Folder
 /// Shared folder-tree walker. Handles UID/name loading, ordering, symlink rejection, and
 /// recursion. The `load_item` closure decides what to do with each request file — it returns
 /// `Ok(Some(item))` to add an item, `Ok(None)` to skip it, or `Err` to propagate.
-fn build_tree<F>(current: &Path, load_item: &mut F) -> DomainResult<Folder>
+pub(super) fn build_tree<F>(current: &Path, load_item: &mut F) -> DomainResult<Folder>
 where
     F: FnMut(&Path, &str) -> DomainResult<Option<CollectionItem>>,
 {

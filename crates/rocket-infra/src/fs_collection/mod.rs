@@ -31,6 +31,10 @@ mod bench_hook_tests;
 #[cfg(test)]
 mod schema_shape_tests;
 
+// Kept in its own group so rustfmt does not sort it before `tests`.
+#[cfg(test)]
+mod tree_walk_tests;
+
 pub struct FsCollectionRepo {
     pub(super) base_dir: PathBuf,
     pub(super) locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
