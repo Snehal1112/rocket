@@ -1,4 +1,4 @@
-import { collectSecretValues } from '@/lib/console-redaction';
+import { buildMaskOptions, collectSecretValues, maskHttpExchange } from '@/lib/console-redaction';
 import { dispatchSend, type ResolvedGraphQl } from '@/lib/dispatch-send';
 import { inheritedHeaders, loadFolderChain } from '@/lib/folder-inheritance';
 import { parseGraphQlResponse } from '@/lib/graphql-response';
@@ -702,11 +702,18 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     environmentName,
     requestPath,
     graphql: resolvedGraphql,
+    secretValues: resolvedSecretValues,
+    secretsUncertain,
   } = await resolveRequestFields(tabId, effectiveRequest, true);
 
   const globalEnvName = getActiveGlobalEnvName();
   const requestName = found?.tab.title ?? resolvedUrl;
   const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
+  const maskOptions = buildMaskOptions(
+    resolvedAuth,
+    resolvedSecretValues ?? [],
+    secretsUncertain ?? false,
+  );
 
   try {
     const requestInput: ExecuteRequestInput = {
@@ -791,23 +798,41 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       ...authHeaders.filter((h) => !explicitKeys.has(h.key.toLowerCase())),
       ...effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
     ];
+    const consoleUrl = applyPathParams(resolvedUrl, resolvedPathParams);
+    const consoleRequestBody = isGraphQl
+      ? JSON.stringify({
+          query: resolvedGraphql?.query,
+          operationName: effectiveRequest.graphql?.operationName,
+          variables: resolvedGraphql?.variables,
+        })
+      : (resolvedBody?.content ?? '');
+    const consoleResponseHeaders = result.headers.map((h) => ({ key: h.key, value: h.value }));
+    const consoleResponseBody = result.isBinary
+      ? `(binary, ${result.sizeBytes} bytes)`
+      : result.body;
+    const redaction = maskHttpExchange(
+      {
+        url: consoleUrl,
+        requestHeaders: consoleRequestHeaders,
+        requestBody: consoleRequestBody,
+        responseHeaders: consoleResponseHeaders,
+        responseBody: consoleResponseBody,
+      },
+      maskOptions,
+    );
     useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
-      url: applyPathParams(resolvedUrl, resolvedPathParams),
+      url: consoleUrl,
       status: result.status,
       statusText: result.statusText,
       durationMs: result.durationMs,
       sizeBytes: result.sizeBytes,
       requestHeaders: consoleRequestHeaders,
-      requestBody: isGraphQl
-        ? JSON.stringify({
-            query: resolvedGraphql?.query,
-            operationName: effectiveRequest.graphql?.operationName,
-            variables: resolvedGraphql?.variables,
-          })
-        : (resolvedBody?.content ?? ''),
-      responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
-      responseBody: result.isBinary ? `(binary, ${result.sizeBytes} bytes)` : result.body,
+      requestBody: consoleRequestBody,
+      responseHeaders: consoleResponseHeaders,
+      responseBody: consoleResponseBody,
+      masked: redaction.masked,
+      uncertain: redaction.uncertain,
     });
     // Forward script console.log/warn/error entries to the Console panel, in
     // one update so they keep their original chronological order (a per-entry
@@ -849,17 +874,32 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       sizeBytes: msg.length,
       activeView: 'raw',
     });
+    const errorUrl = applyPathParams(resolvedUrl, resolvedPathParams);
+    const errorHeaders = effectiveHeaders.map((h) => ({ key: h.key, value: h.value }));
+    const errorBody = resolvedBody?.content ?? '';
+    const errorRedaction = maskHttpExchange(
+      {
+        url: errorUrl,
+        requestHeaders: errorHeaders,
+        requestBody: errorBody,
+        responseHeaders: [],
+        responseBody: msg,
+      },
+      maskOptions,
+    );
     useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
-      url: applyPathParams(resolvedUrl, resolvedPathParams),
+      url: errorUrl,
       status: 0,
       statusText: 'Error',
       durationMs: 0,
       sizeBytes: msg.length,
-      requestHeaders: effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
-      requestBody: resolvedBody?.content ?? '',
+      requestHeaders: errorHeaders,
+      requestBody: errorBody,
       responseHeaders: [],
       responseBody: msg,
+      masked: errorRedaction.masked,
+      uncertain: errorRedaction.uncertain,
     });
   }
 }
