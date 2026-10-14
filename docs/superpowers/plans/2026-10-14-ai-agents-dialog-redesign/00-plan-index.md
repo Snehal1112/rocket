@@ -196,4 +196,5 @@ Provider-neutral error strings in `crates/rocket-app/src/agent_config_service.rs
 - Azure hides the scope field and saves the connection label as `vault_name`.
 - AWS, HashiCorp and GCP stay listed but disabled with "not available yet".
 - A new agent starts with the Claude preset. Changing the agent type replaces a field only when it is empty or still equals the previous type's preset.
+- "Rocket reads it from" follows "Agent reads it as" until edited, but only while the source variable name is empty (a new agent), never for a stored agent.
 - Help text is always visible and required (`FormField` `help` prop). Conditional notes appear only when relevant (see the spec's Help text section).
