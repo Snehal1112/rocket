@@ -13,7 +13,7 @@ A desktop app for Linux, macOS and Windows, built with Tauri 2 (Rust backend, Re
 Four ideas:
 
 - **Native.** Rust and the OS WebView. No bundled browser engine.
-- **File-based.** Collections, folders, requests, environments and contracts are OpenCollection YAML files in `~/.rocket-api/`. You can read, diff and commit them.
+- **File-based.** Collections, folders, requests, environments, contracts and flows are OpenCollection YAML files in `~/.rocket-api/`. You can read, diff and commit them.
 - **Git-native.** Staging, commits, branches, merges, push/pull/fetch (force-with-lease), stash, remotes, SSH key discovery and per-file conflict resolution, all through libgit2 with no shelling out to the git CLI.
 - **Offline-first.** No cloud, no account, no background process phoning home.
 
@@ -32,19 +32,51 @@ Rocket ships roughly 14 to 17 times smaller than either Electron competitor and 
 
 ## What you can do today
 
-- **Request workspace.** Multi-tab editor with split panes and auto-save, params, headers, body (Monaco), auth, response viewer, light and dark themes, keyboard-driven navigation.
-- **Import.** Postman and Bruno collections, environments and zipped exports.
-- **Environments.** `{{variable}}` templates, secret masking, optional external secret-manager integration.
-- **Auth.** Basic, Bearer, API Key, OAuth 2.0 (client credentials) and AWS SigV4.
-- **Scripting and tests.** Pre-request, post-response and test scripts with TypeScript IntelliSense, plus a visual assertions builder.
-- **Collection Runner.** Run a collection or folder sequentially with live progress and a results summary.
-- **Load testing.** Phase-based or fixed concurrency/RPS runs, a live dashboard with latency, throughput and error charts, and export to HTML, CSV, JSON and PDF.
-- **Contract Lock.** Attach SLAs and API contracts to a collection, folder or request. Track provider, consumer, version and expiry, record drift in a changelog, and export as OpenAPI YAML. Contracts are YAML files, so they travel with git.
-- **Security and compliance.** A tamper-evident, hash-chained audit trail with compliance profiles and evidence export.
+**Collections and workspaces**
+- File-based OpenCollection YAML collections; multiple workspaces with embedded and external collections.
+- Folder settings (headers, auth, variables, docs, scripts) in `folder.yml`, inherited by everything beneath the folder.
+- Import from Postman, Bruno and WSDL: collections, environments and zipped exports, format auto-detected, optionally into a new workspace.
+- Collection trust gate: shows which capabilities a collection requests (such as `{{process.env}}`) and which you have allowed.
 
-## What is coming
+**Protocols and requests**
+- HTTP, GraphQL (schema introspection and subscriptions), gRPC and WebSocket in one collection tree.
+- Multi-tab editor with split panes, auto-save, keyboard navigation, and Monaco for JSON, XML and text bodies.
+- Request history with a run-source badge (manual, runner, load test, flow, agent) you can filter on.
 
-*In development, confirm release status before announcing.* A workspace AI assistant that talks to ACP agents (Claude, Gemini), the Flow visual workflow builder, and more of the `rok.*` scripting API.
+**Environments and secrets**
+- `{{variable}}` environments with secret masking.
+- External secret managers: RocketVault and Azure Key Vault.
+
+**Authentication and transport**
+- Basic, Bearer, API Key, Digest, NTLM and WSSE.
+- OAuth 1.0 and OAuth 2.0 (client credentials, password, authorization code with PKCE, implicit).
+- AWS SigV4, mTLS client certificates, proxy support, and auth inheritance from parent folders.
+
+**Scripting and testing**
+- Pre-request, post-response and test scripts with TypeScript IntelliSense for the `rok.*` API, a snippet sidebar, and shared `.js` files via a local `require()`.
+- Visual no-code assertions builder.
+- Collection Runner with live progress and a results summary.
+- Load testing: phase-based or fixed concurrency/RPS, live dashboard with latency, throughput, error-rate and concurrency charts and percentile stats, export to HTML, CSV, JSON and PDF.
+
+**Flow (visual workflow builder)**
+- A canvas for wiring saved requests together, with Input, If, Switch, Transform, Auth, Wait-for-callback and Output nodes.
+- Run a whole flow or part of it; per-step traces and saved run history; flows are plain YAML in the collection.
+
+**AI Assistant**
+- A workspace chat panel that connects to an agent over ACP (Claude, Gemini or a generic agent).
+- The agent reads the workspace through MCP tools and proposes changes (requests, folders, script edits, renames, moves, environment variables, folder settings). Nothing is written until you accept each proposal.
+- Conversations are stored per workspace with secrets masked and can be resumed. Agent credentials come from the vault, an environment variable or the OS keychain.
+
+**Contracts and compliance**
+- Contract Lock attaches SLA and API contracts to collections or folders, tracks drift in a changelog, previews PDFs natively and exports OpenAPI YAML. Contracts are YAML files, so they travel with git.
+- Tamper-evident, hash-chained audit log with compliance profiles and evidence export.
+
+**General**
+- Light and dark themes that follow the system; native app for Linux, macOS and Windows; data stays under `~/.rocket-api/`.
+
+## Still in progress
+
+The static script scanner for the trust gate, parts of the `rok.*` Bruno-parity work (some exist only as specs), and some later Flow plans. Confirm release status before announcing any of these.
 
 ## Call to action
 
@@ -53,12 +85,13 @@ Rocket is MIT licensed. Build it with `yarn install` then `yarn tauri dev`, or `
 ## Suggested one-liners
 
 - Short: "The API client that lives on your machine. Small, fast, git-native, no account."
-- Technical: "Postman-style workflows with Bruno-style files, in a 39 MB native app."
+- Technical: "HTTP, GraphQL, gRPC and WebSocket in a 39 MB native app, with collections you can commit."
+- Trust: "An AI assistant that proposes changes and never writes until you accept."
 - Honest: "Smallest install of the three, faster to start than Bruno, and every number published."
 
 ## Gaps to fill before launch
 
-- Real screenshots (request editor, git panel, load-test dashboard, Contract Lock) for the deck's slots on slides 4 and 8.
+- Real screenshots or clips: the git panel (deck slide 14 still has a placeholder), Flow canvas, AI Assistant proposal card, load-test dashboard and Contract Lock.
 - A download or releases link for the closing call to action.
-- Confirm which roadmap items (AI assistant, Flow) are released before keeping the "coming next" slide.
-- Source for every figure above is the README benchmark section.
+- Retake the workspace and collection captures with a neutral demo workspace (the current ones show internal names and a home path).
+- Source for the benchmark figures is the README benchmark section; the feature list comes from the team's feature summary.
