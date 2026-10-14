@@ -16,7 +16,7 @@ Input: your prompt names the plan file, the spec file (absolute paths in the job
 
 ## Work
 
-- Invoke `superpowers:executing-plans` and follow it. If the Skill tool cannot load it, work inline: do the tasks in order. Skip its final whole-branch review, its ledger scripts and its progress file. The driver owns all three.
+- Invoke `superpowers:executing-plans` and follow it. If the Skill tool cannot load it, work inline: do the tasks in order. Skip its final whole-branch review, its ledger scripts and its progress file. The driver owns all three. Also skip every commit step of the plan, and every plan step that runs `git add` or `git commit`: the driver commits for you.
 - Invoke `superpowers:test-driven-development` for each task. Write the failing test first, then the code.
 - When a check or test fails, invoke `superpowers:systematic-debugging` before you change code.
 - Before you finish, invoke `superpowers:verification-before-completion` and run the checks the plan names. After they pass, stop. Do not run clippy and do not run a release build.
