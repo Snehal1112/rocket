@@ -8,9 +8,9 @@ The Rust driver does everything mechanical: state, checks, diffs, merge, sync, s
 
 ```
 /factory <feature>  (interactive, with the user)
-  superpowers:brainstorming -> spec.md   (staging folder .superpowers/sdd/draft-<slug>/)
-  superpowers:writing-plans -> plan-01-<slug>.md ... (at most 3 tasks each, Next plan: line)
-  factory new <slug> '<feature>' --plans <staging folder>, then factory run <id> --series  (background Bash, session idle)
+  superpowers:brainstorming (full interview) -> docs/superpowers/specs/<date>-<slug>-design.md, committed, approved
+  superpowers:writing-plans -> docs/superpowers/plans/<date>-<slug>/plan-01-<slug>.md ... (at most 3 tasks each, Next plan: line), committed, approved
+  factory new <slug> '<feature>' --plans <plans folder> --spec <spec file>, then factory run <id> --series  (background Bash, session idle)
 
 factory run (no LLM tokens):
   worktree -> builder (claude -p, Sonnet) -> checks -> reviewer (claude -p, Sonnet)
@@ -26,7 +26,7 @@ factory run (no LLM tokens):
 - One job is one feature. It holds a series of plans, each of at most 3 tasks, run one after another, never in parallel.
 - Job id `NNN`, branch `factory/NNN-<slug>`, worktree `.claude/worktrees/factory-NNN-<slug>`. The driver creates the worktree with `git2` and starts the builder inside it.
 - Job directory `.superpowers/sdd/YYYY-MM-DD-NNN-<slug>/` (gitignored): `spec.md`, `plan.md` (the current plan), `progress.md` (the ledger), `checks.md`, `review-*.diff`, review replies.
-- `factory new --plans` makes one job per plan at once. Plan 1 starts at `build`. Plans 2 to N wait at `spec` and share a series id `S<n>` (`series.id` on the board). `spec.md` is checked (non-empty `## Goal` and `## Acceptance criteria`, else `new` creates no job) and copied into every job's folder, so every builder and the reviewer can read it. `run --series` runs the next waiting job when the plan before it merges, and `run <id>` on a waiting job moves it to `build`. A series with one plan has no id. A series made before this change has no id either, and its next job is created after the previous one merges. Cancelling one plan stops the series and leaves the later plans waiting at `spec`, so cancel each of them too if the series is dropped. Plans are copied into their job folders when `factory new` runs, so edit a plan's `plan.md` in its job folder, not the staging file, and do not change a `Next plan:` line after `new`.
+- `factory new --plans` makes one job per plan at once. Plan 1 starts at `build`. Plans 2 to N wait at `spec` and share a series id `S<n>` (`series.id` on the board). The spec file given with `--spec` (or `spec.md` beside the plans when `--spec` is left out) is checked and copied into every job's folder as `spec.md`, so every builder and the reviewer can read it. The check needs a `## Goal` of at least 8 words, an `## Acceptance criteria` section with at least one list item, and no `TBD`, `TODO`, `FIXME` or `???` outside code, else `new` creates no job. `run --series` runs the next waiting job when the plan before it merges, and `run <id>` on a waiting job moves it to `build`. A series with one plan has no id. A series made before this change has no id either, and its next job is created after the previous one merges. Cancelling one plan stops the series and leaves the later plans waiting at `spec`, so cancel each of them too if the series is dropped. Plans are copied into their job folders when `factory new` runs, so edit a plan's `plan.md` in its job folder, not the committed plan file, and do not change a `Next plan:` line after `new`.
 - `.superpowers/factory/board.json`: stage per job. Stages `spec`, `build`, `review`, `approve`, `merged`, `needs-human`. Same names and fields as v1, so the dashboard keeps working.
 - `.superpowers/factory/events.jsonl`: events written by the driver, each with the job id.
 - Only the driver writes the ledger, board and events. Agents and the `/factory` command never do.
@@ -130,7 +130,7 @@ Build once: `cargo build -j4 --manifest-path tools/factory/Cargo.toml -p factory
 
 The command matches subcommands by exact shape, so feature text such as `next button for pagination` stays a feature. The session does not poll while the driver runs. The harness notifies it on exit.
 
-`factory new` validates the plan chain, so the plans are drafted in a staging folder first. The driver cannot ask questions during a run, so plans must be complete. Harness rules the driver keeps: every cargo call has `-j4`, no `--workspace`, no `CARGO_TARGET_DIR`, one implementer per worktree. The builder never commits.
+`factory new` validates the spec and the plan chain, so both are written, approved and committed under `docs/superpowers/` first. The driver cannot ask questions during a run, so the spec and the plans must be complete. `/factory` runs the full `superpowers:brainstorming` interview (one question at a time until the user confirms the written-back understanding, with a required coverage list) and may use read-only exploration subagents for the code survey. Harness rules the driver keeps: every cargo call has `-j4`, no `--workspace`, no `CARGO_TARGET_DIR`, one implementer per worktree. The builder never commits.
 
 ## Dashboard
 
