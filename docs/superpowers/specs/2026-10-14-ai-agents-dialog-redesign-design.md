@@ -34,7 +34,7 @@ All from a code read on 2026-10-14. Nothing was run.
 
 One scrolling form in three sections, in a fixed-width dialog (`max-w-lg`) with a scrolling body and a right-aligned footer.
 
-1. Agent: Label, Agent type with a one-line hint per kind, Command, Arguments (one per row, directly under Command).
+1. Agent: Label, Agent type with a one-line hint per kind, Command, Arguments (one per row, directly under Command). A new agent starts with the Claude preset. Changing the agent type replaces a field only when it is empty or still equals the previous type's preset.
 2. Credential: Source picker, source-specific fields, Key name.
 3. Advanced (collapsed, shows a one-line summary): Idle timeout, Reasoning (Claude and Gemini only), Extra environment variables. Gemini model stays where it is today.
 
