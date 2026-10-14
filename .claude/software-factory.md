@@ -30,7 +30,7 @@ factory run (no LLM tokens):
 - `.superpowers/factory/board.json`: stage per job. Stages `spec`, `build`, `review`, `approve`, `merged`, `needs-human`. Same names and fields as v1, so the dashboard keeps working.
 - `.superpowers/factory/events.jsonl`: events written by the driver, each with the job id.
 - Only the driver writes the ledger, board and events. Agents and the `/factory` command never do.
-- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `[[checks]]`).
+- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `kb_path`, `[[checks]]`).
 
 ## Modes
 
@@ -55,6 +55,25 @@ There are no spec-writer, security, ux, ui or approver agents. Risky diffs go to
 - Merge and sync messages come from the committer in message-only mode (role `message`, tools `Read,Skill`), with the fixed message as fallback (`chore(factory): merge job <id> <slug>`, `chore(factory): sync main into job <id> <slug>`).
 - Parks: `builder committed on its own (the branch was at <sha7> before the run)` (in a task plan `builder committed on its own in task N (the branch was at <sha7> before the run)`), `builder made no changes`, `task N changed nothing`, rewriting the floor, `committer moved HEAD off the job branch`, `the job branch is gone`, and `the committer left nothing to commit: <why>`. To recover from the builder-committed parks, run `git reset --soft <sha7>` in the job worktree (the sha is in the park reason), then `factory rework <id>`.
 - Tokens: `factory tokens` shows the roles `committer` and `message`, each run capped by `commit_budget_weighted`.
+
+### Issue references
+
+- The board job has an `issues` field: the `#N` numbers found in the `factory new` feature text, plus the `spec.md` text for a series (shared by every job of the series). Without a number the field is empty and no issue footer is written.
+- Footers the driver checks or adds:
+
+| Commit | Footer lines |
+|---|---|
+| task, legacy and fix commits (written by the committer, checked by the driver) | `Relates to: #N` |
+| merge message | `Fixes: #N`, then `Factory-Job: <id>` |
+| sync message | `Relates to: #N`, then `Factory-Job: <id>` |
+
+- A task or fix commit without the `Relates to` line is kept, with a ruling. The fallback commit carries it.
+- `Fixes` closes the issue when the user pushes the merge to GitHub. A job that only helps an issue should be created without the number in its text, so the merge does not close it.
+
+### Knowledge base (read side)
+
+- `kb_path` in `config.toml` is the Rocket KB folder, an absolute path or one that starts with `~/` (expanded with `HOME`). Unset turns the KB off.
+- With it set, the builder (first, per-task and resume) and reviewer prompts get a line: read `README.md` in that folder first, then only the topic pages that apply, treat the KB as read-only, let the source and the spec win on a conflict, say in the reply when a page is stale, and skip it if the folder does not exist. The reviewer keeps `Read,Grep,Glob`. The committer prompt has no KB line.
 
 ## Checks
 
