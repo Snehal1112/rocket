@@ -30,7 +30,7 @@ factory run (no LLM tokens):
 - `.superpowers/factory/board.json`: stage per job. Stages `spec`, `build`, `review`, `approve`, `merged`, `needs-human`. Same names and fields as v1, so the dashboard keeps working.
 - `.superpowers/factory/events.jsonl`: events written by the driver, each with the job id.
 - Only the driver writes the ledger, board and events. Agents and the `/factory` command never do.
-- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `[[checks]]`).
+- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `[[checks]]`).
 
 ## Modes
 
@@ -41,10 +41,20 @@ factory run (no LLM tokens):
 
 | Agent | Tools | Duties |
 |---|---|---|
-| `factory-builder` | all | Runs headless in the worktree. `superpowers:executing-plans` with an inline fallback (no final review, ledger scripts or progress file), TDD, systematic debugging on a failing check, verification before finishing. One commit per task through `dev-workflow-skills:1-git-commit`, git commands inline, no amend. At most 2 helper agents per task, none for commits. Reports a blocker as `BLOCKED:` in the result text. |
+| `factory-builder` | all | Runs headless in the worktree. `superpowers:executing-plans` with an inline fallback (no final review, ledger scripts or progress file), TDD, systematic debugging on a failing check, verification before finishing. Never commits, the driver does (see Commits). At most 2 helper agents per task. Reports a blocker as `BLOCKED:` in the result text. |
+| `factory-committer` | all | Runs headless in the worktree and makes the commits through `dev-workflow-skills:1-git-commit` (see Commits). Also runs in message-only mode (role `message`, tools `Read,Skill`) to write merge and sync messages. |
 | `factory-code-reviewer` | Read, Grep, Glob | One combined review: correctness, DDD placement, serde, error handling, persistence compatibility, tests, and the hard rules (shadcn, lucide, SingleLineEditor vs Monaco, Zustand selectors, no unwrap, no git CLI). At most 60 lines, findings tagged `[blocker]` or `[minor]`, last line `VERDICT: APPROVE` or `VERDICT: CHANGES`. |
 
 There are no spec-writer, security, ux, ui or approver agents. Risky diffs go to the human.
+
+## Commits
+
+- The builder never commits. The driver stages everything not ignored and runs the `factory-committer` agent (skill `dev-workflow-skills:1-git-commit`), once per task in a task plan, once per round otherwise.
+- Floor: the job base in round 1, the previous head in a fix round. After a red-check round the floor is the unreviewed head, which is stricter and safe. The committer may amend or fixup above the floor and never at or below it.
+- Checks after each run: the floor is an ancestor, the tree is clean, at most 4 net-new commits, the subject is valid, HEAD is on the job branch. A failure gets one retry by resuming, then a `chore: <task title>` fallback commit. Rewriting the floor parks the job. A message problem never does.
+- Merge and sync messages come from the committer in message-only mode (role `message`, tools `Read,Skill`), with the fixed message as fallback (`chore(factory): merge job <id> <slug>`, `chore(factory): sync main into job <id> <slug>`).
+- Parks: `builder committed on its own (the branch was at <sha7> before the run)`, `builder made no changes`, `task N changed nothing`. To recover from the first, run `git reset --soft <sha7>` in the job worktree (the sha is in the park reason), then `factory rework <id>`.
+- Tokens: `factory tokens` shows the roles `committer` and `message`, each run capped by `commit_budget_weighted`.
 
 ## Checks
 
@@ -77,7 +87,7 @@ Build once: `cargo build -j4 --manifest-path tools/factory/Cargo.toml -p factory
 
 The command matches subcommands by exact shape, so feature text such as `next button for pagination` stays a feature. The session does not poll while the driver runs. The harness notifies it on exit.
 
-`factory new` validates the plan chain, so the plans are drafted in a staging folder first. The driver cannot ask questions during a run, so plans must be complete. Harness rules the driver keeps: every cargo call has `-j4`, no `--workspace`, no `CARGO_TARGET_DIR`, pathspec commits only, one implementer per worktree.
+`factory new` validates the plan chain, so the plans are drafted in a staging folder first. The driver cannot ask questions during a run, so plans must be complete. Harness rules the driver keeps: every cargo call has `-j4`, no `--workspace`, no `CARGO_TARGET_DIR`, one implementer per worktree. The builder never commits.
 
 ## Dashboard
 
@@ -96,9 +106,9 @@ Data flow: `factory driver -> .superpowers/factory/{board.json,events.jsonl} -> 
 ## Per-task builders
 
 - The driver runs one fresh `factory-builder` agent per `### Task N:` heading of `plan.md`, one after another, each as its own `claude -p --agent factory-builder` run (`--max-turns 120`). A plan with no task headings keeps the old whole-plan builder.
-- Each build call handles one task while the board field `task_index` is below the task count. The prompt names the plan, the spec, the base, the current tip, the earlier commit subjects and "Do only Task N". The agent makes exactly one commit. A task with no commit parks the job with `task N made no commit`.
+- Each build call handles one task while the board field `task_index` is below the task count. The prompt names the plan, the spec, the base, the current tip, the earlier commit subjects and "Do only Task N". The builder leaves the commit to the driver. A task that changed nothing parks the job with `task N changed nothing`.
 - Ledger lines: `Ruling: per-task builders, <total> tasks` once, then `Task N: dispatched (BASE <sha>, <model>)` and `Task N: implementer done (<short sha>)` per task. `tick_plan` still writes `Task N: complete` after the merge.
-- Board field `task_index` (number of finished, committed tasks, skipped when 0): a budget or stall kill in task 2 leaves task 1 committed, and a `rework` resumes at `task_index`. After the last task the driver records `head`, checks the diff cap and moves to review once. Fix rounds and `rework` then resume the last task's session and never restart the task loop. The reviewer diff `prev_head..head` is set once, after the last task.
+- Board field `task_index` (number of finished tasks, each committed by the driver, skipped when 0): a budget or stall kill in task 2 leaves task 1 committed, and a `rework` resumes at `task_index`. After the last task the driver records `head`, checks the diff cap and moves to review once. Fix rounds and `rework` then resume the last task's session and never restart the task loop. The reviewer diff `prev_head..head` is set once, after the last task.
 - The dashboard reads the ledger marker `per-task builders` to show each task's true state (`review` after its implementer is done, `active` while dispatched, `pending` before). Jobs without the marker keep the stage-based display.
 - The driver now passes `--agent factory-builder` for the whole-plan, task and fix builders. Before this it never did.
 - Token model (modelled, not measured): a fresh agent for task k pays off when the context it would have inherited, P_k, exceeds `(9F + (n_k+9)S) / n_k` (F = fixed start of about 19K to 38K tokens, S = spec plus plan size, n_k = turns of the task). Estimated saving: about 11 percent on a 2-task run, about 17 percent on a 3-task run, slightly negative on very short plans. The main gain is accurate per-task state on the card.
@@ -165,7 +175,7 @@ Run this once after plans 01 to 08 are merged. It uses real agents, so it costs 
    - One reviewer run, then the stage moves to approve and merged. A diff that touches a risk path (auth, `src-tauri/`, `Cargo.toml` and so on) parks in needs-human instead. Run `factory approve <id>` after reading the diff.
    - The merge commit has the message `chore(factory): merge job NNN <slug>` and its second parent is the reviewed sha (`git log --merges -1 --format=%P`).
    - Plan 2 starts by itself as the next job and merges the same way.
-4. Read the cost: `factory tokens 001` and `factory tokens 002`. Each prints runs, raw and weighted tokens per agent role, and the percent of the job 001 weighted baseline. Add the two jobs and the interactive session to compare with the 2.17M weighted of job 001. Check that the reviewer role shows one run per clean round, and that no commit helper agents appear.
+4. Read the cost: `factory tokens 001` and `factory tokens 002`. Each prints runs, raw and weighted tokens per agent role, and the percent of the job 001 weighted baseline. Add the two jobs and the interactive session to compare with the 2.17M weighted of job 001. Check that the reviewer role shows one run per clean round, that no commit helper agents appear, and that the roles `committer` and `message` are listed.
 5. Pass criteria (the spec's success check): the interactive session was the only place the user spent tokens by hand and sat idle while the driver worked, the driver built in a worktree, ran the checks, ran one reviewer, merged the reviewed sha and started plan 2, the dashboard showed live stages and per-job tokens, no stage needed manual repair, `git status` is clean in the main checkout, and the logged weighted total is well below 2.17M (aim under 1.1M for a comparable small feature).
 6. Clean up with `factory cleanup <id>` for each job and confirm `git branch --list 'factory/*'` shows nothing left.
 

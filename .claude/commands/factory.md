@@ -41,6 +41,7 @@ The driver validates the plans when it creates the job, so the plans must exist 
 
 1. Invoke `superpowers:brainstorming` yourself, with the user, in this session. You may ask the user questions. Save the resulting spec as `spec.md` in the staging folder. Use no subagents.
 2. Invoke `superpowers:writing-plans` yourself. Save every plan in the staging folder as `plan-01-<slug>.md`, `plan-02-<slug>.md` and so on, not under `docs/`. Rules for each plan:
+   - no commit steps: the driver commits, so a plan that still has them is harmless but wasteful, because the builder is told to skip every commit step
    - at most 3 tasks, each ending with an independently testable deliverable, each task heading written as `### Task N: <title>`
    - the header says the plan is executed by a `factory-builder` subagent through `superpowers:executing-plans`, skipping that skill's final whole-branch review, ledger scripts and progress file
    - every task that touches yml, collection or environment data, auth, variable resolution or the crates named in `CLAUDE.md` starts with the line to read `docs/superpowers/specs/opencollection-spec-reference.md`

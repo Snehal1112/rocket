@@ -129,7 +129,7 @@ Retry once on an invalid or missing message. Then the deterministic fallback: `c
 - A new agent file `.claude/agents/factory-kb-refresher.md` (headless, same lint rules as the committer) and a `KbRefresher` port in `ports.rs` with a fake for tests. It runs with `cwd` at the main checkout and an allowed-write scope of `kb_path` only. The `factory kb-refresh` command runs it by hand.
 - `AgentSpec` gets an `env` list, passed to the child process by `claude.rs`. The committer sets `HARNESS_GATE=0`. No other agent sets env.
 - `factory-git` gets: stage everything not ignored in a worktree, list the commits in `floor..tip`, an ancestry check, and a clean-tree check. All through `git2`.
-- New engine module `commit.rs` with a `Committer` port in `ports.rs`, so tests use a fake runner. It owns the prompt text, the standing answers, the verification table, the retry and the fallback. The prompt text lives in the repo, in `.claude/factory/commit-context.md` (the factory context and standing answers only, not skill text), read from the main checkout like `config.toml`. A missing file is a failed run.
+- New engine module `commit.rs` reusing the `AgentRunner` port, so tests use `ScriptedRunner`. The message-only mode lives in `message.rs`. It owns the prompt text, the standing answers, the verification table, the retry and the fallback. The prompt text lives in the repo, in `.claude/factory/commit-context.md` (the factory context and standing answers only, not skill text), read from the main checkout like `config.toml`. A missing file is a failed run.
 - Usage of the committer is added to the job token tally and `usage.jsonl` with role `committer`.
 
 ### 6. Rules, tests and docs

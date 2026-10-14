@@ -7,6 +7,7 @@ Hooks in `.claude/harness/hooks/` enforce these (details in `.claude/harness/REA
 - No bare `git stash` or `git stash pop`. Use `git stash push -u -m <tag>`, `apply`, `list`, `drop`.
 - No `git add -A`, `--all` or `.`. Add explicit paths and commit with a pathspec.
 - Before `git commit`, staged `.ts/.tsx` run `yarn tsc --noEmit` and `yarn check`, staged `.rs` run `cargo check -j4`. `HARNESS_GATE=0` skips.
+- Factory builders never commit. The driver's committer commits, amends only above the floor, and runs with `HARNESS_GATE=0` because the driver already ran the checks.
 
 ## Orchestration convention
 
