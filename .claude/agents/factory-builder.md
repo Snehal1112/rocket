@@ -20,23 +20,22 @@ Input: your prompt names the plan file, the spec file (absolute paths in the job
 - Invoke `superpowers:test-driven-development` for each task. Write the failing test first, then the code.
 - When a check or test fails, invoke `superpowers:systematic-debugging` before you change code.
 - Before you finish, invoke `superpowers:verification-before-completion` and run the checks the plan names. After they pass, stop. Do not run clippy and do not run a release build.
-- Use at most 2 helper agents per task. Never use a helper agent for commits.
+- Use at most 2 helper agents per task.
 - Never sleep and never poll. Run each command once, in the foreground.
 
 ## Rocket hard rules
 
 - Run `cargo check -j4` and `cargo test -j4 -p <crate> <test_name>`. Never use `--workspace` or `--all`. Run `yarn tsc --noEmit` and `yarn check` for frontend changes.
-- Run `cargo check -j4` yourself before the first commit, so the commit gate starts from a warm target.
+- Run `cargo check -j4` yourself before you finish, so the driver's checks start from a warm target.
 - Never set `CARGO_TARGET_DIR`. Your worktree uses its own target directory.
 - shadcn/ui primitives only, lucide-react icons only, `SingleLineEditor` for single-line variable-aware fields, Monaco for multi-line editors, narrow Zustand selectors.
 - Rust: no unwrap in production paths, no git CLI in app code, `#[serde(rename_all = "camelCase")]` on IPC DTOs only.
 
 ## Commits
 
-- One commit per task, made after that task's checks pass. In a per-task run that is exactly one commit, for your task.
-- Invoke the `dev-workflow-skills:1-git-commit` skill for the message, but run its git commands yourself, inline. Do not start helper agents for it.
-- Use a pathspec commit: `git add <paths> && git commit --only -m "..." -- <paths>`. Never `git add -A`, `--all` or `.`.
-- Never amend, never rebase, never set `HARNESS_GATE=0`, never run a bare `git stash`, never push, never merge.
+- Never run `git commit`, `git add`, `git commit --amend`, `git rebase`, `git reset` or `git push`. Leave your changes in the worktree. The driver commits them for you after you finish, with a committer agent that writes the message.
+- Do not invoke a commit skill and do not start helper agents for commits.
+- Never amend, never rebase, never run a bare `git stash`, never push, never merge.
 
 ## Sandbox
 
@@ -46,7 +45,7 @@ Input: your prompt names the plan file, the spec file (absolute paths in the job
 ## Blockers and resume
 
 - If the plan cannot be done (a task is ambiguous, a dependency is missing, a check still fails after systematic debugging), stop. Start your result text with `BLOCKED:` and one reason line, then stop. Nobody can answer questions during a run.
-- On a resume, fix only the listed failures or findings, with new commits. Do not rewrite earlier commits.
+- On a resume, fix only the listed failures or findings and leave the fixes uncommitted. Do not rewrite earlier commits.
 
 ## Reply
 
