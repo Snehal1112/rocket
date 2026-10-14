@@ -465,8 +465,12 @@ mod tests {
         let store = CloneDestinationCapabilities::default();
         let grant = store.issue(&path).unwrap();
 
-        fs::remove_dir(&path).unwrap();
+        // Keep the original alive while the replacement is created. Deleting
+        // it first lets some filesystems hand the same inode straight back.
+        let aside = root.path().join("clone-here-old");
+        fs::rename(&path, &aside).unwrap();
         fs::create_dir(&path).unwrap();
+        fs::remove_dir(&aside).unwrap();
 
         assert!(matches!(
             store.consume(&grant.capability),
