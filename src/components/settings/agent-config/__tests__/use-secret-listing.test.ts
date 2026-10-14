@@ -109,6 +109,27 @@ describe('useSecretListing', () => {
     expect(fetchMock()).toHaveBeenLastCalledWith('c1', 'prod');
   });
 
+  it('restarts the wait on every keystroke', async () => {
+    vi.useFakeTimers();
+    fetchMock().mockResolvedValue([]);
+    const { rerender } = start({ connectionId: 'c1', scope: 'p', enabled: true });
+    rerender({ connectionId: 'c1', scope: 'pr', enabled: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    rerender({ connectionId: 'c1', scope: 'pro', enabled: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(fetchMock()).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+    expect(fetchMock()).toHaveBeenLastCalledWith('c1', 'pro');
+    expect(fetchMock()).not.toHaveBeenCalledWith('c1', 'pr');
+  });
+
   it('loads at once when the connection changes', async () => {
     vi.useFakeTimers();
     fetchMock().mockResolvedValue([]);
