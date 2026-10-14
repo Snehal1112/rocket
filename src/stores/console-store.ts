@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { HttpExchangeText } from '@/lib/console-redaction';
 
 const MAX_ENTRIES = 200;
 /** The backend log buffer is separate so logs never push out other entries. */
@@ -20,6 +21,10 @@ export interface HttpConsoleEntry {
   responseBody: string;
   /** Names the source of the entry, such as a Flow node. */
   requestName?: string;
+  /** Masked copy fixed at send time. Absent for rows that are not masked, such as Flow rows. */
+  masked?: HttpExchangeText;
+  /** True when the secret set could not be built for this row. */
+  uncertain?: boolean;
 }
 
 export interface ScriptLogEntry {

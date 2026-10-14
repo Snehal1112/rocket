@@ -1,3 +1,4 @@
+import { buildMaskOptions, collectSecretValues, maskHttpExchange } from '@/lib/console-redaction';
 import { dispatchSend, type ResolvedGraphQl } from '@/lib/dispatch-send';
 import { inheritedHeaders, loadFolderChain } from '@/lib/folder-inheritance';
 import { parseGraphQlResponse } from '@/lib/graphql-response';
@@ -7,7 +8,7 @@ import { findTabInTree } from '@/lib/pane-utils';
 import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
-import type { Environment, RequestOptions } from '@/lib/tauri-api';
+import type { Environment, RequestOptions, Variable } from '@/lib/tauri-api';
 import {
   type AssertionEntry,
   type Auth,
@@ -232,6 +233,10 @@ export interface ResolvedRequestFields {
   environmentName: string | undefined;
   requestPath: string | undefined;
   graphql?: ResolvedGraphQl;
+  /** Secret values of this send, for the Console masks. */
+  secretValues?: string[];
+  /** True when the environments could not be read from the cache. */
+  secretsUncertain?: boolean;
 }
 
 // The execution options a request's settings ask for. One place builds them, so a single send,
@@ -244,6 +249,29 @@ export function toApiOptions(settings: RequestSettings | undefined): RequestOpti
     maxRedirects: settings?.maxRedirects,
     encodeUrl: settings?.encodeUrl ?? true,
   };
+}
+
+// Secret variables of the active environments, for the Console masks. An environment that
+// should be there but is not in the query cache makes the result uncertain instead of empty.
+function getSecretScope(collection?: string): { variables: Variable[]; uncertain: boolean } {
+  const variables: Variable[] = [];
+  let uncertain = false;
+  const { activeEnvId, activeCollection } = useEnvStore.getState();
+  const source = collection ?? activeCollection;
+  if (activeEnvId && source) {
+    const envs = getQueryClient().getQueryData<Environment[]>(environmentKeys.collection(source));
+    const env = envs?.find((e) => e.name === activeEnvId);
+    if (env) variables.push(...env.variables);
+    else uncertain = true;
+  }
+  const globalEnvName =
+    getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
+  if (globalEnvName) {
+    const env = getQueryClient().getQueryData<Environment>(environmentKeys.global(globalEnvName));
+    if (env) variables.push(...env.variables);
+    else uncertain = true;
+  }
+  return { variables, uncertain };
 }
 
 // Builds the fully-resolved request fields for a given collection +
@@ -309,6 +337,13 @@ export async function resolveRequestFieldsForPath(
     folderVars,
     requestVars,
   });
+  const secretScope = getSecretScope(collection);
+  const secretValues = collectSecretValues([
+    secretScope.variables,
+    collectionVars,
+    folderVars,
+    requestVars,
+  ]);
   // A name the pre-request script sets with rok.setVar stays a placeholder in the request
   // fields, so the backend fills it with the script's value (runtime wins) after the script.
   const runsScript =
@@ -409,6 +444,8 @@ export async function resolveRequestFieldsForPath(
     environmentName: useEnvStore.getState().activeEnvId ?? undefined,
     requestPath,
     graphql: resolvedGraphql,
+    secretValues,
+    secretsUncertain: secretScope.uncertain,
   };
 }
 
@@ -665,11 +702,18 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     environmentName,
     requestPath,
     graphql: resolvedGraphql,
+    secretValues: resolvedSecretValues,
+    secretsUncertain,
   } = await resolveRequestFields(tabId, effectiveRequest, true);
 
   const globalEnvName = getActiveGlobalEnvName();
   const requestName = found?.tab.title ?? resolvedUrl;
   const requestGuardPolicy = await getActiveWorkspaceRequestGuardPolicy();
+  const maskOptions = buildMaskOptions(
+    resolvedAuth,
+    resolvedSecretValues ?? [],
+    secretsUncertain ?? false,
+  );
 
   try {
     const requestInput: ExecuteRequestInput = {
@@ -754,23 +798,41 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       ...authHeaders.filter((h) => !explicitKeys.has(h.key.toLowerCase())),
       ...effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
     ];
+    const consoleUrl = applyPathParams(resolvedUrl, resolvedPathParams);
+    const consoleRequestBody = isGraphQl
+      ? JSON.stringify({
+          query: resolvedGraphql?.query,
+          operationName: effectiveRequest.graphql?.operationName,
+          variables: resolvedGraphql?.variables,
+        })
+      : (resolvedBody?.content ?? '');
+    const consoleResponseHeaders = result.headers.map((h) => ({ key: h.key, value: h.value }));
+    const consoleResponseBody = result.isBinary
+      ? `(binary, ${result.sizeBytes} bytes)`
+      : result.body;
+    const redaction = maskHttpExchange(
+      {
+        url: consoleUrl,
+        requestHeaders: consoleRequestHeaders,
+        requestBody: consoleRequestBody,
+        responseHeaders: consoleResponseHeaders,
+        responseBody: consoleResponseBody,
+      },
+      maskOptions,
+    );
     useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
-      url: applyPathParams(resolvedUrl, resolvedPathParams),
+      url: consoleUrl,
       status: result.status,
       statusText: result.statusText,
       durationMs: result.durationMs,
       sizeBytes: result.sizeBytes,
       requestHeaders: consoleRequestHeaders,
-      requestBody: isGraphQl
-        ? JSON.stringify({
-            query: resolvedGraphql?.query,
-            operationName: effectiveRequest.graphql?.operationName,
-            variables: resolvedGraphql?.variables,
-          })
-        : (resolvedBody?.content ?? ''),
-      responseHeaders: result.headers.map((h) => ({ key: h.key, value: h.value })),
-      responseBody: result.isBinary ? `(binary, ${result.sizeBytes} bytes)` : result.body,
+      requestBody: consoleRequestBody,
+      responseHeaders: consoleResponseHeaders,
+      responseBody: consoleResponseBody,
+      masked: redaction.masked,
+      uncertain: redaction.uncertain,
     });
     // Forward script console.log/warn/error entries to the Console panel, in
     // one update so they keep their original chronological order (a per-entry
@@ -812,17 +874,32 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       sizeBytes: msg.length,
       activeView: 'raw',
     });
+    const errorUrl = applyPathParams(resolvedUrl, resolvedPathParams);
+    const errorHeaders = effectiveHeaders.map((h) => ({ key: h.key, value: h.value }));
+    const errorBody = resolvedBody?.content ?? '';
+    const errorRedaction = maskHttpExchange(
+      {
+        url: errorUrl,
+        requestHeaders: errorHeaders,
+        requestBody: errorBody,
+        responseHeaders: [],
+        responseBody: msg,
+      },
+      maskOptions,
+    );
     useConsoleStore.getState().addHttpEntry({
       method: effectiveRequest.method,
-      url: applyPathParams(resolvedUrl, resolvedPathParams),
+      url: errorUrl,
       status: 0,
       statusText: 'Error',
       durationMs: 0,
       sizeBytes: msg.length,
-      requestHeaders: effectiveHeaders.map((h) => ({ key: h.key, value: h.value })),
-      requestBody: resolvedBody?.content ?? '',
+      requestHeaders: errorHeaders,
+      requestBody: errorBody,
       responseHeaders: [],
       responseBody: msg,
+      masked: errorRedaction.masked,
+      uncertain: errorRedaction.uncertain,
     });
   }
 }
