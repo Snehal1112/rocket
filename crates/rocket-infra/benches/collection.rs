@@ -7,7 +7,7 @@ use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rocket_collection::CollectionRepository;
-use support::{generate, generate_collections, Size};
+use support::{generate, generate_collections, generate_deep, Size};
 
 fn bench_tree(c: &mut Criterion) {
     let mut group = c.benchmark_group("collection_tree");
@@ -31,6 +31,17 @@ fn bench_tree(c: &mut Criterion) {
             b.iter(|| black_box(fx.repo.get(&fx.collection).expect("full tree")))
         });
     }
+    group.finish();
+}
+
+fn bench_tree_deep(c: &mut Criterion) {
+    // 500 folders with 5 requests each: the shape the per-folder savings are measured on.
+    let fixture = generate_deep();
+    let mut group = c.benchmark_group("collection_tree");
+    group.sample_size(10);
+    group.bench_with_input(BenchmarkId::new("get_summaries", "deep"), &fixture, |b, fx| {
+        b.iter(|| black_box(fx.repo.get_summaries(&fx.collection).expect("summaries")))
+    });
     group.finish();
 }
 
@@ -86,5 +97,5 @@ fn bench_validate_path(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_tree, bench_list, bench_get_request, bench_validate_path);
+criterion_group!(benches, bench_tree, bench_tree_deep, bench_list, bench_get_request, bench_validate_path);
 criterion_main!(benches);
