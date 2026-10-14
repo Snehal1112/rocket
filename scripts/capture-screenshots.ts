@@ -1,10 +1,12 @@
 /**
  * Automated screenshot capture for the Rocket user manual.
  *
- * Starts the Vite dev server, navigates through each feature screen,
- * and captures screenshots in both light and dark mode.
+ * Reuses the dev server if one already answers at BASE_URL, otherwise starts
+ * Vite. It then navigates through each feature screen and captures
+ * screenshots in both light and dark mode.
  *
  * Usage: npx tsx scripts/capture-screenshots.ts
+ * Set ROCKET_URL to point at a different server.
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
@@ -15,7 +17,7 @@ import { type Browser, chromium, type Page } from 'playwright';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const BASE_URL = 'http://localhost:1420';
+const BASE_URL = process.env.ROCKET_URL ?? 'http://localhost:1420';
 const SCREENSHOT_DIR = resolve(__dirname, '../docs/manual/screenshots');
 const VIEWPORT = { width: 1440, height: 900 };
 
@@ -32,6 +34,16 @@ async function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error(`Dev server did not respond at ${url} within ${timeoutMs}ms`);
+}
+
+// Check once whether a server already answers at the URL.
+async function isServerUp(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 // Toggle dark mode by adding/removing the class on documentElement.
@@ -156,23 +168,28 @@ async function main(): Promise<void> {
   let browser: Browser | null = null;
 
   try {
-    // Start Vite dev server.
-    console.log('Starting Vite dev server...');
-    devServer = spawn('npx', ['vite', '--port', '1420'], {
-      cwd: resolve(__dirname, '..'),
-      stdio: 'pipe',
-      shell: true,
-    });
+    if (await isServerUp(BASE_URL)) {
+      // Reuse the running server and leave it running afterwards.
+      console.log(`Using the app already running at ${BASE_URL}.\n`);
+    } else {
+      console.log('Starting Vite dev server...');
+      const port = new URL(BASE_URL).port || '1420';
+      devServer = spawn('npx', ['vite', '--port', port], {
+        cwd: resolve(__dirname, '..'),
+        stdio: 'pipe',
+        shell: true,
+      });
 
-    devServer.stderr?.on('data', (data) => {
-      const msg = data.toString();
-      if (msg.includes('error') || msg.includes('Error')) {
-        console.error('Vite error:', msg);
-      }
-    });
+      devServer.stderr?.on('data', (data) => {
+        const msg = data.toString();
+        if (msg.includes('error') || msg.includes('Error')) {
+          console.error('Vite error:', msg);
+        }
+      });
 
-    await waitForServer(BASE_URL);
-    console.log('Dev server ready.\n');
+      await waitForServer(BASE_URL);
+      console.log('Dev server ready.\n');
+    }
 
     // Launch browser.
     browser = await chromium.launch({ headless: true });
