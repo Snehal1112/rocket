@@ -45,9 +45,18 @@ describe('SegmentedControl', () => {
   });
 
   // Radix moves focus on a timer and selects only while the arrow key is held, so hold it.
-  async function press(key: string, assertion: () => void) {
+  async function press(
+    onValue: (value: Source) => void,
+    key: string,
+    expectedValue: Source,
+    expectedLabel: string,
+  ) {
     await userEvent.keyboard(`{${key}>}`);
-    await waitFor(assertion);
+    await waitFor(() => {
+      expect(onValue).toHaveBeenLastCalledWith(expectedValue);
+      expect(screen.getByRole('radio', { name: expectedLabel })).toBeChecked();
+      expect(screen.getByRole('radio', { name: expectedLabel })).toHaveFocus();
+    });
     await userEvent.keyboard(`{/${key}}`);
   }
 
@@ -56,10 +65,10 @@ describe('SegmentedControl', () => {
     render(<Controlled onValue={onValue} />);
     screen.getByRole('radio', { name: 'Secret manager' }).focus();
 
-    await press('ArrowRight', () => () => expect(onValue).toHaveBeenLastCalledWith('env'));
-    await press('ArrowRight', () => () => expect(onValue).toHaveBeenLastCalledWith('keychain'));
-    await press('ArrowRight', () => () => expect(onValue).toHaveBeenLastCalledWith('vault'));
-    await press('ArrowLeft', () => () => expect(onValue).toHaveBeenLastCalledWith('keychain'));
+    await press(onValue, 'ArrowRight', 'env', 'Environment');
+    await press(onValue, 'ArrowRight', 'keychain', 'Keychain');
+    await press(onValue, 'ArrowRight', 'vault', 'Secret manager');
+    await press(onValue, 'ArrowLeft', 'keychain', 'Keychain');
   });
 
   it('styles the track and the selected segment with tokens', () => {
