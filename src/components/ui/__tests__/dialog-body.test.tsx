@@ -17,6 +17,11 @@ describe('DialogBody', () => {
     expect(body).toHaveClass('overflow-auto', 'flex-1', 'min-h-0');
   });
 
+  it('leaves room for the focus ring of full-width fields', () => {
+    render(<DialogBody data-testid='body'>content</DialogBody>);
+    expect(screen.getByTestId('body')).toHaveClass('-mx-1', 'px-1');
+  });
+
   it('merges a custom className and forwards props', () => {
     render(
       <DialogBody data-testid='body' className='space-y-4' id='b1'>

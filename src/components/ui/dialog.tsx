@@ -70,12 +70,12 @@ function DialogFooter({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-/** Scrolling region between header and footer. Give DialogContent flex flex-col and a max height. */
+/** Scrolling region between header and footer. Give DialogContent flex flex-col and a max height. The small inset keeps focus rings from being clipped. */
 function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       data-slot='dialog-body'
-      className={cn('min-h-0 flex-1 overflow-auto', className)}
+      className={cn('-mx-1 min-h-0 flex-1 overflow-auto px-1', className)}
       {...props}
     />
   );

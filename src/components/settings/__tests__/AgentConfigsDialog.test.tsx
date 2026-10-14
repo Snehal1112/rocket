@@ -253,6 +253,21 @@ describe('AgentConfigsDialog', () => {
       expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
     });
 
+    it('points the disabled Save at the help line', async () => {
+      const user = await openEdit();
+      await user.clear(await screen.findByLabelText('Command'));
+      const save = screen.getByRole('button', { name: 'Save' });
+      expect(save).toBeDisabled();
+      const helpId = save.getAttribute('aria-describedby');
+      expect(helpId).toBeTruthy();
+      expect(document.getElementById(helpId ?? '')).toHaveTextContent(/command/i);
+    });
+
+    it('has no description on Save while it is enabled', async () => {
+      await openEdit();
+      expect(screen.getByRole('button', { name: 'Save' })).not.toHaveAttribute('aria-describedby');
+    });
+
     it('lists the missing credential parts of a new agent', async () => {
       vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
       const user = await openAdd();
@@ -799,6 +814,21 @@ describe('AgentConfigsDialog', () => {
       await clickSave(user);
       await waitFor(() => expect(api.saveAgentConfig).toHaveBeenCalledTimes(1));
       expect(api.setAgentCredential).not.toHaveBeenCalled();
+      expect(api.clearAgentCredential).not.toHaveBeenCalled();
+    });
+
+    it('replaces a saved keychain credential without clearing it first', async () => {
+      vi.mocked(api.listAgentConfigs).mockResolvedValue([
+        { ...claude, credentialSource: 'keychain' },
+      ]);
+      vi.mocked(api.hasAgentCredential).mockResolvedValue(true);
+      vi.mocked(api.setAgentCredential).mockResolvedValue(undefined);
+      const user = await openEdit();
+      await user.click(await screen.findByRole('button', { name: /^replace$/i }));
+      await user.type(screen.getByPlaceholderText('Paste the token'), FAKE);
+      await clickSave(user);
+      await waitFor(() => expect(api.setAgentCredential).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(api.setAgentCredential).mock.calls[0]).toEqual(['agent-1', FAKE]);
       expect(api.clearAgentCredential).not.toHaveBeenCalled();
     });
 

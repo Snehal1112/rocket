@@ -45,6 +45,7 @@ interface AgentConfigsDialogProps {
 }
 
 const NEW_AGENT_KEY = 'new-agent';
+const SAVE_HELP_ID = 'agent-save-help';
 const FIELD_ERRORS_HELP = 'Fix the highlighted fields.';
 
 // Maps the known backend rule violation to a friendlier text without echoing input.
@@ -329,7 +330,11 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         </DialogBody>
         {editing && (
           <DialogFooter>
-            {saveHelp && <p className='mr-auto text-xs text-muted-foreground'>{saveHelp}</p>}
+            {saveHelp && (
+              <p id={SAVE_HELP_ID} className='mr-auto text-xs text-muted-foreground'>
+                {saveHelp}
+              </p>
+            )}
             <Button variant='outline' size='sm' onClick={cancelEdit} disabled={saving}>
               Cancel
             </Button>
@@ -338,6 +343,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
               onClick={() => void handleSave()}
               disabled={saving || saveMutation.isPending || !canSave}
               aria-busy={saving}
+              aria-describedby={saveHelp ? SAVE_HELP_ID : undefined}
             >
               {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
               Save
