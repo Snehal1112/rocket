@@ -70,6 +70,17 @@ function DialogFooter({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
+/** Scrolling region between header and footer. Give DialogContent flex flex-col and a max height. */
+function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      data-slot='dialog-body'
+      className={cn('min-h-0 flex-1 overflow-auto', className)}
+      {...props}
+    />
+  );
+}
+
 function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
@@ -95,6 +106,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
