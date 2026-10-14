@@ -23,3 +23,16 @@ Run `strace` three times and keep the smallest `total` row, because start-up of 
 | criterion `get_summaries/deep` time | [50.913 ms 51.185 ms 51.453 ms] |
 
 This baseline is informational. The gate is the paired before and after run of the second plan, done in one worktree in one sitting.
+
+## Result of the change (paired run: one worktree, one sitting, Linux)
+
+The "before" run used the `tree.rs` and `paths.rs` of the merge base with `main`, the "after" run used the changed files. Criterion compared the two with `--save-baseline before` and `--baseline before`.
+
+| measure | before | after |
+|---|---|---|
+| `strace` total calls, lowest of 3 | 14087 | 7583 |
+| criterion `get_summaries/deep` middle estimate | 50.540 ms | 47.046 ms |
+
+Criterion change line: `change: [−13.599% −10.443% −7.3361%] (p = 0.00 < 0.05)` and verdict line: `Performance has improved.`
+
+Gate: the `strace` total dropped and criterion reports an improvement outside its noise band: yes (14087 to 7583 calls, 50.540 ms to 47.046 ms, p = 0.00).
