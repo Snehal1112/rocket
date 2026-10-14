@@ -81,11 +81,11 @@ Whether headless agents can read the KB through `--add-dir` is not proven yet. T
 
 - Config: `kb_path` (see above), `kb_model` (default `sonnet`), `kb_budget_weighted` (default 150000 per run) and `kb_auto_commit`. `kb_auto_commit` is parsed and reserved. Automatic KB commits are not built, so the KB edits always stay uncommitted in the KB folder.
 - After a merge lands, the driver runs the `factory-kb-refresher` agent. The post-merge refresh runs inside the merge step, so the merge call returns after it. The agent runs in the main checkout with the KB folder as `--add-dir`, runs the `kb-refresh` skill (its own subagents through the Agent tool, never `Workflow`) and replies with the pages changed, one per line, or `No relevant changes`.
-- What it may touch: Edit and Write are not path-scoped. The prompt tells it to edit only the KB folder, and the guard below checks the main checkout. Files the checkout ignores are not covered. Bash is read-only git (`git log`, `diff`, `show`, `rev-parse`, `merge-base`, `status`, and `git -C`) plus `date` and `ls`.
+- What it may touch: the run uses permission mode `dontAsk`, so the allowlist is binding. Edit and Write are scoped to the KB folder (`Edit(//<kb path>/**)`, `Write(//<kb path>/**)`). Bash is read-only git (`git log`, `diff`, `show`, `rev-parse`, `merge-base`, `status`), the same with `git -C <repo root>` tied to the main checkout path, plus `date` and `ls`. The guard below checks the main checkout fingerprint (HEAD, every ref, and the content of non-ignored changes). Ignored paths are not covered. The dangerous case is `.claude/worktrees/`, where live job worktrees sit, so a change there goes unnoticed.
 - The guard: the driver takes a fingerprint of the main checkout before and after the run (tip, status entries and file contents). A difference is `Tampered`, whatever the reply says. The fingerprint can show a false `Tampered` if you edit the main checkout while a refresh runs. It fails closed, and a manual run clears it.
-- The stop marker: `Tampered` writes `.superpowers/factory/kb-stopped`, and automatic refreshes are skipped while it exists (a ledger line says so). Clear it by running `factory kb-refresh --job <id>` after you looked, or delete the file. A manual run clears the marker only when it ends `Refreshed` or `UpToDate`.
+- The stop marker: `Tampered` writes `.superpowers/factory/kb-stopped`, and automatic refreshes are skipped while it exists (a ledger line says so). Clear it by running `factory kb-refresh --job <id>` after you looked, or delete the file. A false `Tampered` is cleared only by a manual run that ends `Refreshed` or `UpToDate`.
 - Failures never park or unmerge a job. A failed, over-budget or blocked run writes a ledger line `kb refresh failed, <reason>`. Success writes `kb refreshed, pages: ...` or `kb up to date`.
-- `factory kb-refresh --job <id>` reruns it by hand for a merged job. `--job` is required, and the command refuses while the job's lease is live. Do not run it while a driver run is live.
+- `factory kb-refresh --job <id>` reruns it by hand. `--job` is required, the command refuses unless the job is in stage `merged`, and it refuses while the job's lease is live. Do not run it while a driver run is live.
 - Tokens: the run is logged with role `kb`, so `factory tokens <id>` shows a `kb` row (and a `message` row for commit messages).
 
 First real run checklist: after merge, set `kb_path = "~/data/rocket/Nl-knowledge-base/rocketapi"` and run `factory kb-refresh --job <a merged job id>` once. Check that:
@@ -94,7 +94,8 @@ First real run checklist: after merge, set `kb_path = "~/data/rocket/Nl-knowledg
 2. the agent can read and write the KB through `--add-dir`,
 3. the Agent tool fan-out works,
 4. the fingerprint guard stays quiet,
-5. `factory tokens` shows the weighted cost of the `kb` role.
+5. `factory tokens` shows the weighted cost of the `kb` role,
+6. the refresher can read `projects.json` one folder above the KB folder (the kb-refresh skill step 1). If not, the prompt must say the project is already resolved (it does now, so check the run continues with the given paths).
 
 Record that number here, then adjust `kb_budget_weighted`. Measured `kb` cost: not measured yet.
 

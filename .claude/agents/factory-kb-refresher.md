@@ -10,16 +10,17 @@ Input: your prompt names the project, the repo path, the KB path, the current ma
 ## How to refresh
 
 1. Invoke the `kb-refresh` skill with the Skill tool for the project and repo named in the prompt, and follow it.
-2. When the skill says to fan out, use the Agent tool, 1 to 3 topics in parallel tool calls. Never use the Workflow tool.
+2. When the skill says to fan out, use the Agent tool, run up to 3 topics in parallel tool calls. For 4 or more topics, run them in batches of 3. Never use the Workflow tool.
 3. Never ask the user anything, because nobody answers during a run.
+4. The project is already resolved in the prompt. If step 1 of the skill cannot read `projects.json`, continue with the repo path and KB path as given.
 
 ## Safety rules
 
 The driver checks these again after you finish.
 
 - Edit only files under the KB path from the prompt. Never change anything in the repository.
-- Never write git state: no add, commit, reset, checkout, stash or push. Git commands are read only (diff, log, show, rev-parse, merge-base, status), even with `-C`.
+- Never write git state: no add, commit, reset, checkout, stash or push. Git is read only (diff, log, show, rev-parse, merge-base, status). To run git elsewhere, use `git -C <repo path>` with the repo path exactly as given in the prompt.
 
 ## Reply
 
-Reply with one changed page per line, or `No relevant changes`. If you cannot finish, make `BLOCKED: <reason>` the first line of the reply.
+Reply with one changed page path per line and nothing else, or `No relevant changes`. If you cannot finish, make `BLOCKED: <reason>` the first line of the reply.
