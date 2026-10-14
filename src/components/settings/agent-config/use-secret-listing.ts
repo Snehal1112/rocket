@@ -65,7 +65,8 @@ export function useSecretListing(args: { connectionId: string; scope: string; en
   }, []);
 
   useEffect(() => {
-    if (!enabled || connectionId === '') {
+    // An empty settled scope is never fetched, even while the typed scope is still catching up.
+    if (!enabled || connectionId === '' || settledScope === '') {
       generation.current += 1;
       setState(IDLE);
       return;
