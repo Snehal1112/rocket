@@ -49,7 +49,8 @@ commands = ["cargo check -j4"]
 
 [[checks]]
 paths = ["src/**"]
-commands = ["yarn tsc --noEmit", "yarn check", "yarn test"]
+# Half the workers: the full suite saturates the CPU and heavy dialog tests then time out.
+commands = ["yarn tsc --noEmit", "yarn check", "yarn test --run --maxWorkers=50%"]
 
 [[checks]]
 paths = ["tools/factory/**"]
