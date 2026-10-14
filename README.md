@@ -23,13 +23,18 @@
 
 - **File-based collections** stored as OpenCollection YAML on disk
 - **Multi-workspace** support with embedded and external collections
-- **Import from Postman or Bruno** — collections, environments, and zipped exports, with optional new-workspace creation
+- **Multiple protocols** — HTTP, GraphQL (schema introspection and subscriptions), gRPC, and WebSocket requests in the same collection tree
+- **Import from Postman, Bruno or WSDL** — collections, environments, and zipped exports, with auto-detection and optional new-workspace creation
 - **Full git integration** — staging, commits, branches, merges, push/pull/fetch (force-with-lease), stash, remote management, SSH key discovery, and real per-file conflict resolution, all via `libgit2` (no shell-outs)
-- **Collection Runner** — execute a whole collection or folder sequentially with live streamed progress and a results summary
-- **Scripting & testing** — pre-request/post-response/test scripts in Monaco with real TypeScript IntelliSense for the request/response API, a snippet sidebar, plus a visual no-code assertions builder for scriptless checks
-- **Environment variables** with `{{variable}}` template syntax, secret masking, and optional external secret-manager integration for pulling values from a vault
+- **Collection Runner** — execute a whole collection or folder sequentially with live streamed progress and a results summary. History entries carry a run-source badge (manual, runner, load test, flow, agent) you can filter on
+- **Scripting & testing** — pre-request/post-response/test scripts in Monaco with real TypeScript IntelliSense for the `rok.*` API, a snippet sidebar, shared `.js` script files you can load with a local `require()`, plus a visual no-code assertions builder for scriptless checks
+- **Flow** — a visual workflow builder on a canvas. Wire saved requests together with Input, If, Switch, Transform, Auth, Wait-for-callback and Output nodes, run a whole flow or just part of it, and review per-step traces and saved run history. Flows are plain YAML files inside the collection
+- **AI Assistant** — a workspace chat panel that connects to an agent over ACP (Claude, Gemini, or a generic agent). The agent can read your workspace through MCP tools and propose changes (new requests and folders, script edits, renames, moves, environment variables, folder settings). Nothing is written until you accept each proposal. Conversations are stored per workspace with secrets masked, and agent credentials come from the vault, an environment variable, or the OS keychain
+- **Collection trust** — a trust gate shows which capabilities a collection requests (such as `{{process.env}}` access) and which you have allowed
+- **Folder settings** — a per-folder tab for headers, auth, variables, docs, and scripts, stored in `folder.yml` and inherited by everything beneath the folder
+- **Environment variables** with `{{variable}}` template syntax, secret masking, and optional external secret-manager integration (RocketVault and Azure Key Vault) for pulling values from a vault
 - **Multi-tab editor** with split panes, auto-save, and keyboard-driven navigation
-- **Authentication** — Basic, Bearer, API Key, OAuth 2.0 (client credentials grant), and AWS SigV4
+- **Authentication** — Basic, Bearer, API Key, Digest, NTLM, WSSE, OAuth 1.0, OAuth 2.0 (client credentials, password, authorization code with PKCE, and implicit grants), and AWS SigV4, plus mTLS client certificates and proxy support. Requests and folders can inherit auth from their parent
 - **Load testing** — phase-based (ramp-up/hold/ramp-down) or fixed-concurrency/RPS runs, a live dashboard with latency/throughput/error-rate/concurrency charts and percentile stats, and export to HTML/CSV/JSON/PDF
 - **Monaco editor** for JSON/XML/text bodies with syntax highlighting and theme sync
 - **Contract Lock** — attach SLA/API contracts to collections or folders, track drift with a changelog, preview PDFs natively, and export contracts as OpenAPI YAML
@@ -107,13 +112,13 @@ yarn build
 yarn tsc --noEmit
 
 # Rust
-cargo check
+cargo check -j4
 
 # Frontend tests
 yarn test
 
-# Rust tests
-cargo test
+# Rust tests (target a crate; avoid --workspace)
+cargo test -j4 -p <crate>
 ```
 
 ## Architecture
@@ -131,11 +136,16 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
 | `rocket-environment` | Environment variables and `{{var}}` resolution |
 | `rocket-history` | Request execution history |
 | `rocket-workspace` | Workspace domain model |
-| `rocket-http` | HTTP executor, auth schemes, load testing |
+| `rocket-http` | HTTP executor, auth schemes, WebSocket, load testing |
+| `rocket-grpc` | gRPC engine: `.proto` parsing and protobuf JSON conversion |
+| `rocket-flow` | Flow workflow model, validation and lint |
+| `rocket-scripting` | JS scripting contract (`ScriptEngine` trait and script types) |
+| `rocket-acp` | AI Assistant: ACP agent sessions, proposals, stored conversations |
+| `rocket-audit` | Tamper-evident audit log |
 | `rocket-git` | Git operations via libgit2 |
 | `rocket-app` | Orchestration services |
 | `rocket-infra` | Filesystem implementations |
-| `rocket-import` | Bruno & Postman collection importer |
+| `rocket-import` | Bruno, Postman and WSDL importer |
 | `src-tauri` | Tauri commands and app initialization |
 
 ### Frontend Stack
@@ -160,6 +170,8 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
       my-api/
         opencollection.yml     # Collection settings
         get-users.yml          # Request files
+        flows/
+          onboarding.yml       # Flow definitions
         auth/
           login.yml
         .rocket/
@@ -198,20 +210,25 @@ Contracts are stored as YAML files under `.rocket/contracts/` inside the collect
 ```
 src/                           # React frontend
   components/
+    assistant/                 # AI Assistant panel, composer, proposals
     audit/                     # Security/compliance audit log UI
-    collections/               # Collection sidebar tree
+    collections/               # Collection sidebar tree, folder settings
     contract/                  # Contract status badge
     contracts/                 # Contract Lock workflow (list, diff, changelog, export)
     editor/                    # Monaco wrapper, themes, scripting IntelliSense
     environments/              # Environment editor + external secret-manager binding
+    flow/                      # Flow canvas, node types, run history
     git/                       # Git UI panel
+    grpc/                      # gRPC request UI
     history/                   # Request history panel
     import/                    # Postman/Bruno import dialog
     layout/                    # App shell, sidebar, status bar
     panes/                     # Tab system and editor groups
     request/                   # Request editor, params, auth, body, scripts, runner, load testing
     response/                  # Response viewer
-    settings/                  # External secret-manager connections
+    scripts/                   # Shared script files
+    settings/                  # External secret-manager connections and agents
+    ui/                        # shadcn/ui primitives
     workspace/                 # Workspace overview, environments
   hooks/                       # Custom React hooks
   lib/                         # Utilities, Tauri API bridge
@@ -227,7 +244,12 @@ crates/                        # Rust backend
   rocket-git/
   rocket-app/
   rocket-infra/
-  rocket-import/                # Bruno & Postman importers
+  rocket-import/                # Bruno, Postman and WSDL importers
+  rocket-grpc/
+  rocket-flow/
+  rocket-scripting/
+  rocket-acp/
+  rocket-audit/
 src-tauri/                     # Tauri shell
   src/
     commands/                  # IPC command handlers
