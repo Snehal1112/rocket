@@ -38,4 +38,5 @@ coverage/
 .yarn/install-state.gz
 .worktrees/
 .claude/worktrees/
+.claude/settings.local.json
 .gstack/
