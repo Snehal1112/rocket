@@ -13,9 +13,9 @@ use super::FsCollectionRepo;
 /// Read UID from YAML metadata (opencollection.yml or folder.yml).
 /// Falls back to legacy .uid file, migrating the value into YAML.
 pub(super) fn read_uid_from_yaml(dir: &Path) -> String {
-    // Try opencollection.yml first (collection root).
+    // Try opencollection.yml first (collection root). A missing file is a failed read.
     let oc_path = dir.join("opencollection.yml");
-    if oc_path.exists() {
+    {
         if let Ok(content) = fs::read_to_string(&oc_path) {
             if let Ok(mut oc) = serde_yaml::from_str::<OcCollection>(&content) {
                 if let Some(ref uid) = oc.uid {
@@ -38,7 +38,7 @@ pub(super) fn read_uid_from_yaml(dir: &Path) -> String {
 
     // Try folder.yml (subfolder).
     let folder_path = dir.join("folder.yml");
-    if folder_path.exists() {
+    {
         if let Ok(content) = fs::read_to_string(&folder_path) {
             if let Ok(mut oc_folder) = parse_folder_yml(&content) {
                 if let Some(ref uid) = oc_folder.info.uid {

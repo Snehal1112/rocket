@@ -6,7 +6,7 @@ use rocket_collection::{CollectionItem, CollectionRepository, Folder};
 use rocket_shared::types::HttpMethod;
 use tempfile::TempDir;
 
-use super::tree::build_tree;
+use super::tree::{build_tree, read_order_list};
 use super::FsCollectionRepo;
 
 fn setup() -> (TempDir, FsCollectionRepo) {
@@ -419,4 +419,33 @@ fn walk_of_a_missing_folder_is_the_empty_folder() {
     assert!(folder.items.is_empty());
     assert_eq!(folder.name, "no-such-folder");
     assert_eq!(folder.dir_name.as_deref(), Some("no-such-folder"));
+}
+
+#[test]
+fn read_order_list_prefers_yml_and_falls_back_to_json_only_when_yml_is_absent() {
+    let (dir, _repo) = setup();
+    write(&dir, "d/_order.yml", "- a.yml\n- b.yml\n");
+    write(&dir, "d/_order.json", "[\"z.yml\"]");
+    assert_eq!(
+        read_order_list(&dir.path().join("d")),
+        Some(vec!["a.yml".to_string(), "b.yml".to_string()])
+    );
+    write(&dir, "j/_order.json", "[\"z.yml\", \"y.yml\"]");
+    assert_eq!(
+        read_order_list(&dir.path().join("j")),
+        Some(vec!["z.yml".to_string(), "y.yml".to_string()])
+    );
+}
+
+#[test]
+fn read_order_list_is_none_for_garbage_a_directory_or_no_file() {
+    let (dir, _repo) = setup();
+    write(&dir, "g/_order.yml", "{{{ not a list");
+    write(&dir, "g/_order.json", "[\"z.yml\"]");
+    assert_eq!(read_order_list(&dir.path().join("g")), None);
+    fs::create_dir_all(dir.path().join("dd/_order.yml")).expect("order dir");
+    write(&dir, "dd/_order.json", "[\"z.yml\"]");
+    assert_eq!(read_order_list(&dir.path().join("dd")), None);
+    write(&dir, "e/other.yml", "x");
+    assert_eq!(read_order_list(&dir.path().join("e")), None);
 }

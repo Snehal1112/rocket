@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -113,115 +114,64 @@ where
     // Clear the auto-generated UID; we'll load the actual one from disk or legacy sources.
     folder.uid = String::new();
 
-    // Parse folder.yml once to extract both uid and display name.
-    // For the collection root, folder.yml does not exist — fall back to read_uid_from_yaml
-    // which reads opencollection.yml instead.
-    let folder_yml = current.join("folder.yml");
-    if folder_yml.exists() {
-        if let Ok(content) = fs::read_to_string(&folder_yml) {
-            if let Ok(oc_folder) = parse_folder_yml(&content) {
-                if let Some(ref uid) = oc_folder.info.uid {
-                    if !uid.is_empty() {
-                        folder.uid = uid.clone();
-                    }
+    // Read folder.yml once for both the uid and the display name. The collection root has no
+    // folder.yml, and a missing, unreadable, unparseable or uid-less file all fall back to
+    // read_uid_from_yaml, which reads opencollection.yml and the legacy .uid file.
+    if let Ok(content) = fs::read_to_string(current.join("folder.yml")) {
+        if let Ok(oc_folder) = parse_folder_yml(&content) {
+            if let Some(ref uid) = oc_folder.info.uid {
+                if !uid.is_empty() {
+                    folder.uid = uid.clone();
                 }
-                folder.name = oc_folder.info.name;
             }
+            folder.name = oc_folder.info.name;
         }
-        if folder.uid.is_empty() {
-            folder.uid = read_uid_from_yaml(current);
-        }
-    } else {
+    }
+    if folder.uid.is_empty() {
         folder.uid = read_uid_from_yaml(current);
     }
     folder.dir_name = Some(dir_name);
 
-    if !current.exists() {
-        return Ok(folder);
-    }
-
-    let mut entries: Vec<_> = fs::read_dir(current)?.filter_map(|e| e.ok()).collect();
-    // Apply explicit order from _order.yml (or _order.json for backward compat).
-    let order_path = current.join("_order.yml");
-    let order_path = if order_path.exists() {
-        order_path
-    } else {
-        current.join("_order.json")
+    let read_dir = match fs::read_dir(current) {
+        Ok(read_dir) => read_dir,
+        // A folder that is gone is the empty folder. Any other listing failure is still an error.
+        Err(_) if !current.exists() => return Ok(folder),
+        Err(e) => return Err(e.into()),
     };
-    if let Ok(content) = fs::read_to_string(&order_path) {
-        if let Ok(ordered) = serde_yaml::from_str::<Vec<String>>(&content) {
-            let pos: std::collections::HashMap<String, usize> = ordered
-                .into_iter()
-                .enumerate()
-                .map(|(i, name)| (name, i))
-                .collect();
-            entries.sort_by(|a, b| {
-                let ai = a
-                    .file_name()
-                    .to_str()
-                    .and_then(|n| pos.get(n))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                let bi = b
-                    .file_name()
-                    .to_str()
-                    .and_then(|n| pos.get(n))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
-            });
-        } else if let Ok(ordered) = serde_json::from_str::<Vec<String>>(&content) {
-            let pos: std::collections::HashMap<String, usize> = ordered
-                .into_iter()
-                .enumerate()
-                .map(|(i, name)| (name, i))
-                .collect();
-            entries.sort_by(|a, b| {
-                let ai = a
-                    .file_name()
-                    .to_str()
-                    .and_then(|n| pos.get(n))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                let bi = b
-                    .file_name()
-                    .to_str()
-                    .and_then(|n| pos.get(n))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                ai.cmp(&bi).then_with(|| a.file_name().cmp(&b.file_name()))
-            });
-        } else {
-            entries.sort_by_key(|e| e.file_name());
-        }
-    } else {
-        entries.sort_by_key(|e| e.file_name());
-    }
+    let mut entries: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
+    // Apply explicit order from _order.yml (or _order.json for backward compat).
+    sort_entries(&mut entries, read_order_list(current));
 
     // Only the collection root holds Rocket's flow files, so a nested `flows` folder stays visible.
-    let is_collection_root = current.join("opencollection.yml").exists();
+    // The probe is a real stat, so a case-insensitive filesystem behaves as before, and its result
+    // matters only for an entry named `flows`, so it runs only then.
+    let is_collection_root = || current.join("opencollection.yml").exists();
     for entry in entries {
         let path = entry.path();
         let entry_name = entry.file_name().to_string_lossy().to_string();
-        if is_hidden_entry(&entry_name, is_collection_root) {
+        if is_hidden_entry(&entry_name, entry_name == "flows" && is_collection_root()) {
             continue;
         }
-        if path.is_dir() {
+        // `file_type()` does not follow links and costs no stat on Linux and macOS. A symlink or a
+        // failed lookup falls back to `path.is_dir()`, so a link to a directory is still found
+        // whatever its name.
+        let file_type = entry.file_type().ok();
+        let is_symlink = file_type.map(|t| t.is_symlink()).unwrap_or(false);
+        let is_dir = match file_type {
+            Some(t) if !t.is_symlink() => t.is_dir(),
+            _ => path.is_dir(),
+        };
+        if is_dir {
             // Skip symlinked directories to prevent exfiltration.
-            if std::fs::symlink_metadata(&path)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(false)
-            {
+            if is_symlink {
                 tracing::warn!(path = %path.display(), "skipping symlinked directory in folder tree");
                 continue;
             }
             folder.add_subfolder(build_tree(&path, load_item)?);
         } else if is_script_file(&path) {
             // Symlinked scripts are skipped, as symlinked directories are above.
-            let is_symlink = std::fs::symlink_metadata(&path)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(true);
-            if is_symlink {
+            // A failed lookup counts as a symlink, as before.
+            if file_type.map(|t| t.is_symlink()).unwrap_or(true) {
                 tracing::warn!(path = %path.display(), "skipping symlinked script file");
                 continue;
             }
@@ -236,6 +186,48 @@ where
     }
 
     Ok(folder)
+}
+
+/// Reads the explicit order from `_order.yml`, or from `_order.json` when the YAML file is absent.
+/// The content is read as a YAML list first and then as a JSON list. `None` means no usable order:
+/// an unreadable `_order.yml`, or one that is a directory, does not fall through to the JSON file.
+pub(super) fn read_order_list(dir: &Path) -> Option<Vec<String>> {
+    let content = match fs::read_to_string(dir.join("_order.yml")) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            fs::read_to_string(dir.join("_order.json")).ok()?
+        }
+        Err(_) => return None,
+    };
+    serde_yaml::from_str::<Vec<String>>(&content)
+        .ok()
+        .or_else(|| serde_json::from_str::<Vec<String>>(&content).ok())
+}
+
+/// Sorts by position in `order`, then by file name. A duplicate keeps its last position, and unknown
+/// or non-UTF-8 names come last. Without an order the entries sort by file name.
+fn sort_entries(entries: &mut [fs::DirEntry], order: Option<Vec<String>>) {
+    let Some(ordered) = order else {
+        entries.sort_by_key(|e| e.file_name());
+        return;
+    };
+    let pos: HashMap<String, usize> = ordered
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| (name, i))
+        .collect();
+    let rank = |e: &fs::DirEntry| {
+        e.file_name()
+            .to_str()
+            .and_then(|n| pos.get(n))
+            .copied()
+            .unwrap_or(usize::MAX)
+    };
+    entries.sort_by(|a, b| {
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| a.file_name().cmp(&b.file_name()))
+    });
 }
 
 /// True for names the tree never shows. Script file operations use it too, so a
