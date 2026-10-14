@@ -54,13 +54,13 @@ const claude: api.AgentConfig = {
   vaultSecretName: 'anthropic',
 };
 
-function renderDialog() {
+function renderDialog(onOpenChange: (open: boolean) => void = vi.fn()) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <AgentConfigsDialog open onOpenChange={vi.fn()} />
+      <AgentConfigsDialog open onOpenChange={onOpenChange} />
     </QueryClientProvider>,
   );
 }
@@ -284,6 +284,52 @@ describe('AgentConfigsDialog', () => {
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(await screen.findByText('claude-agent-acp')).toBeInTheDocument();
       expect(api.saveAgentConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('while a save is in flight', () => {
+    function deferSave() {
+      let release: () => void = () => undefined;
+      vi.mocked(api.saveAgentConfig).mockReturnValue(
+        new Promise<void>((resolve) => {
+          release = () => resolve();
+        }),
+      );
+      return () => release();
+    }
+
+    it('disables Cancel until the save settles', async () => {
+      const release = deferSave();
+      const user = await openEdit();
+      await clickSave(user);
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      release();
+      expect(await screen.findByText('claude-agent-acp')).toBeInTheDocument();
+    });
+
+    it('enables Cancel again when the save fails', async () => {
+      vi.mocked(api.saveAgentConfig).mockRejectedValue(new Error('nope'));
+      const user = await openEdit();
+      await clickSave(user);
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    });
+
+    it('does not let the dialog close mid-save', async () => {
+      const release = deferSave();
+      const onOpenChange = vi.fn();
+      const user = userEvent.setup();
+      renderDialog(onOpenChange);
+      await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
+      await screen.findByLabelText('Label');
+      await clickSave(user);
+      await user.keyboard('{Escape}');
+      expect(onOpenChange).not.toHaveBeenCalled();
+      release();
+      await screen.findByText('claude-agent-acp');
+      await user.click(screen.getByRole('button', { name: 'Edit agent' }));
+      await user.keyboard('{Escape}');
+      expect(onOpenChange).toHaveBeenCalledWith(false);
     });
   });
 
@@ -707,6 +753,24 @@ describe('AgentConfigsDialog', () => {
       expect(JSON.stringify(vi.mocked(toast.error).mock.calls)).not.toContain(FAKE);
       expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
       expect(screen.getByLabelText(L.keychainCredential)).toHaveValue('');
+    });
+
+    it('stays disabled while the keychain credential is still being written', async () => {
+      vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
+      let finish: () => void = () => undefined;
+      vi.mocked(api.setAgentCredential).mockReturnValue(
+        new Promise<void>((resolve) => {
+          finish = () => resolve();
+        }),
+      );
+      const user = await openAdd();
+      await openKeychainForm(user);
+      await user.type(screen.getByLabelText(L.keychainCredential), FAKE);
+      await clickSave(user);
+      await waitFor(() => expect(api.setAgentCredential).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      finish();
+      expect(await screen.findByRole('button', { name: /add agent/i })).toBeInTheDocument();
     });
 
     it('blocks a new keychain agent with an empty credential', async () => {

@@ -101,6 +101,11 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   // Set when a form opens. It stays put if a new agent turns into a stored one after a partial save.
   const [formKey, setFormKey] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // True from Save until the agent and its credential are both written.
+  const [saving, setSaving] = useState(false);
+  // Id of the agent the form holds now. Late save results are applied only to that agent.
+  const editingIdRef = useRef<string | null>(null);
+  editingIdRef.current = editing?.id ?? null;
   const [hasSavedCredential, setHasSavedCredential] = useState(false);
   // Id of the agent whose saved-credential check is current. A late answer for another id is dropped.
   const credentialCheckId = useRef<string | null>(null);
@@ -163,6 +168,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     if (!editing || !canSave) return;
     const source = editing.credentialSource;
     const config = toAgentConfig(editing, resolveVaultName(editing));
+    setSaving(true);
     try {
       await saveMutation.mutateAsync(config);
       if (source === 'keychain') {
@@ -173,15 +179,17 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         } catch (e) {
           // The agent is saved. Stay in the form so the user can try again.
           setEditing((current) =>
-            current ? { ...current, isNew: false, localCredential: '' } : current,
+            current?.id === config.id ? { ...current, isNew: false, localCredential: '' } : current,
           );
           toast.error(`The agent was saved, but its credential was not: ${String(e)}`);
           return;
         }
       }
-      cancelEdit();
+      if (editingIdRef.current === config.id) cancelEdit();
     } catch (e) {
       toast.error(saveErrorMessage(e));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -290,7 +298,14 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Closing mid-save would drop the form before the credential is written.
+        if (!next && saving) return;
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className='flex max-h-[85vh] flex-col'>
         <DialogHeader>
           <DialogTitle>AI Agents</DialogTitle>
@@ -315,14 +330,14 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         {editing && (
           <DialogFooter>
             {saveHelp && <p className='mr-auto text-xs text-muted-foreground'>{saveHelp}</p>}
-            <Button variant='outline' size='sm' onClick={cancelEdit}>
+            <Button variant='outline' size='sm' onClick={cancelEdit} disabled={saving}>
               Cancel
             </Button>
             <Button
               size='sm'
               onClick={() => void handleSave()}
-              disabled={saveMutation.isPending || !canSave}
-              aria-busy={saveMutation.isPending}
+              disabled={saving || saveMutation.isPending || !canSave}
+              aria-busy={saving}
             >
               {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
               Save
