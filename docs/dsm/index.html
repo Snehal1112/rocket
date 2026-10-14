@@ -1343,6 +1343,22 @@ html, body {
 @keyframes c-sb-pulse { 50% { opacity: 0.5; } }
 @media (prefers-reduced-motion: reduce) { .c-sb-dot.is-loading { animation: none; } }
 
+/* ── Segmented control (ui/segmented-control.tsx) ── */
+.c-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--muted); }
+.c-seg > span { padding: 4px 12px; border-radius: 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted-foreground); }
+.c-seg > span.is-on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
+.c-seg > span.is-focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent); }
+
+/* ── Collapsible section (ui/collapsible-section.tsx) ── */
+.c-cs { width: 360px; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.c-cs-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.c-cs-head svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--muted-foreground); transition: transform 0.15s; }
+.c-cs.is-open .c-cs-head svg { transform: rotate(180deg); }
+.c-cs-title { font-size: 14px; font-weight: 500; color: var(--foreground); }
+.c-cs-sum { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted-foreground); }
+.c-cs-body { padding: 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
+@media (prefers-reduced-motion: reduce) { .c-cs-head svg { transition: none; } }
+
 /* ─── overlays (DSM sections) ─── */
 /* ─── Overlays fragment (o- prefix). Sizes mirror stock Tailwind v4 in src/components/ui. ─── */
 .o-code { font-family: var(--font-mono); background: var(--muted); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
@@ -1683,6 +1699,8 @@ html, body {
       <div class="nav-section" style="margin-top:10px">Form building blocks</div>
       <a class="nav-item" href="#form-field" onclick="scrollTo('form-field',this)"><span class="dot"></span> Form field</a>
       <a class="nav-item" href="#state-block" onclick="scrollTo('state-block',this)"><span class="dot"></span> State block</a>
+      <a class="nav-item" href="#segmented-control" onclick="scrollTo('segmented-control',this)"><span class="dot"></span> Segmented control</a>
+      <a class="nav-item" href="#collapsible-section" onclick="scrollTo('collapsible-section',this)"><span class="dot"></span> Collapsible section</a>
     </nav>
   </aside>
 
@@ -2839,7 +2857,21 @@ node scripts/sync-dsm-tokens.cjs</div>
 <div class="dsm-card"><div class="component-label">Loading, empty and error with action</div><div class="c-stack"><div class="c-sb" role="status"><span class="c-sb-dot is-loading"></span><span class="c-sb-text">Loading secrets.</span></div><div class="c-sb" role="status"><span class="c-sb-dot is-empty"></span><span class="c-sb-text">No secrets in this connection.</span></div><div class="c-sb is-error" role="alert"><span class="c-sb-dot is-error"></span><span class="c-sb-text">Could not list secrets.</span><span class="c-btn c-btn-outline c-btn-sm" style="height:28px">Retry</span></div></div><div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Block</td><td>flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground; error adds border-destructive/50</td><td>state-block.tsx:27</td></tr><tr><td>Dot</td><td>h-2 w-2 shrink-0 rounded-full; loading bg-muted-foreground animate-pulse motion-reduce:animate-none; empty bg-muted-foreground/50; error bg-destructive</td><td>state-block.tsx:13-17</td></tr><tr><td>Message</td><td>min-w-0 flex-1 break-words</td><td>state-block.tsx:36</td></tr><tr><td>Action</td><td>Button outline sm, h-7 shrink-0</td><td>state-block.tsx:38</td></tr></tbody></table></div></div>
       </section>
 
-      <div style="height:48px"></div>
+      <section class="dsm-section" id="segmented-control">
+        <div class="section-title">39 — Form building blocks</div>
+        <div class="section-heading">Segmented control</div>
+        <p class="section-desc">A Radix radio group drawn as a segmented track, for a short either-or choice such as the credential source. It is one tab stop. Arrow keys move and select, with wrap-around.</p>
+<div class="dsm-card"><div class="component-label">Selected, and keyboard focus on a segment</div><div class="c-stack"><div class="c-seg" role="radiogroup" aria-label="Credential source"><span class="is-on" role="radio" aria-checked="true">Secret manager</span><span role="radio" aria-checked="false">Environment</span><span role="radio" aria-checked="false">Keychain</span></div><div class="c-seg" role="radiogroup" aria-label="Credential source (focus)"><span role="radio" aria-checked="false">Secret manager</span><span class="is-on is-focus" role="radio" aria-checked="true">Environment</span><span role="radio" aria-checked="false">Keychain</span></div></div><div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Track</td><td>inline-flex w-fit gap-0.5 rounded-md bg-muted p-0.5</td><td>segmented-control.tsx:23</td></tr><tr><td>Segment</td><td>rounded-sm px-3 py-1 text-xs font-medium text-muted-foreground transition-colors motion-reduce:transition-none</td><td>segmented-control.tsx:29</td></tr><tr><td>Selected</td><td>data-[state=checked]:bg-background data-[state=checked]:text-foreground data-[state=checked]:shadow-xs</td><td>segmented-control.tsx:29</td></tr><tr><td>Focus</td><td>focus-visible:ring-[3px] focus-visible:ring-ring/50</td><td>segmented-control.tsx:29</td></tr><tr><td>Behaviour</td><td>Radix RadioGroup, horizontal, roving tab stop, arrow keys select and wrap</td><td>segmented-control.tsx:22</td></tr></tbody></table></div></div>
+      </section>
+
+<section class="dsm-section" id="collapsible-section">
+        <div class="section-title">40 — Form building blocks</div>
+        <div class="section-heading">Collapsible section</div>
+        <p class="section-desc">A bordered group built on the Collapsible primitive. The header row shows the title and a one-line summary, so a closed section still tells the user what is inside. The chevron turns when open. Pass <code class="o-code">open</code> and <code class="o-code">onOpenChange</code> to control it, for example to open it when a field inside has an error.</p>
+<div class="dsm-card"><div class="component-label">Closed with a summary, and open</div><div class="c-stack"><div class="c-cs"><div class="c-cs-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span class="c-cs-title">Advanced</span><span class="c-cs-sum">Idle 300s, 2 variables</span></div></div><div class="c-cs is-open"><div class="c-cs-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><span class="c-cs-title">Advanced</span></div><div class="c-cs-body">Idle timeout, reasoning and extra environment variables go here.</div></div></div><div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Group</td><td>rounded-md border (Collapsible root)</td><td>collapsible-section.tsx:31</td></tr><tr><td>Header</td><td>ghost Button, group h-auto w-full justify-start gap-2 rounded-b-none px-3 py-2 text-left</td><td>collapsible-section.tsx:35</td></tr><tr><td>Chevron</td><td>h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none group-data-[state=open]:rotate-180</td><td>collapsible-section.tsx:39</td></tr><tr><td>Title</td><td>text-sm font-medium</td><td>collapsible-section.tsx:41</td></tr><tr><td>Summary</td><td>min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground</td><td>collapsible-section.tsx:43</td></tr><tr><td>Body</td><td>space-y-4 border-t px-3 py-3</td><td>collapsible-section.tsx:49</td></tr><tr><td>Default</td><td>closed; defaultOpen opens it when uncontrolled</td><td>collapsible-section.tsx:29</td></tr><tr><td>Controlled</td><td>open and onOpenChange make it controlled, so a parent can open it to show an error. Children are not mounted while closed.</td><td>collapsible-section.tsx:29</td></tr></tbody></table></div></div>
+      </section>
+
+<div style="height:48px"></div>
     </div>
   </div>
 </div>
