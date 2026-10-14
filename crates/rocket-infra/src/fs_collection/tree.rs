@@ -206,22 +206,26 @@ where
         if is_hidden_entry(&entry_name, is_collection_root) {
             continue;
         }
-        if path.is_dir() {
+        // `file_type()` does not follow links and costs no stat on Linux and macOS. A symlink or a
+        // failed lookup falls back to `path.is_dir()`, so a link to a directory is still found
+        // whatever its name.
+        let file_type = entry.file_type().ok();
+        let is_symlink = file_type.map(|t| t.is_symlink()).unwrap_or(false);
+        let is_dir = match file_type {
+            Some(t) if !t.is_symlink() => t.is_dir(),
+            _ => path.is_dir(),
+        };
+        if is_dir {
             // Skip symlinked directories to prevent exfiltration.
-            if std::fs::symlink_metadata(&path)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(false)
-            {
+            if is_symlink {
                 tracing::warn!(path = %path.display(), "skipping symlinked directory in folder tree");
                 continue;
             }
             folder.add_subfolder(build_tree(&path, load_item)?);
         } else if is_script_file(&path) {
             // Symlinked scripts are skipped, as symlinked directories are above.
-            let is_symlink = std::fs::symlink_metadata(&path)
-                .map(|m| m.file_type().is_symlink())
-                .unwrap_or(true);
-            if is_symlink {
+            // A failed lookup counts as a symlink, as before.
+            if file_type.map(|t| t.is_symlink()).unwrap_or(true) {
                 tracing::warn!(path = %path.display(), "skipping symlinked script file");
                 continue;
             }
