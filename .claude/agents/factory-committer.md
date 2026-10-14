@@ -30,4 +30,4 @@ The driver checks these again after you finish.
 
 Reply with the new commit shas, one per line, each followed by its subject. If you cannot finish, make `BLOCKED: <reason>` the first line of the reply.
 
-Merge and sync runs change nothing. They reply with the message between `---BEGIN MESSAGE---` and `---END MESSAGE---` and no other text.
+Merge and sync runs are message-only. The prompt says there is no floor, no staged change and no issue footer for them. Change nothing, run no git command, and reply with the message between `---BEGIN MESSAGE---` and `---END MESSAGE---` and no other text.
