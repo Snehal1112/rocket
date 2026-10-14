@@ -8,6 +8,13 @@ fix_rounds = 2
 stall_minutes = 10
 builder_model = "sonnet"
 reviewer_model = "sonnet"
+commit_model = "sonnet"
+commit_subagents = false
+commit_budget_weighted = 60000
+# kb_path = "/home/numericlabs/data/rocket/Nl-knowledge-base/rocketapi"
+# kb_model = "sonnet"
+# kb_budget_weighted = 150000
+# kb_auto_commit = false
 
 # Diffs touching these paths stop for the human after review.
 risk_paths = [
