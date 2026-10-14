@@ -1,9 +1,18 @@
-import { CheckCircle2, ChevronDown, ChevronRight, Trash2, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { statusTextColor } from '@/lib/colors';
+import { hasHiddenValues, selectHttpView } from '@/lib/console-redaction';
 import { cn } from '@/lib/utils';
 import {
   type BackendLogLevel,
@@ -34,30 +43,58 @@ function formatTime(iso: string): string {
   });
 }
 
-function HttpEntryDetail({ entry }: { entry: HttpConsoleEntry }) {
+interface HttpEntryDetailProps {
+  entry: HttpConsoleEntry;
+  revealed: boolean;
+  onToggleReveal: () => void;
+}
+
+function HttpEntryDetail({ entry, revealed, onToggleReveal }: HttpEntryDetailProps) {
+  const view = selectHttpView(entry, revealed);
+  const canReveal = !entry.uncertain && hasHiddenValues(entry);
   const sections = [
     {
       label: 'Request Headers',
-      content: entry.requestHeaders.map((h) => `${h.key}: ${h.value}`).join('\n') || '(none)',
+      content: view.requestHeaders.map((h) => `${h.key}: ${h.value}`).join('\n') || '(none)',
     },
-    { label: 'Request Body', content: entry.requestBody || '(empty)' },
+    { label: 'Request Body', content: view.requestBody || '(empty)' },
     {
       label: 'Response Headers',
-      content: entry.responseHeaders.map((h) => `${h.key}: ${h.value}`).join('\n') || '(none)',
+      content: view.responseHeaders.map((h) => `${h.key}: ${h.value}`).join('\n') || '(none)',
     },
-    { label: 'Response Body', content: entry.responseBody || '(empty)' },
+    { label: 'Response Body', content: view.responseBody || '(empty)' },
   ];
 
   return (
-    <div className='grid grid-cols-2 gap-2 px-4 py-2 bg-muted/30 border-t text-xs'>
-      {sections.map((s) => (
-        <div key={s.label}>
-          <div className='font-medium text-muted-foreground mb-1'>{s.label}</div>
-          <pre className='font-mono whitespace-pre-wrap break-all bg-background/60 rounded p-1.5 max-h-32 overflow-auto text-2xs'>
-            {s.content}
-          </pre>
+    <div className='bg-muted/30 border-t text-xs'>
+      {(canReveal || entry.uncertain) && (
+        <div className='flex items-center justify-end gap-2 px-4 pt-2'>
+          {entry.uncertain && <span className='text-muted-foreground'>May contain secrets</span>}
+          {canReveal && (
+            <Button
+              type='button'
+              variant='ghost'
+              size='sm'
+              className='h-6 gap-1 px-2 text-xs'
+              aria-label={revealed ? 'Hide secrets' : 'Show secrets'}
+              onClick={onToggleReveal}
+            >
+              {revealed ? <EyeOff className='h-3.5 w-3.5' /> : <Eye className='h-3.5 w-3.5' />}
+              {revealed ? 'Hide secrets' : 'Show secrets'}
+            </Button>
+          )}
         </div>
-      ))}
+      )}
+      <div className='grid grid-cols-2 gap-2 px-4 py-2'>
+        {sections.map((s) => (
+          <div key={s.label}>
+            <div className='font-medium text-muted-foreground mb-1'>{s.label}</div>
+            <pre className='font-mono whitespace-pre-wrap break-all bg-background/60 rounded p-1.5 max-h-32 overflow-auto text-2xs'>
+              {s.content}
+            </pre>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -160,13 +197,16 @@ function LogRow({ entry }: { entry: LogConsoleEntry }) {
   );
 }
 
-function matchesSearch(entry: PanelEntry, term: string): boolean {
+function matchesSearch(entry: PanelEntry, term: string, revealedId: string | null): boolean {
   const lower = term.toLowerCase();
   if (entry.kind === 'log')
     return (
       entry.message.toLowerCase().includes(lower) || entry.target.toLowerCase().includes(lower)
     );
-  if (entry.kind === 'http') return entry.url.toLowerCase().includes(lower);
+  if (entry.kind === 'http')
+    return selectHttpView(entry, entry.id === revealedId)
+      .url.toLowerCase()
+      .includes(lower);
   if (entry.kind === 'test')
     return (
       entry.name.toLowerCase().includes(lower) || entry.requestName.toLowerCase().includes(lower)
@@ -183,6 +223,12 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
   const [showInfoLogs, setShowInfoLogs] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  // Opening, closing or switching rows always masks again.
+  const toggleExpanded = (id: string) => {
+    setRevealedId(null);
+    setExpandedId((current) => (current === id ? null : id));
+  };
   const dragRef = useRef<{ y: number; h: number } | null>(null);
 
   // Backend logs show WARN and ERROR by default; INFO is opt-in.
@@ -198,7 +244,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
 
   if (!isOpen) return null;
 
-  const filtered = search ? visible.filter((e) => matchesSearch(e, search)) : visible;
+  const filtered = search ? visible.filter((e) => matchesSearch(e, search, revealedId)) : visible;
 
   const handleDragDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -287,11 +333,11 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
                 <button
                   type='button'
                   className='flex items-center gap-1.5 px-2 py-1 hover:bg-accent/40 cursor-pointer border-b border-border/30 w-full text-left'
-                  onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  onClick={() => toggleExpanded(entry.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setExpandedId(expandedId === entry.id ? null : entry.id);
+                      toggleExpanded(entry.id);
                     }
                   }}
                 >
@@ -312,7 +358,9 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
                     </span>
                   )}
                   <span className='font-semibold w-12 shrink-0'>{entry.method}</span>
-                  <span className='flex-1 truncate text-foreground/80'>{entry.url}</span>
+                  <span className='flex-1 truncate text-foreground/80'>
+                    {selectHttpView(entry, entry.id === revealedId).url}
+                  </span>
                   <span
                     className={cn(
                       'w-10 text-right shrink-0 font-semibold',
@@ -325,7 +373,15 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
                     {entry.durationMs}ms
                   </span>
                 </button>
-                {expandedId === entry.id && <HttpEntryDetail entry={entry} />}
+                {expandedId === entry.id && (
+                  <HttpEntryDetail
+                    entry={entry}
+                    revealed={revealedId === entry.id}
+                    onToggleReveal={() =>
+                      setRevealedId((current) => (current === entry.id ? null : entry.id))
+                    }
+                  />
+                )}
               </div>
             );
           })
