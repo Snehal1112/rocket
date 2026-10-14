@@ -270,6 +270,13 @@ mod tests {
         );
     }
 
+    /// Creates a bare repo whose HEAD is "main" regardless of system git config.
+    fn init_bare_main(path: impl AsRef<Path>) -> Repository {
+        let repo = Repository::init_bare(path).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+        repo
+    }
+
     fn setup_repo() -> (TempDir, String) {
         let dir = TempDir::new().unwrap();
         let path = dir.path().to_string_lossy().to_string();
@@ -306,7 +313,7 @@ mod tests {
         // Create a bare "remote" repo.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        git2::Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         // Clone it locally — local file-path remotes need no credentials.
         let local_dir = TempDir::new().unwrap();
@@ -833,7 +840,7 @@ mod tests {
         // Create a bare remote to push to.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         // Add the bare repo as "origin" and push main.
         let mut remote = repo.remote("origin", &remote_path).unwrap();
@@ -874,7 +881,7 @@ mod tests {
         // Create a bare remote and push main.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         let mut remote = repo.remote("origin", &remote_path).unwrap();
         remote
@@ -925,7 +932,7 @@ mod tests {
     fn bare_remote_with_main(files: &[(&str, &str)]) -> (TempDir, TempDir) {
         let bare_dir = TempDir::new().expect("create bare remote directory");
         let bare_path = bare_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&bare_path).expect("init bare remote");
+        init_bare_main(&bare_path);
 
         let seed_dir = TempDir::new().expect("create seed directory");
         let seed = Repository::init(seed_dir.path()).expect("init seed repository");
@@ -1624,7 +1631,7 @@ mod tests {
         // Create bare remote with an initial commit.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        let _remote_repo = Repository::init_bare(&remote_path).unwrap();
+        let _remote_repo = init_bare_main(&remote_path);
 
         // Create local repo, make initial commit, push to remote.
         let local_dir = TempDir::new().unwrap();
@@ -1702,7 +1709,7 @@ mod tests {
         // Build bare remote + local (in sync), then add remote commit.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        let _remote_repo = Repository::init_bare(&remote_path).unwrap();
+        let _remote_repo = init_bare_main(&remote_path);
 
         let local_dir = TempDir::new().unwrap();
         let local_path = local_dir.path().to_string_lossy().to_string();
@@ -1779,7 +1786,7 @@ mod tests {
         // Build bare remote with TWO branches: main and feature.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         let seed_dir = TempDir::new().unwrap();
         let base_oid = {
@@ -1958,7 +1965,7 @@ mod tests {
         // Create bare remote.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        let _remote = Repository::init_bare(&remote_path).unwrap();
+        let _remote = init_bare_main(&remote_path);
 
         // Local: 1 initial commit shared with remote.
         let local_dir = TempDir::new().unwrap();
@@ -2071,7 +2078,7 @@ mod tests {
         // Bare remote with its own independent workspace.yml.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         let seed_dir = TempDir::new().unwrap();
         let seed_repo = Repository::clone(&remote_path, seed_dir.path()).unwrap();
@@ -2314,7 +2321,7 @@ mod tests {
         // Bare remote.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         // Seed clone — commits workspace.yml (same as test-42 remote has it).
         let seed_dir = TempDir::new().unwrap();
@@ -2401,7 +2408,7 @@ mod tests {
         // Build a bare remote repo with 3 commits (simulates test-42 with N commits).
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        let remote_repo = Repository::init_bare(&remote_path).unwrap();
+        let remote_repo = init_bare_main(&remote_path);
 
         // The bare repo needs an initial commit — work via a seed clone.
         let seed_dir = TempDir::new().unwrap();
@@ -2617,7 +2624,7 @@ mod tests {
         // Set up a bare remote and push the initial commit.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
         let repo = Repository::open(&path).unwrap();
         let mut origin = repo.remote("origin", &remote_path).unwrap();
         origin
@@ -2656,7 +2663,7 @@ mod tests {
         // Shared bare remote.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         // Clone A: push initial commit.
         let dir_a = TempDir::new().unwrap();
@@ -3340,7 +3347,7 @@ mod tests {
         // Set up a bare remote.
         let remote_dir = TempDir::new().unwrap();
         let remote_path = remote_dir.path().to_string_lossy().to_string();
-        Repository::init_bare(&remote_path).unwrap();
+        init_bare_main(&remote_path);
 
         // Create a local repo with a shared base commit but NO identity in local config.
         // Note: git2 reads local → global → system config. Writing empty strings to
@@ -3468,7 +3475,7 @@ mod tests {
     #[test]
     fn push_on_unborn_branch_returns_nothing_to_push() {
         let remote_dir = TempDir::new().unwrap();
-        Repository::init_bare(remote_dir.path()).unwrap();
+        init_bare_main(remote_dir.path());
         let dir = TempDir::new().unwrap();
         let path = dir.path().to_string_lossy().to_string();
         Repository::init(&path).unwrap();
