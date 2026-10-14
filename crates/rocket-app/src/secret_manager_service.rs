@@ -112,9 +112,7 @@ impl SecretManagerService {
         let connection = self
             .repo
             .get(id)?
-            .ok_or_else(|| {
-                DomainError::NotFound(format!("secret manager connection '{id}'"))
-            })?;
+            .ok_or_else(|| DomainError::NotFound(format!("secret manager connection '{id}'")))?;
         let stored = self.secret_store.get(VAULT_CONNECTION_SCOPE, id)?;
         let secret = match stored {
             Some(secret) => secret,
