@@ -80,6 +80,23 @@ describe('AgentCredentialSection, environment and keychain sources', () => {
     expect(screen.getByLabelText('Rocket reads it from')).toHaveValue('MY_KEY');
   });
 
+  it('does not rewrite the stored source name when the agent name of a stored agent changes', async () => {
+    const user = userEvent.setup();
+    const { latest } = renderSection({
+      initial: {
+        credentialSource: 'env',
+        credentialEnvVar: 'ANTHROPIC_API_KEY',
+        sourceEnvVar: 'ANTHROPIC_API_KEY',
+      },
+    });
+    const agent = screen.getByLabelText('Agent reads it as');
+    await user.clear(agent);
+    await user.type(agent, 'CLAUDE_CODE_OAUTH_TOKEN');
+    expect(latest.current.credentialEnvVar).toBe('CLAUDE_CODE_OAUTH_TOKEN');
+    expect(latest.current.sourceEnvVar).toBe('ANTHROPIC_API_KEY');
+    expect(screen.getByLabelText('Rocket reads it from')).toHaveValue('ANTHROPIC_API_KEY');
+  });
+
   it.each(['vault', 'keychain'] as const)('never prefills the source name for the %s source', (credentialSource) => {
     const { latest } = renderSection({
       initial: { credentialSource, credentialEnvVar: 'ANTHROPIC_API_KEY', sourceEnvVar: '' },

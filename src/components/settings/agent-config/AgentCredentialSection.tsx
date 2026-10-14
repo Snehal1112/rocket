@@ -344,10 +344,8 @@ export function AgentCredentialSection({
   errors,
   hasSavedCredential,
 }: AgentCredentialSectionProps) {
-  // A saved, different value counts as already edited, so it is never overwritten.
-  const [sourceTouched, setSourceTouched] = useState(
-    () => value.sourceEnvVar.trim() !== '' && value.sourceEnvVar !== value.credentialEnvVar,
-  );
+  // Any stored source name counts as already edited, so it is never rewritten.
+  const [sourceTouched, setSourceTouched] = useState(() => value.sourceEnvVar.trim() !== '');
 
   // Until the user edits it, "Rocket reads it from" follows "Agent reads it as".
   useEffect(() => {
