@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { KeyValueRows } from '@/components/ui/key-value-rows';
@@ -29,7 +29,9 @@ export function AgentConfigForm({ value, onChange, hasSavedCredential }: AgentCo
   // `value`. `patch` also updates the ref at once, so two patches in one event both apply.
   const latest = useRef(value);
   const onChangeRef = useRef(onChange);
-  useEffect(() => {
+  // A layout effect runs before any child passive effect, so a child that patches in its own
+  // effect after a value swap never sees the previous value.
+  useLayoutEffect(() => {
     latest.current = value;
     onChangeRef.current = onChange;
   });

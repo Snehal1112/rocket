@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentConfigForm } from '@/components/settings/agent-config/AgentConfigForm';
 import {
@@ -15,10 +15,19 @@ const seenOnChange: unknown[] = [];
 vi.mock('@/components/settings/agent-config/AgentCredentialSection', () => ({
   AgentCredentialSection: (props: {
     kind: string;
+    value: { credentialSource: string; credentialEnvVar: string; sourceEnvVar: string };
     errors: { credentialEnvVar?: string | null };
     onChange: (patch: Record<string, string>) => void;
   }) => {
     seenOnChange.push(props.onChange);
+    // Mirrors the real section: the source variable follows the key name until edited.
+    const { value, onChange } = props;
+    useEffect(() => {
+      if (value.credentialSource !== 'env') return;
+      if (value.sourceEnvVar !== value.credentialEnvVar) {
+        onChange({ sourceEnvVar: value.credentialEnvVar });
+      }
+    }, [value.credentialSource, value.credentialEnvVar, value.sourceEnvVar, onChange]);
     return (
       <div data-testid='credential-section' data-kind={props.kind}>
         {props.errors.credentialEnvVar ?? ''}
@@ -285,5 +294,47 @@ describe('AgentConfigForm', () => {
   it('passes a Gemini reserved key name to the credential section as an error', () => {
     setup({ kind: 'gemini', credentialEnvVar: 'GEMINI_CLI_HOME' });
     expect(screen.getByTestId('credential-section')).toHaveTextContent(/reserved/i);
+  });
+
+  it('keeps a value swapped in from outside when the credential section patches in its effect', async () => {
+    const user = userEvent.setup();
+    const states: AgentFormState[] = [];
+    const oldAgent = { ...emptyAgentForm('old'), label: 'Old agent' };
+    const newAgent: AgentFormState = {
+      ...emptyAgentForm('new'),
+      isNew: false,
+      label: 'New agent',
+      credentialSource: 'env',
+      credentialEnvVar: 'NEW_KEY',
+      sourceEnvVar: '',
+    };
+    function Swapper() {
+      const [value, setValue] = useState(oldAgent);
+      return (
+        <>
+          <button type='button' onClick={() => setValue(newAgent)}>
+            Swap agent
+          </button>
+          <AgentConfigForm
+            value={value}
+            onChange={(next) => {
+              setValue(next);
+              states.push(next);
+            }}
+            hasSavedCredential={false}
+          />
+        </>
+      );
+    }
+    render(<Swapper />);
+    await user.click(screen.getByRole('button', { name: 'Swap agent' }));
+    expect(states).toHaveLength(1);
+    expect(states[0]).toMatchObject({
+      id: 'new',
+      label: 'New agent',
+      credentialEnvVar: 'NEW_KEY',
+      sourceEnvVar: 'NEW_KEY',
+    });
+    expect(screen.getByLabelText('Label')).toHaveValue('New agent');
   });
 });
