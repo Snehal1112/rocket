@@ -4,6 +4,8 @@
 //! the real on-disk format. The mix is 60% HTTP, 20% GraphQL, 10% WebSocket and 10% gRPC.
 #![allow(dead_code)] // Each bench target uses a different part of this module.
 
+use std::path::Path;
+
 use rocket_collection::{
     CollectionRepository, GraphQlRequest, GrpcMessage, GrpcRequest, Request, WebSocketMessage,
     WebSocketMessageKind, WebSocketRequest,
@@ -206,4 +208,72 @@ fn grpc_request(i: usize) -> GrpcRequest {
         content: format!("{{\"name\": \"item-{i}\"}}"),
     });
     request
+}
+
+/// The deep case: 25 parent folders with 19 child folders each, so 500 folders in all. Every folder
+/// holds 5 HTTP requests and an `_order.yml` that lists its requests and then its child folders.
+pub const DEEP_PARENTS: usize = 25;
+pub const DEEP_CHILDREN: usize = 19;
+pub const DEEP_REQUESTS: usize = 5;
+pub const DEEP_FOLDERS: usize = DEEP_PARENTS * (1 + DEEP_CHILDREN);
+
+/// Writes the deep collection `name` into `repo`.
+pub fn populate_deep(repo: &FsCollectionRepo, name: &str) {
+    repo.create(name).expect("create collection");
+    let root = repo.collection_root_path(name).expect("collection root");
+    for p in 0..DEEP_PARENTS {
+        let parent = format!("p-{p}");
+        repo.create_folder(name, &parent).expect("create parent folder");
+        let children: Vec<String> = (0..DEEP_CHILDREN).map(|c| format!("c-{c}")).collect();
+        fill_deep_folder(repo, name, &root, &parent, &children, p * (1 + DEEP_CHILDREN));
+        for (c, child) in children.iter().enumerate() {
+            let dir = format!("{parent}/{child}");
+            repo.create_folder(name, &dir).expect("create child folder");
+            fill_deep_folder(repo, name, &root, &dir, &[], p * (1 + DEEP_CHILDREN) + c + 1);
+        }
+    }
+}
+
+/// Saves the 5 requests of one deep folder and writes its `_order.yml`.
+fn fill_deep_folder(
+    repo: &FsCollectionRepo,
+    name: &str,
+    root: &Path,
+    dir: &str,
+    subfolders: &[String],
+    seed: usize,
+) {
+    let mut order = String::new();
+    for r in 0..DEEP_REQUESTS {
+        let saved = repo
+            .save_request(name, &format!("{dir}/r-{r}"), &http_request(seed * DEEP_REQUESTS + r))
+            .expect("save request");
+        let file = Path::new(&saved)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("saved file name")
+            .to_string();
+        order.push_str(&format!("- {file}\n"));
+    }
+    for sub in subfolders {
+        order.push_str(&format!("- {sub}\n"));
+    }
+    std::fs::write(root.join(dir).join("_order.yml"), order).expect("write _order.yml");
+}
+
+/// One collection `bench-0` with the deep shape, in a temp dir, verified against its labels.
+pub fn generate_deep() -> Fixture {
+    let dir = TempDir::new().expect("create temp dir");
+    let repo = FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+    populate_deep(&repo, "bench-0");
+    let fixture = Fixture {
+        dir,
+        repo,
+        collection: "bench-0".to_string(),
+        collections: 1,
+        requests_per_collection: DEEP_FOLDERS * DEEP_REQUESTS,
+        http_paths: Vec::new(),
+    };
+    fixture.verify();
+    fixture
 }
