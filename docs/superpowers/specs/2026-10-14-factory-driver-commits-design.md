@@ -121,6 +121,8 @@ There are no staged changes in a merge, and the driver makes the commit with `gi
 
 Retry once on an invalid or missing message. Then the deterministic fallback: `chore(factory): merge job NNN <plan title>` (or `sync main into job NNN`), a body listing the task commit subjects and the check result, and the same footers (issue and `Factory-Job`). Merge parents, head check and sync limits are unchanged. Tests and docs that pin the old `merge job 001 hello` subject change to the new behaviour.
 
+**Plan 05 status.** Message runs use only `Read,Skill` (no Grep, Glob or Bash). The driver-appended `Fixes`/`Relates to`/`Factory-Job` footers land in plan 06. Until then the fallback message is the bare `chore(factory): merge job <id> <slug>` or `chore(factory): sync main into job <id> <slug>`, with no body or footer.
+
 ### 5. Config, runner and git layer
 
 - `config.toml` gets `commit_model = "sonnet"`, `commit_subagents = false` and `commit_budget_weighted = 60000` (all with serde defaults, so older configs load). The runner applies the budget to the committer spec through `with_limits`' existing budget fields, as a per-run cap instead of the job cap.

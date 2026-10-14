@@ -51,9 +51,9 @@ There are no spec-writer, security, ux, ui or approver agents. Risky diffs go to
 
 - The builder never commits. The driver stages everything not ignored and runs the `factory-committer` agent (skill `dev-workflow-skills:1-git-commit`), once per task in a task plan, once per round otherwise.
 - Floor: the job base in round 1, the previous head in a fix round. After a red-check round the floor is the unreviewed head, which is stricter and safe. The committer may amend or fixup above the floor and never at or below it.
-- Checks after each run: the floor is an ancestor, the tree is clean, at most 4 net-new commits, the subject is valid, HEAD is on the job branch. A failure gets one retry by resuming, then a `chore: <task title>` fallback commit. Rewriting the floor parks the job. A message problem never does.
+- Checks after each run: the floor is an ancestor, the tree is clean, at most 4 net-new commits, the subject is valid, HEAD is on the job branch. A failed run (no commit made, a dirty tree, BLOCKED, an unavailable skill) gets one retry by resuming, then a `chore: <task title>` fallback commit. After the retry, a validator or commit-count failure keeps the commits and writes a ruling, with no fallback commit. A message problem never parks the job.
 - Merge and sync messages come from the committer in message-only mode (role `message`, tools `Read,Skill`), with the fixed message as fallback (`chore(factory): merge job <id> <slug>`, `chore(factory): sync main into job <id> <slug>`).
-- Parks: `builder committed on its own (the branch was at <sha7> before the run)`, `builder made no changes`, `task N changed nothing`. To recover from the first, run `git reset --soft <sha7>` in the job worktree (the sha is in the park reason), then `factory rework <id>`.
+- Parks: `builder committed on its own (the branch was at <sha7> before the run)` (in a task plan `builder committed on its own in task N (the branch was at <sha7> before the run)`), `builder made no changes`, `task N changed nothing`, rewriting the floor, `committer moved HEAD off the job branch`, `the job branch is gone`, and `the committer left nothing to commit: <why>`. To recover from the builder-committed parks, run `git reset --soft <sha7>` in the job worktree (the sha is in the park reason), then `factory rework <id>`.
 - Tokens: `factory tokens` shows the roles `committer` and `message`, each run capped by `commit_budget_weighted`.
 
 ## Checks
@@ -70,7 +70,7 @@ Auto-merge needs all of: no check failure, the latest reviewer verdict is exactl
 
 Risky means the diff touches any `risk_paths` entry: the collection trust gate, auth, secrets or `{{process.env}}`, persistence formats, `src-tauri/`, `DomainEvent`, `Cargo.toml`, `Cargo.lock`, `package.json`, `tauri.conf.json`, CSP or the harness hooks. A missing or broken config makes every diff risky.
 
-The driver merges the reviewed sha only: it checks the branch tip equals the recorded head, preflights main (on `main`, clean, not mid-merge), makes a no-ff merge commit `chore(factory): merge job NNN <slug>`, and verifies the second parent. If main moved it merges main into the job branch inside the worktree, re-runs checks and the reviewer on the sync diff (at most 2 syncs). A conflict goes to `needs-human`. It never pushes and never rewrites history.
+The driver merges the reviewed sha only: it checks the branch tip equals the recorded head, preflights main (on `main`, clean, not mid-merge), makes a no-ff merge commit (the committer's message, or the fixed `chore(factory): merge job NNN <slug>` fallback), and verifies the second parent. If main moved it merges main into the job branch inside the worktree, re-runs checks and the reviewer on the sync diff (at most 2 syncs). A conflict goes to `needs-human`. It never pushes and never rewrites history.
 
 ## How to run
 
@@ -173,7 +173,7 @@ Run this once after plans 01 to 08 are merged. It uses real agents, so it costs 
    - A job card in build with its worktree and the token counter rising.
    - A `checks.md` in the job folder (`ls .superpowers/sdd/*/checks.md`) with every check passing, or the builder resumed once after a failure.
    - One reviewer run, then the stage moves to approve and merged. A diff that touches a risk path (auth, `src-tauri/`, `Cargo.toml` and so on) parks in needs-human instead. Run `factory approve <id>` after reading the diff.
-   - The merge commit has the message `chore(factory): merge job NNN <slug>` and its second parent is the reviewed sha (`git log --merges -1 --format=%P`).
+   - The merge commit has the committer's message, or the fixed fallback `chore(factory): merge job NNN <slug>`, and its second parent is the reviewed sha (`git log --merges -1 --format=%P`).
    - Plan 2 starts by itself as the next job and merges the same way.
 4. Read the cost: `factory tokens 001` and `factory tokens 002`. Each prints runs, raw and weighted tokens per agent role, and the percent of the job 001 weighted baseline. Add the two jobs and the interactive session to compare with the 2.17M weighted of job 001. Check that the reviewer role shows one run per clean round, that no commit helper agents appear, and that the roles `committer` and `message` are listed.
 5. Pass criteria (the spec's success check): the interactive session was the only place the user spent tokens by hand and sat idle while the driver worked, the driver built in a worktree, ran the checks, ran one reviewer, merged the reviewed sha and started plan 2, the dashboard showed live stages and per-job tokens, no stage needed manual repair, `git status` is clean in the main checkout, and the logged weighted total is well below 2.17M (aim under 1.1M for a comparable small feature).
