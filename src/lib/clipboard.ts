@@ -2,38 +2,39 @@ import { isTauri } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 // Copies text that is computed asynchronously. WebKit drops the click's user
-// activation after an await, so the clipboard write must start synchronously
-// and receive the text as a promise.
+// activation after an await, so the web clipboard write must start synchronously
+// and receive the text as a promise. The native plugin is the fallback, because
+// it can fail on Linux when no X11 server is reachable (a Wayland session).
 export async function copyTextAsync(textPromise: Promise<string>): Promise<void> {
-  // The native plugin is not bound by webview clipboard rules, so try it first.
+  // Start the web write now, while the click's user activation is still valid.
+  if (await tryWebItemWrite(textPromise)) return;
+
+  const text = await textPromise;
   if (isTauri()) {
-    const text = await textPromise;
     try {
       await writeText(text);
       return;
     } catch (err) {
       console.warn('Native clipboard write failed, trying the web API.', err);
-      return copyWithWebApi(Promise.resolve(text));
     }
   }
-  return copyWithWebApi(textPromise);
-}
-
-async function copyWithWebApi(textPromise: Promise<string>): Promise<void> {
-  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-    try {
-      const blob = textPromise.then((text) => new Blob([text], { type: 'text/plain' }));
-      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
-      return;
-    } catch (err) {
-      console.warn('Async clipboard write failed, trying the fallback.', err);
-    }
-  }
-  const text = await textPromise;
   try {
     await navigator.clipboard.writeText(text);
   } catch {
     legacyCopy(text);
+  }
+}
+
+// Writes a promised blob to the clipboard. Returns false when the API is missing or rejects.
+async function tryWebItemWrite(textPromise: Promise<string>): Promise<boolean> {
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) return false;
+  try {
+    const blob = textPromise.then((text) => new Blob([text], { type: 'text/plain' }));
+    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+    return true;
+  } catch (err) {
+    console.warn('Async clipboard write failed, trying the fallback.', err);
+    return false;
   }
 }
 
