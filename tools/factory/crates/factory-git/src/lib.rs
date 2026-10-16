@@ -7,6 +7,7 @@ mod fingerprint;
 mod merge;
 mod repo;
 mod report;
+mod reset;
 mod stage;
 mod state;
 mod worktree;
