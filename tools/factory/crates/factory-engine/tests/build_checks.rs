@@ -796,17 +796,31 @@ fn a_task_builder_gets_its_own_task_the_header_and_the_spec_excerpt() {
     }
     assert!(prompt.contains(&fx.plan_file.display().to_string()), "{prompt}");
     assert!(prompt.contains("spec.md"), "{prompt}");
+    assert!(prompt.contains("use this excerpt instead and do not read the plan file in full"), "{prompt}");
+}
+
+/// The first builder prompt of a fixture whose plan is `plan`, with the excerpt switch as given.
+fn first_builder_prompt(plan: &str, excerpt_on: bool) -> String {
+    let mut fx = excerpt_fixture();
+    fx.config.builder_excerpt = excerpt_on;
+    std::fs::write(&fx.plan_file, plan).expect("plan");
+    let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
+    fx.engine(&runner).build_stage().expect("task 1");
+    let prompt = runner.last_spec_for("builder").expect("spec").prompt;
+    // The fixtures differ only in the temp dir, so the paths are normalized.
+    prompt.replace(&fx.tmp.path().display().to_string(), "TMP")
 }
 
 #[test]
 fn the_flag_off_gives_the_old_prompt_without_the_excerpt() {
-    let mut fx = excerpt_fixture();
-    fx.config.builder_excerpt = false;
-    let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
-    fx.engine(&runner).build_stage().expect("task 1");
-    let prompt = runner.last_spec_for("builder").expect("spec").prompt;
-    assert!(!prompt.contains("BODY-ONE-MARKER") && !prompt.contains("ACCEPT-MARKER"), "{prompt}");
-    assert!(prompt.contains("Do only Task 1"));
+    // A plan with no extractable section takes the old prompt path even with the switch on.
+    let old = first_builder_prompt("# P\n\n- [ ] Task 1: first thing\n\nBODY-ONE-MARKER\n- [ ] Task 2: second thing\n", true);
+    let off = first_builder_prompt(EXCERPT_PLAN, false);
+    assert_eq!(off, old);
+    for gone in ["Task excerpt", "--- plan header ---", "--- end of excerpt ---", "ACCEPT-MARKER"] {
+        assert!(!off.contains(gone), "unexpected {gone}: {off}");
+    }
+    assert!(off.contains("Do only Task 1: first thing"));
 }
 
 #[test]
@@ -819,7 +833,7 @@ fn a_plan_with_checkbox_tasks_falls_back_to_the_old_prompt() {
     let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
     fx.engine(&runner).build_stage().expect("task 1");
     let prompt = runner.last_spec_for("builder").expect("spec").prompt;
-    assert!(!prompt.contains("BODY-ONE-MARKER"), "{prompt}");
+    assert!(!prompt.contains("BODY-ONE-MARKER") && !prompt.contains("Task excerpt"), "{prompt}");
     assert!(prompt.contains("Do only Task 1"));
 }
 

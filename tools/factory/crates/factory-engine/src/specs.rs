@@ -86,7 +86,8 @@ impl Engine<'_> {
         let spec_part = spec_excerpt(&spec);
         let mut out = String::from(
             "Task excerpt: the plan header, your task, and the spec goal and acceptance criteria follow. \
-             They replace reading plan.md and spec.md in full. Open those files only for something this excerpt refers to outside itself.\n\
+             They replace reading the plan and the spec in full. Open those files only for something this excerpt refers to outside itself. \
+             If a skill such as superpowers:executing-plans tells you to read or load the plan file, use this excerpt instead and do not read the plan file in full.\n\
              --- plan header ---\n",
         );
         out.push_str(&header);
