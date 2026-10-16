@@ -178,6 +178,8 @@ Measured on job 001 (v1, LLM orchestrator, full review set): about 12.75M raw to
 | Reviewer runs per clean round | 5 | 1 |
 | Commit helper agents | 2 or more per commit | 0 |
 
+Since 2026-10-16 each run's output is the larger of the message sum and the result event, and each usage.jsonl line has ts, model, turns, resumed, stop, round, start_ctx, usage_v 2 and, for builder runs, tasks_done. Lines without usage_v are old and their output counts are under-counted, so factory tokens prints a note for such a job. factory tokens also prints one row per run. Jobs 001 to 011 are all old.
+
 The plan-time session (brainstorming and writing plans) is interactive and is not in `factory tokens`. Note it by hand from the session's usage line when comparing totals. The target is a guideline taken from the spec's success check ("well below 2.2M weighted"), not a gate.
 
 ## Test coverage of the removed v1 helper
