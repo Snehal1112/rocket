@@ -162,6 +162,8 @@ fn expand_home(path: &str, home: Option<&str>) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn cost_switches_default_on_and_can_be_turned_off() {
         let cfg = Config::default();
@@ -171,8 +173,6 @@ mod tests {
         assert!(Config::parse("commit_batch = \"yes\"").is_err());
         assert!(Config::parse("commit_bach = true").is_err());
     }
-
-    use super::*;
 
     #[test]
     fn size_thresholds_default_and_validate() {
