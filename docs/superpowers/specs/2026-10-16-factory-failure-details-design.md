@@ -49,7 +49,7 @@ When a factory job parks in `needs-human`, the driver records why and keeps the 
 | Park site | kind | parts | next |
 |---|---|---|---|
 | `decide.rs` checks failed after fix rounds | `checks-failed` | failing check names and output from `checks.md` | `factory rework <id> <note>` |
-| `decide.rs` changes remain after fix rounds | `changes-remain` | the reviewer's `[blocker]` lines from `review-code-rN.md` | `factory rework <id> <note>`, `factory approve <id>` |
+| `decide.rs` changes remain after fix rounds | `changes-remain` | the reviewer's `[blocker]` lines from `review-code-rN.md` | `factory approve <id>`, `factory rework <id> <note>` |
 | `decide.rs` risky diff | `risky-diff` | the risk summary, then the diff stat | `factory approve <id>`, `factory rework <id> <note>` |
 | `decide.rs` and `build.rs` diff over the cap | `diff-too-large` | changed lines against the cap | `factory approve <id>`, `factory rework <id> <note>` |
 | `decide.rs` budget stopped | `budget-stopped` | weighted tokens against the budget | `factory approve <id>`, `factory cancel <id>` |
