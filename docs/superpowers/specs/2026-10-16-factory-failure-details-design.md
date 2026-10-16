@@ -78,7 +78,7 @@ Board: `Job` gains `park_kind: Option<String>` and `park_at: Option<u64>`, both 
 
 - Card: the reason line and copy chips stay. A button, "See what went wrong", is added when `has_park` is true.
 - The popup is a `dialog`: a header with the job id, a kind pill (red wash for `checks-failed`, `changes-remain`, `builder-stopped`, `commit-failed`; amber wash for `risky-diff`, `diff-too-large`, `budget-stopped`, `builder-committed`, `nothing-changed`), the reason as the title and when it parked; a body with one section per part (title, source file in muted text, a bordered scrollable text block with no wrapping and a note when truncated); a footer "What to do next" with the `next` commands as copy chips.
-- Marker: lines that start with `error`, `FAIL`, `FAILED` or `[blocker]` get a red rule at the left edge, and the first such line is scrolled into view on open.
+- Marker: lines that start with `error`, `FAIL` or `[blocker]` (after leading spaces), lines that end with `FAILED`, and lines that contain `panicked at` get a red rule at the left edge, and the first one is scrolled into view on open.
 - States: loading, load error with a retry button, and "No details were recorded for this job" when the endpoint answers 404. If the job leaves `needs-human` while the popup is open, a note says so.
 - Behavior: opens on button click, Esc or the Close button closes it, focus returns to the button. Visible focus ring. At 400 px the popup is full width with 16 px gutters. No animation.
 - The CSP forbids inline styles, so all styling is in `dashboard.css` and any dynamic size goes through the CSSOM like the token bar.
@@ -98,7 +98,7 @@ Board: `Job` gains `park_kind: Option<String>` and `park_at: Option<u64>`, both 
 - The board gains `park_kind` and `park_at` only, and an old board still loads in the driver and in `factory-server`.
 - `GET /api/jobs/<id>/park` returns the sanitized evidence, with the status codes above, and cannot read outside the sdd folder.
 - A `needs-human` card with details shows a "See what went wrong" button that opens a popup with the reason, the evidence parts and the suggested commands.
-- Lines that start with `error`, `FAIL`, `FAILED` or `[blocker]` are marked, and the first one is scrolled into view.
+- Lines that start with `error`, `FAIL` or `[blocker]` (after leading spaces), lines that end with `FAILED`, and lines that contain `panicked at` are marked, and the first one is scrolled into view.
 - `factory status` shows the reason, a short excerpt and the next commands for a parked job.
 - The popup works by keyboard, at phone width, and in light and dark themes.
 - No LLM calls are added, and the polled `/api/state` does not carry the evidence text.
