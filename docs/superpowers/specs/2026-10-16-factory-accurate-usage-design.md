@@ -40,7 +40,7 @@ Before relying on it, confirm against one real `claude -p` stream that `result.u
 | `turns` | `run.turns` |
 | `resumed` | `spec.resume.is_some()` |
 | `stop` | `run.stop_reason` |
-| `task` | job `task_index` plus 1, builder runs of a task plan only |
+| `tasks_done` | job `task_index` at the start of the run (finished tasks), builder runs only |
 | `round` | job `round` |
 | `start_ctx` | cache creation plus cache read of the first assistant message |
 | `usage_v` | constant `2` |
@@ -62,7 +62,7 @@ Before relying on it, confirm against one real `claude -p` stream that `result.u
 ## Acceptance criteria
 
 - A run's recorded output tokens equal the larger of the message sum and the result event value.
-- Each new `usage.jsonl` line carries `ts`, `model`, `turns`, `resumed`, `stop`, `round` and `usage_v`, and `task` for builder runs of a task plan.
+- Each new `usage.jsonl` line carries `ts`, `model`, `turns`, `resumed`, `stop`, `round` and `usage_v`, and `tasks_done` for builder runs.
 - Old lines still load, and `factory tokens` flags a job that has them.
 - `factory tokens <id>` prints a per-run table.
 - The live budget kill behaves as before.

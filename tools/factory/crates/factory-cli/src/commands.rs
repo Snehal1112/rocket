@@ -2,14 +2,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use factory_agent::{AgentRunner, Caps, ClaudeRunner, EventSink};
-use factory_core::{Config, Stage};
+use factory_core::{Config, CostsFile, ParkRecord, Stage};
 use factory_engine::{
-    acquire_lease, create_job_with_spec, lease_is_live, merge_stage, now_secs, release_lease, run_job, run_series, Driver,
+    acquire_lease, costs_path, create_job_with_spec, gather_costs, lease_is_live, merge_stage, now_secs, release_lease, run_job, run_series, Driver,
     MergeResult, RunEnd, LEASE_TTL_SECS,
 };
 
 use crate::cli::{Cli, Command};
-use crate::status::render_status;
+use crate::costs::{estimate_lines, render_costs};
+use crate::status::{render_parked, render_status};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -98,7 +99,10 @@ pub fn dispatch(cli: Cli, ctx: &CliCtx) -> Result<String, CliError> {
         Command::Run { id, series } => run(ctx, &norm(&id)?, series),
         Command::Status => {
             let d = ctx.driver()?;
-            Ok(render_status(&d.store().load()?, d.config()))
+            let board = d.store().load()?;
+            let mut out = render_status(&board, d.config());
+            out.push_str(&render_parked(&board, |j| ParkRecord::read(&d.job_dir(j))));
+            Ok(out)
         }
         Command::Show { id } => {
             let d = ctx.driver()?;
@@ -109,6 +113,7 @@ pub fn dispatch(cli: Cli, ctx: &CliCtx) -> Result<String, CliError> {
         Command::Cancel { id, reason, force } => cancel(ctx, &norm(&id)?, &reason, force),
         Command::Cleanup { id, discard_commits } => cleanup(ctx, &norm(&id)?, discard_commits),
         Command::Tokens { id } => tokens(ctx, &norm(&id)?),
+        Command::Costs => costs(ctx),
         Command::KbRefresh { job } => kb_refresh(ctx, &norm(&job)?),
     }
 }
@@ -127,7 +132,19 @@ fn new_job(
 ) -> Result<String, CliError> {
     let d = ctx.driver()?;
     let job = create_job_with_spec(&d, slug, feature, plans.as_deref(), spec.as_deref(), model.as_deref())?;
-    Ok(format!("created job {} in {}", job.id, job.dir))
+    let board = d.store().load()?;
+    Ok(format!("created job {} in {}{}", job.id, job.dir, estimate_lines(&board, &job)))
+}
+
+fn costs(ctx: &CliCtx) -> Result<String, CliError> {
+    let d = ctx.driver()?;
+    let jobs = gather_costs(&d)?;
+    let file = CostsFile::build(&jobs, d.config(), now_secs());
+    let mut out = render_costs(&jobs, &file.groups);
+    if let Err(e) = file.write(&costs_path(d.root())) {
+        out.push_str(&format!("\nwarning: could not write costs.json: {e}\n"));
+    }
+    Ok(out)
 }
 
 fn run(ctx: &CliCtx, id: &str, series: bool) -> Result<String, CliError> {
@@ -282,10 +299,19 @@ fn tokens(ctx: &CliCtx, id: &str) -> Result<String, CliError> {
     let pct = if budget > 0 { weighted * 100 / budget } else { 0 };
     let records = crate::tokens::load_usage(&d.job_dir(&job).join("usage.jsonl"), id)?;
     let report = crate::tokens::render(id, &crate::tokens::aggregate(&records));
-    Ok(format!(
+    let mut text = format!(
         "input {}\ncache_creation {}\noutput {}\ncache_read {}\nweighted {weighted} ({pct}% of {budget})\n{}",
         t.input, t.cache_creation, t.output, t.cache_read, report.trim_end()
-    ))
+    );
+    let detail = crate::tokens::render_detail(&records);
+    if !detail.is_empty() {
+        text.push('\n');
+        text.push_str(detail.trim_end());
+    }
+    if crate::tokens::under_counted(&records) {
+        text.push_str("\n  note: output under-counted, some lines predate the corrected count");
+    }
+    Ok(text)
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
-use factory_core::Stage;
+use factory_core::{ParkKind, ParkRecord, Stage};
 use factory_git::{BaseState, MergeOutcome, Preflight};
 
+use crate::park::write_record;
 use crate::{now_secs, sync_stage, tick_plan, Driver, EngineError, MessageKind, SyncOutcome};
 
 pub const MAX_SYNCS: u32 = 2;
@@ -19,10 +20,23 @@ enum Step {
 /// Parks the job in needs-human with the real reason. Main is never touched here.
 pub fn park(driver: &Driver, id: &str, reason: &str) -> Result<(), EngineError> {
     let now = now_secs();
+    let at = now.max(0.0) as u64;
     let job = driver.store().update_job(id, |job| {
+        // A park written earlier, such as a failed check in the sync, keeps its kind and evidence.
+        let already = job.stage == Stage::NeedsHuman && job.park_kind.is_some();
+        if !already {
+            job.park_kind = Some(ParkKind::Other.as_str().to_string());
+            job.park_at = Some(at);
+        }
         job.set_stage(Stage::NeedsHuman, Some(reason), false, now)?;
-        Ok(job.clone())
+        Ok((job.clone(), already))
     })?;
+    let (job, already) = job;
+    if !already {
+        // Writing the record is best effort, the park already happened.
+        let record = ParkRecord::new(ParkKind::Other, reason, id, job.round, at, Vec::new());
+        write_record(&driver.job_dir(&job), &record);
+    }
     // The ledger takes one line, so the reason is folded into a single line.
     let one_line = reason.split_whitespace().collect::<Vec<_>>().join(" ");
     driver.ledger(&job).ruling(&format!("parked in needs-human: {one_line}"))?;
@@ -37,6 +51,10 @@ pub fn merge_stage(driver: &Driver, id: &str) -> Result<MergeResult, EngineError
             // The merge is done, so a failed refresh must not change the result.
             if let Err(err) = driver.kb_refresh(id, false) {
                 eprintln!("kb refresh error for job {id}: {err}");
+            }
+            // The costs refresh runs last so that it counts the kb run of this job.
+            if let Err(err) = crate::costs::refresh_costs(driver) {
+                eprintln!("costs refresh error for job {id}: {err}");
             }
             Ok(MergeResult::Merged(sha))
         }

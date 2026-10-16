@@ -309,6 +309,191 @@
     return header.level === "ok" ? "Dashboard is live" : header.text;
   }
 
+  const PARK_LABEL = {
+    "checks-failed": "Checks failed",
+    "changes-remain": "Changes remain",
+    "risky-diff": "Risky diff",
+    "diff-too-large": "Diff too large",
+    "budget-stopped": "Budget stopped",
+    "builder-stopped": "Builder stopped",
+    "builder-committed": "Builder committed",
+    "nothing-changed": "Nothing changed",
+    "commit-failed": "Commit failed",
+    other: "Needs a human",
+  };
+  const PARK_RED = ["checks-failed", "changes-remain", "builder-stopped", "commit-failed"];
+  // A line that starts with an error word, ends a failed test, or reports a panic is a line that matters.
+  const PARK_HIT = /^\s*(error|FAIL|\[blocker\])|\sFAILED\s*$|panicked at/;
+
+  function parkKindLabel(kind) {
+    return PARK_LABEL[kind] || PARK_LABEL.other;
+  }
+
+  function parkKindClass(kind) {
+    return PARK_RED.includes(kind) ? "chip-changes" : "chip-warn";
+  }
+
+  // One block-level span per line. Empty lines hold a space so they keep their height.
+  function markLines(text) {
+    const lines = String(text === null || text === undefined ? "" : text).split("\n");
+    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+    return lines
+      .map((line) => `<span class="ln${PARK_HIT.test(line) ? " ln-hit" : ""}">${line === "" ? " " : escapeHtml(line)}</span>`)
+      .join("");
+  }
+
+  function parkHeader(job, kindHtml, whenHtml, title) {
+    return (
+      `<header class="park-head"><div class="park-meta"><span class="job-id">${escapeHtml(job.id)}</span>${kindHtml}${whenHtml}</div>` +
+      `<h2 id="park-title" class="park-title">${escapeHtml(title)}</h2>` +
+      `<button type="button" class="cmd park-close" data-park-close>Close</button></header>`
+    );
+  }
+
+  function renderParkPart(part) {
+    const cut = part.truncated
+      ? `<p class="park-cut">The start of this text was cut. Only the last part is shown.</p>`
+      : "";
+    return (
+      `<section class="park-part"><h3 class="park-part-title">${escapeHtml(part.title)} <span class="park-source">${escapeHtml(part.source)}</span></h3>` +
+      cut +
+      `<pre class="park-text" tabindex="0" aria-label="${escapeHtml(part.title)}">${markLines(part.text)}</pre></section>`
+    );
+  }
+
+  function renderParkDialog(job, view, now) {
+    const kind = String(view.kind || "other");
+    const kindHtml = `<span class="chip ${parkKindClass(kind)}">${escapeHtml(parkKindLabel(kind))}</span>`;
+    const whenHtml =
+      Number(view.at) > 0
+        ? `<time class="park-when">parked ${escapeHtml(formatAge(Math.max(0, now - Number(view.at))))} ago</time>`
+        : "";
+    const parts = (view.parts || []).map(renderParkPart).join("");
+    const next = (view.next || []).map(copyChip).join("");
+    return (
+      parkHeader(job, kindHtml, whenHtml, view.reason || job.reason || "Needs a human") +
+      `<p class="park-note" role="status" hidden>This job is no longer waiting for you. The details below are from when it parked.</p>` +
+      `<div class="park-body">${parts || `<p class="park-empty">No evidence was recorded for this park.</p>`}</div>` +
+      (next ? `<footer class="park-foot"><p class="park-next-label">What to do next</p><p class="hint">${next}</p></footer>` : "")
+    );
+  }
+
+  // Loading, empty and error states of the popup.
+  function parkMessage(job, text, retry) {
+    return (
+      parkHeader(job, "", "", "What went wrong") +
+      `<div class="park-body"><p class="park-empty">${escapeHtml(text)}</p>` +
+      (retry ? `<p><button type="button" class="cmd" data-park-retry>Try again</button></p>` : "") +
+      `</div>`
+    );
+  }
+
+  function parkButton(job) {
+    if (job.stage !== "needs-human" || !job.has_park) return "";
+    return `<p class="park-link"><button type="button" class="cmd park-open" data-park="${escapeHtml(job.id)}">See what went wrong</button></p>`;
+  }
+
+  const GROUP_ORDER = ["small", "medium", "complex", "all"];
+  const ROLE_CLASS = ["builder", "committer", "reviewer", "message", "kb"];
+  const FEW_JOBS = 3;
+
+  function jobsWord(n) {
+    return n === 1 ? "1 job" : `${n} jobs`;
+  }
+
+  // The words that tell a reader how far to trust a figure.
+  function estimateNotes(group, n, nApprox) {
+    const notes = [group === "all" ? "all sizes" : group, jobsWord(n)];
+    if (n < FEW_JOBS) notes.push("few jobs");
+    if (nApprox > 0) notes.push(`${nApprox} approximate`);
+    return notes.join(", ");
+  }
+
+  function isEstimate(e) {
+    return Boolean(e) && typeof e === "object" && [e.median, e.low, e.high, e.n].every((v) => Number.isFinite(Number(v)));
+  }
+
+  // One line on a card: the estimate before the job merges, the actual cost against it afterwards.
+  function estimateLine(job) {
+    const e = job && job.estimate;
+    if (!isEstimate(e)) return "";
+    const range = `${formatTokens(e.low)} to ${formatTokens(e.high)}`;
+    const actual = job.token_view && Number(job.token_view.weighted);
+    if (job.stage === "merged" && Number.isFinite(actual) && actual > 0) {
+      const word = actual > e.high ? "above" : actual < e.low ? "below" : "within";
+      return `<p class="estimate">Cost ${formatTokens(actual)}, estimate ${range}: ${word} the range</p>`;
+    }
+    return `<p class="estimate">Estimated ${range} weighted (${escapeHtml(estimateNotes(String(e.group), Number(e.n), Number(e.n_approx) || 0))})</p>`;
+  }
+
+  function roleClass(role) {
+    return ROLE_CLASS.includes(role) ? `role-${role}` : "role-other";
+  }
+
+  // A stacked bar of the role shares and a text legend. Widths are set from data-pct by app.js.
+  function roleBar(roles) {
+    const entries = Object.entries(roles || {})
+      .filter(([, pct]) => Number.isFinite(Number(pct)) && Number(pct) > 0)
+      .map(([role, pct]) => [role, Math.max(0, Math.min(100, Math.round(Number(pct))))]);
+    if (!entries.length) return "";
+    const label = entries.map(([role, pct]) => `${role} ${pct}%`).join(", ");
+    const segs = entries
+      .map(([role, pct]) => `<span class="role-seg ${roleClass(role)}" data-pct="${pct}"></span>`)
+      .join("");
+    const legend = entries
+      .map(([role, pct]) => `<li><span class="role-key ${roleClass(role)}" aria-hidden="true"></span>${escapeHtml(role)} ${pct}%</li>`)
+      .join("");
+    return (
+      `<div class="role-bar" role="img" aria-label="${escapeHtml(`Share of tokens by role: ${label}`)}">${segs}</div>` +
+      `<ul class="role-legend">${legend}</ul>`
+    );
+  }
+
+  function costRow(name, g) {
+    const approx = Number(g.n_approx) > 0;
+    const notes = [];
+    if (Number(g.n) < FEW_JOBS) notes.push("few jobs");
+    if (approx) notes.push(`${Number(g.n_approx)} of ${Number(g.n)} approximate`);
+    const mark = approx
+      ? ` <span class="approx" title="Output tokens were counted too low for some of these jobs, so the figure is a little low.">~</span>`
+      : "";
+    return (
+      `<tr><th scope="row">${escapeHtml(name)}</th><td>${Number(g.n)}</td>` +
+      `<td>${formatTokens(g.median)}${mark}</td><td>${formatTokens(g.low)} to ${formatTokens(g.high)}</td>` +
+      `<td class="cost-notes">${escapeHtml(notes.join(", "))}</td></tr>`
+    );
+  }
+
+  function renderCostPanel(costs, now) {
+    const groups = (costs && costs.groups) || {};
+    const names = [...GROUP_ORDER.filter((g) => groups[g]), ...Object.keys(groups).filter((g) => !GROUP_ORDER.includes(g))];
+    const rows = names.filter((name) => groups[name] && Number(groups[name].n) > 0);
+    if (!rows.length) {
+      return (
+        `<h2>Cost per job</h2><p class="cost-empty">No cost history yet. Run ${copyChip("factory costs")} after a job merges, ` +
+        `or wait for the next merge.</p>`
+      );
+    }
+    const age =
+      costs && Number(costs.generated_at) > 0 && Number.isFinite(Number(now))
+        ? `<span class="cost-updated">updated ${escapeHtml(formatAge(Math.max(0, Number(now) - Number(costs.generated_at))))} ago</span>`
+        : "";
+    const corrected = rows
+      .filter((name) => groups[name].corrected && Number(groups[name].corrected.n) > 0)
+      .map((name) => {
+        const c = groups[name].corrected;
+        return `<li>${escapeHtml(name)}: median ${formatTokens(c.median)} (${jobsWord(Number(c.n))})</li>`;
+      });
+    return (
+      `<div class="cost-head"><h2>Cost per job</h2>${age}</div>` +
+      `<div class="cost-scroll"><table class="cost-table"><caption class="sr-only">Weighted tokens per finished job, by plan size</caption>` +
+      `<thead><tr><th scope="col">size</th><th scope="col">jobs</th><th scope="col">median</th><th scope="col">range</th><th scope="col">notes</th></tr></thead>` +
+      `<tbody>${rows.map((name) => costRow(name, groups[name])).join("")}</tbody></table></div>` +
+      (corrected.length ? `<p class="cost-note">Exact counts only</p><ul class="cost-corrected">${corrected.join("")}</ul>` : "") +
+      `<h3 class="cost-sub">Where the tokens go</h3>${roleBar(costs && costs.roles)}`
+    );
+  }
+
   function renderCard(job, now, specs) {
     const id = escapeHtml(job.id);
     const stage = STAGES.some((s) => s.key === job.stage) ? job.stage : "spec";
@@ -319,6 +504,7 @@
     const reason =
       job.stage === "needs-human"
         ? `<p class="reason">${escapeHtml(job.reason || "needs a human")}</p>` +
+          parkButton(job) +
           `<p class="hint">${copyChip(`factory approve ${job.id}`)}${copyChip(`factory rework ${job.id} <note>`)}${copyChip(`factory cancel ${job.id}`)}</p>`
         : "";
     const showAge = job.stage !== "merged" && job.stage !== "needs-human";
@@ -346,6 +532,7 @@
       (showAge ? `<span class="age">${formatAge(job.seconds_in_stage)} in stage</span>` : "") +
       `</div>` +
       planSection(job) +
+      estimateLine(job) +
       (parked ? "" : durationsLine(job)) +
       (parked ? "" : tokensBar(job)) +
       chips +
@@ -515,6 +702,15 @@
     renderLogNotice,
     headerStatus,
     copyChip,
+    renderCostPanel,
+    estimateLine,
+    roleBar,
+    parkKindLabel,
+    parkKindClass,
+    markLines,
+    renderParkDialog,
+    parkMessage,
+    parkButton,
     seriesChip,
     specChip,
     durationsLine,

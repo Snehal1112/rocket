@@ -632,3 +632,207 @@ test("a state from an older server without specs still renders the board", () =>
   assert.match(html, /column-build/);
   assert.doesNotMatch(html, /data-spec=/);
 });
+
+test("a needs-human card with details has a button, one without has none", () => {
+  const withPark = board.renderCard(makeJob({ stage: "needs-human", reason: "why", has_park: true }), 200, []);
+  assert.match(withPark, /<button type="button" class="cmd park-open" data-park="001">See what went wrong<\/button>/);
+  const without = board.renderCard(makeJob({ stage: "needs-human", reason: "why" }), 200, []);
+  assert.doesNotMatch(without, /data-park=/);
+  const building = board.renderCard(makeJob({ stage: "build", has_park: true }), 200, []);
+  assert.doesNotMatch(building, /data-park=/);
+});
+
+test("the card never contains the popup, so a repaint cannot close it", () => {
+  const html = board.renderCard(makeJob({ stage: "needs-human", reason: "why", has_park: true }), 200, []);
+  assert.doesNotMatch(html, /<dialog|park-text/);
+});
+
+test("parkKindLabel and parkKindClass cover every kind", () => {
+  const red = ["checks-failed", "changes-remain", "builder-stopped", "commit-failed"];
+  const amber = ["risky-diff", "diff-too-large", "budget-stopped", "builder-committed", "nothing-changed", "other"];
+  for (const kind of red) assert.equal(board.parkKindClass(kind), "chip-changes", kind);
+  for (const kind of amber) assert.equal(board.parkKindClass(kind), "chip-warn", kind);
+  assert.equal(board.parkKindClass("something-new"), "chip-warn");
+  assert.equal(board.parkKindLabel("checks-failed"), "Checks failed");
+  assert.equal(board.parkKindLabel("other"), "Needs a human");
+  assert.equal(board.parkKindLabel("something-new"), "Needs a human");
+});
+
+test("markLines marks the lines that matter and escapes the text", () => {
+  const html = board.markLines(
+    "error[E0432]: unresolved import\n  --> src/a.rs\ntest a::b ... FAILED\nthread 'x' panicked at src/c.rs:1\n[blocker] src/d.rs wrong\nFAIL cargo check\nall fine",
+  );
+  const hits = html.match(/class="ln ln-hit"/g) || [];
+  assert.equal(hits.length, 5);
+  assert.match(html, /<span class="ln">all fine<\/span>/);
+  assert.match(html, /<span class="ln">  --&gt; src\/a.rs<\/span>/);
+});
+
+test("markLines escapes markup and keeps empty lines at full height", () => {
+  const html = board.markLines('<script>alert("x")</script>\n\nlast\n');
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
+  assert.match(html, /<span class="ln"> <\/span>/);
+  // The trailing newline does not add a phantom last line.
+  assert.equal((html.match(/class="ln/g) || []).length, 3);
+});
+
+test("markLines renders thousands of lines", () => {
+  const text = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join("\n");
+  assert.equal((board.markLines(text).match(/class="ln/g) || []).length, 5000);
+});
+
+test("renderParkDialog shows the kind, reason, parts and next commands", () => {
+  const job = makeJob({ stage: "needs-human", reason: "fallback" });
+  const view = {
+    kind: "checks-failed",
+    reason: "checks failed after 2 fix rounds",
+    at: 100,
+    round: 3,
+    next: ["factory rework 001 <note>"],
+    parts: [
+      { title: "Failing checks", source: "checks.md", text: "FAIL cargo check\nerror: boom", truncated: false },
+      { title: "Cut log", source: "log", text: "tail", truncated: true },
+    ],
+  };
+  const html = board.renderParkDialog(job, view, 220);
+  assert.match(html, /<h2 id="park-title" class="park-title">checks failed after 2 fix rounds<\/h2>/);
+  assert.match(html, /class="chip chip-changes">Checks failed</);
+  assert.match(html, /parked 2m ago/);
+  assert.match(html, /Failing checks/);
+  assert.match(html, /checks\.md/);
+  assert.match(html, /class="ln ln-hit">FAIL cargo check/);
+  assert.match(html, /The start of this text was cut/);
+  assert.match(html, /What to do next/);
+  assert.match(html, /data-copy="factory rework 001 &lt;note&gt;"/);
+  assert.match(html, /data-park-close/);
+  assert.match(html, /class="park-note" role="status" hidden/);
+});
+
+test("renderParkDialog escapes the reason and survives missing fields", () => {
+  const html = board.renderParkDialog(makeJob({ reason: null }), { reason: "<img onerror=x>" }, 10);
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img onerror=x&gt;/);
+  assert.match(html, /No evidence was recorded for this park/);
+  assert.doesNotMatch(html, /What to do next/);
+  const bare = board.renderParkDialog(makeJob({ reason: null }), {}, 10);
+  assert.match(bare, /Needs a human/);
+});
+
+test("parkMessage offers a retry only when asked", () => {
+  const job = makeJob({});
+  assert.match(board.parkMessage(job, "Loading.", false), /Loading\./);
+  assert.doesNotMatch(board.parkMessage(job, "Loading.", false), /data-park-retry/);
+  assert.match(board.parkMessage(job, "It failed.", true), /data-park-retry/);
+  assert.match(board.parkMessage(job, "<b>", false), /&lt;b&gt;/);
+});
+
+const costs = {
+  generated_at: 100,
+  groups: {
+    small: { n: 4, n_approx: 4, median: 280000, low: 220000, high: 370000, roles: { builder: 62 }, corrected: null },
+    medium: { n: 2, n_approx: 1, median: 300000, low: 250000, high: 350000, roles: {}, corrected: { n: 1, median: 350000, low: 350000, high: 350000 } },
+    all: { n: 6, n_approx: 5, median: 290000, low: 220000, high: 370000, roles: { builder: 62 }, corrected: null },
+  },
+  roles: { builder: 62, committer: 20, reviewer: 10, message: 8 },
+};
+
+test("the cost panel lists a row per group in order with median, range and notes", () => {
+  const html = board.renderCostPanel(costs, 160);
+  assert.match(html, /<h2[^>]*>Cost per job<\/h2>/);
+  const order = ["small", "medium", "all"].map((g) => html.indexOf(`>${g}<`));
+  assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], html);
+  assert.doesNotMatch(html, />complex</);
+  assert.match(html, /280K/);
+  assert.match(html, /220K to 370K/);
+  assert.match(html, /4 of 4 approximate/);
+  assert.match(html, /1 of 2 approximate/);
+  assert.match(html, /few jobs/);
+  assert.match(html, /updated 1m ago/);
+  assert.match(html, /<div class="cost-head"><h2>Cost per job<\/h2><span class="cost-updated">updated 1m ago<\/span><\/div>/);
+});
+
+test("approximate medians carry a tilde with an explanation", () => {
+  const html = board.renderCostPanel(costs, 160);
+  assert.match(html, /280K <span class="approx" title="[^"]+">~<\/span>/);
+});
+
+test("corrected figures are listed when a group has them", () => {
+  const html = board.renderCostPanel(costs, 160);
+  assert.match(html, /Exact counts only/);
+  assert.match(html, /medium: median 350K \(1 job\)/);
+});
+
+test("the role bar has a segment and a legend entry per known role", () => {
+  const html = board.roleBar({ builder: 62, committer: 20, reviewer: 10, message: 8 });
+  assert.equal((html.match(/class="role-seg role-(builder|committer|reviewer|message)" data-pct="\d+"/g) || []).length, 4);
+  assert.match(html, /builder 62%/);
+  assert.match(html, /role="img"/);
+  assert.match(html, /aria-label="[^"]*builder 62%[^"]*"/);
+});
+
+test("an unknown or hostile role name is escaped and gets no class from file text", () => {
+  const html = board.roleBar({ '<img onerror=x>': 40, builder: 60 });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img onerror=x&gt; 40%/);
+  assert.match(html, /class="role-seg role-other" data-pct="40"/);
+  assert.equal(board.roleBar({}), "");
+  assert.equal(board.roleBar(null), "");
+});
+
+test("group names are escaped and an unknown group is still listed after the known ones", () => {
+  const html = board.renderCostPanel({ generated_at: 1, groups: { "<b>x</b>": { n: 1, n_approx: 0, median: 5, low: 5, high: 5, roles: {} } }, roles: {} }, 2);
+  assert.doesNotMatch(html, /<b>x/);
+  assert.match(html, /&lt;b&gt;x&lt;\/b&gt;/);
+});
+
+test("a group named like an object property renders as plain text", () => {
+  const html = board.renderCostPanel({ generated_at: 1, groups: JSON.parse('{"constructor":{"n":1,"n_approx":0,"median":5,"low":5,"high":5,"roles":{}}}'), roles: {} }, 2);
+  assert.match(html, /<th scope="row">constructor<\/th>/);
+  assert.doesNotMatch(html, /function|native code/);
+});
+
+test("role shares are rounded and clamped, and a non-finite share is skipped", () => {
+  const html = board.roleBar({ builder: 33.4, reviewer: Infinity, committer: 250 });
+  assert.match(html, /builder 33%/);
+  assert.match(html, /data-pct="33"/);
+  assert.doesNotMatch(html, /reviewer|Infinity/);
+  assert.match(html, /committer 100%/);
+  assert.match(html, /data-pct="100"/);
+});
+
+test("the empty panel invites an action and does not throw on missing data", () => {
+  for (const empty of [null, undefined, {}, { groups: {}, roles: {} }, { groups: { small: { n: 0 } }, roles: {} }]) {
+    const html = board.renderCostPanel(empty, 10);
+    assert.match(html, /No cost history yet/);
+    assert.match(html, /data-copy="factory costs"/);
+  }
+});
+
+test("an unmerged card with an estimate shows the range, group and caveats", () => {
+  const job = makeJob({ stage: "build", estimate: { group: "small", median: 280000, low: 220000, high: 370000, n: 4, n_approx: 4 } });
+  const html = board.renderCard(job, 200, []);
+  assert.match(html, /<p class="estimate">Estimated 220K to 370K weighted \(small, 4 jobs, 4 approximate\)<\/p>/);
+  const few = makeJob({ stage: "spec", estimate: { group: "all", median: 10, low: 10, high: 10, n: 1, n_approx: 0 } });
+  assert.match(board.renderCard(few, 200, []), /Estimated 10 to 10 weighted \(all sizes, 1 job, few jobs\)/);
+});
+
+test("a card without an estimate shows no estimate line", () => {
+  const html = board.renderCard(makeJob({ stage: "build" }), 200, []);
+  assert.doesNotMatch(html, /class="estimate"/);
+  assert.equal(board.estimateLine(makeJob({})), "");
+  assert.equal(board.estimateLine(makeJob({ estimate: "lots" })), "");
+});
+
+test("a merged card compares the actual cost with the estimate range", () => {
+  const est = { group: "small", median: 280000, low: 220000, high: 370000, n: 4, n_approx: 0 };
+  const within = board.estimateLine(makeJob({ stage: "merged", estimate: est, token_view: { weighted: 300000 } }));
+  assert.match(within, /Cost 300K, estimate 220K to 370K: within the range/);
+  assert.match(board.estimateLine(makeJob({ stage: "merged", estimate: est, token_view: { weighted: 220000 } })), /within the range/);
+  assert.match(board.estimateLine(makeJob({ stage: "merged", estimate: est, token_view: { weighted: 370000 } })), /within the range/);
+  assert.match(board.estimateLine(makeJob({ stage: "merged", estimate: est, token_view: { weighted: 370001 } })), /above the range/);
+  assert.match(board.estimateLine(makeJob({ stage: "merged", estimate: est, token_view: { weighted: 100 } })), /below the range/);
+  const noActual = board.estimateLine(makeJob({ stage: "merged", estimate: est }));
+  assert.match(noActual, /Estimated 220K to 370K/);
+  assert.doesNotMatch(noActual, /Cost /);
+});

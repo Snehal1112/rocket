@@ -3,10 +3,12 @@ pub mod board;
 pub mod budget;
 pub mod commitmsg;
 pub mod config;
+pub mod cost;
 pub mod error;
 pub mod fsutil;
 pub mod ids;
 pub mod ledger;
+pub mod park;
 pub mod risk;
 pub mod stage;
 pub mod verdict;
@@ -18,10 +20,12 @@ pub use commitmsg::{
     validate_message, MAX_COMMITS_PER_RUN, MAX_SUBJECT_CHARS, MESSAGE_BEGIN, MESSAGE_END,
 };
 pub use config::{CheckRule, Config};
+pub use cost::{count_tasks, estimate_for, group_of, stats, usage_summary, CostsFile, Estimate, GroupStats, JobCost, SizeGroup, Spread, Thresholds, UsageSummary};
 pub use error::CoreError;
 pub use fsutil::write_atomic;
 pub use ids::{job_dir_name, next_job_id, next_series_id, normalize_id, slugify};
 pub use ledger::{Ledger, TaskState};
+pub use park::{ParkKind, ParkPart, ParkRecord, PARK_FILE, PART_CAP};
 pub use risk::{classify_paths, glob_match, DiffClass};
 pub use stage::Stage;
 pub use verdict::{parse_verdict, Verdict};

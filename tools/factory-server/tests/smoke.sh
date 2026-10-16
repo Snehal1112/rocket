@@ -45,6 +45,16 @@ JSON
   mv "$board.tmp" "$board"
 }
 
+# A parked job whose folder holds a park.json.
+write_board_parked() {
+  local now
+  now="$(date +%s)"
+  cat >"$board.tmp" <<JSON
+{"jobs":[{"id":"001","dir":"2026-10-13-001-smoke","slug":"smoke","created":"2026-10-13","feature":"Smoke test job","branch":"factory/001-smoke","stage":"needs-human","reason":"checks failed after 2 fix rounds","park_kind":"checks-failed","park_at":$now,"round":3,"stage_since":$now,"reviews":{"code":"pending"}}]}
+JSON
+  mv "$board.tmp" "$board"
+}
+
 event() { printf '%s\n' "$1" >>"$log"; }
 
 # Finds a free local port by trying random ones in the dynamic range.
@@ -103,6 +113,18 @@ await "an event without job_id stays unassigned" '.unassigned_agents | map(.agen
 write_board review
 await "a stage change shows up on the next poll" '.jobs[0] | select(.stage=="review")'
 
+write_board_parked
+await "a parked job without park.json has no details yet" '.jobs[0] | select(.stage=="needs-human" and .has_park==false)'
+check "the park endpoint answers 404 without a file" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' $url/api/jobs/001/park)\" = 404 ]"
+mkdir -p "$root/.superpowers/sdd/2026-10-13-001-smoke"
+cat >"$root/.superpowers/sdd/2026-10-13-001-smoke/park.json" <<JSON
+{"kind":"checks-failed","reason":"checks failed after 2 fix rounds","at":$now,"round":3,"next":["factory rework 001 <note>"],"parts":[{"title":"Failing checks","source":"checks.md","text":"FAIL cargo check\nerror: boom","truncated":false}]}
+JSON
+await "a parked job with park.json shows has_park" '.jobs[0] | select(.has_park==true and .park_kind=="checks-failed")'
+check "the park endpoint serves the evidence" bash -c "curl -fs $url/api/jobs/001/park | grep -q 'error: boom'"
+check "the polled state never carries the evidence text" bash -c "! curl -fs $url/api/state | grep -q 'error: boom'"
+check "the park endpoint refuses a foreign Host" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' $url/api/jobs/001/park)\" = 403 ]"
+
 event "{\"ts\":$((now + 5)),\"hook_event_name\":\"SubagentStop\",\"agent_id\":\"b1\",\"job_id\":\"001\",\"last_message\":\"done\"}"
 await "a stopped agent is marked done" '.jobs[0].agents[0] | select(.status=="done")'
 
@@ -124,6 +146,19 @@ cat >"$board" <<JSON
 {"jobs":[{"id":"001","dir":"d","slug":"s","created":"2026-10-13","feature":"f","branch":"b","stage":"build","round":0,"stage_since":1,"reviews":{},"series":{"index":"x"},"tokens":"lots","stage_history":["junk"]}]}
 JSON
 await "a malformed series, tokens or history does not give a board error" '.board_error == null and (.jobs | length) == 1'
+
+# The cost summary and a job estimate reach the state, the per-job list does not.
+cat >"$data/costs.json" <<JSON
+{"generated_at":$now,"groups":{"small":{"n":2,"n_approx":1,"median":280000,"low":220000,"high":340000,"roles":{"builder":60},"corrected":null}},"roles":{"builder":60},"jobs":[{"id":"SECRET-JOB"}]}
+JSON
+await "the state carries the group summary" '.costs | select(.groups.small.n==2 and .roles.builder==60)'
+check "the state never carries a per-job list from costs.json" bash -c "! curl -fs $url/api/state | grep -q SECRET-JOB"
+cat >"$board" <<JSON
+{"jobs":[{"id":"001","dir":"d","slug":"s","created":"2026-10-13","feature":"f","branch":"b","stage":"build","round":0,"stage_since":1,"reviews":{},"estimate":{"group":"small","median":280000,"low":220000,"high":370000,"n":4,"n_approx":2}}]}
+JSON
+await "a job estimate passes through to the state" '.jobs[0].estimate | select(.group=="small" and .median==280000)'
+echo "garbage" >"$data/costs.json"
+await "a broken costs.json gives costs null and no board error" '.costs == null and .board_error == null'
 
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; fi
 exit $((fails > 0))
