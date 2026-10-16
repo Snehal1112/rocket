@@ -4,7 +4,7 @@ use std::time::Duration;
 use factory_agent::AgentSpec;
 
 use crate::ports::JobView;
-use crate::tasks::PlanTask;
+use crate::tasks::{plan_header, spec_excerpt, task_section, PlanTask};
 use crate::Engine;
 
 /// The agent file the driver passes with `--agent`.
@@ -73,6 +73,33 @@ impl Engine<'_> {
         self.with_limits(spec, &self.config.builder_model)
     }
 
+    /// The task excerpt for a builder prompt, or an empty string when the switch is off or the plan has no
+    /// `### Task N:` section for the task. It replaces reading `plan.md` and `spec.md` in full.
+    fn task_excerpt(&self, task: &PlanTask) -> String {
+        if !self.config.builder_excerpt {
+            return String::new();
+        }
+        let plan = std::fs::read_to_string(&self.plan_file).unwrap_or_default();
+        let Some(section) = task_section(&plan, task.n) else { return String::new() };
+        let header = plan_header(&plan);
+        let spec = std::fs::read_to_string(self.job_dir.join("spec.md")).unwrap_or_default();
+        let spec_part = spec_excerpt(&spec);
+        let mut out = String::from(
+            "Task excerpt: the plan header, your task, and the spec goal and acceptance criteria follow. \
+             They replace reading plan.md and spec.md in full. Open those files only for something this excerpt refers to outside itself.\n\
+             --- plan header ---\n",
+        );
+        out.push_str(&header);
+        out.push_str("\n--- your task ---\n");
+        out.push_str(&section);
+        if !spec_part.is_empty() {
+            out.push_str("\n--- spec excerpt ---\n");
+            out.push_str(&spec_part);
+        }
+        out.push_str("\n--- end of excerpt ---\n");
+        out
+    }
+
     /// The headless builder for one plan task. It starts fresh and sees only the earlier commit subjects.
     pub(crate) fn builder_task_spec(
         &self,
@@ -84,6 +111,7 @@ impl Engine<'_> {
         earlier: &[String],
     ) -> AgentSpec {
         let spec_line = self.spec_line();
+        let excerpt = self.task_excerpt(task);
         let done = if earlier.is_empty() {
             "No earlier task has a commit yet.".to_string()
         } else {
@@ -91,7 +119,7 @@ impl Engine<'_> {
         };
         let prompt = format!(
             "You are the builder in Rocket's software factory. Your working directory is the job worktree, already on branch `{branch}`.\n\
-             The plan is at {plan}. Never edit the plan.\n{spec_line}\
+             The plan is at {plan}. Never edit the plan.\n{spec_line}{excerpt}\
              Base commit: {base}. Current tip: {tip}.\n{done}\n\
              Do only Task {n}: {title}. Earlier tasks are already committed, do not redo them. Later tasks belong to other agents.\n\
              Write the failing test first, then the code, then run the checks the task names.\n\

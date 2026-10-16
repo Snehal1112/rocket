@@ -766,3 +766,74 @@ fn a_branch_that_moved_to_other_work_parks_with_the_recovery_command() {
     assert_eq!(runner.specs_for("committer").len(), 0);
     assert!(fx.job().batch_snapshot.is_some());
 }
+
+const EXCERPT_PLAN: &str = "# Demo Plan\n\n**Goal:** make it.\n\n## Global Constraints\n\n- Use -j4.\n\n---\n\n\
+### Task 1: first thing\n\nBODY-ONE-MARKER\n\n### Task 2: second thing\n\nBODY-TWO-MARKER\n\nNext plan: none\n";
+const EXCERPT_SPEC: &str = "# Spec\n\nGoal: ship the thing quickly.\n\n## Background\n\nBACKGROUND-MARKER\n\n\
+## Acceptance criteria\n\n- ACCEPT-MARKER\n\n## Testing\n\nTESTING-MARKER\n";
+
+fn excerpt_fixture() -> Fixture {
+    let fx = committing_fixture();
+    std::fs::write(&fx.plan_file, EXCERPT_PLAN).expect("plan");
+    std::fs::write(fx.job_dir.join("spec.md"), EXCERPT_SPEC).expect("spec");
+    let mut board = factory_core::Board::load(&fx.board_path).expect("load");
+    board.find_mut("001").expect("job").set_stage(Stage::Build, None, false, 1.0).expect("stage");
+    board.save(&fx.board_path).expect("save");
+    fx
+}
+
+#[test]
+fn a_task_builder_gets_its_own_task_the_header_and_the_spec_excerpt() {
+    let fx = excerpt_fixture();
+    let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
+    fx.engine(&runner).build_stage().expect("task 1");
+    let prompt = runner.last_spec_for("builder").expect("spec").prompt;
+    for want in ["Use -j4.", "BODY-ONE-MARKER", "Goal: ship the thing quickly.", "ACCEPT-MARKER", "Do only Task 1"] {
+        assert!(prompt.contains(want), "missing {want}: {prompt}");
+    }
+    for gone in ["BODY-TWO-MARKER", "BACKGROUND-MARKER", "TESTING-MARKER"] {
+        assert!(!prompt.contains(gone), "unexpected {gone}: {prompt}");
+    }
+    assert!(prompt.contains(&fx.plan_file.display().to_string()), "{prompt}");
+    assert!(prompt.contains("spec.md"), "{prompt}");
+}
+
+#[test]
+fn the_flag_off_gives_the_old_prompt_without_the_excerpt() {
+    let mut fx = excerpt_fixture();
+    fx.config.builder_excerpt = false;
+    let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
+    fx.engine(&runner).build_stage().expect("task 1");
+    let prompt = runner.last_spec_for("builder").expect("spec").prompt;
+    assert!(!prompt.contains("BODY-ONE-MARKER") && !prompt.contains("ACCEPT-MARKER"), "{prompt}");
+    assert!(prompt.contains("Do only Task 1"));
+}
+
+#[test]
+fn a_plan_with_checkbox_tasks_falls_back_to_the_old_prompt() {
+    let fx = committing_fixture();
+    std::fs::write(&fx.plan_file, "# P\n\n- [ ] Task 1: first\n\nBODY-ONE-MARKER\n- [ ] Task 2: second\n").expect("plan");
+    let mut board = factory_core::Board::load(&fx.board_path).expect("load");
+    board.find_mut("001").expect("job").set_stage(Stage::Build, None, false, 1.0).expect("stage");
+    board.save(&fx.board_path).expect("save");
+    let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
+    fx.engine(&runner).build_stage().expect("task 1");
+    let prompt = runner.last_spec_for("builder").expect("spec").prompt;
+    assert!(!prompt.contains("BODY-ONE-MARKER"), "{prompt}");
+    assert!(prompt.contains("Do only Task 1"));
+}
+
+#[test]
+fn the_excerpt_prompt_is_smaller_than_the_plan_and_spec_it_replaces() {
+    let big_task = format!("### Task 2: second thing\n\n{}\n", "filler line\n".repeat(400));
+    let plan = format!("# Demo Plan\n\n- Use -j4.\n\n### Task 1: first thing\n\nbody\n\n{big_task}");
+    let fx = excerpt_fixture();
+    std::fs::write(&fx.plan_file, &plan).expect("plan");
+    let runner = scripted_auto(vec![change_effect("a.txt", 3)]);
+    fx.engine(&runner).build_stage().expect("task 1");
+    let prompt = runner.last_spec_for("builder").expect("spec").prompt;
+    // The old prompt only named the files and the builder read them in full, about plan + spec bytes.
+    let replaced = plan.len() + EXCERPT_SPEC.len();
+    assert!(prompt.len() < replaced / 2, "prompt {} bytes, plan and spec {replaced} bytes", prompt.len());
+    assert!(!prompt.contains("filler line"));
+}
