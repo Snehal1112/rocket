@@ -61,22 +61,41 @@ fn is_task_heading(line: &str) -> bool {
     !digits.is_empty() && rest[digits.len()..].starts_with(':')
 }
 
+/// The lines of a text, each with whether it sits inside a fenced code block.
+/// A fence line itself counts as the text around the block, not as inside it.
+fn lines_with_fence(text: &str) -> Vec<(&str, bool)> {
+    let mut in_fence = false;
+    text.lines()
+        .map(|line| {
+            if line.trim_start().starts_with("```") {
+                in_fence = !in_fence;
+                return (line, false);
+            }
+            (line, in_fence)
+        })
+        .collect()
+}
+
 /// The text of a plan before its first `### Task` heading, trimmed. The whole plan when it has no such heading.
+/// Headings inside fenced code blocks are ignored.
 pub fn plan_header(plan: &str) -> String {
-    let end = plan.lines().position(is_task_heading).map_or(plan.lines().count(), |i| i);
-    plan.lines().take(end).collect::<Vec<_>>().join("\n").trim().to_string()
+    let lines = lines_with_fence(plan);
+    let end = lines.iter().position(|(l, fenced)| !fenced && is_task_heading(l)).unwrap_or(lines.len());
+    lines[..end].iter().map(|(l, _)| *l).collect::<Vec<_>>().join("\n").trim().to_string()
 }
 
 /// The heading and body of `### Task N:`, up to the next task heading, a `Next plan:` line or the end.
 /// `None` when the plan has no such heading. Inner headings such as `### Step` stay in the section.
+/// Headings and `Next plan:` lines inside fenced code blocks are ignored.
 pub fn task_section(plan: &str, n: u32) -> Option<String> {
-    let mut lines = plan.lines().skip_while(|line| {
-        !(is_task_heading(line) && line.strip_prefix("### Task ").is_some_and(|r| r.starts_with(&format!("{n}:"))))
-    });
-    let heading = lines.next()?;
-    let mut out = vec![heading];
-    for line in lines {
-        if is_task_heading(line) || line.trim_start().starts_with("Next plan:") {
+    let prefix = format!("{n}:");
+    let lines = lines_with_fence(plan);
+    let start = lines.iter().position(|(l, fenced)| {
+        !fenced && is_task_heading(l) && l.strip_prefix("### Task ").is_some_and(|r| r.starts_with(&prefix))
+    })?;
+    let mut out = vec![lines[start].0];
+    for (line, fenced) in &lines[start + 1..] {
+        if !fenced && (is_task_heading(line) || line.starts_with("Next plan:")) {
             break;
         }
         out.push(line);
@@ -85,7 +104,7 @@ pub fn task_section(plan: &str, n: u32) -> Option<String> {
 }
 
 /// The goal of a spec plus its `Acceptance criteria` section (a `## ` heading containing those words,
-/// up to the next `## ` heading). Empty for an empty spec.
+/// up to the next `## ` heading outside a fenced block). Empty for an empty spec.
 pub fn spec_excerpt(spec: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     let goal = spec_goal(spec);
@@ -95,13 +114,14 @@ pub fn spec_excerpt(spec: &str) -> String {
     } else if !goal.is_empty() {
         parts.push(format!("Goal: {goal}"));
     }
-    let mut lines = spec
-        .lines()
-        .skip_while(|l| !(l.starts_with("## ") && l.to_ascii_lowercase().contains("acceptance criteria")));
-    if let Some(heading) = lines.next() {
-        let mut section = vec![heading];
-        for line in lines {
-            if line.starts_with("## ") {
+    let lines = lines_with_fence(spec);
+    let start = lines
+        .iter()
+        .position(|(l, fenced)| !fenced && l.starts_with("## ") && l.to_ascii_lowercase().contains("acceptance criteria"));
+    if let Some(start) = start {
+        let mut section = vec![lines[start].0];
+        for (line, fenced) in &lines[start + 1..] {
+            if !fenced && line.starts_with("## ") {
                 break;
             }
             section.push(line);
@@ -212,5 +232,43 @@ mod tests {
     fn a_spec_without_acceptance_criteria_gives_the_goal_and_an_empty_spec_gives_nothing() {
         assert_eq!(spec_excerpt("Goal: only this goal here.\n"), "Goal: only this goal here.");
         assert_eq!(spec_excerpt(""), "");
+    }
+
+    #[test]
+    fn fenced_headings_and_pointers_stay_inside_their_task() {
+        let plan = "# P\n\n### Task 1: one\n\nbefore\n\n```text\n### Task 9: fake\nNext plan: x\nin fence\n```\n\nafter fence\n\n\
+### Task 2: two\n\nbody two\n";
+        let one = task_section(plan, 1).expect("task 1");
+        assert!(one.contains("### Task 9: fake") && one.contains("Next plan: x"), "{one}");
+        assert!(one.contains("in fence") && one.contains("after fence"), "{one}");
+        assert!(!one.contains("body two"));
+        assert!(task_section(plan, 9).is_none());
+    }
+
+    #[test]
+    fn a_fenced_task_heading_does_not_end_the_header() {
+        let plan = "# P\n\n```text\n### Task 5: fake\n```\n\nmore header\n\n### Task 1: real\n\nbody\n";
+        let header = plan_header(plan);
+        assert!(header.contains("### Task 5: fake") && header.contains("more header"), "{header}");
+        assert!(!header.contains("Task 1: real"));
+    }
+
+    #[test]
+    fn a_fenced_h2_does_not_end_the_acceptance_section() {
+        let spec = "Goal: g here ok.\n\n## Acceptance criteria\n\n```sh\n## comment\n```\n\n- last item\n\n## Testing\n\nnope\n";
+        let ex = spec_excerpt(spec);
+        assert!(ex.contains("## comment") && ex.contains("- last item"), "{ex}");
+        assert!(!ex.contains("nope"));
+    }
+
+    #[test]
+    fn a_real_plan_with_quoted_plans_keeps_its_whole_first_task() {
+        let plan = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../docs/superpowers/plans/2026-10-17-factory-cost-reduction/plan-02-builder-excerpt.md"
+        ));
+        let one = task_section(plan, 1).expect("task 1");
+        assert!(one.contains("Step 5: Commit"), "{one}");
+        assert!(!one.contains("### Task 2: Excerpt prompt"));
     }
 }
