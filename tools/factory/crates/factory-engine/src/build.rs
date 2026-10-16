@@ -201,10 +201,14 @@ impl Engine<'_> {
         let new_tip = if self.config.commit_batch {
             if !self.repo.head_is_on_branch(&wt).map_err(git_err)? {
                 let short = tip.get(..7).unwrap_or(&tip);
+                let at = self
+                    .repo
+                    .head_sha(&wt)
+                    .map_or(String::new(), |id| format!(", HEAD is at {}", id.get(..7).unwrap_or(&id)));
                 return self.park_with(
                     ParkKind::BuilderCommitted,
                     format!(
-                        "builder moved HEAD off the job branch in task {} (the branch was at {short} before the run); run `git checkout {branch}` in the job worktree, then `factory rework {}`",
+                        "builder moved HEAD off the job branch in task {} (the branch was at {short} before the run{at}); if the detached HEAD has commits, note its sha with `git rev-parse HEAD` first, then run `git checkout {branch}` in the job worktree (uncommitted changes stay), then `factory rework {}`",
                         task.n, self.job_id
                     ),
                     Vec::new(),
@@ -306,12 +310,25 @@ impl Engine<'_> {
         self.repo.same_tree(tip, snapshot).map_err(git_err)
     }
 
+    /// A rework note that the batch commit left unread must not displace the findings of a later fix round.
+    /// Its text goes to the ledger and the file is removed.
+    fn keep_unsent_note(&self) -> Result<(), EngineError> {
+        let path = self.job_dir.join("rework-note.md");
+        let Ok(text) = std::fs::read_to_string(&path) else { return Ok(()) };
+        let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let kept: String = one_line.chars().take(300).collect();
+        self.ruling(&format!("rework note not sent to a builder because the batch commit ran no builder: {kept}"))?;
+        let _ = std::fs::remove_file(&path);
+        Ok(())
+    }
+
     /// Records the end of a batch commit: a ruling, a cleared flag, then the usual build finish.
     fn finish_batch(&self, job: &JobView, base: &str, head: String, count: usize, snapshot: &str) -> Result<StageOutcome, EngineError> {
         let short = head.get(..7).unwrap_or(&head).to_string();
         let was = snapshot.get(..7).unwrap_or(snapshot);
         let what = if count == 0 { format!("batch commit already done, replaced the snapshots up to {was}") } else { format!("batch commit replaced {count} snapshots") };
         self.ruling(&format!("{what}, the branch is at {short}"))?;
+        self.keep_unsent_note()?;
         self.update(|j| {
             j.batch_snapshot = None;
             Ok(())

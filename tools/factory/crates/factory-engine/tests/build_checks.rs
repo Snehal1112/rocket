@@ -867,10 +867,34 @@ fn a_builder_that_detaches_head_parks_before_the_snapshot() {
         StageOutcome::NeedsHuman(r) => {
             assert!(r.contains("moved HEAD off the job branch in task 1"), "{r}");
             assert!(r.contains("factory rework 001"), "{r}");
+            assert!(r.contains("git rev-parse HEAD") && r.contains("HEAD is at "), "{r}");
         }
         other => panic!("unexpected {other:?}"),
     }
     let job = fx.job();
     assert_eq!(job.task_index, 0);
     assert_eq!(fx.repo.tip(&job.branch).expect("tip"), job.base.clone().expect("base"));
+}
+
+#[test]
+fn a_rework_note_left_by_a_batch_goes_to_the_ledger_and_a_fix_round_uses_the_findings() {
+    let fx = two_task_fixture();
+    park_a_batch(&fx);
+    std::fs::write(fx.job_dir.join("rework-note.md"), "please look at the batch").expect("note");
+    let runner = scripted_auto(vec![]);
+    assert_eq!(fx.engine(&runner).build_stage().expect("resume"), StageOutcome::Advanced(Stage::Review));
+    assert!(!fx.job_dir.join("rework-note.md").exists());
+    let ledger = ledger_of(&fx);
+    assert!(ledger.contains("rework note not sent to a builder") && ledger.contains("please look at the batch"), "{ledger}");
+    // A fix round now resumes with the findings file.
+    std::fs::write(fx.job_dir.join("changes-r2.md"), "fix it").expect("findings");
+    let mut board = factory_core::Board::load(&fx.board_path).expect("load");
+    let job = board.find_mut("001").expect("job");
+    job.round = 2;
+    job.set_stage(Stage::Build, None, true, 1.0).expect("stage");
+    board.save(&fx.board_path).expect("save");
+    let fix = scripted_auto(vec![change_effect("c.txt", 2)]);
+    assert_eq!(fx.engine(&fix).build_stage().expect("fix round"), StageOutcome::Advanced(Stage::Review));
+    let prompt = fix.last_spec_for("builder").expect("builder").prompt;
+    assert!(prompt.contains("changes-r2.md"), "{prompt}");
 }
