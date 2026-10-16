@@ -127,6 +127,11 @@ impl Repo {
         Ok(self.inner.graph_descendant_of(b, a)?)
     }
 
+    /// True when two commits have the same tree, whatever their history.
+    pub fn same_tree(&self, a: &str, b: &str) -> Result<bool> {
+        Ok(self.commit_of(a)?.tree_id() == self.commit_of(b)?.tree_id())
+    }
+
     /// `Some(main sha)` when `head` is already on main, `None` when it is not.
     /// Works after a manual merge and after the branch was deleted, because it
     /// takes shas. A job with no commits is refused, as `ctl is-merged` did.
