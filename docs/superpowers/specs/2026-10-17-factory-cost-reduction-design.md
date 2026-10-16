@@ -36,6 +36,7 @@ In `factory-engine` (`build.rs`, `commit.rs`):
 - The Batch prompt is the usual `commit-context.md`, then `## This run` with the plan title, the task titles and for each task the files its snapshot changed (as hints for grouping), the staged diff, and the other facts the committer prompt already carries. The staged diff cut stays at 60 KB. The committer uses `dev-workflow-skills:1-git-commit` as today. Its split path produces focused commits, normally one per task. No rebase is needed, so the committer's allowed git commands do not change.
 - The post-run checks stay: HEAD on the branch, floor is an ancestor, clean tree, at least one new commit, a net count within `MAX_COMMITS_PER_RUN` (4), valid messages with the `Relates to:` footer, and one retry through `--resume` of the committer session.
 - If the committer still fails, the fallback rebuilds one `chore: <task title>` commit per snapshot, from the recorded snapshot tip, instead of one commit for the whole job. No work is lost: the snapshots stay reachable from the recorded tip.
+- A batch run is capped at twice `commit_budget_weighted`, because it sees the whole job diff.
 - Fix rounds are unchanged: each keeps its own Fix committer run with the previous head as floor.
 - With `commit_batch` off, `build_task` runs `commit_work` per task as before.
 

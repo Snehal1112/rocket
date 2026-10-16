@@ -183,6 +183,9 @@ fn approve(ctx: &CliCtx, id: &str) -> Result<String, CliError> {
             job.stage
         )));
     }
+    if job.batch_snapshot.is_some() {
+        return Err(CliError::Refused(format!("job {id} has a pending batch commit, use rework to finish it")));
+    }
     acquire_lease(d.store(), id, &ctx.owner, LEASE_TTL_SECS, now_secs())?;
     let _guard = LeaseGuard { driver: &d, id: id.to_string(), owner: ctx.owner.clone() };
     let now = now_secs();
