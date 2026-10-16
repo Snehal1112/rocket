@@ -18,7 +18,7 @@ When a factory job parks in `needs-human`, the driver records why and keeps the 
 - The driver writes the evidence once, at park time, to `park.json` in the job folder. The dashboard server never writes it.
 - The board keeps only two new optional fields, `park_kind` and `park_at`. The board JSON stays compatible with `factory-server`.
 - The full evidence is not in the polled `/api/state`. A new read-only endpoint serves it when the popup opens.
-- Each evidence part is capped at 200 KB when written, and marked `truncated`. The endpoint reply is capped at 1 MiB.
+- Each evidence part is capped at 200 KB when written. The cap keeps the end of the text and marks the part `truncated`. The endpoint reply is capped at 1 MiB.
 - Writing `park.json` is best effort: a write error never stops the park.
 - Jobs parked before this change have no `park.json`. They show the reason only, and the popup button is hidden.
 - The popup uses the dashboard's existing look (one monospace face, cool-grey oklch palette, hairline borders, 10px radius, teal for identity, red and amber washes for status). No new fonts or colors. The one distinctive element is a marker on the lines that matter.
@@ -44,7 +44,7 @@ When a factory job parks in `needs-human`, the driver records why and keeps the 
 }
 ```
 
-`kind` is one of: `checks-failed`, `changes-remain`, `risky-diff`, `diff-too-large`, `budget-stopped`, `builder-stopped`, `builder-committed`, `nothing-changed`, `commit-failed`.
+`kind` is one of: `checks-failed`, `changes-remain`, `risky-diff`, `diff-too-large`, `budget-stopped`, `builder-stopped`, `builder-committed`, `nothing-changed`, `commit-failed`, `other` (any other park: merge conflicts, main moved, a run loop that did not settle).
 
 | Park site | kind | parts | next |
 |---|---|---|---|
@@ -57,6 +57,7 @@ When a factory job parks in `needs-human`, the driver records why and keeps the 
 | `build.rs` builder committed on its own | `builder-committed` | the park reason, which holds the recovery sha | `factory rework <id> <note>` |
 | `build.rs` nothing changed | `nothing-changed` | the park reason | `factory rework <id> <note>`, `factory cancel <id>` |
 | commit failures from `commit.rs` | `commit-failed` | the park reason | `factory rework <id> <note>` |
+| any other park | `other` | none | `factory approve <id>`, `factory rework <id> <note>`, `factory cancel <id>` |
 
 A part that cannot be read (file missing) is left out, and the reason stays as the first line. `next` holds the commands with the real job id filled in.
 
