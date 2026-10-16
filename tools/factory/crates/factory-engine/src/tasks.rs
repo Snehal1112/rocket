@@ -103,16 +103,38 @@ pub fn task_section(plan: &str, n: u32) -> Option<String> {
     Some(out.join("\n").trim().to_string())
 }
 
+/// The body of a `## Goal` section as `## Goal` plus the body, up to the next `# ` or `## ` heading
+/// outside a fenced block. `None` when there is no such heading or its body is empty.
+fn goal_section(spec: &str) -> Option<String> {
+    let lines = lines_with_fence(spec);
+    let start = lines
+        .iter()
+        .position(|(l, fenced)| !fenced && l.starts_with("## ") && l[3..].trim().eq_ignore_ascii_case("goal"))?;
+    let mut body = Vec::new();
+    for (line, fenced) in &lines[start + 1..] {
+        if !fenced && (line.starts_with("# ") || line.starts_with("## ")) {
+            break;
+        }
+        body.push(*line);
+    }
+    let body = body.join("\n").trim().to_string();
+    (!body.is_empty()).then(|| format!("## Goal\n\n{body}"))
+}
+
 /// The goal of a spec plus its `Acceptance criteria` section (a `## ` heading containing those words,
 /// up to the next `## ` heading outside a fenced block). Empty for an empty spec.
 pub fn spec_excerpt(spec: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
-    let goal = spec_goal(spec);
     let goal_line = spec.lines().map(str::trim).find(|l| l.len() >= 5 && l.is_char_boundary(5) && l[..5].eq_ignore_ascii_case("goal:"));
     if let Some(line) = goal_line {
         parts.push(line.to_string());
-    } else if !goal.is_empty() {
-        parts.push(format!("Goal: {goal}"));
+    } else if let Some(section) = goal_section(spec) {
+        parts.push(section);
+    } else {
+        let goal = spec_goal(spec);
+        if !goal.is_empty() {
+            parts.push(format!("Goal: {goal}"));
+        }
     }
     let lines = lines_with_fence(spec);
     let start = lines
@@ -226,6 +248,29 @@ mod tests {
         assert!(ex.contains("Goal: ship the thing quickly."), "{ex}");
         assert!(ex.contains("Acceptance criteria") && ex.contains("- it is fast"));
         assert!(!ex.contains("long text") && !ex.contains("more text"));
+    }
+
+    #[test]
+    fn a_goal_section_wins_over_an_intro_paragraph() {
+        let spec = "# Spec\n\nFollow-up to something else.\n\n## Goal\n\nCut the cost.\n\n```\n## Not a heading\n```\n\n## Background\n\nlong text\n";
+        let ex = spec_excerpt(spec);
+        assert!(ex.starts_with("## Goal\n\nCut the cost."), "{ex}");
+        assert!(ex.contains("## Not a heading"), "{ex}");
+        assert!(!ex.contains("Follow-up") && !ex.contains("long text"), "{ex}");
+    }
+
+    #[test]
+    fn a_goal_line_still_beats_a_goal_section() {
+        let ex = spec_excerpt("Goal: the line.\n\n## Goal\n\nthe section\n");
+        assert_eq!(ex, "Goal: the line.");
+    }
+
+    #[test]
+    fn the_real_design_spec_excerpt_starts_at_its_goal_section() {
+        let spec = include_str!("../../../../../docs/superpowers/specs/2026-10-17-factory-cost-reduction-design.md");
+        let ex = spec_excerpt(spec);
+        assert!(ex.contains("Cut the weighted tokens of a factory job"), "{ex}");
+        assert!(!ex.contains("Follow-up to the accurate usage"), "{ex}");
     }
 
     #[test]

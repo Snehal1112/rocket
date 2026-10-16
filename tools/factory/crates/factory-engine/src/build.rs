@@ -199,6 +199,17 @@ impl Engine<'_> {
         }
         let wt = self.job_worktree(job, &cwd, &base, &branch);
         let new_tip = if self.config.commit_batch {
+            if !self.repo.head_is_on_branch(&wt).map_err(git_err)? {
+                let short = tip.get(..7).unwrap_or(&tip);
+                return self.park_with(
+                    ParkKind::BuilderCommitted,
+                    format!(
+                        "builder moved HEAD off the job branch in task {} (the branch was at {short} before the run); run `git checkout {branch}` in the job worktree, then `factory rework {}`",
+                        task.n, self.job_id
+                    ),
+                    Vec::new(),
+                );
+            }
             let staged = self.repo.stage_all(&wt).map_err(git_err)?;
             if staged.is_empty() {
                 return self.park_with(ParkKind::NothingChanged, format!("task {} changed nothing", task.n), Vec::new());
@@ -260,8 +271,6 @@ impl Engine<'_> {
             );
             return self.park_with(ParkKind::CommitFailed, reason, Vec::new());
         }
-        // The committer does not read a rework note, so it must not reach a later fix round.
-        let _ = std::fs::remove_file(self.job_dir.join("rework-note.md"));
         let snaps = self.snapshot_refs(&base, &snapshot, tasks)?;
         let plan = std::fs::read_to_string(&self.plan_file).unwrap_or_default();
         let spec = std::fs::read_to_string(self.job_dir.join("spec.md")).unwrap_or_default();

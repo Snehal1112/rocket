@@ -851,3 +851,26 @@ fn the_excerpt_prompt_is_smaller_than_the_plan_and_spec_it_replaces() {
     assert!(prompt.len() < replaced / 2, "prompt {} bytes, plan and spec {replaced} bytes", prompt.len());
     assert!(!prompt.contains("filler line"));
 }
+
+#[test]
+fn a_builder_that_detaches_head_parks_before_the_snapshot() {
+    let fx = two_task_fixture();
+    let detach_and_change: Effect = Box::new(|spec| {
+        std::fs::write(spec.cwd.join("a.txt"), "x\n").expect("write");
+        let repo = git2::Repository::open(&spec.cwd).expect("open");
+        let id = repo.head().expect("head").target().expect("target");
+        repo.set_head_detached(id).expect("detach");
+        "done".to_string()
+    });
+    let runner = scripted_auto(vec![detach_and_change]);
+    match fx.engine(&runner).build_stage().expect("task 1") {
+        StageOutcome::NeedsHuman(r) => {
+            assert!(r.contains("moved HEAD off the job branch in task 1"), "{r}");
+            assert!(r.contains("factory rework 001"), "{r}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    let job = fx.job();
+    assert_eq!(job.task_index, 0);
+    assert_eq!(fx.repo.tip(&job.branch).expect("tip"), job.base.clone().expect("base"));
+}
