@@ -1,5 +1,7 @@
-use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::error::DomainResult;
 use serde::{Deserialize, Serialize};
+
+use crate::invalid::invalid;
 
 /// One secret name captured from a RocketVault "Fetch Secrets" action, paired
 /// with the vault's own UUID so later value lookups skip a list round-trip.
@@ -35,30 +37,28 @@ pub fn validate_external_secret_bindings(bindings: &[ExternalSecretBinding]) -> 
     for binding in bindings {
         let alias = binding.alias.as_str();
         if alias.is_empty() {
-            return Err(DomainError::InvalidInput(
-                "external secret binding alias must not be empty".to_string(),
-            ));
+            return Err(invalid("external secret binding alias must not be empty"));
         }
         if !alias
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         {
-            return Err(DomainError::InvalidInput(format!(
+            return Err(invalid(format!(
                 "external secret alias '{alias}' may only contain letters, digits, '_' or '-'"
             )));
         }
         if !seen.insert(alias) {
-            return Err(DomainError::InvalidInput(format!(
+            return Err(invalid(format!(
                 "external secret alias '{alias}' is used by more than one binding"
             )));
         }
         if binding.connection_id.trim().is_empty() {
-            return Err(DomainError::InvalidInput(format!(
+            return Err(invalid(format!(
                 "external secret binding '{alias}' has no connection selected"
             )));
         }
         if binding.vault_name.trim().is_empty() {
-            return Err(DomainError::InvalidInput(format!(
+            return Err(invalid(format!(
                 "external secret binding '{alias}' has no vault name"
             )));
         }
@@ -69,6 +69,7 @@ pub fn validate_external_secret_bindings(bindings: &[ExternalSecretBinding]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::error::DomainError;
 
     #[test]
     fn external_secret_ref_serde_roundtrip() {
@@ -155,5 +156,40 @@ mod tests {
         no_vault.vault_name = "  ".to_string();
         assert!(validate_external_secret_bindings(&[no_conn]).is_err());
         assert!(validate_external_secret_bindings(&[no_vault]).is_err());
+    }
+
+    fn message_of(bindings: &[ExternalSecretBinding]) -> String {
+        match validate_external_secret_bindings(bindings).expect_err("must reject") {
+            DomainError::InvalidInput(m) => m,
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_bindings_messages_are_pinned() {
+        assert_eq!(
+            message_of(&[binding("")]),
+            "external secret binding alias must not be empty"
+        );
+        assert_eq!(
+            message_of(&[binding("pay.ments")]),
+            "external secret alias 'pay.ments' may only contain letters, digits, '_' or '-'"
+        );
+        assert_eq!(
+            message_of(&[binding("payments"), binding("payments")]),
+            "external secret alias 'payments' is used by more than one binding"
+        );
+        let mut no_conn = binding("payments");
+        no_conn.connection_id = "  ".to_string();
+        assert_eq!(
+            message_of(&[no_conn]),
+            "external secret binding 'payments' has no connection selected"
+        );
+        let mut no_vault = binding("payments");
+        no_vault.vault_name = String::new();
+        assert_eq!(
+            message_of(&[no_vault]),
+            "external secret binding 'payments' has no vault name"
+        );
     }
 }

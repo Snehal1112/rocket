@@ -6,9 +6,10 @@
 //! Secrets aliases and a certificate, and none of its fields may hold key text either.
 
 use rocket_shared::certificate::ClientCertificate;
-use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::error::DomainResult;
 
 use crate::external_secret::ExternalSecretBinding;
+use crate::invalid::invalid;
 use crate::secret_manager::ProviderCapabilityLookup;
 
 const PEM_MARKER: &str = "-----BEGIN";
@@ -211,14 +212,11 @@ pub fn validate_vault_certificate_providers(
     Ok(())
 }
 
-fn invalid(message: String) -> DomainError {
-    DomainError::InvalidInput(message)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::external_secret::ExternalSecretRef;
+    use rocket_shared::error::DomainError;
 
     const KEY_TEXT: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvQsecret\n-----END PRIVATE KEY-----";
 

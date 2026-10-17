@@ -3,6 +3,7 @@ pub mod context;
 pub mod dynamic_vars;
 pub mod environment;
 pub mod external_secret;
+mod invalid;
 pub mod repository;
 pub mod resolver;
 pub mod secret_manager;

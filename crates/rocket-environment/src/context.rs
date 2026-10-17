@@ -28,18 +28,34 @@ pub struct VariableContext {
 }
 
 impl VariableContext {
+    /// The scope maps in precedence order, lowest first. This is the only place the order is written.
+    /// Later layers overwrite earlier ones on key collision. `process_env` is not a layer here:
+    /// `flatten_with_process_env` adds it below all of these.
+    fn layers(&self) -> [&HashMap<String, String>; 7] {
+        [
+            &self.global_env,
+            &self.collection,
+            &self.external_secrets,
+            &self.env,
+            &self.folder,
+            &self.request,
+            &self.runtime,
+        ]
+    }
+
+    /// Folds every layer into `out`, lowest precedence first.
+    fn merge_layers_into(&self, out: &mut HashMap<String, String>) {
+        for layer in self.layers() {
+            out.extend(layer.clone());
+        }
+    }
+
     /// Merge all scopes except process_env.
     /// Insertion order: global_env → collection → external_secrets → env → folder → request → runtime.
     /// Later layers overwrite earlier on key collision.
     pub fn flatten(&self) -> HashMap<String, String> {
         let mut out = HashMap::new();
-        out.extend(self.global_env.clone());
-        out.extend(self.collection.clone());
-        out.extend(self.external_secrets.clone());
-        out.extend(self.env.clone());
-        out.extend(self.folder.clone());
-        out.extend(self.request.clone());
-        out.extend(self.runtime.clone());
+        self.merge_layers_into(&mut out);
         out
     }
 
@@ -49,13 +65,7 @@ impl VariableContext {
         for (k, v) in &self.process_env {
             out.insert(format!("process.env.{}", k), v.clone());
         }
-        out.extend(self.global_env.clone());
-        out.extend(self.collection.clone());
-        out.extend(self.external_secrets.clone());
-        out.extend(self.env.clone());
-        out.extend(self.folder.clone());
-        out.extend(self.request.clone());
-        out.extend(self.runtime.clone());
+        self.merge_layers_into(&mut out);
         out
     }
 }
@@ -255,6 +265,30 @@ mod tests {
         ctx.secret_values.insert("standalone-secret".to_string());
         assert!(ctx.secret_values.contains("standalone-secret"));
         assert!(ctx.flatten().is_empty());
+    }
+
+    #[test]
+    fn process_env_is_the_lowest_layer_and_the_rest_matches_flatten() {
+        let ctx = VariableContext {
+            process_env: m(&[("PATH", "/bin"), ("shared", "from-process")]),
+            global_env: m(&[("process.env.shared", "from-global"), ("g", "1")]),
+            collection: m(&[("c", "1")]),
+            runtime: m(&[("r", "1")]),
+            ..Default::default()
+        };
+        let mut expected = ctx.flatten();
+        expected
+            .entry("process.env.PATH".to_string())
+            .or_insert_with(|| "/bin".to_string());
+        expected
+            .entry("process.env.shared".to_string())
+            .or_insert_with(|| "from-process".to_string());
+        let flat = ctx.flatten_with_process_env();
+        assert_eq!(flat, expected);
+        assert_eq!(
+            flat.get("process.env.shared").expect("present"),
+            "from-global"
+        );
     }
 
     #[test]

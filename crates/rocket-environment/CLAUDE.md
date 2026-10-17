@@ -30,6 +30,7 @@ cargo test -p rocket-environment <test_name>
 | `resolver.rs` | `resolve(template, &HashMap)` — replaces `{{var}}` placeholders; returns `ResolveResult { output, unresolved }` |
 | `repository.rs` | `EnvironmentRepository` trait — `list`, `get`, `save`, `delete` returning `DomainResult<T>` |
 | `client_certificate_validation.rs` | `validate_client_certificates(certs, bindings)` — save-time rules for certificate entries (one source per piece, references match the environment's bindings, no key text in path or reference fields, non-empty domain) |
+| `invalid.rs` | `pub(crate) invalid(message)` — the one way this crate builds `DomainError::InvalidInput`; used by `client_certificate_validation.rs` and `external_secret.rs` |
 
 ### Key Design Points
 
