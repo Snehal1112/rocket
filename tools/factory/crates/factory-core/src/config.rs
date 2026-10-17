@@ -55,6 +55,8 @@ pub struct Config {
     pub commit_batch: bool,
     /// Give each task builder only its own task instead of the whole plan and spec.
     pub builder_excerpt: bool,
+    /// After a merge, file the follow-up tickets and close the parent tickets. Off by default.
+    pub tickets_on_merge: bool,
     /// The Rocket knowledge base folder. `None` turns the KB read side and refresh off.
     pub kb_path: Option<String>,
     pub kb_model: String,
@@ -87,6 +89,7 @@ impl Default for Config {
             commit_budget_weighted: 60_000,
             commit_batch: true,
             builder_excerpt: true,
+            tickets_on_merge: false,
             kb_path: None,
             kb_model: "sonnet".to_string(),
             kb_budget_weighted: 150_000,
@@ -163,6 +166,13 @@ fn expand_home(path: &str, home: Option<&str>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tickets_on_merge_is_off_by_default_and_can_be_turned_on() {
+        assert!(!Config::default().tickets_on_merge);
+        assert!(Config::parse("tickets_on_merge = true").expect("parse").tickets_on_merge);
+        assert!(Config::parse("tickets_on_merge = \"yes\"").is_err());
+    }
 
     #[test]
     fn cost_switches_default_on_and_can_be_turned_off() {
