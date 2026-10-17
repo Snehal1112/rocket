@@ -258,7 +258,7 @@ pub fn run() {
             }
 
             // Determine the application data directory.
-            let data_dir = dirs::home_dir()
+            let data_dir = rocket_shared::paths::home_dir()
                 .ok_or("Home directory could not be determined")?
                 .join(".rocket-api");
             std::fs::create_dir_all(&data_dir).ok();

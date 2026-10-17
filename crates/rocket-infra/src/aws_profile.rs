@@ -76,7 +76,7 @@ pub fn parse_credentials(text: &str, profile: &str) -> Option<AwsProfileCredenti
 pub fn credentials_file_path() -> Option<PathBuf> {
     std::env::var_os("AWS_SHARED_CREDENTIALS_FILE")
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".aws").join("credentials")))
+        .or_else(|| rocket_shared::paths::home_dir().map(|h| h.join(".aws").join("credentials")))
 }
 
 /// Reads `profile` from the credentials file at `path`. Errors name the file and the profile,

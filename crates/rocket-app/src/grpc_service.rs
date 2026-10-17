@@ -538,13 +538,10 @@ impl GrpcService {
                 .join(name)
         });
         let extra: Vec<PathBuf> = collection_dir.iter().cloned().collect();
-        if let Some(rest) = raw.strip_prefix("~/") {
-            let home = std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .ok_or_else(|| {
-                    DomainError::InvalidInput("cannot find the home directory".into())
-                })?;
-            return Ok((PathBuf::from(home).join(rest), extra));
+        if let Some(path) =
+            expand_home_prefix(raw, rocket_shared::paths::home_dir().as_deref())?
+        {
+            return Ok((path, extra));
         }
         let path = Path::new(raw);
         if path.is_absolute() {
@@ -698,6 +695,19 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 fn lock_path(m: &Mutex<PathBuf>) -> PathBuf {
     lock(m).clone()
+}
+
+/// Expands a leading `~` or `~/`. Returns `None` for any other text.
+fn expand_home_prefix(raw: &str, home: Option<&Path>) -> DomainResult<Option<PathBuf>> {
+    if raw != "~" && !raw.starts_with("~/") {
+        return Ok(None);
+    }
+    if home.is_none() {
+        return Err(DomainError::InvalidInput(
+            "cannot find the home directory".into(),
+        ));
+    }
+    Ok(Some(rocket_shared::paths::expand_tilde_with(raw, home)))
 }
 
 #[cfg(test)]
@@ -869,6 +879,46 @@ message Rep { string message = 1; }
             events,
             dir,
         }
+    }
+
+    #[test]
+    fn tilde_user_proto_path_is_relative() {
+        let h = harness(None);
+        let err = h
+            .svc
+            .resolve_proto_path(None, "~nobody/x.proto")
+            .expect_err("must fail");
+        assert!(
+            err.to_string().contains("a relative proto path needs a collection"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn tilde_proto_path_uses_the_home_dir() {
+        let Some(home) = rocket_shared::paths::home_dir() else {
+            return;
+        };
+        let h = harness(None);
+        let (path, _) = h
+            .svc
+            .resolve_proto_path(None, "~/x.proto")
+            .expect("resolves");
+        assert_eq!(path, home.join("x.proto"));
+    }
+
+    #[test]
+    fn tilde_proto_path_without_home_is_an_error() {
+        let err = expand_home_prefix("~/x.proto", None).expect_err("must fail");
+        assert!(
+            err.to_string().contains("cannot find the home directory"),
+            "{err}"
+        );
+        assert_eq!(expand_home_prefix("rel.proto", None).expect("ok"), None);
+        assert_eq!(
+            expand_home_prefix("~/x", Some(Path::new("/h"))).expect("ok"),
+            Some(PathBuf::from("/h/x"))
+        );
     }
 
     fn input(request: GrpcRequest) -> GrpcExecuteInput {

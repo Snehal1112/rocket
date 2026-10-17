@@ -1,0 +1,25 @@
+thread 'rustc' panicked at /rustc-dev/4a4ef493e3a1488c6e321570238084b38948f6db/compiler/rustc_data_structures/src/jobserver.rs:124:14:
+failed to create helper thread: Os { code: 11, kind: WouldBlock, message: "Resource temporarily unavailable" }
+stack backtrace:
+   0:     0x79e8bfc2933b - std::backtrace::Backtrace::create::h7a19607ee9969d74
+   1:     0x79e8bfc29285 - std::backtrace::Backtrace::force_capture::hd6de1cd4e24abb09
+   2:     0x79e8bec11207 - std[765ed69a96918746]::panicking::update_hook::<alloc[7a43974b6697a11c]::boxed::Box<rustc_driver_impl[252c3262fddb99f]::install_ice_hook::{closure#1}>>::{closure#0}
+   3:     0x79e8bfc29e92 - std::panicking::panic_with_hook::hb4bd9ac1123582a0
+   4:     0x79e8bfc29c28 - std::panicking::panic_handler::{{closure}}::hde00dd15f5637fe2
+   5:     0x79e8bfc23ac9 - std::sys::backtrace::__rust_end_short_backtrace::hb72197fa777c1785
+   6:     0x79e8bfc0448d - __rustc[4425a7e20b4c8619]::rust_begin_unwind
+   7:     0x79e8bc78e35c - core::panicking::panic_fmt::ha59b517dd231f4da
+   8:     0x79e8bc5ba222 - core::result::unwrap_failed::hf2d1f30a3ac850fc
+   9:     0x79e8c132a09c - <rustc_data_structures[721127a3047d6cb5]::jobserver::Proxy>::new
+  10:     0x79e8c1329b34 - std[765ed69a96918746]::sys::backtrace::__rust_begin_short_backtrace::<rustc_interface[c6a26c9f392246cf]::util::run_in_thread_with_globals<rustc_interface[c6a26c9f392246cf]::util::run_in_thread_pool_with_globals<rustc_interface[c6a26c9f392246cf]::interface::run_compiler<(), rustc_driver_impl[252c3262fddb99f]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()>
+  11:     0x79e8c132993e - <std[765ed69a96918746]::thread::lifecycle::spawn_unchecked<rustc_interface[c6a26c9f392246cf]::util::run_in_thread_with_globals<rustc_interface[c6a26c9f392246cf]::util::run_in_thread_pool_with_globals<rustc_interface[c6a26c9f392246cf]::interface::run_compiler<(), rustc_driver_impl[252c3262fddb99f]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()>::{closure#1} as core[32850a7867c2faaf]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+  12:     0x79e8c132b702 - std::sys::thread::unix::Thread::new::thread_start::h982f9ea829d1b5fb
+  13:     0x79e8bac9cb84 - start_thread
+                               at ./nptl/pthread_create.c:447:8
+  14:     0x79e8bad29ecc - clone3
+                               at ./misc/../sysdeps/unix/sysv/linux/x86_64/clone3.S:78:0
+  15:                0x0 - <unknown>
+
+
+rustc version: 1.94.0 (4a4ef493e 2026-03-02)
+platform: x86_64-unknown-linux-gnu
