@@ -10,6 +10,7 @@ pub mod oauth2;
 pub mod proxy;
 pub mod run_source;
 pub mod types;
+pub mod validation;
 pub mod variable_value;
 
 pub use action::{ActionSelector, ActionSetVariable, ActionVariable};
