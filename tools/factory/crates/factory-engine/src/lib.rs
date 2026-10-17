@@ -23,6 +23,8 @@ mod store;
 mod sync;
 mod tasks;
 mod tick;
+mod tickets;
+mod tracker;
 
 use std::path::PathBuf;
 
@@ -52,6 +54,8 @@ pub use store::{next_id, BoardStore, StoreError};
 pub use sync::{sync_stage, SyncOutcome};
 pub use tasks::{parse_tasks, plan_title, spec_goal, PlanTask};
 pub use tick::tick_plan;
+pub use tickets::{tickets_step, TicketsReport, TICKETS_FILE};
+pub use tracker::{GhTracker, Tracker};
 pub use checks_stage::checks_stage;
 pub use decide::{decide, risk_summary, DecideInput, Decision};
 pub use review::{apply_decision, final_checks, review_stage, ReviewOutcome};
