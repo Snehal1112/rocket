@@ -112,15 +112,8 @@ impl From<HttpMethod> for String {
 // QueryParam
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct QueryParam {
-    pub key: String,
-    pub value: String,
-    pub enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<Description>,
-}
+/// A query parameter has the same shape as a header, so both share one type.
+pub type QueryParam = Header;
 
 // ============================================================
 // Header
@@ -357,6 +350,52 @@ pub struct RequestSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn header_and_query_param_serialize_to_the_same_json() {
+        let header = Header {
+            key: "k".into(),
+            value: "v".into(),
+            enabled: false,
+            description: Some(Description::text("d")),
+        };
+        let param = QueryParam {
+            key: "k".into(),
+            value: "v".into(),
+            enabled: false,
+            description: Some(Description::text("d")),
+        };
+        let expected = serde_json::json!({
+            "key": "k", "value": "v", "enabled": false, "description": "d"
+        });
+        assert_eq!(serde_json::to_value(&header).unwrap(), expected);
+        assert_eq!(serde_json::to_value(&param).unwrap(), expected);
+    }
+
+    #[test]
+    fn header_and_query_param_omit_a_missing_description() {
+        let expected = serde_json::json!({"key": "k", "value": "v", "enabled": true});
+        assert_eq!(serde_json::to_value(Header::new("k", "v")).unwrap(), expected);
+        let param: QueryParam = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&param).unwrap(), expected);
+    }
+
+    #[test]
+    fn header_and_query_param_load_old_files_without_a_description() {
+        let json = r#"{"key":"k","value":"v","enabled":true}"#;
+        let header: Header = serde_json::from_str(json).unwrap();
+        let param: QueryParam = serde_json::from_str(json).unwrap();
+        assert_eq!(header.description, None);
+        assert_eq!(param.description, None);
+    }
+
+    #[test]
+    fn query_param_is_the_same_type_as_header() {
+        let header: Header = QueryParam::new("k", "v");
+        let param: QueryParam = Header::disabled("k", "v");
+        assert!(header.enabled);
+        assert!(!param.enabled);
+    }
 
     #[test]
     fn query_param_serialization_roundtrip() {

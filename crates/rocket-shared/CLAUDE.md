@@ -31,7 +31,7 @@ cargo check -p rocket-shared
 
 ### HTTP primitives
 - `HttpMethod` — enum for GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD/TRACE/CONNECT plus `Custom(String)` for any other valid method token (`is_valid_method_token`, kept as written). Not `Copy`. Serializes as a plain string; `FromStr` matches standard names case-insensitively.
-- `Header`, `QueryParam`, `PathParam` — keyed, enabled-flag structures with optional `Description`.
+- `Header` — keyed, enabled-flag struct with optional `Description`. `QueryParam` is a type alias of `Header`, so both share one shape and one serde form. `PathParam` — name and value with optional `Description`.
 - `Body` / `BodyMode` — request body with modes: `none`, `json`, `xml`, `text`, `sparql`, `formurlencoded`, `formdata`, `binary`.
 - `Auth` — tagged enum covering `None`, `Basic`, `Bearer`, `ApiKey`, `OAuth2`, `AwsSigV4`, `Wsse`, `Digest`, `Ntlm`, `OAuth1`, `Inherit`. Tag field is `authType` with kebab-case values.
 - `RequestSettings` / `RequestSettingValue<T>` — per-request execution settings (timeout, redirects, URL encoding), each value is either a concrete value or `"inherit"`.
