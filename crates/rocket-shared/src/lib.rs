@@ -7,6 +7,7 @@ pub mod error;
 pub mod grpc;
 pub mod events;
 pub mod oauth2;
+pub mod paths;
 pub mod proxy;
 pub mod run_source;
 pub mod types;
