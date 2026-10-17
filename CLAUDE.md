@@ -64,7 +64,7 @@ See `.claude/assistant-composer.md` for the AI Assistant composer (PromptEditor 
 See `.claude/assistant-conversations.md` for stored assistant conversations (storage, pins, masking, caps).
 See `.claude/collection-trust.md` for the collection trust gate (requested vs allowed access, `{{process.env}}` gate).
 See `.claude/console-masking.md` for the Console secret masking rule (masked copy, reveal toggle, fail-closed, vault values).
-See `.claude/software-factory.md` for the software factory (Rust driver in `tools/factory/`, thin `/factory` command, dashboard in `tools/factory-server/`).
+The software factory is the standalone project `~/data/rocket/rocket-factory` (home `~/.factory`, project `rocket`, global `/factory` command). Rocket's old in-repo copy is archived in `~/data/rocket/Archive/rocket-tools-factory/`.
 See `.claude/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
 See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
 See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.

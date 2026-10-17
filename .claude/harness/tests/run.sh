@@ -272,11 +272,6 @@ if grep -q 'no Rust crate changed' "$repo/.claude/commands/verify-rocket.md"; th
 else
   fail "doc lint: verify-rocket.md says what to do when no crate changed"
 fi
-if grep -q 'tools/factory' "$repo/.claude/commands/verify-rocket.md"; then
-  pass "doc lint: verify-rocket.md covers the factory crates"
-else
-  fail "doc lint: verify-rocket.md covers the factory crates"
-fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASSED"; else echo "$fails FAILED"; exit 1; fi
