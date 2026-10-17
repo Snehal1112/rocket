@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::validation::is_slug_char;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{Workspace, WorkspaceConfig};
@@ -135,11 +136,7 @@ impl<'de> Deserialize<'de> for RepositoryId {
 }
 
 fn validate_component(label: &str, value: &str) -> DomainResult<()> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
+    if value.is_empty() || !value.chars().all(is_slug_char) {
         return Err(DomainError::InvalidInput(format!(
             "Repository {label} contains unsupported characters"
         )));
@@ -158,6 +155,15 @@ fn invalid_repository_id() -> DomainError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_component_accepts_slug_and_rejects_others() {
+        assert!(validate_component("workspace ID", "ws-1_a").is_ok());
+        for bad in ["", "a.b", "é"] {
+            let err = validate_component("workspace ID", bad).expect_err("must reject");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{bad:?}: {err:?}");
+        }
+    }
 
     #[test]
     fn constructs_and_parses_workspace_id() {

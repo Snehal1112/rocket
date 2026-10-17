@@ -1,4 +1,5 @@
-use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::error::DomainResult;
+use rocket_shared::validation::non_empty_name;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -35,12 +36,7 @@ impl Workspace {
     }
 
     pub fn validate_name(name: &str) -> DomainResult<()> {
-        if name.trim().is_empty() {
-            return Err(DomainError::InvalidInput(
-                "Workspace name cannot be empty".into(),
-            ));
-        }
-        Ok(())
+        non_empty_name(name, "Workspace name cannot be empty")
     }
 }
 

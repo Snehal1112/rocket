@@ -1,4 +1,5 @@
 use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::validation::non_empty_name;
 use serde::{Deserialize, Serialize};
 
 use crate::folder::Folder;
@@ -35,11 +36,7 @@ impl Collection {
 
     /// Validate a collection name.
     pub fn validate_name(name: &str) -> DomainResult<()> {
-        if name.trim().is_empty() {
-            return Err(DomainError::InvalidInput(
-                "Collection name cannot be empty".into(),
-            ));
-        }
+        non_empty_name(name, "Collection name cannot be empty")?;
         if name.contains('/') || name.contains('\\') {
             return Err(DomainError::InvalidInput(
                 "Collection name cannot contain path separators".into(),

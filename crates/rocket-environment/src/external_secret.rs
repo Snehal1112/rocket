@@ -1,4 +1,5 @@
 use rocket_shared::error::DomainResult;
+use rocket_shared::validation::is_slug_char;
 use serde::{Deserialize, Serialize};
 
 use crate::invalid::invalid;
@@ -39,10 +40,7 @@ pub fn validate_external_secret_bindings(bindings: &[ExternalSecretBinding]) -> 
         if alias.is_empty() {
             return Err(invalid("external secret binding alias must not be empty"));
         }
-        if !alias
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        {
+        if !alias.chars().all(is_slug_char) {
             return Err(invalid(format!(
                 "external secret alias '{alias}' may only contain letters, digits, '_' or '-'"
             )));
