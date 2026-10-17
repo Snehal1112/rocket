@@ -166,6 +166,7 @@ impl Driver {
                 base: &base,
                 tip: &tip,
                 issues: &job.issues,
+                partial: crate::message::spec_has_follow_ups(&self.job_dir(&job)),
             })
         })
     }
