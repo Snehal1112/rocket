@@ -40,3 +40,6 @@ coverage/
 .claude/worktrees/
 .claude/settings.local.json
 .gstack/
+
+# Compiler crash dumps, for example from running out of threads.
+rustc-ice-*.txt
