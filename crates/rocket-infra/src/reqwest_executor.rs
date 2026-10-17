@@ -977,19 +977,13 @@ fn source_name(source: &CertificateSource, domain: &str) -> String {
     }
 }
 
-/// Reads a certificate file. A leading `~/` is the user's home directory.
+/// Reads a certificate file. A leading `~` or `~/` is the user's home directory.
 ///
 /// A relative path would depend on the working directory of the app. The service turns a
 /// relative path inside the collection folder into an absolute one, so one that is still
 /// relative here could not be resolved and is rejected.
 fn read_certificate_file(path: &str) -> DomainResult<Vec<u8>> {
-    let expanded = match path.strip_prefix("~/") {
-        Some(rest) => std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(|home| std::path::PathBuf::from(home).join(rest))
-            .unwrap_or_else(|| std::path::PathBuf::from(path)),
-        None => std::path::PathBuf::from(path),
-    };
+    let expanded = rocket_shared::paths::expand_tilde(path);
     if !expanded.is_absolute() {
         return Err(DomainError::InvalidInput(format!(
             "Client certificate path {path} cannot be resolved. Use an absolute path, a ~/ path, \
@@ -4155,6 +4149,25 @@ mod proxy_tests {
         let req = HttpRequest::new(HttpMethod::Get, "http://upstream.invalid/x");
         let err = exec.execute(&req).await.expect_err("must fail");
         assert!(!err.to_string().contains("hunter2"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod certificate_path_tests {
+    use super::*;
+
+    #[test]
+    fn certificate_path_with_tilde_user_is_unresolved() {
+        let err = read_certificate_file("~nobody/cert.pem").expect_err("must fail");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(err.to_string().contains("cannot be resolved"), "{err}");
+    }
+
+    #[test]
+    fn relative_certificate_path_is_unresolved() {
+        let err = read_certificate_file("rel/cert.pem").expect_err("must fail");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(err.to_string().contains("cannot be resolved"), "{err}");
     }
 }
 

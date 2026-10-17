@@ -166,19 +166,13 @@ pub(super) fn build_callbacks(
                 private_key_path,
                 passphrase,
             } => {
-                // libgit2 does not expand `~` — do it ourselves so that paths
-                // like `~/.ssh/id_ed25519_snehal1112` resolve correctly.
-                let expanded = if private_key_path.starts_with('~') {
-                    std::env::var("HOME")
-                        .map(|home| private_key_path.replacen('~', &home, 1))
-                        .unwrap_or_else(|_| private_key_path.clone())
-                } else {
-                    private_key_path.clone()
-                };
+                // libgit2 does not expand `~`, so we expand `~` and `~/` ourselves.
+                // A `~user` path is left alone.
+                let expanded = rocket_shared::paths::expand_tilde(private_key_path);
                 git2::Cred::ssh_key(
                     username.unwrap_or("git"),
                     None,
-                    Path::new(&expanded),
+                    expanded.as_path(),
                     passphrase.as_deref(),
                 )
             }
