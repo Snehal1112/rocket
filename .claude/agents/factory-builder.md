@@ -25,8 +25,8 @@ Input: your prompt names the plan file, the spec file (absolute paths in the job
 
 ## Rocket hard rules
 
-- Run `cargo check -j4` and `cargo test -j4 -p <crate> <test_name>`. Never use `--workspace` or `--all`. Run `yarn tsc --noEmit` and `yarn check` for frontend changes.
-- Run `cargo check -j4` yourself before you finish, so the driver's checks start from a warm target.
+- Run `cargo check -j4 -p <crate>` and `cargo test -j4 -p <crate> <test_name>` for each crate you touched. Never run a bare `cargo check -j4` or `cargo test -j4`, and never use `--workspace` or `--all`: in a fresh worktree a workspace-wide check builds the whole app and V8, takes more than ten minutes and stalls the run. Run `yarn tsc --noEmit` and `yarn check` for frontend changes.
+- Run `cargo check -j4 -p <crate>` for each crate you touched before you finish, so the driver's checks start from a warm target.
 - Never set `CARGO_TARGET_DIR`. Your worktree uses its own target directory.
 - shadcn/ui primitives only, lucide-react icons only, `SingleLineEditor` for single-line variable-aware fields, Monaco for multi-line editors, narrow Zustand selectors.
 - Rust: no unwrap in production paths, no git CLI in app code, `#[serde(rename_all = "camelCase")]` on IPC DTOs only.

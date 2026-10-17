@@ -50,6 +50,7 @@ The driver validates the spec and the plans when it creates the job, so both mus
 2. Invoke `superpowers:writing-plans` yourself. The factory driver is the execution method: skip the skill's execution handoff question and do not offer to run the plans yourself. Save every plan in `docs/superpowers/plans/<date>-<slug>/`. Rules for each plan:
    - the header has Goal, Architecture, Tech Stack, the repo-relative path of the spec file (`docs/superpowers/specs/<date>-<slug>-design.md`), Global Constraints and Review Focus, as `superpowers:writing-plans` describes
    - no commit steps: the driver commits, so a plan that still has them is harmless but wasteful, because the builder is told to skip every commit step
+   - cargo commands are per crate: `cargo check -j4 -p <crate>` and `cargo test -j4 -p <crate> <filter>`, never a bare `cargo check -j4` or `cargo test -j4`, because in a fresh worktree a workspace-wide check builds the whole app and V8 and stalls the builder
    - at most 3 tasks, each ending with an independently testable deliverable, each task heading written as `### Task N: <title>`
    - each task lists exact files and its steps are 2 to 5 minute actions with exact code and exact commands; no placeholders such as TBD, "add error handling" or "similar to Task N"
    - the header also says the plan is executed by a `factory-builder` subagent through `superpowers:executing-plans`, skipping that skill's final whole-branch review, ledger scripts and progress file
