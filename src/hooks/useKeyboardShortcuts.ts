@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
+import { openGitPanel } from '@/components/layout/GitToolbarButton';
 import { sendRequest } from '@/lib/execute-request';
 import { findActiveLeaf } from '@/lib/pane-utils';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
@@ -98,9 +99,7 @@ export function useKeyboardShortcuts() {
       // Cmd/Ctrl+Shift+G — open the git panel for the active collection.
       if (e.key === 'G' && e.shiftKey) {
         e.preventDefault();
-        import('@/components/layout/GitToolbarButton').then(({ openGitPanel }) => {
-          void openGitPanel();
-        });
+        void openGitPanel();
         return;
       }
 

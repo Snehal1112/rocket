@@ -43,10 +43,11 @@ export default defineConfig(async () => ({
   },
 
   build: {
+    // Tauri loads assets from disk, and the Monaco workers alone are up to 7 MB.
+    chunkSizeWarningLimit: 8000,
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
           'vendor-radix': [
             '@radix-ui/react-alert-dialog',
             '@radix-ui/react-context-menu',
