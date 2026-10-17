@@ -224,6 +224,25 @@ mod tests {
     };
 
     #[test]
+    fn shorten_secret_keeps_short_values() {
+        assert_eq!(shorten_secret("short"), "short");
+        assert_eq!(shorten_secret("12345678"), "12345678");
+    }
+
+    #[test]
+    fn shorten_secret_cuts_long_values() {
+        assert_eq!(shorten_secret("supersecrettoken"), "supersec…");
+    }
+
+    #[test]
+    fn enabled_entries_skips_disabled_and_keeps_order() {
+        let items = [("a", "1", true), ("b", "2", false), ("c", "3", true)];
+        let out = enabled_entries(&items, |(k, v, e)| (*e, *k, *v));
+        let keys: Vec<&str> = out.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, ["a", "c"]);
+    }
+
+    #[test]
     fn http_method_name_covers_trace_connect_and_custom() {
         assert_eq!(http_method_name(&HttpMethod::Trace), "TRACE");
         assert_eq!(http_method_name(&HttpMethod::Connect), "CONNECT");
