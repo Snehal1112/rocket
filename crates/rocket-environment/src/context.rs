@@ -303,4 +303,42 @@ mod tests {
         let flat = ctx.flatten_with_process_env();
         assert_eq!(flat.get("process.env.X").unwrap(), "user_override");
     }
+
+    #[test]
+    fn precedence_order_is_pinned_for_both_flatten_variants() {
+        let names = [
+            "global_env",
+            "collection",
+            "external_secrets",
+            "env",
+            "folder",
+            "request",
+            "runtime",
+        ];
+        for i in 0..names.len() {
+            let mut ctx = VariableContext::default();
+            for name in &names[..=i] {
+                let layer = m(&[("k", name)]);
+                match *name {
+                    "global_env" => ctx.global_env = layer,
+                    "collection" => ctx.collection = layer,
+                    "external_secrets" => ctx.external_secrets = layer,
+                    "env" => ctx.env = layer,
+                    "folder" => ctx.folder = layer,
+                    "request" => ctx.request = layer,
+                    _ => ctx.runtime = layer,
+                }
+            }
+            assert_eq!(ctx.flatten().get("k").unwrap(), names[i]);
+            assert_eq!(ctx.flatten_with_process_env().get("k").unwrap(), names[i]);
+        }
+        let ctx = VariableContext {
+            process_env: m(&[("k", "process")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            ctx.flatten_with_process_env().get("process.env.k").unwrap(),
+            "process"
+        );
+    }
 }
