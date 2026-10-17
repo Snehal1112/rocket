@@ -49,24 +49,12 @@ impl RequestSignatureSnapshot {
             request_path: path.as_ref().to_path_buf(),
             method: http_method_name(&request.method),
             url_pattern: request.url.clone(),
-            headers: request
-                .headers
-                .iter()
-                .filter(|h| h.enabled)
-                .map(|h| KeyValueEntry {
-                    key: h.key.clone(),
-                    value: h.value.clone(),
-                })
-                .collect(),
-            query_params: request
-                .query_params
-                .iter()
-                .filter(|q| q.enabled)
-                .map(|q| KeyValueEntry {
-                    key: q.key.clone(),
-                    value: q.value.clone(),
-                })
-                .collect(),
+            headers: enabled_entries(&request.headers, |h| {
+                (h.enabled, h.key.as_str(), h.value.as_str())
+            }),
+            query_params: enabled_entries(&request.query_params, |q| {
+                (q.enabled, q.key.as_str(), q.value.as_str())
+            }),
             body_content: extract_body_content(&request.body),
             form_fields: extract_form_fields(&request.body),
             auth_type: auth_type_name(&request.auth),
@@ -82,6 +70,31 @@ impl RequestSignatureSnapshot {
 
 fn http_method_name(m: &HttpMethod) -> String {
     m.to_string()
+}
+
+/// Builds key and value entries from the enabled items of a list.
+/// `parts` returns `(enabled, key, value)` of one item. Disabled items are skipped.
+fn enabled_entries<T>(items: &[T], parts: impl Fn(&T) -> (bool, &str, &str)) -> Vec<KeyValueEntry> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let (enabled, key, value) = parts(item);
+            enabled.then(|| KeyValueEntry {
+                key: key.to_string(),
+                value: value.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Shortens a secret for the snapshot: more than 8 bytes keeps the first 8 characters and adds
+/// an ellipsis. The length check counts bytes and the cut counts characters, as it always did.
+fn shorten_secret(s: &str) -> String {
+    if s.len() > 8 {
+        format!("{}…", s.chars().take(8).collect::<String>())
+    } else {
+        s.to_string()
+    }
 }
 
 fn auth_type_name(auth: &Auth) -> String {
@@ -123,25 +136,12 @@ fn auth_detail(auth: &Auth) -> String {
         | Auth::Digest { username, .. }
         | Auth::Ntlm { username, .. } => username.clone(),
         Auth::OAuth1(a) => a.consumer_key.clone().unwrap_or_default(),
-        Auth::Bearer { token } => {
-            if token.len() > 8 {
-                format!("{}…", token.chars().take(8).collect::<String>())
-            } else {
-                token.clone()
-            }
-        }
+        Auth::Bearer { token } => shorten_secret(token),
         Auth::ApiKey {
             key,
             value,
             placement,
-        } => {
-            let truncated = if value.len() > 8 {
-                format!("{}…", value.chars().take(8).collect::<String>())
-            } else {
-                value.clone()
-            };
-            format!("{}={} ({})", key, truncated, placement)
-        }
+        } => format!("{}={} ({})", key, shorten_secret(value), placement),
         Auth::AwsSigV4 {
             access_key,
             region,
@@ -177,14 +177,7 @@ fn extract_form_fields(body: &Option<Body>) -> Vec<KeyValueEntry> {
             .form_data
             .as_ref()
             .map(|entries| {
-                entries
-                    .iter()
-                    .filter(|e| e.enabled)
-                    .map(|e| KeyValueEntry {
-                        key: e.key.clone(),
-                        value: e.value.clone(),
-                    })
-                    .collect()
+                enabled_entries(entries, |e| (e.enabled, e.key.as_str(), e.value.as_str()))
             })
             .unwrap_or_default(),
         _ => vec![],
@@ -393,6 +386,45 @@ mod tests {
         });
         let snap = RequestSignatureSnapshot::from_request("x.yml", &req);
         assert_eq!(snap.auth_detail, "short");
+    }
+
+    #[test]
+    fn auth_detail_apikey_truncates_the_value() {
+        use rocket_shared::types::Auth;
+        let req = Request::new("Get", HttpMethod::Get, "/x").with_auth(Auth::ApiKey {
+            key: "X-Key".into(),
+            value: "abcdefghijkl".into(),
+            placement: "header".into(),
+        });
+        let snap = RequestSignatureSnapshot::from_request("x.yml", &req);
+        assert_eq!(snap.auth_detail, "X-Key=abcdefgh… (header)");
+        let short = Request::new("Get", HttpMethod::Get, "/x").with_auth(Auth::ApiKey {
+            key: "k".into(),
+            value: "abc".into(),
+            placement: "query".into(),
+        });
+        let snap = RequestSignatureSnapshot::from_request("x.yml", &short);
+        assert_eq!(snap.auth_detail, "k=abc (query)");
+    }
+
+    #[test]
+    fn auth_detail_secret_length_edges_are_kept() {
+        use rocket_shared::types::Auth;
+        let detail = |token: &str| {
+            let req = Request::new("Get", HttpMethod::Get, "/x").with_auth(Auth::Bearer {
+                token: token.into(),
+            });
+            RequestSignatureSnapshot::from_request("x.yml", &req).auth_detail
+        };
+        // Exactly 8 bytes: no ellipsis.
+        assert_eq!(detail("12345678"), "12345678");
+        // 9 bytes: first 8 characters and an ellipsis.
+        assert_eq!(detail("123456789"), "12345678…");
+        // Five characters but ten bytes: the length check counts bytes, so the ellipsis is
+        // added although nothing was cut. This is the current behavior and it is kept on purpose.
+        assert_eq!(detail("ééééé"), "ééééé…");
+        // Nine characters: the first eight characters and an ellipsis.
+        assert_eq!(detail("ééééééééé"), "éééééééé…");
     }
 
     #[test]
