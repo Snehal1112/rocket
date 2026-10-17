@@ -31,7 +31,7 @@ factory run (no LLM tokens):
 - `park.json` (job folder, written by the driver when it parks a job): `kind`, `reason`, `at`, `round`, `next` (the commands to run) and `parts` (title, source, text, truncated; each text capped at 200 KB, keeping the end). Kinds: `checks-failed`, `changes-remain`, `risky-diff`, `diff-too-large`, `budget-stopped`, `builder-stopped`, `builder-committed`, `nothing-changed`, `commit-failed`, `other`. The board job has `park_kind` and `park_at`, cleared when the job leaves needs-human. `factory status` prints the reason, the first 12 lines of the first part and the next commands for each parked job.
 - `.superpowers/factory/events.jsonl`: events written by the driver, each with the job id.
 - Only the driver writes the ledger, board and events. Agents and the `/factory` command never do.
-- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `commit_batch`, `builder_excerpt`, `kb_path`, `kb_model`, `kb_budget_weighted`, `kb_auto_commit`, `[[checks]]`).
+- Config: `.claude/factory/config.toml` (`risk_paths`, `diff_cap_lines`, `budget_weighted`, `fix_rounds`, `stall_minutes`, `builder_model`, `reviewer_model`, `commit_model`, `commit_subagents`, `commit_budget_weighted`, `commit_batch`, `builder_excerpt`, `tickets_on_merge`, `kb_path`, `kb_model`, `kb_budget_weighted`, `kb_auto_commit`, `[[checks]]`).
 
 ## Modes
 
@@ -87,6 +87,7 @@ Whether headless agents can read the KB through `--add-dir` is not proven yet. T
 - The guard: the driver takes a fingerprint of the main checkout before and after the run (tip, status entries and file contents). A difference is `Tampered`, whatever the reply says. The fingerprint can show a false `Tampered` if you edit the main checkout while a refresh runs. It fails closed, and a manual run clears it.
 - The stop marker: `Tampered` writes `.superpowers/factory/kb-stopped`, and automatic refreshes are skipped while it exists (a ledger line says so). Clear it by running `factory kb-refresh --job <id>` after you looked, or delete the file. A false `Tampered` is cleared only by a manual run that ends `Refreshed` or `UpToDate`.
 - Failures never park or unmerge a job. A failed, over-budget or blocked run writes a ledger line `kb refresh failed, <reason>`. Success writes `kb refreshed, pages: ...` or `kb up to date`.
+- `factory tickets <id> [--dry-run]`: file follow-up tickets and close the parent tickets of a merged job (see Ticket hygiene).
 - `factory kb-refresh --job <id>` reruns it by hand. `--job` is required, the command refuses unless the job is in stage `merged`, and it refuses while the job's lease is live. Do not run it while a driver run is live.
 - Tokens: the run is logged with role `kb`, so `factory tokens <id>` shows a `kb` row (and a `message` row for commit messages).
 
@@ -100,6 +101,17 @@ First real run checklist: after merge, set `kb_path = "~/data/rocket/Nl-knowledg
 6. the refresher can read `projects.json` one folder above the KB folder (the kb-refresh skill step 1). If not, the prompt must say the project is already resolved (it does now, so check the run continues with the given paths).
 
 Record that number here, then adjust `kb_budget_weighted`. Measured `kb` cost: not measured yet.
+
+## Ticket hygiene
+
+The driver can file the leftover work of a ticket and close the ticket after the last plan of a job merges. It reaches GitHub only through `gh`, behind the `Tracker` port in `factory-engine/src/tracker.rs`. The command is `factory tickets <id> [--dry-run]`, and the config key `tickets_on_merge` (default `false`) runs the same step at the end of `merge_stage`.
+
+- The parent tickets come from the feature text given to `factory new`: `#N` and `https://github.com/<owner>/<repo>/issues/N` both count. A URL for a repository other than `origin` makes the step skip.
+- The remaining work comes from the `## Follow-ups` section of the job's `spec.md`. One bullet is one ticket: the title is the first sentence (at most 100 characters), the body is the whole bullet. The new tickets get the parent's labels except `tracking`. A missing or empty section files nothing.
+- The step needs a merged job that is the last plan of its series. It files the tickets, comments once on each parent (job id, `main` sha, "not yet pushed" when `origin/main` lacks it, links to the new tickets) and closes each parent that is still open.
+- `tickets.json` in the job folder records every created ticket, comment and close, saved after each `gh` call. A re-run, also after a failure, never repeats a call. `--dry-run` makes only read calls and prints each action.
+- A `gh` failure is written to the ledger and printed. It never changes the merge result, and `factory tickets` exits non-zero.
+- Merge footer: `Relates to: #N` when the spec has follow-ups (the ticket is not finished), `Fixes: #N` otherwise. Commit and sync footers stay `Relates to`.
 
 ## Checks
 
