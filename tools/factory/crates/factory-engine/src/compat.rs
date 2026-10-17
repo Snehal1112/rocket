@@ -54,6 +54,7 @@ pub struct Driver {
     store: BoardStore,
     runner_for: RunnerFactory,
     lease_owner: Option<String>,
+    tracker: Box<dyn crate::Tracker>,
 }
 
 /// The marker that stops automatic KB refreshes, relative to the repo root.
@@ -72,6 +73,7 @@ impl Driver {
             store: BoardStore::new(root),
             runner_for,
             lease_owner: None,
+            tracker: Box::new(crate::GhTracker::new(root)),
         })
     }
 
@@ -79,6 +81,16 @@ impl Driver {
     pub fn with_lease_owner(mut self, owner: &str) -> Driver {
         self.lease_owner = Some(owner.to_string());
         self
+    }
+
+    /// Replaces the issue tracker. Tests pass a fake.
+    pub fn with_tracker(mut self, tracker: Box<dyn crate::Tracker>) -> Driver {
+        self.tracker = tracker;
+        self
+    }
+
+    pub fn tracker(&self) -> &dyn crate::Tracker {
+        self.tracker.as_ref()
     }
 
     /// Takes or renews the lease when this driver has an owner. A live lease of another owner is an error.
