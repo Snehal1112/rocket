@@ -90,7 +90,7 @@ fn enabled_entries<T>(items: &[T], parts: impl Fn(&T) -> (bool, &str, &str)) -> 
 /// Shortens a secret for the snapshot: more than 8 bytes keeps the first 8 characters and adds
 /// an ellipsis. The length check counts bytes and the cut counts characters, as it always did.
 fn shorten_secret(s: &str) -> String {
-    if s.len() > 8 {
+    if s.chars().count() > 8 {
         format!("{}…", s.chars().take(8).collect::<String>())
     } else {
         s.to_string()
@@ -439,9 +439,8 @@ mod tests {
         assert_eq!(detail("12345678"), "12345678");
         // 9 bytes: first 8 characters and an ellipsis.
         assert_eq!(detail("123456789"), "12345678…");
-        // Five characters but ten bytes: the length check counts bytes, so the ellipsis is
-        // added although nothing was cut. This is the current behavior and it is kept on purpose.
-        assert_eq!(detail("ééééé"), "ééééé…");
+        // Five characters but ten bytes: the length check counts characters, so no ellipsis.
+        assert_eq!(detail("ééééé"), "ééééé");
         // Nine characters: the first eight characters and an ellipsis.
         assert_eq!(detail("ééééééééé"), "éééééééé…");
     }
