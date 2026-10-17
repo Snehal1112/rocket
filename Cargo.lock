@@ -5553,7 +5553,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "dirs 5.0.1",
  "git2",
  "keyring",
  "reqwest 0.12.28",
@@ -5718,7 +5717,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
- "dirs 5.0.1",
  "git2",
  "openssl",
  "rocket-shared",
@@ -5818,7 +5816,6 @@ dependencies = [
  "dashmap",
  "deno_core",
  "deno_error",
- "dirs 5.0.1",
  "futures-lite",
  "futures-util",
  "http-body-util",
@@ -5886,6 +5883,7 @@ name = "rocket-shared"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs 5.0.1",
  "serde",
  "serde_json",
  "serde_yaml",

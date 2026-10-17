@@ -127,7 +127,7 @@ fn scratch_parent() -> PathBuf {
     if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
         return PathBuf::from(runtime).join(SCRATCH_PARENT_DIR);
     }
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = rocket_shared::paths::home_dir() {
         return home.join(".rocket-api").join(SCRATCH_PARENT_DIR);
     }
     std::env::temp_dir().join(SCRATCH_PARENT_DIR)

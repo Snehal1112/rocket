@@ -6,7 +6,7 @@ use tauri::State;
 
 #[tauri::command]
 pub fn get_app_data_dir() -> Result<String, DomainError> {
-    let dir = dirs::home_dir()
+    let dir = rocket_shared::paths::home_dir()
         .ok_or_else(|| DomainError::Internal("Home directory not found".into()))?
         .join(".rocket-api");
     Ok(dir.to_string_lossy().to_string())
@@ -17,7 +17,7 @@ pub fn watch_collections(
     watcher: State<'_, NotifyFileWatcher>,
     publisher: State<'_, Arc<dyn EventPublisher>>,
 ) -> Result<(), DomainError> {
-    let collections_dir = dirs::home_dir()
+    let collections_dir = rocket_shared::paths::home_dir()
         .ok_or_else(|| DomainError::Internal("Home directory not found".into()))?
         .join(".rocket-api")
         .join("collections");

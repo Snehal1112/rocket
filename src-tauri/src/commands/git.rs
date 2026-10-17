@@ -882,7 +882,7 @@ impl From<GitCredentialsPayload> for GitCredentials {
 /// Returns None if the home directory cannot be determined or no key exists.
 #[tauri::command]
 pub fn get_default_ssh_key_path() -> Option<String> {
-    let home = dirs::home_dir()?;
+    let home = rocket_shared::paths::home_dir()?;
     let ssh_dir = home.join(".ssh");
     for name in ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"] {
         let path = ssh_dir.join(name);
@@ -900,7 +900,7 @@ pub fn get_default_ssh_key_path() -> Option<String> {
 /// alphabetically.
 #[tauri::command]
 pub fn list_ssh_key_paths() -> Vec<String> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = rocket_shared::paths::home_dir() else {
         return Vec::new();
     };
     let ssh_dir = home.join(".ssh");
