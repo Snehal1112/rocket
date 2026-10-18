@@ -11,6 +11,11 @@ impl FlowService {
         Self { flow_repo }
     }
 
+    /// The repository, for in-crate helpers that must bypass `validate`.
+    pub(crate) fn repo(&self) -> &dyn FlowRepository {
+        self.flow_repo.as_ref()
+    }
+
     pub fn list(&self, collection: &str) -> DomainResult<Vec<String>> {
         self.flow_repo.list(collection)
     }

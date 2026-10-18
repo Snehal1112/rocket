@@ -28,6 +28,7 @@ pub(crate) mod flow_poll;
 pub(crate) mod flow_routing;
 pub(crate) mod flow_run_cache;
 pub(crate) mod flow_run_id;
+mod flow_references;
 pub mod flow_service;
 pub(crate) mod flow_trace;
 pub(crate) mod flow_wait;
@@ -103,6 +104,7 @@ pub use assistant_chip_text::{
     CHIP_TEXT_LIMIT_BYTES,
 };
 pub use flow_partial::PartialRun;
+pub use flow_references::{FlowReferenceUpdater, FlowRewriteReport};
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;
 pub use graphql_request::ExecuteGraphQlInput;
