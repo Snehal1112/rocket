@@ -121,6 +121,14 @@ Shipped on local main (not pushed). Details in `.claude/collection-trust.md` and
 | R-54 | Full test run and manual check after this batch | done (user ran the suites and tried the assistant, 2026-10-11, working as expected) | `cargo test -p rocket-app -j4`, `-p rocket-infra -j4`, `yarn test` | `cargo fmt --check` still flags workspace-wide drift. Run `cargo fmt` once. Later runs: Rust suites green (2026-10-11); a full `yarn test` flakes on 5000 ms timeouts under load, see R-57. |
 | R-55 | Events and IPC rework: missing-event audit, frontend event-to-cache layer, composite backend commands, internal subscribers, activity surface | planned (parked by the user on 2026-10-11, no spec yet) | `.claude/events-and-ipc-rework.md`, GitHub issue #105 | Pick the first sub-project (A or C1) and brainstorm it. Large. |
 
+## 8d. Environment inheritance and `.env` files (2026-10-18)
+
+| ID | Item | Status | Where | What remains |
+|---|---|---|---|---|
+| R-61 | `extends` and `dotEnvFilePath` on environments: flatten along the parent chain, `.env` as `{{process.env.NAME}}` behind the host environment gate, dialog picker, path field and read-only inherited rows (collection and global) | done (factory job 024, plans 1 to 4) | `rocket-environment` `flatten.rs`, `dot_env.rs`; `EnvironmentDialog.tsx`, `WorkspaceEnvironmentsTab.tsx`; spec `specs/2026-10-18-env-extends-dotenv-design.md` | None. |
+| R-62 | Inherit the parent's external secret bindings and client certificates | open | follow-up of R-61 | Needs a decision on binding alias clashes. |
+| R-63 | Show inherited variables (secrets masked) in the assistant chips and MCP environment views; let backend-executed HTTP (flows, `rok.runRequest`, `run_request`) resolve `{{process.env}}` | open | follow-up of R-61 | Two separate pieces, spec each. |
+
 ## 8c. Assistant additions (2026-10-11)
 
 | ID | Item | Status | Where | What remains |

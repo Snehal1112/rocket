@@ -20,6 +20,9 @@ vi.mock('@/lib/tauri-api', async () => {
     getGlobalEnvironmentName: vi.fn().mockResolvedValue(null),
     getGlobalEnvironment: vi.fn().mockResolvedValue(null),
     getProcessEnvVars: vi.fn().mockResolvedValue({}),
+    getResolvedEnvironment: vi
+      .fn()
+      .mockResolvedValue({ name: '', variables: [], warnings: [] }),
     listVaultCertificates: vi.fn().mockResolvedValue([]),
   };
 });
@@ -183,6 +186,150 @@ describe('EnvironmentDialog preserves fields it does not edit', () => {
     expect(savedEnv.dotEnvFilePath).toBe('.env.prod');
     expect(savedEnv.color).toBe('#ff0000');
     expect(savedEnv.description).toEqual({ content: 'Production', type: 'text/markdown' });
+  });
+});
+
+// Radix Select calls pointer-capture and scrollIntoView APIs that jsdom lacks.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {
+    // No-op for test polyfill.
+  };
+}
+
+describe('EnvironmentDialog inheritance and .env fields', () => {
+  const base: Environment = { name: 'base', variables: [], externalSecrets: [] };
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([prodEnv, base]);
+    vi.mocked(tauriApi.saveEnvironment).mockReset().mockResolvedValue(undefined);
+  });
+
+  async function saveLast() {
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+    return vi.mocked(tauriApi.saveEnvironment).mock.calls[0][1];
+  }
+
+  it('dialog_saves_the_chosen_parent_in_extends', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+
+    await user.click(screen.getByRole('combobox', { name: 'Inherits from' }));
+    await user.click(await screen.findByRole('option', { name: 'base' }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect((await saveLast()).extends).toBe('base');
+  });
+
+  it('dialog_saves_the_env_path_in_dotEnvFilePath', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+
+    await user.type(screen.getByLabelText('.env file path'), '.env.prod');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect((await saveLast()).dotEnvFilePath).toBe('.env.prod');
+  });
+
+  it('dialog_clears_extends_when_no_parent_is_chosen', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([{ ...prodEnv, extends: 'base' }, base]);
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+
+    await user.click(screen.getByRole('combobox', { name: 'Inherits from' }));
+    await user.click(await screen.findByRole('option', { name: 'None' }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect((await saveLast()).extends).toBeUndefined();
+  });
+
+  it('dialog_keeps_a_deleted_parent_name_and_shows_a_warning', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([{ ...prodEnv, extends: 'gone' }]);
+    renderDialog();
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    expect(screen.getByRole('combobox', { name: 'Inherits from' })).toHaveTextContent('gone');
+    expect(screen.getByText(/parent "gone" was not found/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect((await saveLast()).extends).toBe('gone');
+  });
+
+  it('picker_is_disabled_when_there_are_no_candidates', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([prodEnv]);
+    renderDialog();
+    await screen.findByLabelText('Variable key 1');
+
+    expect(screen.getByRole('combobox', { name: 'Inherits from' })).toBeDisabled();
+  });
+});
+
+describe('EnvironmentDialog inherited rows', () => {
+  const child: Environment = { ...prodEnv, name: 'child', extends: 'base' };
+  const base: Environment = {
+    name: 'base',
+    variables: [{ key: 'TOKEN', value: 'abc', enabled: true, secret: false }],
+    externalSecrets: [],
+  };
+
+  function resolved(variables: tauriApi.ResolvedVariable[], warnings: string[] = []) {
+    vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
+      name: 'child',
+      variables,
+      warnings,
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([child, base]);
+    vi.mocked(tauriApi.saveEnvironment).mockReset().mockResolvedValue(undefined);
+  });
+
+  it('a_variable_overridden_by_the_child_is_not_listed_as_inherited', async () => {
+    resolved([
+      { key: 'HOST', value: 'https://api.example.com', enabled: true, secret: false, source: 'child' },
+      { key: 'TOKEN', value: 'abc', enabled: true, secret: false, source: 'base' },
+    ]);
+    renderDialog();
+    await screen.findByLabelText('Variable key 1');
+    expect(await screen.findByLabelText('Inherited key 1')).toHaveValue('TOKEN');
+    expect(screen.queryByLabelText('Inherited key 2')).not.toBeInTheDocument();
+  });
+
+  it('saving_does_not_include_inherited_rows', async () => {
+    resolved([
+      { key: 'HOST', value: 'https://api.example.com', enabled: true, secret: false, source: 'child' },
+      { key: 'TOKEN', value: 'abc', enabled: true, secret: false, source: 'base' },
+    ]);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    await screen.findByLabelText('Inherited key 1');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+    const [, saved] = vi.mocked(tauriApi.saveEnvironment).mock.calls[0];
+    expect(saved.variables.map((v) => v.key)).toEqual(['HOST2']);
+  });
+
+  it('a_missing_parent_shows_a_warning_and_save_still_works', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([{ ...child, extends: 'gone' }]);
+    resolved([], ['Parent environment "gone" was not found', 'The .env file is missing']);
+    renderDialog();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    expect(await screen.findByText(/the \.env file is missing/i)).toBeInTheDocument();
+    // The missing parent is reported once, by the dialog's own warning.
+    expect(screen.getAllByText(/"gone"/)).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
   });
 });
 

@@ -538,6 +538,8 @@ extends: string          # name of another environment to inherit from
 dotEnvFilePath: string
 ```
 
+Rocket acts on `extends` and `dotEnvFilePath`. A child inherits the parent's variables (child wins, secret flag kept, flattened before `{{var}}` interpolation), and the parent must be in the same store (collection or global). A cycle is rejected on save and a missing parent warns. Inherited variables are never written into the child's file. The `.env` files of the chain are exposed as `{{process.env.NAME}}` only when the collection's host environment gate allows it; the OS environment wins over a `.env` value, a relative path resolves against the collection folder and `..` is refused.
+
 ### ClientCertificate (oneOf)
 ```yaml
 # PEM type:
