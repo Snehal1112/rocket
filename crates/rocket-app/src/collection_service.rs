@@ -1,3 +1,4 @@
+use crate::flow_references::FlowReferenceUpdater;
 use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
@@ -8,7 +9,7 @@ use rocket_collection::{
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::DomainResult;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::{DomainEvent, EventPublisher, FlowRewriteFailure};
 use std::sync::Arc;
 
 pub struct CollectionService {
@@ -17,6 +18,8 @@ pub struct CollectionService {
     audit: Arc<dyn SecurityAuditPublisher>,
     /// Grants follow create, rename and delete when a store is attached.
     trust: Option<Arc<dyn CollectionTrustStore>>,
+    /// Flow references follow a move when an updater is attached.
+    flow_refs: Option<Arc<dyn FlowReferenceUpdater>>,
 }
 
 impl CollectionService {
@@ -26,6 +29,7 @@ impl CollectionService {
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
             trust: None,
+            flow_refs: None,
         }
     }
 
@@ -34,6 +38,68 @@ impl CollectionService {
     pub fn with_trust_store(mut self, store: Arc<dyn CollectionTrustStore>) -> Self {
         self.trust = Some(store);
         self
+    }
+
+    /// Attaches the flow reference updater, so a move rewrites the flows that use the path.
+    pub fn with_flow_references(mut self, updater: Arc<dyn FlowReferenceUpdater>) -> Self {
+        self.flow_refs = Some(updater);
+        self
+    }
+
+    /// Rewrites flow references after a successful move inside one collection.
+    /// A failed rewrite never fails the move.
+    fn after_move(
+        &self,
+        src_collection: &str,
+        src_path: &str,
+        dst_collection: &str,
+        dst_path: &str,
+    ) {
+        let src = src_path.strip_suffix('/').unwrap_or(src_path);
+        let dst = dst_path.strip_suffix('/').unwrap_or(dst_path);
+        let Some(updater) = &self.flow_refs else {
+            return;
+        };
+        if src_collection != dst_collection {
+            if src.is_empty() {
+                return;
+            }
+            // A failed lookup never fails the move.
+            let Ok(flows) = updater.flows_using(src_collection, src) else {
+                return;
+            };
+            if flows.is_empty() {
+                return;
+            }
+            self.events.publish(DomainEvent::FlowRequestPathsRewritten {
+                collection: src_collection.to_string(),
+                from: src.to_string(),
+                to: dst.to_string(),
+                flows: vec![],
+                failed: flows
+                    .into_iter()
+                    .map(|flow| FlowRewriteFailure {
+                        flow,
+                        message: "moved out of the collection".to_string(),
+                    })
+                    .collect(),
+            });
+            return;
+        }
+        if dst.is_empty() || src == dst {
+            return;
+        }
+        let report = updater.rewrite_request_paths(src_collection, src, dst);
+        if report.rewritten.is_empty() && report.failed.is_empty() {
+            return;
+        }
+        self.events.publish(DomainEvent::FlowRequestPathsRewritten {
+            collection: src_collection.to_string(),
+            from: src.to_string(),
+            to: dst.to_string(),
+            flows: report.rewritten,
+            failed: report.failed,
+        });
     }
 
     pub fn new_with_audit(
@@ -46,6 +112,7 @@ impl CollectionService {
             events,
             audit,
             trust: None,
+            flow_refs: None,
         }
     }
 
@@ -385,6 +452,7 @@ impl CollectionService {
             dst_collection: dst_collection.to_string(),
             dst_path: dst_path.to_string(),
         });
+        self.after_move(src_collection, src_path, dst_collection, dst_path);
         Ok(())
     }
 
@@ -448,6 +516,7 @@ impl CollectionService {
             dst_collection: dst_collection.to_string(),
             dst_path: dst_path.to_string(),
         });
+        self.after_move(src_collection, src_path, dst_collection, dst_path);
         Ok(())
     }
 
@@ -592,6 +661,7 @@ impl CollectionService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow_references::FlowRewriteReport;
     use rocket_shared::error::DomainError;
     use rocket_shared::events::{DomainEvent, EventPublisher, NullEventPublisher};
     use rocket_shared::types::HttpMethod;
@@ -1037,6 +1107,232 @@ mod tests {
             "expected ItemMoved, got {:?}",
             *published
         );
+    }
+
+    struct RecordingUpdater {
+        calls: Mutex<Vec<(String, String, String)>>,
+        report: Mutex<FlowRewriteReport>,
+        using: Mutex<DomainResult<Vec<String>>>,
+        using_calls: Mutex<Vec<(String, String)>>,
+    }
+    impl Default for RecordingUpdater {
+        fn default() -> Self {
+            Self {
+                calls: Mutex::new(vec![]),
+                report: Mutex::new(FlowRewriteReport::default()),
+                using: Mutex::new(Ok(vec![])),
+                using_calls: Mutex::new(vec![]),
+            }
+        }
+    }
+    impl FlowReferenceUpdater for RecordingUpdater {
+        fn rewrite_request_paths(&self, collection: &str, from: &str, to: &str) -> FlowRewriteReport {
+            self.calls.lock().expect("lock").push((
+                collection.to_string(),
+                from.to_string(),
+                to.to_string(),
+            ));
+            self.report.lock().expect("lock").clone()
+        }
+        fn flows_using(&self, collection: &str, path: &str) -> DomainResult<Vec<String>> {
+            self.using_calls
+                .lock()
+                .expect("lock")
+                .push((collection.to_string(), path.to_string()));
+            match &*self.using.lock().expect("lock") {
+                Ok(flows) => Ok(flows.clone()),
+                Err(e) => Err(DomainError::Internal(e.to_string())),
+            }
+        }
+    }
+
+    fn flow_fixture(
+        repo: NullCollectionRepo,
+        report: FlowRewriteReport,
+    ) -> (CollectionService, Arc<RecordingUpdater>, Arc<RecordingEventPublisher>) {
+        let updater = Arc::new(RecordingUpdater::default());
+        *updater.report.lock().expect("lock") = report;
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = CollectionService::new(
+            Box::new(repo),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        )
+        .with_flow_references(updater.clone());
+        (svc, updater, publisher)
+    }
+
+    fn one_rewritten() -> FlowRewriteReport {
+        FlowRewriteReport {
+            rewritten: vec!["A".into()],
+            failed: vec![],
+        }
+    }
+
+    fn flow_events(publisher: &RecordingEventPublisher) -> usize {
+        publisher
+            .events
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter(|e| matches!(e, DomainEvent::FlowRequestPathsRewritten { .. }))
+            .count()
+    }
+
+    fn expected_call() -> Vec<(String, String, String)> {
+        vec![("c".into(), "auth".into(), "identity".into())]
+    }
+
+    #[test]
+    fn move_item_rewrites_flows_in_the_same_collection() {
+        let (svc, updater, publisher) = flow_fixture(mock_collection_repo(), one_rewritten());
+        svc.move_item("c", "auth", "c", "identity").expect("move");
+        assert_eq!(*updater.calls.lock().expect("lock"), expected_call());
+        let events = publisher.events.lock().expect("lock");
+        assert!(events.iter().any(|e| matches!(e, DomainEvent::ItemMoved { .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::FlowRequestPathsRewritten { collection, from, to, flows, failed }
+                if collection == "c" && from == "auth" && to == "identity"
+                    && flows == &vec!["A".to_string()] && failed.is_empty()
+        )));
+    }
+
+    #[test]
+    fn move_item_does_not_rewrite_when_the_move_fails() {
+        let repo = NullCollectionRepo::new()
+            .on_move_item(|_, _, _, _| Err(DomainError::NotFound("x".into())));
+        let (svc, updater, publisher) = flow_fixture(repo, one_rewritten());
+        assert!(svc.move_item("c", "auth", "c", "identity").is_err());
+        assert!(updater.calls.lock().expect("lock").is_empty());
+        assert!(publisher.events.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn move_item_no_replace_rewrites_flows() {
+        let (svc, updater, publisher) = flow_fixture(mock_collection_repo(), one_rewritten());
+        svc.move_item_no_replace("c", "auth", "c", "identity")
+            .expect("move");
+        assert_eq!(*updater.calls.lock().expect("lock"), expected_call());
+        assert_eq!(flow_events(&publisher), 1);
+    }
+
+    #[test]
+    fn move_item_succeeds_when_a_flow_rewrite_fails() {
+        let report = FlowRewriteReport {
+            rewritten: vec![],
+            failed: vec![rocket_shared::events::FlowRewriteFailure {
+                flow: "B".into(),
+                message: "bad".into(),
+            }],
+        };
+        let (svc, _updater, publisher) = flow_fixture(mock_collection_repo(), report);
+        svc.move_item("c", "auth", "c", "identity")
+            .expect("move succeeds");
+        let events = publisher.events.lock().expect("lock");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::FlowRequestPathsRewritten { failed, .. }
+                if failed.len() == 1 && failed[0].flow == "B"
+        )));
+    }
+
+    #[test]
+    fn move_item_publishes_no_flow_event_when_nothing_was_rewritten() {
+        let (svc, _updater, publisher) =
+            flow_fixture(mock_collection_repo(), FlowRewriteReport::default());
+        svc.move_item("c", "auth", "c", "identity").expect("move");
+        assert_eq!(flow_events(&publisher), 0);
+        assert_eq!(publisher.events.lock().expect("lock").len(), 1);
+    }
+
+    #[test]
+    fn move_item_without_an_updater_behaves_as_before() {
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = CollectionService::new(
+            Box::new(mock_collection_repo()),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        svc.move_item("c", "auth", "c", "identity").expect("move");
+        let events = publisher.events.lock().expect("lock");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], DomainEvent::ItemMoved { .. }));
+    }
+
+    #[test]
+    fn move_item_skips_the_rewrite_for_an_empty_destination_or_same_path() {
+        let (svc, updater, _publisher) = flow_fixture(mock_collection_repo(), one_rewritten());
+        svc.move_item("c", "a.yml", "c", "").expect("move");
+        svc.move_item("c", "a", "c", "a/").expect("move");
+        assert!(updater.calls.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn move_item_strips_trailing_slashes_before_rewriting() {
+        let (svc, updater, _publisher) = flow_fixture(mock_collection_repo(), one_rewritten());
+        svc.move_item("c", "auth/", "c", "identity/").expect("move");
+        assert_eq!(*updater.calls.lock().expect("lock"), expected_call());
+    }
+
+    fn other_collection_fixture(
+        using: DomainResult<Vec<String>>,
+    ) -> (CollectionService, Arc<RecordingUpdater>, Arc<RecordingEventPublisher>) {
+        let (svc, updater, publisher) =
+            flow_fixture(mock_collection_repo(), FlowRewriteReport::default());
+        *updater.using.lock().expect("lock") = using;
+        (svc, updater, publisher)
+    }
+
+    #[test]
+    fn move_item_to_another_collection_reports_dangling_flows() {
+        let (svc, updater, publisher) = other_collection_fixture(Ok(vec!["A".into()]));
+        svc.move_item("c", "a.yml", "d", "a.yml").expect("move");
+        assert!(updater.calls.lock().expect("lock").is_empty());
+        assert_eq!(
+            *updater.using_calls.lock().expect("lock"),
+            vec![("c".to_string(), "a.yml".to_string())]
+        );
+        let events = publisher.events.lock().expect("lock");
+        let found: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, DomainEvent::FlowRequestPathsRewritten { .. }))
+            .collect();
+        assert_eq!(found.len(), 1);
+        assert!(matches!(
+            found[0],
+            DomainEvent::FlowRequestPathsRewritten { collection, from, to, flows, failed }
+                if collection == "c" && from == "a.yml" && to == "a.yml"
+                    && flows.is_empty()
+                    && failed.len() == 1
+                    && failed[0].flow == "A"
+                    && failed[0].message == "moved out of the collection"
+        ));
+    }
+
+    #[test]
+    fn move_item_to_another_collection_ignores_a_lookup_error() {
+        let (svc, _updater, publisher) =
+            other_collection_fixture(Err(DomainError::Internal("x".into())));
+        svc.move_item("c", "a.yml", "d", "a.yml").expect("move");
+        assert_eq!(flow_events(&publisher), 0);
+    }
+
+    #[test]
+    fn move_item_to_another_collection_with_no_users_publishes_no_flow_event() {
+        let (svc, _updater, publisher) = other_collection_fixture(Ok(vec![]));
+        svc.move_item("c", "a.yml", "d", "a.yml").expect("move");
+        assert_eq!(flow_events(&publisher), 0);
+    }
+
+    #[test]
+    fn move_item_to_another_collection_with_an_empty_destination_still_reports() {
+        let (svc, updater, publisher) = other_collection_fixture(Ok(vec!["A".into()]));
+        svc.move_item("c", "a.yml", "d", "").expect("move");
+        assert_eq!(updater.using_calls.lock().expect("lock").len(), 1);
+        assert_eq!(flow_events(&publisher), 1);
     }
 
     #[test]
