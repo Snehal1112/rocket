@@ -16,6 +16,7 @@ vi.mock('@/lib/queries/environment-queries', () => ({
   useGlobalEnvironmentName: () => ({ data: null }),
   useGlobalEnvironment: () => ({ data: null }),
   useProcessEnvVars: () => ({ data: {} }),
+  useResolvedEnvironment: () => ({ data: undefined }),
 }));
 
 import { useFolderVariableContext } from '../useFolderVariableContext';

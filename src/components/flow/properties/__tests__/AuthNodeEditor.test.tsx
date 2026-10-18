@@ -131,6 +131,22 @@ vi.mock('@/lib/queries/environment-queries', () => ({
     },
   }),
   useProcessEnvVars: () => ({ data: { HOME: '/home/u' } }),
+  useResolvedEnvironment: (collection: string | null, name: string | null) => {
+    const rv = (key: string, value: string) => ({
+      key,
+      value,
+      enabled: true,
+      secret: false,
+      source: name ?? '',
+    });
+    if (!name) return { data: undefined };
+    if (collection === null) {
+      return { data: { name, warnings: [], variables: [rv('tenant', 'acme')] } };
+    }
+    return collection === 'api'
+      ? { data: { name, warnings: [], variables: [rv('clientId', 'dev-client')] } }
+      : { data: undefined };
+  },
 }));
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
