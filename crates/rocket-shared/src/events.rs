@@ -277,6 +277,13 @@ pub enum WebSocketSessionState {
     Failed,
 }
 
+/// One flow that could not be rewritten after a request or folder move.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowRewriteFailure {
+    pub flow: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
@@ -306,6 +313,13 @@ pub enum DomainEvent {
         src_path: String,
         dst_collection: String,
         dst_path: String,
+    },
+    FlowRequestPathsRewritten {
+        collection: String,
+        from: String,
+        to: String,
+        flows: Vec<String>,
+        failed: Vec<FlowRewriteFailure>,
     },
 
     // Folder events
@@ -833,6 +847,23 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("CollectionCreated") || json.contains("collectionCreated"));
         assert!(json.contains("my-api"));
+    }
+
+    #[test]
+    fn flow_request_paths_rewritten_serializes_with_a_type_tag() {
+        let event = DomainEvent::FlowRequestPathsRewritten {
+            collection: "c".into(),
+            from: "a.yml".into(),
+            to: "b.yml".into(),
+            flows: vec!["f1".into()],
+            failed: vec![FlowRewriteFailure {
+                flow: "f2".into(),
+                message: "bad".into(),
+            }],
+        };
+        let value = serde_json::to_value(&event).expect("serializes");
+        assert_eq!(value["type"], "flowRequestPathsRewritten");
+        assert_eq!(value["failed"][0]["flow"], "f2");
     }
 
     #[test]
