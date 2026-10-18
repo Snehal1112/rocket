@@ -74,7 +74,7 @@ pub struct FlowRewriteReport { pub rewritten: Vec<String>, pub failed: Vec<FlowR
 pub struct FlowRewriteFailure { pub flow: String, pub message: String }
 ```
 
-`FlowService` implements it. `rewrite_request_paths` walks `repo.list`, reads each flow with `repo.get`, rewrites it, and saves it through `repo.save` only when the count is above zero. It does not call `validate`, because a path change cannot change the graph. A `get` or `save` error goes into `failed` with the error text, and the walk continues. A flow that fails to read is never written. `flows_using` returns the flow names that use the path, sorted, without duplicates. A list error is returned as `Err`.
+`FlowService` implements it. `rewrite_request_paths` walks `repo.list`, reads each flow with `repo.get`, rewrites it, and saves it through `repo.save` only when the count is above zero. It does not call `validate`, because a path change cannot change the graph. A `get` or `save` error goes into `failed` with the error text, and the walk continues. A flow that fails to read is never written. `flows_using` returns the flow names that use the path, sorted, without duplicates. A list error is returned as `Err`. `rewrite_request_paths` reports a list error as one `failed` entry named `(all flows)`, so the move still succeeds. `flows_using` rejects bad arguments with `DomainError::InvalidInput`: an invalid collection name (`Collection::validate_name`), an empty path, an absolute path, or a path with a `..` component.
 
 ### 3. Hook in `CollectionService`
 
@@ -89,7 +89,7 @@ A move to another collection runs no rewrite. The service calls `flows_using(src
 
 ### 4. Lookup command
 
-`flows_using_request(collection: String, path: String) -> Vec<String>` in `src-tauri/src/commands/flow.rs`. It validates the arguments and calls `FlowReferenceUpdater::flows_using`. It stays thin.
+`flows_using_request(collection: String, path: String) -> Vec<String>` in `src-tauri/src/commands/flow.rs`. It calls `FlowReferenceUpdater::flows_using` on the managed `FlowService` and maps nothing else, so the validation above lives in the domain and the command stays thin.
 
 ### 5. Wiring in `lib.rs`
 
@@ -106,7 +106,14 @@ Build one `Arc<FlowService>` early, over its own `SharedPathFlowRepo` on the sam
 
 ### 7. Delete dialog
 
-When the delete target is a request or a folder, `CollectionsSidebar` calls `flowsUsingRequest(collection, path)` as the dialog opens. A non-empty result adds the line `Used by N flows: A, B.` The Delete button stays enabled. A lookup error shows nothing and logs to the console.
+When the delete target is a request or a folder, `CollectionsSidebar` calls `flowsUsingRequest(collection, path)` as the dialog opens. A non-empty result adds the line `Used by N flows: A, B.` The Delete button stays enabled. A lookup error shows nothing and logs to the console. The line reads `Used by 1 flow: A.` for one flow and `Used by 2 flows: A, B.` for more. The toast reads `Flows not updated: A (message); B (message)`.
+
+### 8. Docs and roadmap
+
+The roadmap says to update it when work ships. This work:
+- sets F-01 to `done` in `.claude/flow-roadmap.md` and adds follow-up rows at the end of the file (real-app check, the lint after delete, external edits), using the next free IDs;
+- adds `request_refs.rs` to the module map of `crates/rocket-flow/CLAUDE.md`;
+- adds `.claude/flow-request-refs.md` (how the rewrite works, the event, the limits) and one reference line in the project `CLAUDE.md`.
 
 ## Error handling and edge cases
 
@@ -122,6 +129,9 @@ When the delete target is a request or a folder, `CollectionsSidebar` calls `flo
 | Same flow open in a tab with unsaved edits | Tab patched in place, edits kept, still dirty. |
 | User saves the stale tab in the instant before the event | The old path is written back once. Accepted, the tab is patched right after. |
 | Lookup fails in the delete dialog | No list shown, delete still possible. |
+| Lookup called with an empty path, an absolute path or `..` | `InvalidInput`, no flow is read. |
+| The flow list itself fails during a rewrite | One `failed` entry named `(all flows)`, the move still succeeds. |
+| A flow of another collection uses the same path | Untouched. Only the moved item's collection is walked. |
 | Delete | Flows are left as they are. |
 | `move_item` replaces an existing destination | Flows that pointed at the replaced request now point at the moved one. Accepted, it is how the move already behaves. |
 | `dst_path` empty (the "move to collection" menu passes `''` with another collection, `RequestNode.tsx:377`) | No rewrite. It is a cross-collection move, handled as above. |
@@ -130,10 +140,13 @@ When the delete target is a request or a folder, `CollectionsSidebar` calls `flo
 
 ## Testing
 
-- `rocket-flow` (`cargo test -j4 -p rocket-flow`): `path_is_within_matches_exact_and_folder_prefix`, `path_is_within_does_not_match_a_longer_sibling_name`, `rewrite_saved_paths_replaces_a_folder_prefix`, `rewrite_saved_paths_replaces_an_exact_request_path`, `rewrite_saved_paths_ignores_inline_requests`, `uses_saved_path_is_true_for_a_nested_request`.
-- `rocket-app` (`cargo test -j4 -p rocket-app`): `rewrite_request_paths_rewrites_and_saves_matching_flows`, `rewrite_request_paths_skips_a_flow_that_does_not_match`, `rewrite_request_paths_reports_a_failed_save_and_continues`, `rewrite_request_paths_does_not_write_a_flow_it_could_not_read`, `flows_using_lists_each_flow_once_sorted`, `move_item_rewrites_flows_in_the_same_collection`, `move_item_does_not_rewrite_when_the_move_fails`, `move_item_to_another_collection_reports_dangling_flows`, `move_item_no_replace_rewrites_flows`, `move_item_succeeds_when_a_flow_rewrite_fails`, `move_item_without_an_updater_behaves_as_before`.
-- Frontend (`yarn test pane-store`, `yarn test CollectionsSidebar`): `rewriteFlowRequestPaths patches nodes and history snapshots`, `rewriteFlowRequestPaths keeps a clean tab clean and a dirty tab dirty`, `rewriteFlowRequestPaths patches parked collection tabs`, `delete dialog lists the flows that use the request`, `delete dialog stays usable when the lookup fails`.
-- Checks: `cargo check -j4`, `yarn tsc --noEmit`, `yarn check`.
+- `rocket-flow` (`cargo test -j4 -p rocket-flow request_refs`): `path_is_within_matches_exact_and_folder_prefix`, `path_is_within_does_not_match_a_longer_sibling_name`, `path_is_within_never_matches_an_empty_target`, `rewrite_saved_paths_replaces_a_folder_prefix`, `rewrite_saved_paths_replaces_an_exact_request_path`, `rewrite_saved_paths_ignores_inline_requests`, `uses_saved_path_is_true_for_a_nested_request`.
+- `rocket-app`, updater (`cargo test -j4 -p rocket-app flow_references`): `rewrite_request_paths_rewrites_and_saves_matching_flows`, `rewrite_request_paths_skips_a_flow_that_does_not_match`, `rewrite_request_paths_reports_a_failed_save_and_continues`, `rewrite_request_paths_does_not_write_a_flow_it_could_not_read`, `rewrite_request_paths_reports_a_list_error`, `rewrite_request_paths_saves_a_flow_that_would_fail_validation`, `flows_using_lists_each_flow_once_sorted`, `flows_using_rejects_bad_arguments`.
+- `rocket-app`, service (`cargo test -j4 -p rocket-app move_item`): `move_item_rewrites_flows_in_the_same_collection`, `move_item_does_not_rewrite_when_the_move_fails`, `move_item_to_another_collection_reports_dangling_flows`, `move_item_to_another_collection_ignores_a_lookup_error`, `move_item_no_replace_rewrites_flows`, `move_item_succeeds_when_a_flow_rewrite_fails`, `move_item_without_an_updater_behaves_as_before`, `move_item_skips_the_rewrite_for_an_empty_destination_or_same_path`, `move_item_strips_trailing_slashes_before_rewriting`.
+- `rocket-app`, real filesystem (`cargo test -j4 -p rocket-app flow_request_ref_e2e`): `moving_a_request_rewrites_the_saved_flow_on_disk`, `renaming_a_folder_rewrites_every_flow_below_it`, `a_corrupt_flow_file_is_left_untouched_and_the_move_succeeds`, `a_flow_of_another_collection_is_untouched`, `a_move_between_collections_reports_the_dangling_flow`.
+- `src-tauri` (`cargo test -j4 -p rocket flow_request_paths_rewritten_has_its_own_channel`).
+- Frontend: `yarn test pane-store-flow-request-paths --run` (`rewriteFlowRequestPaths patches nodes and history snapshots`, `... keeps a clean tab clean and a dirty tab dirty`, `... patches parked collection tabs`, `... leaves other collections and unrelated paths alone`, `... ignores tabs without history or collection`), `yarn test useFlowRequestPathEvents --run` (`an event with flows patches open tabs and refreshes the flow list`, `an event with only failures shows the toast and patches nothing`, `the hook unsubscribes on unmount`), `yarn test CollectionsSidebar --run` (`delete dialog lists the flows that use the request`, `delete dialog for a folder lists the flows that use it`, `delete dialog stays usable when the lookup fails`, `delete dialog shows nothing when no flow uses the request`).
+- Checks: `cargo check -j4 -p <crate>` for each crate touched (`rocket-flow`, `rocket-shared`, `rocket-app`, `rocket`), `yarn tsc --noEmit`, `yarn check`.
 
 ## Files changed
 
@@ -141,14 +154,17 @@ When the delete target is a request or a folder, `CollectionsSidebar` calls `flo
 - `crates/rocket-app/src/flow_service.rs`, `collection_service.rs`, `lib.rs`
 - `crates/rocket-shared/src/events.rs`
 - `src-tauri/src/tauri_event_bus.rs`, `lib.rs`, `commands/flow.rs`
-- `src/lib/tauri-api.ts`, `src/stores/pane-store.ts`, `src/components/layout/CollectionsSidebar.tsx`, a new event listener hook
+- `crates/rocket-app/src/flow_references.rs` (new), `crates/rocket-app/src/flow_request_ref_e2e_tests.rs` (new), `crates/rocket-app/src/test_doubles.rs`
+- `src/lib/tauri-api.ts`, `src/lib/flow-request-paths.ts` (new), `src/stores/pane-store.ts`, `src/components/layout/CollectionsSidebar.tsx`, `src/hooks/useFlowRequestPathEvents.ts` (new), `src/App.tsx`
+- Docs: `.claude/flow-roadmap.md`, `.claude/flow-request-refs.md` (new), `crates/rocket-flow/CLAUDE.md`, `CLAUDE.md`
 
 ## Constraints
 
 - Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`.
 - `rocket-flow` stays free of I/O. `rocket-app` holds trait objects only. Commands stay thin.
 - No `unwrap` calls in production paths. Tests use `.expect("...")`.
-- IPC DTOs and the event payload use `#[serde(rename_all = "camelCase")]`. Flow files keep their current field names.
+- The event is a `DomainEvent` variant, so it adds no rename attribute: its fields are single words and read the same in snake and camel case. Flow files keep their current field names.
+- Cargo commands are per crate, `cargo check -j4 -p <crate>` and `cargo test -j4 -p <crate> <filter>`, never a workspace command.
 - shadcn primitives and lucide icons only. No full destructure of Zustand state.
 - Existing `CollectionService` tests and callers keep passing without an updater.
 
@@ -163,6 +179,10 @@ When the delete target is a request or a folder, `CollectionsSidebar` calls `flo
 - A move to another collection reports the flows that now dangle.
 - The delete dialog for a request or folder lists the flows that use it, and Delete still works, including when the lookup fails.
 - A collection with no flows behaves exactly as before.
+- With the real file repositories, moving a request or renaming a folder leaves the flow file on disk with the new path, and that path resolves to a saved request (test `flow_request_ref_e2e`).
+- A flow file that cannot be parsed is left byte for byte as it was.
+- `flows_using` rejects an empty path, an absolute path and a `..` path with `InvalidInput`.
+- F-01 is `done` in `.claude/flow-roadmap.md`, with follow-up rows added, and the docs in section 8 exist.
 
 ## Out of scope
 
@@ -193,4 +213,7 @@ When the delete target is a request or a folder, `CollectionsSidebar` calls `flo
 - Paths are compared with a trailing `/` stripped, and a same-collection rewrite needs a non-empty `dst_path`. Decided by: call
 - Stale run cache entries and run history are left alone, since the cache fingerprint already forces a fresh run. Decided by: call
 - A request moved out of its collection uses the same warning toast as a failed rewrite, with the message `moved out of the collection`. Decided by: call
+- Argument validation for the lookup lives in `FlowService::flows_using`, not in the command, so it is tested without Tauri. Decided by: call
+- A list error during a rewrite becomes one `failed` entry named `(all flows)`. Decided by: call
+- Docs and roadmap updates are part of this work, as the project rules ask. Decided by: call
 - A single shared `Arc<FlowService>` is built early in lib.rs for the two CollectionService instances, following the proposal service precedent. Decided by: call
