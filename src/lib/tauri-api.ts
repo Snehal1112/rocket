@@ -1663,8 +1663,43 @@ export const deleteGlobalEnvironment = (name: string) =>
 
 // Process env (read-only OS vars). With a collection that is not allowed host environment
 // access on this computer, the backend returns an empty map. Without one, the full map.
-export const getProcessEnvVars = (collection?: string | null) =>
-  invoke<Record<string, string>>('get_process_env_vars', { collection: collection ?? null });
+export const getProcessEnvVars = (
+  collection?: string | null,
+  environment?: string | null,
+  globalEnvironment?: string | null,
+) =>
+  invoke<ProcessEnv>('get_process_env_vars', {
+    collection: collection ?? null,
+    environment: environment ?? null,
+    globalEnvironment: globalEnvironment ?? null,
+  });
+
+/** One variable of a flattened environment, with the environment it came from. */
+export interface ResolvedVariable {
+  key: string;
+  value: string;
+  enabled: boolean;
+  secret: boolean;
+  source: string;
+}
+
+/** An environment flattened with its `extends` chain. */
+export interface ResolvedEnvironment {
+  name: string;
+  variables: ResolvedVariable[];
+  warnings: string[];
+}
+
+/** The host environment plus the keys whose value came from a `.env` file. */
+export interface ProcessEnv {
+  vars: Record<string, string>;
+  dotEnvKeys: string[];
+}
+
+// The environment with its parents applied. A null collection reads the global store. A
+// cycle rejects with an error naming the environments.
+export const getResolvedEnvironment = (collection: string | null, name: string) =>
+  invoke<ResolvedEnvironment>('get_resolved_environment', { collection, name });
 
 // Folder variables — server walks full parent chain
 export const getFolderChainVariables = (collection: string, requestPath: string) =>

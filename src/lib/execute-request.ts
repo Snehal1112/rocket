@@ -8,7 +8,13 @@ import { findTabInTree } from '@/lib/pane-utils';
 import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
-import type { Environment, RequestOptions, Variable } from '@/lib/tauri-api';
+import type {
+  ProcessEnv,
+  RequestOptions,
+  ResolvedEnvironment,
+  ResolvedVariable,
+  Variable,
+} from '@/lib/tauri-api';
 import {
   type AssertionEntry,
   type Auth,
@@ -19,6 +25,7 @@ import {
   getCollectionSettings,
   getFolderChainVariables,
   getRequestVariables,
+  getResolvedEnvironment,
   getWorkspaceConfig,
   type Header,
   oauth2GetToken,
@@ -44,49 +51,76 @@ import type {
   ResponseState,
 } from '@/types/pane-types';
 
-// Reads the active environment's variables from the query cache. `collection`
-// picks whose environments to read; without it the env store's active
-// collection is used.
-function getActiveVariables(collection?: string): Record<string, string> {
+// Reads an environment flattened by the backend (its `extends` chain applied). A cycle
+// rejects, so the send reports it and never goes out with partial variables.
+function fetchResolved(collection: string | null, name: string): Promise<ResolvedEnvironment> {
+  return getQueryClient().fetchQuery({
+    queryKey: environmentKeys.resolved(collection, name),
+    queryFn: () => getResolvedEnvironment(collection, name),
+    // Always ask: a parent may have been edited since the last send.
+    staleTime: 0,
+  });
+}
+
+// The active collection environment, flattened. `collection` picks whose environments to
+// read; without it the env store's active collection is used.
+async function getActiveResolved(collection?: string): Promise<ResolvedVariable[]> {
   const { activeEnvId, activeCollection } = useEnvStore.getState();
   const source = collection ?? activeCollection;
-  if (!activeEnvId || !source) return {};
-  const envs =
-    getQueryClient().getQueryData<Environment[]>(environmentKeys.collection(source)) ?? [];
-  const env = envs.find((e) => e.name === activeEnvId);
-  if (!env) return {};
-  const vars: Record<string, string> = {};
-  for (const v of env.variables) {
-    if (v.enabled) vars[v.key] = v.value;
-  }
-  return vars;
+  if (!activeEnvId || !source) return [];
+  return (await fetchResolved(source, activeEnvId)).variables;
 }
 
-// Reads the active global environment's variables from the query cache.
-export function getGlobalVariables(): Record<string, string> {
+// The active global environment, flattened.
+async function getGlobalResolved(): Promise<ResolvedVariable[]> {
   const globalEnvName =
     getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
-  if (!globalEnvName) return {};
-  const env = getQueryClient().getQueryData<Environment>(environmentKeys.global(globalEnvName));
-  if (!env) return {};
-  return Object.fromEntries(env.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]));
+  if (!globalEnvName) return [];
+  return (await fetchResolved(null, globalEnvName)).variables;
 }
 
-// Fetches the process env vars of a collection (cached). The backend returns an empty map
-// for a collection that is not allowed host environment access. A failed read resolves to
-// nothing, so a send never blocks and nothing leaks.
-async function getProcessEnvVars(collection?: string | null): Promise<Record<string, string>> {
+function enabledMap(vars: ResolvedVariable[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of vars) if (v.enabled) out[v.key] = v.value;
+  return out;
+}
+
+async function getActiveVariables(collection?: string): Promise<Record<string, string>> {
+  return enabledMap(await getActiveResolved(collection));
+}
+
+// Reads the active global environment's variables, inherited ones included.
+export async function getGlobalVariables(): Promise<Record<string, string>> {
+  return enabledMap(await getGlobalResolved());
+}
+
+const NO_PROCESS_ENV: ProcessEnv = { vars: {}, dotEnvKeys: [] };
+
+// Fetches the process env of a collection. The backend returns an empty map for a collection
+// that is not allowed host environment access, and reads `.env` files of the active
+// environments only when it is. A failed read resolves to nothing, so a send never blocks
+// and nothing leaks.
+async function getProcessEnvVars(collection?: string | null): Promise<ProcessEnv> {
   const scope = collection ?? null;
+  const { activeEnvId, activeCollection } = useEnvStore.getState();
+  const environment = scope && scope === activeCollection ? activeEnvId : null;
+  const globalName =
+    getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
   try {
     return await getQueryClient().fetchQuery({
-      queryKey: environmentKeys.process(scope),
-      queryFn: () => fetchProcessEnvVars(scope),
+      queryKey: environmentKeys.process(scope, environment, globalName),
+      queryFn: () => fetchProcessEnvVars(scope, environment, globalName),
       // Always ask: a trust change or a pull may have withdrawn the access since the last send.
       staleTime: 0,
     });
   } catch {
-    return {};
+    return NO_PROCESS_ENV;
   }
+}
+
+// The values of the keys that came from a `.env` file. All of them are masked as secrets.
+function dotEnvValues(env: ProcessEnv): string[] {
+  return env.dotEnvKeys.flatMap((k) => (env.vars[k] === undefined ? [] : [env.vars[k]]));
 }
 
 // Returns the synthetic request header(s) that the Rust executor adds for a
@@ -251,27 +285,16 @@ export function toApiOptions(settings: RequestSettings | undefined): RequestOpti
   };
 }
 
-// Secret variables of the active environments, for the Console masks. An environment that
-// should be there but is not in the query cache makes the result uncertain instead of empty.
-function getSecretScope(collection?: string): { variables: Variable[]; uncertain: boolean } {
-  const variables: Variable[] = [];
-  let uncertain = false;
-  const { activeEnvId, activeCollection } = useEnvStore.getState();
-  const source = collection ?? activeCollection;
-  if (activeEnvId && source) {
-    const envs = getQueryClient().getQueryData<Environment[]>(environmentKeys.collection(source));
-    const env = envs?.find((e) => e.name === activeEnvId);
-    if (env) variables.push(...env.variables);
-    else uncertain = true;
-  }
-  const globalEnvName =
-    getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
-  if (globalEnvName) {
-    const env = getQueryClient().getQueryData<Environment>(environmentKeys.global(globalEnvName));
-    if (env) variables.push(...env.variables);
-    else uncertain = true;
-  }
-  return { variables, uncertain };
+// Secret variables of the active environments, inherited ones included, for the Console
+// masks. A failed read rejects, so the send fails instead of leaking.
+async function getSecretScope(
+  collection?: string,
+): Promise<{ variables: Variable[]; uncertain: boolean }> {
+  const variables: Variable[] = [
+    ...(await getActiveResolved(collection)),
+    ...(await getGlobalResolved()),
+  ];
+  return { variables, uncertain: false };
 }
 
 // Builds the fully-resolved request fields for a given collection +
@@ -291,9 +314,10 @@ export async function resolveRequestFieldsForPath(
   request: RequestState,
   forSend = false,
 ): Promise<ResolvedRequestFields> {
-  const envVars = getActiveVariables();
-  const globalVars = getGlobalVariables();
-  const processEnvVars = await getProcessEnvVars(collection);
+  const envVars = await getActiveVariables();
+  const globalVars = await getGlobalVariables();
+  const processEnv = await getProcessEnvVars(collection);
+  const processEnvVars = processEnv.vars;
 
   let collectionVars: CollectionVariable[] = [];
   let collectionHeaders: Header[] = [];
@@ -337,13 +361,11 @@ export async function resolveRequestFieldsForPath(
     folderVars,
     requestVars,
   });
-  const secretScope = getSecretScope(collection);
-  const secretValues = collectSecretValues([
-    secretScope.variables,
-    collectionVars,
-    folderVars,
-    requestVars,
-  ]);
+  const secretScope = await getSecretScope(collection);
+  const secretValues = collectSecretValues(
+    [secretScope.variables, collectionVars, folderVars, requestVars],
+    dotEnvValues(processEnv),
+  );
   // A name the pre-request script sets with rok.setVar stays a placeholder in the request
   // fields, so the backend fills it with the script's value (runtime wins) after the script.
   const runsScript =
@@ -656,9 +678,9 @@ export async function buildOAuth2VarContext(
     }
   }
   return buildVariableContext({
-    processEnvVars: await getProcessEnvVars(collection),
-    globalVars: getGlobalVariables(),
-    envVars: getActiveVariables(collection),
+    processEnvVars: (await getProcessEnvVars(collection)).vars,
+    globalVars: await getGlobalVariables(),
+    envVars: await getActiveVariables(collection),
     collectionVars,
     folderVars,
     requestVars,

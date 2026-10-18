@@ -10,6 +10,11 @@ const store: { envs: Record<string, Environment>; active: string | null } = {
 };
 
 vi.mock('@/lib/tauri-api', () => ({
+  getResolvedEnvironment: vi.fn(async (_c: string | null, name: string) => ({
+    name,
+    variables: (store.envs[name]?.variables ?? []).map((v) => ({ ...v, source: name })),
+    warnings: [],
+  })),
   getGlobalEnvironment: vi.fn(async (name: string) => store.envs[name] ?? null),
   getGlobalEnvironmentName: vi.fn(async () => store.active),
   listGlobalEnvironments: vi.fn(async () => Object.values(store.envs)),
@@ -19,6 +24,7 @@ vi.mock('@/lib/tauri-api', () => ({
   setGlobalEnvironment: vi.fn(async (name: string | null) => {
     store.active = name;
   }),
+  saveEnvironment: vi.fn(async () => undefined),
   deleteGlobalEnvironment: vi.fn(async (name: string) => {
     delete store.envs[name];
     if (store.active === name) store.active = null;
@@ -39,6 +45,7 @@ import {
   environmentKeys,
   reloadGlobalEnvironments,
   useDeleteGlobalEnvironment,
+  useSaveEnvironment,
   useSaveGlobalEnvironment,
   useSetGlobalEnvironment,
 } from '@/lib/queries/environment-queries';
@@ -64,12 +71,12 @@ beforeEach(() => {
 
 describe('global environment cache', () => {
   it('serves the saved value to execute-request right after a save', async () => {
-    expect(getGlobalVariables()).toEqual({ host: 'old' });
+    expect(await getGlobalVariables()).toEqual({ host: 'old' });
     const { result } = renderHook(() => useSaveGlobalEnvironment(), { wrapper });
     await act(async () => {
       await result.current.mutateAsync(env('prod', 'new'));
     });
-    expect(getGlobalVariables()).toEqual({ host: 'new' });
+    expect(await getGlobalVariables()).toEqual({ host: 'new' });
   });
 
   it('keeps an environment named "name" off the active-name key', () => {
@@ -82,7 +89,7 @@ describe('global environment cache', () => {
     await act(async () => {
       await result.current.mutateAsync('dev');
     });
-    expect(getGlobalVariables()).toEqual({ host: 'dev-value' });
+    expect(await getGlobalVariables()).toEqual({ host: 'dev-value' });
   });
 
   it('reads nothing right after the active environment is deleted', async () => {
@@ -90,7 +97,7 @@ describe('global environment cache', () => {
     await act(async () => {
       await result.current.mutateAsync('prod');
     });
-    expect(getGlobalVariables()).toEqual({});
+    expect(await getGlobalVariables()).toEqual({});
     expect(client.getQueryData(environmentKeys.global('prod'))).toBeUndefined();
   });
 
@@ -99,7 +106,7 @@ describe('global environment cache', () => {
     await act(async () => {
       await result.current.mutateAsync('dev');
     });
-    expect(getGlobalVariables()).toEqual({ host: 'old' });
+    expect(await getGlobalVariables()).toEqual({ host: 'old' });
   });
 
   it('does not fail a saved change when the refetch fails', async () => {
@@ -111,15 +118,44 @@ describe('global environment cache', () => {
       await result.current.mutateAsync(env('prod', 'new'));
     });
     expect(result.current.isError).toBe(false);
-    expect(getGlobalVariables()).toEqual({ host: 'new' });
+    expect(await getGlobalVariables()).toEqual({ host: 'new' });
     warn.mockRestore();
   });
 
   it('drops the previous workspace values when the workspace switches', async () => {
     // The other workspace has an environment with the same name and other values.
     store.envs = { prod: env('prod', 'other-workspace') };
-    expect(getGlobalVariables()).toEqual({ host: 'old' });
+    // The send path always reads the backend, so it never serves the old workspace value.
     await reloadGlobalEnvironments(client);
-    expect(getGlobalVariables()).toEqual({ host: 'other-workspace' });
+    expect(await getGlobalVariables()).toEqual({ host: 'other-workspace' });
+  });
+
+  it('process_env_query_key_includes_the_active_environment_names', () => {
+    const a = environmentKeys.process('demo', 'dev', null);
+    const b = environmentKeys.process('demo', 'prod', null);
+    const c = environmentKeys.process('demo', 'dev', 'g1');
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(c));
+    expect(a.slice(0, 2)).toEqual(environmentKeys.processAll);
+  });
+
+  it('saving_an_environment_invalidates_the_resolved_and_process_queries', async () => {
+    client.setQueryData(environmentKeys.resolved('demo', 'child'), { name: 'child' });
+    client.setQueryData(environmentKeys.process('demo', 'child', null), { vars: {} });
+    const { result } = renderHook(() => useSaveEnvironment('demo'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync(env('base', 'v'));
+    });
+    expect(client.getQueryState(environmentKeys.resolved('demo', 'child'))?.isInvalidated).toBe(
+      true,
+    );
+    expect(
+      client.getQueryState(environmentKeys.process('demo', 'child', null))?.isInvalidated,
+    ).toBe(true);
+  });
+
+  it('getGlobalVariables_reads_the_resolved_global_environment', async () => {
+    store.envs = { prod: env('prod', 'resolved-value') };
+    expect(await getGlobalVariables()).toEqual({ host: 'resolved-value' });
   });
 });
