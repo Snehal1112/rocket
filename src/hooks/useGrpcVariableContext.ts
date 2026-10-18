@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   useEnvironments,
-  useGlobalEnvironment,
   useGlobalEnvironmentName,
   useProcessEnvVars,
+  useResolvedEnvironment,
 } from '@/lib/queries/environment-queries';
 import {
   type CollectionVariable,
   getCollectionSettings,
   getFolderVariables,
   getRequestVariables,
+  type ResolvedVariable,
 } from '@/lib/tauri-api';
 import { buildScopedContext, secretKeysOf, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
+
+function enabledMap(vars: ResolvedVariable[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of vars ?? []) if (v.enabled) out[v.key] = v.value;
+  return out;
+}
 
 export interface GrpcVariableScope {
   /** Scope-aware variables for the editors, so `{{name}}` highlights like it does for HTTP. */
@@ -33,7 +40,9 @@ export function useGrpcVariableContext(
   const activeCollection = useEnvStore((s) => s.activeCollection);
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
-  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  // Flattened by the backend, so a variable inherited through `extends` is included.
+  const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, activeEnvId);
+  const { data: resolvedGlobal } = useResolvedEnvironment(null, globalEnvName);
   const { data: processEnvVars = {} } = useProcessEnvVars(source?.collection);
 
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
@@ -74,20 +83,13 @@ export function useGrpcVariableContext(
 
   const variableContext = useMemo(() => {
     const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
-    const envVars: Record<string, string> = {};
-    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) envVars[v.key] = v.value;
-    const globalVars: Record<string, string> = globalEnv
-      ? Object.fromEntries(
-          globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
-        )
-      : {};
     return buildScopedContext({
-      envVars,
-      envSecretKeys: secretKeysOf(activeEnv?.variables),
+      envVars: enabledMap(resolvedEnv?.variables),
+      envSecretKeys: secretKeysOf(resolvedEnv?.variables),
       envLabel: activeEnvId ?? undefined,
       externalSecrets: activeEnv?.externalSecrets,
-      globalVars,
-      globalSecretKeys: secretKeysOf(globalEnv?.variables),
+      globalVars: enabledMap(resolvedGlobal?.variables),
+      globalSecretKeys: secretKeysOf(resolvedGlobal?.variables),
       processEnvVars,
       collectionVars,
       folderVars,
@@ -96,7 +98,8 @@ export function useGrpcVariableContext(
   }, [
     activeEnvId,
     environments,
-    globalEnv,
+    resolvedEnv,
+    resolvedGlobal,
     processEnvVars,
     collectionVars,
     folderVars,

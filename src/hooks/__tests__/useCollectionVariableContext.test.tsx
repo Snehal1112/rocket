@@ -7,10 +7,10 @@ const api = vi.hoisted(() => ({
 }));
 const queries = vi.hoisted(() => ({
   environments: [] as unknown[],
-  globalEnv: null as unknown,
   globalName: null as string | null,
   processEnv: {} as Record<string, string>,
   seenCollection: null as string | null,
+  resolved: {} as Record<string, unknown>,
 }));
 vi.mock('@/lib/tauri-api', () => api);
 vi.mock('@/lib/queries/environment-queries', () => ({
@@ -19,7 +19,9 @@ vi.mock('@/lib/queries/environment-queries', () => ({
     return { data: queries.environments };
   },
   useGlobalEnvironmentName: () => ({ data: queries.globalName }),
-  useGlobalEnvironment: () => ({ data: queries.globalEnv }),
+  useResolvedEnvironment: (collection: string | null, name: string | null) => ({
+    data: name ? queries.resolved[`${collection}/${name}`] : undefined,
+  }),
   useProcessEnvVars: () => ({ data: queries.processEnv }),
 }));
 
@@ -52,9 +54,28 @@ describe('useCollectionVariableContext', () => {
       },
     ];
     queries.globalName = 'global';
-    queries.globalEnv = {
-      name: 'global',
-      variables: [{ key: 'tenant', value: 'acme', enabled: true, secret: false }],
+    const rv = (key: string, value: string, secret = false, enabled = true, source = 'dev') => ({
+      key,
+      value,
+      enabled,
+      secret,
+      source,
+    });
+    queries.resolved = {
+      'api/dev': {
+        name: 'dev',
+        warnings: [],
+        variables: [
+          rv('clientId', 'dev-client'),
+          rv('clientSecret', 'real-secret', true),
+          rv('off', 'x', false, false),
+        ],
+      },
+      'null/global': {
+        name: 'global',
+        warnings: [],
+        variables: [rv('tenant', 'acme', false, true, 'global')],
+      },
     };
     queries.processEnv = { HOME: '/home/u' };
     useEnvStore.setState({ activeEnvId: 'dev', activeCollection: 'other' });
@@ -72,6 +93,28 @@ describe('useCollectionVariableContext', () => {
     );
     expect(ctx.has('off')).toBe(false);
     expect(ctx.get('vault.k')?.source).toBe('vault');
+  });
+
+  it('includes_inherited_variables_and_their_secret_keys', async () => {
+    queries.resolved['api/dev'] = {
+      name: 'dev',
+      warnings: [],
+      variables: [
+        { key: 'baseVar', value: 'from-base', enabled: true, secret: false, source: 'base' },
+        { key: 'baseToken', value: 'tok-123456', enabled: true, secret: true, source: 'base' },
+      ],
+    };
+    const { result } = renderHook(() => useCollectionVariableContext('api'));
+    await waitFor(() => expect(result.current.variableContext.get('tokenUrl')).toBeDefined());
+    expect(result.current.envVars).toEqual({ baseVar: 'from-base', baseToken: 'tok-123456' });
+    expect(result.current.variableContext.get('baseVar')?.value).toBe('from-base');
+    expect(result.current.variableContext.get('baseToken')?.secret).toBe(true);
+  });
+
+  it('an_environment_without_extends_resolves_exactly_as_before', async () => {
+    const { result } = renderHook(() => useCollectionVariableContext('api'));
+    await waitFor(() => expect(result.current.collectionVars).toHaveLength(1));
+    expect(Object.keys(result.current.envVars).sort()).toEqual(['clientId', 'clientSecret']);
   });
 
   it('looks environments up in the collection argument, not the env store collection', () => {

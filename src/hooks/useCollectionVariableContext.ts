@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   useEnvironments,
-  useGlobalEnvironment,
   useGlobalEnvironmentName,
   useProcessEnvVars,
+  useResolvedEnvironment,
 } from '@/lib/queries/environment-queries';
-import { type CollectionVariable, type Environment, getCollectionSettings } from '@/lib/tauri-api';
+import {
+  type CollectionVariable,
+  type Environment,
+  getCollectionSettings,
+  type ResolvedVariable,
+} from '@/lib/tauri-api';
 import { buildScopedContext, secretKeysOf, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 
@@ -13,6 +18,12 @@ import { useEnvStore } from '@/stores/env-store';
 // not rebuilt on every render.
 const NO_ENVIRONMENTS: Environment[] = [];
 const NO_PROCESS_ENV: Record<string, string> = {};
+
+function enabledMap(vars: ResolvedVariable[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of vars ?? []) if (v.enabled) out[v.key] = v.value;
+  return out;
+}
 
 /** The variable scope of one collection, as the flow editors need it. */
 export interface CollectionVariableScope {
@@ -40,7 +51,9 @@ export function useCollectionVariableContext(collection: string): CollectionVari
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: environments = NO_ENVIRONMENTS } = useEnvironments(collection);
-  const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
+  // Flattened by the backend, so a variable inherited through `extends` is included.
+  const { data: resolvedEnv } = useResolvedEnvironment(collection, activeEnvId);
+  const { data: resolvedGlobal } = useResolvedEnvironment(null, globalEnvName);
   const { data: processEnvVars = NO_PROCESS_ENV } = useProcessEnvVars(collection);
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
 
@@ -58,35 +71,35 @@ export function useCollectionVariableContext(collection: string): CollectionVari
     };
   }, [collection]);
 
+  // The raw environment only supplies the external secrets, which are not inherited.
   const activeEnv = activeEnvId ? environments.find((e) => e.name === activeEnvId) : undefined;
-  const envVars = useMemo(() => {
-    const vars: Record<string, string> = {};
-    if (activeEnv) for (const v of activeEnv.variables) if (v.enabled) vars[v.key] = v.value;
-    return vars;
-  }, [activeEnv]);
-  const globalVars = useMemo<Record<string, string>>(
-    () =>
-      globalEnv
-        ? Object.fromEntries(
-            globalEnv.variables.filter((v) => v.enabled).map((v) => [v.key, v.value]),
-          )
-        : {},
-    [globalEnv],
-  );
+  const envVariables = resolvedEnv?.variables;
+  const globalVariables = resolvedGlobal?.variables;
+  const envVars = useMemo(() => enabledMap(envVariables), [envVariables]);
+  const globalVars = useMemo(() => enabledMap(globalVariables), [globalVariables]);
 
   const variableContext = useMemo(
     () =>
       buildScopedContext({
         envVars,
-        envSecretKeys: secretKeysOf(activeEnv?.variables),
+        envSecretKeys: secretKeysOf(envVariables),
         envLabel: activeEnvId ?? undefined,
         externalSecrets: activeEnv?.externalSecrets,
         globalVars,
-        globalSecretKeys: secretKeysOf(globalEnv?.variables),
+        globalSecretKeys: secretKeysOf(globalVariables),
         processEnvVars,
         collectionVars,
       }),
-    [activeEnvId, activeEnv, envVars, globalEnv, globalVars, processEnvVars, collectionVars],
+    [
+      activeEnvId,
+      activeEnv,
+      envVars,
+      envVariables,
+      globalVars,
+      globalVariables,
+      processEnvVars,
+      collectionVars,
+    ],
   );
 
   return {
