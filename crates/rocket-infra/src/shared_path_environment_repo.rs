@@ -67,6 +67,15 @@ impl EnvironmentRepository for SharedPathEnvironmentRepo {
     fn pinned(&self) -> Option<Box<dyn EnvironmentRepository>> {
         Some(Box::new(self.current()))
     }
+
+    fn dot_env_base(&self) -> Option<PathBuf> {
+        Some(
+            self.active_workspace_path
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -79,6 +88,16 @@ mod tests {
         let mut env = Environment::new(name);
         env.set_variable(Variable::new(key, value));
         env
+    }
+
+    #[test]
+    fn the_global_repository_reports_the_workspace_folder_as_its_base() {
+        let a = tempfile::tempdir().expect("tempdir");
+        let repo = SharedPathEnvironmentRepo::with_secret_store(
+            Arc::new(Mutex::new(a.path().to_path_buf())),
+            Arc::new(NullSecretStore),
+        );
+        assert_eq!(repo.dot_env_base(), Some(a.path().to_path_buf()));
     }
 
     #[test]

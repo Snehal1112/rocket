@@ -60,6 +60,8 @@ agent-client-protocol = "2.2"
 async-process = "2"
 futures-lite = "2"
 mime_guess = "2"
+# Parses `.env` text only. Its loading functions are never called.
+dotenvy = "0.15.7"
 
 [[bin]]
 name = "test_acp_agent"

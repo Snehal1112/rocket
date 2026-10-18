@@ -39,12 +39,12 @@ mod folder_chain_e2e_tests;
 
 #[cfg(test)]
 mod folder_var_script_tests;
-pub(crate) mod script_chain;
 pub(crate) mod run_request;
+pub(crate) mod script_chain;
 pub(crate) mod script_host;
-mod send_pins;
 #[cfg(test)]
 mod script_host_tests;
+mod send_pins;
 use self::script_chain::{
     folder_labels, folder_mentions, script_mentions, ChainedScript, PhaseScripts,
 };
@@ -155,6 +155,10 @@ impl<'a> EnvironmentRepository for RefEnvRepo<'a> {
 
     fn pinned(&self) -> Option<Box<dyn EnvironmentRepository>> {
         self.0.pinned()
+    }
+
+    fn dot_env_base(&self) -> Option<std::path::PathBuf> {
+        self.0.dot_env_base()
     }
 }
 
@@ -399,6 +403,14 @@ impl PhaseState {
     }
 }
 
+/// The `process.env` values of one send. `dot_env_keys` names the keys whose value came
+/// from a `.env` file, so they can be masked.
+#[derive(Debug, Clone, Default)]
+pub struct ProcessEnv {
+    pub vars: std::collections::HashMap<String, String>,
+    pub dot_env_keys: Vec<String>,
+}
+
 pub struct RequestExecutionService {
     /// Correct only for the workspace-level GLOBAL environment (`global_env_name`).
     /// REGULAR (per-collection) environment lookups must go through
@@ -417,6 +429,8 @@ pub struct RequestExecutionService {
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
     script_engine: Option<Box<dyn ScriptEngine>>,
+    /// Reads `.env` files for `process_env_for`. `None` reads no file.
+    dot_env_loader: Option<Box<dyn rocket_environment::DotEnvLoader>>,
     /// App-level RocketVault connection registry — `resolve_external_secrets`
     /// looks up the `SecretManagerConnection` named by each binding's
     /// `connection_id`. No I/O in this crate; concrete impl lives in
@@ -462,6 +476,7 @@ impl RequestExecutionService {
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
             script_engine: None,
+            dot_env_loader: None,
             secret_manager_repo,
             vault_connection_secret_store,
             vault_fetcher,
@@ -492,6 +507,7 @@ impl RequestExecutionService {
             events,
             audit,
             script_engine: None,
+            dot_env_loader: None,
             secret_manager_repo,
             vault_connection_secret_store,
             vault_fetcher,
@@ -546,6 +562,15 @@ impl RequestExecutionService {
             Some(repo) => repo,
             None => self.global_env_repo(),
         }
+    }
+
+    /// Attach the loader that reads `dotEnvFilePath` files. Without one no `.env` file is read.
+    pub fn with_dot_env_loader(
+        mut self,
+        loader: Box<dyn rocket_environment::DotEnvLoader>,
+    ) -> Self {
+        self.dot_env_loader = Some(loader);
+        self
     }
 
     /// Attach a script engine. Call this after construction in the DI layer.
@@ -765,7 +790,12 @@ impl RequestExecutionService {
             let repo = self.global_env_repo();
             if let Some(global_env) = read_scope(strict, repo.get(name))? {
                 let flat = flatten_scope(&global_env, repo.as_ref())?;
-                for var in flat.variables.iter().map(|f| &f.variable).filter(|v| v.enabled) {
+                for var in flat
+                    .variables
+                    .iter()
+                    .map(|f| &f.variable)
+                    .filter(|v| v.enabled)
+                {
                     ctx.global_env.insert(var.key.clone(), var.value.clone());
                     if var.secret {
                         ctx.secret_keys.insert(var.key.clone());
@@ -786,8 +816,8 @@ impl RequestExecutionService {
         };
 
         if let Some(col) = collection {
-            let settings =
-                read_scope(strict, self.send_collection_repo().get_settings(col))?.unwrap_or_default();
+            let settings = read_scope(strict, self.send_collection_repo().get_settings(col))?
+                .unwrap_or_default();
             for cv in settings.variables.iter().filter(|v| v.enabled) {
                 let val = effective_val(cv);
                 ctx.collection.insert(cv.key.clone(), val.clone());
@@ -804,7 +834,12 @@ impl RequestExecutionService {
             let repo = self.regular_env_repo(collection);
             if let Some(env) = read_scope(strict, repo.get(name))? {
                 let flat = flatten_scope(&env, repo.as_ref())?;
-                for var in flat.variables.iter().map(|f| &f.variable).filter(|v| v.enabled) {
+                for var in flat
+                    .variables
+                    .iter()
+                    .map(|f| &f.variable)
+                    .filter(|v| v.enabled)
+                {
                     ctx.env.insert(var.key.clone(), var.value.clone());
                     if var.secret {
                         ctx.secret_keys.insert(var.key.clone());
@@ -818,9 +853,11 @@ impl RequestExecutionService {
 
         if let (Some(col), Some(path)) = (collection, request_path) {
             let folder_read = if strict {
-                self.send_collection_repo().get_folder_chain_variables_strict(col, path)
+                self.send_collection_repo()
+                    .get_folder_chain_variables_strict(col, path)
             } else {
-                self.send_collection_repo().get_folder_chain_variables(col, path)
+                self.send_collection_repo()
+                    .get_folder_chain_variables(col, path)
             };
             if let Some(folder_vars) = read_scope(strict, folder_read)? {
                 for cv in folder_vars.iter().filter(|v| v.enabled) {
@@ -837,9 +874,10 @@ impl RequestExecutionService {
         }
 
         if let (Some(col), Some(path)) = (collection, request_path) {
-            if let Some(request_vars) =
-                read_scope(strict, self.send_collection_repo().get_request_variables(col, path))?
-            {
+            if let Some(request_vars) = read_scope(
+                strict,
+                self.send_collection_repo().get_request_variables(col, path),
+            )? {
                 for cv in request_vars.iter().filter(|v| v.enabled) {
                     let val = effective_val(cv);
                     ctx.request.insert(cv.key.clone(), val.clone());
@@ -996,6 +1034,62 @@ impl RequestExecutionService {
         }
     }
 
+    /// The `process.env` values for a send: `.env` files layered global first, then the
+    /// collection environment, with the real OS environment on top. A denied gate returns
+    /// nothing and reads no file.
+    pub fn process_env_for(
+        &self,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        global_env_name: Option<&str>,
+    ) -> ProcessEnv {
+        if !self.process_env_allowed(collection) {
+            return ProcessEnv::default();
+        }
+        let mut file_values: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Some(loader) = self.dot_env_loader.as_deref() {
+            let mut layers: Vec<(
+                Box<dyn EnvironmentRepository + '_>,
+                &str,
+                Option<std::path::PathBuf>,
+            )> = Vec::new();
+            if let Some(name) = global_env_name {
+                let repo = self.global_env_repo();
+                let base = repo.dot_env_base();
+                layers.push((repo, name, base));
+            }
+            if let Some(name) = environment_name {
+                let repo = self.regular_env_repo(collection);
+                let base = match collection {
+                    Some(col) => self.pinned_collection_dir(col),
+                    None => repo.dot_env_base(),
+                };
+                layers.push((repo, name, base));
+            }
+            for (repo, name, base) in layers {
+                let Ok(env) = repo.get(name) else { continue };
+                let lookup = |n: &str| repo.get(n).ok();
+                let collected =
+                    rocket_environment::collect_dot_env(&env, &lookup, loader, base.as_deref());
+                for warning in &collected.warnings {
+                    tracing::warn!("{warning}");
+                }
+                file_values.extend(collected.values);
+            }
+        }
+        let os: std::collections::HashMap<String, String> = std::env::vars().collect();
+        let mut dot_env_keys: Vec<String> = file_values
+            .keys()
+            .filter(|k| !os.contains_key(*k))
+            .cloned()
+            .collect();
+        dot_env_keys.sort();
+        let mut vars = file_values;
+        vars.extend(os);
+        ProcessEnv { vars, dot_env_keys }
+    }
+
     /// Same as `build_variable_context`, plus the OS environment as `process.env.NAME`
     /// (lowest priority) when `process_env_allowed`. HTTP requests get these from the
     /// frontend, so the protocols that resolve in the backend (WebSocket, GraphQL
@@ -1016,9 +1110,9 @@ impl RequestExecutionService {
             request_path,
             external_secrets,
         );
-        if self.process_env_allowed(collection) {
-            scopes.process_env = std::env::vars().collect();
-        }
+        scopes.process_env = self
+            .process_env_for(collection, environment_name, global_env_name)
+            .vars;
         scopes.flatten_with_process_env()
     }
 
@@ -1032,7 +1126,9 @@ impl RequestExecutionService {
     ) -> DomainResult<Vec<FolderSettings>> {
         match (collection, request_path) {
             (Some(_), Some(path)) if path.starts_with(FLOW_INLINE_PATH_PREFIX) => Ok(Vec::new()),
-            (Some(col), Some(path)) => self.send_collection_repo().get_folder_chain_settings(col, path),
+            (Some(col), Some(path)) => self
+                .send_collection_repo()
+                .get_folder_chain_settings(col, path),
             _ => Ok(Vec::new()),
         }
     }
@@ -1048,7 +1144,10 @@ impl RequestExecutionService {
     ) -> (Auth, Vec<Header>) {
         match collection {
             Some(col) => {
-                let settings = self.send_collection_repo().get_settings(col).unwrap_or_default();
+                let settings = self
+                    .send_collection_repo()
+                    .get_settings(col)
+                    .unwrap_or_default();
                 apply_inherited_defaults(request_auth, request_headers, settings, folders)
             }
             None => (request_auth, request_headers.to_vec()),
@@ -1373,7 +1472,8 @@ impl RequestExecutionService {
     ) -> DomainResult<()> {
         let mut settings = self.send_collection_repo().get_settings(collection)?;
         upsert_variable(&mut settings.variables, key, value);
-        self.send_collection_repo().save_settings(collection, &settings)?;
+        self.send_collection_repo()
+            .save_settings(collection, &settings)?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
             key: key.to_string(),
@@ -1393,7 +1493,8 @@ impl RequestExecutionService {
         if !remove_variable(&mut settings.variables, key) {
             return Ok(());
         }
-        self.send_collection_repo().save_settings(collection, &settings)?;
+        self.send_collection_repo()
+            .save_settings(collection, &settings)?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
             key: key.to_string(),
@@ -1732,7 +1833,10 @@ impl RequestExecutionService {
                             .parent()
                             .and_then(|p| p.to_str())
                             .unwrap_or("");
-                        match self.send_collection_repo().get_folder_variables(col, folder_path) {
+                        match self
+                            .send_collection_repo()
+                            .get_folder_variables(col, folder_path)
+                        {
                             Ok(mut vars) => {
                                 upsert_variable(&mut vars, var_name, &str_val);
                                 if let Err(e) = self.send_collection_repo().save_folder_variables(
@@ -1754,8 +1858,9 @@ impl RequestExecutionService {
                         match self.send_collection_repo().get_request_variables(col, path) {
                             Ok(mut vars) => {
                                 upsert_variable(&mut vars, var_name, &str_val);
-                                if let Err(e) =
-                                    self.send_collection_repo().save_request_variables(col, path, vars)
+                                if let Err(e) = self
+                                    .send_collection_repo()
+                                    .save_request_variables(col, path, vars)
                                 {
                                     tracing::warn!(error = %e, variable = %var_name, "failed to persist request var from action");
                                 }
@@ -1867,7 +1972,10 @@ impl RequestExecutionService {
 
         let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {
             Some(col) => {
-                let settings = self.send_collection_repo().get_settings(col).unwrap_or_default();
+                let settings = self
+                    .send_collection_repo()
+                    .get_settings(col)
+                    .unwrap_or_default();
                 // The collection file only requests a mode. The trust store decides.
                 let effective = self.effective_capabilities(col);
                 let mode = match effective.sandbox_mode {
@@ -2400,7 +2508,14 @@ impl RequestExecutionService {
             ));
             let host = self.script_host(input, state);
             let result = self
-                .run_script_phase(script, ctx, &host, &request_name, "tests", &mut state.console)
+                .run_script_phase(
+                    script,
+                    ctx,
+                    &host,
+                    &request_name,
+                    "tests",
+                    &mut state.console,
+                )
                 .await;
             self.apply_script_side_effects(
                 &result,
@@ -2563,7 +2678,10 @@ impl RequestExecutionService {
         self.with_send_pins(self.execute_unpinned(input)).await
     }
 
-    async fn execute_unpinned(&self, input: ExecuteRequestInput) -> DomainResult<ExecuteRequestOutput> {
+    async fn execute_unpinned(
+        &self,
+        input: ExecuteRequestInput,
+    ) -> DomainResult<ExecuteRequestOutput> {
         // A configured external secret that fails to resolve live is a hard
         // stop, not a silent empty-string substitution (spec §2/§4.6) — but
         // only when this send refers to it. A binding the request never
@@ -2658,7 +2776,10 @@ impl RequestExecutionService {
         external_secrets: &std::collections::HashMap<String, String>,
         chain: Vec<String>,
         runtime: &std::collections::HashMap<String, String>,
-    ) -> DomainResult<(ExecuteRequestOutput, std::collections::HashMap<String, String>)> {
+    ) -> DomainResult<(
+        ExecuteRequestOutput,
+        std::collections::HashMap<String, String>,
+    )> {
         let mut state = self.begin_phases(&input, external_secrets)?;
         state.run_chain = chain;
         state.seed_runtime(runtime);
@@ -3407,7 +3528,10 @@ mod tests {
         fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
             Ok(())
         }
-        fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+        fn collection_identity(
+            &self,
+            n: &str,
+        ) -> DomainResult<rocket_collection::CollectionIdentity> {
             Ok(crate::test_doubles::test_identity(n))
         }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
@@ -6435,7 +6559,10 @@ mod tests {
         fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
             Ok(())
         }
-        fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+        fn collection_identity(
+            &self,
+            n: &str,
+        ) -> DomainResult<rocket_collection::CollectionIdentity> {
             Ok(crate::test_doubles::test_identity(n))
         }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
@@ -6540,7 +6667,10 @@ mod tests {
         fn reorder_items(&self, a: &str, b: &str, c: &[String]) -> DomainResult<()> {
             self.0.reorder_items(a, b, c)
         }
-        fn collection_identity(&self, n: &str) -> DomainResult<rocket_collection::CollectionIdentity> {
+        fn collection_identity(
+            &self,
+            n: &str,
+        ) -> DomainResult<rocket_collection::CollectionIdentity> {
             self.0.collection_identity(n)
         }
         fn get_settings(&self, n: &str) -> DomainResult<CollectionSettings> {
@@ -6681,7 +6811,9 @@ mod tests {
     async fn user_scripts_receive_the_collection_name() {
         let capture = CapturingScriptEngine::new();
         let svc = build_svc_with_script(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
             Box::new(StubCollectionRepo::empty()),
             Box::new(SharedCapture(Arc::clone(&capture))),
         );
@@ -6712,7 +6844,9 @@ mod tests {
     async fn developer_scripts_receive_the_host_process_env() {
         let capture = CapturingScriptEngine::new();
         let svc = build_svc_with_script(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
             Box::new(StubCollectionRepo::with_settings(developer_settings())),
             Box::new(SharedCapture(Arc::clone(&capture))),
         );
@@ -6736,8 +6870,12 @@ mod tests {
     async fn requested_developer_mode_without_a_grant_runs_safe_with_no_host_env() {
         let capture = CapturingScriptEngine::new();
         let svc = build_svc_with_script(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
-            Box::new(StubCollectionRepo::with_settings(developer_settings()).with_root("/work/my-api")),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
+            Box::new(
+                StubCollectionRepo::with_settings(developer_settings()).with_root("/work/my-api"),
+            ),
             Box::new(SharedCapture(Arc::clone(&capture))),
         )
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
@@ -6773,7 +6911,9 @@ mod tests {
         let mut settings = developer_settings();
         settings.script_context_roots.push("../new".into());
         let svc = build_svc_with_script(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
             Box::new(StubCollectionRepo::with_settings(settings).with_root("/work/my-api")),
             Box::new(SharedCapture(Arc::clone(&capture))),
         )
@@ -6790,14 +6930,19 @@ mod tests {
             rocket_scripting::context::SandboxMode::Developer
         );
         let scope = contexts[0].file_scope.clone().expect("scope");
-        assert_eq!(scope.additional_roots, vec![std::path::PathBuf::from("../shared")]);
+        assert_eq!(
+            scope.additional_roots,
+            vec![std::path::PathBuf::from("../shared")]
+        );
     }
 
     #[tokio::test]
     async fn a_service_without_a_trust_store_denies_developer_mode() {
         let capture = CapturingScriptEngine::new();
         let svc = RequestExecutionService::new(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
             Arc::new(MockExecutor::new(200)),
             Box::new(MockHistoryRepo::new()),
             Box::new(StubCollectionRepo::with_settings(developer_settings())),
@@ -6817,6 +6962,248 @@ mod tests {
         assert_eq!(
             capture.contexts()[0].sandbox_mode,
             rocket_scripting::context::SandboxMode::Safe
+        );
+    }
+
+    struct FakeDotEnv {
+        files: std::collections::HashMap<String, Vec<(String, String)>>,
+        calls: Mutex<Vec<(String, Option<std::path::PathBuf>)>>,
+    }
+
+    impl FakeDotEnv {
+        fn new(files: &[(&str, &[(&str, &str)])]) -> Arc<Self> {
+            Arc::new(Self {
+                files: files
+                    .iter()
+                    .map(|(p, kv)| {
+                        (
+                            p.to_string(),
+                            kv.iter()
+                                .map(|(k, v)| (k.to_string(), v.to_string()))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+                calls: Mutex::new(Vec::new()),
+            })
+        }
+        fn call_count(&self) -> usize {
+            self.calls.lock().expect("calls").len()
+        }
+    }
+
+    struct SharedDotEnv(Arc<FakeDotEnv>);
+
+    impl rocket_environment::DotEnvLoader for SharedDotEnv {
+        fn load(
+            &self,
+            raw_path: &str,
+            base: Option<&std::path::Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            self.0
+                .calls
+                .lock()
+                .expect("calls")
+                .push((raw_path.to_string(), base.map(|b| b.to_path_buf())));
+            self.0
+                .files
+                .get(raw_path)
+                .cloned()
+                .ok_or_else(|| format!("{raw_path} missing"))
+        }
+    }
+
+    /// A global environment repo that knows its own `.env` base folder.
+    struct BaseEnvRepo {
+        inner: MockEnvRepo,
+        base: std::path::PathBuf,
+    }
+
+    impl rocket_environment::EnvironmentRepository for BaseEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            self.inner.list()
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.inner.get(name)
+        }
+        fn save(&self, e: &Environment) -> DomainResult<()> {
+            self.inner.save(e)
+        }
+        fn delete(&self, name: &str) -> DomainResult<()> {
+            self.inner.delete(name)
+        }
+        fn dot_env_base(&self) -> Option<std::path::PathBuf> {
+            Some(self.base.clone())
+        }
+    }
+
+    fn env_with_dot_env(name: &str, path: &str) -> Environment {
+        let mut e = Environment::new(name);
+        e.dot_env_file_path = Some(path.into());
+        e
+    }
+
+    fn dot_env_svc(
+        global: Box<dyn rocket_environment::EnvironmentRepository>,
+        collection_env: Option<Environment>,
+        loader: Option<&Arc<FakeDotEnv>>,
+        allow: bool,
+    ) -> RequestExecutionService {
+        let mut svc = RequestExecutionService::new(
+            global,
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(if allow {
+            crate::test_doubles::InMemoryTrustStore::allow_all()
+        } else {
+            crate::test_doubles::InMemoryTrustStore::new()
+        });
+        if let Some(env) = collection_env {
+            svc = svc.with_collection_env_repo_factory(Box::new(DirEnvRepoFactory {
+                env,
+                dir: std::path::PathBuf::from("/work"),
+            }));
+        }
+        if let Some(l) = loader {
+            svc = svc.with_dot_env_loader(Box::new(SharedDotEnv(Arc::clone(l))));
+        }
+        svc
+    }
+
+    #[test]
+    fn dot_env_values_appear_when_the_gate_allows() {
+        let fake = FakeDotEnv::new(&[(".env", &[("ROCKET_DOT_A", "1")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), None);
+        assert_eq!(pe.vars.get("ROCKET_DOT_A").map(String::as_str), Some("1"));
+        let calls = fake.calls.lock().expect("calls");
+        assert_eq!(calls[0].1, Some(std::path::PathBuf::from("/work/api")));
+    }
+
+    #[test]
+    fn the_os_environment_wins_over_a_dot_env_value() {
+        let os = std::env::var("PATH").expect("PATH should be set");
+        let fake = FakeDotEnv::new(&[(".env", &[("PATH", "from-file")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), None);
+        assert_eq!(pe.vars.get("PATH"), Some(&os));
+        assert!(!pe.dot_env_keys.contains(&"PATH".to_string()));
+    }
+
+    #[test]
+    fn a_denied_gate_returns_empty_vars_and_never_calls_the_loader() {
+        let fake = FakeDotEnv::new(&[(".env", &[("ROCKET_DOT_A", "1")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            false,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), None);
+        assert!(pe.vars.is_empty());
+        assert!(pe.dot_env_keys.is_empty());
+        assert_eq!(fake.call_count(), 0);
+    }
+
+    #[test]
+    fn the_collection_environment_file_wins_over_the_global_environment_file() {
+        let fake = FakeDotEnv::new(&[
+            (
+                "g.env",
+                &[("ROCKET_DOT_B", "global"), ("ROCKET_DOT_G", "g")],
+            ),
+            ("c.env", &[("ROCKET_DOT_B", "collection")]),
+        ]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::with_env(env_with_dot_env("glob", "g.env"))),
+            Some(env_with_dot_env("dev", "c.env")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), Some("glob"));
+        assert_eq!(
+            pe.vars.get("ROCKET_DOT_B").map(String::as_str),
+            Some("collection")
+        );
+        assert_eq!(pe.vars.get("ROCKET_DOT_G").map(String::as_str), Some("g"));
+    }
+
+    #[test]
+    fn dot_env_keys_lists_only_keys_whose_value_came_from_a_file() {
+        let fake = FakeDotEnv::new(&[(".env", &[("ROCKET_DOT_A", "1"), ("PATH", "x")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), None);
+        assert_eq!(pe.dot_env_keys, vec!["ROCKET_DOT_A".to_string()]);
+    }
+
+    #[test]
+    fn a_global_environment_relative_path_uses_the_repository_base() {
+        let fake = FakeDotEnv::new(&[("g.env", &[("ROCKET_DOT_G", "g")])]);
+        let global = BaseEnvRepo {
+            inner: MockEnvRepo::with_env(env_with_dot_env("glob", "g.env")),
+            base: std::path::PathBuf::from("/ws"),
+        };
+        let svc = dot_env_svc(Box::new(global), None, Some(&fake), true);
+        let pe = svc.process_env_for(None, None, Some("glob"));
+        assert_eq!(pe.vars.get("ROCKET_DOT_G").map(String::as_str), Some("g"));
+        let calls = fake.calls.lock().expect("calls");
+        assert_eq!(calls[0].1, Some(std::path::PathBuf::from("/ws")));
+    }
+
+    #[test]
+    fn without_a_loader_only_the_os_environment_is_returned() {
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            None,
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), None);
+        assert!(pe.dot_env_keys.is_empty());
+        assert_eq!(pe.vars.get("PATH"), std::env::var("PATH").ok().as_ref());
+    }
+
+    #[test]
+    fn build_variable_context_with_process_env_exposes_dot_env_values_as_process_env_keys() {
+        let fake = FakeDotEnv::new(&[(".env", &[("ROCKET_DOT_A", "1")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            true,
+        );
+        let ctx = svc.build_variable_context_with_process_env(
+            None,
+            Some("api"),
+            Some("dev"),
+            None,
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(
+            ctx.get("process.env.ROCKET_DOT_A").map(String::as_str),
+            Some("1")
         );
     }
 
@@ -6848,7 +7235,9 @@ mod tests {
             ..Default::default()
         });
         let svc = build_svc_with_script(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
             Box::new(StubCollectionRepo::empty()),
             Box::new(SharedCapture(Arc::clone(&capture))),
         );
@@ -6910,7 +7299,9 @@ mod tests {
     async fn tests_script_receives_precomputed_assertion_outcomes() {
         let capture = CapturingScriptEngine::new();
         let svc = build_svc_with_script(
-            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new("dev")))),
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
             Box::new(StubCollectionRepo::empty()),
             Box::new(SharedCapture(Arc::clone(&capture))),
         );
@@ -7463,7 +7854,11 @@ mod tests {
                 .map(str::to_owned)
         };
         assert_eq!(read(b.path()).as_deref(), Some("new-key"));
-        assert_eq!(read(a.path()).as_deref(), Some("a-old"), "a must be untouched");
+        assert_eq!(
+            read(a.path()).as_deref(),
+            Some("a-old"),
+            "a must be untouched"
+        );
     }
 
     /// Switches the shared workspace path while the request is on the wire.
@@ -7550,13 +7945,23 @@ mod tests {
                 .get_value(key)
                 .map(str::to_owned)
         };
-        assert_eq!(*path.lock().expect("lock"), b.path(), "the switch happened mid-send");
-        assert_eq!(value(a.path(), "environments", "g", "API_KEY").as_deref(), Some("new"));
+        assert_eq!(
+            *path.lock().expect("lock"),
+            b.path(),
+            "the switch happened mid-send"
+        );
+        assert_eq!(
+            value(a.path(), "environments", "g", "API_KEY").as_deref(),
+            Some("new")
+        );
         assert_eq!(
             value(a.path(), "collections/api/environments", "dev", "TOKEN").as_deref(),
             Some("new")
         );
-        assert_eq!(value(b.path(), "environments", "g", "API_KEY").as_deref(), Some("b-old"));
+        assert_eq!(
+            value(b.path(), "environments", "g", "API_KEY").as_deref(),
+            Some("b-old")
+        );
         assert_eq!(
             value(b.path(), "collections/api/environments", "dev", "TOKEN").as_deref(),
             Some("b-old")
@@ -7589,7 +7994,9 @@ mod tests {
                 to: b.path().to_path_buf(),
             }),
             Box::new(MockHistoryRepo::new()),
-            Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(&path))),
+            Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(
+                &path,
+            ))),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -7613,7 +8020,11 @@ mod tests {
                 .find(|v| v.key == "BASE_URL")
                 .map(|v| v.value.clone())
         };
-        assert_eq!(*path.lock().expect("lock"), b.path(), "the switch happened mid-send");
+        assert_eq!(
+            *path.lock().expect("lock"),
+            b.path(),
+            "the switch happened mid-send"
+        );
         assert_eq!(base_url(a.path()).as_deref(), Some("https://a.test"));
         assert_eq!(base_url(b.path()), None, "b's collection must be untouched");
     }
@@ -7669,7 +8080,9 @@ mod tests {
         let svc = build_svc_with_script(
             Box::new(MockEnvRepo::empty()),
             Box::new(StubCollectionRepo::empty()),
-            Box::new(MockScriptEngine::returning_post_response(ScriptResult::default())),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
         );
         svc.apply_env_writes(
             &repo,
@@ -10055,7 +10468,8 @@ mod tests {
         let mut base = Environment::new("g-base");
         base.set_variable(Variable::new("G", "from-parent"));
         let svc = inherit_svc(vec![base, extending("g-child", "g-base")]);
-        let vars = svc.build_variable_context(Some("g-child"), None, None, None, &Default::default());
+        let vars =
+            svc.build_variable_context(Some("g-child"), None, None, None, &Default::default());
         assert_eq!(vars.get("G").map(String::as_str), Some("from-parent"));
     }
 
@@ -10448,11 +10862,15 @@ mod tests {
         let mut ctx = rocket_environment::VariableContext::default();
         let mut result = ScriptResult::default();
         result.runtime_vars.insert("n".into(), serde_json::json!(0));
-        result.runtime_vars.insert("s".into(), serde_json::json!("text"));
+        result
+            .runtime_vars
+            .insert("s".into(), serde_json::json!("text"));
         result
             .runtime_vars
             .insert("o".into(), serde_json::json!({ "a": 1 }));
-        result.runtime_vars.insert("nil".into(), serde_json::Value::Null);
+        result
+            .runtime_vars
+            .insert("nil".into(), serde_json::Value::Null);
         merge_runtime_vars(&mut ctx, &result);
         assert_eq!(ctx.runtime.get("n").map(String::as_str), Some("0"));
         assert_eq!(ctx.runtime.get("s").map(String::as_str), Some("text"));

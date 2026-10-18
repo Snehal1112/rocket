@@ -576,7 +576,8 @@ pub fn run() {
             .with_trust_store(Arc::clone(&trust_store))
             .with_collection_env_repo_factory(Box::new(
                 SharedCollectionEnvironmentRepo::new(Arc::clone(&active_workspace_path)),
-            ));
+            ))
+            .with_dot_env_loader(Box::new(rocket_infra::FsDotEnvLoader));
 
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Its repos follow the active workspace, like the exec service's.
@@ -659,7 +660,8 @@ pub fn run() {
                         Arc::clone(&active_workspace_path),
                         env_secret_store(),
                     ),
-                )),
+                ))
+                .with_dot_env_loader(Box::new(rocket_infra::FsDotEnvLoader)),
             );
 
             // The production Arc<McpToolService> — no earlier plan

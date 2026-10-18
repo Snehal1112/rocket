@@ -64,6 +64,10 @@ impl EnvironmentRepository for PinnedEnvRepo {
     fn delete(&self, name: &str) -> DomainResult<()> {
         self.0.delete(name)
     }
+
+    fn dot_env_base(&self) -> Option<std::path::PathBuf> {
+        self.0.dot_env_base()
+    }
 }
 
 impl RequestExecutionService {

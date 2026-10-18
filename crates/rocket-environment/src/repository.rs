@@ -28,6 +28,11 @@ pub trait EnvironmentRepository: Send + Sync {
     fn pinned(&self) -> Option<Box<dyn EnvironmentRepository>> {
         None
     }
+
+    /// The folder a relative `dotEnvFilePath` resolves against. `None` means unknown.
+    fn dot_env_base(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// Resolves an `EnvironmentRepository` scoped to one collection's own
