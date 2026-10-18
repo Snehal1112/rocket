@@ -3,6 +3,7 @@ pub mod context;
 pub mod dynamic_vars;
 pub mod environment;
 pub mod external_secret;
+pub mod flatten;
 mod invalid;
 pub mod repository;
 pub mod resolver;
@@ -17,6 +18,9 @@ pub use client_certificate_validation::{
 pub use context::VariableContext;
 pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};
+pub use flatten::{
+    find_extends_cycle, flatten_environment, flatten_with_repo, FlatVariable, Flattened,
+};
 pub use repository::{EnvironmentRepository, EnvironmentRepositoryFactory};
 pub use resolver::{resolve, resolve_with_env, ResolveResult};
 pub use secret_manager::{

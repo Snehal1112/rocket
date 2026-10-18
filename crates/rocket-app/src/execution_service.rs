@@ -204,6 +204,18 @@ fn read_scope<T>(strict: bool, result: DomainResult<T>) -> DomainResult<Option<T
     }
 }
 
+/// Flattens `env` with its parent chain and logs each warning. A cycle is an error.
+fn flatten_scope(
+    env: &rocket_environment::Environment,
+    repo: &dyn EnvironmentRepository,
+) -> DomainResult<rocket_environment::Flattened> {
+    let flat = rocket_environment::flatten_with_repo(env, repo)?;
+    for warning in &flat.warnings {
+        tracing::warn!("{warning}");
+    }
+    Ok(flat)
+}
+
 fn sent_credentials(request: &HttpRequest) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     match &request.auth {
@@ -750,8 +762,10 @@ impl RequestExecutionService {
         let mut ctx = VariableContext::default();
 
         if let Some(name) = global_env_name {
-            if let Some(global_env) = read_scope(strict, self.global_env_repo().get(name))? {
-                for var in global_env.variables.iter().filter(|v| v.enabled) {
+            let repo = self.global_env_repo();
+            if let Some(global_env) = read_scope(strict, repo.get(name))? {
+                let flat = flatten_scope(&global_env, repo.as_ref())?;
+                for var in flat.variables.iter().map(|f| &f.variable).filter(|v| v.enabled) {
                     ctx.global_env.insert(var.key.clone(), var.value.clone());
                     if var.secret {
                         ctx.secret_keys.insert(var.key.clone());
@@ -787,8 +801,10 @@ impl RequestExecutionService {
         }
 
         if let Some(name) = environment_name {
-            if let Some(env) = read_scope(strict, self.regular_env_repo(collection).get(name))? {
-                for var in env.variables.iter().filter(|v| v.enabled) {
+            let repo = self.regular_env_repo(collection);
+            if let Some(env) = read_scope(strict, repo.get(name))? {
+                let flat = flatten_scope(&env, repo.as_ref())?;
+                for var in flat.variables.iter().map(|f| &f.variable).filter(|v| v.enabled) {
                     ctx.env.insert(var.key.clone(), var.value.clone());
                     if var.secret {
                         ctx.secret_keys.insert(var.key.clone());
@@ -9973,6 +9989,74 @@ mod tests {
             captured.secret_values.contains("abcdef"),
             "a secret exactly MIN_REDACTION_LEN characters long must be added to secret_values"
         );
+    }
+
+    fn extending(name: &str, parent: &str) -> Environment {
+        let mut e = Environment::new(name);
+        e.extends = Some(parent.to_string());
+        e
+    }
+
+    fn inherit_svc(envs: Vec<Environment>) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(MultiEnvRepo::new(envs)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+    }
+
+    #[test]
+    fn a_variable_inherited_from_the_parent_resolves_in_scopes() {
+        let mut base = Environment::new("base");
+        base.set_variable(Variable::new("HOST", "base.local"));
+        let svc = inherit_svc(vec![base, extending("dev", "base")]);
+        let vars = svc.build_variable_context(None, None, Some("dev"), None, &Default::default());
+        assert_eq!(vars.get("HOST").map(String::as_str), Some("base.local"));
+    }
+
+    #[test]
+    fn a_child_variable_overrides_the_parent_in_scopes() {
+        let mut base = Environment::new("base");
+        base.set_variable(Variable::new("HOST", "base.local"));
+        let mut dev = extending("dev", "base");
+        dev.set_variable(Variable::new("HOST", "dev.local"));
+        let svc = inherit_svc(vec![base, dev]);
+        let vars = svc.build_variable_context(None, None, Some("dev"), None, &Default::default());
+        assert_eq!(vars.get("HOST").map(String::as_str), Some("dev.local"));
+    }
+
+    #[test]
+    fn a_cycle_fails_scope_building_with_the_cycle_names() {
+        let svc = inherit_svc(vec![extending("a", "b"), extending("b", "a")]);
+        let err = svc
+            .scopes_inner(true, None, None, Some("a"), None, &Default::default())
+            .expect_err("cycle");
+        let text = err.to_string();
+        assert!(text.contains('a') && text.contains('b'), "{text}");
+    }
+
+    #[test]
+    fn an_inherited_secret_is_in_secret_values() {
+        let mut base = Environment::new("base");
+        base.set_variable(Variable::secret("TOKEN", "parent-secret-value"));
+        let svc = inherit_svc(vec![base, extending("dev", "base")]);
+        let values = svc.secret_values(None, None, Some("dev"), &Default::default());
+        assert!(values.contains("parent-secret-value"));
+    }
+
+    #[test]
+    fn a_global_environment_inherits_from_a_global_parent() {
+        let mut base = Environment::new("g-base");
+        base.set_variable(Variable::new("G", "from-parent"));
+        let svc = inherit_svc(vec![base, extending("g-child", "g-base")]);
+        let vars = svc.build_variable_context(Some("g-child"), None, None, None, &Default::default());
+        assert_eq!(vars.get("G").map(String::as_str), Some("from-parent"));
     }
 
     #[tokio::test]

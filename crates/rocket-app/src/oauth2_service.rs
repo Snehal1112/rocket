@@ -292,8 +292,21 @@ impl OAuth2Service {
 
         if let Some(name) = environment_name {
             if let Ok(env) = self.env_repo.get(name) {
-                for (k, v) in env.enabled_variables() {
-                    ctx.env.insert(k.to_string(), v.to_string());
+                match rocket_environment::flatten_with_repo(&env, self.env_repo.as_ref()) {
+                    Ok(flat) => {
+                        for warning in &flat.warnings {
+                            tracing::warn!("{warning}");
+                        }
+                        for (k, v) in flat.enabled_pairs() {
+                            ctx.env.insert(k.to_string(), v.to_string());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "environment not flattened, using its own variables");
+                        for (k, v) in env.enabled_variables() {
+                            ctx.env.insert(k.to_string(), v.to_string());
+                        }
+                    }
                 }
             }
         }
@@ -686,6 +699,41 @@ pub(crate) mod tests {
     }
 
     // ─── Tests ───────────────────────────────────────────
+
+    struct ChainEnvRepo(Vec<Environment>);
+
+    impl EnvironmentRepository for ChainEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            Ok(self.0.clone())
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.0
+                .iter()
+                .find(|e| e.name == name)
+                .cloned()
+                .ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+        fn save(&self, _env: &Environment) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _name: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn oauth_context_includes_inherited_variables() {
+        let mut base = Environment::new("base");
+        base.set_variable(Variable::new("auth_host", "https://auth.example.com"));
+        let mut child = Environment::new("child");
+        child.extends = Some("base".into());
+        let svc = OAuth2Service::new(
+            Box::new(ChainEnvRepo(vec![base, child])),
+            Box::new(NullCollectionRepo::new()),
+        );
+        let vars = svc.build_variable_context(None, Some("child"), None, &HashMap::new());
+        assert_eq!(vars.get("auth_host").map(String::as_str), Some("https://auth.example.com"));
+    }
 
     #[test]
     fn resolve_replaces_variables_in_all_fields() {

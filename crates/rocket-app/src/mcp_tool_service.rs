@@ -3298,6 +3298,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn chip_masks_an_inherited_secret() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        let env_factory = FakeEnvRepoFactory::new();
+        env_factory.with_env(secret_env("base", "TOKEN", "inherited-secret-value-9"));
+        let mut child = Environment::new("child");
+        child.extends = Some("base".into());
+        env_factory.with_env(child);
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+        let chip = svc
+            .mask_response_chip(
+                "my-api",
+                "echo.yml",
+                Some("child"),
+                &echo_response(r#"{"t":"inherited-secret-value-9"}"#),
+            )
+            .await
+            .expect("chip");
+        assert!(!chip.text.contains("inherited-secret-value-9"), "{}", chip.text);
+    }
+
+    #[tokio::test]
+    async fn chip_is_refused_on_an_extends_cycle() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.with_request("my-api", "echo.yml", sample_request("Echo"));
+        let env_factory = FakeEnvRepoFactory::new();
+        for (name, parent) in [("a", "b"), ("b", "a")] {
+            let mut e = Environment::new(name);
+            e.extends = Some(parent.into());
+            env_factory.with_env(e);
+        }
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+        let err = svc
+            .mask_response_chip("my-api", "echo.yml", None, &echo_response("body"))
+            .await
+            .expect_err("a cycle must refuse the chip");
+        assert!(err.to_string().contains("environment chain"), "{err}");
+    }
+
+    #[tokio::test]
     async fn request_chip_is_refused_when_environments_cannot_be_listed() {
         let repo = ConfigurableCollectionRepo::new();
         repo.with_request("my-api", "echo.yml", sample_request("Echo"));
