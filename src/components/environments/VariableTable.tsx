@@ -8,10 +8,11 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SaveButtonState } from '@/hooks/use-save-button';
-import type { Variable } from '@/lib/tauri-api';
+import type { ResolvedVariable, Variable } from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 
+const NO_ROWS: ResolvedVariable[] = [];
 const GRID_COLS = 'grid-cols-[20px_1fr_1fr_52px]';
 
 interface VariableTableProps {
@@ -23,7 +24,11 @@ interface VariableTableProps {
   isDirty: boolean;
   saveState: SaveButtonState;
   variableContext?: Map<string, VariableScopeEntry>;
+  /** Variables inherited from parent environments, shown read-only after the editable rows. */
+  inheritedRows?: ResolvedVariable[];
 }
+
+const MASK = '••••••••';
 
 export function VariableTable({
   variables,
@@ -34,6 +39,7 @@ export function VariableTable({
   isDirty,
   saveState,
   variableContext,
+  inheritedRows = NO_ROWS,
 }: VariableTableProps) {
   const keyCounts = new Map<string, number>();
   for (const v of variables) {
@@ -59,7 +65,7 @@ export function VariableTable({
         <div />
       </div>
 
-      {variables.length === 0 ? (
+      {variables.length === 0 && inheritedRows.length === 0 ? (
         <div className='flex-1 flex flex-col items-center justify-center gap-3 text-center px-6'>
           <p className='text-sm font-medium text-foreground'>No variables yet</p>
           <p className='text-xs text-muted-foreground leading-relaxed max-w-[220px]'>
@@ -166,6 +172,43 @@ export function VariableTable({
                 </div>
               );
             })}
+            {inheritedRows.length > 0 && (
+              <div className='pt-3 space-y-1'>
+                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                  Inherited
+                </p>
+                {inheritedRows.map((row, idx) => (
+                  <div
+                    key={`${row.source}:${row.key}`}
+                    className={cn(
+                      'grid min-w-0 items-center gap-1.5',
+                      GRID_COLS,
+                      !row.enabled && 'opacity-50',
+                    )}
+                  >
+                    <div />
+                    <Input
+                      readOnly
+                      value={row.key}
+                      aria-label={`Inherited key ${idx + 1}`}
+                      className='h-7 min-w-0 text-xs font-mono bg-muted/40'
+                    />
+                    <Input
+                      readOnly
+                      value={row.secret ? MASK : row.value}
+                      aria-label={`Inherited value ${idx + 1}`}
+                      className='h-7 min-w-0 text-xs font-mono bg-muted/40'
+                    />
+                    <span
+                      className='truncate text-[10px] text-muted-foreground'
+                      title={`From ${row.source}`}
+                    >
+                      {row.source}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </ScrollArea>
       )}

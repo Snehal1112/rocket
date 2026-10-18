@@ -1,5 +1,6 @@
 // src/components/environments/EnvironmentDialog.tsx
 
+import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { RocketIdle } from '@/components/illustrations';
@@ -10,6 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { validateClientCertificates } from '@/lib/certificate-validation';
@@ -20,6 +30,7 @@ import {
   useGlobalEnvironment,
   useGlobalEnvironmentName,
   useProcessEnvVars,
+  useResolvedEnvironment,
   useSaveEnvironment,
 } from '@/lib/queries/environment-queries';
 import { useSecretManagerConnections } from '@/lib/queries/secret-manager-queries';
@@ -28,6 +39,7 @@ import type {
   ClientCertificate,
   Environment,
   ExternalSecretBinding,
+  ResolvedVariable,
   Variable,
 } from '@/lib/tauri-api';
 import { deleteEnvironment as deleteEnvironmentApi, saveEnvironment } from '@/lib/tauri-api';
@@ -36,6 +48,7 @@ import { useEnvStore } from '@/stores/env-store';
 import { CertificatesTab } from './CertificatesTab';
 import { EnvironmentSidebar } from './EnvironmentSidebar';
 import { ExternalSecretsTab } from './ExternalSecretsTab';
+import { extendsCandidates } from './extends-candidates';
 import { VariableTable } from './VariableTable';
 
 interface EnvironmentDialogProps {
@@ -44,6 +57,9 @@ interface EnvironmentDialogProps {
 }
 
 const EMPTY_ENVS: Environment[] = [];
+const EMPTY_ROWS: ResolvedVariable[] = [];
+// Radix Select forbids an empty item value, so "None" uses a sentinel.
+const NO_PARENT = '__none__';
 
 // Collapses variables sharing a key, keeping the last-edited row's value and
 // its original position. Backstop for Save: even if a duplicate ever makes
@@ -233,6 +249,45 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       }
     },
     [localEnvs, activeCollection, saveMutation, activeEnvId, setActiveEnvId],
+  );
+
+  const updateEnvField = useCallback(
+    (patch: Partial<Pick<Environment, 'extends' | 'dotEnvFilePath'>>) => {
+      if (!selectedEnv) return;
+      setLocalEnvs((prev) =>
+        prev.map((e) => (e.name === selectedEnv.name ? { ...e, ...patch } : e)),
+      );
+      setIsDirty(true);
+    },
+    [selectedEnv],
+  );
+
+  const candidates = useMemo(
+    () => (selectedEnv ? extendsCandidates(environments, selectedEnv.name) : []),
+    [environments, selectedEnv],
+  );
+  // A stored parent that no longer exists stays visible so the save keeps it.
+  const missingParent =
+    selectedEnv?.extends && !environments.some((e) => e.name === selectedEnv.extends)
+      ? selectedEnv.extends
+      : null;
+
+  // Inherited rows come from the saved, flattened environment. Rows the child
+  // defines (saved or in-flight) are its own, so they are not listed here.
+  const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, selectedName);
+  const inheritedRows = useMemo(() => {
+    if (!selectedEnv) return EMPTY_ROWS;
+    const own = new Set(selectedEnv.variables.map((v) => v.key));
+    return (resolvedEnv?.variables ?? EMPTY_ROWS).filter(
+      (v) => v.source !== selectedEnv.name && !own.has(v.key),
+    );
+  }, [resolvedEnv, selectedEnv]);
+  const warnings = useMemo(
+    () =>
+      (resolvedEnv?.warnings ?? []).filter(
+        (w) => !missingParent || !w.includes(`"${missingParent}"`),
+      ),
+    [resolvedEnv, missingParent],
   );
 
   const updateVariable = useCallback(
@@ -448,6 +503,69 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 onValueChange={(v) => setActiveDialogTab(v as DialogTab)}
                 className='flex-1 flex flex-col min-h-0 min-w-0'
               >
+                <div className='shrink-0 flex items-center gap-3 border-b px-3 py-2'>
+                  <Label className='text-xs shrink-0' htmlFor='env-extends'>
+                    Inherits from
+                  </Label>
+                  <Select
+                    value={selectedEnv.extends || NO_PARENT}
+                    onValueChange={(v) =>
+                      updateEnvField({ extends: v === NO_PARENT ? undefined : v })
+                    }
+                    disabled={candidates.length === 0 && !missingParent}
+                  >
+                    <SelectTrigger
+                      id='env-extends'
+                      className='h-7 w-[150px] shrink-0 text-xs'
+                      aria-label='Inherits from'
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_PARENT} className='text-xs'>
+                        None
+                      </SelectItem>
+                      {missingParent && (
+                        <SelectItem value={missingParent} className='text-xs'>
+                          {missingParent}
+                        </SelectItem>
+                      )}
+                      {candidates.map((name) => (
+                        <SelectItem key={name} value={name} className='text-xs'>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Label className='text-xs shrink-0' htmlFor='env-dotenv-path'>
+                    .env file
+                  </Label>
+                  <Input
+                    id='env-dotenv-path'
+                    aria-label='.env file path'
+                    className='h-7 min-w-0 flex-1 text-xs font-mono'
+                    placeholder='.env'
+                    value={selectedEnv.dotEnvFilePath ?? ''}
+                    onChange={(e) =>
+                      updateEnvField({ dotEnvFilePath: e.target.value || undefined })
+                    }
+                  />
+                </div>
+                {missingParent && (
+                  <p className='shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-500 border-b'>
+                    <AlertTriangle className='h-3.5 w-3.5 shrink-0' />
+                    {`Parent "${missingParent}" was not found. Its variables are not inherited.`}
+                  </p>
+                )}
+                {warnings.map((warning) => (
+                  <p
+                    key={warning}
+                    className='shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-500 border-b'
+                  >
+                    <AlertTriangle className='h-3.5 w-3.5 shrink-0' />
+                    {warning}
+                  </p>
+                ))}
                 <TabsList className='shrink-0 w-full justify-start rounded-none border-b bg-transparent px-2'>
                   <TabsTrigger value='variables' className='text-xs'>
                     Variables
@@ -469,6 +587,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     isDirty={isDirty}
                     saveState={saveState}
                     variableContext={variableContext}
+                    inheritedRows={inheritedRows}
                   />
                 </TabsContent>
                 <TabsContent
