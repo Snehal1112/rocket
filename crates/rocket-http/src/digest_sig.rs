@@ -3,7 +3,6 @@
 //! Pure functions only: the executor in `rocket-infra` sends the first request, reads the
 //! `WWW-Authenticate` challenge from the 401, and retries with the header built here.
 
-use rand::{distributions::Alphanumeric, Rng};
 use sha2::{Digest, Sha256, Sha512_256};
 
 /// Hash algorithms a challenge may ask for.
@@ -55,11 +54,7 @@ pub struct Challenge {
 
 /// Returns a fresh random client nonce.
 pub fn generate_cnonce() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(16)
-        .map(char::from)
-        .collect()
+    crate::util::rand_alnum(16)
 }
 
 /// Picks the strongest usable Digest challenge from all `WWW-Authenticate` header values.
@@ -275,6 +270,57 @@ fn quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generate_cnonce_is_16_ascii_alphanumeric_and_unique() {
+        let all: Vec<String> = (0..50).map(|_| generate_cnonce()).collect();
+        assert!(all
+            .iter()
+            .all(|n| n.len() == 16 && n.chars().all(|c| c.is_ascii_alphanumeric())));
+        let unique: std::collections::HashSet<_> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+    }
+
+    const GOLDEN_DIGEST: &[&str] = &[
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", response=\"ccc4fb02a27ce615126ceecf007a6518\", qop=auth, nc=00000001, cnonce=\"0a4f113b\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", response=\"1f2061c65afa2156f58a4684349199c0\", qop=auth, nc=00000002, cnonce=\"0a4f113b\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", response=\"2b3f362956ca53073195abcb6c1577ca\", opaque=\"op\", qop=auth-int, nc=00000001, cnonce=\"0a4f113b\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", response=\"1d8b63f41048af3c44eb9c9cd43fab50\", opaque=\"op\", qop=auth-int, nc=00000002, cnonce=\"0a4f113b\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", response=\"65e27ecd248c7ae6cad5af4fcf41fc6a\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", response=\"65e27ecd248c7ae6cad5af4fcf41fc6a\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", algorithm=SHA-256, response=\"f31a40db2cad5cb203d102a83bf13def0f2a9f4f649f7ee77a29d942d7d2968e\", qop=auth, nc=00000001, cnonce=\"0a4f113b\"",
+        "Digest username=\"us\\\"er\\\\x\", realm=\"r\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/a b/index.html?q=1\", algorithm=SHA-256, response=\"386bb7141b8f7d84d96f6db34d44dd611462597c4c6a49de720a63819321cfb6\", qop=auth, nc=00000002, cnonce=\"0a4f113b\"",
+    ];
+
+    #[test]
+    fn golden_authorize_fixed_cnonce() {
+        let nonce = "dcd98b7102dd2f0e8b11d0f600bfb0c093";
+        let headers = [
+            format!("Digest realm=\"r\", qop=\"auth\", nonce=\"{nonce}\""),
+            format!("Digest realm=\"r\", qop=\"auth-int\", nonce=\"{nonce}\", opaque=\"op\""),
+            format!("Digest realm=\"r\", nonce=\"{nonce}\""),
+            format!("Digest realm=\"r\", qop=\"auth\", algorithm=SHA-256, nonce=\"{nonce}\""),
+        ];
+        let mut actual: Vec<String> = Vec::new();
+        for header in &headers {
+            let challenge = select_challenge(&[header.as_str()]).expect("challenge parses");
+            for nc in [1u32, 2] {
+                let out = authorize(
+                    &challenge,
+                    "us\"er\\x",
+                    "pa\"ss\\w~ +%*é",
+                    "POST",
+                    "/dir/a b/index.html?q=1",
+                    b"entity body",
+                    nc,
+                    "0a4f113b",
+                )
+                .expect("authorize");
+                actual.push(out);
+            }
+        }
+        assert_eq!(actual, GOLDEN_DIGEST);
+    }
 
     // RFC 2617 section 3.5 and RFC 7616 section 3.9.1 worked examples.
     const RFC2617: &str = "Digest realm=\"testrealm@host.com\", qop=\"auth,auth-int\", \

@@ -31,7 +31,7 @@ pub fn substitute_path_params(url: &str, params: &[PathParam]) -> String {
 /// The form a path parameter value takes in the URL. A caller that must find a substituted
 /// value again, such as a later variable pass, uses it to match the URL text exactly.
 pub fn encode_path_param_value(value: &str) -> String {
-    urlencoding::encode(value).into_owned()
+    crate::util::percent_encode(value)
 }
 
 fn is_delimiter(c: char) -> bool {
@@ -92,6 +92,54 @@ fn replace_braced(segment: &str, name: &str, encoded: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_encode_path_param_value_still_matches_the_helper() {
+        for input in ["", "%", "a b", "~", "+", "*", "a/b", "é"] {
+            assert_eq!(
+                encode_path_param_value(input),
+                crate::util::percent_encode(input)
+            );
+        }
+    }
+
+    const GOLDEN_ENCODE: &[&str] = &[
+        "",
+        "a%20b",
+        "~",
+        "%2B",
+        "%25",
+        "%2A",
+        "a%2Fb",
+        "%C3%A9",
+        "a%2520b",
+    ];
+    const GOLDEN_SUBSTITUTE: &[&str] = &[
+        "https://h.test/a/a%2Fb%3Fc%23d%25e%20%C3%A9/b/x%20y%2F~%2B%2A",
+        "https://h.test:8080/u/a%2Fb%3Fc%23d%25e%20%C3%A9/x%20y%2F~%2B%2A.json?q=:id#f",
+    ];
+
+    #[test]
+    fn golden_encode_path_param_value_awkward() {
+        let actual: Vec<String> = ["", "a b", "~", "+", "%", "*", "a/b", "é", "a%20b"]
+            .iter()
+            .map(|v| encode_path_param_value(v))
+            .collect();
+        assert_eq!(actual, GOLDEN_ENCODE);
+    }
+
+    #[test]
+    fn golden_substitute_path_params_awkward() {
+        let params = [p("id", "a/b?c#d%e é"), p("name", "x y/~+*")];
+        let actual: Vec<String> = [
+            "https://h.test/a/:id/b/{name}",
+            "https://h.test:8080/u/:id/{name}.json?q=:id#f",
+        ]
+        .iter()
+        .map(|u| substitute_path_params(u, &params))
+        .collect();
+        assert_eq!(actual, GOLDEN_SUBSTITUTE);
+    }
 
     fn p(name: &str, value: &str) -> PathParam {
         PathParam {

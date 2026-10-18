@@ -27,6 +27,15 @@ pub struct JwtClaims {
     pub raw_payload: String,
 }
 
+/// Decodes one base64url JWT segment into JSON. The label names it in errors.
+fn decode_segment(part: &str, label: &str) -> Result<serde_json::Value, DomainError> {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(part)
+        .map_err(|e| DomainError::InvalidInput(format!("Invalid JWT {label} encoding: {e}")))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|e| DomainError::InvalidInput(format!("Invalid JWT {label} JSON: {e}")))
+}
+
 /// Decodes a JWT token WITHOUT signature verification.
 /// Used for display purposes only (showing token metadata in the UI).
 ///
@@ -44,19 +53,8 @@ pub fn decode_jwt(token: &str) -> Result<JwtClaims, DomainError> {
         ));
     }
 
-    // Decode header.
-    let header_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[0])
-        .map_err(|e| DomainError::InvalidInput(format!("Invalid JWT header encoding: {e}")))?;
-    let header: serde_json::Value = serde_json::from_slice(&header_bytes)
-        .map_err(|e| DomainError::InvalidInput(format!("Invalid JWT header JSON: {e}")))?;
-
-    // Decode payload.
-    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[1])
-        .map_err(|e| DomainError::InvalidInput(format!("Invalid JWT payload encoding: {e}")))?;
-    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
-        .map_err(|e| DomainError::InvalidInput(format!("Invalid JWT payload JSON: {e}")))?;
+    let header = decode_segment(parts[0], "header")?;
+    let payload = decode_segment(parts[1], "payload")?;
 
     // Extract audience — can be string or array of strings.
     let audience = match payload.get("aud") {
@@ -114,6 +112,105 @@ mod tests {
         let h = URL_SAFE_NO_PAD.encode(header_json.as_bytes());
         let p = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
         format!("{h}.{p}.fake_signature")
+    }
+
+    fn segment_error(part: &str, label: &str) -> String {
+        match decode_segment(part, label) {
+            Err(DomainError::InvalidInput(m)) => m,
+            Err(other) => panic!("expected InvalidInput, got {other:?}"),
+            Ok(v) => panic!("expected an error, got {v}"),
+        }
+    }
+
+    #[test]
+    fn decode_segment_returns_the_parsed_value() {
+        let value = decode_segment(&b64(r#"{"a":1}"#), "header").expect("decode segment");
+        assert_eq!(value, serde_json::json!({"a": 1}));
+    }
+
+    #[test]
+    fn decode_segment_bad_encoding_uses_the_label() {
+        assert!(segment_error("!!!", "header").starts_with("Invalid JWT header encoding: "));
+        assert!(segment_error("!!!", "payload").starts_with("Invalid JWT payload encoding: "));
+    }
+
+    #[test]
+    fn decode_segment_bad_json_uses_the_label() {
+        let part = b64("not json");
+        assert!(segment_error(&part, "header").starts_with("Invalid JWT header JSON: "));
+        assert!(segment_error(&part, "payload").starts_with("Invalid JWT payload JSON: "));
+    }
+
+    #[test]
+    fn decode_segment_empty_part_is_a_json_error() {
+        assert!(segment_error("", "header").starts_with("Invalid JWT header JSON: "));
+    }
+
+    #[test]
+    fn decode_segment_accepts_a_json_array_and_null() {
+        assert_eq!(
+            decode_segment(&b64("[]"), "payload").expect("array"),
+            serde_json::json!([])
+        );
+        assert_eq!(
+            decode_segment(&b64("null"), "payload").expect("null"),
+            serde_json::Value::Null
+        );
+    }
+
+    fn b64(s: &str) -> String {
+        URL_SAFE_NO_PAD.encode(s.as_bytes())
+    }
+
+    fn invalid(token: &str) -> String {
+        match decode_jwt(token) {
+            Err(DomainError::InvalidInput(m)) => m,
+            Err(other) => panic!("expected InvalidInput, got {other:?}"),
+            Ok(_) => panic!("expected an error for {token}"),
+        }
+    }
+
+    #[test]
+    fn jwt_bad_header_encoding_message() {
+        assert!(invalid("!!!.e30.sig").starts_with("Invalid JWT header encoding: "));
+    }
+
+    #[test]
+    fn jwt_bad_header_json_message() {
+        let token = format!("{}.e30.sig", b64("not json"));
+        assert!(invalid(&token).starts_with("Invalid JWT header JSON: "));
+    }
+
+    #[test]
+    fn jwt_bad_payload_encoding_message() {
+        let token = format!("{}.!!!.sig", b64("{}"));
+        assert!(invalid(&token).starts_with("Invalid JWT payload encoding: "));
+    }
+
+    #[test]
+    fn jwt_bad_payload_json_message() {
+        let token = format!("{}.{}.sig", b64("{}"), b64("not json"));
+        assert!(invalid(&token).starts_with("Invalid JWT payload JSON: "));
+    }
+
+    #[test]
+    fn jwt_empty_header_segment_message() {
+        let json_err = serde_json::from_slice::<serde_json::Value>(b"")
+            .expect_err("empty input is not JSON");
+        assert_eq!(
+            invalid("..sig"),
+            format!("Invalid JWT header JSON: {json_err}")
+        );
+    }
+
+    #[test]
+    fn jwt_wrong_part_count_message_is_unchanged() {
+        for token in ["a.b", "a.b.c.d"] {
+            assert_eq!(
+                invalid(token),
+                "Invalid JWT: expected 3 dot-separated parts."
+            );
+        }
     }
 
     #[test]

@@ -166,8 +166,8 @@ fn canonical_query(url: &reqwest::Url) -> String {
         .query_pairs()
         .map(|(k, v)| {
             (
-                urlencoding::encode(&k).into_owned(),
-                urlencoding::encode(&v).into_owned(),
+                crate::util::percent_encode(&k),
+                crate::util::percent_encode(&v),
             )
         })
         .collect();
@@ -189,7 +189,7 @@ fn canonical_path(path: &str, service: &str) -> String {
         return path.to_string();
     }
     path.split('/')
-        .map(|segment| urlencoding::encode(segment).into_owned())
+        .map(|segment| crate::util::percent_encode(segment))
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -211,6 +211,84 @@ pub fn hex_sha256(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Signatures only, one per URL in `golden_urls`, in order.
+    const GOLDEN_AWS_NON_S3: &[&str] = &[
+        "1fa8f3cb9c4beb89642bc71f8b7a9d48c30dfc586fb5b0207476939f6448d411",
+        "2b5e5668c5314dca847c947b6717acfdf2c38d9fcc7d2dbde1146b9481a890a1",
+        "5a8a3a6e1930ca85baee3d13988267cb7e87346ff3b85646d6ca702d328f92f7",
+        "f7a2ccd055adcb9c23e5b35ca8afd2325c6f44ae8f7d242a39857c9d25016bf8",
+        "dcfc793aafd382cb823685dd6b7ce82e2ae60dc1de80ba2bae18ef15d4035335",
+        "babada42c869e251d38c85ea22068e32da7b2281d20a29ed76d4b1bf39a072ef",
+        "046f89e97c685f012fc30382001a89c33cb4af1b66680942970ece4bd71b99b5",
+        "0b1e1a9568022f4d7b8f04fad23b3491d8aed4297e301680f1adc45ebb0f29a7",
+        "1922cca857fdeda9daff1a6f7945c7404bd2ac582df23dd560eab60503543227",
+    ];
+    const GOLDEN_AWS_S3: &[&str] = &[
+        "2a3ac7a1539a778b6193198aa2260dc4b6b05394e2ca90f951230c9c4114395a",
+        "3ece51c9676ca9d140001a7ca77b48a61f69c1159c5cf7b0a8c1177db59ae50e",
+        "2f5aabb9c4881c4f8cd042080a14f5f26133c9bb09d2010052e00dfffd2cc82a",
+        "cc10262e0ce0f995d6642d479143fe393049ea5a5e832b804ac71e39c62af73a",
+        "00fdf65026753d0224c0bb25c2ab4d37483098b8bde0662750d9c61708ff7516",
+        "7e3dd771ceb6a120650b341aadecdcda3cc393c8297c0f26b7d05d86c91a1530",
+        "62b26e3b5476c0703a9540f55eab3c9374cde1ba0d9c706bb44f4d2c49caf6d5",
+        "8a796595e53c1962f49288114a3ea63292a35c9a5245f2fcddf64c6743b54da1",
+        "b85ea35e8a0977c99045411ff556ca11fd6d9589c58b309c2799e86e45063213",
+    ];
+
+    fn golden_urls() -> Vec<String> {
+        let mut urls: Vec<String> = ["a b", "~", "+", "%", "*", "é", ""]
+            .iter()
+            .map(|v| {
+                let enc_key = format!("k{v}");
+                format!("https://api.example.com/p/{v}?{enc_key}={v}&dup=1&dup=2&empty=")
+            })
+            .collect();
+        urls.push("https://api.example.com//a//b/?x=1".to_string());
+        urls.push("https://api.example.com/a%20b/c%2Fd/ü/a~b/".to_string());
+        urls
+    }
+
+    fn golden_sign_all(service: &str) -> Vec<String> {
+        let creds = AwsCredentials {
+            access_key: "AKIAIOSFODNN7EXAMPLE".into(),
+            secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
+            region: "us-east-1".into(),
+            service: service.into(),
+            session_token: None,
+        };
+        golden_urls()
+            .iter()
+            .filter_map(|url| {
+                // A raw space or percent sign may be rejected by the URL parser, so skip those.
+                sign_request(
+                    "GET",
+                    url,
+                    &[("host".to_string(), "api.example.com".to_string())],
+                    b"",
+                    &creds,
+                    "20130524T000000Z",
+                )
+                .ok()
+                .and_then(|s| {
+                    s.authorization
+                        .rsplit("Signature=")
+                        .next()
+                        .map(str::to_string)
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn golden_sign_request_awkward_query_and_path_non_s3() {
+        assert_eq!(golden_sign_all("execute-api"), GOLDEN_AWS_NON_S3);
+    }
+
+    #[test]
+    fn golden_sign_request_awkward_query_and_path_s3() {
+        assert_eq!(golden_sign_all("s3"), GOLDEN_AWS_S3);
+    }
 
     #[test]
     fn test_sign_request_produces_valid_authorization() {
