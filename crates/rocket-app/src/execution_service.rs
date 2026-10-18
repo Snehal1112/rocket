@@ -1034,6 +1034,21 @@ impl RequestExecutionService {
         }
     }
 
+    /// The named environment flattened with its `extends` chain. `None` for `collection`
+    /// reads the global store. A cycle is an error.
+    pub fn resolved_environment(
+        &self,
+        collection: Option<&str>,
+        name: &str,
+    ) -> rocket_shared::error::DomainResult<rocket_environment::Flattened> {
+        let repo = match collection {
+            Some(_) => self.regular_env_repo(collection),
+            None => self.global_env_repo(),
+        };
+        let env = repo.get(name)?;
+        rocket_environment::flatten_with_repo(&env, repo.as_ref())
+    }
+
     /// The `process.env` values for a send: `.env` files layered global first, then the
     /// collection environment, with the real OS environment on top. A denied gate returns
     /// nothing and reads no file.
