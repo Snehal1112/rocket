@@ -740,6 +740,8 @@ type Hook2<R> = Option<Box<dyn Fn(&str, &str) -> DomainResult<R> + Send + Sync>>
 type SaveRequestHook =
     Option<Box<dyn Fn(&str, &str, &CollectionRequest) -> DomainResult<String> + Send + Sync>>;
 
+type MoveItemHook = Box<dyn Fn(&str, &str, &str, &str) -> DomainResult<()> + Send + Sync>;
+
 /// A `CollectionRepository` that does nothing, with optional per-method hooks.
 ///
 /// `new()` is lenient: unhooked methods return a harmless default. `strict()` keeps
@@ -758,6 +760,7 @@ pub struct NullCollectionRepo {
     save_request: SaveRequestHook,
     delete_request: Hook2<()>,
     get_settings: Hook1<CollectionSettings>,
+    move_item: Option<MoveItemHook>,
     get_folder_chain_variables: Hook2<Vec<CollectionVariable>>,
     get_request_variables: Hook2<Vec<CollectionVariable>>,
 }
@@ -786,6 +789,7 @@ impl NullCollectionRepo {
             save_request: None,
             delete_request: None,
             get_settings: None,
+            move_item: None,
             get_folder_chain_variables: None,
             get_request_variables: None,
         }
@@ -873,6 +877,13 @@ impl NullCollectionRepo {
         f: impl Fn(&str, &str) -> DomainResult<()> + Send + Sync + 'static,
     ) -> Self {
         self.delete_request = Some(Box::new(f));
+        self
+    }
+    pub fn on_move_item(
+        mut self,
+        f: impl Fn(&str, &str, &str, &str) -> DomainResult<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.move_item = Some(Box::new(f));
         self
     }
     pub fn on_get_settings(
@@ -979,9 +990,15 @@ impl CollectionRepository for NullCollectionRepo {
         self.gate(CollectionMethod::DeleteFolder);
         Ok(())
     }
-    fn move_item(&self, _: &str, _: &str, _: &str, _: &str) -> DomainResult<()> {
+    fn move_item(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> {
+        if let Some(f) = &self.move_item {
+            return f(a, b, c, d);
+        }
         self.gate(CollectionMethod::MoveItem);
         Ok(())
+    }
+    fn move_item_no_replace(&self, a: &str, b: &str, c: &str, d: &str) -> DomainResult<()> {
+        self.move_item(a, b, c, d)
     }
     fn reorder_items(&self, _: &str, _: &str, _: &[String]) -> DomainResult<()> {
         self.gate(CollectionMethod::ReorderItems);
