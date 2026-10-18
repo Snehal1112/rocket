@@ -400,8 +400,7 @@ impl ContractService {
         event: StatusEvent,
     ) -> ContractResult<Contract> {
         let mut contract = self.repo.load_contract(collection_root, id)?;
-        let new_status = transition_status(&contract.status, &event)
-            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        let new_status = apply_transition(&contract.status, &event)?;
         contract.status = new_status;
         contract.updated_at = Some(chrono::Utc::now());
         self.repo.save_contract(collection_root, &contract)?;
@@ -422,8 +421,7 @@ impl ContractService {
             ContractStatus::Drift | ContractStatus::Breach => StatusEvent::Resign,
             _ => StatusEvent::Publish,
         };
-        let new_status = transition_status(&contract.status, &event)
-            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        let new_status = apply_transition(&contract.status, &event)?;
         contract.status = new_status;
         contract.updated_at = Some(chrono::Utc::now());
         let mut snapshot = self.repo.load_snapshot(collection_root, id)?;
@@ -454,8 +452,7 @@ impl ContractService {
     ) -> ContractResult<Contract> {
         let mut contract = self.repo.load_contract(collection_root, id)?;
 
-        let new_status = transition_status(&contract.status, &StatusEvent::Resign)
-            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        let new_status = apply_transition(&contract.status, &StatusEvent::Resign)?;
 
         // Walk the live collection to capture the current request state as the
         // new baseline — this is what makes accept idempotent: recompute_drift
@@ -505,8 +502,7 @@ impl ContractService {
         new_expiry: Option<chrono::NaiveDate>,
     ) -> ContractResult<Contract> {
         let mut contract = self.repo.load_contract(collection_root, id)?;
-        let new_status = transition_status(&contract.status, &StatusEvent::Renew)
-            .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))?;
+        let new_status = apply_transition(&contract.status, &StatusEvent::Renew)?;
         contract.status = new_status;
         contract.expiry_date = new_expiry;
         contract.drift_count = 0;
@@ -930,6 +926,15 @@ impl ContractService {
         };
         serde_yaml::to_string(&doc).map_err(|e| ContractError::Internal(e.to_string()))
     }
+}
+
+/// Runs the status state machine and maps a rejected event to an internal error.
+fn apply_transition(
+    status: &ContractStatus,
+    event: &StatusEvent,
+) -> ContractResult<ContractStatus> {
+    transition_status(status, event)
+        .map_err(|e| ContractError::Internal(format!("invalid transition: {:?}", e.from)))
 }
 
 /// Increments the patch segment of a semver-like version string.
@@ -1633,6 +1638,56 @@ mod tests {
             .transition_contract_status(root(), contract.id, StatusEvent::Pause)
             .unwrap();
         assert_eq!(result.status, ContractStatus::Paused);
+    }
+
+    fn invalid_transition_message(result: ContractResult<Contract>) -> String {
+        match result {
+            Err(ContractError::Internal(m)) => m,
+            other => panic!("expected ContractError::Internal, got {other:?}"),
+        }
+    }
+
+    fn saved_contract(svc: &ContractService, status: ContractStatus) -> Contract {
+        let mut contract = make_contract_with_status(status);
+        contract.id = Ulid::new();
+        svc.repo
+            .save_contract(root(), &contract)
+            .expect("save contract");
+        contract
+    }
+
+    #[test]
+    fn invalid_transition_message_transition_contract_status() {
+        let svc = make_service();
+        let contract = saved_contract(&svc, ContractStatus::Draft);
+        let m = invalid_transition_message(
+            svc.transition_contract_status(root(), contract.id, StatusEvent::Renew),
+        );
+        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Draft));
+    }
+
+    #[test]
+    fn invalid_transition_message_publish_contract() {
+        let svc = make_service();
+        let contract = saved_contract(&svc, ContractStatus::Active);
+        let m = invalid_transition_message(svc.publish_contract(root(), contract.id, vec![]));
+        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Active));
+    }
+
+    #[test]
+    fn invalid_transition_message_accept_drift() {
+        let svc = make_service();
+        let contract = saved_contract(&svc, ContractStatus::Draft);
+        let m = invalid_transition_message(svc.accept_drift(root(), contract.id, "v2".into()));
+        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Draft));
+    }
+
+    #[test]
+    fn invalid_transition_message_renew_contract() {
+        let svc = make_service();
+        let contract = saved_contract(&svc, ContractStatus::Draft);
+        let m = invalid_transition_message(svc.renew_contract(root(), contract.id, None));
+        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Draft));
     }
 
     #[test]

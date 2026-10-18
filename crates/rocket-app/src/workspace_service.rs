@@ -127,10 +127,7 @@ impl WorkspaceService {
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
 
         // Capture old path for rollback if persist fails.
-        let mut path_guard = self
-            .active_path
-            .lock()
-            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?;
+        let mut path_guard = self.lock_active_path()?;
         let old_path = path_guard.clone();
 
         // Update in-memory state before persisting so live threads always see
@@ -300,20 +297,12 @@ impl WorkspaceService {
     }
 
     pub fn get_global_environment_name(&self) -> DomainResult<Option<String>> {
-        let path = self
-            .active_path
-            .lock()
-            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?
-            .clone();
+        let path = self.lock_active_path()?.clone();
         Ok(self.config_repo.load(&path)?.global_environment)
     }
 
     pub fn set_global_environment(&self, name: Option<String>) -> DomainResult<()> {
-        let path = self
-            .active_path
-            .lock()
-            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))?
-            .clone();
+        let path = self.lock_active_path()?.clone();
         let mut config = self.config_repo.load(&path)?;
         config.global_environment = name;
         self.config_repo.save(&path, &config)
@@ -416,10 +405,15 @@ impl WorkspaceService {
             .cloned()
             .ok_or_else(|| DomainError::InvalidInput("No workspace left to activate".into()))?;
         registry.active_workspace_id = next.id.clone();
-        *self.active_path.lock().map_err(|_| {
-            DomainError::Internal("active workspace path lock poisoned".into())
-        })? = next.path.clone();
+        *self.lock_active_path()? = next.path.clone();
         Ok(Some(next))
+    }
+
+    /// Locks the active workspace path, mapping a poisoned lock to an internal error.
+    fn lock_active_path(&self) -> DomainResult<std::sync::MutexGuard<'_, PathBuf>> {
+        self.active_path
+            .lock()
+            .map_err(|_| DomainError::Internal("active workspace path lock poisoned".into()))
     }
 
     /// Tells listeners that another workspace is active after a close or delete, the same
@@ -683,6 +677,85 @@ mod tests {
         svc.switch(&ws.id).unwrap();
         let active = svc.get_active().unwrap();
         assert_eq!(active.id, ws.id);
+    }
+
+    fn poison(active_path: &Arc<Mutex<PathBuf>>) {
+        let held = Arc::clone(active_path);
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock().expect("lock before poisoning");
+            panic!("poison the active path lock");
+        })
+        .join();
+    }
+
+    fn lock_message(result: DomainResult<impl std::fmt::Debug>) -> String {
+        match result {
+            Err(DomainError::Internal(m)) => m,
+            other => panic!("expected DomainError::Internal, got {other:?}"),
+        }
+    }
+
+    fn make_service_with_active_path(tmp: &TempDir) -> (WorkspaceService, Arc<Mutex<PathBuf>>) {
+        let (repo, config_repo, active_path) = service_dependencies(tmp);
+        let service = WorkspaceService::new(
+            repo,
+            config_repo,
+            Box::new(NullEventPublisher),
+            Arc::clone(&active_path),
+        );
+        (service, active_path)
+    }
+
+    #[test]
+    fn poisoned_lock_message_get_global_environment_name() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (service, active_path) = make_service_with_active_path(&tmp);
+        poison(&active_path);
+        assert_eq!(
+            lock_message(service.get_global_environment_name()),
+            "active workspace path lock poisoned"
+        );
+    }
+
+    #[test]
+    fn poisoned_lock_message_set_global_environment() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (service, active_path) = make_service_with_active_path(&tmp);
+        poison(&active_path);
+        assert_eq!(
+            lock_message(service.set_global_environment(None)),
+            "active workspace path lock poisoned"
+        );
+    }
+
+    #[test]
+    fn poisoned_lock_message_delete() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (service, active_path) = make_service_with_active_path(&tmp);
+        let ws = service
+            .create("Other", tmp.path().join("other"))
+            .expect("create workspace");
+        // Deleting the active workspace is what reaches the lock.
+        service.switch(&ws.id).expect("switch to workspace");
+        poison(&active_path);
+        assert_eq!(
+            lock_message(service.delete(&ws.id)),
+            "active workspace path lock poisoned"
+        );
+    }
+
+    #[test]
+    fn poisoned_lock_message_switch() {
+        let tmp = TempDir::new().expect("tempdir");
+        let (service, active_path) = make_service_with_active_path(&tmp);
+        let ws = service
+            .create("Other", tmp.path().join("other"))
+            .expect("create workspace");
+        poison(&active_path);
+        assert_eq!(
+            lock_message(service.switch(&ws.id)),
+            "active workspace path lock poisoned"
+        );
     }
 
     #[test]
