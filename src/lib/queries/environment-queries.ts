@@ -6,6 +6,7 @@ import {
   getGlobalEnvironment,
   getGlobalEnvironmentName,
   getProcessEnvVars,
+  getResolvedEnvironment,
   listEnvironments,
   listGlobalEnvironments,
   saveEnvironment,
@@ -23,7 +24,15 @@ export const environmentKeys = {
   globalList: ['environments', 'global', 'list'] as const,
   /** Prefix of every process env query, to invalidate them all. */
   processAll: ['environments', 'process'] as const,
-  process: (collection: string | null) => ['environments', 'process', collection] as const,
+  process: (
+    collection: string | null,
+    environment: string | null = null,
+    globalEnvironment: string | null = null,
+  ) => ['environments', 'process', collection, environment, globalEnvironment] as const,
+  /** Prefix of every resolved (flattened) environment query, to invalidate them all. */
+  resolvedAll: ['environments', 'resolved'] as const,
+  resolved: (collection: string | null, name: string) =>
+    ['environments', 'resolved', collection, name] as const,
 };
 
 export function useEnvironments(collectionName: string | null) {
@@ -62,8 +71,24 @@ export function useProcessEnvVars(collection: string | null | undefined = null) 
   return useQuery({
     queryKey: environmentKeys.process(scope),
     queryFn: () => getProcessEnvVars(scope),
+    select: (env) => env.vars,
     staleTime: Number.POSITIVE_INFINITY,
   });
+}
+
+/** An environment flattened with its `extends` chain. A null collection reads the global store. */
+export function useResolvedEnvironment(collection: string | null, name: string | null) {
+  return useQuery({
+    queryKey: environmentKeys.resolved(collection, name ?? ''),
+    queryFn: () => getResolvedEnvironment(collection, name ?? ''),
+    enabled: !!name,
+  });
+}
+
+/** Any environment write can change what a child inherits and which `.env` files load. */
+export function invalidateResolvedEnvironments(qc: QueryClient) {
+  void qc.invalidateQueries({ queryKey: environmentKeys.resolvedAll });
+  void qc.invalidateQueries({ queryKey: environmentKeys.processAll });
 }
 
 export function useSaveEnvironment(collectionName: string | null) {
@@ -71,6 +96,7 @@ export function useSaveEnvironment(collectionName: string | null) {
   return useMutation({
     mutationFn: (env: Environment) => saveEnvironment(collectionName ?? '', env),
     onSuccess: () => {
+      invalidateResolvedEnvironments(qc);
       if (collectionName) {
         qc.invalidateQueries({ queryKey: environmentKeys.collection(collectionName) });
       }
@@ -83,6 +109,7 @@ export function useDeleteEnvironment(collectionName: string | null) {
   return useMutation({
     mutationFn: (name: string) => deleteEnvironment(collectionName ?? '', name),
     onSuccess: () => {
+      invalidateResolvedEnvironments(qc);
       if (collectionName) {
         qc.invalidateQueries({ queryKey: environmentKeys.collection(collectionName) });
       }
@@ -93,6 +120,7 @@ export function useDeleteEnvironment(collectionName: string | null) {
 // Brings every global environment cache entry up to date. The send paths read the
 // cache synchronously, so the entry for the active name is awaited here.
 async function refreshGlobalEnvironments(qc: QueryClient, activeName: string | null) {
+  invalidateResolvedEnvironments(qc);
   await qc.invalidateQueries({ queryKey: environmentKeys.globalAll });
   await fetchActiveGlobalEnvironment(qc, activeName);
 }
@@ -115,6 +143,7 @@ async function fetchActiveGlobalEnvironment(qc: QueryClient, activeName: string 
 // workspace switch can keep the same environment name with other values.
 export async function reloadGlobalEnvironments(qc: QueryClient) {
   qc.removeQueries({ queryKey: environmentKeys.globalAll });
+  qc.removeQueries({ queryKey: environmentKeys.resolvedAll });
   let name: string | null = null;
   try {
     name = await qc.fetchQuery({

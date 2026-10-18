@@ -6,10 +6,18 @@ vi.mock('@/lib/tauri-api', () => ({
   getCollectionSettings: vi.fn(async () => ({ variables: [], headers: [] })),
   getFolderChainVariables: vi.fn(async () => []),
   getRequestVariables: vi.fn(async () => []),
+  getResolvedEnvironment: vi.fn(async (collection: string, name: string) => {
+    const envs = (cache.data.get(JSON.stringify(['environments', collection])) ?? []) as {
+      name: string;
+      variables: unknown[];
+    }[];
+    return { name, variables: envs.find((e) => e.name === name)?.variables ?? [], warnings: [] };
+  }),
 }));
 vi.mock('@/lib/query-client', () => ({
   getQueryClient: () => ({
     getQueryData: (key: unknown) => cache.data.get(JSON.stringify(key)),
+    fetchQuery: (opts: { queryFn: () => unknown }) => opts.queryFn(),
   }),
 }));
 

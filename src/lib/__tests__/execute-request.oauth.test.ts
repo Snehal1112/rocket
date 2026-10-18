@@ -7,6 +7,13 @@ vi.mock('@/lib/tauri-api', () => ({
   getFolderChainVariables: vi.fn(async () => []),
   getRequestVariables: vi.fn(async () => []),
   getWorkspaceConfig: vi.fn(async () => ({})),
+  getResolvedEnvironment: vi.fn(async (collection: string, name: string) => {
+    const envs = (cache.data.get(JSON.stringify(['environments', collection])) ?? []) as {
+      name: string;
+      variables: unknown[];
+    }[];
+    return { name, variables: envs.find((e) => e.name === name)?.variables ?? [], warnings: [] };
+  }),
   executeRequest: vi.fn(),
   oauth2GetToken: vi.fn(),
   oauth2RefreshToken: vi.fn(),
@@ -14,6 +21,7 @@ vi.mock('@/lib/tauri-api', () => ({
 vi.mock('@/lib/query-client', () => ({
   getQueryClient: () => ({
     getQueryData: (key: unknown) => cache.data.get(JSON.stringify(key)),
+    fetchQuery: (opts: { queryFn: () => unknown }) => opts.queryFn(),
     invalidateQueries: vi.fn(),
   }),
 }));

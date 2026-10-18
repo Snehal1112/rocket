@@ -16,7 +16,15 @@ const collectionVars: CollectionVariable[] = [
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
-  getProcessEnvVars: vi.fn(async () => ({ HOME: '/home/u' })),
+  getProcessEnvVars: vi.fn(async () => ({ vars: { HOME: '/home/u' }, dotEnvKeys: [] })),
+  getResolvedEnvironment: vi.fn(async (_c: string | null, name: string) => ({
+    name,
+    variables:
+      name === 'global'
+        ? [{ key: 'tenant', value: 'acme', enabled: true, secret: false, source: 'global' }]
+        : [{ key: 'clientId', value: 'dev-client', enabled: true, secret: false, source: 'dev' }],
+    warnings: [],
+  })),
   getCollectionSettings: vi.fn(async () => ({
     headers: [],
     variables: [

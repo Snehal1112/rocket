@@ -13,6 +13,8 @@ vi.mock('@/lib/tauri-api', async () => {
   };
 });
 
+const pe = (vars: Record<string, string>) => ({ vars, dotEnvKeys: [] as string[] });
+
 describe('process env scope', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -20,33 +22,33 @@ describe('process env scope', () => {
   });
 
   it('asks for the host environment of the collection and gets none when it is withheld', async () => {
-    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue({});
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue(pe({}));
     const ctx = await buildOAuth2VarContext('clone');
-    expect(tauriApi.getProcessEnvVars).toHaveBeenCalledWith('clone');
+    expect(tauriApi.getProcessEnvVars).toHaveBeenCalledWith('clone', null, null);
     expect(Object.keys(ctx).some((k) => k.startsWith('process.env.'))).toBe(false);
   });
 
   it('adds the host environment when the backend returns it', async () => {
-    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue({ HOME: '/home/u' });
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue(pe({ HOME: '/home/u' }));
     const ctx = await buildOAuth2VarContext('mine');
     expect(ctx['process.env.HOME']).toBe('/home/u');
   });
 
   it('asks the backend on every send, so a withdrawn permission applies at once', async () => {
-    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValueOnce({ HOME: '/home/u' });
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValueOnce(pe({ HOME: '/home/u' }));
     expect((await buildOAuth2VarContext('mine'))['process.env.HOME']).toBe('/home/u');
 
     // The backend now returns nothing for the collection.
-    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue({});
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue(pe({}));
     const ctx = await buildOAuth2VarContext('mine');
     expect(ctx['process.env.HOME']).toBeUndefined();
     expect(tauriApi.getProcessEnvVars).toHaveBeenCalledTimes(2);
   });
 
   it('keeps full access for a scratch request and never throws on a failed read', async () => {
-    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValueOnce({ HOME: '/h' });
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValueOnce(pe({ HOME: '/h' }));
     expect((await buildOAuth2VarContext(undefined))['process.env.HOME']).toBe('/h');
-    expect(tauriApi.getProcessEnvVars).toHaveBeenCalledWith(null);
+    expect(tauriApi.getProcessEnvVars).toHaveBeenCalledWith(null, null, null);
 
     vi.mocked(tauriApi.getProcessEnvVars).mockRejectedValue(new Error('boom'));
     const ctx = await buildOAuth2VarContext('other');

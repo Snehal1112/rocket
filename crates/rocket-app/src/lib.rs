@@ -85,7 +85,9 @@ pub use environment_service::EnvironmentService;
 pub use execution_service::websocket_resolution::{
     WebSocketConnectInput, WebSocketScope, WebSocketSendInput,
 };
-pub use execution_service::{ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService};
+pub use execution_service::{
+    ExecuteRequestInput, ExecuteRequestOutput, ProcessEnv, RequestExecutionService,
+};
 pub use export_service::{ExportFormat, ExportService};
 pub use flow_auth::{
     FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher, OAuth2ServiceFetcher,
