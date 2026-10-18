@@ -31,13 +31,13 @@ impl Flattened {
 
 /// Result of walking the chain: layers from child to root, an optional cycle,
 /// and an optional missing parent name.
-struct Chain {
-    layers: Vec<Environment>,
-    cycle: Option<Vec<String>>,
+pub(crate) struct Chain {
+    pub(crate) layers: Vec<Environment>,
+    pub(crate) cycle: Option<Vec<String>>,
     missing: Option<String>,
 }
 
-fn walk_chain(env: &Environment, lookup: &dyn Fn(&str) -> Option<Environment>) -> Chain {
+pub(crate) fn walk_chain(env: &Environment, lookup: &dyn Fn(&str) -> Option<Environment>) -> Chain {
     let mut layers = vec![env.clone()];
     let mut names = vec![env.name.clone()];
     loop {
