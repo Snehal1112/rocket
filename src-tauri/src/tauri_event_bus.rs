@@ -82,6 +82,7 @@ pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
             "collection-changed"
         }
         DomainEvent::ItemMoved { .. } => "collection-changed",
+        DomainEvent::FlowRequestPathsRewritten { .. } => "flow-request-paths-rewritten",
         DomainEvent::FolderCreated { .. }
         | DomainEvent::FolderDeleted { .. }
         | DomainEvent::ItemsReordered { .. }
@@ -149,6 +150,18 @@ mod tests {
             "assistant-conversations-cleared"
         );
         assert_eq!(channel_for(&DomainEvent::HistoryCleared), "history-changed");
+    }
+
+    #[test]
+    fn flow_request_paths_rewritten_has_its_own_channel() {
+        let event = DomainEvent::FlowRequestPathsRewritten {
+            collection: "c".into(),
+            from: "a".into(),
+            to: "b".into(),
+            flows: Vec::new(),
+            failed: Vec::new(),
+        };
+        assert_eq!(channel_for(&event), "flow-request-paths-rewritten");
     }
 
     #[test]

@@ -3,7 +3,10 @@ pub mod graph;
 pub mod handle;
 pub mod lint;
 pub mod node;
+pub mod request_refs;
 pub mod validate;
+
+pub use request_refs::{path_is_within, rewrite_saved_paths, uses_saved_path};
 
 pub use flow::{Flow, FlowEdge, FlowNode, FlowRepository};
 pub use graph::{topological_sort, FlowGraphError};
