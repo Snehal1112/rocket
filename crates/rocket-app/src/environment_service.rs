@@ -1,6 +1,6 @@
 use rocket_audit::publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher};
 use rocket_environment::{Environment, EnvironmentRepository};
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use std::sync::Arc;
 
@@ -47,6 +47,25 @@ impl EnvironmentService {
             &env.client_certificates,
             &env.external_secrets,
         )?;
+        let repo = self.repo.as_ref();
+        let own = |name: &str| {
+            if name == env.name {
+                Some(env.clone())
+            } else {
+                repo.get(name).ok()
+            }
+        };
+        if let Some(cycle) = rocket_environment::find_extends_cycle(env, &own) {
+            let first = cycle.first().cloned().unwrap_or_default();
+            let path = cycle
+                .into_iter()
+                .chain(std::iter::once(first))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            return Err(DomainError::InvalidInput(format!(
+                "Environment extends cycle: {path}"
+            )));
+        }
         // Snapshot previous state so we can detect which secret values actually changed.
         let previous = self.repo.get(&env.name).ok();
         self.repo.save(env)?;
@@ -356,5 +375,47 @@ mod tests {
             svc.list().expect("list").is_empty(),
             "nothing may be written"
         );
+    }
+
+    fn child(name: &str, parent: &str) -> Environment {
+        let mut e = Environment::new(name);
+        e.extends = Some(parent.to_string());
+        e
+    }
+
+    #[test]
+    fn save_rejects_self_extends() {
+        let svc = make_service();
+        let err = svc.save(&child("a", "a")).expect_err("self extends");
+        assert!(matches!(err, DomainError::InvalidInput(m) if m.contains("a -> a")));
+    }
+
+    #[test]
+    fn save_rejects_cycle_through_a_saved_environment() {
+        let svc = make_service();
+        svc.save(&child("a", "b")).expect("a saves, b missing");
+        let err = svc.save(&child("b", "a")).expect_err("cycle");
+        assert!(matches!(err, DomainError::InvalidInput(m) if m.contains('a') && m.contains('b')));
+    }
+
+    #[test]
+    fn save_allows_a_missing_parent() {
+        let svc = make_service();
+        svc.save(&child("a", "nope")).expect("missing parent only warns");
+    }
+
+    #[test]
+    fn save_never_writes_inherited_variables() {
+        let svc = make_service();
+        let mut base = Environment::new("base");
+        base.set_variable(Variable::new("PARENT", "p"));
+        svc.save(&base).expect("base");
+        let mut c = child("c", "base");
+        c.set_variable(Variable::new("OWN", "o"));
+        svc.save(&c).expect("child");
+        let stored = svc.get("c").expect("get");
+        assert_eq!(stored.variables.len(), 1);
+        assert_eq!(stored.variables[0].key, "OWN");
+        assert_eq!(stored.extends.as_deref(), Some("base"));
     }
 }
