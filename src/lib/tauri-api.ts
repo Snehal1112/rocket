@@ -2371,6 +2371,27 @@ export const deleteFlow = (collection: string, name: string) =>
 export const renameFlow = (collection: string, oldName: string, newName: string) =>
   invoke<void>('rename_flow', { collection, oldName, newName });
 
+export const flowsUsingRequest = (collection: string, path: string) =>
+  invoke<string[]>('flows_using_request', { collection, path });
+
+export interface FlowRewriteFailure {
+  flow: string;
+  message: string;
+}
+
+export interface FlowRequestPathsRewrittenEvent {
+  collection: string;
+  from: string;
+  to: string;
+  flows: string[];
+  failed: FlowRewriteFailure[];
+}
+
+export const onFlowRequestPathsRewritten = (
+  handler: (event: FlowRequestPathsRewrittenEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<FlowRequestPathsRewrittenEvent>('flow-request-paths-rewritten', (e) => handler(e.payload));
+
 /** Backend-reported node status. `'idle'` is frontend-only. */
 export type FlowRunNodeStatus = Exclude<FlowNodeStatus, 'idle'>;
 

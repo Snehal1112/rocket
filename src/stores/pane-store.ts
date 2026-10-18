@@ -10,6 +10,7 @@ import {
   snapOf,
   undoStep,
 } from '@/lib/flow-history';
+import { rewriteTabPaths } from '@/lib/flow-request-paths';
 import { appendRunRecord } from '@/lib/flow-run-history';
 import { mergeRunResult } from '@/lib/flow-run-result';
 import { findFlowTabs } from '@/lib/flow-tabs';
@@ -325,6 +326,9 @@ export interface PaneState {
   updateFolderSection: (tabId: string, section: FolderSection) => void;
   /** Retargets open folder tabs when a folder is renamed, matching whole path segments. */
   renameFolderTabs: (collection: string, oldPath: string, newPath: string) => void;
+
+  /** Rewrites saved request paths in open and parked flow tabs of a collection. Never touches isDirty. */
+  rewriteFlowRequestPaths: (collection: string, from: string, to: string) => void;
 
   // Focus tracking.
   setActiveGroup: (groupId: string) => void;
@@ -1601,5 +1605,31 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       };
     }
     set({ root: next.root, collectionTabState: next.collectionTabState });
+  },
+
+  rewriteFlowRequestPaths(collection, from, to) {
+    // Each location of a tab (live or parked) is rewritten by id. The helper keeps
+    // unchanged tabs as the same object, so nothing is set when nothing changed.
+    const state = get();
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    const candidates = [
+      ...collectAllTabs(state.root),
+      ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
+    ];
+    for (const tab of candidates) {
+      if (!isFlowTab(tab) || tab.collectionName !== collection || seen.has(tab.id)) continue;
+      seen.add(tab.id);
+      ids.push(tab.id);
+    }
+    let next: Pick<PaneState, 'root' | 'collectionTabState'> = state;
+    for (const id of ids) {
+      next = updateTabEverywhere(next as PaneState, id, (tab) =>
+        isFlowTab(tab) ? rewriteTabPaths(tab, from, to) : tab,
+      );
+    }
+    if (next.root !== state.root || next.collectionTabState !== state.collectionTabState) {
+      set({ root: next.root, collectionTabState: next.collectionTabState });
+    }
   },
 }));
