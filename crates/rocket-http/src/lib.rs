@@ -16,6 +16,7 @@ pub mod request;
 pub mod resolved_certificate;
 pub mod response;
 pub mod token_client;
+mod util;
 pub mod websocket;
 pub mod wsse_sig;
 

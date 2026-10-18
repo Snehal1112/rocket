@@ -5,23 +5,18 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use hmac::{Hmac, Mac};
-use rand::{distributions::Alphanumeric, Rng};
 use rocket_shared::types::OAuth1Auth;
 use sha1::{Digest as _, Sha1};
 use sha2::{Sha256, Sha512};
 
 /// Percent-encodes with the RFC 5849 §3.6 rules: only unreserved characters stay as-is.
 pub fn percent_encode(input: &str) -> String {
-    urlencoding::encode(input).into_owned()
+    crate::util::percent_encode(input)
 }
 
 /// Returns a fresh random nonce.
 pub fn generate_nonce() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect()
+    crate::util::rand_alnum(32)
 }
 
 /// Returns the current Unix time in seconds.
@@ -183,6 +178,126 @@ fn non_empty(v: &Option<String>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generate_nonce_is_32_ascii_alphanumeric_and_unique() {
+        let all: Vec<String> = (0..50).map(|_| generate_nonce()).collect();
+        assert!(all
+            .iter()
+            .all(|n| n.len() == 32 && n.chars().all(|c| c.is_ascii_alphanumeric())));
+        let unique: std::collections::HashSet<_> = all.iter().collect();
+        assert_eq!(unique.len(), all.len());
+    }
+
+    #[test]
+    fn public_percent_encode_still_matches_the_helper() {
+        for input in ["", "%", "a b", "~", "+", "*", "a/b", "é"] {
+            assert_eq!(percent_encode(input), crate::util::percent_encode(input));
+        }
+    }
+
+    const AWKWARD: [&str; 7] = ["a b", "~", "+", "%", "*", "é", ""];
+
+    const GOLDEN_BASE_STRINGS: &[&str] = &[
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3Da%2520b",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3D~",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3D%252B",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3D%2525",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3D%252A",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3D%25C3%25A9",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&k%3D",
+        "GET&https%3A%2F%2Fexample.com%3A8443%2Fa%2520b%2F%25C3%25BC&dup%3D1%26dup%3D2",
+    ];
+    const GOLDEN_HEADERS: &[&str] = &[
+        "OAuth oauth_nonce=\"n\"",
+        "OAuth realm=\"a%20b\", oauth_nonce=\"n\"",
+        "OAuth oauth_nonce=\"n\"",
+        "OAuth oauth_k=\"a%20b\"",
+        "OAuth oauth_k=\"~\"",
+        "OAuth oauth_k=\"%2B\"",
+        "OAuth oauth_k=\"%25\"",
+        "OAuth oauth_k=\"%2A\"",
+        "OAuth oauth_k=\"%C3%A9\"",
+        "OAuth oauth_k=\"\"",
+    ];
+    const GOLDEN_SIGN: &[&str] = &[
+        "oauth_consumer_key=ck ~",
+        "oauth_nonce=fixednonce",
+        "oauth_signature_method=HMAC-SHA1",
+        "oauth_timestamp=1700000000",
+        "oauth_version=1.0",
+        "oauth_token=tok en",
+        "oauth_body_hash=93RgNqn5qilENXGVtHc26X5I3Ps=",
+        "oauth_signature=oRsru9voXYFK37oYBSb8lJhoTQY=",
+    ];
+
+    #[test]
+    fn golden_signature_base_string_awkward_chars() {
+        let mut cases: Vec<Vec<(String, String)>> = AWKWARD
+            .iter()
+            .map(|v| vec![("k".to_string(), (*v).to_string())])
+            .collect();
+        cases.push(vec![
+            ("dup".to_string(), "1".to_string()),
+            ("dup".to_string(), "2".to_string()),
+        ]);
+        let actual: Vec<String> = cases
+            .iter()
+            .map(|params| {
+                signature_base_string("GET", "https://example.com:8443/a b/ü?x=1", params)
+                    .expect("base string")
+            })
+            .collect();
+        assert_eq!(actual, GOLDEN_BASE_STRINGS);
+    }
+
+    #[test]
+    fn golden_authorization_header_awkward_chars() {
+        let mut actual: Vec<String> = Vec::new();
+        for realm in [None, Some("a b"), Some("")] {
+            actual.push(authorization_header(
+                realm,
+                &[("oauth_nonce".to_string(), "n".to_string())],
+            ));
+        }
+        for v in AWKWARD {
+            actual.push(authorization_header(
+                None,
+                &[("oauth_k".to_string(), v.to_string())],
+            ));
+        }
+        assert_eq!(actual, GOLDEN_HEADERS);
+    }
+
+    #[test]
+    fn golden_sign_hmac_sha1_fixed_nonce() {
+        let auth = OAuth1Auth {
+            consumer_key: Some("ck ~".into()),
+            consumer_secret: Some("cs+%*é".into()),
+            access_token: Some("tok en".into()),
+            access_token_secret: Some("ts/~ ".into()),
+            signature_method: Some("HMAC-SHA1".into()),
+            include_body_hash: Some(true),
+            ..Default::default()
+        };
+        let extra: Vec<(String, String)> = AWKWARD
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (format!("p{i}"), (*v).to_string()))
+            .collect();
+        let out = sign(
+            "POST",
+            "https://example.com/a b/ü?x=1",
+            &extra,
+            b"body=1&x=a b",
+            &auth,
+            "1700000000",
+            "fixednonce",
+        )
+        .expect("sign");
+        let actual: Vec<String> = out.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        assert_eq!(actual, GOLDEN_SIGN);
+    }
 
     // Worked example from the Twitter OAuth 1.0a signing documentation.
     const URL: &str = "https://api.twitter.com/1.1/statuses/update.json";
