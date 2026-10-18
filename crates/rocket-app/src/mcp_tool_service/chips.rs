@@ -253,17 +253,17 @@ impl McpToolService {
             .execution_svc
             .try_secret_values_for_request(global.as_deref(), collection, None, request_path)
             .map_err(|_| refuse("the variable scopes"))?;
-        let environments = self
-            .environment_repo_factory
-            .for_collection(collection)
-            .list()
-            .map_err(|_| refuse("the environments"))?;
+        let env_repo = self.environment_repo_factory.for_collection(collection);
+        let environments = env_repo.list().map_err(|_| refuse("the environments"))?;
         for env in &environments {
+            // Flatten so a secret inherited through `extends` counts. A cycle refuses the chip.
+            let flat = rocket_environment::flatten_with_repo(env, env_repo.as_ref())
+                .map_err(|_| refuse("the environment chain"))?;
             variable_secrets.extend(
-                env.variables
+                flat.variables
                     .iter()
-                    .filter(|variable| variable.secret)
-                    .map(|variable| variable.value.clone()),
+                    .filter(|f| f.variable.secret && !f.variable.value.is_empty())
+                    .map(|f| f.variable.value.clone()),
             );
         }
         let env_names: Vec<String> = environments.iter().map(|env| env.name.clone()).collect();
