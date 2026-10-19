@@ -555,3 +555,58 @@ describe('RequestNode grpc items', () => {
     );
   });
 });
+
+describe('RequestNode Duplicate', () => {
+  function renderWithDuplicate(
+    itemData: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }>,
+    path: string,
+    onDuplicate: (collection: string, path: string) => Promise<void>,
+  ) {
+    return render(
+      <RequestNode
+        uid={itemData.uid}
+        name={itemData.name}
+        method={itemData.method}
+        collectionName='c1'
+        collectionRoot='/workspace/collections/c1'
+        path={path}
+        itemData={itemData}
+        summaries={[]}
+        onMove={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={onDuplicate}
+      />,
+    );
+  }
+
+  beforeEach(() => {
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+  });
+
+  it('RequestNode Duplicate passes the collection and path', async () => {
+    const onDuplicate = vi.fn().mockResolvedValue(undefined);
+    renderWithDuplicate(fullItem, 'auth/login.yml', onDuplicate);
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Actions for Get Users'));
+    await user.click(await screen.findByText('Duplicate'));
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
+    expect(onDuplicate).toHaveBeenCalledWith('c1', 'auth/login.yml');
+  });
+
+  it('Duplicate is hidden for non-HTTP requests', async () => {
+    const gql: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }> = {
+      type: 'summary',
+      uid: 'g-9',
+      name: 'Gql One',
+      method: 'POST',
+      url: 'https://api.example.com/graphql',
+      kind: 'graphql',
+    };
+    renderWithDuplicate(gql, 'gql-one.yml', vi.fn());
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Actions for Gql One'));
+    await screen.findByText('Rename');
+    expect(screen.queryByText('Duplicate')).toBeNull();
+  });
+});
