@@ -128,6 +128,7 @@ Shipped on local main (not pushed). Details in `.claude/collection-trust.md` and
 | R-61 | `extends` and `dotEnvFilePath` on environments: flatten along the parent chain, `.env` as `{{process.env.NAME}}` behind the host environment gate, dialog picker, path field and read-only inherited rows (collection and global) | done (factory job 024, plans 1 to 4) | `rocket-environment` `flatten.rs`, `dot_env.rs`; `EnvironmentDialog.tsx`, `WorkspaceEnvironmentsTab.tsx`; spec `specs/2026-10-18-env-extends-dotenv-design.md` | None. |
 | R-62 | Inherit the parent's external secret bindings and client certificates | open | follow-up of R-61 | Needs a decision on binding alias clashes. |
 | R-63 | Show inherited variables (secrets masked) in the assistant chips and MCP environment views; let backend-executed HTTP (flows, `rok.runRequest`, `run_request`) resolve `{{process.env}}` | open | follow-up of R-61 | Two separate pieces, spec each. |
+| R-64 | Duplicate request through the backend `duplicate_request` command (fresh uid, source by full path, unique name in the folder, no overwrite) | done | `crates/rocket-app/src/collection_service.rs`; spec `docs/superpowers/specs/2026-10-19-duplicate-request-backend-design.md` | Three follow-ups from the spec: non-HTTP kinds (GraphQL, WebSocket, gRPC), ordering the copy next to the source, duplicate a folder. |
 
 ## 8c. Assistant additions (2026-10-11)
 
