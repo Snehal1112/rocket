@@ -186,6 +186,15 @@ pub fn save_websocket_request(
 }
 
 #[tauri::command]
+pub fn duplicate_request(
+    collection: String,
+    path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<Request, DomainError> {
+    svc.duplicate_request(&collection, &path)
+}
+
+#[tauri::command]
 pub fn save_request(
     collection: String,
     path: String,
