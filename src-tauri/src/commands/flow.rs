@@ -1,5 +1,5 @@
 use rocket_app::{
-    FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowService, PartialRun,
+    FlowExecutionService, FlowReferenceUpdater, FlowRunOptions, FlowRunSummary, FlowService, PartialRun,
     RequestExecutionService, RunFlowInput,
 };
 use rocket_flow::{
@@ -450,6 +450,15 @@ pub fn rename_flow(
     svc: State<'_, FlowService>,
 ) -> Result<(), DomainError> {
     svc.rename(&collection, &old_name, &new_name)
+}
+
+#[tauri::command]
+pub fn flows_using_request(
+    collection: String,
+    path: String,
+    svc: State<'_, FlowService>,
+) -> Result<Vec<String>, DomainError> {
+    FlowReferenceUpdater::flows_using(&*svc, &collection, &path)
 }
 
 #[tauri::command]

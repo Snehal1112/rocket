@@ -382,6 +382,11 @@ pub fn run() {
             // watcher (started further below) remains a fallback for changes
             // made outside the app; this service publishes its own events for
             // deterministic, immediate sidebar/tree refresh on success.
+            // Follows workspace switches through the shared path.
+            let flow_refs: Arc<dyn rocket_app::FlowReferenceUpdater> =
+                Arc::new(rocket_app::FlowService::new(Box::new(
+                    rocket_infra::SharedPathFlowRepo::new(Arc::clone(&active_workspace_path)),
+                )));
             let collection_svc = CollectionService::new_with_audit(
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(
                     &active_workspace_path,
@@ -389,7 +394,8 @@ pub fn run() {
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit_publisher.clone(),
             )
-            .with_trust_store(Arc::clone(&trust_store));
+            .with_trust_store(Arc::clone(&trust_store))
+            .with_flow_references(Arc::clone(&flow_refs));
             // Holds the assistant's proposed changes until the user accepts
             // them. It applies them through its own CollectionService, built
             // like collection_svc above, so accepted changes follow workspace
@@ -402,7 +408,8 @@ pub fn run() {
                     ))),
                     Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                     audit_publisher.clone(),
-                ),
+                )
+                .with_flow_references(Arc::clone(&flow_refs)),
                 Arc::new(SharedCollectionEnvironmentRepo::with_secret_store(
                     Arc::clone(&active_workspace_path),
                     env_secret_store(),
@@ -968,6 +975,7 @@ pub fn run() {
             commands::flow::get_flow,
             commands::flow::delete_flow,
             commands::flow::rename_flow,
+            commands::flow::flows_using_request,
             commands::flow::save_flow,
             commands::flow::lint_flow,
             commands::flow::run_flow,
