@@ -8,7 +8,7 @@ use rocket_collection::{
     GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher, FlowRewriteFailure};
 use std::sync::Arc;
 
@@ -433,6 +433,53 @@ impl CollectionService {
             path: actual_path.clone(),
         });
         self.repo.get_request(collection, &actual_path)
+    }
+
+    /// Duplicates an HTTP request found by its full path. The copy gets a new
+    /// uid and a unique name in the source's folder, and no file is replaced.
+    pub fn duplicate_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
+        if self.repo.request_kind(collection, path)? != RequestKind::Http {
+            return Err(DomainError::InvalidInput(
+                "Only HTTP requests can be duplicated".into(),
+            ));
+        }
+        let source = self.repo.get_request(collection, path)?;
+        let (dir, file) = match path.rsplit_once('/') {
+            Some((dir, file)) => (Some(dir), file),
+            None => (None, path),
+        };
+        let stem = [".yml", ".yaml", ".json"]
+            .iter()
+            .find_map(|ext| file.strip_suffix(ext))
+            .unwrap_or(file);
+        for n in 1..=1000u32 {
+            let suffix = if n == 1 {
+                " copy".to_string()
+            } else {
+                format!(" copy {n}")
+            };
+            let file_name = format!("{stem}{suffix}.yml");
+            let candidate = match dir {
+                Some(dir) => format!("{dir}/{file_name}"),
+                None => file_name,
+            };
+            if self.repo.path_exists(collection, &candidate).unwrap_or(true) {
+                continue;
+            }
+            let mut copy = source.clone();
+            copy.uid = rocket_collection::generate_uid();
+            copy.name = format!("{}{suffix}", source.name);
+            copy.seq = None;
+            copy.file_name = None;
+            match self.create_request_exclusive(collection, &candidate, &copy) {
+                Ok(saved) => return Ok(saved),
+                Err(DomainError::AlreadyExists(_)) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(DomainError::Conflict(
+            "No free name for the duplicate request".into(),
+        ))
     }
 
     /// Moves an item without replacing the destination. See
@@ -1107,6 +1154,222 @@ mod tests {
             "expected ItemMoved, got {:?}",
             *published
         );
+    }
+
+    type Recorded = Arc<Mutex<Vec<(String, Request)>>>;
+
+    fn dup_source() -> Request {
+        let mut r = Request::new("Login", HttpMethod::Get, "http://x".to_string());
+        r.seq = Some(3);
+        r.file_name = Some("Login.yml".into());
+        r
+    }
+
+    fn dup_service(
+        source: Request,
+        kind: impl Fn() -> DomainResult<RequestKind> + Send + Sync + 'static,
+        exists: impl Fn(&str) -> DomainResult<bool> + Send + Sync + 'static,
+        create_err_first: bool,
+    ) -> (CollectionService, Recorded, Arc<RecordingEventPublisher>) {
+        let recorded: Recorded = Arc::new(Mutex::new(vec![]));
+        let rec = Arc::clone(&recorded);
+        let calls = Arc::new(Mutex::new(0u32));
+        let src = source;
+        let repo = NullCollectionRepo::strict()
+            .on_request_kind(move |_, _| kind())
+            .on_get_request(move |_, _| Ok(src.clone()))
+            .on_path_exists(move |_, p| exists(p))
+            .on_create_request_exclusive(move |_, p, r| {
+                let mut n = calls.lock().expect("lock");
+                *n += 1;
+                if create_err_first && *n == 1 {
+                    return Err(DomainError::AlreadyExists("x".into()));
+                }
+                rec.lock().expect("lock").push((p.to_string(), r.clone()));
+                Ok(p.to_string())
+            });
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = CollectionService::new(
+            Box::new(repo),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        (svc, recorded, publisher)
+    }
+
+    fn dup_ok(path: &str) -> (Recorded, Request) {
+        let (svc, rec, _) = dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        let out = svc.duplicate_request("c", path).expect("duplicate");
+        (rec, out)
+    }
+
+    #[test]
+    fn duplicate_request_creates_a_copy_with_a_new_uid_and_name() {
+        let (rec, _) = dup_ok("auth/Login.yml");
+        let rec = rec.lock().expect("lock");
+        assert_eq!(rec[0].0, "auth/Login copy.yml");
+        assert_eq!(rec[0].1.name, "Login copy");
+        assert!(!rec[0].1.uid.is_empty());
+        assert_ne!(rec[0].1.uid, dup_source().uid);
+    }
+
+    #[test]
+    fn duplicate_request_clears_seq() {
+        let (rec, _) = dup_ok("auth/Login.yml");
+        let rec = rec.lock().expect("lock");
+        assert_eq!(rec[0].1.seq, None);
+        assert_eq!(rec[0].1.file_name, None);
+    }
+
+    #[test]
+    fn duplicate_request_copies_every_other_field() {
+        let mut source = dup_source();
+        source.headers = vec![rocket_shared::types::Header {
+            key: "X-A".into(),
+            value: "1".into(),
+            enabled: true,
+            description: None,
+        }];
+        source.tags = vec!["t".into()];
+        source.pre_request_script = Some("pre".into());
+        source.post_response_script = Some("post".into());
+        source.tests = Some("tests".into());
+        source.variables = vec![CollectionVariable {
+            key: "v".into(),
+            value: "1".into(),
+            initial_value: "1".into(),
+            enabled: true,
+            secret: false,
+        }];
+        let (svc, rec, _) = dup_service(source.clone(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        svc.duplicate_request("c", "Login.yml").expect("duplicate");
+        let mut expected = source;
+        let got = rec.lock().expect("lock")[0].1.clone();
+        expected.uid = got.uid.clone();
+        expected.name = "Login copy".into();
+        expected.seq = None;
+        expected.file_name = None;
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn duplicate_request_rejects_a_graphql_request() {
+        let (svc, rec, _) =
+            dup_service(dup_source(), || Ok(RequestKind::GraphQl), |_| Ok(false), false);
+        let err = svc.duplicate_request("c", "Login.yml").expect_err("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(rec.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn duplicate_request_of_a_missing_request_is_not_found() {
+        let (svc, _, _) = dup_service(
+            dup_source(),
+            || Err(DomainError::NotFound("x".into())),
+            |_| Ok(false),
+            false,
+        );
+        let err = svc.duplicate_request("c", "Login.yml").expect_err("missing");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn duplicate_request_publishes_request_saved() {
+        let (svc, _, publisher) =
+            dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        let published = publisher.events.lock().expect("lock");
+        assert_eq!(published.len(), 1);
+        assert!(matches!(
+            &published[0],
+            DomainEvent::RequestSaved { collection, path }
+                if collection == "c" && path == "auth/Login copy.yml"
+        ));
+    }
+
+    #[test]
+    fn duplicate_request_skips_a_taken_name() {
+        let (svc, rec, _) = dup_service(
+            dup_source(),
+            || Ok(RequestKind::Http),
+            |p| Ok(p == "auth/Login copy.yml"),
+            false,
+        );
+        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        let rec = rec.lock().expect("lock");
+        assert_eq!(rec[0].0, "auth/Login copy 2.yml");
+        assert_eq!(rec[0].1.name, "Login copy 2");
+    }
+
+    #[test]
+    fn duplicate_request_retries_the_next_name_when_the_file_appears_meanwhile() {
+        let (svc, rec, _) =
+            dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), true);
+        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        let rec = rec.lock().expect("lock");
+        assert_eq!(rec.len(), 1);
+        assert_eq!(rec[0].0, "auth/Login copy 2.yml");
+    }
+
+    #[test]
+    fn duplicate_request_gives_up_after_1000_names() {
+        let count = Arc::new(Mutex::new(0u32));
+        let c = Arc::clone(&count);
+        let (svc, rec, _) = dup_service(
+            dup_source(),
+            || Ok(RequestKind::Http),
+            move |_| {
+                *c.lock().expect("lock") += 1;
+                Ok(true)
+            },
+            false,
+        );
+        let err = svc.duplicate_request("c", "Login.yml").expect_err("full");
+        assert!(matches!(err, DomainError::Conflict(_)));
+        assert_eq!(*count.lock().expect("lock"), 1000);
+        assert!(rec.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn duplicate_request_skips_a_candidate_when_the_existence_check_fails() {
+        let (svc, rec, _) = dup_service(
+            dup_source(),
+            || Ok(RequestKind::Http),
+            |p| {
+                if p == "auth/Login copy.yml" {
+                    Err(DomainError::Internal("boom".into()))
+                } else {
+                    Ok(false)
+                }
+            },
+            false,
+        );
+        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        assert_eq!(rec.lock().expect("lock")[0].0, "auth/Login copy 2.yml");
+    }
+
+    #[test]
+    fn duplicate_request_uses_the_source_file_stem_for_the_path() {
+        let mut source = dup_source();
+        source.name = "A/B: C".into();
+        let (svc, rec, _) = dup_service(source, || Ok(RequestKind::Http), |_| Ok(false), false);
+        svc.duplicate_request("c", "auth/ab.yml").expect("duplicate");
+        let rec = rec.lock().expect("lock");
+        assert_eq!(rec[0].0, "auth/ab copy.yml");
+        assert_eq!(rec[0].1.name, "A/B: C copy");
+    }
+
+    #[test]
+    fn duplicate_request_of_a_legacy_json_source_writes_a_yml_copy() {
+        let (rec, _) = dup_ok("auth/Foo.json");
+        assert_eq!(rec.lock().expect("lock")[0].0, "auth/Foo copy.yml");
+    }
+
+    #[test]
+    fn duplicate_request_in_the_root_has_no_leading_slash() {
+        let (rec, _) = dup_ok("Login.yml");
+        assert_eq!(rec.lock().expect("lock")[0].0, "Login copy.yml");
     }
 
     struct RecordingUpdater {
