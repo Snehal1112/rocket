@@ -28,6 +28,8 @@ vi.mock('@/lib/tauri-api', async () => {
     deleteScriptFile: vi.fn(),
     listFlows: vi.fn().mockResolvedValue([]),
     deleteFlow: vi.fn(),
+    deleteRequest: vi.fn(),
+    flowsUsingRequest: vi.fn(),
     readScriptFile: vi.fn(),
     // biome-ignore lint/suspicious/noEmptyBlockStatements: unlisten stub.
     onCollectionChanged: vi.fn().mockResolvedValue(() => {}),
@@ -40,7 +42,8 @@ vi.mock('@/components/history/HistoryPanel', () => ({
   HistoryPanel: () => <div data-testid='history-panel-marker' />,
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() },
+}));
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -264,5 +267,119 @@ describe('CollectionsSidebar flow delete', () => {
     );
     expect(flowTabs()).toHaveLength(1);
     expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([key]);
+  });
+});
+
+describe('CollectionsSidebar delete dialog flow list', () => {
+  const summary: tauriApi.CollectionSummary = {
+    uid: 'c1',
+    repositoryId: 'r1',
+    name: 'col',
+    path: '/w/col',
+    requestCount: 1,
+  };
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.mocked(tauriApi.listCollections).mockResolvedValue([summary]);
+    vi.mocked(tauriApi.listWorkspaces).mockResolvedValue([
+      { id: 'ws1', repositoryId: 'r1', name: 'WS', path: '/w', pinned: false },
+    ]);
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue({
+      name: 'col',
+      root: {
+        uid: 'root',
+        name: 'col',
+        items: [
+          { type: 'summary', uid: 'r1', name: 'List Orders', method: 'GET', url: 'http://x' },
+          { type: 'folder', uid: 'f1', name: 'Orders', items: [] },
+        ],
+      },
+      settings: { headers: [], variables: [], sandboxMode: 'safe' },
+    });
+    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue(['Login']);
+    vi.mocked(tauriApi.flowsUsingRequest).mockReset().mockResolvedValue([]);
+    vi.mocked(tauriApi.deleteRequest).mockReset().mockResolvedValue(undefined);
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
+    usePaneStore.setState({ activeCollection: 'col' });
+  });
+
+  async function openDelete(label: string) {
+    await userEvent.click(await screen.findByRole('button', { name: `Actions for ${label}` }));
+    await userEvent.click(await screen.findByText('Delete'));
+    await screen.findByText('Confirm Delete');
+  }
+
+  it('delete dialog lists the flows that use the request', async () => {
+    vi.mocked(tauriApi.flowsUsingRequest).mockResolvedValue(['Checkout', 'Smoke test']);
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('List Orders');
+    expect(await screen.findByText(/Used by 2 flows: Checkout, Smoke test\./)).toBeInTheDocument();
+  });
+
+  it('delete dialog uses the singular form for one flow', async () => {
+    vi.mocked(tauriApi.flowsUsingRequest).mockResolvedValue(['Checkout']);
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('List Orders');
+    expect(await screen.findByText(/Used by 1 flow: Checkout\./)).toBeInTheDocument();
+  });
+
+  it('delete dialog for a folder lists the flows that use it', async () => {
+    vi.mocked(tauriApi.flowsUsingRequest).mockResolvedValue(['Checkout']);
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('Orders');
+    expect(await screen.findByText(/Used by 1 flow: Checkout\./)).toBeInTheDocument();
+    expect(tauriApi.flowsUsingRequest).toHaveBeenCalledWith('col', expect.any(String));
+    expect(vi.mocked(tauriApi.flowsUsingRequest).mock.calls[0]?.[1]).toContain('Orders');
+  });
+
+  it('delete dialog stays usable when the lookup fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(tauriApi.flowsUsingRequest).mockRejectedValue('boom');
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('List Orders');
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(screen.queryByText(/Used by/)).not.toBeInTheDocument();
+    const del = screen.getByRole('button', { name: 'Delete' });
+    expect(del).toBeEnabled();
+    await userEvent.click(del);
+    await waitFor(() => expect(tauriApi.deleteRequest).toHaveBeenCalled());
+    consoleError.mockRestore();
+  });
+
+  it('delete dialog shows nothing when no flow uses the request', async () => {
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('List Orders');
+    await waitFor(() => expect(tauriApi.flowsUsingRequest).toHaveBeenCalled());
+    expect(screen.queryByText(/Used by/)).not.toBeInTheDocument();
+  });
+
+  it('delete dialog ignores a late lookup result', async () => {
+    let resolveFirst: (v: string[]) => void = () => undefined;
+    vi.mocked(tauriApi.flowsUsingRequest)
+      .mockImplementationOnce(
+        () =>
+          new Promise<string[]>((r) => {
+            resolveFirst = r;
+          }),
+      )
+      .mockResolvedValue([]);
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('List Orders');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText('Confirm Delete')).not.toBeInTheDocument());
+    await openDelete('Orders');
+    await waitFor(() => expect(tauriApi.flowsUsingRequest).toHaveBeenCalledTimes(2));
+    resolveFirst(['Stale']);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(/Stale/)).not.toBeInTheDocument();
+  });
+
+  it('delete dialog does not call the lookup for a flow or a script target', async () => {
+    render(<CollectionsSidebar />, { wrapper });
+    await openDelete('Login');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText('Confirm Delete')).not.toBeInTheDocument());
+    expect(tauriApi.flowsUsingRequest).not.toHaveBeenCalled();
   });
 });
