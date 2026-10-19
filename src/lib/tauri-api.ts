@@ -923,6 +923,9 @@ export const renameCollection = (oldName: string, newName: string) =>
 export const saveRequest = (collection: string, path: string, request: Request) =>
   invoke<Request>('save_request', { collection, path, request });
 
+export const duplicateRequest = (collection: string, path: string) =>
+  invoke<Request>('duplicate_request', { collection, path });
+
 export const saveGraphQlRequest = (collection: string, path: string, request: GraphQlRequest) =>
   invoke<GraphQlRequest>('save_graphql_request', { collection, path, request });
 
