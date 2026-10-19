@@ -37,11 +37,11 @@ import {
   deleteFolder,
   deleteRequest,
   deleteScriptFile,
+  duplicateRequest,
   flowsUsingRequest,
   getCollection,
   moveItem,
   onCollectionChanged,
-  saveRequest,
 } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
@@ -228,60 +228,12 @@ export function CollectionsSidebar() {
     [],
   );
 
-  const handleDuplicate = useCallback(async (collection: string, path: string, name: string) => {
+  const handleDuplicate = useCallback(async (collection: string, path: string) => {
     try {
-      // Read the existing collection to locate the source request.
-      const col = await getCollection(collection);
-      const items = col.root.items;
-
-      // Recursively find the request by fileName or name.
-      const findRequest = (
-        nodes: CollectionItem[],
-        targetPath: string,
-      ): CollectionItem | undefined => {
-        for (const item of nodes) {
-          if (item.type === 'request') {
-            const fn = item.fileName ?? item.name;
-            if (fn === targetPath || item.name === name) return item;
-          }
-          if (item.type === 'folder') {
-            const found = findRequest(item.items, targetPath);
-            if (found) return found;
-          }
-        }
-        return undefined;
-      };
-
-      const source = findRequest(items, path.split('/').pop() ?? path);
-      if (source?.type !== 'request') return;
-
-      // Collect existing names at the top level to find a unique copy name.
-      const existing = new Set(
-        items
-          .filter((i: CollectionItem) => i.type === 'request')
-          .map((i: CollectionItem) => i.name),
-      );
-      let copyName = `${name} copy`;
-      let counter = 1;
-      while (existing.has(copyName)) {
-        counter++;
-        copyName = `${name} copy ${counter}`;
-      }
-
-      // Preserve the folder prefix from the original path.
-      const pathParts = path.split('/');
-      pathParts.pop();
-      const folderPath = pathParts.join('/');
-      const newPath = folderPath ? `${folderPath}/${copyName}` : copyName;
-
-      // Save the duplicate with all source data. New uid and name, rest copied.
-      const { type: _t, uid: _u, name: _n, fileName: _f, ...requestData } = source;
-      await saveRequest(collection, newPath, {
-        ...requestData,
-        uid: '',
-        name: copyName,
-      });
+      await duplicateRequest(collection, path);
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Could not duplicate the request: ${message}`);
       console.error('[CollectionsSidebar] duplicate failed:', err);
     }
   }, []);

@@ -111,3 +111,41 @@ describe('FolderNode', () => {
     expect(folderTabs()).toHaveLength(1);
   });
 });
+
+describe('FolderNode duplicate forwarding', () => {
+  it('FolderNode forwards onDuplicate to its child requests', async () => {
+    usePaneStore.getState().reset();
+    const onDuplicate = vi.fn().mockResolvedValue(undefined);
+    const request: CollectionItem = {
+      type: 'summary',
+      uid: 'r-1',
+      name: 'Child Req',
+      fileName: 'child.yml',
+      method: 'GET',
+      url: 'https://api.example.com/x',
+    };
+    render(
+      <Tree aria-label='tree'>
+        <FolderNode
+          name='folder'
+          items={[request]}
+          collectionName='col'
+          collectionRoot='/ws/col'
+          basePath='folder'
+          depth={0}
+          filter=''
+          summaries={[]}
+          onNewFolder={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={vi.fn()}
+          onDuplicate={onDuplicate}
+        />
+      </Tree>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Expand folder' }));
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Actions for Child Req'));
+    await user.click(await screen.findByText('Duplicate'));
+    expect(onDuplicate).toHaveBeenCalledWith('col', 'folder/child.yml');
+  });
+});

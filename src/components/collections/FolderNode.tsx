@@ -61,7 +61,7 @@ interface FolderNodeProps {
     dstPath: string,
   ) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
+  onDuplicate: (collection: string, path: string) => Promise<void>;
 }
 
 export function FolderNode({

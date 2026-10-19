@@ -29,6 +29,9 @@ vi.mock('@/lib/tauri-api', async () => {
     listFlows: vi.fn().mockResolvedValue([]),
     deleteFlow: vi.fn(),
     deleteRequest: vi.fn(),
+    duplicateRequest: vi.fn(),
+    getCollection: vi.fn(),
+    saveRequest: vi.fn(),
     flowsUsingRequest: vi.fn(),
     readScriptFile: vi.fn(),
     // biome-ignore lint/suspicious/noEmptyBlockStatements: unlisten stub.
@@ -267,6 +270,108 @@ describe('CollectionsSidebar flow delete', () => {
     );
     expect(flowTabs()).toHaveLength(1);
     expect(Object.keys(useFlowAuthStore.getState().auths)).toEqual([key]);
+  });
+});
+
+describe('CollectionsSidebar duplicate request', () => {
+  const summary: tauriApi.CollectionSummary = {
+    uid: 'c1',
+    repositoryId: 'r1',
+    name: 'col',
+    path: '/w/col',
+    requestCount: 2,
+  };
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.mocked(toast.error).mockReset();
+    vi.mocked(tauriApi.listCollections).mockResolvedValue([summary]);
+    vi.mocked(tauriApi.listWorkspaces).mockResolvedValue([
+      { id: 'ws1', repositoryId: 'r1', name: 'WS', path: '/w', pinned: false },
+    ]);
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue({
+      name: 'col',
+      root: {
+        uid: 'root',
+        name: 'col',
+        items: [
+          {
+            type: 'summary',
+            uid: 'r1',
+            name: 'Login',
+            method: 'GET',
+            url: 'http://x',
+            fileName: 'login.yml',
+          },
+        ],
+      },
+      settings: { headers: [], variables: [], sandboxMode: 'safe' },
+    });
+    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue([]);
+    vi.mocked(tauriApi.duplicateRequest).mockReset().mockResolvedValue({} as tauriApi.Request);
+    vi.mocked(tauriApi.getCollection).mockReset();
+    vi.mocked(tauriApi.saveRequest).mockReset();
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
+    usePaneStore.setState({ activeCollection: 'col' });
+  });
+
+  async function clickDuplicate(label: string) {
+    await userEvent.click(await screen.findByRole('button', { name: `Actions for ${label}` }));
+    await userEvent.click(await screen.findByText('Duplicate'));
+  }
+
+  it('duplicate calls duplicateRequest with the collection and the path', async () => {
+    render(<CollectionsSidebar />, { wrapper });
+    await clickDuplicate('Login');
+    await waitFor(() => expect(tauriApi.duplicateRequest).toHaveBeenCalledTimes(1));
+    expect(tauriApi.duplicateRequest).toHaveBeenCalledWith('col', 'login.yml');
+    expect(tauriApi.getCollection).not.toHaveBeenCalled();
+    expect(tauriApi.saveRequest).not.toHaveBeenCalled();
+  });
+
+  it('duplicate passes the full path of a request in a folder', async () => {
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue({
+      name: 'col',
+      root: {
+        uid: 'root',
+        name: 'col',
+        items: [
+          {
+            type: 'folder',
+            uid: 'f1',
+            name: 'auth',
+            items: [
+              {
+                type: 'summary',
+                uid: 'r2',
+                name: 'Login',
+                method: 'GET',
+                url: 'http://x',
+                fileName: 'login.yml',
+              },
+            ],
+          },
+        ],
+      },
+      settings: { headers: [], variables: [], sandboxMode: 'safe' },
+    });
+    render(<CollectionsSidebar />, { wrapper });
+    await userEvent.click(await screen.findByText('auth'));
+    await clickDuplicate('Login');
+    await waitFor(() => expect(tauriApi.duplicateRequest).toHaveBeenCalledTimes(1));
+    expect(tauriApi.duplicateRequest).toHaveBeenCalledWith('col', 'auth/login.yml');
+  });
+
+  it('duplicate failure shows an error toast and logs', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(tauriApi.duplicateRequest).mockRejectedValue(new Error('boom'));
+    render(<CollectionsSidebar />, { wrapper });
+    await clickDuplicate('Login');
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Could not duplicate the request: boom'),
+    );
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });
 

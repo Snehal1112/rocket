@@ -87,7 +87,7 @@ interface RequestNodeProps {
     dstPath: string,
   ) => Promise<void>;
   onDelete: (target: DeleteTarget) => void;
-  onDuplicate: (collection: string, path: string, name: string) => Promise<void>;
+  onDuplicate: (collection: string, path: string) => Promise<void>;
 }
 
 export function RequestNode({
@@ -354,7 +354,7 @@ export function RequestNode({
             </DropdownMenuTrigger>
             <DropdownMenuContent className='w-48' onClick={(e) => e.stopPropagation()}>
               {kind === 'http' && (
-                <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
+                <DropdownMenuItem onClick={() => void onDuplicate(collectionName, path)}>
                   <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
                 </DropdownMenuItem>
               )}
@@ -431,7 +431,7 @@ export function RequestNode({
       {/* Right-click context menu — same actions, power-user shortcut. */}
       <ContextMenuContent className='w-48'>
         {kind === 'http' && (
-          <ContextMenuItem onClick={() => void onDuplicate(collectionName, path, name)}>
+          <ContextMenuItem onClick={() => void onDuplicate(collectionName, path)}>
             <Copy aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Duplicate
           </ContextMenuItem>
         )}
