@@ -12,7 +12,7 @@ use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall}
 use async_trait::async_trait;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    FolderSettings, Request as CollectionRequest, RequestScriptPhase,
+    FolderSettings, Request as CollectionRequest, RequestKind, RequestScriptPhase,
 };
 use rocket_environment::{
     Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
@@ -763,6 +763,9 @@ pub struct NullCollectionRepo {
     move_item: Option<MoveItemHook>,
     get_folder_chain_variables: Hook2<Vec<CollectionVariable>>,
     get_request_variables: Hook2<Vec<CollectionVariable>>,
+    request_kind: Hook2<RequestKind>,
+    path_exists: Hook2<bool>,
+    create_request_exclusive: SaveRequestHook,
 }
 
 impl Default for NullCollectionRepo {
@@ -792,6 +795,9 @@ impl NullCollectionRepo {
             move_item: None,
             get_folder_chain_variables: None,
             get_request_variables: None,
+            request_kind: None,
+            path_exists: None,
+            create_request_exclusive: None,
         }
     }
 
@@ -900,6 +906,27 @@ impl NullCollectionRepo {
         self.get_folder_chain_variables = Some(Box::new(f));
         self
     }
+    pub fn on_request_kind(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<RequestKind> + Send + Sync + 'static,
+    ) -> Self {
+        self.request_kind = Some(Box::new(f));
+        self
+    }
+    pub fn on_path_exists(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<bool> + Send + Sync + 'static,
+    ) -> Self {
+        self.path_exists = Some(Box::new(f));
+        self
+    }
+    pub fn on_create_request_exclusive(
+        mut self,
+        f: impl Fn(&str, &str, &CollectionRequest) -> DomainResult<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.create_request_exclusive = Some(Box::new(f));
+        self
+    }
     pub fn on_get_request_variables(
         mut self,
         f: impl Fn(&str, &str) -> DomainResult<Vec<CollectionVariable>> + Send + Sync + 'static,
@@ -958,6 +985,33 @@ impl CollectionRepository for NullCollectionRepo {
         }
         self.gate(CollectionMethod::GetRequest);
         Err(DomainError::NotFound("stub".into()))
+    }
+    fn request_kind(&self, collection: &str, path: &str) -> DomainResult<RequestKind> {
+        match &self.request_kind {
+            Some(f) => f(collection, path),
+            None => Ok(RequestKind::Http),
+        }
+    }
+    fn path_exists(&self, collection: &str, path: &str) -> DomainResult<bool> {
+        match &self.path_exists {
+            Some(f) => f(collection, path),
+            None => Err(DomainError::Internal(
+                "path existence check is not available".into(),
+            )),
+        }
+    }
+    fn create_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &CollectionRequest,
+    ) -> DomainResult<String> {
+        match &self.create_request_exclusive {
+            Some(f) => f(collection, path, request),
+            None => Err(DomainError::Internal(
+                "exclusive request creation is not available".into(),
+            )),
+        }
     }
     fn save_request(
         &self,

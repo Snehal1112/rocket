@@ -55,6 +55,8 @@ pub mod template_service;
 #[cfg(test)]
 mod flow_request_ref_e2e_tests;
 #[cfg(test)]
+mod duplicate_request_e2e_tests;
+#[cfg(test)]
 pub(crate) mod test_doubles;
 pub(crate) mod vault_certificates;
 pub mod vault_secret_resolution;
