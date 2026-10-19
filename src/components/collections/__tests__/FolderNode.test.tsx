@@ -1,11 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FolderNode } from '@/components/collections/FolderNode';
 import { Tree } from '@/components/ui/tree';
 import { collectAllTabs } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import { moveItem } from '@/lib/tauri-api';
+import { createRequest, saveRequest, moveItem } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FolderTab } from '@/types/pane-types';
 import { isFolderTab } from '@/types/pane-types';
@@ -18,8 +19,11 @@ vi.mock('@/lib/tauri-api', async () => {
     getCollection: vi.fn(),
     endAgentSession: vi.fn(),
     moveItem: vi.fn().mockResolvedValue(undefined),
+    saveRequest: vi.fn(),
+    createRequest: vi.fn(),
   };
 });
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 const childFolder: CollectionItem = { type: 'folder', uid: 'f-child', name: 'child', items: [] };
 
@@ -147,5 +151,69 @@ describe('FolderNode duplicate forwarding', () => {
     await user.click(screen.getByLabelText('Actions for Child Req'));
     await user.click(await screen.findByText('Duplicate'));
     expect(onDuplicate).toHaveBeenCalledWith('col', 'folder/child.yml');
+  });
+});
+
+describe('FolderNode new request name collision', () => {
+  const existing: CollectionItem = {
+    type: 'summary',
+    uid: 'r-existing',
+    name: 'Login',
+    fileName: 'login.yml',
+    method: 'POST',
+    url: 'https://api.example.com/login',
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function createRequestNamed(name: string) {
+    usePaneStore.getState().reset();
+    vi.mocked(saveRequest).mockReset();
+    vi.mocked(createRequest).mockReset();
+    vi.mocked(toast.error).mockReset();
+    vi.mocked(createRequest).mockRejectedValue(new Error('Already exists: col/auth/login.yml'));
+    render(
+      <Tree aria-label='tree'>
+        <FolderNode
+          name='auth'
+          items={[existing]}
+          collectionName='col'
+          collectionRoot='/ws/col'
+          basePath='auth'
+          depth={0}
+          filter=''
+          summaries={[]}
+          onNewFolder={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={vi.fn()}
+          onDuplicate={vi.fn()}
+        />
+      </Tree>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Expand auth' }));
+    // Focus is stubbed: when the menu closes it moves focus, which blurs the new
+    // request input and hides it before the test can type.
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(() => undefined);
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for auth' }));
+    await userEvent.click(await screen.findByText('New Request'));
+    const input = await screen.findByPlaceholderText('Request name');
+    fireEvent.change(input, { target: { value: name } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  }
+
+  it('does not overwrite an existing request with the same file name', async () => {
+    await createRequestNamed('login');
+    expect(saveRequest).not.toHaveBeenCalled();
+    expect(createRequest).toHaveBeenCalledWith('col', expect.stringMatching(/^auth\/login$/i), expect.anything());
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already exists'));
+  });
+
+  it('treats a case variant of an existing file name as a collision', async () => {
+    await createRequestNamed('LOGIN');
+    expect(saveRequest).not.toHaveBeenCalled();
+    expect(createRequest).toHaveBeenCalledWith('col', expect.stringMatching(/^auth\/login$/i), expect.anything());
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already exists'));
   });
 });

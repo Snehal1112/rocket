@@ -435,6 +435,22 @@ impl CollectionService {
         self.repo.get_request(collection, &actual_path)
     }
 
+    /// Creates a new request and refuses to replace an existing one. A name
+    /// that differs only in case counts as taken, as the file may be one entry
+    /// on a case-insensitive filesystem.
+    pub fn create_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<Request> {
+        let file_path = rocket_collection::request_filename_for(path);
+        if self.repo.path_exists(collection, &file_path)? {
+            return Err(DomainError::AlreadyExists(format!("{collection}/{file_path}")));
+        }
+        self.create_request_exclusive(collection, &file_path, request)
+    }
+
     /// Duplicates an HTTP request found by its full path. The copy gets a new
     /// uid and a unique name in the source's folder, and no file is replaced.
     pub fn duplicate_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
@@ -1202,6 +1218,29 @@ mod tests {
         let (svc, rec, _) = dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
         let out = svc.duplicate_request("c", path).expect("duplicate");
         (rec, out)
+    }
+
+    #[test]
+    fn create_request_refuses_a_name_that_exists_even_in_another_case() {
+        let (svc, rec, publisher) =
+            dup_service(dup_source(), || Ok(RequestKind::Http), |p| Ok(p.to_lowercase() == "auth/login.yml"), false);
+        let blank = Request::new("LOGIN", HttpMethod::Get, String::new());
+        let err = svc
+            .create_request("c", "auth/LOGIN", &blank)
+            .expect_err("exists");
+        assert!(matches!(err, DomainError::AlreadyExists(_)), "got {err:?}");
+        assert!(rec.lock().expect("lock").is_empty());
+        assert!(publisher.events.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn create_request_writes_a_new_name_and_publishes() {
+        let (svc, rec, _) = dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        let fresh = Request::new("Fresh", HttpMethod::Get, String::new());
+        svc.create_request("c", "auth/Fresh", &fresh).expect("created");
+        let rec = rec.lock().expect("lock");
+        assert_eq!(rec.len(), 1);
+        assert_eq!(rec[0].0, "auth/Fresh.yml");
     }
 
     #[test]

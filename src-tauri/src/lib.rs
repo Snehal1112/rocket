@@ -916,6 +916,7 @@ pub fn run() {
             commands::collections::delete_collection,
             commands::collections::rename_collection,
             commands::collections::save_request,
+            commands::collections::create_request,
             commands::collections::duplicate_request,
             commands::collections::save_grpc_request,
             commands::collections::get_websocket_request,

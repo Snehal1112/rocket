@@ -12,6 +12,7 @@ import {
   Variable,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
 import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
@@ -32,9 +33,10 @@ import {
 import { Input } from '@/components/ui/input';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
+import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
-import { moveItem, saveRequest } from '@/lib/tauri-api';
+import { createRequest, moveItem } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
@@ -150,7 +152,7 @@ export function FolderNode({
         headers: [],
         auth: { authType: 'none' as const },
       };
-      const saved = await saveRequest(collectionName, path, payload);
+      const saved = await createRequest(collectionName, path, payload);
       usePaneStore.getState().openTab({
         id: uid,
         title: saved.name,
@@ -165,6 +167,7 @@ export function FolderNode({
       });
     } catch (err) {
       console.error('[FolderNode] Failed to create request:', err);
+      toast.error(createRequestErrorMessage(err, reqName));
     }
   };
 

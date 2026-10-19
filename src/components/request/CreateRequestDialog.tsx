@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -17,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { sanitizeFilename } from '@/lib/filename-utils';
 import {
   createDefaultRequest,
@@ -25,7 +27,7 @@ import {
   mapGraphQlToState,
   mapGrpcToState,
 } from '@/lib/pane-utils';
-import { saveGraphQlRequest, saveGrpcRequest, saveRequest } from '@/lib/tauri-api';
+import { createRequest, saveGraphQlRequest, saveGrpcRequest } from '@/lib/tauri-api';
 import { createWebSocketItem } from '@/lib/websocket-create';
 import { usePaneStore } from '@/stores/pane-store';
 import type { HttpMethod, RequestTab } from '@/types/pane-types';
@@ -151,7 +153,7 @@ export function CreateRequestDialog({
         auth: { authType: 'none' as const },
         fileName: filePath,
       };
-      const saved = await saveRequest(collectionName, filePath, payload);
+      const saved = await createRequest(collectionName, filePath, payload);
       const tab: RequestTab = {
         id: uid,
         title: trimmedName,
@@ -171,6 +173,7 @@ export function CreateRequestDialog({
       onClose();
     } catch (err) {
       console.error('[CreateRequestDialog] failed:', err);
+      toast.error(createRequestErrorMessage(err, trimmedName));
       setError('Failed to create request. Please try again.');
     } finally {
       setSaving(false);

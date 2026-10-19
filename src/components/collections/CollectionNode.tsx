@@ -15,6 +15,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { FlowListItem } from '@/components/collections/FlowListItem';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
 import { ScriptNode } from '@/components/collections/ScriptNode';
@@ -38,15 +39,16 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
+import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { useFlows } from '@/lib/queries/flow-queries';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type { Collection, CollectionSummary, Contract } from '@/lib/tauri-api';
 import {
+  createRequest,
   getCollectionSummaries,
   onCollectionChanged,
   renameCollection,
-  saveRequest,
 } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
@@ -309,7 +311,7 @@ export function CollectionNode({
         headers: [],
         auth: { authType: 'none' as const },
       };
-      const saved = await saveRequest(summary.name, name, payload);
+      const saved = await createRequest(summary.name, name, payload);
       usePaneStore.getState().openTab({
         id: uid,
         title: saved.name,
@@ -324,6 +326,7 @@ export function CollectionNode({
       });
     } catch (err) {
       console.error('[CollectionNode] Failed to create request:', err);
+      toast.error(createRequestErrorMessage(err, name));
     }
   };
 
