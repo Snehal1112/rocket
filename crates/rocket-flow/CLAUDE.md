@@ -33,6 +33,7 @@ cargo test -p rocket-flow -j4
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
 | `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V15 (spec §7, listed in the file header) |
 | `lint.rs` | Non-blocking lint tier: `validate_with_warnings(flow, ctx)`, `graph_error_lints`, `FlowLint`, `LintSeverity`, `LintContext` |
+| `request_refs.rs` | Rewrites Saved request paths in a flow after a move (whole path segments, folder prefix) and finds flows that use a path |
 
 ### Key Design Points
 

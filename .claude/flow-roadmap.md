@@ -24,7 +24,7 @@ Sizes: S under half a day, M one to two days, L more than two days or needs a ba
 
 | ID | Item | Size | Status | Evidence | Notes |
 |---|---|---|---|---|---|
-| F-01 | Renaming, moving or deleting a collection request silently breaks flows that use it. Add a rewrite hook in the collection service, plus a warning (see F-20). | L | open | `collection_service.rs:179,281,344`; `node.rs:152-155` | Needs the OpenCollection read. |
+| F-01 | Renaming, moving or deleting a collection request silently breaks flows that use it. Add a rewrite hook in the collection service, plus a warning (see F-20). | L | done | `collection_service.rs:179,281,344`; `node.rs:152-155` | Needs the OpenCollection read. Done 2026-10-18, series `flow-request-ref-rewrite`. See `.claude/flow-request-refs.md`. |
 | F-02 | Redact step error text. A failed send can quote a query-string API key. Auth follow-up F2. | S | open | `flow_execution_service.rs:1642,1663`; contrast `flow_debug.rs:36` | Reuse `redact_url_secrets`. |
 | F-03 | Let the client choose the run ID. Runs are matched to tabs by collection and flow name, so two tabs can cross-attach and Stop can cancel the wrong run. | M | done | `FlowToolbar.tsx` `handleRun`; `flow_execution_service.rs` `run_with_options` | Done in P22: client UUID in `RunFlowOptions.runId`, backend checks and reserves it first, tab keeps `pendingRunId`. F-05 can build on the early reservation. |
 | F-04 | Stop must interrupt an in-flight HTTP send. Race `execute_capturing` against the cancel token. Also cap each poll attempt at the deadline. | M | open | `flow_execution_service.rs:1361-1363`; `flow_poll.rs:85-87` | A collection timeout of 0 means no timeout. |
@@ -266,3 +266,11 @@ Branch `worktree-flow-tier1-small`. Reviews logged in `.superpowers/sdd/flow-tie
 | F-130 | Console entries for a parked flow tab (`onStepLogs`, `onStepDebug`) still use `latestFlowTab()` and are labelled with the node id. Use `findFlowTabAnywhere`. | F-74 remainder. |
 | F-131 | `cleanSaveMessage` masks only quoted text after match/case/value. Mirror the backend lint `sentence()` table for wait names, request paths and handle names. | F-76(6) remainder. |
 | F-132 | Two tests are timing-sensitive: `wait_accepts_a_call_queued_when_the_deadline_has_passed` (1.3 s real sleep) and `a_steady_stream_of_calls_does_not_hold_the_wait_open_past_its_timeout` (3 s bound). FlowPane suites can time out at 5 s under heavy machine load. | Consider `--no-file-parallelism` or a larger `testTimeout` in CI. |
+
+## Follow-ups from F-01 (2026-10-18)
+
+| ID | Item | Notes |
+|---|---|---|
+| F-133 | Real-app check of a request move, a folder rename, the delete dialog and the toast, with a flow tab open. | Manual check for F-01. |
+| F-134 | Show the dangling-path lint after a delete once `worktree-flow-tier2` merges. | Depends on F-21. |
+| F-135 | Rewrite or warn on changes made outside the app, such as a git pull. | Limit of F-01. |

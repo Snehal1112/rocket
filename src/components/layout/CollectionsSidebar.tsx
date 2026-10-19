@@ -37,6 +37,7 @@ import {
   deleteFolder,
   deleteRequest,
   deleteScriptFile,
+  flowsUsingRequest,
   getCollection,
   moveItem,
   onCollectionChanged,
@@ -83,6 +84,25 @@ export function CollectionsSidebar() {
   const [createError, setCreateError] = useState('');
 
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  // Flows that reference the request or folder about to be deleted.
+  const [flowsUsingTarget, setFlowsUsingTarget] = useState<string[]>([]);
+  useEffect(() => {
+    setFlowsUsingTarget([]);
+    if (!deleteTarget?.path) return;
+    if (deleteTarget.type !== 'request' && deleteTarget.type !== 'folder') return;
+    let cancelled = false;
+    flowsUsingRequest(deleteTarget.collection, deleteTarget.path)
+      .then((names) => {
+        if (!cancelled) setFlowsUsingTarget(names);
+      })
+      .catch((err) => {
+        console.error('Flow lookup failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deleteTarget]);
 
   // Warn when the delete would discard unsaved edits in an open script tab.
   const deleteHasDirtyScripts = usePaneStore((s) =>
@@ -659,6 +679,8 @@ export function CollectionsSidebar() {
                     : deleteTarget?.type === 'flow'
                       ? `Delete flow '${deleteTarget.name}'?`
                       : `Delete request '${deleteTarget?.name}'?`}
+              {flowsUsingTarget.length > 0 &&
+                ` Used by ${flowsUsingTarget.length} ${flowsUsingTarget.length === 1 ? 'flow' : 'flows'}: ${flowsUsingTarget.join(', ')}.`}
               {deleteHasDirtyScripts && ' An open script has unsaved changes that will be lost.'}
               {deleteHasDirtyFlows && ' An open flow has unsaved changes that will be lost.'}
             </AlertDialogDescription>
