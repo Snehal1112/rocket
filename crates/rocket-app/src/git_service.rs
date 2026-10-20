@@ -6,6 +6,21 @@ use rocket_git::{
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
+/// Removes the user and password from a URL so it is safe to publish.
+/// Input without `scheme://` userinfo, such as scp-style `git@host:repo`, is returned as is.
+fn strip_url_credentials(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let start = scheme_end + 3;
+    let rest = &url[start..];
+    let authority_len = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_len].rfind('@') {
+        Some(at) => format!("{}{}", &url[..start], &rest[at + 1..]),
+        None => url.to_string(),
+    }
+}
+
 pub struct GitAppService {
     git: Box<dyn GitService>,
     events: Box<dyn EventPublisher>,
@@ -33,7 +48,7 @@ impl GitAppService {
     ) -> DomainResult<()> {
         self.git.clone_repo(url, dest_path, creds)?;
         self.events.publish(DomainEvent::GitCloned {
-            url: url.to_string(),
+            url: strip_url_credentials(url),
             dest: dest_path.to_string(),
         });
         Ok(())
@@ -49,7 +64,7 @@ impl GitAppService {
         self.events.publish(DomainEvent::GitRemoteAdded {
             collection: path.to_string(),
             name: name.to_string(),
-            url: url.to_string(),
+            url: strip_url_credentials(url),
         });
         Ok(())
     }
@@ -281,5 +296,214 @@ impl GitAppService {
             collection: path.to_string(),
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_doubles::{RecordingPublisher, SharedPublisher};
+    use rocket_git::GitCredentials;
+    use std::sync::{Arc, Mutex};
+
+    /// Fake git service. It records the URLs it receives and fails every other call.
+    struct FakeGit {
+        urls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl GitService for FakeGit {
+        fn is_repo(&self, _: &str) -> bool {
+            unimplemented!()
+        }
+        fn init(&self, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn clone_repo(&self, url: &str, _: &str, _: &GitCredentials) -> DomainResult<()> {
+            self.urls.lock().expect("lock").push(url.to_string());
+            Ok(())
+        }
+        fn list_remotes(&self, _: &str) -> DomainResult<Vec<RemoteInfo>> {
+            unimplemented!()
+        }
+        fn add_remote(&self, _: &str, _: &str, url: &str) -> DomainResult<()> {
+            self.urls.lock().expect("lock").push(url.to_string());
+            Ok(())
+        }
+        fn remove_remote(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn set_remote_url(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn status(&self, _: &str) -> DomainResult<RepoStatus> {
+            unimplemented!()
+        }
+        fn diff_file(&self, _: &str, _: &str) -> DomainResult<FileDiff> {
+            unimplemented!()
+        }
+        fn diff_staged(&self, _: &str, _: &str) -> DomainResult<FileDiff> {
+            unimplemented!()
+        }
+        fn diff_commit(&self, _: &str, _: &str) -> DomainResult<Vec<FileDiff>> {
+            unimplemented!()
+        }
+        fn stage(&self, _: &str, _: &[&str]) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn unstage(&self, _: &str, _: &[&str]) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn discard(&self, _: &str, _: &[&str]) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn commit(&self, _: &str, _: &str) -> DomainResult<CommitInfo> {
+            unimplemented!()
+        }
+        fn log(&self, _: &str, _: usize) -> DomainResult<Vec<CommitInfo>> {
+            unimplemented!()
+        }
+        fn push(&self, _: &str, _: &str, _: &GitCredentials, _: bool) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn pull(&self, _: &str, _: &str, _: &GitCredentials) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn fetch(&self, _: &str, _: &str, _: &GitCredentials) -> DomainResult<FetchResult> {
+            unimplemented!()
+        }
+        fn branches(&self, _: &str) -> DomainResult<BranchList> {
+            unimplemented!()
+        }
+        fn switch_branch(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn checkout_remote_branch(
+            &self,
+            _: &str,
+            _: &str,
+            _: bool,
+            _: Option<&str>,
+        ) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn create_branch(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn delete_branch(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn merge_branch(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn stash_list(&self, _: &str) -> DomainResult<Vec<StashEntry>> {
+            unimplemented!()
+        }
+        fn stash_save(&self, _: &str, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn stash_pop(&self, _: &str, _: usize) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn stash_apply(&self, _: &str, _: usize) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn stash_drop(&self, _: &str, _: usize) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn stash_diff(&self, _: &str, _: usize) -> DomainResult<Vec<FileDiff>> {
+            unimplemented!()
+        }
+        fn conflicts(&self, _: &str) -> DomainResult<Vec<ConflictFile>> {
+            unimplemented!()
+        }
+        fn resolve_conflict(&self, _: &str, _: &str, _: &ConflictResolution) -> DomainResult<()> {
+            unimplemented!()
+        }
+        fn abort_merge(&self, _: &str) -> DomainResult<()> {
+            unimplemented!()
+        }
+    }
+
+    fn service() -> (
+        GitAppService,
+        Arc<RecordingPublisher>,
+        Arc<Mutex<Vec<String>>>,
+    ) {
+        let urls = Arc::new(Mutex::new(Vec::new()));
+        let events = RecordingPublisher::new();
+        let svc = GitAppService::new(
+            Box::new(FakeGit { urls: urls.clone() }),
+            Box::new(SharedPublisher(events.clone())),
+        );
+        (svc, events, urls)
+    }
+
+    #[test]
+    fn strip_url_credentials_removes_userinfo() {
+        let cases = [
+            ("https://u:p@host/x", "https://host/x"),
+            ("https://token@host/x", "https://host/x"),
+            ("ssh://git@host/x", "ssh://host/x"),
+            ("https://u:p@w@host:8443/x", "https://host:8443/x"),
+            ("https://u:p@host", "https://host"),
+            ("https://u:p@host?a=b", "https://host?a=b"),
+            ("https://@host/x", "https://host/x"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(strip_url_credentials(input), want, "input {input}");
+        }
+    }
+
+    #[test]
+    fn strip_url_credentials_leaves_other_input_alone() {
+        let cases = [
+            "git@host:org/repo.git",
+            "https://host/x",
+            "https://host/a@b",
+            "https://host/x?mail=a@b",
+            "https://host/x#a@b",
+            "/local/path/repo",
+            "",
+            "not a url @",
+        ];
+        for input in cases {
+            assert_eq!(strip_url_credentials(input), input, "input {input}");
+        }
+    }
+
+    #[test]
+    fn clone_event_has_no_credentials_but_git_gets_original() {
+        let (svc, events, urls) = service();
+        let url = "https://user:token@host/org/repo.git";
+        svc.clone_repo(url, "/dest", &GitCredentials::SshAgent)
+            .expect("clone");
+        assert_eq!(urls.lock().expect("lock").as_slice(), [url]);
+        match events.events().as_slice() {
+            [DomainEvent::GitCloned { url, dest }] => {
+                assert_eq!(url, "https://host/org/repo.git");
+                assert_eq!(dest, "/dest");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_remote_event_has_no_credentials_but_git_gets_original() {
+        let (svc, events, urls) = service();
+        let url = "https://user:token@host/org/repo.git";
+        svc.add_remote("/repo", "origin", url).expect("add");
+        assert_eq!(urls.lock().expect("lock").as_slice(), [url]);
+        match events.events().as_slice() {
+            [DomainEvent::GitRemoteAdded {
+                collection,
+                name,
+                url,
+            }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(name, "origin");
+                assert_eq!(url, "https://host/org/repo.git");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
     }
 }
