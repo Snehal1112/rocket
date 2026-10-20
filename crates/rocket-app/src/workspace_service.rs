@@ -801,6 +801,16 @@ mod tests {
                 DomainEvent::WorkspaceSwitched { id, .. } => format!("switched:{id}"),
                 DomainEvent::WorkspaceClosed { id } => format!("closed:{id}"),
                 DomainEvent::WorkspaceDeleted { id } => format!("deleted:{id}"),
+                DomainEvent::WorkspaceRenamed {
+                    id,
+                    old_name,
+                    new_name,
+                } => format!("renamed:{id}:{old_name}:{new_name}"),
+                DomainEvent::WorkspacePinned { id } => format!("pinned:{id}"),
+                DomainEvent::WorkspaceUnpinned { id } => format!("unpinned:{id}"),
+                DomainEvent::WorkspaceDescriptionUpdated { id, description } => {
+                    format!("description:{id}:{description:?}")
+                }
                 _ => return,
             };
             self.0.lock().expect("lock").push(name);
@@ -833,6 +843,68 @@ mod tests {
                 format!("switched:{}", deleting.id),
                 format!("deleted:{}", deleting.id),
                 "switched:default".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_publishes_workspace_renamed_with_both_names() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let ws = svc.create("Before", tmp.path().join("before")).unwrap();
+        svc.rename(&ws.id, "After").unwrap();
+        assert_eq!(
+            *events.0.lock().unwrap(),
+            [format!("renamed:{}:Before:After", ws.id)]
+        );
+    }
+
+    #[test]
+    fn failed_rename_publishes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let ws = svc.create("Name", tmp.path().join("name")).unwrap();
+        assert!(svc.rename(&ws.id, "").is_err());
+        assert!(svc.rename("missing", "Other").is_err());
+        assert!(events.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pin_and_unpin_publish_their_own_events() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let ws = svc.create("Pinnable", tmp.path().join("pinnable")).unwrap();
+        svc.pin(&ws.id).unwrap();
+        svc.unpin(&ws.id).unwrap();
+        assert_eq!(
+            *events.0.lock().unwrap(),
+            [format!("pinned:{}", ws.id), format!("unpinned:{}", ws.id)]
+        );
+    }
+
+    #[test]
+    fn pin_of_an_unknown_workspace_publishes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        assert!(svc.pin("missing").is_err());
+        assert!(svc.unpin("missing").is_err());
+        assert!(events.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn update_description_publishes_the_new_value_and_none_when_cleared() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let ws = svc
+            .create("Described", tmp.path().join("described"))
+            .unwrap();
+        svc.update_description(&ws.id, Some("hello")).unwrap();
+        svc.update_description(&ws.id, None).unwrap();
+        assert_eq!(
+            *events.0.lock().unwrap(),
+            [
+                format!("description:{}:Some(\"hello\")", ws.id),
+                format!("description:{}:None", ws.id),
             ]
         );
     }

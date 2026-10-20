@@ -138,6 +138,21 @@ mod tests {
     }
 
     #[test]
+    fn clear_publishes_history_cleared_once() {
+        use crate::test_doubles::{RecordingPublisher, SharedPublisher};
+        let events = RecordingPublisher::new();
+        let svc = HistoryService::new(
+            Box::new(MockHistoryRepo::new()),
+            Box::new(SharedPublisher(events.clone())),
+        );
+        svc.clear().expect("clear");
+        assert!(matches!(
+            events.events().as_slice(),
+            [DomainEvent::HistoryCleared]
+        ));
+    }
+
+    #[test]
     fn list_with_limit() {
         let repo = MockHistoryRepo::new();
         {

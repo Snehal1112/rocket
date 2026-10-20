@@ -304,11 +304,25 @@ mod tests {
     use super::*;
     use crate::test_doubles::{RecordingPublisher, SharedPublisher};
     use rocket_git::GitCredentials;
+    use rocket_shared::error::DomainError;
     use std::sync::{Arc, Mutex};
 
-    /// Fake git service. It records the URLs it receives and fails every other call.
+    /// Fake git service. It records the URLs it receives. Calls the tests need
+    /// succeed, or fail when `fail` is set. The other calls panic.
     struct FakeGit {
         urls: Arc<Mutex<Vec<String>>>,
+        fail: bool,
+        conflict_paths: Vec<String>,
+    }
+
+    impl FakeGit {
+        fn outcome(&self) -> DomainResult<()> {
+            if self.fail {
+                Err(DomainError::Internal("git failed".into()))
+            } else {
+                Ok(())
+            }
+        }
     }
 
     impl GitService for FakeGit {
@@ -320,7 +334,7 @@ mod tests {
         }
         fn clone_repo(&self, url: &str, _: &str, _: &GitCredentials) -> DomainResult<()> {
             self.urls.lock().expect("lock").push(url.to_string());
-            Ok(())
+            self.outcome()
         }
         fn list_remotes(&self, _: &str) -> DomainResult<Vec<RemoteInfo>> {
             unimplemented!()
@@ -330,7 +344,7 @@ mod tests {
             Ok(())
         }
         fn remove_remote(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn set_remote_url(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
             unimplemented!()
@@ -348,25 +362,34 @@ mod tests {
             unimplemented!()
         }
         fn stage(&self, _: &str, _: &[&str]) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn unstage(&self, _: &str, _: &[&str]) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn discard(&self, _: &str, _: &[&str]) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
-        fn commit(&self, _: &str, _: &str) -> DomainResult<CommitInfo> {
-            unimplemented!()
+        fn commit(&self, _: &str, message: &str) -> DomainResult<CommitInfo> {
+            self.outcome()?;
+            Ok(CommitInfo {
+                id: "abc1234".into(),
+                full_id: "abc1234def".into(),
+                message: message.into(),
+                author: "Tester".into(),
+                author_email: "t@example.com".into(),
+                timestamp: chrono::Utc::now(),
+                files_changed: 1,
+            })
         }
         fn log(&self, _: &str, _: usize) -> DomainResult<Vec<CommitInfo>> {
             unimplemented!()
         }
         fn push(&self, _: &str, _: &str, _: &GitCredentials, _: bool) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn pull(&self, _: &str, _: &str, _: &GitCredentials) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn fetch(&self, _: &str, _: &str, _: &GitCredentials) -> DomainResult<FetchResult> {
             unimplemented!()
@@ -375,7 +398,7 @@ mod tests {
             unimplemented!()
         }
         fn switch_branch(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn checkout_remote_branch(
             &self,
@@ -384,47 +407,60 @@ mod tests {
             _: bool,
             _: Option<&str>,
         ) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn create_branch(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn delete_branch(&self, _: &str, _: &str) -> DomainResult<()> {
             unimplemented!()
         }
         fn merge_branch(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn stash_list(&self, _: &str) -> DomainResult<Vec<StashEntry>> {
             unimplemented!()
         }
         fn stash_save(&self, _: &str, _: &str) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn stash_pop(&self, _: &str, _: usize) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn stash_apply(&self, _: &str, _: usize) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn stash_drop(&self, _: &str, _: usize) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
         fn stash_diff(&self, _: &str, _: usize) -> DomainResult<Vec<FileDiff>> {
             unimplemented!()
         }
         fn conflicts(&self, _: &str) -> DomainResult<Vec<ConflictFile>> {
-            unimplemented!()
+            self.outcome()?;
+            Ok(self
+                .conflict_paths
+                .iter()
+                .map(|path| ConflictFile {
+                    path: path.clone(),
+                    ours: String::new(),
+                    theirs: String::new(),
+                    ancestor: None,
+                })
+                .collect())
         }
         fn resolve_conflict(&self, _: &str, _: &str, _: &ConflictResolution) -> DomainResult<()> {
             unimplemented!()
         }
         fn abort_merge(&self, _: &str) -> DomainResult<()> {
-            unimplemented!()
+            self.outcome()
         }
     }
 
-    fn service() -> (
+    fn build(
+        fail: bool,
+        conflict_paths: Vec<String>,
+    ) -> (
         GitAppService,
         Arc<RecordingPublisher>,
         Arc<Mutex<Vec<String>>>,
@@ -432,10 +468,27 @@ mod tests {
         let urls = Arc::new(Mutex::new(Vec::new()));
         let events = RecordingPublisher::new();
         let svc = GitAppService::new(
-            Box::new(FakeGit { urls: urls.clone() }),
+            Box::new(FakeGit {
+                urls: urls.clone(),
+                fail,
+                conflict_paths,
+            }),
             Box::new(SharedPublisher(events.clone())),
         );
         (svc, events, urls)
+    }
+
+    fn service() -> (
+        GitAppService,
+        Arc<RecordingPublisher>,
+        Arc<Mutex<Vec<String>>>,
+    ) {
+        build(false, Vec::new())
+    }
+
+    fn failing_service() -> (GitAppService, Arc<RecordingPublisher>) {
+        let (svc, events, _) = build(true, Vec::new());
+        (svc, events)
     }
 
     #[test]
@@ -505,5 +558,199 @@ mod tests {
             }
             other => panic!("unexpected events: {other:?}"),
         }
+    }
+
+    #[test]
+    fn commit_publishes_git_commit_with_sha() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        let info = svc.commit("/repo", "add things")?;
+        assert_eq!(info.id, "abc1234");
+        match events.events().as_slice() {
+            [DomainEvent::GitCommit {
+                collection,
+                message,
+                sha,
+            }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(message, "add things");
+                assert_eq!(sha, "abc1234");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn push_publishes_git_push() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.push("/repo", "origin", &GitCredentials::SshAgent, false)?;
+        match events.events().as_slice() {
+            [DomainEvent::GitPush { collection, remote }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(remote, "origin");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pull_publishes_git_pull() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.pull("/repo", "upstream", &GitCredentials::SshAgent)?;
+        match events.events().as_slice() {
+            [DomainEvent::GitPull { collection, remote }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(remote, "upstream");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn switch_create_and_checkout_remote_publish_branch_switched() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.switch_branch("/repo", "main")?;
+        svc.create_branch("/repo", "feature")?;
+        svc.checkout_remote_branch("/repo", "origin/dev", false, None)?;
+        let got: Vec<(String, String)> = events
+            .events()
+            .into_iter()
+            .map(|e| match e {
+                DomainEvent::BranchSwitched { collection, branch } => (collection, branch),
+                other => panic!("unexpected event: {other:?}"),
+            })
+            .collect();
+        let want = ["main", "feature", "origin/dev"].map(|b| ("/repo".to_string(), b.to_string()));
+        assert_eq!(got, want);
+        Ok(())
+    }
+
+    #[test]
+    fn merge_publishes_branch_merged() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.merge_branch("/repo", "feature")?;
+        match events.events().as_slice() {
+            [DomainEvent::BranchMerged { collection, branch }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(branch, "feature");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn every_stash_change_publishes_git_stash_changed() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.stash_save("/repo", "wip")?;
+        svc.stash_pop("/repo", 0)?;
+        svc.stash_apply("/repo", 0)?;
+        svc.stash_drop("/repo", 0)?;
+        let recorded = events.events();
+        assert_eq!(recorded.len(), 4);
+        for event in recorded {
+            match event {
+                DomainEvent::GitStashChanged { collection } => assert_eq!(collection, "/repo"),
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn stage_unstage_discard_and_abort_merge_publish_status_changed() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.stage("/repo", &["a.yml"])?;
+        svc.unstage("/repo", &["a.yml"])?;
+        svc.discard("/repo", &["a.yml"])?;
+        svc.abort_merge("/repo")?;
+        let recorded = events.events();
+        assert_eq!(recorded.len(), 4);
+        for event in recorded {
+            match event {
+                DomainEvent::GitStatusChanged { collection } => assert_eq!(collection, "/repo"),
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn remove_remote_publishes_git_remote_removed() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        svc.remove_remote("/repo", "origin")?;
+        match events.events().as_slice() {
+            [DomainEvent::GitRemoteRemoved { collection, name }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(name, "origin");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+        Ok(())
+    }
+
+    // Current behaviour: this read-only query publishes when conflicts exist.
+    #[test]
+    fn conflicts_publishes_git_conflict_detected_with_file_paths() -> DomainResult<()> {
+        let (svc, events, _) = build(false, vec!["a.yml".into(), "b.yml".into()]);
+        let files = svc.conflicts("/repo")?;
+        assert_eq!(files.len(), 2);
+        match events.events().as_slice() {
+            [DomainEvent::GitConflictDetected { collection, files }] => {
+                assert_eq!(collection, "/repo");
+                assert_eq!(files, &["a.yml".to_string(), "b.yml".to_string()]);
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn conflicts_publishes_nothing_when_list_is_empty() -> DomainResult<()> {
+        let (svc, events, _) = service();
+        assert!(svc.conflicts("/repo")?.is_empty());
+        assert!(events.events().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn failed_commit_publishes_no_event() {
+        let (svc, events) = failing_service();
+        assert!(svc.commit("/repo", "msg").is_err());
+        assert!(events.events().is_empty());
+    }
+
+    #[test]
+    fn failed_push_publishes_no_event() {
+        let (svc, events) = failing_service();
+        assert!(svc
+            .push("/repo", "origin", &GitCredentials::SshAgent, false)
+            .is_err());
+        assert!(events.events().is_empty());
+    }
+
+    #[test]
+    fn failed_clone_publishes_no_event() {
+        let (svc, events) = failing_service();
+        assert!(svc
+            .clone_repo("https://host/r.git", "/dest", &GitCredentials::SshAgent)
+            .is_err());
+        assert!(events.events().is_empty());
+    }
+
+    #[test]
+    fn failed_pull_merge_and_stash_publish_no_event() {
+        let (svc, events) = failing_service();
+        assert!(svc
+            .pull("/repo", "origin", &GitCredentials::SshAgent)
+            .is_err());
+        assert!(svc.merge_branch("/repo", "x").is_err());
+        assert!(svc.stash_save("/repo", "m").is_err());
+        assert!(svc.stage("/repo", &["a"]).is_err());
+        assert!(svc.remove_remote("/repo", "origin").is_err());
+        assert!(svc.switch_branch("/repo", "x").is_err());
+        assert!(events.events().is_empty());
     }
 }

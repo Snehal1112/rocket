@@ -9560,6 +9560,81 @@ mod tests {
         assert_eq!(output.test_results[1].status, TestStatus::Failed);
     }
 
+    /// Builds a service whose events land in the returned recorder.
+    fn service_recording_events() -> (RequestExecutionService, Arc<RecordingPublisher>) {
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+        let publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        (svc, publisher)
+    }
+
+    #[tokio::test]
+    async fn execute_publishes_tests_completed_with_each_result() {
+        use rocket_shared::Assertion;
+
+        let (svc, publisher) = service_recording_events();
+        let mut input = sample_input("https://example.com", None);
+        input.request_name = Some("my request".into());
+        input.assertions = vec![
+            Assertion::new("res.status", "eq", Some("200".into())),
+            Assertion::new("res.status", "eq", Some("404".into())),
+        ];
+        svc.execute(input).await.expect("execute");
+
+        let events = publisher.events.lock().expect("lock");
+        let completed: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::TestsCompleted {
+                    request_name,
+                    results,
+                } => Some((request_name.clone(), results.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(completed.len(), 1, "exactly one TestsCompleted event");
+        let (request_name, results) = &completed[0];
+        assert_eq!(request_name, "my request");
+        let statuses: Vec<_> = results.iter().map(|r| r["status"].clone()).collect();
+        assert_eq!(
+            statuses,
+            vec![serde_json::json!("passed"), serde_json::json!("failed")]
+        );
+        assert!(results.iter().all(|r| r["name"].is_string()));
+        // The failed assertion carries an error, the passed one does not.
+        assert!(results[0]["error"].is_null());
+        assert!(results[1]["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn execute_without_tests_publishes_no_tests_completed() {
+        let (svc, publisher) = service_recording_events();
+        svc.execute(sample_input("https://example.com", None))
+            .await
+            .expect("execute");
+        let events = publisher.events.lock().expect("lock");
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::TestsCompleted { .. })));
+    }
+
     #[tokio::test]
     async fn before_request_script_max_redirects_mutation_reaches_executor() {
         use rocket_scripting::{RequestMutations, ScriptResult};

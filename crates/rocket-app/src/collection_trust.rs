@@ -445,6 +445,144 @@ mod tests {
         );
     }
 
+    fn recording_service(
+        repo: &Arc<ConfigurableCollectionRepo>,
+        store: &Arc<InMemoryTrustStore>,
+    ) -> (
+        CollectionTrustService,
+        Arc<crate::test_doubles::RecordingPublisher>,
+    ) {
+        let events = crate::test_doubles::RecordingPublisher::new();
+        let svc = CollectionTrustService::new(
+            Arc::clone(repo) as Arc<dyn CollectionRepository>,
+            Arc::clone(store) as Arc<dyn CollectionTrustStore>,
+            Arc::clone(&events) as Arc<dyn EventPublisher>,
+        );
+        (svc, events)
+    }
+
+    /// Reduces the events to (kind, collection) pairs.
+    fn kinds(events: &crate::test_doubles::RecordingPublisher) -> Vec<(&'static str, String)> {
+        events
+            .events()
+            .into_iter()
+            .map(|e| match e {
+                DomainEvent::CollectionSettingsSaved { collection } => ("settings", collection),
+                DomainEvent::CollectionTrustChanged { collection } => ("trust", collection),
+                other => panic!("unexpected event: {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn set_capability_with_a_file_field_publishes_settings_saved_then_trust_changed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", CollectionSettings::default());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        svc.set_capability("c", Capability::DeveloperMode, true)
+            .expect("dev");
+        svc.set_capability("c", Capability::AgentRun, true)
+            .expect("agent");
+        let want = |k: &'static str| (k, "c".to_string());
+        assert_eq!(
+            kinds(&events),
+            vec![
+                want("settings"),
+                want("trust"),
+                want("settings"),
+                want("trust")
+            ]
+        );
+    }
+
+    // Current behaviour: the file is rewritten and the event published even when
+    // the value is unchanged.
+    #[test]
+    fn set_capability_to_the_same_value_still_publishes_settings_saved() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", CollectionSettings::default());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        svc.set_capability("c", Capability::DeveloperMode, false)
+            .expect("off");
+        assert_eq!(
+            kinds(&events),
+            vec![("settings", "c".to_string()), ("trust", "c".to_string())]
+        );
+    }
+
+    #[test]
+    fn set_capability_without_a_file_field_publishes_only_trust_changed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", CollectionSettings::default());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        svc.set_capability("c", Capability::ProcessEnv, true)
+            .expect("env");
+        assert_eq!(kinds(&events), vec![("trust", "c".to_string())]);
+    }
+
+    #[test]
+    fn set_capability_for_context_roots_is_refused_and_publishes_nothing() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", CollectionSettings::default());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        assert!(svc
+            .set_capability("c", Capability::ContextRoots, true)
+            .is_err());
+        assert!(events.events().is_empty());
+    }
+
+    #[test]
+    fn set_context_roots_publishes_settings_saved_then_trust_changed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", CollectionSettings::default());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        svc.set_context_roots("c", vec!["a".into()]).expect("roots");
+        assert_eq!(
+            kinds(&events),
+            vec![("settings", "c".to_string()), ("trust", "c".to_string())]
+        );
+    }
+
+    #[test]
+    fn grant_requested_publishes_only_trust_changed_and_nothing_when_stale() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", requesting_everything());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        let fingerprint = svc.status("c").expect("status").fingerprint;
+        svc.grant_requested("c", &[Capability::DeveloperMode], "stale")
+            .expect_err("stale");
+        assert!(events.events().is_empty());
+        svc.grant_requested("c", &[Capability::DeveloperMode], &fingerprint)
+            .expect("grant");
+        assert_eq!(kinds(&events), vec![("trust", "c".to_string())]);
+    }
+
+    #[test]
+    fn revoke_publishes_only_trust_changed() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_settings("c", requesting_everything());
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        svc.revoke("c").expect("revoke");
+        assert_eq!(kinds(&events), vec![("trust", "c".to_string())]);
+    }
+
+    #[test]
+    fn migrate_legacy_publishes_no_event() {
+        let repo = ConfigurableCollectionRepo::new();
+        let store = InMemoryTrustStore::new();
+        let (svc, events) = recording_service(&repo, &store);
+        svc.migrate_legacy(vec![legacy("plain", RequestedElevation::default())])
+            .expect("migrate");
+        assert!(events.events().is_empty());
+    }
+
     fn legacy(name: &str, requested: RequestedElevation) -> LegacyCollection {
         LegacyCollection {
             name: name.into(),
