@@ -9,9 +9,20 @@ use rocket_acp::{
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
+use crate::acp_stream::{stream_secret_forms, ChunkKind, ChunkStream};
 use crate::agent_config_service::AgentConfigService;
 use crate::agent_isolation::ROCKET_MCP_SERVER_NAME;
+use crate::redaction::redact_secrets;
 use crate::session_plan::SessionPlan;
+
+/// Supplies the secret values a session's live agent text is masked with.
+/// `ConversationService` implements it with the secret variables of the
+/// session's pinned workspace, the same set stored conversations use.
+pub trait StreamSecretSource: Send + Sync {
+    /// The secret values to mask. An error means a scope could not be read,
+    /// and the prompt is then refused, so nothing is shown unmasked.
+    fn secret_values(&self, session_id: &str) -> DomainResult<HashSet<String>>;
+}
 
 /// Releases per-session resources that live outside this crate, such as the
 /// MCP tool server, its caches and the session's scratch directories.
@@ -49,6 +60,12 @@ pub struct AcpSessionService {
     prompt_idle_timeout: Duration,
     /// Idle limits of sessions whose agent config sets one.
     session_idle: Mutex<HashMap<String, Duration>>,
+    /// Values handed to each session that must never be shown: the agent
+    /// credential and the MCP token.
+    session_secrets: Mutex<HashMap<String, HashSet<String>>>,
+    /// Workspace secrets for masking the live text. `None` masks only the
+    /// session's own values.
+    stream_secrets: Option<Arc<dyn StreamSecretSource>>,
 }
 
 /// Fixed idle limit for one prompt turn, from the spec. Every update from the
@@ -107,7 +124,39 @@ impl AcpSessionService {
             agent_config_service,
             prompt_idle_timeout,
             session_idle: Mutex::new(HashMap::new()),
+            session_secrets: Mutex::new(HashMap::new()),
+            stream_secrets: None,
         }
+    }
+
+    /// Masks the live agent text of every session with the secrets `source`
+    /// returns, on top of the session's own credential and MCP token.
+    pub fn with_stream_secrets(mut self, source: Arc<dyn StreamSecretSource>) -> Self {
+        self.stream_secrets = Some(source);
+        self
+    }
+
+    /// The masking forms for one prompt turn of a session. Fails closed: a
+    /// secret source that cannot be read refuses the prompt.
+    fn stream_forms(&self, session_id: &str) -> DomainResult<HashSet<String>> {
+        let mut values = self
+            .session_secrets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(source) = &self.stream_secrets {
+            let workspace = source.secret_values(session_id).map_err(|_| {
+                DomainError::InvalidInput(
+                    "could not read the workspace variables to mask the assistant's reply, \
+                     so the prompt was not sent"
+                        .to_string(),
+                )
+            })?;
+            values.extend(workspace);
+        }
+        Ok(stream_secret_forms(&values))
     }
 
     /// The idle limit of one session: its agent's configured value, or the
@@ -121,8 +170,13 @@ impl AcpSessionService {
             .unwrap_or(self.prompt_idle_timeout)
     }
 
+    /// Drops the idle limit and the secret values kept for a session.
     fn forget_idle(&self, session_id: &str) {
         self.session_idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(session_id);
+        self.session_secrets
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(session_id);
@@ -197,6 +251,9 @@ impl AcpSessionService {
             .agent_config_service
             .resolve_credential(agent_config_id)
             .await?;
+        let own_secrets: HashSet<String> = [credential.clone(), mcp_http.token.clone()]
+            .into_iter()
+            .collect();
         let env = session_env(&config, credential, &plan.env);
         let mcp_servers = mcp_server_specs(mcp_http)?;
         let mut args = config.args.clone();
@@ -214,6 +271,10 @@ impl AcpSessionService {
                     Duration::from_secs(u64::from(secs)),
                 );
         }
+        self.session_secrets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(info.session_id.clone(), own_secrets);
         self.event_publisher
             .publish(DomainEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
@@ -229,9 +290,14 @@ impl AcpSessionService {
 
     /// Sends one prompt turn and returns the agent's stop reason string.
     ///
-    /// Each update is published as it arrives: text as `AcpSessionChunk`, tool
-    /// calls as `AcpToolActivity`, options as `AcpConfigOptionsChanged`, usage
-    /// as `AcpUsage`. Then exactly one terminal event follows:
+    /// Updates are published in order: text as `AcpSessionChunk`, reasoning
+    /// as `AcpThoughtChunk`, tool calls as `AcpToolActivity`, options as
+    /// `AcpConfigOptionsChanged`, usage as `AcpUsage`. Text and reasoning are
+    /// joined into at most one event per `CHUNK_FLUSH_WINDOW` and masked with
+    /// the session's secrets (see `acp_stream`). Pending text is published
+    /// before any other update and before the end. A secret source that
+    /// cannot be read refuses the prompt with InvalidInput before it is sent.
+    /// Then exactly one terminal event follows:
     /// `AcpSessionFinished` on success (including the `cancelled` stop reason,
     /// which is a normal finish), or `AcpSessionFailed` on error or idle
     /// timeout. The error is still returned to the caller. A prompt the
@@ -256,18 +322,27 @@ impl AcpSessionService {
         parts: Vec<PromptPart>,
     ) -> DomainResult<String> {
         let idle = self.idle_timeout_for(session_id);
+        let forms = self.stream_forms(session_id)?;
+        let mut chunks = ChunkStream::new(forms.clone());
+        // The channel stays unbounded: the agent client sends from its
+        // dispatch loop and from a sync callback, and must never block or
+        // drop an update. Joining chunks here keeps the consumer fast.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpUpdate>();
         let mut send = self.session_client.send_prompt(session_id, parts, tx);
         let mut outcome: Option<DomainResult<String>> = None;
         let mut channel_open = true;
         let mut tool_calls = ToolCallStates::new();
         let mut open_permissions: HashSet<String> = HashSet::new();
+        let mut idle_deadline = tokio::time::Instant::now() + idle;
 
         while outcome.is_none() || channel_open {
+            let flush_at = chunks.deadline().map(tokio::time::Instant::from_std);
             tokio::select! {
                 biased;
                 update = rx.recv(), if channel_open => match update {
                     Some(update) => {
+                        let now = tokio::time::Instant::now();
+                        idle_deadline = now + idle;
                         match &update {
                             AcpUpdate::PermissionRequest { request_id, .. } => {
                                 open_permissions.insert(request_id.clone());
@@ -277,14 +352,35 @@ impl AcpSessionService {
                             }
                             _ => {}
                         }
-                        self.publish_update(session_id, update, &mut tool_calls);
+                        match update {
+                            AcpUpdate::Text { text } => {
+                                let ready = chunks.push(ChunkKind::Text, &text, now.into_std());
+                                self.publish_chunks(session_id, ready);
+                            }
+                            AcpUpdate::Thought { text } => {
+                                let ready = chunks.push(ChunkKind::Thought, &text, now.into_std());
+                                self.publish_chunks(session_id, ready);
+                            }
+                            other => {
+                                self.publish_chunks(session_id, chunks.finish());
+                                self.publish_update(session_id, other, &mut tool_calls);
+                            }
+                        }
                     }
                     None => channel_open = false,
                 },
-                result = &mut send, if outcome.is_none() => outcome = Some(result),
+                result = &mut send, if outcome.is_none() => {
+                    idle_deadline = tokio::time::Instant::now() + idle;
+                    outcome = Some(result);
+                }
+                () = tokio::time::sleep_until(flush_at.unwrap_or(idle_deadline)),
+                    if flush_at.is_some() =>
+                {
+                    self.publish_chunks(session_id, chunks.flush_due());
+                }
                 // A turn waiting for the user's answer is not idle. The clock
                 // starts again when the answer arrives.
-                () = tokio::time::sleep(idle), if open_permissions.is_empty() => {
+                () = tokio::time::sleep_until(idle_deadline), if open_permissions.is_empty() => {
                     // The client already finished, but another sender clone
                     // keeps the channel open. The turn is done, so finish
                     // with its outcome instead of killing the session.
@@ -294,11 +390,15 @@ impl AcpSessionService {
                     // Drop the pending prompt first, so the client releases
                     // the turn before the session is killed.
                     drop(send);
+                    self.publish_chunks(session_id, chunks.finish());
                     return Err(self.end_idle_session(session_id, idle).await);
                 }
             }
         }
 
+        // No text may follow the end of the turn.
+        self.publish_chunks(session_id, chunks.finish());
+        let outcome = outcome.map(|result| result.map_err(|e| mask_error(e, &forms)));
         match outcome {
             Some(Ok(stop_reason)) => {
                 self.event_publisher
@@ -372,13 +472,25 @@ impl AcpSessionService {
         Ok(options)
     }
 
+    /// Publishes joined and masked agent text, in order.
+    fn publish_chunks(&self, session_id: &str, chunks: Vec<(ChunkKind, String)>) {
+        for (kind, text) in chunks {
+            let session_id = session_id.to_string();
+            self.event_publisher.publish(match kind {
+                ChunkKind::Text => DomainEvent::AcpSessionChunk { session_id, text },
+                ChunkKind::Thought => DomainEvent::AcpThoughtChunk { session_id, text },
+            });
+        }
+    }
+
     /// Publishes one update as its domain event. Tool call updates are merged
-    /// with the last known title and status of the same call.
+    /// with the last known title and status of the same call. Text and
+    /// reasoning go through `ChunkStream` and `publish_chunks` instead, so
+    /// they are ignored here.
     fn publish_update(&self, session_id: &str, update: AcpUpdate, tool_calls: &mut ToolCallStates) {
         let session_id = session_id.to_string();
         let event = match update {
-            AcpUpdate::Text { text } => DomainEvent::AcpSessionChunk { session_id, text },
-            AcpUpdate::Thought { text } => DomainEvent::AcpThoughtChunk { session_id, text },
+            AcpUpdate::Text { .. } | AcpUpdate::Thought { .. } => return,
             AcpUpdate::ToolCall {
                 call_id,
                 title,
@@ -505,6 +617,10 @@ impl AcpSessionService {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
+        self.session_secrets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         let result = self.session_client.end_all_sessions().await;
         for session_id in &ended {
             self.cleanup.on_session_ended(session_id);
@@ -586,6 +702,23 @@ fn session_env(
     env.push((config.credential_env_var.clone(), credential));
     env.extend(isolation_env.iter().cloned());
     env
+}
+
+/// Masks the secret forms in an error's message. The message reaches the
+/// webview both in `AcpSessionFailed` and as the command's error.
+fn mask_error(error: DomainError, forms: &HashSet<String>) -> DomainError {
+    if forms.is_empty() {
+        return error;
+    }
+    let mask = |text: String| redact_secrets(&text, forms);
+    match error {
+        DomainError::NotFound(m) => DomainError::NotFound(mask(m)),
+        DomainError::InvalidInput(m) => DomainError::InvalidInput(mask(m)),
+        DomainError::Io(m) => DomainError::Io(mask(m)),
+        DomainError::Http(m) => DomainError::Http(mask(m)),
+        DomainError::Internal(m) => DomainError::Internal(mask(m)),
+        other => other,
+    }
 }
 
 /// Longest permission title sent to the UI, in characters.
@@ -1205,7 +1338,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_prompt_publishes_every_chunk_before_finished_in_order() {
+    async fn send_prompt_joins_chunks_into_one_event_before_finished() {
         let publisher = Arc::new(FakeEventPublisher::new());
         let client = FakeSessionClient {
             prompt_updates: vec![
@@ -1234,20 +1367,18 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert_eq!(
             events.len(),
-            3,
-            "expected 2 chunks then 1 finished, got {events:?}"
+            2,
+            "expected 1 joined chunk then 1 finished, got {events:?}"
         );
-        match (&events[0], &events[1], &events[2]) {
+        match (&events[0], &events[1]) {
             (
-                DomainEvent::AcpSessionChunk { text: t0, .. },
-                DomainEvent::AcpSessionChunk { text: t1, .. },
+                DomainEvent::AcpSessionChunk { text, .. },
                 DomainEvent::AcpSessionFinished { stop_reason, .. },
             ) => {
-                assert_eq!(t0, "Hello, ");
-                assert_eq!(t1, "world!");
+                assert_eq!(text, "Hello, world!");
                 assert_eq!(stop_reason, "end_turn");
             }
-            other => panic!("expected [Chunk, Chunk, Finished] in order, got {other:?}"),
+            other => panic!("expected [Chunk, Finished] in order, got {other:?}"),
         }
     }
 
@@ -1891,6 +2022,224 @@ mod tests {
         assert!(info.prompt_capabilities.embedded_context);
     }
 
+    /// Text of every chunk event of one kind, joined, and the event count.
+    fn joined_chunks(events: &[DomainEvent], thought: bool) -> (String, usize) {
+        let texts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::AcpSessionChunk { text, .. } if !thought => Some(text.as_str()),
+                DomainEvent::AcpThoughtChunk { text, .. } if thought => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        (texts.concat(), texts.len())
+    }
+
+    struct FixedSecrets(DomainResult<HashSet<String>>);
+    impl StreamSecretSource for FixedSecrets {
+        fn secret_values(&self, _session_id: &str) -> DomainResult<HashSet<String>> {
+            match &self.0 {
+                Ok(values) => Ok(values.clone()),
+                Err(_) => Err(DomainError::Io("unreadable".to_string())),
+            }
+        }
+    }
+
+    fn masked_service(
+        client: FakeSessionClient,
+        publisher: &Arc<FakeEventPublisher>,
+        secrets: &[&str],
+    ) -> AcpSessionService {
+        let values = secrets.iter().map(|s| s.to_string()).collect();
+        service_with(client, publisher, Duration::from_secs(5))
+            .with_stream_secrets(Arc::new(FixedSecrets(Ok(values))))
+    }
+
+    fn texts(pieces: &[&str]) -> Vec<AcpUpdate> {
+        pieces
+            .iter()
+            .map(|t| AcpUpdate::Text {
+                text: t.to_string(),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn chunks_are_flushed_before_a_tool_call_and_keep_their_order() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let mut updates = texts(&["Let me ", "look."]);
+        updates.push(AcpUpdate::ToolCall {
+            call_id: "c1".to_string(),
+            title: "Read".to_string(),
+            kind: "read".to_string(),
+            status: ToolCallStatus::Pending,
+        });
+        updates.push(AcpUpdate::Thought {
+            text: "hmm ".to_string(),
+        });
+        updates.push(AcpUpdate::Thought {
+            text: "ok".to_string(),
+        });
+        updates.extend(texts(&["Done ", "now."]));
+        let client = FakeSessionClient {
+            prompt_updates: updates,
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+        service.send_prompt("session-1", hi()).await.expect("send");
+
+        let events = publisher.events.lock().expect("lock");
+        let shape: Vec<String> = events
+            .iter()
+            .map(|e| match e {
+                DomainEvent::AcpSessionChunk { text, .. } => format!("text:{text}"),
+                DomainEvent::AcpThoughtChunk { text, .. } => format!("thought:{text}"),
+                DomainEvent::AcpToolActivity { .. } => "tool".to_string(),
+                DomainEvent::AcpSessionFinished { .. } => "finished".to_string(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                "text:Let me look.",
+                "tool",
+                "thought:hmm ok",
+                "text:Done now.",
+                "finished"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_long_stream_is_published_in_windows_and_joins_back_exactly() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        // Multi-byte text in 40 pieces, 10 ms apart: about 400 ms in total.
+        let pieces: Vec<String> = (0..40).map(|i| format!("é{i}世🚀 ")).collect();
+        let refs: Vec<&str> = pieces.iter().map(String::as_str).collect();
+        let client = FakeSessionClient {
+            prompt_updates: texts(&refs),
+            update_interval: Duration::from_millis(10),
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &["unrelated-secret"]);
+        service.send_prompt("session-1", hi()).await.expect("send");
+
+        let events = publisher.events.lock().expect("lock");
+        let (joined, count) = joined_chunks(&events, false);
+        assert_eq!(joined, pieces.concat());
+        // About one event per 50 ms window. A slow machine stretches the
+        // sleeps, so only check that pieces were joined and windows split.
+        assert!((2..40).contains(&count), "got {count} events");
+        assert!(matches!(
+            events.last(),
+            Some(DomainEvent::AcpSessionFinished { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_secret_split_across_chunks_is_never_published() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: texts(&["your key is sk-li", "ve-98", "7654 and ", "more text"]),
+            // Each piece lands in its own flush window.
+            update_interval: Duration::from_millis(80),
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &["sk-live-987654"]);
+        service.send_prompt("session-1", hi()).await.expect("send");
+
+        let events = publisher.events.lock().expect("lock");
+        let (joined, count) = joined_chunks(&events, false);
+        assert!(count >= 2, "{events:?}");
+        assert_eq!(
+            joined,
+            format!("your key is {} and more text", crate::redaction::REDACTED)
+        );
+        for event in events.iter() {
+            let text = format!("{event:?}");
+            assert!(!text.contains("live-9") && !text.contains("7654"), "{text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_held_tail_is_flushed_before_a_failure_and_the_error_is_masked() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: texts(&["partial sk-li"]),
+            prompt_should_fail: true,
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &["sk-live-987654", "agent crashed"]);
+        let err = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect_err("the prompt fails");
+        assert!(!err.to_string().contains("agent crashed"), "{err}");
+
+        let events = publisher.events.lock().expect("lock");
+        let (joined, _) = joined_chunks(&events, false);
+        assert_eq!(joined, "partial sk-li");
+        match events.last() {
+            Some(DomainEvent::AcpSessionFailed { error, .. }) => {
+                assert!(!error.contains("agent crashed"), "{error}");
+                assert!(error.contains(crate::redaction::REDACTED), "{error}");
+            }
+            other => panic!("expected AcpSessionFailed last, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_credential_and_mcp_token_are_masked_without_a_secret_source() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            // "sk-abc123" is the fake vault credential, "tok-123456" the token.
+            prompt_updates: texts(&["cred sk-ab", "c123 tok-12", "3456 end"]),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+        let creds = McpHttpServerCredentials {
+            port: 4321,
+            token: "tok-123456".to_string(),
+        };
+        let info = service
+            .start_workspace_session("agent-1", "/tmp", creds, test_isolation())
+            .await
+            .expect("start");
+        service
+            .send_prompt(&info.session_id, hi())
+            .await
+            .expect("send");
+
+        let events = publisher.events.lock().expect("lock");
+        let (joined, _) = joined_chunks(&events, false);
+        let r = crate::redaction::REDACTED;
+        assert_eq!(joined, format!("cred {r} {r} end"));
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_secret_source_refuses_the_prompt_before_it_is_sent() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let held: Arc<Mutex<Vec<UnboundedSender<AcpUpdate>>>> = Arc::new(Mutex::new(Vec::new()));
+        let client = FakeSessionClient {
+            held_update_tx: Some(Arc::clone(&held)),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5)).with_stream_secrets(
+            Arc::new(FixedSecrets(Err(DomainError::Io("x".to_string())))),
+        );
+        let err = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect_err("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(
+            held.lock().expect("lock").is_empty(),
+            "the agent got the prompt"
+        );
+        assert!(publisher.events.lock().expect("lock").is_empty());
+    }
+
     #[tokio::test]
     async fn thought_updates_are_published_in_order_before_the_reply_and_the_finish() {
         let publisher = Arc::new(FakeEventPublisher::new());
@@ -1923,7 +2272,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(thoughts, vec!["checking auth ", "then docs"]);
+        assert_eq!(thoughts, vec!["checking auth then docs"]);
         let last_thought = events
             .iter()
             .rposition(|e| matches!(e, DomainEvent::AcpThoughtChunk { .. }))

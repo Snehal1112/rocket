@@ -103,6 +103,13 @@ const USERINFO_SET: &AsciiSet = &PATH_SET
 /// A URL is re-serialized before it is sent, so a secret can appear in it
 /// (or in an error that quotes it) in an encoded form.
 pub(crate) fn redact_url_secrets(text: &str, secret_values: &HashSet<String>) -> String {
+    redact_secrets(text, &url_secret_forms(secret_values))
+}
+
+/// The plain and percent-encoded forms that `redact_url_secrets` masks.
+///
+/// Build it once when many texts are masked with the same secrets.
+pub(crate) fn url_secret_forms(secret_values: &HashSet<String>) -> HashSet<String> {
     let mut forms: HashSet<String> = HashSet::new();
     for secret in secret_values
         .iter()
@@ -114,7 +121,7 @@ pub(crate) fn redact_url_secrets(text: &str, secret_values: &HashSet<String>) ->
         }
         forms.insert(url::form_urlencoded::byte_serialize(secret.as_bytes()).collect());
     }
-    redact_secrets(text, &forms)
+    forms
 }
 
 /// Whether a header's value is always masked, whatever it contains.

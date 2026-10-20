@@ -709,6 +709,11 @@ pub enum DomainEvent {
         /// Payload size in bytes (before base64).
         size: usize,
         timestamp_ms: i64,
+        /// True when `data` was cut to the live event size cap. Text then
+        /// ends with a marker; base64 is cut whole so it still decodes.
+        /// Left out of the JSON when false, so the pinned key set holds.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        truncated: bool,
     },
     /// A WebSocket session changed state. `code` and `reason` describe a close.
     WebSocketStatus {
@@ -1832,6 +1837,7 @@ mod tests {
             data: "AQID".into(),
             size: 3,
             timestamp_ms: 42,
+            truncated: false,
         };
         let json = serde_json::to_value(&message).expect("serialize");
         assert_eq!(json["type"], "webSocketMessage");
@@ -2384,6 +2390,7 @@ mod tests {
                 data: "d".into(),
                 size: 1,
                 timestamp_ms: 0,
+                truncated: false,
             },
             &[
                 "type",
@@ -2393,6 +2400,28 @@ mod tests {
                 "data",
                 "size",
                 "timestamp_ms",
+            ],
+        );
+        // The cut flag is additive: present only when true.
+        assert_keys(
+            &DomainEvent::WebSocketMessage {
+                session_id: "s".into(),
+                direction: WebSocketDirection::In,
+                kind: WebSocketPayloadKind::Binary,
+                data: "AAAA".into(),
+                size: 9,
+                timestamp_ms: 0,
+                truncated: true,
+            },
+            &[
+                "type",
+                "session_id",
+                "direction",
+                "kind",
+                "data",
+                "size",
+                "timestamp_ms",
+                "truncated",
             ],
         );
     }

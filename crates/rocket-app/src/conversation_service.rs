@@ -256,6 +256,25 @@ impl ConversationService {
     }
 }
 
+/// The live agent text is masked with the same secrets as a saved
+/// conversation. A session without a pin uses the active workspace.
+impl crate::acp_session_service::StreamSecretSource for ConversationService {
+    fn secret_values(&self, session_id: &str) -> DomainResult<HashSet<String>> {
+        match self.pin(session_id) {
+            Ok(pin) => workspace_secret_values(
+                pin.collections.as_ref(),
+                pin.collection_envs.as_ref(),
+                pin.global_envs.as_ref(),
+            ),
+            Err(_) => workspace_secret_values(
+                self.collections.as_ref(),
+                self.collection_envs.as_ref(),
+                self.global_envs.as_ref(),
+            ),
+        }
+    }
+}
+
 /// Index of the oldest message to keep so the kept text fits `MAX_INPUT_TEXT_BYTES`.
 /// It equals the length when even the newest message alone is over the bound.
 fn first_kept_index(messages: &[StoredMessage]) -> usize {

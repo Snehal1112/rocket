@@ -2964,6 +2964,8 @@ export interface WebSocketMessageEvent {
   data: string;
   size: number;
   timestamp_ms: number;
+  /** True when `data` was cut to the live event size cap. Absent when not cut. */
+  truncated?: boolean;
 }
 
 export interface WebSocketStatusEvent {

@@ -2585,9 +2585,10 @@ impl RequestExecutionService {
                 serde_json::json!({ "level": level, "message": e.message })
             })
             .collect();
+        // The live event is capped; the request's output keeps every entry.
         self.events.publish(DomainEvent::ConsoleOutput {
             request_name: request_name.to_string(),
-            entries,
+            entries: crate::event_caps::cap_console_entries(entries),
         });
     }
 
@@ -2643,9 +2644,10 @@ impl RequestExecutionService {
                     serde_json::json!({ "name": t.name, "status": status, "error": t.error })
                 })
                 .collect();
+            // The live event is capped; the request's output keeps every result.
             self.events.publish(DomainEvent::TestsCompleted {
                 request_name: request_name.clone(),
-                results,
+                results: crate::event_caps::cap_test_results(results),
             });
         }
 
@@ -6298,6 +6300,52 @@ mod tests {
         fn publish(&self, event: DomainEvent) {
             self.events.lock().expect("lock").push(event);
         }
+    }
+
+    #[test]
+    fn the_console_event_is_capped_but_the_entries_passed_in_are_not() {
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+        let publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let entries: Vec<ConsoleEntry> = (0..crate::event_caps::MAX_CONSOLE_ENTRIES + 10)
+            .map(|i| ConsoleEntry {
+                level: ConsoleLevel::Log,
+                message: format!("line {i}"),
+            })
+            .collect();
+        svc.publish_console("req", &entries);
+
+        assert_eq!(entries.len(), crate::event_caps::MAX_CONSOLE_ENTRIES + 10);
+        let events = publisher.events.lock().expect("lock");
+        let published = events
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::ConsoleOutput { entries, .. } => Some(entries.clone()),
+                _ => None,
+            })
+            .expect("a console event");
+        assert_eq!(published.len(), crate::event_caps::MAX_CONSOLE_ENTRIES);
+        assert_eq!(
+            published.last().map(|e| e["message"].clone()),
+            Some(serde_json::json!("...[11 more console entries truncated]"))
+        );
     }
 
     #[tokio::test]

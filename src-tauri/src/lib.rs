@@ -820,7 +820,11 @@ pub fn run() {
                     Arc::clone(&proposal_svc),
                 )),
                 acp_agent_config_svc,
-            );
+            )
+            // Live agent text is masked with the same workspace secrets as
+            // saved conversations.
+            .with_stream_secrets(Arc::clone(&conversation_svc)
+                as Arc<dyn rocket_app::StreamSecretSource>);
 
             // Register all services as Tauri managed state.
             app.manage(collection_svc);

@@ -18,6 +18,8 @@ use rocket_shared::events::{
 };
 use tokio::sync::mpsc;
 
+use crate::event_caps::{cap_with_marker, MAX_STREAM_MESSAGE_BYTES};
+
 /// A session slot. `tx` is `None` while the id is reserved and the handshake is in flight.
 /// `generation` tells apart two sessions that reuse one id, so a stale task never acts on
 /// the newer session.
@@ -55,10 +57,7 @@ fn publish_frame(
     direction: WebSocketDirection,
     frame: &WebSocketFrame,
 ) {
-    let (kind, data) = match frame {
-        WebSocketFrame::Text(text) => (WebSocketPayloadKind::Text, text.clone()),
-        WebSocketFrame::Binary(bytes) => (WebSocketPayloadKind::Binary, STANDARD.encode(bytes)),
-    };
+    let (kind, data, truncated) = frame_event_data(frame, MAX_STREAM_MESSAGE_BYTES);
     events.publish(DomainEvent::WebSocketMessage {
         session_id: session_id.to_string(),
         direction,
@@ -66,7 +65,27 @@ fn publish_frame(
         data,
         size: frame.size(),
         timestamp_ms: chrono::Utc::now().timestamp_millis(),
+        truncated,
     });
+}
+
+/// The event payload of a frame, cut to `limit` bytes. Text gets a marker.
+/// A binary frame is cut before encoding, at a multiple of 3 bytes, so the
+/// base64 stays at most `limit` long and still decodes. `size` keeps the
+/// full frame size either way.
+fn frame_event_data(frame: &WebSocketFrame, limit: usize) -> (WebSocketPayloadKind, String, bool) {
+    match frame {
+        WebSocketFrame::Text(text) => {
+            let (data, cut) = cap_with_marker(text.clone(), limit);
+            (WebSocketPayloadKind::Text, data, cut)
+        }
+        WebSocketFrame::Binary(bytes) => {
+            let max_bytes = limit / 4 * 3;
+            let cut = bytes.len() > max_bytes;
+            let shown = if cut { &bytes[..max_bytes] } else { &bytes[..] };
+            (WebSocketPayloadKind::Binary, STANDARD.encode(shown), cut)
+        }
+    }
 }
 
 impl WebSocketService {
@@ -353,6 +372,40 @@ impl WebSocketService {
                 })
                 .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod frame_cap_tests {
+    use super::*;
+
+    #[test]
+    fn a_small_frame_is_sent_whole() {
+        let (kind, data, cut) = frame_event_data(&WebSocketFrame::Text("hi".into()), 16);
+        assert_eq!(
+            (kind, data.as_str(), cut),
+            (WebSocketPayloadKind::Text, "hi", false)
+        );
+        let (_, data, cut) = frame_event_data(&WebSocketFrame::Binary(vec![1, 2, 3]), 16);
+        assert_eq!((data.as_str(), cut), ("AQID", false));
+    }
+
+    #[test]
+    fn a_large_text_frame_is_cut_with_a_marker() {
+        let (_, data, cut) = frame_event_data(&WebSocketFrame::Text("abcdefghij".into()), 4);
+        assert!(cut);
+        assert_eq!(data, "abcd...[truncated 6 bytes]");
+    }
+
+    #[test]
+    fn a_large_binary_frame_is_cut_to_decodable_base64() {
+        let bytes: Vec<u8> = (0..100).collect();
+        let (kind, data, cut) = frame_event_data(&WebSocketFrame::Binary(bytes.clone()), 10);
+        assert_eq!(kind, WebSocketPayloadKind::Binary);
+        assert!(cut);
+        assert!(data.len() <= 10);
+        let decoded = STANDARD.decode(&data).expect("still base64");
+        assert_eq!(decoded, bytes[..6]);
     }
 }
 

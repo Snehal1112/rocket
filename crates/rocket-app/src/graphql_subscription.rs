@@ -292,6 +292,9 @@ fn publish_message(
     event: GraphQlSubscriptionEventKind,
     data: String,
 ) {
+    // A huge result is cut for the live event. The marker says how much was left out.
+    let (data, _) =
+        crate::event_caps::cap_with_marker(data, crate::event_caps::MAX_STREAM_MESSAGE_BYTES);
     events.publish(DomainEvent::GraphQlSubscriptionMessage {
         session_id: session_id.to_string(),
         event,
@@ -1421,5 +1424,42 @@ mod session_tests {
             "the second session never received its stop: {:?}",
             types(&received_b)
         );
+    }
+}
+
+#[cfg(test)]
+mod event_cap_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<DomainEvent>>);
+    impl EventPublisher for Recorder {
+        fn publish(&self, event: DomainEvent) {
+            self.0.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+        }
+    }
+
+    fn published_data(data: String) -> String {
+        let recorder = Recorder::default();
+        publish_message(&recorder, "s1", GraphQlSubscriptionEventKind::Next, data);
+        let events = recorder.0.into_inner().unwrap_or_else(|e| e.into_inner());
+        match events.into_iter().next() {
+            Some(DomainEvent::GraphQlSubscriptionMessage { data, .. }) => data,
+            other => panic!("expected a message event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_small_result_is_published_whole() {
+        assert_eq!(published_data("{}".to_string()), "{}");
+    }
+
+    #[test]
+    fn a_huge_result_is_capped_with_a_marker() {
+        let limit = crate::event_caps::MAX_STREAM_MESSAGE_BYTES;
+        let data = published_data("y".repeat(limit + 5));
+        assert!(data.ends_with("...[truncated 5 bytes]"));
+        assert!(data.starts_with(&"y".repeat(limit)));
     }
 }

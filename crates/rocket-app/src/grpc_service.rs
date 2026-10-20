@@ -580,6 +580,11 @@ async fn forward_events(
                 }
             }
             GrpcStreamEvent::Message(json) => {
+                // Only the live event is capped. The marker says how much was left out.
+                let (json, _) = crate::event_caps::cap_with_marker(
+                    json,
+                    crate::event_caps::MAX_STREAM_MESSAGE_BYTES,
+                );
                 if !publish_while_open(&sessions, &events, &session_id, || {
                     DomainEvent::GrpcSessionMessage {
                         session_id: session_id.clone(),
@@ -1332,6 +1337,36 @@ message Rep { string message = 1; }
             .await
             .expect_err("session is gone");
         assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn a_huge_stream_message_is_capped_with_a_marker_in_the_event() {
+        let h = harness(None);
+        let fx = prepare_stream(&h, false);
+        h.svc
+            .start_session(input(request("demo.v1.Greeter/List")), "s1".to_string())
+            .await
+            .expect("start");
+        let limit = crate::event_caps::MAX_STREAM_MESSAGE_BYTES;
+        let huge = format!("\"{}\"", "x".repeat(limit + 98));
+        fx.events_tx
+            .send(GrpcStreamEvent::Message(huge))
+            .await
+            .expect("send");
+        wait_for_tags(&h, &["started:server-streaming", "message:0"]).await;
+        let json = lock(&h.events.0)
+            .iter()
+            .find_map(|e| match e {
+                DomainEvent::GrpcSessionMessage { json, .. } => Some(json.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert!(
+            json.ends_with("...[truncated 100 bytes]"),
+            "{}",
+            &json[limit - 10..]
+        );
+        assert_eq!(json.len(), limit + "...[truncated 100 bytes]".len());
     }
 
     #[tokio::test]

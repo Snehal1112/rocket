@@ -1,6 +1,7 @@
 // Application services — orchestration layer
 
 pub mod acp_session_service;
+pub(crate) mod acp_stream;
 pub mod agent_config_service;
 pub mod agent_isolation;
 pub mod assertion_evaluator;
@@ -18,6 +19,7 @@ pub mod cookie_service;
 mod duplicate_request_e2e_tests;
 pub mod env_audit;
 pub mod environment_service;
+pub mod event_caps;
 pub mod execution_service;
 pub mod export_service;
 pub mod flow_auth;
@@ -65,6 +67,7 @@ pub mod workspace_service;
 
 pub use acp_session_service::{
     AcpSessionService, McpHttpServerCredentials, NoopSessionCleanup, SessionCleanup,
+    StreamSecretSource,
 };
 pub use agent_config_service::{process_env_reader, AgentConfigService, EnvReader};
 pub use agent_isolation::{
