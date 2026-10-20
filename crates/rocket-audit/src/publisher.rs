@@ -14,6 +14,42 @@ impl SecurityAuditPublisher for NullSecurityAuditPublisher {
     }
 }
 
+/// One call recorded by `RecordingSecurityAuditPublisher`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedAudit {
+    pub actor: String,
+    pub workspace_id: Option<String>,
+    pub kind: AuditEventKind,
+}
+
+/// Test double that keeps every published event with its actor and workspace id.
+#[derive(Default)]
+pub struct RecordingSecurityAuditPublisher {
+    records: std::sync::Mutex<Vec<RecordedAudit>>,
+}
+
+impl RecordingSecurityAuditPublisher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn records(&self) -> Vec<RecordedAudit> {
+        self.records.lock().map(|r| r.clone()).unwrap_or_default()
+    }
+}
+
+impl SecurityAuditPublisher for RecordingSecurityAuditPublisher {
+    fn publish(&self, actor: String, workspace_id: Option<String>, kind: AuditEventKind) {
+        if let Ok(mut records) = self.records.lock() {
+            records.push(RecordedAudit {
+                actor,
+                workspace_id,
+                kind,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use rocket_app::SecurityAuditService;
-use rocket_audit::{event::SecurityAuditEvent, profile::ComplianceProfile};
+use rocket_audit::{actor::AuditActor, event::SecurityAuditEvent, profile::ComplianceProfile};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
@@ -58,19 +58,15 @@ pub fn export_audit_evidence(
     svc: State<'_, Arc<SecurityAuditService>>,
     input: RangeInput,
 ) -> Result<EvidenceExport, String> {
-    let events = svc
-        .list_range(input.start, input.end)
+    let bundle = svc
+        .export_evidence(AuditActor::User, input.start, input.end)
         .map_err(|e| e.to_string())?;
-    let chain_verified = matches!(
-        rocket_audit::chain::verify_chain(&events),
-        rocket_audit::chain::ChainVerification::Ok
-    );
     Ok(EvidenceExport {
         exported_at: Utc::now(),
         range_start: input.start,
         range_end: input.end,
-        events,
-        chain_verified,
+        events: bundle.events,
+        chain_verified: bundle.chain_verified,
     })
 }
 

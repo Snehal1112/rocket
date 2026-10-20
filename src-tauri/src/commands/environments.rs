@@ -1,4 +1,8 @@
 use rocket_app::{EnvironmentService, RequestExecutionService, WorkspaceService};
+use rocket_audit::{
+    actor::AuditActor,
+    publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
+};
 use rocket_environment::Environment;
 use rocket_infra::FsEnvironmentRepo;
 use rocket_shared::{
@@ -19,6 +23,7 @@ fn env_service_for(
     collection: &str,
     ws_path: &Path,
     events: Box<dyn EventPublisher>,
+    audit: Arc<dyn SecurityAuditPublisher>,
 ) -> Result<EnvironmentService, DomainError> {
     // Reject names that could escape the workspace directory.
     if collection.contains('\0')
@@ -34,13 +39,15 @@ fn env_service_for(
         .join("collections")
         .join(collection)
         .join("environments");
-    Ok(EnvironmentService::new(
+    Ok(EnvironmentService::new_with_audit(
         Box::new(FsEnvironmentRepo::with_secret_store(
             env_dir,
             crate::env_secret_store(),
         )),
         events,
-    ))
+        audit,
+    )
+    .with_audit_actor(AuditActor::User))
 }
 
 #[tauri::command]
@@ -51,7 +58,13 @@ pub fn list_environments(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
-    env_service_for(&collection, &ws, Box::new(NullEventPublisher))?.list()
+    env_service_for(
+        &collection,
+        &ws,
+        Box::new(NullEventPublisher),
+        Arc::new(NullSecurityAuditPublisher),
+    )?
+    .list()
 }
 
 #[tauri::command]
@@ -64,7 +77,13 @@ pub fn get_environment(
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     Environment::validate_name(&name)?;
-    env_service_for(&collection, &ws, Box::new(NullEventPublisher))?.get(&name)
+    env_service_for(
+        &collection,
+        &ws,
+        Box::new(NullEventPublisher),
+        Arc::new(NullSecurityAuditPublisher),
+    )?
+    .get(&name)
 }
 
 #[tauri::command]
@@ -72,6 +91,7 @@ pub fn save_environment(
     collection: String,
     env: Environment,
     app: AppHandle,
+    audit: State<'_, Arc<dyn SecurityAuditPublisher>>,
     workspace: State<'_, Arc<Mutex<PathBuf>>>,
     secret_managers: State<'_, rocket_app::SecretManagerService>,
 ) -> Result<(), DomainError> {
@@ -79,8 +99,13 @@ pub fn save_environment(
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     Environment::validate_name(&env.name)?;
-    env_service_for(&collection, &ws, Box::new(TauriEventBus::new(app)))?
-        .save_with_capabilities(&env, &*secret_managers)
+    env_service_for(
+        &collection,
+        &ws,
+        Box::new(TauriEventBus::new(app)),
+        Arc::clone(&audit),
+    )?
+    .save_with_capabilities(&env, &*secret_managers)
 }
 
 #[tauri::command]
@@ -88,13 +113,20 @@ pub fn delete_environment(
     collection: String,
     name: String,
     app: AppHandle,
+    audit: State<'_, Arc<dyn SecurityAuditPublisher>>,
     workspace: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<(), DomainError> {
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     Environment::validate_name(&name)?;
-    env_service_for(&collection, &ws, Box::new(TauriEventBus::new(app)))?.delete(&name)
+    env_service_for(
+        &collection,
+        &ws,
+        Box::new(TauriEventBus::new(app)),
+        Arc::clone(&audit),
+    )?
+    .delete(&name)
 }
 
 #[tauri::command]
@@ -125,15 +157,18 @@ pub fn set_global_environment(
 fn global_env_service(
     ws_path: &Path,
     events: Box<dyn EventPublisher>,
+    audit: Arc<dyn SecurityAuditPublisher>,
 ) -> Result<EnvironmentService, DomainError> {
     let env_dir = ws_path.join("environments");
-    Ok(EnvironmentService::new(
+    Ok(EnvironmentService::new_with_audit(
         Box::new(FsEnvironmentRepo::with_secret_store(
             env_dir,
             crate::env_secret_store(),
         )),
         events,
-    ))
+        audit,
+    )
+    .with_audit_actor(AuditActor::User))
 }
 
 #[tauri::command]
@@ -143,7 +178,12 @@ pub fn list_global_environments(
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
-    global_env_service(&ws, Box::new(NullEventPublisher))?.list()
+    global_env_service(
+        &ws,
+        Box::new(NullEventPublisher),
+        Arc::new(NullSecurityAuditPublisher),
+    )?
+    .list()
 }
 
 #[tauri::command]
@@ -155,13 +195,19 @@ pub fn get_global_environment(
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     Environment::validate_name(&name)?;
-    global_env_service(&ws, Box::new(NullEventPublisher))?.get(&name)
+    global_env_service(
+        &ws,
+        Box::new(NullEventPublisher),
+        Arc::new(NullSecurityAuditPublisher),
+    )?
+    .get(&name)
 }
 
 #[tauri::command]
 pub fn save_global_environment(
     env: Environment,
     app: AppHandle,
+    audit: State<'_, Arc<dyn SecurityAuditPublisher>>,
     workspace: State<'_, Arc<Mutex<PathBuf>>>,
     secret_managers: State<'_, rocket_app::SecretManagerService>,
 ) -> Result<(), DomainError> {
@@ -169,7 +215,7 @@ pub fn save_global_environment(
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     Environment::validate_name(&env.name)?;
-    global_env_service(&ws, Box::new(TauriEventBus::new(app)))?
+    global_env_service(&ws, Box::new(TauriEventBus::new(app)), Arc::clone(&audit))?
         .save_with_capabilities(&env, &*secret_managers)
 }
 
@@ -177,13 +223,14 @@ pub fn save_global_environment(
 pub fn delete_global_environment(
     name: String,
     app: AppHandle,
+    audit: State<'_, Arc<dyn SecurityAuditPublisher>>,
     workspace: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<(), DomainError> {
     let ws = workspace
         .lock()
         .map_err(|_| DomainError::Internal("workspace lock poisoned".into()))?;
     Environment::validate_name(&name)?;
-    global_env_service(&ws, Box::new(TauriEventBus::new(app)))?.delete(&name)
+    global_env_service(&ws, Box::new(TauriEventBus::new(app)), Arc::clone(&audit))?.delete(&name)
 }
 
 /// One variable of a flattened environment, with the environment that defines it.

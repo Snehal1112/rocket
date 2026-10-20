@@ -1,6 +1,7 @@
 use crate::env_audit;
 use crate::redaction::MIN_REDACTION_LEN;
 use rocket_audit::{
+    actor::AuditActor,
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
@@ -428,6 +429,8 @@ pub struct RequestExecutionService {
     cookie_repo: Box<dyn CookieRepository>,
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
+    /// The actor of audit rows for a send. Script writes always use `Script`.
+    audit_actor: AuditActor,
     script_engine: Option<Box<dyn ScriptEngine>>,
     /// Reads `.env` files for `process_env_for`. `None` reads no file.
     dot_env_loader: Option<Box<dyn rocket_environment::DotEnvLoader>>,
@@ -475,6 +478,7 @@ impl RequestExecutionService {
             cookie_repo,
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
+            audit_actor: AuditActor::System,
             script_engine: None,
             dot_env_loader: None,
             secret_manager_repo,
@@ -506,6 +510,7 @@ impl RequestExecutionService {
             cookie_repo,
             events,
             audit,
+            audit_actor: AuditActor::System,
             script_engine: None,
             dot_env_loader: None,
             secret_manager_repo,
@@ -513,6 +518,12 @@ impl RequestExecutionService {
             vault_fetcher,
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
         }
+    }
+
+    /// Sets who the send-time audit rows name as the actor.
+    pub fn with_audit_actor(mut self, actor: AuditActor) -> Self {
+        self.audit_actor = actor;
+        self
     }
 
     /// Attach the trust store that decides which requested capabilities are granted.
@@ -1613,6 +1624,7 @@ impl RequestExecutionService {
                 env_audit::publish_env_write_events(
                     self.events.as_ref(),
                     self.audit.as_ref(),
+                    AuditActor::Script,
                     env_name,
                     &before,
                     &env,
@@ -1970,7 +1982,7 @@ impl RequestExecutionService {
         // the intent even if the network call itself fails.
         if let Some(auth_type) = sensitive_auth_label(&http_request.auth) {
             self.audit.publish(
-                "system".into(),
+                self.audit_actor.into(),
                 None,
                 AuditEventKind::SensitiveAuthUsed {
                     auth_type: auth_type.to_string(),
@@ -6385,6 +6397,70 @@ mod tests {
             "expected SensitiveAuthUsed bearer event, got {:?}",
             *captured
         );
+    }
+
+    #[tokio::test]
+    async fn sensitive_auth_audit_uses_the_configured_actor() {
+        use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+        let publisher = Arc::new(RecordingSecurityAuditPublisher::new());
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_audit_actor(AuditActor::Agent);
+        let mut input = sample_input("https://api.example.com/users", None);
+        input.auth = Auth::Bearer {
+            token: "tok".into(),
+        };
+        svc.execute(input).await.unwrap();
+        let records = publisher.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].actor, "agent");
+    }
+
+    #[tokio::test]
+    async fn script_env_write_audit_names_the_script_actor() {
+        use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-old"));
+        let env_repo = RecordingEnvRepo::with_env(env);
+        let result = ScriptResult {
+            env_var_writes: vec![EnvVarWrite {
+                key: "API_KEY".into(),
+                value: serde_json::json!("sk-new"),
+                persist: true,
+            }],
+            ..Default::default()
+        };
+        let publisher = Arc::new(RecordingSecurityAuditPublisher::new());
+        let svc = RequestExecutionService::new_with_audit(
+            Box::new(SharedEnvRepo(Arc::clone(&env_repo))),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_audit_actor(AuditActor::User)
+        .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
+        let mut input = sample_input("https://example.com", Some("prod"));
+        input.post_response_script = Some("// post".into());
+        svc.execute(input).await.expect("execute failed");
+        let records = publisher.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].actor, "script");
     }
 
     #[tokio::test]

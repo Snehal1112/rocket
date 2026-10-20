@@ -1,4 +1,5 @@
 use rocket_audit::{
+    actor::AuditActor,
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
@@ -100,6 +101,7 @@ pub struct ContractService {
     repo: Arc<dyn ContractRepository>,
     collection_repo: Arc<dyn CollectionRepository>,
     audit: Arc<dyn SecurityAuditPublisher>,
+    audit_actor: AuditActor,
 }
 
 /// Summary returned by `recompute_drift_for_collection` for each processed contract.
@@ -131,6 +133,7 @@ impl ContractService {
             repo,
             collection_repo,
             audit: Arc::new(NullSecurityAuditPublisher),
+            audit_actor: AuditActor::System,
         }
     }
 
@@ -143,7 +146,14 @@ impl ContractService {
             repo,
             collection_repo,
             audit,
+            audit_actor: AuditActor::System,
         }
+    }
+
+    /// Sets who the audit rows of this service name as the actor.
+    pub fn with_audit_actor(mut self, actor: AuditActor) -> Self {
+        self.audit_actor = actor;
+        self
     }
 
     /// Create a new contract and take a baseline snapshot of every covered request.
@@ -218,7 +228,7 @@ impl ContractService {
         self.repo.append_changelog(collection_root, &changelog)?;
 
         self.audit.publish(
-            "system".into(),
+            self.audit_actor.into(),
             None,
             AuditEventKind::ContractAttached {
                 contract_id: contract.id.to_string(),
@@ -292,7 +302,7 @@ impl ContractService {
             .unwrap_or("")
             .to_string();
         self.audit.publish(
-            "system".into(),
+            self.audit_actor.into(),
             None,
             AuditEventKind::ContractDeleted {
                 contract_id: id.to_string(),
@@ -357,7 +367,7 @@ impl ContractService {
                             // before handing the entries to the changelog store.
                             for entry in &entries {
                                 self.audit.publish(
-                                    "system".into(),
+                                    self.audit_actor.into(),
                                     None,
                                     AuditEventKind::ContractViolation {
                                         contract_id: contract.id.to_string(),
@@ -1527,6 +1537,25 @@ mod tests {
             "expected ContractAttached, got {:?}",
             *captured
         );
+    }
+
+    #[test]
+    fn attach_records_the_configured_actor() {
+        use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+        let publisher = Arc::new(RecordingSecurityAuditPublisher::new());
+        let mut empty = Collection::new(COLLECTION_NAME);
+        empty.root.dir_name = Some(COLLECTION_NAME.into());
+        let svc = ContractService::new_with_audit(
+            Arc::new(MockContractRepo::default()),
+            Arc::new(MockCollectionRepo::with_collection(empty)),
+            publisher.clone(),
+        )
+        .with_audit_actor(AuditActor::User);
+        svc.attach_contract(root(), make_contract(), vec![], vec![])
+            .unwrap();
+        let records = publisher.records();
+        assert!(!records.is_empty());
+        assert!(records.iter().all(|r| r.actor == "user"));
     }
 
     #[test]

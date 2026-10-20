@@ -133,7 +133,7 @@ pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};
 pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};
 pub use secret_manager_service::SecretManagerService;
-pub use security_audit_service::SecurityAuditService;
+pub use security_audit_service::{EvidenceBundle, SecurityAuditService, WorkspaceIdResolver};
 pub use session_plan::{
     session_plan, PlanInput, PlannedFile, SessionPlan, GEMINI_FIRST_PROMPT_REMINDER,
     NON_CLAUDE_TOOL_NOTICE, ROCKET_MCP_TOOL_NAMES,

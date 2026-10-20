@@ -3,7 +3,7 @@
 //! write (`RequestExecutionService::apply_env_writes`) produce an identical audit
 //! trail — see docs/superpowers/specs/2026-09-16-env-var-write-audit-spec.md §3.2.
 
-use rocket_audit::{event::AuditEventKind, publisher::SecurityAuditPublisher};
+use rocket_audit::{actor::AuditActor, event::AuditEventKind, publisher::SecurityAuditPublisher};
 use rocket_environment::Environment;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
@@ -14,6 +14,7 @@ use rocket_shared::events::{DomainEvent, EventPublisher};
 pub fn publish_env_write_events(
     events: &dyn EventPublisher,
     audit: &dyn SecurityAuditPublisher,
+    actor: AuditActor,
     env_name: &str,
     before: &Environment,
     after: &Environment,
@@ -34,7 +35,7 @@ pub fn publish_env_write_events(
             .unwrap_or(true);
         if changed {
             audit.publish(
-                "system".into(),
+                actor.into(),
                 None,
                 AuditEventKind::SecretVariableWritten {
                     environment: env_name.to_string(),
@@ -80,7 +81,7 @@ mod tests {
         let before = Environment::new("prod");
         let after = Environment::new("prod");
 
-        publish_env_write_events(&events, &audit, "prod", &before, &after);
+        publish_env_write_events(&events, &audit, AuditActor::User, "prod", &before, &after);
 
         let published = events.events.lock().expect("lock");
         assert!(published
@@ -100,7 +101,7 @@ mod tests {
         let mut after = Environment::new("prod");
         after.set_variable(Variable::secret("API_KEY", "sk-12345"));
 
-        publish_env_write_events(&events, &audit, "prod", &before, &after);
+        publish_env_write_events(&events, &audit, AuditActor::User, "prod", &before, &after);
 
         let captured = audit.captured.lock().expect("lock");
         assert!(captured.iter().any(|k| matches!(
@@ -122,7 +123,7 @@ mod tests {
         let mut after = Environment::new("prod");
         after.set_variable(Variable::new("HOST", "api.example.com"));
 
-        publish_env_write_events(&events, &audit, "prod", &before, &after);
+        publish_env_write_events(&events, &audit, AuditActor::User, "prod", &before, &after);
 
         let captured = audit.captured.lock().expect("lock");
         assert!(captured.is_empty());
@@ -140,7 +141,7 @@ mod tests {
         before.set_variable(Variable::secret("API_KEY", "sk-12345"));
         let after = before.clone();
 
-        publish_env_write_events(&events, &audit, "prod", &before, &after);
+        publish_env_write_events(&events, &audit, AuditActor::User, "prod", &before, &after);
 
         let captured = audit.captured.lock().expect("lock");
         assert!(captured.is_empty());

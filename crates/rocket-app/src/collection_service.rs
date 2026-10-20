@@ -1,5 +1,6 @@
 use crate::flow_references::FlowReferenceUpdater;
 use rocket_audit::{
+    actor::AuditActor,
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
@@ -17,6 +18,7 @@ pub struct CollectionService {
     repo: Box<dyn CollectionRepository>,
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
+    audit_actor: AuditActor,
     /// Grants follow create, rename and delete when a store is attached.
     trust: Option<Arc<dyn CollectionTrustStore>>,
     /// Flow references follow a move when an updater is attached.
@@ -29,6 +31,7 @@ impl CollectionService {
             repo,
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
+            audit_actor: AuditActor::System,
             trust: None,
             flow_refs: None,
         }
@@ -112,9 +115,16 @@ impl CollectionService {
             repo,
             events,
             audit,
+            audit_actor: AuditActor::System,
             trust: None,
             flow_refs: None,
         }
+    }
+
+    /// Sets who the audit rows of this service name as the actor.
+    pub fn with_audit_actor(mut self, actor: AuditActor) -> Self {
+        self.audit_actor = actor;
+        self
     }
 
     pub fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
@@ -243,7 +253,7 @@ impl CollectionService {
             }
         }
         self.audit.publish(
-            "system".into(),
+            self.audit_actor.into(),
             None,
             AuditEventKind::CollectionDeleted {
                 collection: name.to_string(),
@@ -1854,6 +1864,37 @@ mod tests {
             "expected CollectionDeleted, got {:?}",
             *captured
         );
+    }
+
+    #[test]
+    fn delete_records_the_configured_actor() {
+        use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+        let publisher = Arc::new(RecordingSecurityAuditPublisher::new());
+        let svc = CollectionService::new_with_audit(
+            Box::new(mock_collection_repo()),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+        )
+        .with_audit_actor(AuditActor::User);
+        svc.create("victim").unwrap();
+        svc.delete("victim").unwrap();
+        let records = publisher.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].actor, "user");
+    }
+
+    #[test]
+    fn delete_defaults_to_the_system_actor() {
+        use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+        let publisher = Arc::new(RecordingSecurityAuditPublisher::new());
+        let svc = CollectionService::new_with_audit(
+            Box::new(mock_collection_repo()),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+        );
+        svc.create("victim").unwrap();
+        svc.delete("victim").unwrap();
+        assert_eq!(publisher.records()[0].actor, "system");
     }
 
     #[test]

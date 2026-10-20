@@ -1,3 +1,4 @@
+use rocket_audit::actor::AuditActor;
 use rocket_audit::publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher};
 use rocket_environment::{Environment, EnvironmentRepository};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -8,6 +9,7 @@ pub struct EnvironmentService {
     repo: Box<dyn EnvironmentRepository>,
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
+    audit_actor: AuditActor,
 }
 
 impl EnvironmentService {
@@ -16,6 +18,7 @@ impl EnvironmentService {
             repo,
             events,
             audit: Arc::new(NullSecurityAuditPublisher),
+            audit_actor: AuditActor::System,
         }
     }
 
@@ -28,7 +31,14 @@ impl EnvironmentService {
             repo,
             events,
             audit,
+            audit_actor: AuditActor::System,
         }
+    }
+
+    /// Sets who the audit rows of this service name as the actor.
+    pub fn with_audit_actor(mut self, actor: AuditActor) -> Self {
+        self.audit_actor = actor;
+        self
     }
 
     pub fn list(&self) -> DomainResult<Vec<Environment>> {
@@ -77,6 +87,7 @@ impl EnvironmentService {
         crate::env_audit::publish_env_write_events(
             self.events.as_ref(),
             self.audit.as_ref(),
+            self.audit_actor,
             &env.name,
             &before,
             env,
@@ -306,6 +317,26 @@ mod tests {
             rec.events()
         );
         Ok(())
+    }
+
+    #[test]
+    fn save_records_the_configured_actor_for_a_secret() {
+        use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+        let publisher = Arc::new(RecordingSecurityAuditPublisher::new());
+        let svc = EnvironmentService::new_with_audit(
+            Box::new(MockEnvRepo::new()),
+            Box::new(NullEventPublisher),
+            publisher.clone(),
+        )
+        .with_audit_actor(AuditActor::User);
+        let mut env = Environment::new("prod");
+        env.set_variable(Variable::secret("API_KEY", "sk-12345"));
+        svc.save(&env).unwrap();
+        let records = publisher.records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].actor, "user");
+        // Only the key is recorded, never the value.
+        assert!(!format!("{:?}", records[0].kind).contains("sk-12345"));
     }
 
     #[test]

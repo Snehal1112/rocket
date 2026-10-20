@@ -17,7 +17,7 @@ use rocket_app::{
     HistoryService, RequestExecutionService, SecurityAuditService, TemplateService,
     WorkspaceService,
 };
-use rocket_audit::publisher::SecurityAuditPublisher;
+use rocket_audit::{actor::AuditActor, publisher::SecurityAuditPublisher};
 use rocket_environment::secret_store::SecretStore;
 use rocket_infra::{
     scripting::DenoScriptEngine, CloneDestinationCapabilities, FsAuditLogRepo,
@@ -26,7 +26,7 @@ use rocket_infra::{
     SharedCollectionEnvironmentRepo, SharedPathCollectionRepo, SharedPathEnvironmentRepo,
 };
 use rocket_shared::events::NullEventPublisher;
-use rocket_workspace::WorkspaceConfigRepository;
+use rocket_workspace::{WorkspaceConfigRepository, WorkspaceRepository};
 use tauri::Manager;
 
 /// OS-keychain backend for environment secret values.
@@ -331,9 +331,18 @@ pub fn run() {
                 FsComplianceProfileRepo::new(audit_dir.join("profile.yml"))
                     .map_err(|e| format!("Failed to initialise compliance profile: {e}"))?,
             );
+            // The audit service reads the active workspace id from the registry
+            // when it records, so no call site has to pass it.
+            let audit_workspace_repo = FsWorkspaceRepo::new(data_dir.clone());
             let audit_svc = Arc::new(
                 SecurityAuditService::new(audit_log_repo.clone(), profile_repo.clone())
-                    .map_err(|e| format!("Failed to initialise audit service: {e}"))?,
+                    .map_err(|e| format!("Failed to initialise audit service: {e}"))?
+                    .with_workspace_resolver(Arc::new(move || {
+                        audit_workspace_repo
+                            .load()
+                            .ok()
+                            .map(|registry| registry.active_workspace_id)
+                    })),
             );
             let audit_publisher: Arc<dyn SecurityAuditPublisher> = Arc::new(
                 audit_bridge::ServiceBackedAuditPublisher::new(audit_svc.clone()),
@@ -399,7 +408,8 @@ pub fn run() {
                 audit_publisher.clone(),
             )
             .with_trust_store(Arc::clone(&trust_store))
-            .with_flow_references(Arc::clone(&flow_refs));
+            .with_flow_references(Arc::clone(&flow_refs))
+            .with_audit_actor(AuditActor::User);
             // Holds the assistant's proposed changes until the user accepts
             // them. It applies them through its own CollectionService, built
             // like collection_svc above, so accepted changes follow workspace
@@ -413,7 +423,8 @@ pub fn run() {
                     Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                     audit_publisher.clone(),
                 )
-                .with_flow_references(Arc::clone(&flow_refs)),
+                .with_flow_references(Arc::clone(&flow_refs))
+                .with_audit_actor(AuditActor::Agent),
                 Arc::new(SharedCollectionEnvironmentRepo::with_secret_store(
                     Arc::clone(&active_workspace_path),
                     env_secret_store(),
@@ -583,6 +594,7 @@ pub fn run() {
                 Arc::clone(&vault_connection_secret_store),
                 Arc::clone(&vault_fetcher),
             )
+            .with_audit_actor(AuditActor::User)
             .with_script_engine(Box::new(DenoScriptEngine::new()))
             .with_trust_store(Arc::clone(&trust_store))
             .with_collection_env_repo_factory(Box::new(
@@ -664,6 +676,7 @@ pub fn run() {
                     Arc::clone(&vault_connection_secret_store),
                     Arc::clone(&vault_fetcher),
                 )
+                .with_audit_actor(AuditActor::Agent)
                 .with_script_engine(Box::new(DenoScriptEngine::new()))
                 .with_trust_store(Arc::clone(&trust_store))
                 .with_collection_env_repo_factory(Box::new(
@@ -778,7 +791,8 @@ pub fn run() {
                     &active_workspace_path,
                 ))),
                 audit_publisher.clone(),
-            );
+            )
+            .with_audit_actor(AuditActor::User);
 
             // gRPC calls. The workspace path is shared with the collection repo, so relative
             // proto paths follow a workspace switch.
@@ -850,6 +864,7 @@ pub fn run() {
             app.manage(git_svc);
             app.manage(CloneDestinationCapabilities::default());
             app.manage(audit_svc);
+            app.manage(audit_publisher.clone());
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
             app.manage(Arc::clone(&mcp_server_registry));
