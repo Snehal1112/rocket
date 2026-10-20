@@ -76,6 +76,9 @@ pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
         DomainEvent::AssistantConversationSaved { .. } => "assistant-conversation-saved",
         DomainEvent::AssistantConversationDeleted { .. } => "assistant-conversation-deleted",
         DomainEvent::AssistantConversationsCleared => "assistant-conversations-cleared",
+        // Load test events keep the channel names the frontend listens on.
+        DomainEvent::LoadTestProgress(_) => "load_test_progress",
+        DomainEvent::LoadTestComplete(_) => "load_test_complete",
         DomainEvent::CollectionCreated { .. }
         | DomainEvent::CollectionDeleted { .. }
         | DomainEvent::CollectionRenamed { .. } => "collection-changed",
@@ -194,6 +197,51 @@ mod tests {
                 option_id: None,
             }),
             "agent-permission-resolved"
+        );
+    }
+
+    #[test]
+    fn load_test_events_keep_their_channel_names() {
+        use rocket_shared::load_test::{LoadTestProgressEvent, LoadTestResult};
+        let progress = LoadTestProgressEvent {
+            elapsed_ms: 0,
+            completed: 0,
+            active_concurrent: 0,
+            succeeded: 0,
+            failed_status: 0,
+            failed_transport: 0,
+            requests_per_second: 0.0,
+            p50_ms: 0.0,
+            p95_ms: 0.0,
+            p99_ms: 0.0,
+            current_phase_index: 0,
+            recent_log: vec![],
+        };
+        assert_eq!(
+            channel_for(&DomainEvent::LoadTestProgress(progress)),
+            "load_test_progress"
+        );
+        let result = LoadTestResult {
+            total_requests: 0,
+            succeeded: 0,
+            failed: 0,
+            failed_transport: 0,
+            failed_status: 0,
+            min_latency_ms: 0.0,
+            avg_latency_ms: 0.0,
+            p50_latency_ms: 0.0,
+            p95_latency_ms: 0.0,
+            p99_latency_ms: 0.0,
+            max_latency_ms: 0.0,
+            requests_per_second: 0.0,
+            total_duration_ms: 0.0,
+            phase_timeline: vec![],
+            request_log: vec![],
+            time_series: vec![],
+        };
+        assert_eq!(
+            channel_for(&DomainEvent::LoadTestComplete(result)),
+            "load_test_complete"
         );
     }
 }

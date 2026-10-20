@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use rocket_http::{run_load_test_v2, HttpExecutor, LoadTestConfigV2, LoadTestResult};
 use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::events::EventPublisher;
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
 
@@ -16,7 +17,7 @@ impl LoadTestService {
         executor: Arc<dyn HttpExecutor>,
         input: ExecuteRequestInput,
         config: LoadTestConfigV2,
-        app: Option<&tauri::AppHandle>,
+        publisher: Option<Arc<dyn EventPublisher>>,
     ) -> DomainResult<LoadTestResult> {
         if !config.has_uniform_target_unit() {
             return Err(DomainError::InvalidInput(
@@ -36,7 +37,7 @@ impl LoadTestService {
         );
         // Concurrent load must not read every jar file per request or rewrite one per response.
         resolved.options.use_cookie_jar = false;
-        let result = run_load_test_v2(executor, &resolved, &config, app).await;
+        let result = run_load_test_v2(executor, &resolved, &config, publisher).await;
         Ok(result)
     }
 }
@@ -269,9 +270,26 @@ mod tests {
         };
 
         let load_exec: Arc<dyn HttpExecutor> = Arc::new(SharedExec(Arc::clone(&exec_arc)));
-        let result = LoadTestService::run(&svc, load_exec, input, config, None)
+        let recorder = crate::test_doubles::RecordingPublisher::new();
+        let publisher: Arc<dyn EventPublisher> = recorder.clone();
+        let result = LoadTestService::run(&svc, load_exec, input, config, Some(publisher))
             .await
             .unwrap();
+
+        // The run publishes progress events and exactly one completion event.
+        let events = recorder.events();
+        let completes = events
+            .iter()
+            .filter(|e| matches!(e, rocket_shared::events::DomainEvent::LoadTestComplete(_)))
+            .count();
+        assert_eq!(completes, 1, "expected one completion event");
+        assert!(
+            matches!(
+                events.last(),
+                Some(rocket_shared::events::DomainEvent::LoadTestComplete(_))
+            ),
+            "completion must be the last event"
+        );
 
         assert!(
             result.total_requests > 0,

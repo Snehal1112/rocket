@@ -32,7 +32,6 @@ reqwest.workspace = true
 url = "2"
 percent-encoding = "2"
 which = "6"
-tauri = { version = "2" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]

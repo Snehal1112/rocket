@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
 
-use tauri::{AppHandle, Emitter};
+use rocket_shared::events::{DomainEvent, EventPublisher};
+pub use rocket_shared::load_test::{
+    LoadTestProgressEvent, LoadTestResult, PhaseMarker, RequestLogEntry, TimeSeriesPoint,
+};
 
 /// Fixed-capacity circular buffer. When full, the oldest entry is overwritten.
 pub struct RingBuffer<T> {
@@ -344,57 +347,6 @@ impl LoadTestConfigV2 {
     }
 }
 
-/// Emitted via Tauri event every 250 ms during a running load test.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LoadTestProgressEvent {
-    pub elapsed_ms: u64,
-    pub completed: u32,
-    pub active_concurrent: u32,
-    pub succeeded: u32,
-    pub failed_status: u32,
-    pub failed_transport: u32,
-    /// Rolling requests-per-second over the last 2 seconds.
-    pub requests_per_second: f64,
-    pub p50_ms: f64,
-    pub p95_ms: f64,
-    pub p99_ms: f64,
-    pub current_phase_index: usize,
-    /// Last 50 entries from the ring buffer — drives the live per-request log.
-    pub recent_log: Vec<RequestLogEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimeSeriesPoint {
-    pub elapsed_ms: u64,
-    pub rps: f64,
-    pub p50_ms: f64,
-    pub p95_ms: f64,
-    pub p99_ms: f64,
-    pub error_rate_pct: f64,
-    pub active_concurrent: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RequestLogEntry {
-    pub seq: u32,
-    /// `None` means transport-level failure (no HTTP response received).
-    pub status: Option<u16>,
-    pub latency_ms: f64,
-    pub response_bytes: u64,
-    pub error: Option<String>,
-    pub phase_index: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PhaseMarker {
-    pub phase_index: usize,
-    pub started_at_ms: u64,
-}
-
 /// Configuration for a load test run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -408,31 +360,6 @@ pub struct LoadTestConfig {
     /// yet reached. `None` means no cap.
     #[serde(default)]
     pub duration_cap_secs: Option<u32>,
-}
-
-/// Aggregated statistics from a completed load test.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LoadTestResult {
-    pub total_requests: u32,
-    pub succeeded: u32,
-    pub failed: u32,
-    pub failed_transport: u32,
-    pub failed_status: u32,
-    pub min_latency_ms: f64,
-    pub avg_latency_ms: f64,
-    pub p50_latency_ms: f64,
-    pub p95_latency_ms: f64,
-    pub p99_latency_ms: f64,
-    pub max_latency_ms: f64,
-    pub requests_per_second: f64,
-    pub total_duration_ms: f64,
-    #[serde(default)]
-    pub phase_timeline: Vec<PhaseMarker>,
-    #[serde(default)]
-    pub request_log: Vec<RequestLogEntry>,
-    #[serde(default)]
-    pub time_series: Vec<TimeSeriesPoint>,
 }
 
 /// Returns the value at percentile p (0–100) from a sorted slice.
@@ -527,7 +454,7 @@ impl RunAccumulator {
     }
 }
 
-/// Phase-aware load test runner with optional Tauri event emission.
+/// Phase-aware load test runner with optional domain event publishing.
 ///
 /// Drives either a `PhaseScheduler`-backed semaphore (for Concurrency phases)
 /// or a `RateDriver` token bucket (for RPS phases). The unit is determined by
@@ -539,7 +466,7 @@ pub async fn run_load_test_v2(
     executor: Arc<dyn HttpExecutor>,
     request: &HttpRequest,
     config: &LoadTestConfigV2,
-    app: Option<&AppHandle>,
+    publisher: Option<Arc<dyn EventPublisher>>,
 ) -> LoadTestResult {
     use tokio::time::interval;
 
@@ -664,7 +591,7 @@ pub async fn run_load_test_v2(
     let acc_snap = Arc::clone(&accumulator);
     let active_snap = Arc::clone(&active_concurrent);
     let scheduler_snap = Arc::clone(&scheduler);
-    let app_clone = app.cloned();
+    let publisher_clone = publisher.clone();
 
     let snapshot_handle = tokio::spawn(async move {
         let mut ticker = interval(Duration::from_millis(250));
@@ -734,8 +661,8 @@ pub async fn run_load_test_v2(
 
             drop(acc);
 
-            if let Some(ref handle) = app_clone {
-                let _ = handle.emit("load_test_progress", &event);
+            if let Some(ref publisher) = publisher_clone {
+                publisher.publish(DomainEvent::LoadTestProgress(event));
             }
         }
     });
@@ -942,8 +869,8 @@ pub async fn run_load_test_v2(
         time_series: acc.time_series.clone(),
     };
 
-    if let Some(handle) = app {
-        let _ = handle.emit("load_test_complete", &result);
+    if let Some(publisher) = publisher {
+        publisher.publish(DomainEvent::LoadTestComplete(result.clone()));
     }
 
     result

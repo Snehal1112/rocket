@@ -5,7 +5,10 @@ use rocket_app::{
 };
 use rocket_http::{HttpExecutor, LoadTestConfig, LoadTestConfigV2, LoadTestResult};
 use rocket_shared::error::DomainError;
+use rocket_shared::events::EventPublisher;
 use tauri::{AppHandle, State};
+
+use crate::tauri_event_bus::TauriEventBus;
 
 /// Runs a load test against the given request and returns aggregated statistics.
 /// Variable resolution is handled by RequestExecutionService using the same
@@ -33,7 +36,15 @@ pub async fn run_load_test_v2_command(
     exec_svc: State<'_, RequestExecutionService>,
     executor: State<'_, Arc<dyn HttpExecutor>>,
 ) -> Result<(), DomainError> {
-    LoadTestService::run(&exec_svc, Arc::clone(&executor), input, config, Some(&app)).await?;
+    let publisher: Arc<dyn EventPublisher> = Arc::new(TauriEventBus::new(app));
+    LoadTestService::run(
+        &exec_svc,
+        Arc::clone(&executor),
+        input,
+        config,
+        Some(publisher),
+    )
+    .await?;
     Ok(())
 }
 

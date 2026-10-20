@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::acp::{ConfigOption, PermissionOption};
+use crate::load_test::{LoadTestProgressEvent, LoadTestResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -642,11 +643,22 @@ pub enum DomainEvent {
     },
     /// Emitted after an assistant conversation was saved. Carries the id
     /// only, never message text.
-    AssistantConversationSaved { conversation_id: String },
+    AssistantConversationSaved {
+        conversation_id: String,
+    },
     /// Emitted after one stored assistant conversation was deleted.
-    AssistantConversationDeleted { conversation_id: String },
+    AssistantConversationDeleted {
+        conversation_id: String,
+    },
     /// Emitted after every stored conversation of the workspace was deleted.
     AssistantConversationsCleared,
+
+    // Load test events
+    /// Emitted every 250 ms while a load test runs. The payload fields keep
+    /// their camelCase names, so the frontend reads them unchanged.
+    LoadTestProgress(LoadTestProgressEvent),
+    /// Emitted once when a load test has finished.
+    LoadTestComplete(LoadTestResult),
 
     // gRPC session events
     /// Emitted once a streaming gRPC call has been opened.
@@ -1262,7 +1274,10 @@ mod tests {
         );
         let old = r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"f","collection":"c","total_nodes":1}"#;
         let back: DomainEvent = serde_json::from_str(old).expect("old JSON still reads");
-        assert!(matches!(back, DomainEvent::FlowRunStarted { partial: None, .. }));
+        assert!(matches!(
+            back,
+            DomainEvent::FlowRunStarted { partial: None, .. }
+        ));
     }
 
     #[test]
@@ -2200,5 +2215,59 @@ mod tests {
             serde_json::to_string(&resolved).expect("serialize"),
             r#"{"type":"acpPermissionResolved","session_id":"sess-1","request_id":"perm-1","option_id":null}"#
         );
+    }
+
+    #[test]
+    fn load_test_events_wire_shape() {
+        use crate::load_test::RequestLogEntry;
+        let progress = DomainEvent::LoadTestProgress(LoadTestProgressEvent {
+            elapsed_ms: 250,
+            completed: 3,
+            active_concurrent: 2,
+            succeeded: 2,
+            failed_status: 1,
+            failed_transport: 0,
+            requests_per_second: 12.0,
+            p50_ms: 1.0,
+            p95_ms: 2.0,
+            p99_ms: 3.0,
+            current_phase_index: 0,
+            recent_log: vec![RequestLogEntry {
+                seq: 1,
+                status: Some(200),
+                latency_ms: 1.5,
+                response_bytes: 10,
+                error: None,
+                phase_index: 0,
+            }],
+        });
+        let value = serde_json::to_value(&progress).expect("serialize");
+        assert_eq!(value["type"], "loadTestProgress");
+        assert_eq!(value["elapsedMs"], 250);
+        assert_eq!(value["currentPhaseIndex"], 0);
+        assert_eq!(value["recentLog"][0]["latencyMs"], 1.5);
+
+        let complete = DomainEvent::LoadTestComplete(LoadTestResult {
+            total_requests: 3,
+            succeeded: 2,
+            failed: 1,
+            failed_transport: 0,
+            failed_status: 1,
+            min_latency_ms: 1.0,
+            avg_latency_ms: 2.0,
+            p50_latency_ms: 2.0,
+            p95_latency_ms: 3.0,
+            p99_latency_ms: 3.0,
+            max_latency_ms: 3.0,
+            requests_per_second: 5.0,
+            total_duration_ms: 600.0,
+            phase_timeline: vec![],
+            request_log: vec![],
+            time_series: vec![],
+        });
+        let value = serde_json::to_value(&complete).expect("serialize");
+        assert_eq!(value["type"], "loadTestComplete");
+        assert_eq!(value["totalRequests"], 3);
+        assert_eq!(value["requestLog"], serde_json::json!([]));
     }
 }
