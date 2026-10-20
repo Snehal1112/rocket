@@ -267,6 +267,47 @@ mod tests {
         assert!(svc.list().unwrap().is_empty());
     }
 
+    fn recording_service() -> (
+        EnvironmentService,
+        Arc<crate::test_doubles::RecordingPublisher>,
+    ) {
+        let rec = crate::test_doubles::RecordingPublisher::new();
+        let svc = EnvironmentService::new(
+            Box::new(MockEnvRepo::new()),
+            Box::new(crate::test_doubles::SharedPublisher(Arc::clone(&rec))),
+        );
+        (svc, rec)
+    }
+
+    #[test]
+    fn save_publishes_environment_saved() -> DomainResult<()> {
+        let (svc, rec) = recording_service();
+        svc.save(&Environment::new("prod"))?;
+        assert!(
+            rec.events()
+                .iter()
+                .any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
+            "got {:?}",
+            rec.events()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn delete_publishes_environment_deleted() -> DomainResult<()> {
+        let (svc, rec) = recording_service();
+        svc.save(&Environment::new("temp"))?;
+        svc.delete("temp")?;
+        assert!(
+            rec.events()
+                .iter()
+                .any(|e| matches!(e, DomainEvent::EnvironmentDeleted { name } if name == "temp")),
+            "got {:?}",
+            rec.events()
+        );
+        Ok(())
+    }
+
     #[test]
     fn save_emits_security_audit_event() {
         let publisher = Arc::new(CapturingPublisher {
@@ -401,7 +442,8 @@ mod tests {
     #[test]
     fn save_allows_a_missing_parent() {
         let svc = make_service();
-        svc.save(&child("a", "nope")).expect("missing parent only warns");
+        svc.save(&child("a", "nope"))
+            .expect("missing parent only warns");
     }
 
     #[test]
