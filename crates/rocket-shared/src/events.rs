@@ -720,6 +720,12 @@ pub enum DomainEvent {
         collection: Option<String>,
     },
 
+    /// The file watcher could not start, so the sidebar will not refresh by itself.
+    /// The message holds the directory and the error text only.
+    FileWatcherFailed {
+        message: String,
+    },
+
     // History events
     HistoryCleared,
 
@@ -864,6 +870,18 @@ mod tests {
         let value = serde_json::to_value(&event).expect("serializes");
         assert_eq!(value["type"], "flowRequestPathsRewritten");
         assert_eq!(value["failed"][0]["flow"], "f2");
+    }
+
+    #[test]
+    fn file_watcher_failed_wire_shape() {
+        let event = DomainEvent::FileWatcherFailed {
+            message: "boom".into(),
+        };
+        let value = serde_json::to_value(&event).expect("serializes");
+        assert_eq!(
+            value,
+            serde_json::json!({ "type": "fileWatcherFailed", "message": "boom" })
+        );
     }
 
     #[test]

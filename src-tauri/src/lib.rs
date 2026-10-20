@@ -859,12 +859,27 @@ pub fn run() {
             // Start filesystem watcher for the collections directory.
             let watcher_started = std::time::Instant::now();
             let watcher = NotifyFileWatcher::new();
-            let _ = watcher.start(collections_dir, watcher_bus.clone());
+            match watcher.start(collections_dir.clone(), watcher_bus.clone()) {
+                Ok(()) => tracing::info!(
+                    elapsed_ms = watcher_started.elapsed().as_millis() as u64,
+                    "startup: file watcher"
+                ),
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        dir = %collections_dir.display(),
+                        "startup: file watcher failed to start"
+                    );
+                    // The window may not be listening yet, so the log is the fallback.
+                    rocket_shared::events::EventPublisher::publish(
+                        &*watcher_bus,
+                        rocket_shared::events::DomainEvent::FileWatcherFailed {
+                            message: format!("{}: {e}", collections_dir.display()),
+                        },
+                    );
+                }
+            }
             app.manage(watcher);
-            tracing::info!(
-                elapsed_ms = watcher_started.elapsed().as_millis() as u64,
-                "startup: file watcher"
-            );
 
             // Share the event bus so commands like watch_collections can reuse it.
             app.manage(watcher_bus);

@@ -94,6 +94,17 @@ mod tests {
     }
 
     #[test]
+    fn start_on_a_missing_directory_returns_an_error() {
+        let dir = TempDir::new().unwrap();
+        let watcher = NotifyFileWatcher::new();
+        let publisher = Arc::new(NullEventPublisher);
+
+        let result = watcher.start(dir.path().join("missing"), publisher);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn stop_before_start_is_safe() {
         let watcher = NotifyFileWatcher::new();
         watcher.stop(); // Should not panic.

@@ -1504,6 +1504,9 @@ export const onCollectionTrustChanged = (
 ): Promise<UnlistenFn> =>
   listen<{ collection: string }>('collection-trust-changed', (e) => handler(e.payload));
 
+export const onFileWatcherFailed = (handler: (message: string) => void): Promise<UnlistenFn> =>
+  listen<{ message: string }>('file-watcher-failed', (e) => handler(e.payload.message));
+
 export const onRequestExecuted = (handler: () => void): Promise<UnlistenFn> =>
   listen('request-executed', () => handler());
 

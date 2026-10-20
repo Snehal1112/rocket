@@ -34,6 +34,7 @@ pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
         // needs to refresh when files are created/modified/deleted.
         DomainEvent::FileChanged { .. } => "collection-changed",
         DomainEvent::RequestExecuted { .. } => "request-executed",
+        DomainEvent::FileWatcherFailed { .. } => "file-watcher-failed",
         // Collection Runner events — each gets its own channel so the run
         // view can append steps without re-reading the whole run.
         DomainEvent::RunnerStarted { .. } => "runner-started",
@@ -150,6 +151,14 @@ mod tests {
             "assistant-conversations-cleared"
         );
         assert_eq!(channel_for(&DomainEvent::HistoryCleared), "history-changed");
+    }
+
+    #[test]
+    fn file_watcher_failed_has_its_own_channel() {
+        let event = DomainEvent::FileWatcherFailed {
+            message: "m".into(),
+        };
+        assert_eq!(channel_for(&event), "file-watcher-failed");
     }
 
     #[test]

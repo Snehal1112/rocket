@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use rocket_app::{FlowExecutionService, WorkspaceService};
 use rocket_infra::NotifyFileWatcher;
 use rocket_shared::error::DomainError;
+use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_workspace::{RepositoryId, RequestGuardPolicy, Workspace, WorkspaceConfig};
 use serde::Serialize;
 use tauri::State;
@@ -97,10 +98,20 @@ fn restart_watcher(
     app: tauri::AppHandle,
 ) {
     let collections_dir = workspace.join("collections");
-    std::fs::create_dir_all(&collections_dir).ok();
-    watcher.stop();
     let publisher = Arc::new(crate::tauri_event_bus::TauriEventBus::new(app));
-    let _ = watcher.start(collections_dir, publisher);
+    let mut failure = None;
+    if let Err(e) = std::fs::create_dir_all(&collections_dir) {
+        tracing::error!(error = %e, dir = %collections_dir.display(), "could not create the collections directory");
+        failure = Some(format!("{}: {e}", collections_dir.display()));
+    }
+    watcher.stop();
+    if let Err(e) = watcher.start(collections_dir.clone(), publisher.clone()) {
+        tracing::error!(error = %e, dir = %collections_dir.display(), "file watcher failed to start");
+        failure = Some(format!("{}: {e}", collections_dir.display()));
+    }
+    if let Some(message) = failure {
+        publisher.publish(DomainEvent::FileWatcherFailed { message });
+    }
 }
 
 /// Runs a close or delete and moves the file watcher when it changed the active workspace.
