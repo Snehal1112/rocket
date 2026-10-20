@@ -8,6 +8,7 @@ import { flowKeys } from '@/lib/queries/flow-queries';
 import type { FlowEdge, FlowNode } from '@/lib/tauri-api';
 import {
   getFlow,
+  getFlowRunCallbacks,
   listCollections,
   listFlows,
   onFlowRunStarted,
@@ -35,6 +36,7 @@ vi.mock('@/lib/tauri-api', async () => {
     saveFlow: vi.fn(),
     getFlow: vi.fn(),
     runFlow: vi.fn(),
+    getFlowRunCallbacks: vi.fn(async () => []),
     onFlowRunStarted: vi.fn(),
     onFlowStepStarted: vi.fn(),
     onFlowStepCompleted: vi.fn(),
@@ -411,6 +413,10 @@ describe('FlowPane run logs', () => {
   });
 
   it('stores live progress and the callback URLs on the tab', async () => {
+    // The URL is fetched after flow-run-started, never read from the event.
+    vi.mocked(getFlowRunCallbacks).mockResolvedValue([
+      { nodeId: 'n1', name: 'hook', url: 'http://h:1/cb/tok' },
+    ]);
     let startedHandler: Parameters<typeof onFlowRunStarted>[0] | undefined;
     let progress: Parameters<typeof onFlowStepProgress>[0] | undefined;
     vi.mocked(onFlowRunStarted).mockImplementation(async (h) => {
@@ -434,7 +440,7 @@ describe('FlowPane run logs', () => {
       flow_name: 'login-flow',
       collection: 'demo',
       total_nodes: 1,
-      callbacks: [{ nodeId: 'n1', name: 'hook', url: 'http://h:1/cb/tok' }],
+      callbacks: [{ nodeId: 'n1', name: 'hook' }],
     });
     progress?.({
       type: 'flowStepProgress',
@@ -445,11 +451,15 @@ describe('FlowPane run logs', () => {
       message: 'waiting… 9s left · 0 ignored call(s)',
       live: { ignored: 0, remainingMs: 9000 },
     });
+    await waitFor(() => {
+      const { root: r } = usePaneStore.getState();
+      const t = r.type === 'leaf' ? r.tabs.find((x) => x.id === logTab.id) : undefined;
+      expect(t && 'callbackUrls' in t ? t.callbackUrls : undefined).toEqual({
+        n1: 'http://h:1/cb/tok',
+      });
+    });
     const { root } = usePaneStore.getState();
     const stored = root.type === 'leaf' ? root.tabs.find((t) => t.id === logTab.id) : undefined;
-    expect(stored && 'callbackUrls' in stored ? stored.callbackUrls : undefined).toEqual({
-      n1: 'http://h:1/cb/tok',
-    });
     expect(stored && 'nodeDetail' in stored ? stored.nodeDetail?.n1?.live : undefined).toEqual({
       ignored: 0,
       remainingMs: 9000,

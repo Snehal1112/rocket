@@ -1,6 +1,6 @@
 use rocket_app::{
-    FlowExecutionService, FlowReferenceUpdater, FlowRunOptions, FlowRunSummary, FlowService, PartialRun,
-    RequestExecutionService, RunFlowInput,
+    FlowExecutionService, FlowReferenceUpdater, FlowRunCallback, FlowRunOptions, FlowRunSummary,
+    FlowService, PartialRun, RequestExecutionService, RunFlowInput,
 };
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
@@ -640,9 +640,59 @@ pub fn cancel_flow_run(
     Ok(())
 }
 
+/// One Wait for callback node's URL, as the UI receives it. The URL holds a
+/// bearer token, so it is sent only to the caller of
+/// `get_flow_run_callbacks`, never in an event, and never logged.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowRunCallbackDto {
+    pub node_id: String,
+    pub name: String,
+    pub url: String,
+}
+
+impl From<FlowRunCallback> for FlowRunCallbackDto {
+    fn from(c: FlowRunCallback) -> Self {
+        Self {
+            node_id: c.node_id,
+            name: c.name,
+            url: c.url,
+        }
+    }
+}
+
+/// Returns the callback URLs of a Flow run while it is active. The
+/// `flow-run-started` event names the Wait nodes without their URLs, and
+/// the UI calls this right after it. The URLs are known before that event
+/// is sent. An unknown or finished run id returns an empty list.
+#[tauri::command]
+pub fn get_flow_run_callbacks(
+    run_id: String,
+    flow_exec: State<'_, FlowExecutionService>,
+) -> Result<Vec<FlowRunCallbackDto>, DomainError> {
+    Ok(flow_exec
+        .callback_urls(&run_id)
+        .into_iter()
+        .map(FlowRunCallbackDto::from)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_dto_is_camel_case() {
+        let dto = FlowRunCallbackDto::from(FlowRunCallback {
+            node_id: "w".to_string(),
+            name: "payment".to_string(),
+            url: "http://h:1/cb/tok".to_string(),
+        });
+        assert_eq!(
+            serde_json::to_string(&dto).expect("serialize"),
+            r#"{"nodeId":"w","name":"payment","url":"http://h:1/cb/tok"}"#
+        );
+    }
 
     use rocket_flow::lint::{FlowLint, LintSeverity};
 

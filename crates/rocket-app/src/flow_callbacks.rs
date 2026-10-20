@@ -9,13 +9,33 @@ use rocket_shared::events::FlowCallbackInfo;
 
 use crate::callback_listener::{CallbackEndpoint, CallbackListener};
 
+/// The callback URL of one Wait for callback node of an active run. The URL
+/// holds a bearer token, so it never goes into an event or a log. `Debug`
+/// hides it for the same reason.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FlowRunCallback {
+    pub node_id: String,
+    pub name: String,
+    pub url: String,
+}
+
+impl std::fmt::Debug for FlowRunCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlowRunCallback")
+            .field("node_id", &self.node_id)
+            .field("name", &self.name)
+            .field("url", &"<hidden>")
+            .finish()
+    }
+}
+
 pub(crate) struct RunCallbacks {
     /// `callback.<name>` → endpoint URL, for every request in the run.
     vars: HashMap<String, String>,
     /// Open endpoints by Wait for callback node id.
     endpoints: HashMap<String, CallbackEndpoint>,
     /// `(node id, name, url)` per Wait for callback node, in node order.
-    infos: Vec<FlowCallbackInfo>,
+    urls: Vec<FlowRunCallback>,
 }
 
 impl RunCallbacks {
@@ -27,7 +47,7 @@ impl RunCallbacks {
     ) -> DomainResult<Self> {
         let mut vars = HashMap::new();
         let mut endpoints = HashMap::new();
-        let mut infos = Vec::new();
+        let mut urls = Vec::new();
         for node in &flow.nodes {
             let FlowNodeKind::WaitForCallback { name, .. } = &node.kind else {
                 continue;
@@ -39,7 +59,7 @@ impl RunCallbacks {
                     DomainError::Internal(format!("could not open callback listener: {e}"))
                 })?;
             vars.insert(format!("{CALLBACK_VAR_PREFIX}{name}"), endpoint.url.clone());
-            infos.push(FlowCallbackInfo {
+            urls.push(FlowRunCallback {
                 node_id: node.id.clone(),
                 name: name.clone(),
                 url: endpoint.url.clone(),
@@ -49,7 +69,7 @@ impl RunCallbacks {
         Ok(Self {
             vars,
             endpoints,
-            infos,
+            urls,
         })
     }
 
@@ -57,9 +77,22 @@ impl RunCallbacks {
         &self.vars
     }
 
-    /// Every endpoint's node id, name and URL, for the run-started event only.
-    pub(crate) fn infos(&self) -> &[FlowCallbackInfo] {
-        &self.infos
+    /// Every endpoint's node id and name, with no URL, for the run-started
+    /// event.
+    pub(crate) fn infos(&self) -> Vec<FlowCallbackInfo> {
+        self.urls
+            .iter()
+            .map(|u| FlowCallbackInfo {
+                node_id: u.node_id.clone(),
+                name: u.name.clone(),
+            })
+            .collect()
+    }
+
+    /// Every endpoint's node id, name and URL, for the active-run registry
+    /// that `FlowExecutionService::callback_urls` reads.
+    pub(crate) fn urls(&self) -> &[FlowRunCallback] {
+        &self.urls
     }
 
     /// Each endpoint's full URL and bare token, keyed for the run's secret
@@ -69,7 +102,7 @@ impl RunCallbacks {
     /// `MIN_REDACTION_LEN`) is not masked alone, but the full URL still is.
     pub(crate) fn mask_secrets(&self) -> Vec<(String, String)> {
         let mut secrets = Vec::new();
-        for info in &self.infos {
+        for info in &self.urls {
             secrets.push((
                 format!("flow-callback.{}.url", info.node_id),
                 info.url.clone(),
@@ -133,9 +166,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn infos_list_each_wait_node_with_its_name_and_url_in_node_order() {
-        use rocket_shared::events::FlowCallbackInfo;
-
+    async fn infos_list_each_wait_node_with_its_name_and_no_url_in_node_order() {
         let flow = Flow {
             name: "cb".to_string(),
             nodes: vec![wait_node("w1", "first"), wait_node("w2", "second")],
@@ -151,19 +182,44 @@ mod tests {
 
         assert_eq!(
             callbacks.infos(),
-            &[
+            vec![
                 FlowCallbackInfo {
+                    node_id: "w1".to_string(),
+                    name: "first".to_string(),
+                },
+                FlowCallbackInfo {
+                    node_id: "w2".to_string(),
+                    name: "second".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            callbacks.urls(),
+            &[
+                FlowRunCallback {
                     node_id: "w1".to_string(),
                     name: "first".to_string(),
                     url: "http://fake:1/cb/0".to_string(),
                 },
-                FlowCallbackInfo {
+                FlowRunCallback {
                     node_id: "w2".to_string(),
                     name: "second".to_string(),
                     url: "http://fake:1/cb/1".to_string(),
                 },
             ]
         );
+    }
+
+    #[test]
+    fn debug_output_hides_the_callback_url() {
+        let callback = FlowRunCallback {
+            node_id: "w".to_string(),
+            name: "payment".to_string(),
+            url: "http://h:1/cb/secret-token".to_string(),
+        };
+        let shown = format!("{callback:?}");
+        assert!(!shown.contains("secret-token"), "{shown}");
+        assert!(shown.contains("payment"), "{shown}");
     }
 
     #[tokio::test]
@@ -179,5 +235,6 @@ mod tests {
                 .await
                 .expect("nothing to open");
         assert!(callbacks.infos().is_empty());
+        assert!(callbacks.urls().is_empty());
     }
 }

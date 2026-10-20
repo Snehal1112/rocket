@@ -22,6 +22,7 @@ import {
   type FlowStepCompletedEvent,
   type FlowStepProgressEvent,
   type FlowStepResult,
+  getFlowRunCallbacks,
   onFlowRunFinished,
   onFlowRunStarted,
   onFlowStepCompleted,
@@ -120,15 +121,27 @@ function forwardProgress(
   else handler(event.node_id, event.message);
 }
 
-// Maps the run-started callbacks to node id and URL. A partial run lists only
-// its own Waits, because the backend opens an endpoint for every Wait.
-function callbackUrlsFrom(event: FlowRunStartedEvent): Record<string, string> {
+// Fetches the callback URLs of a run that just started, as node id to URL.
+// The event only names the Wait nodes, because every listener gets events
+// and the URL is a bearer token. A partial run keeps only its own Waits,
+// because the backend opens an endpoint for every Wait. Resolves to null
+// when there is nothing to show or the fetch fails.
+async function fetchCallbackUrls(
+  event: FlowRunStartedEvent,
+): Promise<Record<string, string> | null> {
+  if (!event.callbacks?.length) return null;
   const inRun = event.partial ? new Set(event.partial.nodeIds) : null;
-  return Object.fromEntries(
-    (event.callbacks ?? [])
-      .filter((c) => !inRun || inRun.has(c.nodeId))
-      .map((c) => [c.nodeId, c.url]),
+  let fetched: Awaited<ReturnType<typeof getFlowRunCallbacks>>;
+  try {
+    fetched = await getFlowRunCallbacks(event.run_id);
+  } catch {
+    // The run shows no URLs. The error is not logged, so no URL is either.
+    return null;
+  }
+  const urls = Object.fromEntries(
+    fetched.filter((c) => !inRun || inRun.has(c.nodeId)).map((c) => [c.nodeId, c.url]),
   );
+  return Object.keys(urls).length > 0 ? urls : null;
 }
 
 // Ids of runs whose own handleRun still listens, even after its toolbar unmounted.
@@ -224,9 +237,11 @@ export function FlowToolbar({
       if (event.run_id !== resumedRunId) return;
       if (event.partial) onRunStateChangeRef.current('running', event.run_id, event.partial);
       else onRunStateChangeRef.current('running', event.run_id);
-      // After the run state, because a new run drops older URLs.
-      const urls = callbackUrlsFrom(event);
-      if (Object.keys(urls).length > 0) onCallbackUrlsRef.current?.(urls);
+      // After the run state, because a new run drops older URLs. A run that
+      // ended meanwhile has closed its endpoints, so late URLs are dropped.
+      void fetchCallbackUrls(event).then((urls) => {
+        if (urls && !disposed) onCallbackUrlsRef.current?.(urls);
+      });
     }).then((fn) => {
       if (disposed) fn();
       else unlistenRun = fn;
@@ -372,9 +387,11 @@ export function FlowToolbar({
       startedAt = performance.now();
       if (event.partial) onRunStateChange('running', runId, event.partial);
       else onRunStateChange('running', runId);
-      // After the run state, because a new run drops older URLs.
-      const urls = callbackUrlsFrom(event);
-      if (Object.keys(urls).length > 0) onCallbackUrls?.(urls);
+      // After the run state, because a new run drops older URLs. A run that
+      // ended meanwhile has closed its endpoints, so late URLs are dropped.
+      void fetchCallbackUrls(event).then((urls) => {
+        if (urls && !ended) onCallbackUrls?.(urls);
+      });
     });
     const unlistenStepStarted = await onFlowStepStarted((event) => {
       if (!isOurs(event.run_id)) return;

@@ -190,14 +190,14 @@ pub struct FlowWaitDetail {
     pub last_rejected: Option<FlowRejectedCall>,
 }
 
-/// The callback URL of one Wait for callback node. The URL holds a bearer
-/// token and works only while its run is active.
+/// One Wait for callback node of a run, without its URL. The URL holds a
+/// bearer token, so it never goes into an event. The UI asks for it with
+/// `get_flow_run_callbacks` while the run is active.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowCallbackInfo {
     pub node_id: String,
     pub name: String,
-    pub url: String,
 }
 
 /// Structured progress of a node that is still running. Every field is
@@ -454,9 +454,10 @@ pub enum DomainEvent {
         flow_name: String,
         collection: String,
         total_nodes: usize,
-        /// Every Wait for callback node's URL. Sent here only: the URL is a
-        /// bearer token, so it never goes into the summary, a step or history.
-        /// The nested fields are camelCase inside this snake_case event.
+        /// Every Wait for callback node of the run, with no URL. Events are
+        /// broadcast to every listener, so the bearer URL is fetched on
+        /// demand instead. The nested fields are camelCase inside this
+        /// snake_case event.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         callbacks: Vec<FlowCallbackInfo>,
         /// Set for a partial run. `total_nodes` then counts only its nodes.
@@ -1185,7 +1186,7 @@ mod tests {
     }
 
     #[test]
-    fn flow_run_started_carries_callback_urls_in_camel_case() {
+    fn flow_run_started_carries_callback_names_but_no_url() {
         let event = DomainEvent::FlowRunStarted {
             run_id: "01J".into(),
             flow_name: "Pay".into(),
@@ -1194,17 +1195,23 @@ mod tests {
             callbacks: vec![FlowCallbackInfo {
                 node_id: "w".into(),
                 name: "payment".into(),
-                url: "http://10.0.0.5:4000/cb/tok".into(),
             }],
             partial: None,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert!(
-            json.contains(
-                r#""callbacks":[{"nodeId":"w","name":"payment","url":"http://10.0.0.5:4000/cb/tok"}]"#
-            ),
+            json.contains(r#""callbacks":[{"nodeId":"w","name":"payment"}]"#),
             "{json}"
         );
+        assert!(!json.contains("url") && !json.contains("/cb/"), "{json}");
+    }
+
+    #[test]
+    fn flow_run_started_ignores_a_url_in_an_old_payload() {
+        let json = r#"{"type":"flowRunStarted","run_id":"01J","flow_name":"f","collection":"c","total_nodes":1,"callbacks":[{"nodeId":"w","name":"p","url":"http://h/cb/tok"}]}"#;
+        let event: DomainEvent = serde_json::from_str(json).expect("old payload");
+        let back = serde_json::to_string(&event).expect("serialize");
+        assert!(!back.contains("tok"), "{back}");
     }
 
     #[test]

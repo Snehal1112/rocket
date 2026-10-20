@@ -182,11 +182,18 @@ send-time note above).
 
 ## Flow callback URLs
 
-`RunCallbacks::infos()` lists `(node id, name, url)` per Wait for callback
-node. `FlowRunStarted.callbacks` is the only place a callback URL leaves the
-backend, because the URL holds a bearer token. Never put it in a
-`FlowRunSummary`, a step, an exchange, a log, a live progress event or
-history. The field is omitted when empty and defaults on old payloads.
+`RunCallbacks::urls()` lists `(node id, name, url)` per Wait for callback
+node; `infos()` gives the same list without the URL. The URL holds a bearer
+token and events are broadcast to every webview, so no event carries it:
+`FlowRunStarted.callbacks` names the nodes only (omitted when empty, an old
+`url` key is ignored). The UI fetches the URLs with the
+`get_flow_run_callbacks` command, which reads
+`FlowExecutionService::callback_urls(run_id)`. The registry entry is written
+right after the endpoints open, before `FlowRunStarted`, and removed by
+`RunRegistration`'s drop on every end path (finish, error, cancel). An
+unknown or finished run id returns an empty list. `FlowRunCallback` hides
+the URL in `Debug`. Never put the URL in a `FlowRunSummary`, a step, an
+exchange, a log, an event or history.
 Each endpoint's full URL and bare token also join the run's
 `external_secrets` (`flow-callback.<node id>.url` and `.token`, from
 `RunCallbacks::mask_secrets`), so a sender that echoes its URL is masked in

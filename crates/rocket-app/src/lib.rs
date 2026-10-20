@@ -98,6 +98,7 @@ pub use flow_auth::{
     FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher, OAuth2ServiceFetcher,
     SuppliedToken,
 };
+pub use flow_callbacks::FlowRunCallback;
 pub use flow_execution_service::{
     CapturedOutput, FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowStepResult,
     RunFlowInput,

@@ -15,6 +15,7 @@ use crate::flow_auth::{
     resolve_flow_credentials, FetchContext, FlowAuthTokens, FlowCredentials, FlowTokenFetcher,
     NoTokenFetcher,
 };
+use crate::flow_callbacks::FlowRunCallback;
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange, sent_masks};
 use crate::flow_partial::{PartialPlan, PartialRun};
@@ -855,6 +856,10 @@ impl Drop for RunRegistration<'_> {
         if let Ok(mut handles) = self.service.cancel_handles.lock() {
             handles.remove(&self.run_id);
         }
+        // The callback URLs stop being handed out the moment the run ends.
+        if let Ok(mut urls) = self.service.callback_urls.lock() {
+            urls.remove(&self.run_id);
+        }
     }
 }
 
@@ -880,6 +885,9 @@ pub struct FlowExecutionService {
     /// One cancel handle per in-flight run. `cancel` triggers it, so a node
     /// that is waiting stops at once.
     cancel_handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    /// Callback URLs of each in-flight run, by run id. Filled once the run's
+    /// endpoints open and emptied by `RunRegistration` when the run ends.
+    callback_urls: Arc<Mutex<HashMap<String, Vec<FlowRunCallback>>>>,
     /// Opens run-scoped callback endpoints for Wait for callback nodes.
     callback_listener: Box<dyn crate::callback_listener::CallbackListener>,
     /// Fetches non-interactive OAuth2 tokens for Auth nodes at run start.
@@ -903,6 +911,7 @@ impl FlowExecutionService {
             cancelled: Arc::new(Mutex::new(HashSet::new())),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
             cancel_handles: Arc::new(Mutex::new(HashMap::new())),
+            callback_urls: Arc::new(Mutex::new(HashMap::new())),
             callback_listener: Box::new(crate::callback_listener::NoCallbackListener),
             token_fetcher: Box::new(NoTokenFetcher),
             token_fetch_timeout: crate::flow_auth::TOKEN_FETCH_TIMEOUT,
@@ -969,6 +978,19 @@ impl FlowExecutionService {
                 handle.cancel();
             }
         }
+    }
+
+    /// The callback URLs of an in-flight run, in node order. They are known
+    /// from the moment the run's endpoints open, before `FlowRunStarted` is
+    /// published. An unknown or finished run id returns an empty list, so a
+    /// caller cannot tell an unknown run from one without Wait nodes. The
+    /// URLs hold bearer tokens: callers must not log them.
+    pub fn callback_urls(&self, run_id: &str) -> Vec<FlowRunCallback> {
+        self.callback_urls
+            .lock()
+            .ok()
+            .and_then(|urls| urls.get(run_id).cloned())
+            .unwrap_or_default()
     }
 
     /// Forgets every cached run. Called when the workspace changes, because a
@@ -1132,9 +1154,16 @@ impl FlowExecutionService {
             crate::flow_callbacks::RunCallbacks::open_all(self.callback_listener.as_ref(), &flow)
                 .await?;
         // The callback URL and token are bearer secrets: mask them in every
-        // sink, like a credential. Only `FlowRunStarted` carries the URL.
+        // sink, like a credential. No event carries the URL. The UI reads it
+        // through `callback_urls`, which knows it from here until
+        // `registration` drops at the end of the run.
         for (key, value) in callbacks.mask_secrets() {
             external_secrets.insert(key, value);
+        }
+        if !callbacks.urls().is_empty() {
+            if let Ok(mut urls) = self.callback_urls.lock() {
+                urls.insert(run_id.clone(), callbacks.urls().to_vec());
+            }
         }
         // Masked values as the run starts, kept for this run's cache entry.
         let start_secret_values = exec.secret_values(
@@ -1158,7 +1187,7 @@ impl FlowExecutionService {
             flow_name: input.flow_name.clone(),
             collection: input.collection.clone(),
             total_nodes: run_order.len(),
-            callbacks: callbacks.infos().to_vec(),
+            callbacks: callbacks.infos(),
             partial: partial_info.clone(),
         });
 
@@ -8479,20 +8508,15 @@ mod tests {
         assert!(!json.contains("tok-secret-0"), "{json}");
         for event in publisher.events() {
             let json = serde_json::to_string(&event).expect("serialize");
-            match &event {
-                DomainEvent::FlowRunStarted { callbacks, .. } => {
-                    assert_eq!(callbacks[0].url, "http://fake:1/cb/tok-secret-0");
-                }
-                _ => assert!(!json.contains("tok-secret-0"), "{json}"),
-            }
+            assert!(!json.contains("tok-secret-0"), "{json}");
         }
     }
 
     #[tokio::test]
-    async fn run_started_lists_the_callback_urls_and_nothing_else_does() {
+    async fn run_started_lists_the_callback_nodes_and_no_event_carries_a_url() {
         use rocket_shared::events::FlowCallbackInfo;
 
-        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let fake = crate::test_doubles::FakeCallbackListener::with_long_tokens();
         fake.queue_on_open(event_call("payment.completed"));
         let publisher = RecordingPublisher::new();
         let flow = Flow {
@@ -8521,22 +8545,169 @@ mod tests {
             vec![FlowCallbackInfo {
                 node_id: "w".to_string(),
                 name: "payment".to_string(),
-                url: "http://fake:1/cb/0".to_string(),
             }]
         );
-        // The fake's token is "0"; neither the URL nor its token path may appear elsewhere.
+        // Neither the URL nor its token may appear in any event or the summary.
         let json = serde_json::to_string(&summary).expect("serialize");
-        assert!(
-            !json.contains("http://fake:1/cb/0") && !json.contains("/cb/0"),
-            "{json}"
-        );
-        for event in events
-            .iter()
-            .filter(|e| !matches!(e, DomainEvent::FlowRunStarted { .. }))
-        {
+        assert!(!json.contains("tok-secret-0"), "{json}");
+        for event in &events {
             let json = serde_json::to_string(event).expect("serialize");
-            assert!(!json.contains("/cb/0"), "{json}");
+            assert!(
+                !json.contains("tok-secret-0") && !json.contains("http://fake:1/cb/"),
+                "{json}"
+            );
         }
+    }
+
+    /// Publisher that reads the service's callback URL registry the moment
+    /// `FlowRunStarted` is published, the way the UI reacts to the event.
+    struct ProbeUrlsOnStart {
+        urls: Arc<Mutex<HashMap<String, Vec<FlowRunCallback>>>>,
+        seen: Arc<Mutex<Option<Vec<FlowRunCallback>>>>,
+        events: Arc<RecordingPublisher>,
+    }
+    impl EventPublisher for ProbeUrlsOnStart {
+        fn publish(&self, event: DomainEvent) {
+            if let DomainEvent::FlowRunStarted { run_id, .. } = &event {
+                let found = self
+                    .urls
+                    .lock()
+                    .expect("lock urls")
+                    .get(run_id)
+                    .cloned()
+                    .unwrap_or_default();
+                *self.seen.lock().expect("lock seen") = Some(found);
+            }
+            self.events.publish(event);
+        }
+    }
+
+    fn run_id_of(publisher: &RecordingPublisher) -> Option<String> {
+        publisher.events().into_iter().find_map(|e| match e {
+            DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+    }
+
+    #[tokio::test]
+    async fn callback_urls_are_known_when_the_run_is_announced() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.completed"));
+        let flow = Flow {
+            name: "cb".to_string(),
+            nodes: vec![wait_node_with("w", 60_000, None)],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let recorded = RecordingPublisher::new();
+        let seen = Arc::new(Mutex::new(None));
+        let mut service =
+            service_with_flow(flow).with_callback_listener(Box::new(Arc::clone(&fake)));
+        service.events = Box::new(ProbeUrlsOnStart {
+            urls: Arc::clone(&service.callback_urls),
+            seen: Arc::clone(&seen),
+            events: Arc::clone(&recorded),
+        });
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service.run(&exec, run_input("cb")).await.expect("run");
+
+        assert_eq!(
+            seen.lock().expect("lock").clone(),
+            Some(vec![FlowRunCallback {
+                node_id: "w".to_string(),
+                name: "payment".to_string(),
+                url: "http://fake:1/cb/0".to_string(),
+            }]),
+            "the URL is readable before the first node runs"
+        );
+        assert!(service.callback_urls(&summary.run_id).is_empty());
+    }
+
+    #[tokio::test]
+    async fn callback_urls_are_served_while_the_run_waits_and_gone_after_a_stop() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 60_000, None)),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let (summary, during) = tokio::join!(service.run(&exec, run_input("cb")), async {
+            fake.wait_opened(1).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let run_id = run_id_of(&publisher).expect("the run started");
+            let during = service.callback_urls(&run_id);
+            service.cancel(&run_id);
+            during
+        });
+        let summary = summary.expect("run");
+
+        assert_eq!(summary.stopped_reason, "cancelled");
+        assert_eq!(during.len(), 1);
+        assert_eq!(during[0].node_id, "w");
+        assert_eq!(during[0].url, "http://fake:1/cb/0");
+        assert!(service.callback_urls(&summary.run_id).is_empty());
+        assert!(service.callback_urls.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn callback_urls_of_an_unknown_run_are_empty() {
+        let service = service_with_flow(register_then_wait(wait_node_with("w", 1000, None)));
+        assert!(service.callback_urls("no-such-run").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_run_that_fails_after_its_endpoints_open_leaves_no_callback_urls() {
+        // The second endpoint cannot open, so the run ends with an error
+        // after the first one opened.
+        let fake = crate::test_doubles::FakeCallbackListener::failing_after(1, "no port");
+        let flow = Flow {
+            name: "cb".to_string(),
+            nodes: vec![
+                wait_node_with("w1", 1000, None),
+                FlowNode {
+                    id: "w2".to_string(),
+                    kind: FlowNodeKind::WaitForCallback {
+                        label: "Wait w2".to_string(),
+                        name: "second".to_string(),
+                        timeout_ms: 1000,
+                        accept_when: None,
+                    },
+                    position: NodePosition { x: 0.0, y: 0.0 },
+                },
+            ],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = service_with_listener(flow, &fake);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let outcome = service.run(&exec, run_input("cb")).await;
+
+        assert!(outcome.is_err());
+        assert!(service.callback_urls.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_run_that_finishes_leaves_no_callback_urls() {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        fake.queue_on_open(event_call("payment.completed"));
+        let service =
+            service_with_listener(register_then_wait(wait_node_with("w", 60_000, None)), &fake);
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+
+        let summary = service.run(&exec, run_input("cb")).await.expect("run");
+
+        assert_eq!(summary.stopped_reason, "completed");
+        assert!(service.callback_urls(&summary.run_id).is_empty());
+        assert!(service.callback_urls.lock().expect("lock").is_empty());
     }
 
     #[tokio::test]

@@ -2544,10 +2544,18 @@ export interface FlowLiveProgress {
   lastRejected?: FlowRejectedCall;
 }
 
-/** The callback URL of one Wait for callback node. Valid only while its run is active. */
+/** One Wait for callback node of a run, as `flow-run-started` names it. It has no URL. */
 export interface FlowCallbackInfo {
   nodeId: string;
   name: string;
+}
+
+/**
+ * The callback URL of one Wait for callback node. The URL holds a bearer
+ * token and works only while its run is active. Keep it in memory only and
+ * never log it.
+ */
+export interface FlowRunCallback extends FlowCallbackInfo {
   url: string;
 }
 
@@ -2623,6 +2631,13 @@ export const runFlow = (
 
 export const cancelFlowRun = (runId: string) => invoke<void>('cancel_flow_run', { runId });
 
+/**
+ * Fetches the callback URLs of an active run. The backend knows them before
+ * `flow-run-started` is sent. An unknown or finished run returns an empty list.
+ */
+export const getFlowRunCallbacks = (runId: string) =>
+  invoke<FlowRunCallback[]>('get_flow_run_callbacks', { runId });
+
 // Event payloads are DomainEvent JSON. Their fields are snake_case, like
 // every other DomainEvent. Do not camelCase them here.
 export interface FlowRunStartedEvent {
@@ -2631,7 +2646,11 @@ export interface FlowRunStartedEvent {
   flow_name: string;
   collection: string;
   total_nodes: number;
-  /** Every Wait for callback node's URL. Omitted when the flow has none. Keys are camelCase. */
+  /**
+   * Every Wait for callback node of the run, without its URL. Events reach
+   * every listener, so fetch the URLs with `getFlowRunCallbacks`. Omitted
+   * when the flow has none. Keys are camelCase.
+   */
   callbacks?: FlowCallbackInfo[];
   /** Set for a partial run. `total_nodes` then counts only its nodes. */
   partial?: FlowPartialRunInfo;

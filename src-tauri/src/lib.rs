@@ -997,6 +997,7 @@ pub fn run() {
             commands::flow::lint_flow,
             commands::flow::run_flow,
             commands::flow::cancel_flow_run,
+            commands::flow::get_flow_run_callbacks,
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,

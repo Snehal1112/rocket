@@ -13,6 +13,7 @@ vi.mock('@/lib/tauri-api', async () => {
     ...actual,
     runFlow: vi.fn(),
     cancelFlowRun: vi.fn(),
+    getFlowRunCallbacks: vi.fn(),
     saveFlow: vi.fn(),
     onFlowRunStarted: vi.fn(),
     onFlowStepStarted: vi.fn(),
@@ -117,6 +118,8 @@ describe('FlowToolbar', () => {
     );
     vi.mocked(tauriApi.saveFlow).mockResolvedValue(undefined);
     vi.mocked(tauriApi.cancelFlowRun).mockResolvedValue(undefined);
+    vi.mocked(tauriApi.getFlowRunCallbacks).mockReset();
+    vi.mocked(tauriApi.getFlowRunCallbacks).mockResolvedValue([]);
     vi.mocked(getActiveGlobalEnvName).mockReturnValue(undefined);
     onPatchStatus.mockClear();
     onRunStateChange.mockClear();
@@ -830,7 +833,57 @@ describe('FlowToolbar', () => {
     expect(onPatchProgress).toHaveBeenCalledWith('w', 'waiting… 5s left · 2 ignored call(s)', live);
   });
 
-  it('hands the callback URLs from flow-run-started to onCallbackUrls', async () => {
+  it('fetches the callback URLs after flow-run-started and hands them to onCallbackUrls', async () => {
+    vi.mocked(tauriApi.getFlowRunCallbacks).mockResolvedValue([
+      { nodeId: 'w', name: 'payment', url: 'http://10.0.0.5:4000/cb/tok' },
+    ]);
+    const onCallbackUrls = vi.fn();
+    renderToolbar({ onCallbackUrls });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    // Nothing is fetched before the run announces itself.
+    expect(tauriApi.getFlowRunCallbacks).not.toHaveBeenCalled();
+    // The event names the Wait nodes only. It never carries the URL.
+    startedHandler?.({
+      type: 'flowRunStarted',
+      run_id: 'run-123',
+      flow_name: 'my-flow',
+      collection: 'my-collection',
+      total_nodes: 2,
+      callbacks: [{ nodeId: 'w', name: 'payment' }],
+    });
+    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
+    expect(tauriApi.getFlowRunCallbacks).toHaveBeenCalledWith('run-123');
+    await waitFor(() =>
+      expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://10.0.0.5:4000/cb/tok' }),
+    );
+    // The run state is set first, because a new run drops older URLs.
+    expect(onRunStateChange.mock.invocationCallOrder[0]).toBeLessThan(
+      onCallbackUrls.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not fetch or call onCallbackUrls for a run without callbacks', async () => {
+    const onCallbackUrls = vi.fn();
+    renderToolbar({ onCallbackUrls });
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(startedHandler).toBeDefined());
+    started('run-123');
+    await act(async () => {});
+    expect(tauriApi.getFlowRunCallbacks).not.toHaveBeenCalled();
+    expect(onCallbackUrls).not.toHaveBeenCalled();
+  });
+
+  it('drops callback URLs that arrive after the run ended', async () => {
+    let answer: (urls: tauriApi.FlowRunCallback[]) => void = () => {
+      // Reassigned by the mock below before use.
+    };
+    vi.mocked(tauriApi.getFlowRunCallbacks).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
     const onCallbackUrls = vi.fn();
     renderToolbar({ onCallbackUrls });
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
@@ -840,24 +893,34 @@ describe('FlowToolbar', () => {
       run_id: 'run-123',
       flow_name: 'my-flow',
       collection: 'my-collection',
-      total_nodes: 2,
-      callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://10.0.0.5:4000/cb/tok' }],
+      total_nodes: 1,
+      callbacks: [{ nodeId: 'w', name: 'payment' }],
     });
-    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
-    expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://10.0.0.5:4000/cb/tok' });
-    // The run state is set first, because a new run drops older URLs.
-    expect(onRunStateChange.mock.invocationCallOrder[0]).toBeLessThan(
-      onCallbackUrls.mock.invocationCallOrder[0],
-    );
+    resolveRun({ runId: 'run-123', steps: [], stoppedReason: 'completed' });
+    await waitFor(() => expect(onRunStateChange).toHaveBeenCalledWith('done', 'run-123'));
+    answer([{ nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' }]);
+    await act(async () => {});
+    expect(onCallbackUrls).not.toHaveBeenCalled();
   });
 
-  it('does not call onCallbackUrls for a run without callbacks', async () => {
+  it('shows no callback URLs when the fetch fails', async () => {
+    vi.mocked(tauriApi.getFlowRunCallbacks).mockRejectedValue(new Error('gone'));
     const onCallbackUrls = vi.fn();
     renderToolbar({ onCallbackUrls });
     await userEvent.click(screen.getByRole('button', { name: 'Run' }));
     await waitFor(() => expect(startedHandler).toBeDefined());
-    started('run-123');
+    startedHandler?.({
+      type: 'flowRunStarted',
+      run_id: 'run-123',
+      flow_name: 'my-flow',
+      collection: 'my-collection',
+      total_nodes: 1,
+      callbacks: [{ nodeId: 'w', name: 'payment' }],
+    });
+    await act(async () => {});
+    expect(tauriApi.getFlowRunCallbacks).toHaveBeenCalledWith('run-123');
     expect(onCallbackUrls).not.toHaveBeenCalled();
+    expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
   });
 
   describe('pending sign-in', () => {
@@ -1359,6 +1422,9 @@ describe('FlowToolbar', () => {
         subscribers.push(h);
         return unlisten;
       });
+      vi.mocked(tauriApi.getFlowRunCallbacks).mockResolvedValue([
+        { nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' },
+      ]);
       const onCallbackUrls = vi.fn();
       const view = renderToolbar({ onCallbackUrls });
       await userEvent.click(screen.getByRole('button', { name: 'Run' }));
@@ -1371,10 +1437,10 @@ describe('FlowToolbar', () => {
         flow_name: 'my-flow',
         collection: 'my-collection',
         total_nodes: 1,
-        callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' }],
+        callbacks: [{ nodeId: 'w', name: 'payment' }],
       });
       expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123');
-      expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://h:1/cb/tok' });
+      await waitFor(() => expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://h:1/cb/tok' }));
       // A toolbar mounted later follows the run without handling the event twice.
       onRunStateChange.mockClear();
       renderToolbar({ tabRunState: 'running', tabRunId: 'run-123', onCallbackUrls });
@@ -1393,6 +1459,9 @@ describe('FlowToolbar', () => {
     });
 
     it('a remounted toolbar follows a run that has not announced itself yet', async () => {
+      vi.mocked(tauriApi.getFlowRunCallbacks).mockResolvedValue([
+        { nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' },
+      ]);
       const onCallbackUrls = vi.fn();
       renderToolbar({
         tabRunState: 'done',
@@ -1410,10 +1479,11 @@ describe('FlowToolbar', () => {
         flow_name: 'my-flow',
         collection: 'my-collection',
         total_nodes: 1,
-        callbacks: [{ nodeId: 'w', name: 'payment', url: 'http://h:1/cb/tok' }],
+        callbacks: [{ nodeId: 'w', name: 'payment' }],
       });
       expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-7');
-      expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://h:1/cb/tok' });
+      expect(tauriApi.getFlowRunCallbacks).toHaveBeenCalledWith('run-7');
+      await waitFor(() => expect(onCallbackUrls).toHaveBeenCalledWith({ w: 'http://h:1/cb/tok' }));
       await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
       expect(tauriApi.cancelFlowRun).toHaveBeenCalledWith('run-7');
     });
@@ -1477,7 +1547,13 @@ describe('FlowToolbar', () => {
       expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-123', info);
     });
 
+    // The event names both Waits. The fetch returns both URLs, because the
+    // backend opens an endpoint for every Wait.
     const twoCallbacks = [
+      { nodeId: 'w1', name: 'one' },
+      { nodeId: 'w2', name: 'two' },
+    ];
+    const twoUrls = [
       { nodeId: 'w1', name: 'one', url: 'http://h:1/cb/one' },
       { nodeId: 'w2', name: 'two', url: 'http://h:1/cb/two' },
     ];
@@ -1489,6 +1565,7 @@ describe('FlowToolbar', () => {
     };
 
     it('keeps only the callback URLs of Waits inside the partial run', async () => {
+      vi.mocked(tauriApi.getFlowRunCallbacks).mockResolvedValue(twoUrls);
       const onCallbackUrls = vi.fn();
       renderToolbar({ ...withBase, onCallbackUrls });
       ask(runB);
@@ -1502,10 +1579,11 @@ describe('FlowToolbar', () => {
         callbacks: twoCallbacks,
         partial: partialInfo,
       });
-      expect(onCallbackUrls).toHaveBeenCalledWith({ w2: 'http://h:1/cb/two' });
+      await waitFor(() => expect(onCallbackUrls).toHaveBeenCalledWith({ w2: 'http://h:1/cb/two' }));
     });
 
     it('a remounted toolbar passes the partial info and filters callbacks', async () => {
+      vi.mocked(tauriApi.getFlowRunCallbacks).mockResolvedValue(twoUrls);
       const onCallbackUrls = vi.fn();
       renderToolbar({
         ...withBase,
@@ -1523,7 +1601,7 @@ describe('FlowToolbar', () => {
         partial: partialInfo,
       });
       expect(onRunStateChange).toHaveBeenCalledWith('running', 'run-7', partialInfo);
-      expect(onCallbackUrls).toHaveBeenCalledWith({ w2: 'http://h:1/cb/two' });
+      await waitFor(() => expect(onCallbackUrls).toHaveBeenCalledWith({ w2: 'http://h:1/cb/two' }));
     });
 
     it('keeps the base run id when the backend refuses', async () => {
