@@ -180,7 +180,10 @@ fn exit_lints(node: &FlowNode, index: &GraphIndex<'_>) -> Vec<FlowLint> {
         let message = if unwired.len() == 1 {
             format!("The {} exit of '{label}' has no wire.", unwired.join(", "))
         } else {
-            format!("The {} exits of '{label}' have no wire.", unwired.join(", "))
+            format!(
+                "The {} exits of '{label}' have no wire.",
+                unwired.join(", ")
+            )
         };
         lints.push(warning(
             EXIT_WITHOUT_EDGE,
@@ -189,7 +192,8 @@ fn exit_lints(node: &FlowNode, index: &GraphIndex<'_>) -> Vec<FlowLint> {
             "A run that takes an unwired exit ends that branch. Wire it to a node if the run should go on.",
         ));
     }
-    if matches!(node.kind, FlowNodeKind::Switch { .. }) && !index.is_wired(&node.id, handle::DEFAULT)
+    if matches!(node.kind, FlowNodeKind::Switch { .. })
+        && !index.is_wired(&node.id, handle::DEFAULT)
     {
         lints.push(warning(
             SWITCH_WITHOUT_DEFAULT,
@@ -276,16 +280,15 @@ const LOOP: &str = "Remove one of the wires in the loop.";
 /// names, so the canvas can mark each one. An unknown node is reported on
 /// the first wire that points to it, because its id is not on the canvas.
 pub fn graph_error_lints(flow: &Flow, error: &FlowGraphError) -> Vec<FlowLint> {
-    let lint = |node_id: Option<&str>, edge_id: Option<&str>, message: String, hint: &str| {
-        FlowLint {
+    let lint =
+        |node_id: Option<&str>, edge_id: Option<&str>, message: String, hint: &str| FlowLint {
             code: INVALID_GRAPH.to_string(),
             severity: LintSeverity::Error,
             node_id: node_id.map(str::to_string),
             edge_id: edge_id.map(str::to_string),
             message,
             hint: Some(hint.to_string()),
-        }
-    };
+        };
     // Built once, so a large loop stays linear. The first node of an id wins.
     let mut labels: HashMap<&str, &FlowNode> = HashMap::with_capacity(flow.nodes.len());
     for n in &flow.nodes {
@@ -396,19 +399,21 @@ fn routed_reason(reason: &str) -> Option<String> {
     let kind = ROUTED_KINDS.iter().find(|k| rest.starts_with(**k))?;
     let rest = rest.strip_prefix(*kind)?.strip_prefix(" node")?;
     if rest.starts_with("'s wire must target '") {
-        return Some(format!("The {kind} node's wire must target its 'input' handle."));
+        return Some(format!(
+            "The {kind} node's wire must target its 'input' handle."
+        ));
     }
     if let Some(count) = rest.strip_prefix(" needs exactly one input wire, found ") {
         let plain = !count.is_empty() && count.chars().all(|c| c.is_ascii_digit());
-        return plain.then(|| format!("The {kind} node needs exactly one input wire, found {count}."));
+        return plain
+            .then(|| format!("The {kind} node needs exactly one input wire, found {count}."));
     }
     let field = match *kind {
         "If" => "condition",
         "Switch" => "value",
         _ => "script",
     };
-    (rest == format!("'s {field} is empty"))
-        .then(|| format!("The {kind} node's {field} is empty."))
+    (rest == format!("'s {field} is empty")).then(|| format!("The {kind} node's {field} is empty."))
 }
 
 /// Reasons with no user text: the exact list and the numbered ones.
@@ -544,7 +549,12 @@ mod tests {
     #[test]
     fn a_fully_wired_if_has_no_exit_lint() {
         let f = flow(
-            vec![input("in"), if_node("if1", "Check"), output("ok"), output("ko")],
+            vec![
+                input("in"),
+                if_node("if1", "Check"),
+                output("ok"),
+                output("ko"),
+            ],
             vec![
                 edge("e1", "in", handle::RESULT, "if1", handle::INPUT),
                 edge("e2", "if1", handle::TRUE, "ok", "value"),
@@ -666,7 +676,12 @@ mod tests {
     #[test]
     fn an_exit_wired_by_a_trigger_wire_counts_as_wired() {
         let f = flow(
-            vec![input("in"), if_node("if1", "Check"), request("req"), output("out")],
+            vec![
+                input("in"),
+                if_node("if1", "Check"),
+                request("req"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "in", handle::RESULT, "if1", handle::INPUT),
                 edge("e2", "if1", handle::TRUE, "req", handle::TRIGGER),
@@ -699,7 +714,11 @@ mod tests {
     #[test]
     fn a_repeated_node_id_is_linted_once() {
         let f = flow(
-            vec![input("in"), if_node("if1", "First"), if_node("if1", "Second")],
+            vec![
+                input("in"),
+                if_node("if1", "First"),
+                if_node("if1", "Second"),
+            ],
             vec![edge("e1", "in", handle::RESULT, "if1", handle::INPUT)],
         );
         let lints = lint(&f);
@@ -765,7 +784,12 @@ mod tests {
     #[test]
     fn paths_through_trigger_and_auth_wires_reach_the_output() {
         let f = flow(
-            vec![auth("a1", false), request("r1"), request("r2"), output("out")],
+            vec![
+                auth("a1", false),
+                request("r1"),
+                request("r2"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "a1", handle::RESULT, "r1", handle::AUTH),
                 edge("e2", "r1", handle::RESULT, "r2", handle::TRIGGER),
@@ -786,7 +810,10 @@ mod tests {
             vec![auth("a1", false), request("r1"), output("out")],
             vec![edge("e1", "r1", handle::RESULT, "out", "value")],
         );
-        assert_eq!(keys(&lint(&idle)), vec![(Some("a1"), None, NO_PATH_TO_OUTPUT)]);
+        assert_eq!(
+            keys(&lint(&idle)),
+            vec![(Some("a1"), None, NO_PATH_TO_OUTPUT)]
+        );
     }
 
     #[test]
@@ -906,7 +933,13 @@ mod tests {
             } else {
                 (format!("if{}", i + 1), handle::INPUT)
             };
-            edges.push(edge(&format!("e{i}"), &format!("if{i}"), handle::TRUE, &next, field));
+            edges.push(edge(
+                &format!("e{i}"),
+                &format!("if{i}"),
+                handle::TRUE,
+                &next,
+                field,
+            ));
         }
         nodes.push(output("out"));
         flow(nodes, edges)
@@ -1040,10 +1073,7 @@ mod tests {
 
     fn assert_no_canary(lints: &[FlowLint]) {
         for l in lints {
-            let all = format!(
-                "{:?} {:?} {} {:?}",
-                l.node_id, l.edge_id, l.message, l.hint
-            );
+            let all = format!("{:?} {:?} {} {:?}", l.node_id, l.edge_id, l.message, l.hint);
             assert!(!all.contains(CANARY), "leaked in: {all}");
         }
     }
@@ -1088,7 +1118,11 @@ mod tests {
         assert_no_canary(&lint(&bad));
         let same = flow(vec![wait("w1", "pay"), wait("w2", "pay")], vec![]);
         let lints = graph_lints(&same);
-        assert!(lints[0].message.contains("same name"), "{}", lints[0].message);
+        assert!(
+            lints[0].message.contains("same name"),
+            "{}",
+            lints[0].message
+        );
         // The callback name is valid here, and only the order rule quotes it.
         let late = flow(
             vec![
@@ -1162,7 +1196,10 @@ mod tests {
             vec![input("in1"), output("out"), output("out"), input("lonely")],
             vec![edge("e1", "in1", handle::RESULT, "out", "value")],
         );
-        assert_eq!(keys(&lint(&f)), vec![(Some("lonely"), None, NO_PATH_TO_OUTPUT)]);
+        assert_eq!(
+            keys(&lint(&f)),
+            vec![(Some("lonely"), None, NO_PATH_TO_OUTPUT)]
+        );
         assert_eq!(
             keys(&graph_lints(&f)),
             vec![(Some("out"), None, INVALID_GRAPH)]
@@ -1172,7 +1209,12 @@ mod tests {
     #[test]
     fn a_routing_node_without_a_path_does_not_claim_a_result() {
         let f = flow(
-            vec![input("in1"), if_node("if1", "Check"), input("in2"), output("out")],
+            vec![
+                input("in1"),
+                if_node("if1", "Check"),
+                input("in2"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "in1", handle::RESULT, "if1", handle::INPUT),
                 edge("e2", "in2", handle::RESULT, "out", "value"),
@@ -1313,9 +1355,6 @@ mod tests {
             sentence("the If node needs exactly one input wire, found sk-live"),
             generic
         );
-        assert_eq!(
-            sentence("the Foo node's condition is empty"),
-            generic
-        );
+        assert_eq!(sentence("the Foo node's condition is empty"), generic);
     }
 }

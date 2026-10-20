@@ -71,12 +71,9 @@ impl ProtoLoader for FsProtoLoader {
         let parent = real.parent().ok_or_else(|| {
             DomainError::InvalidInput(format!("'{}' has no directory", proto_file.display()))
         })?;
-        let entry = real
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| {
-                DomainError::InvalidInput(format!("'{}' is not a file name", proto_file.display()))
-            })?;
+        let entry = real.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+            DomainError::InvalidInput(format!("'{}' is not a file name", proto_file.display()))
+        })?;
         let mut dirs = vec![parent.to_path_buf()];
         dirs.extend(extra_include_dirs.iter().cloned());
         ProtoRegistry::compile(entry, Arc::new(FsProtoFileReader::new(dirs)))

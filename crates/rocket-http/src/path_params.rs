@@ -104,15 +104,7 @@ mod tests {
     }
 
     const GOLDEN_ENCODE: &[&str] = &[
-        "",
-        "a%20b",
-        "~",
-        "%2B",
-        "%25",
-        "%2A",
-        "a%2Fb",
-        "%C3%A9",
-        "a%2520b",
+        "", "a%20b", "~", "%2B", "%25", "%2A", "a%2Fb", "%C3%A9", "a%2520b",
     ];
     const GOLDEN_SUBSTITUTE: &[&str] = &[
         "https://h.test/a/a%2Fb%3Fc%23d%25e%20%C3%A9/b/x%20y%2F~%2B%2A",

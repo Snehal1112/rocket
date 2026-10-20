@@ -220,7 +220,10 @@ async fn the_initialize_reply_has_no_sse_priming_event() {
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let body = response.text().await.expect("read the reply");
 
-    assert!(!body.contains("retry:") && !body.contains("id: 0"), "no priming event: {body:?}");
+    assert!(
+        !body.contains("retry:") && !body.contains("id: 0"),
+        "no priming event: {body:?}"
+    );
     assert!(
         body.contains("\"jsonrpc\""),
         "the JSON-RPC reply is present: {body:?}"

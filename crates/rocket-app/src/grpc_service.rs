@@ -284,7 +284,9 @@ impl GrpcService {
                 None => match lock(&self.connecting).remove(session_id) {
                     Some(started) => (started, None),
                     None => {
-                        return Err(DomainError::NotFound(format!("gRPC session '{session_id}'")))
+                        return Err(DomainError::NotFound(format!(
+                            "gRPC session '{session_id}'"
+                        )))
                     }
                 },
             }
@@ -538,9 +540,7 @@ impl GrpcService {
                 .join(name)
         });
         let extra: Vec<PathBuf> = collection_dir.iter().cloned().collect();
-        if let Some(path) =
-            expand_home_prefix(raw, rocket_shared::paths::home_dir().as_deref())?
-        {
+        if let Some(path) = expand_home_prefix(raw, rocket_shared::paths::home_dir().as_deref())? {
             return Ok((path, extra));
         }
         let path = Path::new(raw);
@@ -889,7 +889,8 @@ message Rep { string message = 1; }
             .resolve_proto_path(None, "~nobody/x.proto")
             .expect_err("must fail");
         assert!(
-            err.to_string().contains("a relative proto path needs a collection"),
+            err.to_string()
+                .contains("a relative proto path needs a collection"),
             "{err}"
         );
     }
@@ -1284,7 +1285,11 @@ message Rep { string message = 1; }
         let fx = prepare_stream(&h, false);
         let mut i = input(request("demo.v1.Greeter/List"));
         i.message = Some(r#"{"name":"n"}"#.into());
-        let id = h.svc.start_session(i, "s1".to_string()).await.expect("start");
+        let id = h
+            .svc
+            .start_session(i, "s1".to_string())
+            .await
+            .expect("start");
         assert_eq!(
             lock(&h.exec.streams)[0].1.as_deref(),
             Some(r#"{"name":"n"}"#)
@@ -1335,7 +1340,11 @@ message Rep { string message = 1; }
         let mut fx = prepare_stream(&h, true);
         let mut i = input(request("demo.v1.Greeter/Collect"));
         i.variables = HashMap::from([("who".into(), "ada".into())]);
-        let id = h.svc.start_session(i, "s1".to_string()).await.expect("start");
+        let id = h
+            .svc
+            .start_session(i, "s1".to_string())
+            .await
+            .expect("start");
         assert_eq!(
             lock(&h.exec.streams)[0].1,
             None,

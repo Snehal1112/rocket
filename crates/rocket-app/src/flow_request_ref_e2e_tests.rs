@@ -31,7 +31,8 @@ fn world() -> (
         repo.create(name).expect("create collection");
     }
     repo.create_folder("c", "auth").expect("create folder");
-    repo.create_folder("c", "auth/sub").expect("create subfolder");
+    repo.create_folder("c", "auth/sub")
+        .expect("create subfolder");
     for path in ["auth/login.yml", "auth/sub/me.yml"] {
         repo.save_request(
             "c",
@@ -120,7 +121,9 @@ fn renaming_a_folder_rewrites_every_flow_below_it() {
     save(&flows, "c", "A", &["auth/login.yml"]);
     save(&flows, "c", "B", &["auth/login.yml", "auth/sub/me.yml"]);
 
-    service.move_item("c", "auth", "c", "identity").expect("move");
+    service
+        .move_item("c", "auth", "c", "identity")
+        .expect("move");
 
     assert_eq!(
         saved_paths(&flows.get("c", "A").expect("get A")),

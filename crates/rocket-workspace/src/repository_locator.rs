@@ -161,7 +161,10 @@ mod tests {
         assert!(validate_component("workspace ID", "ws-1_a").is_ok());
         for bad in ["", "a.b", "é"] {
             let err = validate_component("workspace ID", bad).expect_err("must reject");
-            assert!(matches!(err, DomainError::InvalidInput(_)), "{bad:?}: {err:?}");
+            assert!(
+                matches!(err, DomainError::InvalidInput(_)),
+                "{bad:?}: {err:?}"
+            );
         }
     }
 

@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
 
 use rocket_collection::{
-    Collection, CollectionIdentity, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase,
-    WebSocketRequest,
+    Collection, CollectionIdentity, CollectionRepository, CollectionSettings, CollectionSummary,
+    CollectionVariable, FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind,
+    RequestScriptPhase, WebSocketRequest,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -308,7 +308,14 @@ impl CollectionRepository for FsCollectionRepo {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        folders::move_item_impl(self, src_collection, src_path, dst_collection, dst_path, true)
+        folders::move_item_impl(
+            self,
+            src_collection,
+            src_path,
+            dst_collection,
+            dst_path,
+            true,
+        )
     }
 
     fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {

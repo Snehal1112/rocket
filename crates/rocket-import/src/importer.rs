@@ -596,8 +596,7 @@ impl ImportService {
                 var.enabled = v.enabled;
                 env.set_variable(var);
             }
-            repo.save(&env)
-                .map_err(ImportError::DomainError)?;
+            repo.save(&env).map_err(ImportError::DomainError)?;
         }
 
         self.write_postman_items(&collection.item, &col_name, "", &mut report)?;
@@ -811,8 +810,7 @@ impl ImportService {
             env.set_variable(var);
         }
 
-        repo.save(&env)
-            .map_err(ImportError::DomainError)?;
+        repo.save(&env).map_err(ImportError::DomainError)?;
 
         report.imported = postman_env.values.len();
         Ok(report)

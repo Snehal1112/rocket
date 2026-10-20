@@ -59,5 +59,8 @@ fn hook_reports_a_missing_base_like_validate_path() {
     let gone = dir.path().join("no-such-collection");
     let expected = Err(DomainError::NotFound("Base dir not found".into()));
     assert_eq!(repo.validate_path(&gone, Path::new("a.yml")), expected);
-    assert_eq!(repo.validate_path_for_bench(&gone, Path::new("a.yml")), expected);
+    assert_eq!(
+        repo.validate_path_for_bench(&gone, Path::new("a.yml")),
+        expected
+    );
 }

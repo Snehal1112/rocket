@@ -706,7 +706,10 @@ mod tests {
         assert_eq!(parsed[1].node_id, None);
         let reserialized = serde_json::to_value(&parsed).expect("serialize");
         let original: serde_json::Value = serde_json::from_str(LINT_FIXTURE).expect("fixture json");
-        assert_eq!(reserialized, original, "keys, casing and omitted optionals must match");
+        assert_eq!(
+            reserialized, original,
+            "keys, casing and omitted optionals must match"
+        );
     }
 
     #[test]

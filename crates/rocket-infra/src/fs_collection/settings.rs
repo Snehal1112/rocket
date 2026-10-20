@@ -1,7 +1,9 @@
 use std::fs;
 
 use rocket_collection::settings::SandboxMode;
-use rocket_collection::{Collection, CollectionIdentity, CollectionSettings, CollectionVariable, ScriptFlow};
+use rocket_collection::{
+    Collection, CollectionIdentity, CollectionSettings, CollectionVariable, ScriptFlow,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -244,14 +246,16 @@ pub(super) fn collection_identity(
     let path = repo.settings_path(name);
     let uid = if path.exists() {
         let content = fs::read_to_string(&path)?;
-        let oc: OcCollection = serde_yaml::from_str(&content).map_err(|_| {
-            DomainError::Internal("Failed to parse opencollection.yml".into())
-        })?;
+        let oc: OcCollection = serde_yaml::from_str(&content)
+            .map_err(|_| DomainError::Internal("Failed to parse opencollection.yml".into()))?;
         oc.uid.filter(|u| !u.trim().is_empty())
     } else {
         None
     };
-    Ok(CollectionIdentity { canonical_root, uid })
+    Ok(CollectionIdentity {
+        canonical_root,
+        uid,
+    })
 }
 
 pub(super) fn get_settings(
@@ -595,10 +599,12 @@ mod tests {
     fn set_agent_autonomy_enabled_in_extensions_preserves_sibling_keys() {
         let yaml = "someOtherTool:\n  foo: bar\nrocketapi:\n  unrelatedFlag: true\n";
         let value: serde_yaml::Value = serde_yaml::from_str(yaml).expect("parse fixture yaml");
-        let result = set_agent_autonomy_enabled_in_extensions(Some(value), true)
-            .expect("extensions value");
+        let result =
+            set_agent_autonomy_enabled_in_extensions(Some(value), true).expect("extensions value");
 
-        assert!(agent_autonomy_enabled_from_extensions(&Some(result.clone())));
+        assert!(agent_autonomy_enabled_from_extensions(&Some(
+            result.clone()
+        )));
         let serialized = serde_yaml::to_string(&result).expect("serialize extensions");
         assert!(serialized.contains("someOtherTool"));
         assert!(serialized.contains("foo: bar"));

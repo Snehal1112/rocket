@@ -105,7 +105,11 @@ fn build(collections: usize, requests: usize, folders: usize) -> Fixture {
         }
     }
     let expected_http = (0..requests).filter(|i| i % 10 <= 5).count();
-    assert_eq!(first_http.len(), expected_http, "http request count of bench-0");
+    assert_eq!(
+        first_http.len(),
+        expected_http,
+        "http request count of bench-0"
+    );
     for path in first_http.iter().take(3).chain(first_http.last()) {
         repo.get_request("bench-0", path)
             .expect("a recorded http path must load");
@@ -165,7 +169,11 @@ fn populate(repo: &FsCollectionRepo, name: &str, requests: usize, folders: usize
 }
 
 fn http_request(i: usize) -> Request {
-    let method = if i % 2 == 0 { HttpMethod::Get } else { HttpMethod::Post };
+    let method = if i % 2 == 0 {
+        HttpMethod::Get
+    } else {
+        HttpMethod::Post
+    };
     let mut request = Request::new(
         format!("Request {i}"),
         method.clone(),
@@ -223,13 +231,28 @@ pub fn populate_deep(repo: &FsCollectionRepo, name: &str) {
     let root = repo.collection_root_path(name).expect("collection root");
     for p in 0..DEEP_PARENTS {
         let parent = format!("p-{p}");
-        repo.create_folder(name, &parent).expect("create parent folder");
+        repo.create_folder(name, &parent)
+            .expect("create parent folder");
         let children: Vec<String> = (0..DEEP_CHILDREN).map(|c| format!("c-{c}")).collect();
-        fill_deep_folder(repo, name, &root, &parent, &children, p * (1 + DEEP_CHILDREN));
+        fill_deep_folder(
+            repo,
+            name,
+            &root,
+            &parent,
+            &children,
+            p * (1 + DEEP_CHILDREN),
+        );
         for (c, child) in children.iter().enumerate() {
             let dir = format!("{parent}/{child}");
             repo.create_folder(name, &dir).expect("create child folder");
-            fill_deep_folder(repo, name, &root, &dir, &[], p * (1 + DEEP_CHILDREN) + c + 1);
+            fill_deep_folder(
+                repo,
+                name,
+                &root,
+                &dir,
+                &[],
+                p * (1 + DEEP_CHILDREN) + c + 1,
+            );
         }
     }
 }
@@ -246,7 +269,11 @@ fn fill_deep_folder(
     let mut order = String::new();
     for r in 0..DEEP_REQUESTS {
         let saved = repo
-            .save_request(name, &format!("{dir}/r-{r}"), &http_request(seed * DEEP_REQUESTS + r))
+            .save_request(
+                name,
+                &format!("{dir}/r-{r}"),
+                &http_request(seed * DEEP_REQUESTS + r),
+            )
             .expect("save request");
         let file = Path::new(&saved)
             .file_name()

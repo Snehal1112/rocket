@@ -245,7 +245,13 @@ fn dedent(lines: &[&str]) -> String {
         .unwrap_or(0);
     lines
         .iter()
-        .map(|l| if l.len() >= indent { &l[indent..] } else { l.trim_start() })
+        .map(|l| {
+            if l.len() >= indent {
+                &l[indent..]
+            } else {
+                l.trim_start()
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -576,7 +582,6 @@ body:ws {
         assert_eq!(doc.ws_messages[1].content, "hello");
     }
 
-
     #[test]
     fn multi_line_message_content_keeps_its_relative_indentation() {
         let raw = "message 1 [json] {\n  {\n    \"a\": 1\n  }\n}\n";
@@ -609,7 +614,11 @@ body:ws {
         assert_eq!(doc.ws_messages[0].content, "{\"pattern\":\"}\"}");
         assert_eq!(doc.ws_messages[1].content, "{\"open\":\"{\"}");
         assert_eq!(doc.ws_messages[2].content, "ok");
-        assert_eq!(doc.headers.len(), 1, "blocks after body:ws must still parse");
+        assert_eq!(
+            doc.headers.len(),
+            1,
+            "blocks after body:ws must still parse"
+        );
     }
 
     const GRPC_BRU: &str = "meta {\n  name: Say Hello\n  type: grpc\n  seq: 2\n}\n\ngrpc {\n  url: localhost:50051\n  method: /demo.greeter.v1.Greeter/SayHello\n  body: grpc\n  auth: none\n  methodType: unary\n  protoPath: protos/greeter.proto\n}\n\nmetadata {\n  x-trace: abc\n  ~x-off: 1\n}\n\nbody:grpc {\n  name: message 1\n  content: '''\n    {\n      \"name\": \"ada\"\n    }\n  '''\n}\n";

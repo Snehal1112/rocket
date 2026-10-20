@@ -407,9 +407,12 @@ async fn run_user_code(
         return Ok(Some(script_error_message(e.to_string())));
     }
 
-    let drained = drive(clock, runtime.run_event_loop(PollEventLoopOptions::default()))
-        .await
-        .ok_or_else(aborted)?;
+    let drained = drive(
+        clock,
+        runtime.run_event_loop(PollEventLoopOptions::default()),
+    )
+    .await
+    .ok_or_else(aborted)?;
     Ok(drained.err().map(|e| script_error_message(e.to_string())))
 }
 
@@ -838,7 +841,10 @@ mod tests {
         let engine = DenoScriptEngine::new();
         let ctx = minimal_ctx("Promise.resolve().then(() => rok.setVar('late', 'yes'))");
         let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("late").expect("late present"), "yes");
+        assert_eq!(
+            result.runtime_vars.get("late").expect("late present"),
+            "yes"
+        );
     }
 
     #[tokio::test]
@@ -1027,7 +1033,10 @@ mod tests {
             .execute_with_host(ctx, &host)
             .await
             .expect("execute");
-        assert_eq!(result.runtime_vars.get("d").expect("d present"), "plain text");
+        assert_eq!(
+            result.runtime_vars.get("d").expect("d present"),
+            "plain text"
+        );
         let sent = host.sent();
         assert_eq!(sent[0].method, "GET");
         assert_eq!(sent[0].body.as_deref(), Some("hello"));
@@ -1079,7 +1088,10 @@ mod tests {
             result.runtime_vars.get("e").expect("e present"),
             "rok.sendRequest: connection refused"
         );
-        assert_eq!(result.runtime_vars.get("plain").expect("plain present"), true);
+        assert_eq!(
+            result.runtime_vars.get("plain").expect("plain present"),
+            true
+        );
     }
 
     #[tokio::test]
@@ -1128,7 +1140,10 @@ mod tests {
             .execute_with_host(ctx, &host)
             .await
             .expect("execute");
-        assert_eq!(result.runtime_vars.get("cb").expect("cb present"), "null|201");
+        assert_eq!(
+            result.runtime_vars.get("cb").expect("cb present"),
+            "null|201"
+        );
     }
 
     #[tokio::test]
@@ -1253,7 +1268,10 @@ mod tests {
                 .collect()
         };
         assert_eq!(content_types(0), vec!["application/json".to_string()]);
-        assert_eq!(content_types(1), vec!["application/vnd.api+json".to_string()]);
+        assert_eq!(
+            content_types(1),
+            vec!["application/vnd.api+json".to_string()]
+        );
     }
 
     // ── runRequest ───────────────────────────────────────────────────────────
@@ -1329,13 +1347,17 @@ mod tests {
     #[tokio::test]
     async fn run_request_passes_the_callers_runtime_vars() {
         let host = RunHost::answering(Ok(ran(200, "{}")));
-        let mut ctx = minimal_ctx("rok.setVar('b', 2); rok.deleteVar('a'); await rok.runRequest('x')");
+        let mut ctx =
+            minimal_ctx("rok.setVar('b', 2); rok.deleteVar('a'); await rok.runRequest('x')");
         ctx.variables.runtime = map(&[("a", "1"), ("keep", "k")]);
         DenoScriptEngine::new()
             .execute_with_host(ctx, &host)
             .await
             .expect("execute");
-        assert_eq!(host.seen()[0].runtime_vars, map(&[("keep", "k"), ("b", "2")]));
+        assert_eq!(
+            host.seen()[0].runtime_vars,
+            map(&[("keep", "k"), ("b", "2")])
+        );
     }
 
     #[tokio::test]
@@ -1372,9 +1394,16 @@ mod tests {
             result.runtime_vars.get("seen").expect("seen present"),
             "t1|new|mine-too|c2|false"
         );
-        assert_eq!(result.runtime_vars.get("token").expect("token present"), "t1");
+        assert_eq!(
+            result.runtime_vars.get("token").expect("token present"),
+            "t1"
+        );
         assert!(result.runtime_var_deletes.contains(&"gone".to_string()));
-        let env_keys: Vec<_> = result.env_var_writes.iter().map(|w| w.key.clone()).collect();
+        let env_keys: Vec<_> = result
+            .env_var_writes
+            .iter()
+            .map(|w| w.key.clone())
+            .collect();
         assert_eq!(env_keys, vec!["F".to_string()], "the nested run's E wins");
         assert!(result
             .console_entries
@@ -1500,7 +1529,10 @@ mod tests {
         );
         let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
         assert!(result.error.is_none(), "{:?}", result.error);
-        assert_eq!(result.runtime_vars.get("waited").expect("waited present"), true);
+        assert_eq!(
+            result.runtime_vars.get("waited").expect("waited present"),
+            true
+        );
     }
 
     #[tokio::test]
@@ -1575,7 +1607,10 @@ mod tests {
             .execute(ctx)
             .await
             .expect("execute");
-        assert_eq!(result.runtime_vars.get("short").expect("short present"), true);
+        assert_eq!(
+            result.runtime_vars.get("short").expect("short present"),
+            true
+        );
     }
 
     #[tokio::test]
@@ -1684,11 +1719,8 @@ mod tests {
                 .build()
                 .expect("runtime");
             rt.block_on(async {
-                let run = run_script_bounded(
-                    minimal_ctx("while (true) {}"),
-                    None,
-                    ScriptLimits::DEFAULT,
-                );
+                let run =
+                    run_script_bounded(minimal_ctx("while (true) {}"), None, ScriptLimits::DEFAULT);
                 // The timeout drops the run long before its own limits apply.
                 let _ = tokio::time::timeout(Duration::from_millis(300), run).await;
             });
@@ -1721,7 +1753,10 @@ mod tests {
         )
         .await
         .expect("a later script still runs");
-        assert_eq!(result.runtime_vars.get("alive").expect("alive present"), "yes");
+        assert_eq!(
+            result.runtime_vars.get("alive").expect("alive present"),
+            "yes"
+        );
     }
 
     #[tokio::test]
@@ -1860,10 +1895,7 @@ mod tests {
             let mut ctx = minimal_ctx(code);
             ctx.variables.process_env = std::env::vars().collect();
             ctx.sandbox_mode = mode;
-            let result = DenoScriptEngine::new()
-                .execute(ctx)
-                .await
-                .expect("execute");
+            let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
             assert_eq!(result.runtime_vars.get("out").expect("out present"), &want);
         }
     }

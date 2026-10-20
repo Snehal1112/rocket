@@ -287,7 +287,10 @@ async fn run_this_node_reuses_the_cached_upstream_response() {
         1,
         "the cached request is not sent again: {sent:?}"
     );
-    assert!(sent.last().is_some_and(|u| u.contains("/profile")), "{sent:?}");
+    assert!(
+        sent.last().is_some_and(|u| u.contains("/profile")),
+        "{sent:?}"
+    );
     assert_eq!(node_ids(&summary), vec!["b"]);
     assert_ne!(summary.run_id, base.run_id);
     let info = summary.partial.clone().expect("partial info");
@@ -327,7 +330,8 @@ async fn an_upstream_edit_since_the_base_run_refuses_with_no_events() {
     let h = harness(login_then_b());
     h.http.set_body("/login", "https://api.example.com/profile");
     let base = h.service.run(&h.exec, input()).await.expect("base run");
-    h.flows.edit(|f| f.nodes[0] = request("a", "https://api.example.com/login?v=2"));
+    h.flows
+        .edit(|f| f.nodes[0] = request("a", "https://api.example.com/login?v=2"));
     let events_before = h.events.events().len();
     let sent_before = h.http.sent_urls().len();
 
@@ -345,7 +349,11 @@ async fn an_upstream_edit_since_the_base_run_refuses_with_no_events() {
     let text = err.to_string();
     assert!(text.contains("'a' changed since the earlier run"), "{text}");
     assert!(text.ends_with("node(s): a; edge(s): "), "{text}");
-    assert_eq!(h.events.events().len(), events_before, "a refused run sends no events");
+    assert_eq!(
+        h.events.events().len(),
+        events_before,
+        "a refused run sends no events"
+    );
     assert_eq!(h.http.sent_urls().len(), sent_before);
 }
 
@@ -382,7 +390,10 @@ async fn editing_the_start_node_itself_is_allowed() {
     assert_eq!(step(&summary, "b").status, FlowNodeStatus::Success);
     let sent = h.http.sent_urls();
     assert_eq!(sent.len(), sent_before + 1, "{sent:?}");
-    assert!(sent.last().is_some_and(|u| u.contains("/profile")), "{sent:?}");
+    assert!(
+        sent.last().is_some_and(|u| u.contains("/profile")),
+        "{sent:?}"
+    );
     assert_eq!(
         h.http.sent_bodies().last().cloned().flatten().as_deref(),
         Some("edited-body")
@@ -504,7 +515,10 @@ fn callback_call() -> crate::callback_listener::ReceivedCall {
 fn callback_flow() -> rocket_flow::Flow {
     flow(
         vec![
-            request("reg", "https://api.example.com/register?cb={{callback.pay}}"),
+            request(
+                "reg",
+                "https://api.example.com/register?cb={{callback.pay}}",
+            ),
             wait("w", "pay"),
             output("out"),
         ],
@@ -689,7 +703,12 @@ async fn client_run_id_absent_falls_back_to_a_generated_ulid() {
 
     let summary = h
         .service
-        .run_with_options(&h.exec, input(), FlowAuthTokens::new(), FlowRunOptions::default())
+        .run_with_options(
+            &h.exec,
+            input(),
+            FlowAuthTokens::new(),
+            FlowRunOptions::default(),
+        )
         .await
         .expect("run");
 
@@ -711,11 +730,17 @@ async fn client_run_id_that_is_malformed_is_refused_before_any_event() {
             .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id(bad))
             .await
             .expect_err("a malformed id must be refused");
-        assert!(matches!(err, DomainError::InvalidInput(_)), "{bad:?}: {err:?}");
+        assert!(
+            matches!(err, DomainError::InvalidInput(_)),
+            "{bad:?}: {err:?}"
+        );
     }
 
     assert!(h.events.events().is_empty(), "a refused id sends no event");
-    assert!(h.http.sent_urls().is_empty(), "a refused id sends no request");
+    assert!(
+        h.http.sent_urls().is_empty(),
+        "a refused id sends no request"
+    );
     assert!(h.service.in_flight.lock().expect("lock").is_empty());
 }
 
@@ -763,7 +788,11 @@ async fn client_run_id_of_a_kept_run_is_refused_and_the_kept_run_is_untouched() 
         .await
         .expect_err("the id of a kept run must be refused");
     assert!(matches!(err, DomainError::AlreadyExists(_)), "{err:?}");
-    assert_eq!(h.events.events().len(), events_before, "no event for a refused id");
+    assert_eq!(
+        h.events.events().len(),
+        events_before,
+        "no event for a refused id"
+    );
 
     // The kept run still feeds a partial run, which takes its own client id.
     let summary = h
@@ -780,16 +809,16 @@ async fn client_run_id_of_a_kept_run_is_refused_and_the_kept_run_is_untouched() 
         .await
         .expect("partial run on the kept run");
     assert_eq!(summary.run_id, "partial-1");
-    assert_eq!(
-        summary.partial.expect("partial info").base_run_id,
-        "kept-1"
-    );
+    assert_eq!(summary.partial.expect("partial info").base_run_id, "kept-1");
     let partial_ids: Vec<String> = flow_event_run_ids(&h.events)
         .into_iter()
         .skip(ids_before)
         .collect();
     assert!(!partial_ids.is_empty());
-    assert!(partial_ids.iter().all(|e| e == "partial-1"), "{partial_ids:?}");
+    assert!(
+        partial_ids.iter().all(|e| e == "partial-1"),
+        "{partial_ids:?}"
+    );
 }
 
 #[tokio::test]

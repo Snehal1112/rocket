@@ -138,8 +138,14 @@ mod tests {
 
     #[test]
     fn the_dialect_follows_the_negotiated_subprotocol() {
-        assert_eq!(Dialect::from_subprotocol(Some("graphql-ws")), Dialect::Legacy);
-        assert_eq!(Dialect::from_subprotocol(Some("graphql-transport-ws")), Dialect::Transport);
+        assert_eq!(
+            Dialect::from_subprotocol(Some("graphql-ws")),
+            Dialect::Legacy
+        );
+        assert_eq!(
+            Dialect::from_subprotocol(Some("graphql-transport-ws")),
+            Dialect::Transport
+        );
         // No subprotocol selected: assume the modern protocol.
         assert_eq!(Dialect::from_subprotocol(None), Dialect::Transport);
         assert_eq!(Dialect::Legacy.subprotocol(), "graphql-ws");
@@ -148,7 +154,10 @@ mod tests {
 
     #[test]
     fn connection_init_carries_the_params_only_when_given() {
-        assert_eq!(parse(&init_message(None)), json!({ "type": "connection_init" }));
+        assert_eq!(
+            parse(&init_message(None)),
+            json!({ "type": "connection_init" })
+        );
         let params = json!({ "token": "abc" });
         assert_eq!(
             parse(&init_message(Some(&params))),
@@ -159,7 +168,12 @@ mod tests {
     #[test]
     fn the_transport_dialect_subscribes() {
         let vars = json!({ "n": 3 });
-        let msg = parse(&start_message(Dialect::Transport, "subscription S { s }", Some(&vars), Some("S")));
+        let msg = parse(&start_message(
+            Dialect::Transport,
+            "subscription S { s }",
+            Some(&vars),
+            Some("S"),
+        ));
         assert_eq!(msg["type"], "subscribe");
         assert_eq!(msg["id"], OPERATION_ID);
         assert_eq!(msg["payload"]["query"], "subscription S { s }");
@@ -169,7 +183,12 @@ mod tests {
 
     #[test]
     fn the_legacy_dialect_starts_and_omits_empty_optionals() {
-        let msg = parse(&start_message(Dialect::Legacy, "subscription { s }", None, None));
+        let msg = parse(&start_message(
+            Dialect::Legacy,
+            "subscription { s }",
+            None,
+            None,
+        ));
         assert_eq!(msg["type"], "start");
         assert_eq!(msg["id"], OPERATION_ID);
         assert!(msg["payload"].get("variables").is_none());
@@ -178,13 +197,25 @@ mod tests {
 
     #[test]
     fn stopping_differs_per_dialect() {
-        let transport: Vec<_> = stop_messages(Dialect::Transport).iter().map(|m| parse(m)).collect();
-        assert_eq!(transport, vec![json!({ "id": OPERATION_ID, "type": "complete" })]);
+        let transport: Vec<_> = stop_messages(Dialect::Transport)
+            .iter()
+            .map(|m| parse(m))
+            .collect();
+        assert_eq!(
+            transport,
+            vec![json!({ "id": OPERATION_ID, "type": "complete" })]
+        );
 
-        let legacy: Vec<_> = stop_messages(Dialect::Legacy).iter().map(|m| parse(m)).collect();
+        let legacy: Vec<_> = stop_messages(Dialect::Legacy)
+            .iter()
+            .map(|m| parse(m))
+            .collect();
         assert_eq!(
             legacy,
-            vec![json!({ "id": OPERATION_ID, "type": "stop" }), json!({ "type": "connection_terminate" })]
+            vec![
+                json!({ "id": OPERATION_ID, "type": "stop" }),
+                json!({ "type": "connection_terminate" })
+            ]
         );
         assert_eq!(parse(&pong_message()), json!({ "type": "pong" }));
     }
@@ -200,10 +231,16 @@ mod tests {
             Incoming::Result(json!({ "data": { "n": 1 } }))
         );
         assert_eq!(
-            interpret(d, r#"{"id":"1","type":"error","payload":[{"message":"boom"}]}"#),
+            interpret(
+                d,
+                r#"{"id":"1","type":"error","payload":[{"message":"boom"}]}"#
+            ),
             Incoming::Errors(json!([{ "message": "boom" }]))
         );
-        assert_eq!(interpret(d, r#"{"id":"1","type":"complete"}"#), Incoming::Complete);
+        assert_eq!(
+            interpret(d, r#"{"id":"1","type":"complete"}"#),
+            Incoming::Complete
+        );
     }
 
     #[test]
@@ -216,33 +253,66 @@ mod tests {
             Incoming::Result(json!({ "data": { "n": 2 } }))
         );
         assert_eq!(
-            interpret(d, r#"{"id":"1","type":"error","payload":{"message":"bad"}}"#),
+            interpret(
+                d,
+                r#"{"id":"1","type":"error","payload":{"message":"bad"}}"#
+            ),
             Incoming::Errors(json!({ "message": "bad" }))
         );
         assert_eq!(
-            interpret(d, r#"{"type":"connection_error","payload":{"message":"no"}}"#),
+            interpret(
+                d,
+                r#"{"type":"connection_error","payload":{"message":"no"}}"#
+            ),
             Incoming::ConnectionError(json!({ "message": "no" }))
         );
-        assert_eq!(interpret(d, r#"{"id":"1","type":"complete"}"#), Incoming::Complete);
+        assert_eq!(
+            interpret(d, r#"{"id":"1","type":"complete"}"#),
+            Incoming::Complete
+        );
     }
 
     #[test]
     fn a_dialects_own_frame_names_do_not_leak_into_the_other() {
         // `data` and `ka` mean nothing in the transport dialect, and `next` and `ping` nothing in the legacy one.
-        assert_eq!(interpret(Dialect::Transport, r#"{"id":"1","type":"data","payload":{}}"#), Incoming::Ignore);
-        assert_eq!(interpret(Dialect::Transport, r#"{"type":"ka"}"#), Incoming::Ignore);
-        assert_eq!(interpret(Dialect::Legacy, r#"{"id":"1","type":"next","payload":{}}"#), Incoming::Ignore);
-        assert_eq!(interpret(Dialect::Legacy, r#"{"type":"ping"}"#), Incoming::Ignore);
+        assert_eq!(
+            interpret(
+                Dialect::Transport,
+                r#"{"id":"1","type":"data","payload":{}}"#
+            ),
+            Incoming::Ignore
+        );
+        assert_eq!(
+            interpret(Dialect::Transport, r#"{"type":"ka"}"#),
+            Incoming::Ignore
+        );
+        assert_eq!(
+            interpret(Dialect::Legacy, r#"{"id":"1","type":"next","payload":{}}"#),
+            Incoming::Ignore
+        );
+        assert_eq!(
+            interpret(Dialect::Legacy, r#"{"type":"ping"}"#),
+            Incoming::Ignore
+        );
     }
 
     #[test]
     fn frames_for_another_operation_and_garbage_are_ignored() {
         assert_eq!(
-            interpret(Dialect::Transport, r#"{"id":"7","type":"next","payload":{}}"#),
+            interpret(
+                Dialect::Transport,
+                r#"{"id":"7","type":"next","payload":{}}"#
+            ),
             Incoming::Ignore
         );
         assert_eq!(interpret(Dialect::Transport, "not json"), Incoming::Ignore);
-        assert_eq!(interpret(Dialect::Transport, r#"{"payload":1}"#), Incoming::Ignore);
-        assert_eq!(interpret(Dialect::Transport, r#"{"type":"surprise"}"#), Incoming::Ignore);
+        assert_eq!(
+            interpret(Dialect::Transport, r#"{"payload":1}"#),
+            Incoming::Ignore
+        );
+        assert_eq!(
+            interpret(Dialect::Transport, r#"{"type":"surprise"}"#),
+            Incoming::Ignore
+        );
     }
 }

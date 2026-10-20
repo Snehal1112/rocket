@@ -59,7 +59,10 @@ pub(crate) fn http_request_for(
     options: &RequestOptions,
 ) -> Result<HttpRequest, HostError> {
     let method: HttpMethod = request.method.parse().map_err(|_| {
-        HostError::Failed(format!("rok.sendRequest: invalid method - {}", request.method))
+        HostError::Failed(format!(
+            "rok.sendRequest: invalid method - {}",
+            request.method
+        ))
     })?;
     let mut http = HttpRequest::new(method, request.url.clone());
     http.headers = request
@@ -230,9 +233,11 @@ mod tests {
     #[test]
     fn http_request_for_picks_the_body_mode() {
         let options = RequestOptions::default();
-        let json = http_request_for(&host_request("POST", Some("{}"), true), &options).expect("valid");
+        let json =
+            http_request_for(&host_request("POST", Some("{}"), true), &options).expect("valid");
         assert_eq!(json.body.expect("body").mode, BodyMode::Json);
-        let text = http_request_for(&host_request("POST", Some("hi"), false), &options).expect("valid");
+        let text =
+            http_request_for(&host_request("POST", Some("hi"), false), &options).expect("valid");
         assert_eq!(text.body.expect("body").mode, BodyMode::Text);
         let mut xml = host_request("POST", Some("<a/>"), false);
         xml.headers = vec![("Content-Type".into(), "application/xml".into())];
@@ -242,8 +247,11 @@ mod tests {
 
     #[test]
     fn http_request_for_rejects_an_invalid_method() {
-        let err = http_request_for(&host_request("NOT A METHOD", None, false), &RequestOptions::default())
-            .expect_err("invalid");
+        let err = http_request_for(
+            &host_request("NOT A METHOD", None, false),
+            &RequestOptions::default(),
+        )
+        .expect_err("invalid");
         assert_eq!(
             err,
             HostError::Failed("rok.sendRequest: invalid method - NOT A METHOD".into())

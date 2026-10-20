@@ -95,7 +95,11 @@ pub async fn op_rok_sleep(state: Rc<RefCell<OpState>>, ms: f64) {
         .map(|limits| limits.sleep_cap)
         .unwrap_or(ScriptLimits::DEFAULT.sleep_cap);
     let cap_ms = cap.as_millis() as f64;
-    let ms = if ms.is_nan() { 0.0 } else { ms.clamp(0.0, cap_ms) };
+    let ms = if ms.is_nan() {
+        0.0
+    } else {
+        ms.clamp(0.0, cap_ms)
+    };
     tokio::time::sleep(Duration::from_millis(ms as u64)).await;
 }
 
@@ -163,10 +167,8 @@ fn merge_run_outcome(state: &mut OpState, run: &HostRunOutcome) -> ChangedKeys {
             // phase's saved write as the nested run's and drop the caller's own
             // pending write to that key.
             let before = run.scopes_before.as_ref();
-            changed.env = changed_keys(
-                before.map_or(&input.variables.env, |b| &b.env),
-                &scopes.env,
-            );
+            changed.env =
+                changed_keys(before.map_or(&input.variables.env, |b| &b.env), &scopes.env);
             changed.global = changed_keys(
                 before.map_or(&input.variables.global_env, |b| &b.global_env),
                 &scopes.global_env,

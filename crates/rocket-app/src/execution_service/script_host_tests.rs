@@ -101,7 +101,11 @@ async fn a_pre_request_script_sends_with_the_request_options() {
     assert_eq!(body.content.as_deref(), Some("{\"a\":1}"));
     assert_eq!(seen[1].url, "https://main.test/x");
 
-    let lines: Vec<&str> = out.console_entries.iter().map(|e| e.message.as_str()).collect();
+    let lines: Vec<&str> = out
+        .console_entries
+        .iter()
+        .map(|e| e.message.as_str())
+        .collect();
     assert!(lines.contains(&"side 200 true"), "{lines:?}");
     assert!(
         lines.contains(&"rok.sendRequest POST https://side.test/token -> 200 (3 ms)"),
@@ -277,7 +281,9 @@ async fn real_network_error_is_masked() {
     .await;
     assert!(lines.iter().all(|l| !l.contains(SECRET)), "{lines:?}");
     assert!(
-        lines.iter().any(|l| l.starts_with("caught rok.sendRequest:")),
+        lines
+            .iter()
+            .any(|l| l.starts_with("caught rok.sendRequest:")),
         "{lines:?}"
     );
 }
@@ -287,7 +293,9 @@ async fn real_server_echo_of_a_secret_is_masked_in_the_console() {
     let server = server_with_main().await;
     Mock::given(method("GET"))
         .and(path("/echo"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "echo": SECRET })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "echo": SECRET })),
+        )
         .mount(&server)
         .await;
     let lines = run_pre_request(
@@ -347,7 +355,9 @@ fn run_service(collection: Collection) -> (RequestExecutionService, Arc<KeepingE
         Box::new(MemoryEnvRepo(Arc::new(Mutex::new(env)))),
         Arc::new(SharedKeeping(Arc::clone(&executor))),
         Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
-        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(collection))),
+        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+            collection,
+        ))),
         Box::new(NullCookieRepo),
         Box::new(NullEventPublisher),
         Box::new(EmptySecretManagerRepo),
@@ -376,7 +386,10 @@ fn send_input(collection: &Collection, path: &str) -> ExecuteRequestInput {
 }
 
 fn console(out: &ExecuteRequestOutput) -> Vec<String> {
-    out.console_entries.iter().map(|e| e.message.clone()).collect()
+    out.console_entries
+        .iter()
+        .map(|e| e.message.clone())
+        .collect()
 }
 
 fn urls(executor: &KeepingExecutor) -> Vec<String> {
@@ -386,7 +399,9 @@ fn urls(executor: &KeepingExecutor) -> Vec<String> {
 /// root: [main.yml with `main_script`], auth/ [login.yml with `login_pre`, `login_post`]
 fn main_and_login(main_script: &str, login_pre: &str, login_post: &str) -> Collection {
     let mut collection = Collection::new("api");
-    collection.root.add_request(saved("Main", "main.yml", main_script));
+    collection
+        .root
+        .add_request(saved("Main", "main.yml", main_script));
     let mut login = saved("Login", "login.yml", login_pre);
     if !login_post.is_empty() {
         login.post_response_script = Some(login_post.to_string());
@@ -453,7 +468,11 @@ async fn run_request_e2e_the_nested_run_sees_the_callers_runtime_vars() {
     let input = send_input(&collection, "main.yml");
     let (svc, _executor) = run_service(collection);
     let out = svc.execute(input).await.expect("execute");
-    assert!(console(&out).contains(&"seen main".to_string()), "{:?}", console(&out));
+    assert!(
+        console(&out).contains(&"seen main".to_string()),
+        "{:?}",
+        console(&out)
+    );
 }
 
 #[tokio::test]
@@ -466,18 +485,18 @@ async fn run_request_e2e_nested_env_writes_are_visible_after_the_call() {
     let input = send_input(&collection, "main.yml");
     let (svc, _executor) = run_service(collection);
     let out = svc.execute(input).await.expect("execute");
-    assert!(console(&out).contains(&"E new".to_string()), "{:?}", console(&out));
+    assert!(
+        console(&out).contains(&"E new".to_string()),
+        "{:?}",
+        console(&out)
+    );
 }
 
 #[tokio::test]
 async fn run_request_e2e_a_pending_env_write_survives_an_unrelated_nested_run() {
     // An earlier phase saved E=a. The post-response script then writes E=b and
     // runs a request that never touches E, so E must stay b.
-    let mut collection = main_and_login(
-        "rok.setEnvVar('E', 'a');",
-        "",
-        "",
-    );
+    let mut collection = main_and_login("rok.setEnvVar('E', 'a');", "", "");
     if let Some(CollectionItem::Request(main)) = collection.root.items.first_mut() {
         main.post_response_script = Some(
             "rok.setEnvVar('E', 'b'); await rok.runRequest('auth/login'); \
@@ -488,7 +507,11 @@ async fn run_request_e2e_a_pending_env_write_survives_an_unrelated_nested_run() 
     let input = send_input(&collection, "main.yml");
     let (svc, _executor) = run_service(collection);
     let out = svc.execute(input).await.expect("execute");
-    assert!(console(&out).contains(&"E b".to_string()), "{:?}", console(&out));
+    assert!(
+        console(&out).contains(&"E b".to_string()),
+        "{:?}",
+        console(&out)
+    );
 }
 
 #[tokio::test]
@@ -507,8 +530,15 @@ async fn run_request_e2e_other_protocols_are_skipped() {
     let input = send_input(&collection, "main.yml");
     let (svc, executor) = run_service(collection);
     let out = svc.execute(input).await.expect("execute");
-    assert!(console(&out).contains(&"ws skipped".to_string()), "{:?}", console(&out));
-    assert_eq!(urls(&executor), vec!["https://api.test/main.yml".to_string()]);
+    assert!(
+        console(&out).contains(&"ws skipped".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    assert_eq!(
+        urls(&executor),
+        vec!["https://api.test/main.yml".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -522,7 +552,8 @@ async fn run_request_e2e_an_unknown_path_rejects() {
     let (svc, _executor) = run_service(collection);
     let out = svc.execute(input).await.expect("execute");
     assert!(
-        console(&out).contains(&"err rok.runRequest: invalid request path - nope/missing".to_string()),
+        console(&out)
+            .contains(&"err rok.runRequest: invalid request path - nope/missing".to_string()),
         "{:?}",
         console(&out)
     );
@@ -543,7 +574,10 @@ async fn run_request_e2e_a_self_call_rejects() {
         "{:?}",
         console(&out)
     );
-    assert_eq!(urls(&executor), vec!["https://api.test/main.yml".to_string()]);
+    assert_eq!(
+        urls(&executor),
+        vec!["https://api.test/main.yml".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -569,7 +603,10 @@ async fn run_request_e2e_a_cycle_rejects_inside_the_nested_run() {
     );
     assert_eq!(
         urls(&executor),
-        vec!["https://api.test/b.yml".to_string(), "https://api.test/a.yml".to_string()]
+        vec![
+            "https://api.test/b.yml".to_string(),
+            "https://api.test/a.yml".to_string()
+        ]
     );
 }
 

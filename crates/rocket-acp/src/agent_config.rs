@@ -139,7 +139,8 @@ impl AgentTuning {
             }
         }
         if let Some(model) = &self.model {
-            let plain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/');
+            let plain =
+                |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/');
             if model.is_empty() || model.len() > MAX_MODEL_NAME_LEN || !model.chars().all(plain) {
                 return Err(format!(
                     "tuning model must be 1 to {MAX_MODEL_NAME_LEN} characters: letters, digits and . _ - : /"
@@ -370,17 +371,35 @@ mod tests {
             model: Some(m.to_string()),
             ..AgentTuning::default()
         };
-        for good in ["gemini-2.5-pro", "gemini-3-pro-preview", "models/gemini-2.5-flash", "a_b:c.d"] {
+        for good in [
+            "gemini-2.5-pro",
+            "gemini-3-pro-preview",
+            "models/gemini-2.5-flash",
+            "a_b:c.d",
+        ] {
             assert!(with_model(good).validate().is_ok(), "{good}");
         }
-        for bad in ["", "   ", "has space", "quote\"d", "new\nline", "back\\slash", "{x}"] {
+        for bad in [
+            "",
+            "   ",
+            "has space",
+            "quote\"d",
+            "new\nline",
+            "back\\slash",
+            "{x}",
+        ] {
             let err = with_model(bad).validate().expect_err(bad);
             assert!(err.contains("tuning model"), "{err}");
-            assert!(!err.contains(bad.trim()) || bad.trim().is_empty(), "never echoes the value: {err}");
+            assert!(
+                !err.contains(bad.trim()) || bad.trim().is_empty(),
+                "never echoes the value: {err}"
+            );
         }
         let too_long = "a".repeat(MAX_MODEL_NAME_LEN + 1);
         assert!(with_model(&too_long).validate().is_err());
-        assert!(with_model(&"a".repeat(MAX_MODEL_NAME_LEN)).validate().is_ok());
+        assert!(with_model(&"a".repeat(MAX_MODEL_NAME_LEN))
+            .validate()
+            .is_ok());
     }
 
     #[test]

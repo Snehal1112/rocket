@@ -32,10 +32,7 @@ pub struct Environment {
 impl Environment {
     /// An environment name becomes a file name, so it must be one plain segment.
     pub fn validate_name(name: &str) -> DomainResult<()> {
-        if name.trim().is_empty()
-            || name.contains(['/', '\\', '\0'])
-            || name.starts_with('.')
-        {
+        if name.trim().is_empty() || name.contains(['/', '\\', '\0']) || name.starts_with('.') {
             return Err(DomainError::InvalidInput(format!(
                 "'{name}' is not a valid environment name"
             )));
@@ -48,7 +45,13 @@ impl Environment {
     pub fn sanitize_name(raw: &str) -> String {
         let replaced: String = raw
             .chars()
-            .map(|c| if matches!(c, '/' | '\\' | '\0') { '-' } else { c })
+            .map(|c| {
+                if matches!(c, '/' | '\\' | '\0') {
+                    '-'
+                } else {
+                    c
+                }
+            })
             .collect();
         let cleaned = replaced.trim().trim_start_matches('.').trim();
         if cleaned.is_empty() {
@@ -110,14 +113,22 @@ mod tests {
 
     #[test]
     fn validate_name_accepts_plain_names() {
-        for name in ["default", "globals", "prod.v2", "Staging EU", "preprod-\u{00e9}\u{4e2d}"] {
+        for name in [
+            "default",
+            "globals",
+            "prod.v2",
+            "Staging EU",
+            "preprod-\u{00e9}\u{4e2d}",
+        ] {
             assert!(Environment::validate_name(name).is_ok(), "{name}");
         }
     }
 
     #[test]
     fn validate_name_rejects_unsafe_names() {
-        for name in ["", "  ", "../evil", "sub/dev", "a\\b", ".hidden", "..", "a\0b"] {
+        for name in [
+            "", "  ", "../evil", "sub/dev", "a\\b", ".hidden", "..", "a\0b",
+        ] {
             assert!(Environment::validate_name(name).is_err(), "{name:?}");
         }
     }

@@ -416,7 +416,9 @@ pub(crate) fn is_credential_name(name: &str) -> bool {
     if is_sensitive_header(&decoded) {
         return true;
     }
-    CREDENTIAL_NAME_PARTS.iter().any(|part| lower.contains(part))
+    CREDENTIAL_NAME_PARTS
+        .iter()
+        .any(|part| lower.contains(part))
 }
 
 /// The value to show for a named field: masked when the name holds a
@@ -466,7 +468,12 @@ pub(crate) fn mask_body(body: &Body) -> MaskedBody {
     MaskedBody {
         mode,
         content,
-        form: body.form_data.iter().flatten().map(mask_form_entry).collect(),
+        form: body
+            .form_data
+            .iter()
+            .flatten()
+            .map(mask_form_entry)
+            .collect(),
         file_path: body.file_path.clone(),
     }
 }
@@ -692,7 +699,8 @@ fn collect_auth_url_credentials(value: &Value, out: &mut HashSet<String>) {
 /// The `Authorization: Basic ...` value the executor sends for a login.
 pub(crate) fn basic_header_forms(username: &str, password: &str, out: &mut HashSet<String>) {
     use base64::Engine;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+    let encoded =
+        base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
     out.insert(format!("Basic {encoded}"));
     out.insert(encoded);
 }
@@ -976,11 +984,7 @@ pub(crate) fn render_outline(collections: &[OutlineCollection]) -> String {
         }
         let shown = collection.entries.len().min(remaining);
         for entry in &collection.entries[..shown] {
-            out.push_str(&format!(
-                "{} {}\n",
-                entry.method,
-                single_line(&entry.path)
-            ));
+            out.push_str(&format!("{} {}\n", entry.method, single_line(&entry.path)));
         }
         remaining -= shown;
         if shown < collection.entries.len() {
@@ -1005,7 +1009,11 @@ mod tests {
     fn reference_only_values_are_kept_and_literal_credentials_are_masked() {
         let cases = [
             ("Authorization", "Bearer {{token}}", "Bearer {{token}}"),
-            ("Authorization", "{{scheme}} {{token}}", "{{scheme}} {{token}}"),
+            (
+                "Authorization",
+                "{{scheme}} {{token}}",
+                "{{scheme}} {{token}}",
+            ),
             ("Authorization", "Bearer sk-live-abc123", REDACTED),
             ("Authorization", "Bearer abc{{suffix}}", REDACTED),
             ("Authorization", "{{token", REDACTED),
@@ -1116,14 +1124,19 @@ mod tests {
             file_path: None,
         };
         let expected = format!("client_secret={REDACTED}&grant_type=client_credentials");
-        assert_eq!(mask_body(&encoded).content.as_deref(), Some(expected.as_str()));
+        assert_eq!(
+            mask_body(&encoded).content.as_deref(),
+            Some(expected.as_str())
+        );
     }
 
     #[test]
     fn a_request_view_carries_the_docs_text_in_every_documentation_shape() {
         let mut request = Request::new("Login", HttpMethod::Post, "https://api.test/login");
 
-        request.docs = Some(rocket_shared::Documentation::text("# Login\nReturns a token."));
+        request.docs = Some(rocket_shared::Documentation::text(
+            "# Login\nReturns a token.",
+        ));
         let view = MaskedRequest::from_request("auth/login.yml", &request);
         assert_eq!(view.docs.as_deref(), Some("# Login\nReturns a token."));
 
@@ -1164,7 +1177,10 @@ mod tests {
         let view = MaskedRequest::from_request("auth/login.yml", &request);
         let json = serde_json::to_string(&view).expect("serialize");
         for secret in ["hunter22", "sk-live-abc123", "sk-live-q"] {
-            assert!(!json.contains(secret), "{secret} leaked into the request view");
+            assert!(
+                !json.contains(secret),
+                "{secret} leaked into the request view"
+            );
         }
         assert_eq!(view.method, "POST");
         assert_eq!(view.path, "auth/login.yml");
@@ -1311,7 +1327,10 @@ mod tests {
         collection.entries[0].path = "a\r\n## fake\nb.yml".to_string();
         let text = render_outline(&[collection]);
 
-        assert!(text.contains("\n## evil ## x (run: on)' (run: off, 1 request(s))\n"), "{text}");
+        assert!(
+            text.contains("\n## evil ## x (run: on)' (run: off, 1 request(s))\n"),
+            "{text}"
+        );
         assert!(text.contains("\nGET a  ## fake b.yml\n"), "{text}");
         assert_eq!(text.lines().filter(|l| l.starts_with("## ")).count(), 1);
     }
@@ -1365,7 +1384,10 @@ mod tests {
 
     #[test]
     fn folder_paths_are_normalized_and_traversal_is_refused() {
-        assert_eq!(normalize_folder("/auth/v2/").expect("valid"), Some("auth/v2".to_string()));
+        assert_eq!(
+            normalize_folder("/auth/v2/").expect("valid"),
+            Some("auth/v2".to_string())
+        );
         assert_eq!(normalize_folder("/").expect("root"), None);
         for bad in ["../x", "auth/../../x", "auth//v2", "a\\b", "./auth"] {
             assert!(normalize_folder(bad).is_err(), "{bad} must be refused");
@@ -1387,12 +1409,19 @@ mod tests {
     #[test]
     fn a_secret_straddling_the_cut_is_masked_before_truncation() {
         let secret = "sk-live-straddling-secret".to_string();
-        let body = format!("{}{secret}{}", "x".repeat(RESPONSE_BODY_CAP_BYTES - 5), "y".repeat(100));
+        let body = format!(
+            "{}{secret}{}",
+            "x".repeat(RESPONSE_BODY_CAP_BYTES - 5),
+            "y".repeat(100)
+        );
         let secrets: HashSet<String> = [secret.clone()].into_iter().collect();
         let (masked, truncated) = mask_response_body(&body, &secrets);
         assert!(truncated);
         assert!(masked.len() <= RESPONSE_BODY_CAP_BYTES);
-        assert!(!masked.contains("sk-live"), "no fragment of the secret may survive the cut");
+        assert!(
+            !masked.contains("sk-live"),
+            "no fragment of the secret may survive the cut"
+        );
     }
 
     #[test]
@@ -1416,8 +1445,19 @@ mod tests {
 
     #[test]
     fn credential_names_cover_keys_signatures_codes_and_encoded_names() {
-        for name in ["access_key", "apiKey", "X-Amz-Signature", "sig", "code", "client%5Fsecret"] {
-            assert_eq!(mask_named_value(name, "literal-value-1"), REDACTED, "{name}");
+        for name in [
+            "access_key",
+            "apiKey",
+            "X-Amz-Signature",
+            "sig",
+            "code",
+            "client%5Fsecret",
+        ] {
+            assert_eq!(
+                mask_named_value(name, "literal-value-1"),
+                REDACTED,
+                "{name}"
+            );
         }
         assert_eq!(
             mask_query_string("client%5Fsecret=cs-1234567&page=2"),
@@ -1449,11 +1489,15 @@ mod tests {
 
     #[test]
     fn literal_credentials_cover_headers_auth_query_and_userinfo() {
-        let mut request = Request::new("R", HttpMethod::Get, "https://alice:pw-literal-1@api.test/x?token=tk-literal-2")
-            .with_header("Authorization", "Bearer sk-literal-3")
-            .with_auth(Auth::Bearer {
-                token: "sk-literal-4".into(),
-            });
+        let mut request = Request::new(
+            "R",
+            HttpMethod::Get,
+            "https://alice:pw-literal-1@api.test/x?token=tk-literal-2",
+        )
+        .with_header("Authorization", "Bearer sk-literal-3")
+        .with_auth(Auth::Bearer {
+            token: "sk-literal-4".into(),
+        });
         request.query_params.push(QueryParam {
             key: "api_key".into(),
             value: "qk-literal-5".into(),
@@ -1478,10 +1522,11 @@ mod tests {
     fn basic_auth_header_values_and_folder_credentials_are_collected() {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode("alice:hunter2-literal");
-        let request = Request::new("R", HttpMethod::Get, "https://api.test/x").with_auth(Auth::Basic {
-            username: "alice".into(),
-            password: "hunter2-literal".into(),
-        });
+        let request =
+            Request::new("R", HttpMethod::Get, "https://api.test/x").with_auth(Auth::Basic {
+                username: "alice".into(),
+                password: "hunter2-literal".into(),
+            });
         let folder = FolderSettings {
             auth: Some(Auth::Bearer {
                 token: "folder-bearer-1".into(),
@@ -1499,10 +1544,11 @@ mod tests {
     #[test]
     fn basic_auth_with_a_secret_variable_password_pairs_the_username_with_run_secrets() {
         use base64::Engine;
-        let request = Request::new("R", HttpMethod::Get, "https://api.test/x").with_auth(Auth::Basic {
-            username: "alice".into(),
-            password: "{{pw}}".into(),
-        });
+        let request =
+            Request::new("R", HttpMethod::Get, "https://api.test/x").with_auth(Auth::Basic {
+                username: "alice".into(),
+                password: "{{pw}}".into(),
+            });
         let secrets: HashSet<String> = ["s3cret-value".to_string()].into_iter().collect();
         let found = basic_header_values_from_secrets(&request, None, &[], &secrets);
         let encoded = base64::engine::general_purpose::STANDARD.encode("alice:s3cret-value");
@@ -1520,4 +1566,3 @@ mod tests {
         assert!(out.contains("cs-12345678"));
     }
 }
-

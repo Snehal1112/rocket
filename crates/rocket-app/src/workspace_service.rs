@@ -810,8 +810,7 @@ mod tests {
     fn service_with_events(tmp: &TempDir) -> (WorkspaceService, EventNames) {
         let (repo, config_repo, active_path) = service_dependencies(tmp);
         let events = EventNames::default();
-        let svc =
-            WorkspaceService::new(repo, config_repo, Box::new(events.clone()), active_path);
+        let svc = WorkspaceService::new(repo, config_repo, Box::new(events.clone()), active_path);
         (svc, events)
     }
 

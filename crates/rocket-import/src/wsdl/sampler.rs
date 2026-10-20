@@ -16,7 +16,9 @@ const MAX_TYPE_CHAIN: usize = 64;
 
 /// Escape text content.
 pub(crate) fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Escape an attribute value.
@@ -262,8 +264,18 @@ mod tests {
             xml,
             "<ns1:Add><ns1:operands><ns2:a>0</ns2:a><ns2:b>0</ns2:b><ns2:mode>fast</ns2:mode></ns1:operands></ns1:Add>"
         );
-        assert_eq!(s.namespaces().get("http://example.com/calc").map(String::as_str), Some("ns1"));
-        assert_eq!(s.namespaces().get("http://example.com/types").map(String::as_str), Some("ns2"));
+        assert_eq!(
+            s.namespaces()
+                .get("http://example.com/calc")
+                .map(String::as_str),
+            Some("ns1")
+        );
+        assert_eq!(
+            s.namespaces()
+                .get("http://example.com/types")
+                .map(String::as_str),
+            Some("ns2")
+        );
     }
 
     #[test]
@@ -299,7 +311,10 @@ mod tests {
         let mut s = Sampler::new(&model.schemas);
         let xml = s.element(&QName::new("urn:t", "Root"));
         assert!(xml.contains("<!-- depth limit -->"), "got: {xml}");
-        assert!(!xml.contains("L11"), "must stop before the deepest level: {xml}");
+        assert!(
+            !xml.contains("L11"),
+            "must stop before the deepest level: {xml}"
+        );
     }
 
     #[test]
@@ -493,7 +508,11 @@ mod tests {
             }
         }
         assert!(body.contains("<!-- size limit -->"), "marker missing");
-        assert!(body.len() < 1_000_000, "total output was {} bytes", body.len());
+        assert!(
+            body.len() < 1_000_000,
+            "total output was {} bytes",
+            body.len()
+        );
         assert_wellformed(&s, &body);
     }
 

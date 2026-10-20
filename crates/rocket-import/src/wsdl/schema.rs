@@ -73,7 +73,10 @@ fn is_xsd(n: &Node, name: &str) -> bool {
 impl SchemaSet {
     /// Read one `xsd:schema` element. Attributes, wildcards and groups are ignored.
     pub(crate) fn add_schema(&mut self, schema: Node, warnings: &mut Vec<String>) {
-        let tns = schema.attribute("targetNamespace").unwrap_or("").to_string();
+        let tns = schema
+            .attribute("targetNamespace")
+            .unwrap_or("")
+            .to_string();
         let qualified = schema.attribute("elementFormDefault") == Some("qualified");
         for child in schema.children().filter(|n| n.is_element()) {
             if is_xsd(&child, "element") {

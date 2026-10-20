@@ -195,8 +195,8 @@ mod tests {
 
     #[test]
     fn jwt_empty_header_segment_message() {
-        let json_err = serde_json::from_slice::<serde_json::Value>(b"")
-            .expect_err("empty input is not JSON");
+        let json_err =
+            serde_json::from_slice::<serde_json::Value>(b"").expect_err("empty input is not JSON");
         assert_eq!(
             invalid("..sig"),
             format!("Invalid JWT header JSON: {json_err}")

@@ -3,8 +3,8 @@ mod body;
 mod environment;
 mod folder;
 mod folder_settings;
-mod grpc;
 mod graphql;
+mod grpc;
 mod header;
 mod param;
 mod request;
@@ -26,8 +26,6 @@ pub use body::*;
 #[allow(unused_imports)]
 pub use environment::*;
 #[allow(unused_imports)]
-pub use grpc::{derived_grpc_uid, grpc_to_oc, oc_grpc_to_domain};
-#[allow(unused_imports)]
 pub use folder::{
     collection_to_oc_collection, folder_to_oc_folder, oc_collection_to_collection,
     oc_folder_to_folder, oc_item_to_collection_item,
@@ -38,6 +36,8 @@ pub use folder_settings::{
 };
 #[allow(unused_imports)]
 pub use graphql::{graphql_to_oc, oc_graphql_to_domain};
+#[allow(unused_imports)]
+pub use grpc::{derived_grpc_uid, grpc_to_oc, oc_grpc_to_domain};
 #[allow(unused_imports)]
 pub use header::*;
 #[allow(unused_imports)]

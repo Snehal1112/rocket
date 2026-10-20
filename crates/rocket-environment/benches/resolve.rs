@@ -6,7 +6,11 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rocket_environment::resolve;
 
-const SIZES: [(&str, usize); 3] = [("1KB", 1_024), ("100KB", 100 * 1_024), ("1MB", 1_024 * 1_024)];
+const SIZES: [(&str, usize); 3] = [
+    ("1KB", 1_024),
+    ("100KB", 100 * 1_024),
+    ("1MB", 1_024 * 1_024),
+];
 const PLACEHOLDER_COUNTS: [usize; 3] = [0, 10, 1000];
 
 /// Builds a body of about `size` bytes with `count` placeholders spread evenly.
@@ -38,18 +42,19 @@ fn bench_resolve(c: &mut Criterion) {
 
             // Guard the input: a bench that times the unresolved path would mislead.
             let check = resolve(&body, &vars);
-            assert!(check.unresolved.is_empty(), "every placeholder must resolve");
+            assert!(
+                check.unresolved.is_empty(),
+                "every placeholder must resolve"
+            );
             assert!(!check.output.contains("{{"), "no placeholder may remain");
             if count == 0 {
                 assert_eq!(check.output, body, "no placeholders means no change");
             }
 
             group.throughput(Throughput::Bytes(body.len() as u64));
-            group.bench_with_input(
-                BenchmarkId::new(label, count),
-                &body,
-                |b, body| b.iter(|| black_box(resolve(black_box(body), &vars))),
-            );
+            group.bench_with_input(BenchmarkId::new(label, count), &body, |b, body| {
+                b.iter(|| black_box(resolve(black_box(body), &vars)))
+            });
         }
     }
     group.finish();

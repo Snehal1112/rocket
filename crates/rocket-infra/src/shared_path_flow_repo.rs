@@ -104,9 +104,13 @@ mod tests {
         // A case-only rename fails on the trait default, so this proves the override is used.
         repo.rename("acme", "Login Flow", "login flow")
             .expect("case-only rename");
-        repo.rename("acme", "login flow", "Sign In").expect("rename");
+        repo.rename("acme", "login flow", "Sign In")
+            .expect("rename");
 
-        assert_eq!(repo.list("acme").expect("list"), vec!["Sign In".to_string()]);
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["Sign In".to_string()]
+        );
         let files: Vec<_> = std::fs::read_dir(dir.path().join("collections/acme/flows"))
             .expect("read flows dir")
             .collect();

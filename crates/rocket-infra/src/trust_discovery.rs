@@ -85,10 +85,8 @@ mod tests {
             },
         )
         .expect("save");
-        let found = discover_legacy_collections(
-            &[ws.path().to_path_buf()],
-            &FsWorkspaceConfigRepo::new(),
-        );
+        let found =
+            discover_legacy_collections(&[ws.path().to_path_buf()], &FsWorkspaceConfigRepo::new());
         assert_eq!(found.len(), 2);
         let dev = found.iter().find(|c| c.name == "dev").expect("dev");
         assert!(dev.requested.developer_mode);

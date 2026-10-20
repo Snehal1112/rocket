@@ -124,10 +124,7 @@ pub async fn run_stdio_bridge() -> io::Result<()> {
         .map_err(|e| io::Error::new(io::ErrorKind::ConnectionRefused, e.to_string()))?;
 
     let handler = ForwardingHandler { upstream };
-    let server = handler
-        .serve(stdio())
-        .await
-        .map_err(io::Error::other)?;
+    let server = handler.serve(stdio()).await.map_err(io::Error::other)?;
     server.waiting().await.map_err(io::Error::other)?;
     Ok(())
 }

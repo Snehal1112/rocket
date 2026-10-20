@@ -106,7 +106,9 @@ impl BudgetClock {
     fn time(&self) -> MutexGuard<'_, BusyTime> {
         // The guarded data is two plain values that a panic cannot leave
         // half-written, so a poisoned lock is still safe to use.
-        self.time.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.time
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Marks the start of a stretch of busy time.
@@ -252,8 +254,14 @@ mod tests {
     #[test]
     fn stop_messages_say_timed_out() {
         assert!(Verdict::CpuExceeded.message(&LIMITS).contains("timed out"));
-        assert!(Verdict::CpuExceeded.message(&LIMITS).contains("of script time"));
-        assert!(Verdict::CeilingExceeded.message(&LIMITS).contains("timed out"));
-        assert!(Verdict::CeilingExceeded.message(&LIMITS).contains("at most"));
+        assert!(Verdict::CpuExceeded
+            .message(&LIMITS)
+            .contains("of script time"));
+        assert!(Verdict::CeilingExceeded
+            .message(&LIMITS)
+            .contains("timed out"));
+        assert!(Verdict::CeilingExceeded
+            .message(&LIMITS)
+            .contains("at most"));
     }
 }

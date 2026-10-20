@@ -114,16 +114,16 @@ fn a_case_variant_counts_as_taken() {
         .duplicate_request("c", "auth/Login.yml")
         .expect("duplicate");
     assert!(dir.path().join("c/auth/Login copy 2.yml").is_file());
-    assert!(!dir.path().join("c/auth/Login copy.yml").is_file()
-        || dir.path().join("c/auth/login copy.yml").is_file());
+    assert!(
+        !dir.path().join("c/auth/Login copy.yml").is_file()
+            || dir.path().join("c/auth/login copy.yml").is_file()
+    );
 }
 
 #[test]
 fn the_copy_has_its_own_uid_and_is_listed_in_the_tree() {
     let (_dir, service, events) = world();
-    let source = service
-        .get_request("c", "auth/Login.yml")
-        .expect("source");
+    let source = service.get_request("c", "auth/Login.yml").expect("source");
     let copy = service
         .duplicate_request("c", "auth/Login.yml")
         .expect("duplicate");
@@ -153,7 +153,9 @@ fn duplicating_a_request_in_the_root_has_no_leading_slash() {
     let repo = FsCollectionRepo::new_standalone(dir.path().to_path_buf());
     repo.save_request("c", "Solo.yml", &request("Solo", "http://solo"))
         .expect("seed solo");
-    service.duplicate_request("c", "Solo.yml").expect("duplicate");
+    service
+        .duplicate_request("c", "Solo.yml")
+        .expect("duplicate");
     assert!(dir.path().join("c/Solo copy.yml").is_file());
     assert!(saved_paths(&events).contains(&"Solo copy.yml".to_string()));
 }

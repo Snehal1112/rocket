@@ -92,7 +92,11 @@ fn assert_both_loads(repo: &FsCollectionRepo, expected: &str) {
     let full = repo.get("col").expect("full load");
     assert_eq!(outline(&full.root), expected, "full load");
     let summaries = repo.get_summaries("col").expect("summaries load");
-    assert_eq!(outline(&summaries.root), as_summary(expected), "summaries load");
+    assert_eq!(
+        outline(&summaries.root),
+        as_summary(expected),
+        "summaries load"
+    );
 }
 
 const SMALL_ONLY: &str = "dir:col|col|uid-set\n  req:req-a.yml|Alpha";
@@ -104,11 +108,27 @@ fn rich() -> (TempDir, FsCollectionRepo) {
     save(&repo, "req-a.yml", "Alpha");
     save(&repo, "req-c.yml", "Gamma");
     write(&dir, "col/lib.js", "module.exports = 1;");
-    write(&dir, "col/a-folder/folder.yml", &folder_yml("Alpha Display", "uid-a"));
+    write(
+        &dir,
+        "col/a-folder/folder.yml",
+        &folder_yml("Alpha Display", "uid-a"),
+    );
     save(&repo, "a-folder/x.yml", "X");
-    write(&dir, "col/b-folder/folder.yml", &folder_yml("b-folder", "uid-b"));
-    write(&dir, "col/b-folder/nested/folder.yml", &folder_yml("nested", "uid-n"));
-    write(&dir, "col/b-folder/nested/flows/folder.yml", &folder_yml("flows", "uid-f"));
+    write(
+        &dir,
+        "col/b-folder/folder.yml",
+        &folder_yml("b-folder", "uid-b"),
+    );
+    write(
+        &dir,
+        "col/b-folder/nested/folder.yml",
+        &folder_yml("nested", "uid-n"),
+    );
+    write(
+        &dir,
+        "col/b-folder/nested/flows/folder.yml",
+        &folder_yml("flows", "uid-f"),
+    );
     save(&repo, "b-folder/nested/flows/inner.yml", "Inner");
     // Entries the tree must hide.
     write(&dir, "col/.hidden/h.yml", "x");
@@ -152,8 +172,11 @@ fn walk_skips_a_symlinked_directory_named_like_a_request_file() {
     let (dir, repo) = small();
     let valid = fs::read_to_string(dir.path().join("col/req-a.yml")).expect("read request");
     write(&dir, "outside/secret.yml", &valid);
-    std::os::unix::fs::symlink(dir.path().join("outside"), dir.path().join("col/dirlink.yml"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        dir.path().join("outside"),
+        dir.path().join("col/dirlink.yml"),
+    )
+    .expect("symlink");
     assert_both_loads(&repo, SMALL_ONLY);
     let strict = repo.get_strict("col").expect("strict load");
     assert_eq!(outline(&strict.root), SMALL_ONLY, "strict load");
@@ -175,8 +198,11 @@ fn walk_skips_a_symlinked_directory_named_like_a_script() {
 fn walk_skips_a_symlinked_js_file() {
     let (dir, repo) = small();
     write(&dir, "outside/real.js", "module.exports = 1;");
-    std::os::unix::fs::symlink(dir.path().join("outside/real.js"), dir.path().join("col/link.js"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        dir.path().join("outside/real.js"),
+        dir.path().join("col/link.js"),
+    )
+    .expect("symlink");
     assert_both_loads(&repo, SMALL_ONLY);
 }
 
@@ -201,10 +227,16 @@ fn walk_still_lists_a_symlinked_request_file() {
 #[test]
 fn walk_keeps_its_behavior_for_a_dangling_symlinked_request_file() {
     let (dir, repo) = small();
-    std::os::unix::fs::symlink(dir.path().join("nowhere.yml"), dir.path().join("col/dead.yml"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        dir.path().join("nowhere.yml"),
+        dir.path().join("col/dead.yml"),
+    )
+    .expect("symlink");
     // The full load reads the file with `?`, so a dangling link is an error today.
-    assert!(repo.get("col").is_err(), "full load errors on a dangling link");
+    assert!(
+        repo.get("col").is_err(),
+        "full load errors on a dangling link"
+    );
     // The summaries load skips an unreadable file.
     let summaries = repo.get_summaries("col").expect("summaries load");
     assert_eq!(outline(&summaries.root), as_summary(SMALL_ONLY));
@@ -223,7 +255,10 @@ fn a_file_removed_after_the_listing_fails_a_loader_that_reads_with_a_question_ma
         let _text = fs::read_to_string(path)?;
         Ok(None)
     });
-    assert!(result.is_err(), "the full-load style loader errors on the removed file");
+    assert!(
+        result.is_err(),
+        "the full-load style loader errors on the removed file"
+    );
 }
 
 #[test]
@@ -241,7 +276,10 @@ fn a_file_removed_after_the_listing_is_skipped_by_a_lenient_loader() {
         }
         Ok(None)
     });
-    assert!(result.is_ok(), "the summaries style loader skips the removed file");
+    assert!(
+        result.is_ok(),
+        "the summaries style loader skips the removed file"
+    );
     assert_eq!(seen, vec!["req-a.yml".to_string()]);
 }
 
@@ -259,21 +297,33 @@ const RICH_ORDERED: &str = "dir:col|col|uid-set
 #[test]
 fn walk_applies_order_yml_and_puts_unlisted_names_last() {
     let (dir, repo) = rich();
-    write(&dir, "col/_order.yml", "- req-c.yml\n- lib.js\n- b-folder\n");
+    write(
+        &dir,
+        "col/_order.yml",
+        "- req-c.yml\n- lib.js\n- b-folder\n",
+    );
     assert_both_loads(&repo, RICH_ORDERED);
 }
 
 #[test]
 fn walk_applies_order_json_when_there_is_no_order_yml() {
     let (dir, repo) = rich();
-    write(&dir, "col/_order.json", "[\"req-c.yml\", \"lib.js\", \"b-folder\"]");
+    write(
+        &dir,
+        "col/_order.json",
+        "[\"req-c.yml\", \"lib.js\", \"b-folder\"]",
+    );
     assert_both_loads(&repo, RICH_ORDERED);
 }
 
 #[test]
 fn walk_prefers_order_yml_over_order_json() {
     let (dir, repo) = rich();
-    write(&dir, "col/_order.yml", "- req-c.yml\n- lib.js\n- b-folder\n");
+    write(
+        &dir,
+        "col/_order.yml",
+        "- req-c.yml\n- lib.js\n- b-folder\n",
+    );
     write(&dir, "col/_order.json", "[\"req-a.yml\"]");
     assert_both_loads(&repo, RICH_ORDERED);
 }
@@ -290,7 +340,11 @@ fn walk_falls_back_to_name_order_for_an_unparseable_order_yml_without_reading_th
 fn walk_gives_name_order_when_order_yml_is_a_directory_and_does_not_read_the_json() {
     let (dir, repo) = rich();
     // The directory is listed as a folder like any other. A folder.yml gives it a fixed uid.
-    write(&dir, "col/_order.yml/folder.yml", &folder_yml("_order.yml", "uid-o"));
+    write(
+        &dir,
+        "col/_order.yml/folder.yml",
+        &folder_yml("_order.yml", "uid-o"),
+    );
     write(&dir, "col/_order.json", "[\"req-c.yml\", \"lib.js\"]");
     let expected = RICH_BY_NAME.replacen(
         "\n  dir:a-folder",
@@ -356,9 +410,13 @@ fn first_subfolder(folder: &Folder) -> &Folder {
 fn walk_takes_the_root_uid_from_opencollection_yml() {
     let (dir, repo) = small();
     let first = repo.get("col").expect("first load").root.uid;
-    let text = fs::read_to_string(dir.path().join("col/opencollection.yml")).expect("read opencollection.yml");
+    let text = fs::read_to_string(dir.path().join("col/opencollection.yml"))
+        .expect("read opencollection.yml");
     assert!(!first.is_empty());
-    assert!(text.contains(&first), "the root uid is the one stored in opencollection.yml");
+    assert!(
+        text.contains(&first),
+        "the root uid is the one stored in opencollection.yml"
+    );
     let second = repo.get_summaries("col").expect("second load").root.uid;
     assert_eq!(first, second);
 }
@@ -381,9 +439,16 @@ fn walk_falls_back_to_the_legacy_uid_file_and_migrates_it_into_folder_yml() {
     let full = repo.get("col").expect("full load");
     assert_eq!(first_subfolder(&full.root).uid, "legacy-uid");
     // The load wrote the uid into folder.yml and deleted the legacy file, as it does today.
-    let migrated = fs::read_to_string(dir.path().join("col/legacy/folder.yml")).expect("read folder.yml");
-    assert!(migrated.contains("legacy-uid"), "folder.yml now holds the uid: {migrated}");
-    assert!(!dir.path().join("col/legacy/.uid").exists(), "the .uid file is deleted");
+    let migrated =
+        fs::read_to_string(dir.path().join("col/legacy/folder.yml")).expect("read folder.yml");
+    assert!(
+        migrated.contains("legacy-uid"),
+        "folder.yml now holds the uid: {migrated}"
+    );
+    assert!(
+        !dir.path().join("col/legacy/.uid").exists(),
+        "the .uid file is deleted"
+    );
 }
 
 #[test]
@@ -395,8 +460,14 @@ fn walk_uses_the_legacy_uid_file_for_a_folder_without_folder_yml_and_leaves_it_a
     let folder = first_subfolder(&full.root);
     assert_eq!(folder.uid, "plain-uid");
     assert_eq!(folder.name, "plain");
-    assert!(dir.path().join("col/plain/.uid").exists(), "no YAML was written, so .uid stays");
-    assert!(!dir.path().join("col/plain/folder.yml").exists(), "no folder.yml is created");
+    assert!(
+        dir.path().join("col/plain/.uid").exists(),
+        "no YAML was written, so .uid stays"
+    );
+    assert!(
+        !dir.path().join("col/plain/folder.yml").exists(),
+        "no folder.yml is created"
+    );
 }
 
 #[test]
@@ -407,7 +478,8 @@ fn walk_keeps_the_directory_name_for_an_unparseable_folder_yml_and_does_not_touc
     let folder = first_subfolder(&full.root);
     assert_eq!(folder.name, "broken");
     assert!(!folder.uid.is_empty(), "a uid is generated");
-    let text = fs::read_to_string(dir.path().join("col/broken/folder.yml")).expect("read folder.yml");
+    let text =
+        fs::read_to_string(dir.path().join("col/broken/folder.yml")).expect("read folder.yml");
     assert_eq!(text, "info: [unclosed");
 }
 
@@ -415,7 +487,8 @@ fn walk_keeps_the_directory_name_for_an_unparseable_folder_yml_and_does_not_touc
 fn walk_of_a_missing_folder_is_the_empty_folder() {
     let (dir, _repo) = setup();
     let gone = dir.path().join("no-such-folder");
-    let folder = super::tree::build_folder_tree(&gone, false).expect("a missing folder is not an error");
+    let folder =
+        super::tree::build_folder_tree(&gone, false).expect("a missing folder is not an error");
     assert!(folder.items.is_empty());
     assert_eq!(folder.name, "no-such-folder");
     assert_eq!(folder.dir_name.as_deref(), Some("no-such-folder"));

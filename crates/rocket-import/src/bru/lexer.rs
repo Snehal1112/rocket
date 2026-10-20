@@ -132,8 +132,13 @@ pub fn tokenise(input: &str) -> ImportResult<Vec<Token>> {
                         if is_raw {
                             raw_lines.push(inner);
                             // Track nesting depth for inner braces.
-                            raw_depth =
-                                nested_depth(raw_depth, inner_trimmed, open_ch, close_ch, skip_strings);
+                            raw_depth = nested_depth(
+                                raw_depth,
+                                inner_trimmed,
+                                open_ch,
+                                close_ch,
+                                skip_strings,
+                            );
                         } else if !inner_trimmed.is_empty() {
                             // Key-value: `key: value` (value may contain colons)
                             if let Some((k, v)) = inner_trimmed.split_once(':') {

@@ -952,7 +952,8 @@ edges:
         let original = sample("Login Flow");
         repo.save("acme", &original).expect("save");
 
-        repo.rename("acme", "Login Flow", "Sign In").expect("rename");
+        repo.rename("acme", "Login Flow", "Sign In")
+            .expect("rename");
 
         assert_eq!(flow_files(&dir), vec!["sign-in.yml".to_string()]);
         assert!(matches!(
@@ -962,7 +963,10 @@ edges:
         let loaded = repo.get("acme", "Sign In").expect("get renamed");
         assert_eq!(loaded.name, "Sign In");
         assert_eq!(loaded.nodes, original.nodes);
-        assert_eq!(repo.list("acme").expect("list"), vec!["Sign In".to_string()]);
+        assert_eq!(
+            repo.list("acme").expect("list"),
+            vec!["Sign In".to_string()]
+        );
     }
 
     #[test]

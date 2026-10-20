@@ -126,7 +126,8 @@ pub(super) fn path_exists(
         if index + 1 == segments.len() {
             return Ok(true);
         }
-        let meta = fs::symlink_metadata(entry.path()).map_err(|e| DomainError::Io(e.to_string()))?;
+        let meta =
+            fs::symlink_metadata(entry.path()).map_err(|e| DomainError::Io(e.to_string()))?;
         if meta.file_type().is_symlink() {
             return Err(DomainError::InvalidInput(format!(
                 "'{segment}' is a symlink; paths through symlinks are refused"

@@ -42,7 +42,10 @@ mod tests {
         let ulid = Ulid::new().to_string();
         assert_eq!(choose_run_id(Some(ulid.clone())).expect("ulid"), ulid);
         let longest = "x".repeat(MAX_RUN_ID_LEN);
-        assert_eq!(choose_run_id(Some(longest.clone())).expect("64 chars"), longest);
+        assert_eq!(
+            choose_run_id(Some(longest.clone())).expect("64 chars"),
+            longest
+        );
     }
 
     #[test]
@@ -55,7 +58,14 @@ mod tests {
     #[test]
     fn rejects_empty_long_and_odd_ids_without_quoting_them() {
         let long = "x".repeat(MAX_RUN_ID_LEN + 1);
-        for bad in ["", "has space", "line\nbreak", "../etc", "ü-umlaut", long.as_str()] {
+        for bad in [
+            "",
+            "has space",
+            "line\nbreak",
+            "../etc",
+            "ü-umlaut",
+            long.as_str(),
+        ] {
             match choose_run_id(Some(bad.to_string())) {
                 Err(DomainError::InvalidInput(message)) => {
                     if !bad.is_empty() {

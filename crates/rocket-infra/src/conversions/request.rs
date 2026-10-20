@@ -130,7 +130,11 @@ pub fn request_to_oc_http_request(req: &Request) -> OcHttpRequest {
         auth: persisted_oc_auth(req.auth.clone()),
     };
 
-    let scripts = scripts_to_oc(&req.pre_request_script, &req.post_response_script, &req.tests);
+    let scripts = scripts_to_oc(
+        &req.pre_request_script,
+        &req.post_response_script,
+        &req.tests,
+    );
     let actions = actions_to_oc(&req.actions);
 
     let has_runtime = !scripts.is_empty()

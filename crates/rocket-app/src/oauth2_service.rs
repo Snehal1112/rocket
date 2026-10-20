@@ -245,13 +245,14 @@ impl OAuth2Service {
         if !crate::vault_certificates::needs_fetch(certificates, &[url]) {
             return Cow::Borrowed(certificates);
         }
-        let access = self.vault_access.as_ref().map(|v| {
-            crate::vault_certificates::VaultCertificateAccess {
-                connections: v.connections.as_ref(),
-                secret_store: v.secret_store.as_ref(),
-                fetcher: v.fetcher.as_ref(),
-            }
-        });
+        let access =
+            self.vault_access
+                .as_ref()
+                .map(|v| crate::vault_certificates::VaultCertificateAccess {
+                    connections: v.connections.as_ref(),
+                    secret_store: v.secret_store.as_ref(),
+                    fetcher: v.fetcher.as_ref(),
+                });
         let mut fetched = certificates.to_vec();
         crate::vault_certificates::materialize_selected(&mut fetched, &[url], access.as_ref())
             .await;
@@ -417,7 +418,9 @@ impl OAuth2Service {
         let (form, extra_headers) = Self::build_token_request_parts(config);
         // Apply queryparam-type extra token params to the URL (body-type were added to `form`).
         let url = apply_params_to_url(&config.token_url, &config.token_params);
-        let certificates = self.certificates_for(&url, &config.client_certificates).await;
+        let certificates = self
+            .certificates_for(&url, &config.client_certificates)
+            .await;
         let client = self.token_client(&url, config.verify_ssl, &certificates)?;
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
@@ -561,7 +564,9 @@ impl OAuth2Service {
             ));
         }
 
-        let certificates = self.certificates_for(&url, &config.client_certificates).await;
+        let certificates = self
+            .certificates_for(&url, &config.client_certificates)
+            .await;
         let client = self.token_client(&url, config.verify_ssl, &certificates)?;
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
@@ -688,7 +693,10 @@ pub(crate) mod tests {
     /// A service over empty stub repos. Also used by the Flow Auth real-fetch
     /// tests (`flow_auth.rs`, `flow_execution_service.rs`).
     pub(crate) fn make_service() -> OAuth2Service {
-        OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(NullCollectionRepo::new()))
+        OAuth2Service::new(
+            Box::new(StubEnvRepo::empty()),
+            Box::new(NullCollectionRepo::new()),
+        )
     }
 
     fn make_service_with_env(vars: &[(&str, &str)]) -> OAuth2Service {
@@ -732,7 +740,10 @@ pub(crate) mod tests {
             Box::new(NullCollectionRepo::new()),
         );
         let vars = svc.build_variable_context(None, Some("child"), None, &HashMap::new());
-        assert_eq!(vars.get("auth_host").map(String::as_str), Some("https://auth.example.com"));
+        assert_eq!(
+            vars.get("auth_host").map(String::as_str),
+            Some("https://auth.example.com")
+        );
     }
 
     #[test]
@@ -1370,11 +1381,14 @@ pub(crate) mod tests {
     fn a_collection_environment_is_used_and_relative_paths_join_its_folder() {
         let provider = CapturingProvider::new();
         // The fixed repo has no certificates, so they can only come from the factory.
-        let svc = OAuth2Service::new(Box::new(StubEnvRepo::empty()), Box::new(NullCollectionRepo::new()))
-            .with_token_client_provider(provider)
-            .with_collection_env_repo_factory(Box::new(DirFactory {
-                env: env_with_certificates(vec![pkcs12("idp.example.com", "certs/client.p12")]),
-            }));
+        let svc = OAuth2Service::new(
+            Box::new(StubEnvRepo::empty()),
+            Box::new(NullCollectionRepo::new()),
+        )
+        .with_token_client_provider(provider)
+        .with_collection_env_repo_factory(Box::new(DirFactory {
+            env: env_with_certificates(vec![pkcs12("idp.example.com", "certs/client.p12")]),
+        }));
         let mut req = get_token_request();
         req.collection = Some("api".into());
         let config = svc.resolve_get_token_request(&req);
@@ -1395,7 +1409,9 @@ pub(crate) mod tests {
                 Arc::clone(&path),
                 Arc::new(rocket_environment::NullSecretStore),
             )),
-            Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(&path))),
+            Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(
+                &path,
+            ))),
         );
         // Each workspace has a collection "api" and a global environment "g".
         for (dir, value) in [(a.path(), "a"), (b.path(), "b")] {
@@ -1413,7 +1429,9 @@ pub(crate) mod tests {
                 }],
                 ..CollectionSettings::default()
             };
-            collections.save_settings("api", &settings).expect("settings");
+            collections
+                .save_settings("api", &settings)
+                .expect("settings");
             let mut env = Environment::new("g");
             env.set_variable(Variable::new("glob", value));
             rocket_infra::FsEnvironmentRepo::new(dir.join("environments"))

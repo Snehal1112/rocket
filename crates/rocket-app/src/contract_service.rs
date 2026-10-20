@@ -1660,10 +1660,15 @@ mod tests {
     fn invalid_transition_message_transition_contract_status() {
         let svc = make_service();
         let contract = saved_contract(&svc, ContractStatus::Draft);
-        let m = invalid_transition_message(
-            svc.transition_contract_status(root(), contract.id, StatusEvent::Renew),
+        let m = invalid_transition_message(svc.transition_contract_status(
+            root(),
+            contract.id,
+            StatusEvent::Renew,
+        ));
+        assert_eq!(
+            m,
+            format!("invalid transition: {:?}", ContractStatus::Draft)
         );
-        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Draft));
     }
 
     #[test]
@@ -1671,7 +1676,10 @@ mod tests {
         let svc = make_service();
         let contract = saved_contract(&svc, ContractStatus::Active);
         let m = invalid_transition_message(svc.publish_contract(root(), contract.id, vec![]));
-        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Active));
+        assert_eq!(
+            m,
+            format!("invalid transition: {:?}", ContractStatus::Active)
+        );
     }
 
     #[test]
@@ -1679,7 +1687,10 @@ mod tests {
         let svc = make_service();
         let contract = saved_contract(&svc, ContractStatus::Draft);
         let m = invalid_transition_message(svc.accept_drift(root(), contract.id, "v2".into()));
-        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Draft));
+        assert_eq!(
+            m,
+            format!("invalid transition: {:?}", ContractStatus::Draft)
+        );
     }
 
     #[test]
@@ -1687,7 +1698,10 @@ mod tests {
         let svc = make_service();
         let contract = saved_contract(&svc, ContractStatus::Draft);
         let m = invalid_transition_message(svc.renew_contract(root(), contract.id, None));
-        assert_eq!(m, format!("invalid transition: {:?}", ContractStatus::Draft));
+        assert_eq!(
+            m,
+            format!("invalid transition: {:?}", ContractStatus::Draft)
+        );
     }
 
     #[test]

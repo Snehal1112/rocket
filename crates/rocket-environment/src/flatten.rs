@@ -42,11 +42,19 @@ pub(crate) fn walk_chain(env: &Environment, lookup: &dyn Fn(&str) -> Option<Envi
     let mut names = vec![env.name.clone()];
     loop {
         let Some(parent) = layers.last().and_then(|e| e.extends.clone()) else {
-            return Chain { layers, cycle: None, missing: None };
+            return Chain {
+                layers,
+                cycle: None,
+                missing: None,
+            };
         };
         if let Some(pos) = names.iter().position(|n| *n == parent) {
             let cycle = names[pos..].to_vec();
-            return Chain { layers, cycle: Some(cycle), missing: None };
+            return Chain {
+                layers,
+                cycle: Some(cycle),
+                missing: None,
+            };
         }
         match lookup(&parent) {
             Some(found) => {
@@ -54,7 +62,11 @@ pub(crate) fn walk_chain(env: &Environment, lookup: &dyn Fn(&str) -> Option<Envi
                 layers.push(found);
             }
             None => {
-                return Chain { layers, cycle: None, missing: Some(parent) };
+                return Chain {
+                    layers,
+                    cycle: None,
+                    missing: Some(parent),
+                };
             }
         }
     }
@@ -138,10 +150,7 @@ mod tests {
         envs.into_iter().map(|e| (e.name.clone(), e)).collect()
     }
 
-    fn flat(
-        child: &Environment,
-        s: &HashMap<String, Environment>,
-    ) -> DomainResult<Flattened> {
+    fn flat(child: &Environment, s: &HashMap<String, Environment>) -> DomainResult<Flattened> {
         flatten_environment(child, &|n| s.get(n).cloned())
     }
 
@@ -240,8 +249,16 @@ mod tests {
     fn a_chain_of_thirty_environments_flattens() {
         let mut envs = Vec::new();
         for i in 0..30 {
-            let parent = if i == 29 { None } else { Some(format!("e{}", i + 1)) };
-            envs.push(env(&format!("e{i}"), parent.as_deref(), &[(&format!("k{i}"), "v")]));
+            let parent = if i == 29 {
+                None
+            } else {
+                Some(format!("e{}", i + 1))
+            };
+            envs.push(env(
+                &format!("e{i}"),
+                parent.as_deref(),
+                &[(&format!("k{i}"), "v")],
+            ));
         }
         let s = store(envs.clone());
         let f = flat(&envs[0], &s).unwrap();

@@ -27,6 +27,11 @@ fn build_deep_fixture() {
 #[test]
 #[ignore = "loads the deep fixture once; run by hand, see .claude/perf-tree-walk.md"]
 fn load_deep_fixture_once() {
-    let collection = fixture_repo().get_summaries("bench-0").expect("summaries load");
-    assert_eq!(collection.request_count(), support::DEEP_FOLDERS * support::DEEP_REQUESTS);
+    let collection = fixture_repo()
+        .get_summaries("bench-0")
+        .expect("summaries load");
+    assert_eq!(
+        collection.request_count(),
+        support::DEEP_FOLDERS * support::DEEP_REQUESTS
+    );
 }

@@ -534,9 +534,12 @@ mod tests {
     fn websocket_items_are_never_steps() {
         let mut collection = Collection::new("my-api");
         collection.root.add_request(req("Login", "login.yml"));
-        collection.root.items.push(rocket_collection::CollectionItem::WebSocket(Box::new(
-            rocket_collection::WebSocketRequest::new("Chat", "wss://x"),
-        )));
+        collection
+            .root
+            .items
+            .push(rocket_collection::CollectionItem::WebSocket(Box::new(
+                rocket_collection::WebSocketRequest::new("Chat", "wss://x"),
+            )));
 
         let items = flatten_run_set(&collection, None).expect("flatten");
         assert_eq!(items.len(), 1);

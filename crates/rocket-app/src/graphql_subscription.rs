@@ -179,7 +179,10 @@ pub async fn resolve_graphql_subscription(
             .unwrap_or_else(|| input.url.clone()),
         headers: input.headers.clone(),
         auth: input.auth.clone(),
-        subprotocols: vec![SUBPROTOCOL_TRANSPORT.to_string(), SUBPROTOCOL_LEGACY.to_string()],
+        subprotocols: vec![
+            SUBPROTOCOL_TRANSPORT.to_string(),
+            SUBPROTOCOL_LEGACY.to_string(),
+        ],
         timeout_ms: input.timeout_ms,
         keep_alive_ms: None,
         verify_ssl: input.verify_ssl,
@@ -189,7 +192,8 @@ pub async fn resolve_graphql_subscription(
     connect.url = to_websocket_url(&connect.url)?;
 
     let query = resolved_text(exec, &input.scope, &input.query).await?;
-    let variables = resolved_object(exec, &input.scope, input.variables.as_deref(), "variables").await?;
+    let variables =
+        resolved_object(exec, &input.scope, input.variables.as_deref(), "variables").await?;
     let connection_params = resolved_object(
         exec,
         &input.scope,
@@ -560,7 +564,10 @@ impl GraphQlSubscriptionService {
 
         let mut connect = start.connect.clone();
         if connect.subprotocols.is_empty() {
-            connect.subprotocols = vec![SUBPROTOCOL_TRANSPORT.to_string(), SUBPROTOCOL_LEGACY.to_string()];
+            connect.subprotocols = vec![
+                SUBPROTOCOL_TRANSPORT.to_string(),
+                SUBPROTOCOL_LEGACY.to_string(),
+            ];
         }
         let handle = match self.client.connect(connect).await {
             Ok(handle) => handle,
@@ -584,7 +591,9 @@ impl GraphQlSubscriptionService {
         let registered = {
             let mut sessions = self.lock();
             match sessions.get_mut(session_id) {
-                Some(slot) if slot.generation() == generation && matches!(slot, Slot::Connecting(_)) => {
+                Some(slot)
+                    if slot.generation() == generation && matches!(slot, Slot::Connecting(_)) =>
+                {
                     *slot = Slot::Running(generation, stop_tx);
                     true
                 }
@@ -678,7 +687,9 @@ mod resolve_tests {
             Box::new(StaticEnvRepo(env)),
             RecordingExecutor::new(),
             Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
-            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(Collection::new("api")))),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+                Collection::new("api"),
+            ))),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -704,10 +715,22 @@ mod resolve_tests {
 
     #[test]
     fn http_schemes_become_websocket_schemes() {
-        assert_eq!(to_websocket_url("http://h/graphql").expect("http"), "ws://h/graphql");
-        assert_eq!(to_websocket_url("https://h/graphql?a=1").expect("https"), "wss://h/graphql?a=1");
-        assert_eq!(to_websocket_url("wss://h/graphql").expect("wss"), "wss://h/graphql");
-        assert_eq!(to_websocket_url("ws://h/graphql").expect("ws"), "ws://h/graphql");
+        assert_eq!(
+            to_websocket_url("http://h/graphql").expect("http"),
+            "ws://h/graphql"
+        );
+        assert_eq!(
+            to_websocket_url("https://h/graphql?a=1").expect("https"),
+            "wss://h/graphql?a=1"
+        );
+        assert_eq!(
+            to_websocket_url("wss://h/graphql").expect("wss"),
+            "wss://h/graphql"
+        );
+        assert_eq!(
+            to_websocket_url("ws://h/graphql").expect("ws"),
+            "ws://h/graphql"
+        );
         let err = to_websocket_url("ftp://h/graphql").expect_err("unsupported scheme");
         assert!(err.to_string().contains("http"), "{err}");
     }
@@ -726,10 +749,20 @@ mod resolve_tests {
         .expect("resolve");
 
         assert_eq!(start.connect.url, "wss://api.example.com/graphql");
-        assert_eq!(start.variables, Some(serde_json::json!({ "room": "general" })));
-        assert_eq!(start.connection_params, Some(serde_json::json!({ "token": "abc123" })));
+        assert_eq!(
+            start.variables,
+            Some(serde_json::json!({ "room": "general" }))
+        );
+        assert_eq!(
+            start.connection_params,
+            Some(serde_json::json!({ "token": "abc123" }))
+        );
         assert_eq!(start.operation_name.as_deref(), Some("OnMsg"));
-        assert!(start.connect.headers.iter().any(|(k, v)| k == "X-Token" && v == "abc123"));
+        assert!(start
+            .connect
+            .headers
+            .iter()
+            .any(|(k, v)| k == "X-Token" && v == "abc123"));
         assert_eq!(
             start.connect.subprotocols,
             vec!["graphql-transport-ws".to_string(), "graphql-ws".to_string()]
@@ -749,8 +782,14 @@ mod resolve_tests {
         .await
         .expect("a value holding quotes, backslashes or newlines must not break the JSON");
 
-        assert_eq!(start.variables, Some(serde_json::json!({ "who": tricky, "n": 3 })));
-        assert_eq!(start.connection_params, Some(serde_json::json!({ "token": tricky })));
+        assert_eq!(
+            start.variables,
+            Some(serde_json::json!({ "who": tricky, "n": 3 }))
+        );
+        assert_eq!(
+            start.connection_params,
+            Some(serde_json::json!({ "token": tricky }))
+        );
     }
 
     #[tokio::test]
@@ -766,9 +805,12 @@ mod resolve_tests {
 
     #[tokio::test]
     async fn blank_variables_and_params_mean_none() {
-        let start = resolve_graphql_subscription(&service(), input(serde_json::json!({ "variables": "  " })))
-            .await
-            .expect("resolve");
+        let start = resolve_graphql_subscription(
+            &service(),
+            input(serde_json::json!({ "variables": "  " })),
+        )
+        .await
+        .expect("resolve");
         assert_eq!(start.variables, None);
         assert_eq!(start.connection_params, None);
     }
@@ -776,14 +818,18 @@ mod resolve_tests {
     #[tokio::test]
     async fn variables_and_params_must_be_json_objects_after_resolution() {
         let svc = service();
-        let err = resolve_graphql_subscription(&svc, input(serde_json::json!({ "variables": "[1]" })))
-            .await
-            .expect_err("array variables");
+        let err =
+            resolve_graphql_subscription(&svc, input(serde_json::json!({ "variables": "[1]" })))
+                .await
+                .expect_err("array variables");
         assert!(err.to_string().contains("variables"), "{err}");
 
-        let err = resolve_graphql_subscription(&svc, input(serde_json::json!({ "connectionParams": "{oops" })))
-            .await
-            .expect_err("invalid params");
+        let err = resolve_graphql_subscription(
+            &svc,
+            input(serde_json::json!({ "connectionParams": "{oops" })),
+        )
+        .await
+        .expect_err("invalid params");
         assert!(err.to_string().contains("connection parameters"), "{err}");
     }
 
@@ -869,30 +915,48 @@ mod session_tests {
         Legacy,
     }
 
-    async fn spawn_server(script: Script, offer: Offer) -> (u16, Arc<Mutex<Vec<serde_json::Value>>>) {
+    async fn spawn_server(
+        script: Script,
+        offer: Offer,
+    ) -> (u16, Arc<Mutex<Vec<serde_json::Value>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
         let received: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
         let log = Arc::clone(&received);
         tokio::spawn(async move {
-            let Ok((tcp, _)) = listener.accept().await else { return };
-            let chosen = if offer == Offer::Legacy { "graphql-ws" } else { "graphql-transport-ws" };
+            let Ok((tcp, _)) = listener.accept().await else {
+                return;
+            };
+            let chosen = if offer == Offer::Legacy {
+                "graphql-ws"
+            } else {
+                "graphql-transport-ws"
+            };
             // The error type is fixed by the tungstenite callback signature.
             #[allow(clippy::result_large_err)]
-            let callback = move |_: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
-                if let Ok(value) = chosen.parse() {
-                    resp.headers_mut().insert("sec-websocket-protocol", value);
-                }
-                Ok(resp)
+            let callback =
+                move |_: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
+                    if let Ok(value) = chosen.parse() {
+                        resp.headers_mut().insert("sec-websocket-protocol", value);
+                    }
+                    Ok(resp)
+                };
+            let Ok(mut ws) = tokio_tungstenite::accept_hdr_async(tcp, callback).await else {
+                return;
             };
-            let Ok(mut ws) = tokio_tungstenite::accept_hdr_async(tcp, callback).await else { return };
-            let result_kind = if offer == Offer::Legacy { "data" } else { "next" };
+            let result_kind = if offer == Offer::Legacy {
+                "data"
+            } else {
+                "next"
+            };
             let result = |n: u32| {
-                json!({ "id": "1", "type": result_kind, "payload": { "data": { "n": n } } }).to_string()
+                json!({ "id": "1", "type": result_kind, "payload": { "data": { "n": n } } })
+                    .to_string()
             };
             while let Some(Ok(msg)) = ws.next().await {
                 let Message::Text(text) = msg else { continue };
-                let frame: serde_json::Value = serde_json::from_str(text.as_str()).unwrap_or_default();
+                let frame: serde_json::Value =
+                    serde_json::from_str(text.as_str()).unwrap_or_default();
                 log.lock().expect("lock").push(frame.clone());
                 match frame["type"].as_str() {
                     Some("connection_init") => {
@@ -903,14 +967,22 @@ mod session_tests {
                             };
                             let _ = ws.send(Message::Close(Some(frame))).await;
                         } else if !matches!(script, Script::NoAck) {
-                            let _ = ws.send(Message::text(json!({ "type": "connection_ack" }).to_string())).await;
+                            let _ = ws
+                                .send(Message::text(
+                                    json!({ "type": "connection_ack" }).to_string(),
+                                ))
+                                .await;
                         }
                     }
                     Some("subscribe") | Some("start") => match script {
                         Script::Finite => {
                             let _ = ws.send(Message::text(result(1))).await;
                             let _ = ws.send(Message::text(result(2))).await;
-                            let _ = ws.send(Message::text(json!({ "id": "1", "type": "complete" }).to_string())).await;
+                            let _ = ws
+                                .send(Message::text(
+                                    json!({ "id": "1", "type": "complete" }).to_string(),
+                                ))
+                                .await;
                         }
                         Script::Hold => {
                             let _ = ws.send(Message::text(result(1))).await;
@@ -921,12 +993,23 @@ mod session_tests {
                             } else {
                                 json!([{ "message": "boom" }])
                             };
-                            let _ = ws.send(Message::text(json!({ "id": "1", "type": "error", "payload": payload }).to_string())).await;
+                            let _ = ws
+                                .send(Message::text(
+                                    json!({ "id": "1", "type": "error", "payload": payload })
+                                        .to_string(),
+                                ))
+                                .await;
                         }
                         Script::PingFirst => {
-                            let _ = ws.send(Message::text(json!({ "type": "ping" }).to_string())).await;
+                            let _ = ws
+                                .send(Message::text(json!({ "type": "ping" }).to_string()))
+                                .await;
                             let _ = ws.send(Message::text(result(1))).await;
-                            let _ = ws.send(Message::text(json!({ "id": "1", "type": "complete" }).to_string())).await;
+                            let _ = ws
+                                .send(Message::text(
+                                    json!({ "id": "1", "type": "complete" }).to_string(),
+                                ))
+                                .await;
                         }
                         Script::NoAck | Script::Reject => {}
                     },
@@ -942,7 +1025,10 @@ mod session_tests {
             connect: WebSocketConnectRequest {
                 url: format!("ws://127.0.0.1:{port}/graphql"),
                 headers: Vec::new(),
-                subprotocols: vec![SUBPROTOCOL_TRANSPORT.to_string(), SUBPROTOCOL_LEGACY.to_string()],
+                subprotocols: vec![
+                    SUBPROTOCOL_TRANSPORT.to_string(),
+                    SUBPROTOCOL_LEGACY.to_string(),
+                ],
                 connect_timeout: Some(Duration::from_secs(5)),
                 keep_alive_interval: None,
                 verify_ssl: true,
@@ -964,14 +1050,21 @@ mod session_tests {
         (svc, publisher)
     }
 
-    async fn wait_for(publisher: &RecordingPublisher, what: &str, pred: impl Fn(&[DomainEvent]) -> bool) {
+    async fn wait_for(
+        publisher: &RecordingPublisher,
+        what: &str,
+        pred: impl Fn(&[DomainEvent]) -> bool,
+    ) {
         for _ in 0..600 {
             if pred(&publisher.events()) {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        panic!("timed out waiting for {what}; events: {:?}", publisher.events());
+        panic!(
+            "timed out waiting for {what}; events: {:?}",
+            publisher.events()
+        );
     }
 
     fn states(events: &[DomainEvent]) -> Vec<WebSocketSessionState> {
@@ -988,16 +1081,21 @@ mod session_tests {
         events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::GraphQlSubscriptionMessage { event, data, .. } => Some((*event, data.clone())),
+                DomainEvent::GraphQlSubscriptionMessage { event, data, .. } => {
+                    Some((*event, data.clone()))
+                }
                 _ => None,
             })
             .collect()
     }
 
     fn terminal(events: &[DomainEvent]) -> bool {
-        states(events)
-            .iter()
-            .any(|s| matches!(s, WebSocketSessionState::Closed | WebSocketSessionState::Failed))
+        states(events).iter().any(|s| {
+            matches!(
+                s,
+                WebSocketSessionState::Closed | WebSocketSessionState::Failed
+            )
+        })
     }
 
     fn types(received: &Arc<Mutex<Vec<serde_json::Value>>>) -> Vec<String> {
@@ -1046,21 +1144,37 @@ mod session_tests {
         let events = publisher.events();
         assert_eq!(
             states(&events),
-            vec![WebSocketSessionState::Connecting, WebSocketSessionState::Open, WebSocketSessionState::Closed]
+            vec![
+                WebSocketSessionState::Connecting,
+                WebSocketSessionState::Open,
+                WebSocketSessionState::Closed
+            ]
         );
         let seen = results(&events);
         assert_eq!(seen.len(), 3, "{seen:?}");
         assert_eq!(seen[0].0, GraphQlSubscriptionEventKind::Next);
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&seen[0].1).expect("json"), json!({ "data": { "n": 1 } }));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&seen[0].1).expect("json"),
+            json!({ "data": { "n": 1 } })
+        );
         assert_eq!(seen[1].0, GraphQlSubscriptionEventKind::Next);
-        assert_eq!(seen[2], (GraphQlSubscriptionEventKind::Complete, String::new()));
+        assert_eq!(
+            seen[2],
+            (GraphQlSubscriptionEventKind::Complete, String::new())
+        );
 
         // The server saw the init (with its params) and then the subscribe (with the operation).
         let frames = received.lock().expect("lock").clone();
-        assert_eq!(frames[0], json!({ "type": "connection_init", "payload": { "token": "abc" } }));
+        assert_eq!(
+            frames[0],
+            json!({ "type": "connection_init", "payload": { "token": "abc" } })
+        );
         assert_eq!(frames[1]["type"], "subscribe");
         assert_eq!(frames[1]["payload"]["operationName"], "OnN");
-        assert_eq!(frames[1]["payload"]["variables"], json!({ "room": "general" }));
+        assert_eq!(
+            frames[1]["payload"]["variables"],
+            json!({ "room": "general" })
+        );
         assert_eq!(svc.session_count(), 0);
     }
 
@@ -1072,8 +1186,15 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("start");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        assert_eq!(types(&received).first().map(String::as_str), Some("connection_init"));
-        assert!(types(&received).contains(&"start".to_string()), "{:?}", types(&received));
+        assert_eq!(
+            types(&received).first().map(String::as_str),
+            Some("connection_init")
+        );
+        assert!(
+            types(&received).contains(&"start".to_string()),
+            "{:?}",
+            types(&received)
+        );
         assert!(!types(&received).contains(&"subscribe".to_string()));
         let next_results = results(&publisher.events())
             .iter()
@@ -1081,7 +1202,11 @@ mod session_tests {
             .count();
         assert_eq!(next_results, 2, "legacy `data` frames are results");
         let open_dialect = publisher.events().iter().find_map(|e| match e {
-            DomainEvent::GraphQlSubscriptionStatus { state: WebSocketSessionState::Open, dialect, .. } => dialect.clone(),
+            DomainEvent::GraphQlSubscriptionStatus {
+                state: WebSocketSessionState::Open,
+                dialect,
+                ..
+            } => dialect.clone(),
             _ => None,
         });
         assert_eq!(open_dialect.as_deref(), Some("graphql-ws"));
@@ -1097,8 +1222,14 @@ mod session_tests {
 
         // The init came first, and Open was published only after the ack led to the subscribe.
         let order = types(&received);
-        let init = order.iter().position(|t| t == "connection_init").expect("init");
-        let subscribe = order.iter().position(|t| t == "subscribe").expect("subscribe");
+        let init = order
+            .iter()
+            .position(|t| t == "connection_init")
+            .expect("init");
+        let subscribe = order
+            .iter()
+            .position(|t| t == "subscribe")
+            .expect("subscribe");
         assert!(init < subscribe, "{order:?}");
     }
 
@@ -1113,11 +1244,21 @@ mod session_tests {
         let events = publisher.events();
         assert_eq!(states(&events).last(), Some(&WebSocketSessionState::Failed));
         let reason = events.iter().find_map(|e| match e {
-            DomainEvent::GraphQlSubscriptionStatus { state: WebSocketSessionState::Failed, reason, .. } => reason.clone(),
+            DomainEvent::GraphQlSubscriptionStatus {
+                state: WebSocketSessionState::Failed,
+                reason,
+                ..
+            } => reason.clone(),
             _ => None,
         });
-        assert!(reason.unwrap_or_default().contains("acknowledge"), "{events:?}");
-        assert!(!types(&received).contains(&"subscribe".to_string()), "no subscribe without an ack");
+        assert!(
+            reason.unwrap_or_default().contains("acknowledge"),
+            "{events:?}"
+        );
+        assert!(
+            !types(&received).contains(&"subscribe".to_string()),
+            "no subscribe without an ack"
+        );
         assert_eq!(svc.session_count(), 0);
     }
 
@@ -1131,7 +1272,10 @@ mod session_tests {
         svc.stop("s1").await.expect("stop");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        assert_eq!(states(&publisher.events()).last(), Some(&WebSocketSessionState::Closed));
+        assert_eq!(
+            states(&publisher.events()).last(),
+            Some(&WebSocketSessionState::Closed)
+        );
         let completes = received
             .lock()
             .expect("lock")
@@ -1173,11 +1317,18 @@ mod session_tests {
         let events = publisher.events();
         assert_eq!(states(&events).last(), Some(&WebSocketSessionState::Failed));
         let reason = events.iter().find_map(|e| match e {
-            DomainEvent::GraphQlSubscriptionStatus { state: WebSocketSessionState::Failed, reason, .. } => reason.clone(),
+            DomainEvent::GraphQlSubscriptionStatus {
+                state: WebSocketSessionState::Failed,
+                reason,
+                ..
+            } => reason.clone(),
             _ => None,
         });
         let reason = reason.unwrap_or_default();
-        assert!(reason.contains("4403") && reason.contains("Forbidden"), "{reason}");
+        assert!(
+            reason.contains("4403") && reason.contains("Forbidden"),
+            "{reason}"
+        );
     }
 
     #[tokio::test]
@@ -1188,7 +1339,11 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("start");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        assert!(types(&received).contains(&"pong".to_string()), "{:?}", types(&received));
+        assert!(
+            types(&received).contains(&"pong".to_string()),
+            "{:?}",
+            types(&received)
+        );
     }
 
     #[tokio::test]
@@ -1198,10 +1353,19 @@ mod session_tests {
         drop(probe);
         let (svc, publisher) = service();
 
-        let err = svc.start("s1", start_for(dead_port)).await.expect_err("refused");
+        let err = svc
+            .start("s1", start_for(dead_port))
+            .await
+            .expect_err("refused");
 
         assert!(err.to_string().contains("connection failed"), "{err}");
-        assert_eq!(states(&publisher.events()), vec![WebSocketSessionState::Connecting, WebSocketSessionState::Failed]);
+        assert_eq!(
+            states(&publisher.events()),
+            vec![
+                WebSocketSessionState::Connecting,
+                WebSocketSessionState::Failed
+            ]
+        );
         assert_eq!(svc.session_count(), 0);
     }
 
@@ -1212,9 +1376,15 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("first");
         wait_for(&publisher, "the first result", |e| !results(e).is_empty()).await;
 
-        let err = svc.start("s1", start_for(port)).await.expect_err("duplicate");
+        let err = svc
+            .start("s1", start_for(port))
+            .await
+            .expect_err("duplicate");
         assert!(matches!(err, DomainError::AlreadyExists(_)), "{err:?}");
-        assert!(svc.start("", start_for(port)).await.is_err(), "an empty id is invalid");
+        assert!(
+            svc.start("", start_for(port)).await.is_err(),
+            "an empty id is invalid"
+        );
         svc.end_all().await;
     }
 
@@ -1229,11 +1399,17 @@ mod session_tests {
         // `start` reserves the id before its first await, so the first session's task has not
         // finished yet when the id is reused.
         svc.stop("s1").await.expect("stop first");
-        svc.start("s1", start_for(port_b)).await.expect("reuse the id");
+        svc.start("s1", start_for(port_b))
+            .await
+            .expect("reuse the id");
         wait_for(&publisher, "the first session's end", terminal).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(svc.session_count(), 1, "the new session must still be registered");
+        assert_eq!(
+            svc.session_count(),
+            1,
+            "the new session must still be registered"
+        );
         svc.stop("s1").await.expect("stop second");
         for _ in 0..300 {
             if types(&received_b).contains(&"complete".to_string()) {
@@ -1241,6 +1417,9 @@ mod session_tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        panic!("the second session never received its stop: {:?}", types(&received_b));
+        panic!(
+            "the second session never received its stop: {:?}",
+            types(&received_b)
+        );
     }
 }

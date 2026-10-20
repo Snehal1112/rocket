@@ -39,7 +39,10 @@ fn imports_wsdl_through_the_public_api() {
         .expect("should import");
     assert_eq!(report.imported, 4);
     assert_eq!(report.created_collections, vec!["calc".to_string()]);
-    assert!(ws.path().join("collections/calc/Calculator/CalcSoap").is_dir());
+    assert!(ws
+        .path()
+        .join("collections/calc/Calculator/CalcSoap")
+        .is_dir());
 }
 
 #[test]
@@ -48,7 +51,10 @@ fn missing_file_is_an_io_error_not_a_panic() {
     let err = make_service(ws.path())
         .import_wsdl(&fixture("does-not-exist.wsdl"), "default")
         .expect_err("must fail");
-    assert!(err.to_string().to_lowercase().contains("io error"), "got: {err}");
+    assert!(
+        err.to_string().to_lowercase().contains("io error"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -60,5 +66,8 @@ fn non_wsdl_xml_is_a_parse_error() {
     let err = make_service(ws.path())
         .import_wsdl(&path, "default")
         .expect_err("must fail");
-    assert!(err.to_string().contains("not a WSDL 1.1 document"), "got: {err}");
+    assert!(
+        err.to_string().contains("not a WSDL 1.1 document"),
+        "got: {err}"
+    );
 }

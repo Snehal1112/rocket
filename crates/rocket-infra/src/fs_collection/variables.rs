@@ -7,8 +7,8 @@ use crate::atomic_write;
 use crate::conversions::folder_oc_variables;
 use crate::conversions::{oc_http_request_to_request, request_to_oc_http_request};
 use crate::oc::{
-    OcGraphQLRequest, OcGraphQLRequestRuntime, OcHttpRequest, OcGrpcRequest,
-    OcHttpRequestRuntime, OcRequestDefaults, OcVariable, OcWebSocketRequest,
+    OcGraphQLRequest, OcGraphQLRequestRuntime, OcGrpcRequest, OcHttpRequest, OcHttpRequestRuntime,
+    OcRequestDefaults, OcVariable, OcWebSocketRequest,
 };
 
 use super::folder_file::parse_folder_yml;
@@ -72,7 +72,9 @@ pub(super) fn folder_chain_variables(
         let oc_folder = match parse_folder_yml(&content) {
             Ok(oc_folder) => oc_folder,
             Err(e) if strict => {
-                return Err(DomainError::Internal(format!("Failed to parse folder.yml: {e}")))
+                return Err(DomainError::Internal(format!(
+                    "Failed to parse folder.yml: {e}"
+                )))
             }
             Err(_) => continue,
         };

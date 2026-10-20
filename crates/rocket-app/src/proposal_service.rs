@@ -244,8 +244,7 @@ impl ProposalService {
         let env_fingerprint = meta.and_then(|m| m.env_fingerprint.clone());
         // A proposal from another workspace must not touch this one, even if
         // a collection of the same name exists here.
-        let same_workspace =
-            meta.is_some_and(|m| m.workspace == (self.workspace_identity)());
+        let same_workspace = meta.is_some_and(|m| m.workspace == (self.workspace_identity)());
         // The lock stays held while the change is applied, so a second
         // accept of the same proposal waits and then finds it answered.
         let applies = if same_workspace {
@@ -557,8 +556,10 @@ impl ProposalService {
             } => {
                 let root = self.tree(collection)?;
                 let target = join_path(folder_path, &request_filename_for(&request.name));
-                Ok(is_folder(&root, folder_path)
-                    && self.target_free(collection, &root, &target)?)
+                Ok(
+                    is_folder(&root, folder_path)
+                        && self.target_free(collection, &root, &target)?,
+                )
             }
             ProposedChange::UpdateRequest {
                 collection,
@@ -604,7 +605,11 @@ impl ProposalService {
             } => {
                 let root = self.tree(collection)?;
                 if is_folder(&root, path)
-                    && !self.target_free(collection, &root, &join_path(parent_of(path), new_name))?
+                    && !self.target_free(
+                        collection,
+                        &root,
+                        &join_path(parent_of(path), new_name),
+                    )?
                 {
                     return Ok(false);
                 }
@@ -1103,15 +1108,25 @@ fn refuse_masked_values(change: &ProposedChange) -> DomainResult<()> {
     let pair_masked = |key: &str, value: &str| masked(key) || masked(value);
     let body_masked = |body: &rocket_shared::types::Body| {
         body.content.as_deref().is_some_and(masked)
-            || body.form_data.iter().flatten().any(|e| pair_masked(&e.key, &e.value))
+            || body
+                .form_data
+                .iter()
+                .flatten()
+                .any(|e| pair_masked(&e.key, &e.value))
     };
     let found = match change {
         ProposedChange::SetEnvVar { value, .. } => masked(value),
         ProposedChange::EditScript { body, .. } => masked(body),
         ProposedChange::CreateRequest { request, .. } => {
             masked(&request.url)
-                || request.headers.iter().any(|h| pair_masked(&h.key, &h.value))
-                || request.query_params.iter().any(|q| pair_masked(&q.key, &q.value))
+                || request
+                    .headers
+                    .iter()
+                    .any(|h| pair_masked(&h.key, &h.value))
+                || request
+                    .query_params
+                    .iter()
+                    .any(|q| pair_masked(&q.key, &q.value))
                 || request.body.as_ref().is_some_and(body_masked)
         }
         ProposedChange::UpdateRequest { patch, .. } => {
@@ -1829,10 +1844,7 @@ mod tests {
                 name: format!("f{i}"),
             })
             .collect();
-        let err = f
-            .svc
-            .propose("s1", changes)
-            .expect_err("over the cap");
+        let err = f.svc.propose("s1", changes).expect_err("over the cap");
         assert!(err.to_string().contains("too many pending proposals"));
     }
 
@@ -1967,10 +1979,12 @@ mod tests {
     fn accepting_a_plain_set_env_var_keeps_a_secret_variable_value() {
         let f = fixture();
         let ws = tempfile::tempdir().expect("workspace dir");
-        let factory = Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::with_secret_store(
-            Arc::new(StdMutex::new(ws.path().to_path_buf())),
-            Arc::new(MemorySecrets::default()),
-        ));
+        let factory = Arc::new(
+            rocket_infra::SharedCollectionEnvironmentRepo::with_secret_store(
+                Arc::new(StdMutex::new(ws.path().to_path_buf())),
+                Arc::new(MemorySecrets::default()),
+            ),
+        );
         let mut dev = Environment::new("dev");
         dev.set_variable(Variable::new("HOST", "api.example.com"));
         let mut token = Variable::new("TOKEN", "s3cr3t");
@@ -2099,7 +2113,13 @@ mod tests {
     #[test]
     fn a_request_named_like_a_reserved_file_is_refused() {
         let f = fixture();
-        for name in ["opencollection", "folder", "_order", "Folder", "OpenCollection"] {
+        for name in [
+            "opencollection",
+            "folder",
+            "_order",
+            "Folder",
+            "OpenCollection",
+        ] {
             let err = f
                 .svc
                 .propose("s1", vec![create_request(name)])
@@ -2274,10 +2294,7 @@ mod tests {
             request.headers = vec![Header::new("X-Api-Key", REDACTED)];
         }
         for change in [with_header, with_query, with_url, with_body, created] {
-            let err = f
-                .svc
-                .propose("s1", vec![change])
-                .expect_err("masked value");
+            let err = f.svc.propose("s1", vec![change]).expect_err("masked value");
             assert!(matches!(err, DomainError::InvalidInput(_)));
             assert!(err.to_string().contains("masked placeholder"));
         }
@@ -2289,7 +2306,9 @@ mod tests {
         let f = fixture();
         let mut stored = f.repo.get_request("demo", "get-users.yml").expect("load");
         let mut accept = Header::new("Accept", "text/plain");
-        accept.description = Some(rocket_shared::description::Description::text("what we take"));
+        accept.description = Some(rocket_shared::description::Description::text(
+            "what we take",
+        ));
         stored.headers = vec![accept];
         f.repo
             .save_request("demo", "get-users.yml", &stored)
@@ -2406,7 +2425,12 @@ mod tests {
         f.repo
             .create_folder("demo", "archive")
             .expect("create folder");
-        for name in ["_order.yml", "folder.yml", "opencollection.yml", "Folder.YML"] {
+        for name in [
+            "_order.yml",
+            "folder.yml",
+            "opencollection.yml",
+            "Folder.YML",
+        ] {
             let err = f
                 .svc
                 .propose("s1", vec![folder(name)])
@@ -2604,7 +2628,8 @@ mod tests {
             path: &str,
             request: &Request,
         ) -> DomainResult<String> {
-            self.inner.create_request_exclusive(collection, path, request)
+            self.inner
+                .create_request_exclusive(collection, path, request)
         }
         fn move_item_no_replace(&self, sc: &str, sp: &str, dc: &str, dp: &str) -> DomainResult<()> {
             self.inner.move_item_no_replace(sc, sp, dc, dp)
@@ -2754,7 +2779,9 @@ mod tests {
     /// A "reports" folder with a bearer auth, old docs and one header.
     fn fixture_with_folder() -> Fixture {
         let f = fixture();
-        f.repo.create_folder("demo", "reports").expect("create folder");
+        f.repo
+            .create_folder("demo", "reports")
+            .expect("create folder");
         f.repo
             .save_folder_settings(
                 "demo",
@@ -2888,8 +2915,7 @@ mod tests {
                 )],
             )
             .expect("propose");
-        std::fs::remove_dir_all(f._dir.path().join("demo").join("reports"))
-            .expect("remove folder");
+        std::fs::remove_dir_all(f._dir.path().join("demo").join("reports")).expect("remove folder");
         let accepted = f.svc.accept("s1", &ids[0]).expect("accept");
         assert_eq!(accepted.status, ProposalStatus::Stale);
     }
@@ -2906,7 +2932,8 @@ mod tests {
             Err(DomainError::InvalidInput(_))
         ));
         assert!(matches!(
-            f.svc.propose("s1", vec![folder_update("nope", docs.clone())]),
+            f.svc
+                .propose("s1", vec![folder_update("nope", docs.clone())]),
             Err(DomainError::NotFound(_))
         ));
         assert!(matches!(
@@ -2941,7 +2968,10 @@ mod tests {
                     },
                 )],
             );
-            assert!(matches!(result, Err(DomainError::InvalidInput(_))), "{result:?}");
+            assert!(
+                matches!(result, Err(DomainError::InvalidInput(_))),
+                "{result:?}"
+            );
         }
     }
 

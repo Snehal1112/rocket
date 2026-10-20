@@ -19,8 +19,8 @@ use crate::flow_callbacks::FlowRunCallback;
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange, sent_masks};
 use crate::flow_partial::{PartialPlan, PartialRun};
-use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
+use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults};
 use crate::runner_sequence::{build_step_input, RunItem};
 
 /// One node's fully-executed result, kept around so a downstream edge's
@@ -1056,7 +1056,8 @@ impl FlowExecutionService {
             run_id: None,
             partial: Some(partial),
         };
-        self.run_with_options(exec, input, auth_tokens, options).await
+        self.run_with_options(exec, input, auth_tokens, options)
+            .await
     }
 
     /// The run loop shared by full and partial runs. The run id from
@@ -1091,12 +1092,16 @@ impl FlowExecutionService {
         // Saved requests are read once, for fingerprints and the callback check.
         let saved = self.saved_requests(&input.collection, &flow);
         let fingerprints = crate::flow_run_cache::fingerprints(&flow, &order, &|path| {
-            saved.get(path).map(crate::flow_run_cache::saved_request_text)
+            saved
+                .get(path)
+                .map(crate::flow_run_cache::saved_request_text)
         });
         // A partial run is checked before any secret is fetched or event sent,
         // so a refusal costs nothing and leaves no trace.
         let prepared = match &partial {
-            Some(p) => Some(self.prepare_partial(&input, &flow, &order, &saved, &fingerprints, p)?),
+            Some(p) => {
+                Some(self.prepare_partial(&input, &flow, &order, &saved, &fingerprints, p)?)
+            }
             None => None,
         };
 
@@ -1485,13 +1490,10 @@ impl FlowExecutionService {
         fingerprints: &HashMap<String, u64>,
     ) {
         let entry = match prepared {
-            Some(p) => p.base.merge_partial(
-                input,
-                flow,
-                &p.partial.start_node_id,
-                results,
-                fingerprints,
-            ),
+            Some(p) => {
+                p.base
+                    .merge_partial(input, flow, &p.partial.start_node_id, results, fingerprints)
+            }
             None => CachedRun::from_full_run(input, flow, results, fingerprints),
         };
         if let Ok(mut cache) = self.run_cache.lock() {
@@ -1796,8 +1798,10 @@ impl FlowExecutionService {
                 }
                 let output = result?;
                 logs.extend(to_flow_logs(output.console_entries.clone()));
-                Ok(ExecutedNode::plain(CapturedOutput::Request(Box::new(output)))
-                    .with_sent_secret(sent_value))
+                Ok(
+                    ExecutedNode::plain(CapturedOutput::Request(Box::new(output)))
+                        .with_sent_secret(sent_value),
+                )
             }
             FlowNodeKind::If { condition, .. } => {
                 let source = single_input(node, data_edges, captured, trace, &trace_masks)?;
@@ -2159,8 +2163,8 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::test_doubles::NullCollectionRepo;
+    use async_trait::async_trait;
     use rocket_collection::{CollectionSettings, Request};
     use rocket_environment::{Environment, EnvironmentRepository};
     use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
@@ -2728,7 +2732,9 @@ mod tests {
             "https://api.example.com/login",
         );
         saved.tags = vec!["auth".to_string()];
-        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved).build();
+        let repo = FakeCollectionRepo::new()
+            .with_request("my-api", "auth/login.yml", saved)
+            .build();
 
         let node = saved_flow_node("n1", "auth/login.yml");
         let input = build_execute_request_input(&repo, "my-api", Some("dev"), None, &node)
@@ -2752,7 +2758,9 @@ mod tests {
             "https://api.example.com/login",
         );
         saved.runtime_auth = Some(Auth::Inherit);
-        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved).build();
+        let repo = FakeCollectionRepo::new()
+            .with_request("my-api", "auth/login.yml", saved)
+            .build();
 
         let input = build_execute_request_input(
             &repo,
@@ -2774,7 +2782,9 @@ mod tests {
             "https://api.example.com/login",
         );
         saved.tags = vec!["auth".to_string()];
-        let repo = FakeCollectionRepo::new().with_request("my-api", "auth/login.yml", saved).build();
+        let repo = FakeCollectionRepo::new()
+            .with_request("my-api", "auth/login.yml", saved)
+            .build();
 
         let node = saved_flow_node("n1", "auth/login.yml");
         let input =
@@ -3884,7 +3894,11 @@ mod tests {
         saved.runtime_auth = Some(request_auth);
         FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved).build()),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", saved)
+                    .build(),
+            ),
             Box::new(NullEventPublisher),
         )
     }
@@ -3923,7 +3937,11 @@ mod tests {
             Box::new(
                 FakeFlowRepository::new().with_flow("my-api", auth_and_request_flow(true, vec![])),
             ),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "req.yml", saved).build()),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", saved)
+                    .build(),
+            ),
             Box::new(NullEventPublisher),
         );
 
@@ -7779,7 +7797,11 @@ mod tests {
                     callback_host: None,
                 },
             )),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "job.yml", request).build()),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "job.yml", request)
+                    .build(),
+            ),
             Box::new(NullEventPublisher),
         );
 
@@ -9582,11 +9604,11 @@ mod tests {
         };
         let service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new().with_request(
-                "my-api",
-                "req.yml",
-                inherit_saved_request(),
-            ).build()),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", inherit_saved_request())
+                    .build(),
+            ),
             Box::new(SharedPublisher(Arc::clone(&publisher))),
         )
         .with_token_fetcher(Box::new(SharedFetcher(Arc::clone(&fetcher))));
@@ -9878,7 +9900,11 @@ mod tests {
         let login = Request::new("Login", HttpMethod::Post, "https://api.example.com/login");
         let service = FlowExecutionService::new(
             Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
-            Box::new(FakeCollectionRepo::new().with_request("my-api", "login.yml", login).build()),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "login.yml", login)
+                    .build(),
+            ),
             Box::new(NullEventPublisher),
         );
 

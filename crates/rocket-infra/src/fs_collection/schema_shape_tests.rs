@@ -849,7 +849,8 @@ fn written_collection_files_only_use_schema_keys() {
 fn saved_graphql_request_only_uses_schema_keys_besides_deferred() {
     let (dir, repo) = setup();
     repo.create("api").expect("create collection");
-    let mut g = rocket_collection::GraphQlRequest::new("Q", "https://x/graphql").with_query("{ a }");
+    let mut g =
+        rocket_collection::GraphQlRequest::new("Q", "https://x/graphql").with_query("{ a }");
     g.body.variables = Some("{}".into());
     g.settings = Some(RequestSettings {
         encode_url: None,
@@ -1120,8 +1121,13 @@ fn script_flow_is_written_only_under_bruno_extensions() {
             "`{key}` must not be a root key"
         );
     }
-    let request = doc.get("request").expect("request defaults written for headers");
-    assert!(request.get("scripts").is_none(), "flow is not a RequestDefaults key");
+    let request = doc
+        .get("request")
+        .expect("request defaults written for headers");
+    assert!(
+        request.get("scripts").is_none(),
+        "flow is not a RequestDefaults key"
+    );
     assert!(
         doc.get("extensions")
             .and_then(|e| e.get("rocketapi"))

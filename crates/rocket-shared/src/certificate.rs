@@ -305,7 +305,10 @@ mod tests {
             serde_json::from_str::<VaultCertificateFormat>("\"pem\"").expect("deserialize"),
             VaultCertificateFormat::Pem
         );
-        assert_eq!(VaultCertificateFormat::default(), VaultCertificateFormat::Pem);
+        assert_eq!(
+            VaultCertificateFormat::default(),
+            VaultCertificateFormat::Pem
+        );
         assert!(serde_json::from_str::<VaultCertificateFormat>("\"der\"").is_err());
         assert_eq!(VaultCertificateFormat::Pem.as_str(), "pem");
         assert_eq!(VaultCertificateFormat::Pkcs12.as_str(), "pkcs12");
@@ -360,6 +363,9 @@ mod tests {
         assert_eq!(cert.domain(), "api.example.com");
         let shown = format!("{cert:?}");
         assert!(shown.contains("Vault"), "{shown}");
-        assert!(shown.contains("prod") && shown.contains("client-a"), "{shown}");
+        assert!(
+            shown.contains("prod") && shown.contains("client-a"),
+            "{shown}"
+        );
     }
 }

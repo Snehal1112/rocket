@@ -380,7 +380,10 @@ mod tests {
             .put(&id("/a", Some("u2")), CollectionGrant::default())
             .expect("put");
         assert_eq!(store.grant_for(&id("/a", Some("u1"))).expect("read"), None);
-        assert!(store.grant_for(&id("/a", Some("u2"))).expect("read").is_some());
+        assert!(store
+            .grant_for(&id("/a", Some("u2")))
+            .expect("read")
+            .is_some());
     }
 
     #[test]
@@ -391,7 +394,10 @@ mod tests {
             .rekey(&id("/a", Some("u1")), &id("/b", Some("u1")))
             .expect("rekey");
         assert_eq!(store.grant_for(&id("/a", Some("u1"))).expect("read"), None);
-        assert!(store.grant_for(&id("/b", Some("u1"))).expect("read").is_some());
+        assert!(store
+            .grant_for(&id("/b", Some("u1")))
+            .expect("read")
+            .is_some());
         store.remove(&id("/b", Some("u1"))).expect("remove");
         assert_eq!(store.grant_for(&id("/b", Some("u1"))).expect("read"), None);
     }
@@ -426,7 +432,11 @@ mod tests {
         let quarantined = fs::read_dir(dir.path())
             .expect("dir")
             .filter_map(Result::ok)
-            .any(|e| e.file_name().to_string_lossy().starts_with("trust.yml.corrupt-"));
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("trust.yml.corrupt-")
+            });
         assert!(quarantined);
     }
 
@@ -472,7 +482,9 @@ mod tests {
     #[test]
     fn an_empty_migration_marks_the_store_migrated() {
         let (_dir, store) = store();
-        store.complete_migration(Vec::new(), Vec::new()).expect("migrate");
+        store
+            .complete_migration(Vec::new(), Vec::new())
+            .expect("migrate");
         assert!(store.migrated().expect("migrated"));
         store.put(&id("/a", None), dev_grant()).expect("put");
         assert!(store.migrated().expect("migrated"));
@@ -490,6 +502,9 @@ mod tests {
             .rekey(&id("/a", Some("changed")), &id("/b", Some("u1")))
             .expect("rekey");
         assert_eq!(store.grant_for(&id("/a", Some("u1"))).expect("read"), None);
-        assert!(store.grant_for(&id("/b", Some("u1"))).expect("read").is_some());
+        assert!(store
+            .grant_for(&id("/b", Some("u1")))
+            .expect("read")
+            .is_some());
     }
 }

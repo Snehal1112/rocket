@@ -111,7 +111,8 @@ impl CollectionRepository for SharedPathCollectionRepo {
         path: &str,
         request: &WebSocketRequest,
     ) -> DomainResult<String> {
-        self.repo().save_websocket_request(collection, path, request)
+        self.repo()
+            .save_websocket_request(collection, path, request)
     }
 
     fn get_grpc_request(&self, collection: &str, path: &str) -> DomainResult<GrpcRequest> {
@@ -203,7 +204,8 @@ impl CollectionRepository for SharedPathCollectionRepo {
         path: &str,
         request: &Request,
     ) -> DomainResult<String> {
-        self.repo().create_request_exclusive(collection, path, request)
+        self.repo()
+            .create_request_exclusive(collection, path, request)
     }
 
     fn move_item_no_replace(

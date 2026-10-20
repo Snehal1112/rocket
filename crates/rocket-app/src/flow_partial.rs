@@ -256,7 +256,10 @@ pub(crate) fn check_seeds(
     }
     // Input and Auth nodes run again and always succeed.
     for id in &plan.run_order {
-        if nodes.get(id.as_str()).is_some_and(|n| is_free_node(&n.kind)) {
+        if nodes
+            .get(id.as_str())
+            .is_some_and(|n| is_free_node(&n.kind))
+        {
             outcomes.insert(
                 id.clone(),
                 NodeOutcome::Succeeded {
@@ -812,7 +815,11 @@ mod tests {
             )]),
         )
         .expect_err("stale");
-        assert!(stale.message.contains("is out of date"), "{}", stale.message);
+        assert!(
+            stale.message.contains("is out of date"),
+            "{}",
+            stale.message
+        );
         let missing = plan(
             &flow,
             &order,
@@ -837,7 +844,11 @@ mod tests {
             &HashMap::new(),
         )
         .expect_err("unknown");
-        assert!(err.message.contains("is not in the saved flow"), "{}", err.message);
+        assert!(
+            err.message.contains("is not in the saved flow"),
+            "{}",
+            err.message
+        );
     }
 
     /// r (sends {{callback.pay}}) -trigger-> w.
@@ -861,7 +872,11 @@ mod tests {
             &HashMap::new(),
         )
         .expect_err("a Wait cannot run alone");
-        assert!(err.message.contains("cannot run on its own"), "{}", err.message);
+        assert!(
+            err.message.contains("cannot run on its own"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]
@@ -875,7 +890,11 @@ mod tests {
             &senders,
         )
         .expect_err("r would never get the new URL");
-        assert!(err.message.contains("is not part of this run"), "{}", err.message);
+        assert!(
+            err.message.contains("is not part of this run"),
+            "{}",
+            err.message
+        );
         assert_eq!(err.node_ids, ids(&["w", "r"]));
     }
 
@@ -963,8 +982,17 @@ mod tests {
         let saved = HashMap::from([("pay.yml".to_string(), saved_request)]);
         let senders = callback_senders(&flow, &saved);
         assert_eq!(senders.get("w"), Some(&ids(&["s"])));
-        let err = select_nodes(&flow, &order, &partial("w", FlowPartialMode::FromHere), &senders)
-            .expect_err("the sender is upstream of the run");
-        assert!(err.message.contains("is not part of this run"), "{}", err.message);
+        let err = select_nodes(
+            &flow,
+            &order,
+            &partial("w", FlowPartialMode::FromHere),
+            &senders,
+        )
+        .expect_err("the sender is upstream of the run");
+        assert!(
+            err.message.contains("is not part of this run"),
+            "{}",
+            err.message
+        );
     }
 }

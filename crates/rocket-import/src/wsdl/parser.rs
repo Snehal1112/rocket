@@ -278,14 +278,20 @@ impl Raw {
         warnings: &mut Vec<String>,
     ) -> ImportResult<()> {
         if root.tag_name().namespace() == Some(WSDL2_NS) {
-            return Err(parse_err(path, "WSDL 2.0 is not supported, use a WSDL 1.1 document"));
+            return Err(parse_err(
+                path,
+                "WSDL 2.0 is not supported, use a WSDL 1.1 document",
+            ));
         }
         if in_ns(&root, XSD_NS, "schema") {
             schemas.add_schema(root, warnings);
             return Ok(());
         }
         if !in_ns(&root, WSDL_NS, "definitions") {
-            return Err(parse_err(path, "not a WSDL 1.1 document (no wsdl:definitions root)"));
+            return Err(parse_err(
+                path,
+                "not a WSDL 1.1 document (no wsdl:definitions root)",
+            ));
         }
         let tns = root.attribute("targetNamespace").unwrap_or("").to_string();
         for child in root.children().filter(|n| n.is_element()) {
@@ -309,10 +315,14 @@ impl Raw {
     }
 
     fn absorb_message(&mut self, node: Node, tns: &str) {
-        let Some(name) = node.attribute("name") else { return };
+        let Some(name) = node.attribute("name") else {
+            return;
+        };
         let mut parts = Vec::new();
         for p in node.children().filter(|n| in_ns(n, WSDL_NS, "part")) {
-            let Some(pname) = p.attribute("name") else { continue };
+            let Some(pname) = p.attribute("name") else {
+                continue;
+            };
             let kind = if let Some(q) = qname_attr(p, "element") {
                 PartKind::Element(q)
             } else if let Some(q) = qname_attr(p, "type") {
@@ -329,10 +339,14 @@ impl Raw {
     }
 
     fn absorb_port_type(&mut self, node: Node, tns: &str) {
-        let Some(name) = node.attribute("name") else { return };
+        let Some(name) = node.attribute("name") else {
+            return;
+        };
         let mut ops = Vec::new();
         for op in node.children().filter(|n| in_ns(n, WSDL_NS, "operation")) {
-            let Some(oname) = op.attribute("name") else { continue };
+            let Some(oname) = op.attribute("name") else {
+                continue;
+            };
             let input = op.children().find(|n| in_ns(n, WSDL_NS, "input"));
             ops.push(RawPortOp {
                 name: oname.to_string(),
@@ -352,11 +366,13 @@ impl Raw {
             n.is_element() && n.tag_name().name() == "binding" && soap_version_of(n).is_some()
         });
         let soap = soap_el.as_ref().and_then(soap_version_of);
-        let style = style_of(soap_el.and_then(|e| e.attribute("style")))
-            .unwrap_or(BindingStyle::Document);
+        let style =
+            style_of(soap_el.and_then(|e| e.attribute("style"))).unwrap_or(BindingStyle::Document);
         let mut ops = Vec::new();
         for op in node.children().filter(|n| in_ns(n, WSDL_NS, "operation")) {
-            let Some(oname) = op.attribute("name") else { continue };
+            let Some(oname) = op.attribute("name") else {
+                continue;
+            };
             let soap_op = op.children().find(|n| {
                 n.is_element() && n.tag_name().name() == "operation" && soap_version_of(n).is_some()
             });
@@ -374,7 +390,9 @@ impl Raw {
                     .unwrap_or("")
                     .to_string(),
                 style: soap_op.and_then(|s| style_of(s.attribute("style"))),
-                rpc_ns: body.and_then(|b| b.attribute("namespace")).map(str::to_string),
+                rpc_ns: body
+                    .and_then(|b| b.attribute("namespace"))
+                    .map(str::to_string),
             });
         }
         self.bindings.insert(
@@ -389,7 +407,9 @@ impl Raw {
     }
 
     fn absorb_service(&mut self, node: Node) {
-        let Some(name) = node.attribute("name") else { return };
+        let Some(name) = node.attribute("name") else {
+            return;
+        };
         let mut ports = Vec::new();
         for p in node.children().filter(|n| in_ns(n, WSDL_NS, "port")) {
             let (Some(pname), Some(binding)) = (p.attribute("name"), qname_attr(p, "binding"))
@@ -399,7 +419,9 @@ impl Raw {
             let address = p
                 .children()
                 .find(|n| {
-                    n.is_element() && n.tag_name().name() == "address" && soap_version_of(n).is_some()
+                    n.is_element()
+                        && n.tag_name().name() == "address"
+                        && soap_version_of(n).is_some()
                 })
                 .and_then(|a| a.attribute("location"))
                 .map(str::to_string);
@@ -632,7 +654,9 @@ mod tests {
         assert_eq!(port.operations.len(), 1);
         assert_eq!(port.operations[0].soap_action, "urn:echo#Echo");
         match &port.operations[0].input_parts[0].kind {
-            PartKind::Type(q) => assert_eq!((q.ns.as_str(), q.local.as_str()), ("urn:echo", "Text")),
+            PartKind::Type(q) => {
+                assert_eq!((q.ns.as_str(), q.local.as_str()), ("urn:echo", "Text"))
+            }
             other => panic!("expected a type part, got {other:?}"),
         }
     }
@@ -754,7 +778,11 @@ mod tests {
     #[test]
     fn read_limited_rejects_over_limit_files() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let big = write(dir.path(), "big.xsd", &"a".repeat(MAX_SOURCE_BYTES as usize + 1));
+        let big = write(
+            dir.path(),
+            "big.xsd",
+            &"a".repeat(MAX_SOURCE_BYTES as usize + 1),
+        );
         let err = read_limited(&big).expect_err("over limit must fail");
         assert!(err.to_string().contains("5 MiB"), "got: {err}");
         let ok = write(dir.path(), "ok.xsd", &"a".repeat(MAX_SOURCE_BYTES as usize));
@@ -775,7 +803,11 @@ mod tests {
     fn unc_imports_are_warned_not_opened() {
         let wsdl = wsdl_importing(&["//host/share/x.xsd", r"\\host\share\y.xsd"]);
         let model = parse_wsdl_str(&wsdl, Path::new("unc.wsdl")).expect("parses");
-        let n = model.warnings.iter().filter(|w| w.contains("not fetched")).count();
+        let n = model
+            .warnings
+            .iter()
+            .filter(|w| w.contains("not fetched"))
+            .count();
         assert_eq!(n, 2, "got: {:?}", model.warnings);
     }
 
@@ -784,14 +816,24 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::create_dir(dir.path().join("inner")).expect("inner dir");
         write(dir.path(), "outside.xsd", GOOD_XSD);
-        let root = write(&dir.path().join("inner"), "main.wsdl", &wsdl_importing(&["../outside.xsd"]));
+        let root = write(
+            &dir.path().join("inner"),
+            "main.wsdl",
+            &wsdl_importing(&["../outside.xsd"]),
+        );
         let model = parse_wsdl_file(&root).expect("parses");
         assert!(
-            model.warnings.iter().any(|w| w.contains("outside the WSDL directory")),
+            model
+                .warnings
+                .iter()
+                .any(|w| w.contains("outside the WSDL directory")),
             "got: {:?}",
             model.warnings
         );
-        assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
+        assert!(model
+            .schemas
+            .types
+            .contains_key(&QName::new("urn:g", "Good")));
     }
 
     #[test]
@@ -818,13 +860,31 @@ mod tests {
         let root = write(
             dir.path(),
             "main.wsdl",
-            &wsdl_importing(&["notxml.xsd", "dtd.xsd", "wrongroot.xsd", "adir", "missing.xsd", "good.xsd"]),
+            &wsdl_importing(&[
+                "notxml.xsd",
+                "dtd.xsd",
+                "wrongroot.xsd",
+                "adir",
+                "missing.xsd",
+                "good.xsd",
+            ]),
         );
         let model = parse_wsdl_file(&root).expect("a bad import must not abort");
-        let skipped = model.warnings.iter().filter(|w| w.contains("import skipped")).count();
+        let skipped = model
+            .warnings
+            .iter()
+            .filter(|w| w.contains("import skipped"))
+            .count();
         assert_eq!(skipped, 5, "got: {:?}", model.warnings);
-        assert!(model.warnings.iter().any(|w| w.contains("DTD")), "got: {:?}", model.warnings);
-        assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
+        assert!(
+            model.warnings.iter().any(|w| w.contains("DTD")),
+            "got: {:?}",
+            model.warnings
+        );
+        assert!(model
+            .schemas
+            .types
+            .contains_key(&QName::new("urn:g", "Good")));
     }
 
     #[test]
@@ -855,7 +915,11 @@ mod tests {
                <types><xsd:schema targetNamespace="urn:t">{xsd}</xsd:schema></types></definitions>"#
         );
         let model = parse_wsdl_str(&wsdl, Path::new("deep.wsdl")).expect("parses");
-        assert!(model.warnings.iter().any(|w| w.contains("nesting")), "got: {:?}", model.warnings);
+        assert!(
+            model.warnings.iter().any(|w| w.contains("nesting")),
+            "got: {:?}",
+            model.warnings
+        );
     }
 
     #[test]
@@ -873,7 +937,11 @@ mod tests {
                <types><xsd:schema targetNamespace="urn:t">{xsd}</xsd:schema></types></definitions>"#
         );
         let model = parse_wsdl_str(&wsdl, Path::new("deep2.wsdl")).expect("parses");
-        assert!(model.warnings.iter().any(|w| w.contains("nesting")), "got: {:?}", model.warnings);
+        assert!(
+            model.warnings.iter().any(|w| w.contains("nesting")),
+            "got: {:?}",
+            model.warnings
+        );
     }
 
     fn nested(depth: usize) -> String {
@@ -899,14 +967,21 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         write(dir.path(), "deep.xsd", &nested(10_000));
         write(dir.path(), "good.xsd", GOOD_XSD);
-        let root = write(dir.path(), "main.wsdl", &wsdl_importing(&["deep.xsd", "good.xsd"]));
+        let root = write(
+            dir.path(),
+            "main.wsdl",
+            &wsdl_importing(&["deep.xsd", "good.xsd"]),
+        );
         let model = parse_wsdl_file(&root).expect("a deep import must not abort");
         assert!(
             model.warnings.iter().any(|w| w.contains("nesting")),
             "got: {:?}",
             model.warnings
         );
-        assert!(model.schemas.types.contains_key(&QName::new("urn:g", "Good")));
+        assert!(model
+            .schemas
+            .types
+            .contains_key(&QName::new("urn:g", "Good")));
     }
 
     #[test]
@@ -921,7 +996,11 @@ mod tests {
     fn mixed_separator_unc_imports_are_warned_not_opened() {
         let wsdl = wsdl_importing(&[r"/\host\share\x.xsd", r"\/host/share/y.xsd"]);
         let model = parse_wsdl_str(&wsdl, Path::new("mixed.wsdl")).expect("parses");
-        let n = model.warnings.iter().filter(|w| w.contains("not fetched")).count();
+        let n = model
+            .warnings
+            .iter()
+            .filter(|w| w.contains("not fetched"))
+            .count();
         assert_eq!(n, 2, "got: {:?}", model.warnings);
     }
 }

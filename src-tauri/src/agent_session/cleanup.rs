@@ -50,14 +50,16 @@ impl SessionResourceRegistry {
     /// Drops every entry, which removes every scratch directory. The app-exit
     /// paths call this as a backstop after `end_all_sessions`.
     pub fn clear_all(&self) {
-        let drained = std::mem::take(
-            &mut *self.entries.lock().unwrap_or_else(PoisonError::into_inner),
-        );
+        let drained =
+            std::mem::take(&mut *self.entries.lock().unwrap_or_else(PoisonError::into_inner));
         drop(drained);
     }
 
     pub fn len(&self) -> usize {
-        self.entries.lock().unwrap_or_else(PoisonError::into_inner).len()
+        self.entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -121,8 +123,8 @@ impl SessionCleanup for TauriSessionCleanup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::tool_server::{McpHttpServerHandle, McpSessionBinding};
     use crate::agent_session::scratch::private_tempdir;
+    use crate::mcp::tool_server::{McpHttpServerHandle, McpSessionBinding};
     use tokio_util::sync::CancellationToken;
 
     fn handle() -> (McpHttpServerHandle, CancellationToken) {
@@ -142,9 +144,10 @@ mod tests {
     ) -> (TauriSessionCleanup, Arc<Mutex<Vec<String>>>) {
         let forgotten = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&forgotten);
-        let cleanup = TauriSessionCleanup::with_cache_forgetter(mcp_registry, resources, move |id| {
-            sink.lock().expect("lock forgotten").push(id.to_string());
-        });
+        let cleanup =
+            TauriSessionCleanup::with_cache_forgetter(mcp_registry, resources, move |id| {
+                sink.lock().expect("lock forgotten").push(id.to_string());
+            });
         (cleanup, forgotten)
     }
 
@@ -232,8 +235,20 @@ mod tests {
         let a = SessionScratch::create_in(parent.path()).expect("scratch a");
         let b = SessionScratch::create_in(parent.path()).expect("scratch b");
         let (root_a, root_b) = (a.root().to_path_buf(), b.root().to_path_buf());
-        resources.register("a".to_string(), SessionResources { scratch: a, mcp_session_id: None });
-        resources.register("b".to_string(), SessionResources { scratch: b, mcp_session_id: None });
+        resources.register(
+            "a".to_string(),
+            SessionResources {
+                scratch: a,
+                mcp_session_id: None,
+            },
+        );
+        resources.register(
+            "b".to_string(),
+            SessionResources {
+                scratch: b,
+                mcp_session_id: None,
+            },
+        );
 
         resources.clear_all();
 

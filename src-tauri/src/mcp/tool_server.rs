@@ -84,11 +84,11 @@ use tokio_util::sync::CancellationToken;
 /// origin — the router below has no route at `/`.
 pub const MCP_HTTP_PATH: &str = "/mcp";
 
-use rocket_app::mcp_read_views::HISTORY_LIMIT_MAX;
 use rocket_acp::proposal::{
     AgentProposal, FolderSettingsPatch, ProposedChange, ProposedRequest, ProposedVariable,
     RequestPatch, ScriptPhase,
 };
+use rocket_app::mcp_read_views::HISTORY_LIMIT_MAX;
 use rocket_app::AssistantMode;
 use rocket_app::McpToolService;
 use rocket_app::ProposalService;
@@ -512,7 +512,10 @@ fn parse_method(method: &str) -> Result<HttpMethod, String> {
 fn to_body(body: BodyParams) -> Result<Body, String> {
     let mode: BodyMode = serde_json::from_value(serde_json::Value::String(body.mode.clone()))
         .map_err(|_| format!("unknown body mode '{}'", body.mode))?;
-    if matches!(mode, BodyMode::FormData | BodyMode::Binary | BodyMode::GraphQl) {
+    if matches!(
+        mode,
+        BodyMode::FormData | BodyMode::Binary | BodyMode::GraphQl
+    ) {
         return Err(format!(
             "body mode '{}' cannot be proposed; use none, json, xml, text, sparql or formurlencoded",
             body.mode
@@ -587,7 +590,9 @@ fn check_len(label: &str, value: &str, max: usize) -> Result<(), String> {
 }
 
 fn check_opt(label: &str, value: &Option<String>, max: usize) -> Result<(), String> {
-    value.as_deref().map_or(Ok(()), |v| check_len(label, v, max))
+    value
+        .as_deref()
+        .map_or(Ok(()), |v| check_len(label, v, max))
 }
 
 fn check_pairs(label: &str, pairs: &[KeyValueParams]) -> Result<(), String> {
@@ -654,7 +659,11 @@ fn check_change_sizes(change: &ProposedChangeParams) -> Result<(), String> {
                 check_body(body)?;
             }
             check_opt("docs", &request.docs, MAX_TEXT_BYTES)?;
-            check_opt("pre_request_script", &request.pre_request_script, MAX_TEXT_BYTES)?;
+            check_opt(
+                "pre_request_script",
+                &request.pre_request_script,
+                MAX_TEXT_BYTES,
+            )?;
             check_opt(
                 "post_response_script",
                 &request.post_response_script,
@@ -744,7 +753,11 @@ fn check_change_sizes(change: &ProposedChangeParams) -> Result<(), String> {
                     check_len("variable value", &variable.value, MAX_FIELD_BYTES)?;
                 }
             }
-            check_opt("pre_request_script", &patch.pre_request_script, MAX_TEXT_BYTES)?;
+            check_opt(
+                "pre_request_script",
+                &patch.pre_request_script,
+                MAX_TEXT_BYTES,
+            )?;
             check_opt(
                 "post_response_script",
                 &patch.post_response_script,
@@ -928,7 +941,9 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
     )]
     async fn list_collections(&self) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        Ok(to_tool_result(svc.list_collections(self.binding.session_id())))
+        Ok(to_tool_result(
+            svc.list_collections(self.binding.session_id()),
+        ))
     }
 
     #[tool(
@@ -939,7 +954,11 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         Parameters(params): Parameters<GetRequestParams>,
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        let result = svc.get_request(self.binding.session_id(), &params.collection, &params.request_path);
+        let result = svc.get_request(
+            self.binding.session_id(),
+            &params.collection,
+            &params.request_path,
+        );
         Ok(to_tool_result(result))
     }
 
@@ -1060,17 +1079,16 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         // The service reads the workspace from disk, so it runs off the async
         // executor.
         let session_id = self.binding.session_id().to_string();
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            proposals.propose(&session_id, changes)
-        })
-        .await
-        .map_err(|_| DomainError::Internal("proposal task failed".to_string()))
-        .and_then(|inner| inner)
-        .map(|proposal_ids| ProposeChangesResult {
-            proposal_ids,
-            status: PROPOSALS_QUEUED,
-        })
-        .map_err(for_agent);
+        let result =
+            tauri::async_runtime::spawn_blocking(move || proposals.propose(&session_id, changes))
+                .await
+                .map_err(|_| DomainError::Internal("proposal task failed".to_string()))
+                .and_then(|inner| inner)
+                .map(|proposal_ids| ProposeChangesResult {
+                    proposal_ids,
+                    status: PROPOSALS_QUEUED,
+                })
+                .map_err(for_agent);
         Ok(to_tool_result(result))
     }
 
@@ -1100,8 +1118,11 @@ impl<R: tauri::Runtime> RocketMcpToolServer<R> {
         Parameters(params): Parameters<GetTestResultsParams>,
     ) -> Result<CallToolResult, McpError> {
         let svc = mcp_tool_service(&self.app_handle)?;
-        let result =
-            svc.get_test_results(self.binding.session_id(), &params.collection, &params.request_path);
+        let result = svc.get_test_results(
+            self.binding.session_id(),
+            &params.collection,
+            &params.request_path,
+        );
         Ok(to_tool_result(result))
     }
 }
@@ -1288,7 +1309,10 @@ mod tests {
             .expect("get_request is registered");
         let description = tool.description.as_deref().unwrap_or_default();
         assert!(description.contains("docs"), "{description}");
-        assert!(description.contains("masked"), "it keeps its masking note: {description}");
+        assert!(
+            description.contains("masked"),
+            "it keeps its masking note: {description}"
+        );
     }
 
     #[test]
@@ -1446,16 +1470,18 @@ mod tests {
                 SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path)),
             ));
 
-            let mcp_tool_svc = Arc::new(McpToolService::new(
-                Arc::new(FsCollectionRepo::new_standalone(collections_dir)),
-                Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
-                Arc::new(exec_svc),
-                Arc::new(NullEventPublisher),
-                Box::new(FsWorkspaceConfigRepo::new()),
-                Arc::clone(&ws_path),
-                Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
-            )
-            .with_trust_store(Arc::clone(&trust_store)));
+            let mcp_tool_svc = Arc::new(
+                McpToolService::new(
+                    Arc::new(FsCollectionRepo::new_standalone(collections_dir)),
+                    Arc::new(SharedCollectionEnvironmentRepo::new(Arc::clone(&ws_path))),
+                    Arc::new(exec_svc),
+                    Arc::new(NullEventPublisher),
+                    Box::new(FsWorkspaceConfigRepo::new()),
+                    Arc::clone(&ws_path),
+                    Box::new(FsHistoryRepo::new(tmp.path().join("history"))),
+                )
+                .with_trust_store(Arc::clone(&trust_store)),
+            );
 
             let app = tauri::test::mock_builder()
                 .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -1635,7 +1661,11 @@ mod tests {
             "propose_changes",
             "run_request",
         ];
-        for mode in [AssistantMode::Ask, AssistantMode::Edit, AssistantMode::Agent] {
+        for mode in [
+            AssistantMode::Ask,
+            AssistantMode::Edit,
+            AssistantMode::Agent,
+        ] {
             let names: Vec<String> = fixture
                 .server_in(mode)
                 .tool_router
@@ -1783,7 +1813,10 @@ mod tests {
         };
         assert_eq!(collection, "demo");
         assert_eq!(folder_path, "auth");
-        assert!(base_fingerprint.is_empty(), "the service fills the fingerprint");
+        assert!(
+            base_fingerprint.is_empty(),
+            "the service fills the fingerprint"
+        );
         assert_eq!(patch.headers.expect("headers")[0].key, "X-Key");
         let variables = patch.variables.expect("variables");
         assert_eq!(variables[0].key, "HOST");
@@ -1928,7 +1961,9 @@ mod tests {
         let ws_path = Arc::new(std::sync::Mutex::new(tmp.path().to_path_buf()));
         let proposals = Arc::new(ProposalService::new(
             rocket_app::CollectionService::new(
-                Box::new(rocket_infra::FsCollectionRepo::new_standalone(collections_dir)),
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    collections_dir,
+                )),
                 Box::new(rocket_shared::events::NullEventPublisher),
             ),
             Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(ws_path)),
@@ -1976,7 +2011,9 @@ mod tests {
         let ws_path = Arc::new(std::sync::Mutex::new(tmp.path().to_path_buf()));
         let proposals = Arc::new(ProposalService::new(
             rocket_app::CollectionService::new(
-                Box::new(rocket_infra::FsCollectionRepo::new_standalone(collections_dir)),
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    collections_dir,
+                )),
                 Box::new(rocket_shared::events::NullEventPublisher),
             ),
             Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(ws_path)),
@@ -2012,11 +2049,17 @@ mod tests {
         };
 
         let before = server.list_proposals().await.expect("tool call");
-        assert!(!text_of(&before).contains(&ids[0]), "unbound: the provisional id has none");
+        assert!(
+            !text_of(&before).contains(&ids[0]),
+            "unbound: the provisional id has none"
+        );
 
         binding.bind("acp-1");
         let after = server.list_proposals().await.expect("tool call");
-        assert!(text_of(&after).contains(&ids[0]), "bound: the real session's proposals");
+        assert!(
+            text_of(&after).contains(&ids[0]),
+            "bound: the real session's proposals"
+        );
     }
 
     #[tokio::test]
@@ -2064,7 +2107,9 @@ mod tests {
         let ws_path = Arc::new(std::sync::Mutex::new(tmp.path().to_path_buf()));
         let proposals = Arc::new(ProposalService::new(
             rocket_app::CollectionService::new(
-                Box::new(rocket_infra::FsCollectionRepo::new_standalone(collections_dir)),
+                Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    collections_dir,
+                )),
                 Box::new(rocket_shared::events::NullEventPublisher),
             ),
             Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(ws_path)),
@@ -2080,7 +2125,9 @@ mod tests {
             }
         })))
         .expect("convert");
-        proposals.propose("session-1", vec![change]).expect("propose");
+        proposals
+            .propose("session-1", vec![change])
+            .expect("propose");
 
         let app = tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
@@ -2097,10 +2144,7 @@ mod tests {
         }
     }
 
-    async fn propose_json(
-        fixture: &TestFixture,
-        changes: serde_json::Value,
-    ) -> CallToolResult {
+    async fn propose_json(fixture: &TestFixture, changes: serde_json::Value) -> CallToolResult {
         let params: ProposeChangesParams =
             serde_json::from_value(serde_json::json!({ "changes": changes })).expect("parse");
         fixture
@@ -2143,7 +2187,11 @@ mod tests {
         for case in cases {
             let result = propose_json(&fixture, serde_json::json!([case])).await;
             assert!(tool_is_error(&result));
-            assert!(tool_text(&result).contains("too long"), "{}", tool_text(&result));
+            assert!(
+                tool_text(&result).contains("too long"),
+                "{}",
+                tool_text(&result)
+            );
         }
     }
 
@@ -2162,7 +2210,11 @@ mod tests {
         for case in cases {
             let result = propose_json(&fixture, serde_json::json!([case])).await;
             assert!(tool_is_error(&result));
-            assert!(tool_text(&result).contains("too many"), "{}", tool_text(&result));
+            assert!(
+                tool_text(&result).contains("too many"),
+                "{}",
+                tool_text(&result)
+            );
         }
     }
 
@@ -2172,12 +2224,18 @@ mod tests {
         // Each script is under its own cap; together they pass the call cap.
         let body = "x".repeat(MAX_TEXT_BYTES - 1);
         let changes: Vec<serde_json::Value> = (0..MAX_CHANGES_PER_CALL)
-            .map(|_| serde_json::json!({ "op": "edit_script", "collection": "demo",
-                "request_path": "ping.yml", "phase": "tests", "body": body }))
+            .map(|_| {
+                serde_json::json!({ "op": "edit_script", "collection": "demo",
+                "request_path": "ping.yml", "phase": "tests", "body": body })
+            })
             .collect();
         let result = propose_json(&fixture, serde_json::Value::Array(changes)).await;
         assert!(tool_is_error(&result));
-        assert!(tool_text(&result).contains("too large"), "{}", tool_text(&result));
+        assert!(
+            tool_text(&result).contains("too large"),
+            "{}",
+            tool_text(&result)
+        );
     }
 
     #[test]

@@ -86,7 +86,11 @@ pub fn resolve_effective(
     };
     let developer = req.developer_mode && grant.developer_mode;
     let context_roots = if developer {
-        let approved: Vec<String> = grant.context_roots.iter().map(|r| normalize_root(r)).collect();
+        let approved: Vec<String> = grant
+            .context_roots
+            .iter()
+            .map(|r| normalize_root(r))
+            .collect();
         req.context_roots
             .iter()
             .map(|r| normalize_root(r))
@@ -123,7 +127,11 @@ pub fn normalize_root(raw: &str) -> String {
 /// Canonical text of a request, so a change between showing and approving is detectable.
 /// Roots are sorted and deduplicated, so their order does not matter.
 pub fn request_fingerprint(req: &RequestedElevation) -> String {
-    let mut roots: Vec<String> = req.context_roots.iter().map(|r| normalize_root(r)).collect();
+    let mut roots: Vec<String> = req
+        .context_roots
+        .iter()
+        .map(|r| normalize_root(r))
+        .collect();
     roots.sort();
     roots.dedup();
     format!(
@@ -356,6 +364,8 @@ mod tests {
             uid: None,
         };
         assert_eq!(DenyAllTrustStore.grant_for(&id).expect("ok"), None);
-        assert!(DenyAllTrustStore.put(&id, CollectionGrant::default()).is_err());
+        assert!(DenyAllTrustStore
+            .put(&id, CollectionGrant::default())
+            .is_err());
     }
 }

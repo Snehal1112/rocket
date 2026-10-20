@@ -1142,7 +1142,9 @@ mod tests {
     #[test]
     fn thought_chunks_become_thought_updates_and_non_text_thoughts_are_dropped() {
         assert_eq!(
-            session_update_to_acp(SessionUpdate::AgentThoughtChunk(text_chunk("checking auth"))),
+            session_update_to_acp(SessionUpdate::AgentThoughtChunk(text_chunk(
+                "checking auth"
+            ))),
             Some(AcpUpdate::Thought {
                 text: "checking auth".to_string()
             })

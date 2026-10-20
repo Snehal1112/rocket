@@ -17,8 +17,15 @@ fn bench_tree(c: &mut Criterion) {
         let fixture = generate(size);
 
         // Guard the fixture: a bench that lost requests would report a fast, wrong number.
-        let summaries = fixture.repo.get_summaries(&fixture.collection).expect("summaries");
-        assert_eq!(summaries.request_count(), size.requests(), "get_summaries count");
+        let summaries = fixture
+            .repo
+            .get_summaries(&fixture.collection)
+            .expect("summaries");
+        assert_eq!(
+            summaries.request_count(),
+            size.requests(),
+            "get_summaries count"
+        );
         let full = fixture.repo.get(&fixture.collection).expect("full tree");
         assert_eq!(full.request_count(), size.requests(), "get count");
 
@@ -39,9 +46,11 @@ fn bench_tree_deep(c: &mut Criterion) {
     let fixture = generate_deep();
     let mut group = c.benchmark_group("collection_tree");
     group.sample_size(10);
-    group.bench_with_input(BenchmarkId::new("get_summaries", "deep"), &fixture, |b, fx| {
-        b.iter(|| black_box(fx.repo.get_summaries(&fx.collection).expect("summaries")))
-    });
+    group.bench_with_input(
+        BenchmarkId::new("get_summaries", "deep"),
+        &fixture,
+        |b, fx| b.iter(|| black_box(fx.repo.get_summaries(&fx.collection).expect("summaries"))),
+    );
     group.finish();
 }
 
@@ -50,7 +59,11 @@ fn bench_list(c: &mut Criterion) {
     group.sample_size(10);
     for count in [10usize, 50] {
         let fixture = generate_collections(count, 5);
-        assert_eq!(fixture.repo.list().expect("list").len(), count, "list count");
+        assert_eq!(
+            fixture.repo.list().expect("list").len(),
+            count,
+            "list count"
+        );
         group.bench_with_input(BenchmarkId::new("list", count), &fixture, |b, fx| {
             b.iter(|| black_box(fx.repo.list().expect("list")))
         });
@@ -61,12 +74,26 @@ fn bench_list(c: &mut Criterion) {
 fn bench_get_request(c: &mut Criterion) {
     let fixture = generate(Size::Medium);
     let path = fixture.http_paths[fixture.http_paths.len() / 2].clone();
-    let probe = fixture.repo.get_request(&fixture.collection, &path).expect("get_request");
-    assert!(probe.name.starts_with("Request "), "unexpected request {:?}", probe.name);
+    let probe = fixture
+        .repo
+        .get_request(&fixture.collection, &path)
+        .expect("get_request");
+    assert!(
+        probe.name.starts_with("Request "),
+        "unexpected request {:?}",
+        probe.name
+    );
 
     let mut group = c.benchmark_group("collection_request");
     group.bench_function("get_request", |b| {
-        b.iter(|| black_box(fixture.repo.get_request(&fixture.collection, &path).expect("get_request")))
+        b.iter(|| {
+            black_box(
+                fixture
+                    .repo
+                    .get_request(&fixture.collection, &path)
+                    .expect("get_request"),
+            )
+        })
     });
     group.finish();
 }
@@ -97,5 +124,12 @@ fn bench_validate_path(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_tree, bench_tree_deep, bench_list, bench_get_request, bench_validate_path);
+criterion_group!(
+    benches,
+    bench_tree,
+    bench_tree_deep,
+    bench_list,
+    bench_get_request,
+    bench_validate_path
+);
 criterion_main!(benches);

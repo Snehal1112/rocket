@@ -1259,7 +1259,10 @@ fn strict_folder_chain_variables_fail_on_a_broken_folder_yml_only() {
         .get_folder_chain_variables_strict("my-api", "auth/login.yml")
         .expect("missing folder.yml")
         .is_empty());
-    let folder_yml = repo.collection_root_path("my-api").unwrap().join("auth/folder.yml");
+    let folder_yml = repo
+        .collection_root_path("my-api")
+        .unwrap()
+        .join("auth/folder.yml");
     std::fs::write(&folder_yml, "{ not: [valid").expect("write broken folder.yml");
     assert!(repo
         .get_folder_chain_variables("my-api", "auth/login.yml")
@@ -1276,7 +1279,10 @@ fn strict_folder_chain_variables_fail_on_an_unreadable_folder_yml() {
     repo.create("my-api").unwrap();
     repo.create_folder("my-api", "auth").unwrap();
     // A directory named folder.yml exists but cannot be read as a file.
-    let folder_yml = repo.collection_root_path("my-api").unwrap().join("auth/folder.yml");
+    let folder_yml = repo
+        .collection_root_path("my-api")
+        .unwrap()
+        .join("auth/folder.yml");
     let _ = std::fs::remove_file(&folder_yml);
     std::fs::create_dir(&folder_yml).expect("create folder.yml directory");
     assert!(repo
@@ -1668,9 +1674,11 @@ fn build_folder_tree_loads_non_http_items_as_opaque() {
     root.sort();
     // GraphQL and gRPC are typed now. Only WebSocket stays opaque.
     assert!(root.is_empty(), "no opaque item at the root: {root:?}");
-    assert!(col.root.items.iter().any(
-        |i| matches!(i, rocket_collection::CollectionItem::Grpc(g) if g.name == "Get User")
-    ));
+    assert!(col
+        .root
+        .items
+        .iter()
+        .any(|i| matches!(i, rocket_collection::CollectionItem::Grpc(g) if g.name == "Get User")));
     assert!(col.root.items.iter().any(
         |i| matches!(i, rocket_collection::CollectionItem::GraphQl(g) if g.name == "List Users")
     ));
@@ -1768,7 +1776,10 @@ fn websocket_settings_survive_the_typed_load() {
     let ws = repo.get_websocket_request("my-api", "chat.yml").unwrap();
     let settings = ws.settings.expect("settings");
     assert_eq!(settings.timeout, Some(RequestSettingValue::Value(5000.0)));
-    assert_eq!(settings.keep_alive_interval, Some(RequestSettingValue::Value(30000.0)));
+    assert_eq!(
+        settings.keep_alive_interval,
+        Some(RequestSettingValue::Value(30000.0))
+    );
 }
 
 #[test]
@@ -1922,13 +1933,12 @@ fn gql_fixture(uid_line: &str) -> String {
 fn graphql_request_round_trips_through_the_repo() {
     let (dir, repo) = setup();
     repo.create("my-api").expect("create collection");
-    let mut g = rocket_collection::GraphQlRequest::new(
-        "List Users",
-        "https://api.example.com/graphql",
-    )
-    .with_query("query Users { users { id } }");
+    let mut g =
+        rocket_collection::GraphQlRequest::new("List Users", "https://api.example.com/graphql")
+            .with_query("query Users { users { id } }");
     g.body.variables = Some("{\"first\": 5}".into());
-    g.headers.push(rocket_shared::types::Header::new("X-Trace", "1"));
+    g.headers
+        .push(rocket_shared::types::Header::new("X-Trace", "1"));
 
     let saved = repo
         .save_graphql_request("my-api", "list-users.yml", &g)
@@ -2086,7 +2096,12 @@ fn get_summaries_returns_a_graphql_summary_with_its_kind() {
     fs::write(dir.path().join("my-api/get-user.yml"), GRPC_ITEM_YML).expect("write grpc");
 
     let col = repo.get_summaries("my-api").unwrap();
-    assert_eq!(col.root.items.len(), 2, "GraphQL and gRPC both listed: {:?}", col.root.items);
+    assert_eq!(
+        col.root.items.len(),
+        2,
+        "GraphQL and gRPC both listed: {:?}",
+        col.root.items
+    );
     let s = col
         .root
         .items
@@ -2122,11 +2137,24 @@ fn websocket_roundtrip_through_the_repo_preserves_every_field() {
     ws.tags = vec!["realtime".into()];
     ws.headers = vec![Header::new("Origin", "https://example.com")];
     ws.messages = vec![
-        WebSocketMessage { title: "hi".into(), selected: true, kind: WebSocketMessageKind::Json, data: "{}".into() },
-        WebSocketMessage { title: "raw".into(), selected: false, kind: WebSocketMessageKind::Binary, data: "AQID".into() },
+        WebSocketMessage {
+            title: "hi".into(),
+            selected: true,
+            kind: WebSocketMessageKind::Json,
+            data: "{}".into(),
+        },
+        WebSocketMessage {
+            title: "raw".into(),
+            selected: false,
+            kind: WebSocketMessageKind::Binary,
+            data: "AQID".into(),
+        },
     ];
     ws.auth = Auth::Bearer { token: "t".into() };
-    ws.runtime_auth = Some(Auth::Basic { username: "u".into(), password: "p".into() });
+    ws.runtime_auth = Some(Auth::Basic {
+        username: "u".into(),
+        password: "p".into(),
+    });
     ws.variables = vec![CollectionVariable {
         key: "room".into(),
         value: "general".into(),
@@ -2134,7 +2162,10 @@ fn websocket_roundtrip_through_the_repo_preserves_every_field() {
         enabled: true,
         secret: false,
     }];
-    ws.scripts = vec![WebSocketScript { script_type: "before-request".into(), code: "// pre".into() }];
+    ws.scripts = vec![WebSocketScript {
+        script_type: "before-request".into(),
+        code: "// pre".into(),
+    }];
     ws.settings = Some(WebSocketSettings {
         timeout: Some(RequestSettingValue::Value(5000.0)),
         keep_alive_interval: Some(RequestSettingValue::Inherit("inherit".into())),
@@ -2166,7 +2197,8 @@ fn single_untitled_message_is_written_in_the_single_form() {
     repo.save_websocket_request("my-api", "chat", &ws).unwrap();
 
     let raw: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(dir.path().join("my-api/chat.yml")).unwrap()).unwrap();
+        serde_yaml::from_str(&fs::read_to_string(dir.path().join("my-api/chat.yml")).unwrap())
+            .unwrap();
     assert!(raw["websocket"]["message"].is_mapping(), "{raw:?}");
     assert_eq!(raw["websocket"]["message"]["type"].as_str(), Some("json"));
     assert_eq!(raw["info"]["type"].as_str(), Some("websocket"));
@@ -2180,13 +2212,24 @@ fn several_messages_are_written_as_variants() {
     repo.create("my-api").unwrap();
     let mut ws = WebSocketRequest::new("Chat", "ws://x");
     ws.messages = vec![
-        WebSocketMessage { title: "a".into(), selected: true, kind: WebSocketMessageKind::Text, data: "1".into() },
-        WebSocketMessage { title: "b".into(), selected: false, kind: WebSocketMessageKind::Text, data: "2".into() },
+        WebSocketMessage {
+            title: "a".into(),
+            selected: true,
+            kind: WebSocketMessageKind::Text,
+            data: "1".into(),
+        },
+        WebSocketMessage {
+            title: "b".into(),
+            selected: false,
+            kind: WebSocketMessageKind::Text,
+            data: "2".into(),
+        },
     ];
     repo.save_websocket_request("my-api", "chat", &ws).unwrap();
 
     let raw: serde_yaml::Value =
-        serde_yaml::from_str(&fs::read_to_string(dir.path().join("my-api/chat.yml")).unwrap()).unwrap();
+        serde_yaml::from_str(&fs::read_to_string(dir.path().join("my-api/chat.yml")).unwrap())
+            .unwrap();
     assert!(raw["websocket"]["message"].is_sequence(), "{raw:?}");
     assert_eq!(raw["websocket"]["message"][1]["title"].as_str(), Some("b"));
 }
@@ -2267,16 +2310,24 @@ fn saving_a_websocket_request_keeps_runtime_variables_edited_on_their_own_path()
         enabled: true,
         secret: false,
     };
-    repo.save_request_variables("my-api", "chat.yml", vec![var.clone()]).unwrap();
-    assert_eq!(repo.get_request_variables("my-api", "chat.yml").unwrap(), vec![var.clone()]);
+    repo.save_request_variables("my-api", "chat.yml", vec![var.clone()])
+        .unwrap();
+    assert_eq!(
+        repo.get_request_variables("my-api", "chat.yml").unwrap(),
+        vec![var.clone()]
+    );
 
     // A later save from the UI sends no variables and must not erase them.
     let mut again = repo.get_websocket_request("my-api", "chat.yml").unwrap();
     again.variables = Vec::new();
     again.name = "Chat v2".into();
-    repo.save_websocket_request("my-api", "chat", &again).unwrap();
+    repo.save_websocket_request("my-api", "chat", &again)
+        .unwrap();
 
-    assert_eq!(repo.get_request_variables("my-api", "chat.yml").unwrap(), vec![var]);
+    assert_eq!(
+        repo.get_request_variables("my-api", "chat.yml").unwrap(),
+        vec![var]
+    );
     let after = repo.get_websocket_request("my-api", "chat.yml").unwrap();
     assert_eq!(after.name, "Chat v2");
     assert_eq!(after.url, "ws://x", "the file is still a websocket file");
@@ -2286,7 +2337,8 @@ fn saving_a_websocket_request_keeps_runtime_variables_edited_on_their_own_path()
 fn get_websocket_on_an_http_file_is_an_error_not_a_panic() {
     let (_dir, repo) = setup();
     repo.create("my-api").unwrap();
-    let req = rocket_collection::Request::new("Get", rocket_shared::types::HttpMethod::Get, "https://x");
+    let req =
+        rocket_collection::Request::new("Get", rocket_shared::types::HttpMethod::Get, "https://x");
     repo.save_request("my-api", "get", &req).unwrap();
     assert!(repo.get_websocket_request("my-api", "get.yml").is_err());
 }
@@ -2562,16 +2614,26 @@ fn a_uid_less_grpc_file_has_one_stable_uid_everywhere() {
         rocket_collection::CollectionItem::Summary(s) => s.uid.clone(),
         other => panic!("expected a summary, got {other:?}"),
     };
-    let loaded = repo.get_grpc_request("my-api", "get-user.yml").expect("get");
-    let again = repo.get_grpc_request("my-api", "get-user.yml").expect("get again");
+    let loaded = repo
+        .get_grpc_request("my-api", "get-user.yml")
+        .expect("get");
+    let again = repo
+        .get_grpc_request("my-api", "get-user.yml")
+        .expect("get again");
     let tree_uid = match &repo.get("my-api").expect("tree").root.items[0] {
         rocket_collection::CollectionItem::Grpc(g) => g.uid.clone(),
         other => panic!("expected a grpc item, got {other:?}"),
     };
 
-    assert!(!summary_uid.is_empty(), "the sidebar needs an id to open the tab by");
+    assert!(
+        !summary_uid.is_empty(),
+        "the sidebar needs an id to open the tab by"
+    );
     assert_eq!(summary_uid, loaded.uid);
-    assert_eq!(loaded.uid, again.uid, "a read must give the same uid every time");
+    assert_eq!(
+        loaded.uid, again.uid,
+        "a read must give the same uid every time"
+    );
     assert_eq!(loaded.uid, tree_uid);
 }
 
@@ -2591,10 +2653,19 @@ fn saving_collection_settings_keeps_scripts_metadata_and_request_settings() {
     repo.save_settings("my-api", &settings).expect("save");
 
     let saved = fs::read_to_string(&file).expect("read");
-    assert!(saved.contains("// collection script"), "scripts kept: {saved}");
+    assert!(
+        saved.contains("// collection script"),
+        "scripts kept: {saved}"
+    );
     assert!(saved.contains("x-meta"), "metadata kept: {saved}");
-    assert!(saved.contains("timeout: 5000"), "request settings kept: {saved}");
-    assert!(!saved.contains("X-A"), "the edited header list is respected: {saved}");
+    assert!(
+        saved.contains("timeout: 5000"),
+        "request settings kept: {saved}"
+    );
+    assert!(
+        !saved.contains("X-A"),
+        "the edited header list is respected: {saved}"
+    );
 }
 
 #[test]
@@ -3015,7 +3086,10 @@ fn settings_default_save_writes_no_bruno_extension() {
     let (_dir, repo) = setup();
     repo.create("col").expect("create");
     let settings = repo.get_settings("col").expect("get");
-    assert_eq!(settings.script_flow, rocket_collection::ScriptFlow::Sandwich);
+    assert_eq!(
+        settings.script_flow,
+        rocket_collection::ScriptFlow::Sandwich
+    );
     repo.save_settings("col", &settings).expect("save");
     let yaml = fs::read_to_string(repo.settings_path("col")).expect("read");
     assert!(!yaml.contains("bruno"), "no bruno key for sandwich: {yaml}");
@@ -3034,7 +3108,10 @@ fn settings_script_flow_reads_a_bruno_authored_file() {
     )
     .expect("write fixture");
     let loaded = repo.get_settings("col").expect("get");
-    assert_eq!(loaded.script_flow, rocket_collection::ScriptFlow::Sequential);
+    assert_eq!(
+        loaded.script_flow,
+        rocket_collection::ScriptFlow::Sequential
+    );
 }
 
 #[test]
@@ -3058,7 +3135,10 @@ fn settings_script_flow_sequential_roundtrips_and_keeps_other_extensions() {
     repo.save_settings("col", &settings).expect("save");
 
     let loaded = repo.get_settings("col").expect("reload");
-    assert_eq!(loaded.script_flow, rocket_collection::ScriptFlow::Sequential);
+    assert_eq!(
+        loaded.script_flow,
+        rocket_collection::ScriptFlow::Sequential
+    );
     assert_eq!(loaded.sandbox_mode, SandboxMode::Developer);
     assert_eq!(loaded.script_context_roots, vec!["../shared"]);
     let yaml = fs::read_to_string(&path).expect("read back");
@@ -3090,7 +3170,8 @@ fn settings_script_flow_back_to_sandwich_removes_the_bruno_stub() {
     repo.create("col").expect("create");
     let mut settings = repo.get_settings("col").expect("get");
     settings.script_flow = rocket_collection::ScriptFlow::Sequential;
-    repo.save_settings("col", &settings).expect("save sequential");
+    repo.save_settings("col", &settings)
+        .expect("save sequential");
     settings.script_flow = rocket_collection::ScriptFlow::Sandwich;
     repo.save_settings("col", &settings).expect("save sandwich");
     let yaml = fs::read_to_string(repo.settings_path("col")).expect("read");
@@ -3106,10 +3187,14 @@ fn path_exists_sees_hidden_items_and_ignores_case() {
     fs::create_dir_all(root.join("environments")).expect("environments");
     fs::create_dir_all(root.join("Reports")).expect("reports");
     fs::write(root.join("Reports").join("get-users.yml"), "x").expect("file");
-    assert!(repo.path_exists("col", "opencollection.yml").expect("check"));
+    assert!(repo
+        .path_exists("col", "opencollection.yml")
+        .expect("check"));
     assert!(repo.path_exists("col", "environments").expect("check"));
     assert!(repo.path_exists("col", "reports").expect("check"));
-    assert!(repo.path_exists("col", "REPORTS/Get-Users.yml").expect("check"));
+    assert!(repo
+        .path_exists("col", "REPORTS/Get-Users.yml")
+        .expect("check"));
     assert!(!repo.path_exists("col", "reports/other.yml").expect("check"));
     assert!(!repo.path_exists("col", "missing/other.yml").expect("check"));
 }
@@ -3123,7 +3208,9 @@ fn path_exists_refuses_a_symlinked_parent() {
     fs::create_dir_all(&outside).expect("outside");
     std::os::unix::fs::symlink(&outside, dir.path().join("col").join("link")).expect("symlink");
     assert!(repo.path_exists("col", "link/x.yml").is_err());
-    assert!(repo.path_exists("col", "link").expect("the link itself exists"));
+    assert!(repo
+        .path_exists("col", "link")
+        .expect("the link itself exists"));
 }
 
 #[test]
@@ -3139,7 +3226,9 @@ fn create_folder_exclusive_refuses_an_existing_folder_and_keeps_its_metadata() {
         .expect_err("exists");
     assert!(matches!(err, DomainError::AlreadyExists(_)));
     assert_eq!(fs::read_to_string(&folder_yml).expect("folder.yml"), before);
-    assert!(repo.create_folder_exclusive("col", "missing/child").is_err());
+    assert!(repo
+        .create_folder_exclusive("col", "missing/child")
+        .is_err());
 }
 
 #[test]
@@ -3262,7 +3351,10 @@ fn folder_chain_variables_reject_parent_dir_and_absolute_paths() {
         let err = repo
             .get_folder_chain_variables("my-api", bad)
             .expect_err("unsafe request path must be rejected");
-        assert!(matches!(err, DomainError::InvalidInput(_)), "{bad}: {err:?}");
+        assert!(
+            matches!(err, DomainError::InvalidInput(_)),
+            "{bad}: {err:?}"
+        );
     }
 }
 
@@ -3413,9 +3505,16 @@ fn list_strict_errors_on_a_legacy_collection_that_cannot_migrate() {
     fs::create_dir_all(dir.path().join("plain")).expect("mkdir plain");
 
     let lenient = repo.list().expect("lenient list");
-    assert_eq!(lenient.len(), 1, "the broken and the plain directory are skipped");
+    assert_eq!(
+        lenient.len(),
+        1,
+        "the broken and the plain directory are skipped"
+    );
     let strict = repo.list_strict();
-    assert!(matches!(strict, Err(DomainError::Internal(_))), "{strict:?}");
+    assert!(
+        matches!(strict, Err(DomainError::Internal(_))),
+        "{strict:?}"
+    );
 
     fs::remove_dir_all(dir.path().join("legacy")).expect("remove");
     let strict = repo.list_strict().expect("plain directories stay skipped");

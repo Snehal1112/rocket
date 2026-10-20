@@ -1587,9 +1587,16 @@ graphql:
 "#;
     let oc: OcGraphQLRequest = serde_yaml::from_str(yaml).expect("parse");
     let mut g = oc_graphql_to_domain(oc);
-    assert_eq!(g.method, rocket_shared::types::HttpMethod::Post, "method defaults to POST");
+    assert_eq!(
+        g.method,
+        rocket_shared::types::HttpMethod::Post,
+        "method defaults to POST"
+    );
     assert_eq!(g.body_variants.len(), 2);
-    assert_eq!(g.body.query, "{ orders { id } }", "the selected variant is the active body");
+    assert_eq!(
+        g.body.query, "{ orders { id } }",
+        "the selected variant is the active body"
+    );
 
     g.body.query = "{ orders { id total } }".into();
     let back = graphql_to_oc(&g);
@@ -1600,12 +1607,16 @@ graphql:
     assert_eq!(vs[0].body.query, "{ users { id } }");
     assert!(!vs[0].selected);
     assert!(vs[1].selected);
-    assert_eq!(vs[1].body.query, "{ orders { id total } }", "edits land in the selected variant");
+    assert_eq!(
+        vs[1].body.query, "{ orders { id total } }",
+        "edits land in the selected variant"
+    );
 }
 
 #[test]
 fn graphql_to_oc_drops_blank_variables_and_empty_uid() {
-    let mut g = rocket_collection::GraphQlRequest::new("A", "https://x/graphql").with_query("{ a }");
+    let mut g =
+        rocket_collection::GraphQlRequest::new("A", "https://x/graphql").with_query("{ a }");
     g.uid = String::new();
     g.body.variables = Some("   ".into());
     let oc = graphql_to_oc(&g);

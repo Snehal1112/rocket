@@ -95,9 +95,9 @@ fn graph_error_message(error: FlowGraphError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_flow::lint::{LintSeverity, EXIT_WITHOUT_EDGE, INVALID_GRAPH, NO_PATH_TO_OUTPUT};
     use rocket_flow::{FlowEdge, FlowNode, FlowNodeKind, NodePosition};
     use std::sync::Mutex;
-    use rocket_flow::lint::{LintSeverity, EXIT_WITHOUT_EDGE, INVALID_GRAPH, NO_PATH_TO_OUTPUT};
 
     fn sample_flow() -> Flow {
         Flow {
@@ -497,7 +497,13 @@ mod tests {
                 ),
             ],
             edges: vec![
-                wire("e1", "in", rocket_flow::handle::RESULT, "if1", rocket_flow::handle::INPUT),
+                wire(
+                    "e1",
+                    "in",
+                    rocket_flow::handle::RESULT,
+                    "if1",
+                    rocket_flow::handle::INPUT,
+                ),
                 wire("e2", "if1", rocket_flow::handle::TRUE, "out", "value"),
             ],
             callback_host: None,
@@ -515,7 +521,10 @@ mod tests {
     fn lint_reads_only_the_given_graph() {
         let svc = FlowService::new(Box::new(UntouchedRepo));
         let lints = svc.lint("demo", &routing_flow());
-        assert_eq!(lint_keys(&lints), vec![(Some("if1"), None, EXIT_WITHOUT_EDGE)]);
+        assert_eq!(
+            lint_keys(&lints),
+            vec![(Some("if1"), None, EXIT_WITHOUT_EDGE)]
+        );
         assert_eq!(lints[0].severity, LintSeverity::Warning);
         assert_eq!(
             lints[0].message,
@@ -573,7 +582,9 @@ mod tests {
             "got: {}",
             lints[0].message
         );
-        assert!(lints[1..].iter().all(|l| l.severity == LintSeverity::Warning));
+        assert!(lints[1..]
+            .iter()
+            .all(|l| l.severity == LintSeverity::Warning));
     }
 
     #[test]

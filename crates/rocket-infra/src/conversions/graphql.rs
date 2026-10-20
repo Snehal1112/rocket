@@ -211,9 +211,6 @@ pub fn graphql_to_oc(g: &GraphQlRequest) -> OcGraphQLRequest {
         },
         runtime,
         settings: g.settings.clone().map(settings_to_oc),
-        docs: g
-            .docs
-            .as_ref()
-            .and_then(|d| d.content().map(String::from)),
+        docs: g.docs.as_ref().and_then(|d| d.content().map(String::from)),
     }
 }

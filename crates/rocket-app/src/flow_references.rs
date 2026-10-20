@@ -98,9 +98,7 @@ impl FlowReferenceUpdater for FlowService {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use rocket_flow::{
-        Flow, FlowNode, FlowNodeKind, FlowRepository, NodePosition, RequestSource,
-    };
+    use rocket_flow::{Flow, FlowNode, FlowNodeKind, FlowRepository, NodePosition, RequestSource};
     use rocket_shared::error::{DomainError, DomainResult};
     use std::sync::{Arc, Mutex};
 
@@ -117,8 +115,10 @@ pub(crate) mod test_support {
     impl ScriptedFlowRepo {
         pub(crate) fn seeded(collection: &str, flows: Vec<Flow>) -> Arc<Self> {
             let repo = Self::default();
-            *repo.flows.lock().expect("lock flows") =
-                flows.into_iter().map(|f| (collection.to_string(), f)).collect();
+            *repo.flows.lock().expect("lock flows") = flows
+                .into_iter()
+                .map(|f| (collection.to_string(), f))
+                .collect();
             Arc::new(repo)
         }
 
@@ -323,11 +323,7 @@ mod tests {
         let report = service(&repo).rewrite_request_paths("c", "auth", "identity");
         assert_eq!(report.failed.len(), 1);
         assert_eq!(report.failed[0].flow, "A");
-        assert!(!repo
-            .saved
-            .lock()
-            .expect("lock")
-            .contains(&"A".to_string()));
+        assert!(!repo.saved.lock().expect("lock").contains(&"A".to_string()));
         assert_eq!(report.rewritten, vec!["C".to_string()]);
     }
 

@@ -694,7 +694,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_workspace_session_refuses_a_persisted_gemini_config_that_claims_a_reserved_name() {
+    async fn start_workspace_session_refuses_a_persisted_gemini_config_that_claims_a_reserved_name()
+    {
         let mut bad = sample_config();
         bad.kind = rocket_acp::AgentKind::Gemini;
         bad.extra_env = vec![env_pair("GEMINI_CLI_HOME", "/evil")];
@@ -722,7 +723,10 @@ mod tests {
             .expect_err("a reserved name must not start");
         assert!(matches!(err, DomainError::InvalidInput(_)));
         let msg = err.to_string();
-        assert!(msg.contains("extra_env #1") && msg.contains("reserved"), "got: {msg}");
+        assert!(
+            msg.contains("extra_env #1") && msg.contains("reserved"),
+            "got: {msg}"
+        );
         assert!(!msg.contains("/evil"));
     }
 

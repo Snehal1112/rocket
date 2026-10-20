@@ -144,7 +144,9 @@ impl FsEnvironmentRepo {
             } else if strict {
                 return Err(DomainError::Internal(format!(
                     "environment file '{}' cannot be parsed",
-                    path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+                    path.file_name()
+                        .map(|n| n.to_string_lossy())
+                        .unwrap_or_default()
                 )));
             } else {
                 tracing::warn!(path = %path.display(), "skipping corrupt environment YAML file");
@@ -367,7 +369,12 @@ mod tests {
             );
         }
         assert!(!dir.path().join("sub").exists());
-        assert!(!dir.path().parent().expect("parent").join("evil.yml").exists());
+        assert!(!dir
+            .path()
+            .parent()
+            .expect("parent")
+            .join("evil.yml")
+            .exists());
     }
 
     #[test]
@@ -383,11 +390,7 @@ mod tests {
     #[test]
     fn list_falls_back_to_file_stem_for_unusable_stored_name() {
         let (dir, repo) = setup();
-        std::fs::write(
-            dir.path().join("real.yml"),
-            "name: a/b\nvariables: []\n",
-        )
-        .expect("write");
+        std::fs::write(dir.path().join("real.yml"), "name: a/b\nvariables: []\n").expect("write");
         let list = repo.list().expect("list");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "real");
@@ -906,17 +909,18 @@ mod tests {
 
         assert_eq!(repo.list().expect("lenient list").len(), 1);
         let strict = repo.list_strict();
-        assert!(matches!(strict, Err(DomainError::Internal(_))), "{strict:?}");
+        assert!(
+            matches!(strict, Err(DomainError::Internal(_))),
+            "{strict:?}"
+        );
     }
 
     #[test]
     fn list_strict_errors_when_the_secret_store_fails_and_list_does_not() {
         let tmp = TempDir::new().expect("tempdir");
         let store = Arc::new(InMemorySecretStore::default());
-        let repo = FsEnvironmentRepo::with_secret_store(
-            tmp.path().join("environments"),
-            store.clone(),
-        );
+        let repo =
+            FsEnvironmentRepo::with_secret_store(tmp.path().join("environments"), store.clone());
         let mut env = Environment::new("prod");
         env.set_variable(Variable::secret("token", "s3cret-value-1"));
         repo.save(&env).expect("save");

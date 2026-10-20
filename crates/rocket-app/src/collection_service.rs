@@ -4,8 +4,9 @@ use rocket_audit::{
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_collection::{
-    Collection, CollectionGrant, CollectionRepository, CollectionTrustStore, GrantSource, CollectionSummary, CollectionVariable, FolderSettings,
-    GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase, WebSocketRequest,
+    Collection, CollectionGrant, CollectionRepository, CollectionSummary, CollectionTrustStore,
+    CollectionVariable, FolderSettings, GrantSource, GraphQlRequest, GrpcRequest, Request,
+    RequestKind, RequestScriptPhase, WebSocketRequest,
 };
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -322,7 +323,9 @@ impl CollectionService {
         if kind == RequestKind::Grpc {
             let mut request = self.repo.get_grpc_request(collection, old_path)?;
             request.name = new_name.to_string();
-            let actual_path = self.repo.save_grpc_request(collection, old_path, &request)?;
+            let actual_path = self
+                .repo
+                .save_grpc_request(collection, old_path, &request)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
@@ -427,7 +430,9 @@ impl CollectionService {
         path: &str,
         request: &Request,
     ) -> DomainResult<Request> {
-        let actual_path = self.repo.create_request_exclusive(collection, path, request)?;
+        let actual_path = self
+            .repo
+            .create_request_exclusive(collection, path, request)?;
         self.events.publish(DomainEvent::RequestSaved {
             collection: collection.to_string(),
             path: actual_path.clone(),
@@ -446,7 +451,9 @@ impl CollectionService {
     ) -> DomainResult<Request> {
         let file_path = rocket_collection::request_filename_for(path);
         if self.repo.path_exists(collection, &file_path)? {
-            return Err(DomainError::AlreadyExists(format!("{collection}/{file_path}")));
+            return Err(DomainError::AlreadyExists(format!(
+                "{collection}/{file_path}"
+            )));
         }
         self.create_request_exclusive(collection, &file_path, request)
     }
@@ -479,7 +486,11 @@ impl CollectionService {
                 Some(dir) => format!("{dir}/{file_name}"),
                 None => file_name,
             };
-            if self.repo.path_exists(collection, &candidate).unwrap_or(true) {
+            if self
+                .repo
+                .path_exists(collection, &candidate)
+                .unwrap_or(true)
+            {
                 continue;
             }
             let mut copy = source.clone();
@@ -735,8 +746,7 @@ mod tests {
     /// Builds a strict stateful repo. `rename_request` still panics.
     fn mock_collection_repo() -> NullCollectionRepo {
         let collections: Arc<Mutex<Vec<Collection>>> = Arc::new(Mutex::new(Vec::new()));
-        let requests: Arc<Mutex<Vec<(String, String, Request)>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let requests: Arc<Mutex<Vec<(String, String, Request)>>> = Arc::new(Mutex::new(Vec::new()));
 
         let cols = collections.clone();
         let list = move || {
@@ -1215,15 +1225,20 @@ mod tests {
     }
 
     fn dup_ok(path: &str) -> (Recorded, Request) {
-        let (svc, rec, _) = dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        let (svc, rec, _) =
+            dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
         let out = svc.duplicate_request("c", path).expect("duplicate");
         (rec, out)
     }
 
     #[test]
     fn create_request_refuses_a_name_that_exists_even_in_another_case() {
-        let (svc, rec, publisher) =
-            dup_service(dup_source(), || Ok(RequestKind::Http), |p| Ok(p.to_lowercase() == "auth/login.yml"), false);
+        let (svc, rec, publisher) = dup_service(
+            dup_source(),
+            || Ok(RequestKind::Http),
+            |p| Ok(p.to_lowercase() == "auth/login.yml"),
+            false,
+        );
         let blank = Request::new("LOGIN", HttpMethod::Get, String::new());
         let err = svc
             .create_request("c", "auth/LOGIN", &blank)
@@ -1235,9 +1250,11 @@ mod tests {
 
     #[test]
     fn create_request_writes_a_new_name_and_publishes() {
-        let (svc, rec, _) = dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        let (svc, rec, _) =
+            dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
         let fresh = Request::new("Fresh", HttpMethod::Get, String::new());
-        svc.create_request("c", "auth/Fresh", &fresh).expect("created");
+        svc.create_request("c", "auth/Fresh", &fresh)
+            .expect("created");
         let rec = rec.lock().expect("lock");
         assert_eq!(rec.len(), 1);
         assert_eq!(rec[0].0, "auth/Fresh.yml");
@@ -1281,7 +1298,12 @@ mod tests {
             enabled: true,
             secret: false,
         }];
-        let (svc, rec, _) = dup_service(source.clone(), || Ok(RequestKind::Http), |_| Ok(false), false);
+        let (svc, rec, _) = dup_service(
+            source.clone(),
+            || Ok(RequestKind::Http),
+            |_| Ok(false),
+            false,
+        );
         svc.duplicate_request("c", "Login.yml").expect("duplicate");
         let mut expected = source;
         let got = rec.lock().expect("lock")[0].1.clone();
@@ -1294,9 +1316,15 @@ mod tests {
 
     #[test]
     fn duplicate_request_rejects_a_graphql_request() {
-        let (svc, rec, _) =
-            dup_service(dup_source(), || Ok(RequestKind::GraphQl), |_| Ok(false), false);
-        let err = svc.duplicate_request("c", "Login.yml").expect_err("refused");
+        let (svc, rec, _) = dup_service(
+            dup_source(),
+            || Ok(RequestKind::GraphQl),
+            |_| Ok(false),
+            false,
+        );
+        let err = svc
+            .duplicate_request("c", "Login.yml")
+            .expect_err("refused");
         assert!(matches!(err, DomainError::InvalidInput(_)));
         assert!(rec.lock().expect("lock").is_empty());
     }
@@ -1309,7 +1337,9 @@ mod tests {
             |_| Ok(false),
             false,
         );
-        let err = svc.duplicate_request("c", "Login.yml").expect_err("missing");
+        let err = svc
+            .duplicate_request("c", "Login.yml")
+            .expect_err("missing");
         assert!(matches!(err, DomainError::NotFound(_)));
     }
 
@@ -1317,7 +1347,8 @@ mod tests {
     fn duplicate_request_publishes_request_saved() {
         let (svc, _, publisher) =
             dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), false);
-        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        svc.duplicate_request("c", "auth/Login.yml")
+            .expect("duplicate");
         let published = publisher.events.lock().expect("lock");
         assert_eq!(published.len(), 1);
         assert!(matches!(
@@ -1335,7 +1366,8 @@ mod tests {
             |p| Ok(p == "auth/Login copy.yml"),
             false,
         );
-        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        svc.duplicate_request("c", "auth/Login.yml")
+            .expect("duplicate");
         let rec = rec.lock().expect("lock");
         assert_eq!(rec[0].0, "auth/Login copy 2.yml");
         assert_eq!(rec[0].1.name, "Login copy 2");
@@ -1345,7 +1377,8 @@ mod tests {
     fn duplicate_request_retries_the_next_name_when_the_file_appears_meanwhile() {
         let (svc, rec, _) =
             dup_service(dup_source(), || Ok(RequestKind::Http), |_| Ok(false), true);
-        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        svc.duplicate_request("c", "auth/Login.yml")
+            .expect("duplicate");
         let rec = rec.lock().expect("lock");
         assert_eq!(rec.len(), 1);
         assert_eq!(rec[0].0, "auth/Login copy 2.yml");
@@ -1384,7 +1417,8 @@ mod tests {
             },
             false,
         );
-        svc.duplicate_request("c", "auth/Login.yml").expect("duplicate");
+        svc.duplicate_request("c", "auth/Login.yml")
+            .expect("duplicate");
         assert_eq!(rec.lock().expect("lock")[0].0, "auth/Login copy 2.yml");
     }
 
@@ -1393,7 +1427,8 @@ mod tests {
         let mut source = dup_source();
         source.name = "A/B: C".into();
         let (svc, rec, _) = dup_service(source, || Ok(RequestKind::Http), |_| Ok(false), false);
-        svc.duplicate_request("c", "auth/ab.yml").expect("duplicate");
+        svc.duplicate_request("c", "auth/ab.yml")
+            .expect("duplicate");
         let rec = rec.lock().expect("lock");
         assert_eq!(rec[0].0, "auth/ab copy.yml");
         assert_eq!(rec[0].1.name, "A/B: C copy");
@@ -1428,7 +1463,12 @@ mod tests {
         }
     }
     impl FlowReferenceUpdater for RecordingUpdater {
-        fn rewrite_request_paths(&self, collection: &str, from: &str, to: &str) -> FlowRewriteReport {
+        fn rewrite_request_paths(
+            &self,
+            collection: &str,
+            from: &str,
+            to: &str,
+        ) -> FlowRewriteReport {
             self.calls.lock().expect("lock").push((
                 collection.to_string(),
                 from.to_string(),
@@ -1451,7 +1491,11 @@ mod tests {
     fn flow_fixture(
         repo: NullCollectionRepo,
         report: FlowRewriteReport,
-    ) -> (CollectionService, Arc<RecordingUpdater>, Arc<RecordingEventPublisher>) {
+    ) -> (
+        CollectionService,
+        Arc<RecordingUpdater>,
+        Arc<RecordingEventPublisher>,
+    ) {
         let updater = Arc::new(RecordingUpdater::default());
         *updater.report.lock().expect("lock") = report;
         let publisher = Arc::new(RecordingEventPublisher {
@@ -1492,7 +1536,9 @@ mod tests {
         svc.move_item("c", "auth", "c", "identity").expect("move");
         assert_eq!(*updater.calls.lock().expect("lock"), expected_call());
         let events = publisher.events.lock().expect("lock");
-        assert!(events.iter().any(|e| matches!(e, DomainEvent::ItemMoved { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::ItemMoved { .. })));
         assert!(events.iter().any(|e| matches!(
             e,
             DomainEvent::FlowRequestPathsRewritten { collection, from, to, flows, failed }
@@ -1581,7 +1627,11 @@ mod tests {
 
     fn other_collection_fixture(
         using: DomainResult<Vec<String>>,
-    ) -> (CollectionService, Arc<RecordingUpdater>, Arc<RecordingEventPublisher>) {
+    ) -> (
+        CollectionService,
+        Arc<RecordingUpdater>,
+        Arc<RecordingEventPublisher>,
+    ) {
         let (svc, updater, publisher) =
             flow_fixture(mock_collection_repo(), FlowRewriteReport::default());
         *updater.using.lock().expect("lock") = using;
@@ -1815,7 +1865,8 @@ mod tests {
         repo.save_grpc_request("api", "call.yml", &g).expect("save");
 
         let svc = CollectionService::new(Box::new(repo), Box::new(NullEventPublisher));
-        svc.rename_request("api", "call.yml", "New").expect("rename");
+        svc.rename_request("api", "call.yml", "New")
+            .expect("rename");
 
         let back = svc.get_grpc_request("api", "call.yml").expect("get");
         assert_eq!(back.name, "New");
@@ -2017,7 +2068,8 @@ mod folder_settings_tests {
             .expect("save_folder_settings");
 
         assert_eq!(
-            svc.get_folder_settings("api", "auth").expect("get_folder_settings"),
+            svc.get_folder_settings("api", "auth")
+                .expect("get_folder_settings"),
             sample()
         );
         let events = recorder.0.lock().expect("lock");
@@ -2066,11 +2118,17 @@ mod trust_tests {
     use rocket_infra::{FsCollectionRepo, FsCollectionTrustStore};
     use rocket_shared::events::NullEventPublisher;
 
-    fn setup() -> (tempfile::TempDir, CollectionService, Arc<FsCollectionTrustStore>) {
+    fn setup() -> (
+        tempfile::TempDir,
+        CollectionService,
+        Arc<FsCollectionTrustStore>,
+    ) {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Arc::new(FsCollectionTrustStore::new(dir.path().join("trust.yml")));
         let svc = CollectionService::new(
-            Box::new(FsCollectionRepo::new_standalone(dir.path().join("collections"))),
+            Box::new(FsCollectionRepo::new_standalone(
+                dir.path().join("collections"),
+            )),
             Box::new(NullEventPublisher),
         )
         .with_trust_store(Arc::clone(&store) as Arc<dyn CollectionTrustStore>);

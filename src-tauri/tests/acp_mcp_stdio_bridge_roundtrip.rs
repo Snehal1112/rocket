@@ -35,7 +35,9 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
     let collection_repo: Arc<dyn CollectionRepository> = Arc::new(
         rocket_infra::FsCollectionRepo::new_standalone(collections_dir.clone()),
     );
-    collection_repo.create("demo").expect("create demo collection");
+    collection_repo
+        .create("demo")
+        .expect("create demo collection");
     collection_repo
         .save_settings(
             "demo",
@@ -55,11 +57,15 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
             Arc::new(rocket_environment::secret_store::NullSecretStore),
         )),
         Arc::clone(&executor),
-        Box::new(rocket_infra::FsHistoryRepo::new(fixture.path().join("history"))),
+        Box::new(rocket_infra::FsHistoryRepo::new(
+            fixture.path().join("history"),
+        )),
         Box::new(rocket_infra::FsCollectionRepo::new_standalone(
             collections_dir.clone(),
         )),
-        Box::new(rocket_infra::FsCookieRepo::new(fixture.path().join("cookies"))),
+        Box::new(rocket_infra::FsCookieRepo::new(
+            fixture.path().join("cookies"),
+        )),
         Box::new(rocket_shared::events::NullEventPublisher),
         Arc::new(rocket_audit::publisher::NullSecurityAuditPublisher),
         Box::new(rocket_infra::FsSecretManagerRepo::new(
@@ -68,10 +74,9 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
         Arc::new(rocket_environment::secret_store::NullSecretStore),
         Arc::new(rocket_environment::vault_secret_fetcher::NullVaultSecretFetcher),
     ));
-    let env_repo_factory: Arc<dyn rocket_environment::EnvironmentRepositoryFactory> =
-        Arc::new(rocket_infra::SharedCollectionEnvironmentRepo::new(
-            Arc::clone(&workspace_path),
-        ));
+    let env_repo_factory: Arc<dyn rocket_environment::EnvironmentRepositoryFactory> = Arc::new(
+        rocket_infra::SharedCollectionEnvironmentRepo::new(Arc::clone(&workspace_path)),
+    );
 
     let mcp_tool_svc = Arc::new(rocket_app::McpToolService::new(
         Arc::clone(&collection_repo),
@@ -80,7 +85,9 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
         Arc::new(rocket_shared::events::NullEventPublisher),
         Box::new(rocket_infra::FsWorkspaceConfigRepo::new()),
         Arc::clone(&workspace_path),
-        Box::new(rocket_infra::FsHistoryRepo::new(fixture.path().join("history"))),
+        Box::new(rocket_infra::FsHistoryRepo::new(
+            fixture.path().join("history"),
+        )),
     ));
 
     let app = tauri::test::mock_builder()
@@ -157,7 +164,9 @@ async fn stdio_bridge_forwards_a_real_tool_list_round_trip() {
 fn write_line(stdin: &mut std::process::ChildStdin, value: &serde_json::Value) {
     let mut line = value.to_string();
     line.push('\n');
-    stdin.write_all(line.as_bytes()).expect("write to child stdin");
+    stdin
+        .write_all(line.as_bytes())
+        .expect("write to child stdin");
     stdin.flush().expect("flush child stdin");
 }
 

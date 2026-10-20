@@ -27,14 +27,26 @@ mod tests {
 
     #[test]
     fn serializes_as_snake_case_string() {
-        assert_eq!(serde_json::to_string(&RunSource::Manual).unwrap(), r#""manual""#);
-        assert_eq!(serde_json::to_string(&RunSource::Runner).unwrap(), r#""runner""#);
+        assert_eq!(
+            serde_json::to_string(&RunSource::Manual).unwrap(),
+            r#""manual""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RunSource::Runner).unwrap(),
+            r#""runner""#
+        );
         assert_eq!(
             serde_json::to_string(&RunSource::LoadTest).unwrap(),
             r#""load_test""#
         );
-        assert_eq!(serde_json::to_string(&RunSource::Flow).unwrap(), r#""flow""#);
-        assert_eq!(serde_json::to_string(&RunSource::Agent).unwrap(), r#""agent""#);
+        assert_eq!(
+            serde_json::to_string(&RunSource::Flow).unwrap(),
+            r#""flow""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RunSource::Agent).unwrap(),
+            r#""agent""#
+        );
     }
 
     #[test]

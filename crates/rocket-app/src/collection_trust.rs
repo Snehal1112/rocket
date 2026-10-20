@@ -7,12 +7,12 @@
 
 use std::sync::Arc;
 
+use rocket_collection::settings::SandboxMode;
 use rocket_collection::{
     normalize_root, request_fingerprint, resolve_effective, CollectionGrant, CollectionIdentity,
     CollectionRepository, CollectionTrustStore, EffectiveCapabilities, GrantSource,
     LegacyCollection, MigrationNoticeEntry, RequestedElevation,
 };
-use rocket_collection::settings::SandboxMode;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 
@@ -37,7 +37,10 @@ pub fn effective_capabilities(
     let Ok(grant) = store.grant_for(&identity) else {
         return EffectiveCapabilities::untrusted();
     };
-    resolve_effective(&RequestedElevation::from_settings(&settings), grant.as_ref())
+    resolve_effective(
+        &RequestedElevation::from_settings(&settings),
+        grant.as_ref(),
+    )
 }
 
 /// A capability a grant can be given or taken away.
@@ -331,7 +334,8 @@ mod tests {
         let store = InMemoryTrustStore::new();
         let svc = service(&repo, &store);
 
-        svc.set_capability("c", Capability::DeveloperMode, true).expect("on");
+        svc.set_capability("c", Capability::DeveloperMode, true)
+            .expect("on");
         assert!(store.grant_of("c").expect("grant").developer_mode);
         assert_eq!(
             repo.get_settings("c").expect("settings").sandbox_mode,
@@ -339,7 +343,8 @@ mod tests {
         );
         assert_eq!(svc.effective("c").sandbox_mode, SandboxMode::Developer);
 
-        svc.set_capability("c", Capability::DeveloperMode, false).expect("off");
+        svc.set_capability("c", Capability::DeveloperMode, false)
+            .expect("off");
         assert!(!store.grant_of("c").expect("grant").developer_mode);
         assert_eq!(
             repo.get_settings("c").expect("settings").sandbox_mode,
@@ -354,14 +359,22 @@ mod tests {
         let store = InMemoryTrustStore::new();
         let svc = service(&repo, &store);
 
-        svc.set_capability("c", Capability::AgentRun, true).expect("agent");
-        assert!(repo.get_settings("c").expect("settings").agent_autonomy_enabled);
+        svc.set_capability("c", Capability::AgentRun, true)
+            .expect("agent");
+        assert!(
+            repo.get_settings("c")
+                .expect("settings")
+                .agent_autonomy_enabled
+        );
         assert!(svc.effective("c").agent_run);
 
         // Process env has no file field, so only the store changes.
-        svc.set_capability("c", Capability::ProcessEnv, true).expect("env");
+        svc.set_capability("c", Capability::ProcessEnv, true)
+            .expect("env");
         assert!(svc.effective("c").process_env);
-        assert!(svc.set_capability("c", Capability::ContextRoots, true).is_err());
+        assert!(svc
+            .set_capability("c", Capability::ContextRoots, true)
+            .is_err());
     }
 
     #[test]
@@ -373,10 +386,15 @@ mod tests {
         svc.set_context_roots("c", vec!["./a/".into(), "a".into(), "b".into()])
             .expect("roots");
         assert_eq!(
-            repo.get_settings("c").expect("settings").script_context_roots,
+            repo.get_settings("c")
+                .expect("settings")
+                .script_context_roots,
             vec!["a", "b"]
         );
-        assert_eq!(store.grant_of("c").expect("grant").context_roots, vec!["a", "b"]);
+        assert_eq!(
+            store.grant_of("c").expect("grant").context_roots,
+            vec!["a", "b"]
+        );
     }
 
     #[test]
@@ -391,15 +409,22 @@ mod tests {
             .expect_err("stale fingerprint");
         assert!(store.grant_of("c").is_none());
 
-        svc.grant_requested("c", &[Capability::DeveloperMode, Capability::ContextRoots], &fingerprint)
-            .expect("grant");
+        svc.grant_requested(
+            "c",
+            &[Capability::DeveloperMode, Capability::ContextRoots],
+            &fingerprint,
+        )
+        .expect("grant");
         let eff = svc.effective("c");
         assert_eq!(eff.sandbox_mode, SandboxMode::Developer);
         assert_eq!(eff.context_roots, vec!["../shared"]);
         // Agent run was requested but not approved.
         assert!(!eff.agent_run);
         // The file was not touched.
-        assert_eq!(repo.get_settings("c").expect("settings"), requesting_everything());
+        assert_eq!(
+            repo.get_settings("c").expect("settings"),
+            requesting_everything()
+        );
     }
 
     #[test]
@@ -408,11 +433,16 @@ mod tests {
         repo.set_settings("c", requesting_everything());
         let store = InMemoryTrustStore::new();
         let svc = service(&repo, &store);
-        svc.set_capability("c", Capability::AgentRun, true).expect("on");
+        svc.set_capability("c", Capability::AgentRun, true)
+            .expect("on");
         svc.revoke("c").expect("revoke");
         assert!(store.grant_of("c").is_none());
         assert_eq!(svc.effective("c"), EffectiveCapabilities::untrusted());
-        assert!(repo.get_settings("c").expect("settings").agent_autonomy_enabled);
+        assert!(
+            repo.get_settings("c")
+                .expect("settings")
+                .agent_autonomy_enabled
+        );
     }
 
     fn legacy(name: &str, requested: RequestedElevation) -> LegacyCollection {
@@ -449,7 +479,10 @@ mod tests {
         let notice = svc.migration_notice().expect("notice");
         assert_eq!(notice.len(), 1);
         assert!(notice[0].root.ends_with("dev"));
-        assert_eq!(notice[0].capabilities, vec![NOTICE_DEVELOPER_MODE, NOTICE_CONTEXT_ROOTS]);
+        assert_eq!(
+            notice[0].capabilities,
+            vec![NOTICE_DEVELOPER_MODE, NOTICE_CONTEXT_ROOTS]
+        );
 
         // A second run changes nothing.
         svc.migrate_legacy(vec![legacy("later", RequestedElevation::default())])
@@ -675,7 +708,10 @@ mod tests {
         rust_files(&src, &mut files);
         let mut offenders = Vec::new();
         for path in files {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
             if ALLOWED_FILES.contains(&name) || name.ends_with("tests.rs") {
                 continue;
             }
@@ -692,7 +728,10 @@ mod tests {
             );
             for (number, line) in production.lines().enumerate() {
                 let code = line.trim();
-                if ALLOWED_LINES.iter().any(|(f, l)| rel.ends_with(f) && *l == code) {
+                if ALLOWED_LINES
+                    .iter()
+                    .any(|(f, l)| rel.ends_with(f) && *l == code)
+                {
                     continue;
                 }
                 if FIELDS.iter().any(|f| has_word(code, f)) {
@@ -727,7 +766,10 @@ mod tests {
 
     #[test]
     fn has_word_matches_whole_identifiers_only() {
-        assert!(has_word("CollectionSettings { sandbox_mode, .. }", "sandbox_mode"));
+        assert!(has_word(
+            "CollectionSettings { sandbox_mode, .. }",
+            "sandbox_mode"
+        ));
         assert!(has_word("x.sandbox_mode", "sandbox_mode"));
         assert!(!has_word(".with_sandbox_mode(m)", "sandbox_mode"));
         assert!(!has_word("sandbox_modes", "sandbox_mode"));

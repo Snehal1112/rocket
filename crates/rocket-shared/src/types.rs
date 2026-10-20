@@ -375,7 +375,10 @@ mod tests {
     #[test]
     fn header_and_query_param_omit_a_missing_description() {
         let expected = serde_json::json!({"key": "k", "value": "v", "enabled": true});
-        assert_eq!(serde_json::to_value(Header::new("k", "v")).unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(Header::new("k", "v")).unwrap(),
+            expected
+        );
         let param: QueryParam = serde_json::from_value(expected.clone()).unwrap();
         assert_eq!(serde_json::to_value(&param).unwrap(), expected);
     }

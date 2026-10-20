@@ -70,7 +70,10 @@ mod tests {
             if let Ok(mut b) = self.bases.lock() {
                 b.push(base.map(Path::to_path_buf));
             }
-            self.files.get(raw).cloned().ok_or_else(|| format!("cannot read {raw}"))
+            self.files
+                .get(raw)
+                .cloned()
+                .ok_or_else(|| format!("cannot read {raw}"))
         }
     }
 
@@ -82,7 +85,9 @@ mod tests {
     }
 
     fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
-        v.iter().map(|(k, x)| (k.to_string(), x.to_string())).collect()
+        v.iter()
+            .map(|(k, x)| (k.to_string(), x.to_string()))
+            .collect()
     }
 
     fn run(envs: &[Environment], child: &str, fake: &Fake, base: Option<&Path>) -> DotEnvValues {
@@ -96,7 +101,10 @@ mod tests {
         let mut fake = Fake::default();
         fake.files.insert("p.env".into(), pairs(&[("A", "1")]));
         fake.files.insert("c.env".into(), pairs(&[("A", "2")]));
-        let envs = [env("p", None, Some("p.env")), env("c", Some("p"), Some("c.env"))];
+        let envs = [
+            env("p", None, Some("p.env")),
+            env("c", Some("p"), Some("c.env")),
+        ];
         let out = run(&envs, "c", &fake, None);
         assert_eq!(out.values, pairs(&[("A", "2")]));
         assert!(out.warnings.is_empty());
@@ -107,7 +115,10 @@ mod tests {
         let mut fake = Fake::default();
         fake.files.insert("p.env".into(), pairs(&[("B", "1")]));
         fake.files.insert("c.env".into(), pairs(&[("A", "2")]));
-        let envs = [env("p", None, Some("p.env")), env("c", Some("p"), Some("c.env"))];
+        let envs = [
+            env("p", None, Some("p.env")),
+            env("c", Some("p"), Some("c.env")),
+        ];
         let out = run(&envs, "c", &fake, None);
         assert_eq!(out.values, pairs(&[("B", "1"), ("A", "2")]));
     }
@@ -129,7 +140,10 @@ mod tests {
     fn a_loader_error_becomes_a_warning_and_other_files_still_load() {
         let mut fake = Fake::default();
         fake.files.insert("c.env".into(), pairs(&[("A", "2")]));
-        let envs = [env("p", None, Some("missing.env")), env("c", Some("p"), Some("c.env"))];
+        let envs = [
+            env("p", None, Some("missing.env")),
+            env("c", Some("p"), Some("c.env")),
+        ];
         let out = run(&envs, "c", &fake, None);
         assert_eq!(out.values, pairs(&[("A", "2")]));
         assert_eq!(out.warnings, vec!["cannot read missing.env".to_string()]);
@@ -140,7 +154,10 @@ mod tests {
         let mut fake = Fake::default();
         fake.files.insert("a.env".into(), pairs(&[("A", "1")]));
         fake.files.insert("b.env".into(), pairs(&[("B", "1")]));
-        let envs = [env("a", Some("b"), Some("a.env")), env("b", Some("a"), Some("b.env"))];
+        let envs = [
+            env("a", Some("b"), Some("a.env")),
+            env("b", Some("a"), Some("b.env")),
+        ];
         let out = run(&envs, "a", &fake, None);
         assert_eq!(out.warnings.len(), 1);
         assert!(out.warnings[0].contains("cycle"));

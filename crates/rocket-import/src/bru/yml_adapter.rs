@@ -222,7 +222,10 @@ fn adapt_request(yml: BruYmlRequest) -> BruDocument {
     if let Some(m) = meta {
         let request_type = m.request_type.clone().unwrap_or_default();
         // Non-http types go to unknown_blocks immediately.
-        if !matches!(request_type.as_str(), "http" | "" | "graphql" | "ws" | "websocket") {
+        if !matches!(
+            request_type.as_str(),
+            "http" | "" | "graphql" | "ws" | "websocket"
+        ) {
             doc.unknown_blocks.push(BruRawBlock {
                 name: "unsupported_type".into(),
                 subtype: Some(request_type.clone()),

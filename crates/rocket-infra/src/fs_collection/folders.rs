@@ -281,7 +281,14 @@ pub(super) fn move_item(
     dst_collection: &str,
     dst_path: &str,
 ) -> DomainResult<()> {
-    move_item_impl(repo, src_collection, src_path, dst_collection, dst_path, false)
+    move_item_impl(
+        repo,
+        src_collection,
+        src_path,
+        dst_collection,
+        dst_path,
+        false,
+    )
 }
 
 /// Renames `src` to `dst` and fails with `AlreadyExists` when `dst` exists.

@@ -317,8 +317,10 @@ impl CachedRun {
         if self.scope.environment_name != scope.environment_name
             || self.scope.global_env_name != scope.global_env_name
         {
-            let describe =
-                |name: &Option<String>| name.as_deref().map_or("none".to_string(), |n| format!("'{n}'"));
+            let describe = |name: &Option<String>| {
+                name.as_deref()
+                    .map_or("none".to_string(), |n| format!("'{n}'"))
+            };
             return Err(PartialRefusal {
                 message: format!(
                     "the earlier run used environment {} and global environment {}, this run uses {} and {}. Run the full flow first",
@@ -470,8 +472,11 @@ pub(crate) fn fingerprints(
                 .unwrap_or_else(|| "<missing>".to_string())
                 .hash(&mut hasher);
         }
-        let mut incoming: Vec<&FlowEdge> =
-            flow.edges.iter().filter(|e| e.target_node_id == *id).collect();
+        let mut incoming: Vec<&FlowEdge> = flow
+            .edges
+            .iter()
+            .filter(|e| e.target_node_id == *id)
+            .collect();
         incoming.sort_by(|a, b| a.id.cmp(&b.id));
         for e in incoming {
             (
@@ -639,7 +644,11 @@ mod tests {
         if let Some(FlowNodeKind::Request {
             source: RequestSource::Inline { request },
             ..
-        }) = flow.nodes.iter_mut().find(|n| n.id == id).map(|n| &mut n.kind)
+        }) = flow
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == id)
+            .map(|n| &mut n.kind)
         {
             request.url = url.to_string();
         }
@@ -669,7 +678,12 @@ mod tests {
                 .collect(),
             captured: entries
                 .iter()
-                .map(|(id, v)| (id.to_string(), CapturedOutput::Value(VariableValue::simple(*v))))
+                .map(|(id, v)| {
+                    (
+                        id.to_string(),
+                        CapturedOutput::Value(VariableValue::simple(*v)),
+                    )
+                })
                 .collect(),
             masking_secrets: HashSet::new(),
         }
@@ -793,7 +807,9 @@ mod tests {
         let base = full_run(&flow, &order, &[("a", "1")]);
         let mut other = scope();
         other.environment_name = Some("staging".to_string());
-        let err = base.check_scope(&other, "a").expect_err("environment differs");
+        let err = base
+            .check_scope(&other, "a")
+            .expect_err("environment differs");
         assert!(err.message.contains("environment"), "{}", err.message);
         base.check_scope(&scope(), "a").expect("same scope");
     }
@@ -814,7 +830,10 @@ mod tests {
             results(&[("au", "tok-123456"), ("big", huge.as_str()), ("ok", "fine")]),
             &fingerprints(&flow, &order, &|_| None),
         );
-        assert!(run.nodes["au"].output.is_none(), "an Auth token is never cached");
+        assert!(
+            run.nodes["au"].output.is_none(),
+            "an Auth token is never cached"
+        );
         assert!(run.nodes["big"].output.is_none());
         assert_eq!(value_of(&run, "ok"), Some("fine"));
         let views = run.seed_views();
@@ -830,7 +849,11 @@ mod tests {
     #[test]
     fn a_partial_entry_overlays_its_nodes_and_leaves_the_base_untouched() {
         let (flow, order) = chain(&["a", "b", "c", "d"]);
-        let base = full_run(&flow, &order, &[("a", "1"), ("b", "old"), ("c", "3"), ("d", "4")]);
+        let base = full_run(
+            &flow,
+            &order,
+            &[("a", "1"), ("b", "old"), ("c", "3"), ("d", "4")],
+        );
         let merged = base.merge_partial(
             &scope(),
             &flow,
@@ -845,14 +868,19 @@ mod tests {
         assert!(!base.nodes["c"].stale, "the base entry never changes");
         let shared_a = merged.nodes["a"].output.as_ref().expect("a in merged");
         let base_a = base.nodes["a"].output.as_ref().expect("a in base");
-        assert!(Arc::ptr_eq(shared_a, base_a), "untouched outputs are shared, not copied");
+        assert!(
+            Arc::ptr_eq(shared_a, base_a),
+            "untouched outputs are shared, not copied"
+        );
     }
 
     #[test]
     fn a_partial_entry_keeps_the_masks_of_its_base() {
         let (flow, order) = chain(&["a", "b"]);
         let mut base_results = results(&[("a", "1"), ("b", "2")]);
-        base_results.masking_secrets.insert("old-token-123456".to_string());
+        base_results
+            .masking_secrets
+            .insert("old-token-123456".to_string());
         let base = CachedRun::from_full_run(
             &scope(),
             &flow,
@@ -860,7 +888,9 @@ mod tests {
             &fingerprints(&flow, &order, &|_| None),
         );
         let mut partial_results = results(&[("b", "3")]);
-        partial_results.masking_secrets.insert("new-token-654321".to_string());
+        partial_results
+            .masking_secrets
+            .insert("new-token-654321".to_string());
         let merged = base.merge_partial(
             &scope(),
             &flow,
@@ -881,7 +911,10 @@ mod tests {
             ("prev".to_string(), "control-value".to_string()),
         ]);
         let control = rocket_environment::resolve("{{prev}}", &vars).output;
-        assert_eq!(control, "control-value", "a normal key resolves in this harness");
+        assert_eq!(
+            control, "control-value",
+            "a normal key resolves in this harness"
+        );
         for template in ["{{}}prev-run.0}}", "{{ }}prev-run.0 }}", "{{prev-run.0}}"] {
             let out = rocket_environment::resolve(template, &vars).output;
             assert!(!out.contains("old-token-123456"), "{template} -> {out}");
@@ -933,7 +966,9 @@ mod tests {
 
     #[test]
     fn output_size_counts_console_tests_script_error_history_and_typed_values() {
-        let plain = output_size(&CapturedOutput::Request(Box::new(request_output("", false))));
+        let plain = output_size(&CapturedOutput::Request(Box::new(request_output(
+            "", false,
+        ))));
         let mut full = request_output("", true);
         full.console_entries.push(rocket_scripting::ConsoleEntry {
             level: rocket_scripting::ConsoleLevel::Log,
@@ -990,7 +1025,11 @@ mod tests {
         let run = CachedRun::from_full_run_with_budget(
             &scope(),
             &flow,
-            results(&[("a", text.as_str()), ("b", text.as_str()), ("c", text.as_str())]),
+            results(&[
+                ("a", text.as_str()),
+                ("b", text.as_str()),
+                ("c", text.as_str()),
+            ]),
             &fingerprints(&flow, &order, &|_| None),
             1_000,
         );
@@ -1034,7 +1073,11 @@ mod tests {
         let (flow, order) = chain(&["a", "b", "c"]);
         let big = "x".repeat(600);
         let small = "y".repeat(300);
-        let forward = [("a", big.as_str()), ("b", small.as_str()), ("c", big.as_str())];
+        let forward = [
+            ("a", big.as_str()),
+            ("b", small.as_str()),
+            ("c", big.as_str()),
+        ];
         let mut backward = forward;
         backward.reverse();
         for _ in 0..20 {
@@ -1086,10 +1129,16 @@ mod tests {
         let big = "x".repeat(2_000);
         let mut cache = FlowRunCache::with_limits(2, 1_000);
         cache.insert("r1".to_string(), full_run(&flow, &order, &[("a", "1")]));
-        cache.insert("r2".to_string(), full_run(&flow, &order, &[("a", big.as_str())]));
+        cache.insert(
+            "r2".to_string(),
+            full_run(&flow, &order, &[("a", big.as_str())]),
+        );
         assert!(cache.contains("r2") && !cache.contains("r1"));
         cache.insert("r3".to_string(), full_run(&flow, &order, &[("a", "3")]));
-        cache.insert("r4".to_string(), full_run(&flow, &order, &[("a", big.as_str())]));
+        cache.insert(
+            "r4".to_string(),
+            full_run(&flow, &order, &[("a", big.as_str())]),
+        );
         assert!(cache.contains("r4"));
         assert!(!cache.contains("r2") && !cache.contains("r3"));
     }
@@ -1100,7 +1149,10 @@ mod tests {
         let mut cache = FlowRunCache::with_limits(2, usize::MAX);
         cache.insert("r1".to_string(), full_run(&flow, &order, &[("a", "1")]));
         cache.insert("r2".to_string(), full_run(&flow, &order, &[("a", "2")]));
-        assert!(cache.get("r1").is_some(), "a lookup makes r1 the most recent");
+        assert!(
+            cache.get("r1").is_some(),
+            "a lookup makes r1 the most recent"
+        );
         cache.insert("r3".to_string(), full_run(&flow, &order, &[("a", "3")]));
         assert!(cache.contains("r1") && cache.contains("r3"));
         assert!(!cache.contains("r2"));
@@ -1128,7 +1180,10 @@ mod tests {
             "a's 600 bytes are shared, so both entries fit"
         );
         let other = "y".repeat(600);
-        cache.insert("other".to_string(), full_run(&flow, &order, &[("a", other.as_str())]));
+        cache.insert(
+            "other".to_string(),
+            full_run(&flow, &order, &[("a", other.as_str())]),
+        );
         assert!(cache.contains("other"), "the newest entry always stays");
         assert!(!cache.contains("base") && !cache.contains("partial"));
     }

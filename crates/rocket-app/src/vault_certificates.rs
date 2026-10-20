@@ -668,7 +668,10 @@ mod wiring_tests {
             _verify_ssl: bool,
             certificates: &[ResolvedClientCertificate],
         ) -> DomainResult<reqwest::Client> {
-            self.seen.lock().expect("lock").push(describe_all(certificates));
+            self.seen
+                .lock()
+                .expect("lock")
+                .push(describe_all(certificates));
             Err(DomainError::Internal("stopped before the network".into()))
         }
     }
@@ -721,7 +724,9 @@ mod wiring_tests {
             Box::new(StaticEnvRepo(environment())),
             executor,
             Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
-            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(Collection::new("c")))),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+                Collection::new("c"),
+            ))),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(FakeSecretManagerRepo(connection())),
@@ -771,14 +776,19 @@ mod wiring_tests {
     }
 
     fn pkcs12_line(domain: &str) -> String {
-        format!("pkcs12 {domain} inline:{} pass:{FAKE_PASSWORD}", FAKE_BUNDLE.len())
+        format!(
+            "pkcs12 {domain} inline:{} pass:{FAKE_PASSWORD}",
+            FAKE_BUNDLE.len()
+        )
     }
 
     #[tokio::test]
     async fn a_send_fetches_the_vault_certificate_selected_for_the_request_url() {
         let executor = Arc::new(CertificateRecordingExecutor::default());
-        let fetcher =
-            FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok), ("idp-cert", FakeExport::Ok)]);
+        let fetcher = FakeCertificateFetcher::new(&[
+            ("client-a", FakeExport::Ok),
+            ("idp-cert", FakeExport::Ok),
+        ]);
         let svc = service(executor.clone(), fetcher.clone());
 
         svc.execute(input("https://api.example.com/v1", Auth::None))
@@ -788,16 +798,24 @@ mod wiring_tests {
         assert_eq!(fetcher.calls(), vec!["prod-vault/client-a/pem"]);
         let seen = executor.seen();
         assert_eq!(seen.len(), 1);
-        assert!(seen[0][0].starts_with("pem api.example.com inline:"), "{seen:?}");
-        assert!(seen[0][1].starts_with("deferred idp.example.com"), "{seen:?}");
+        assert!(
+            seen[0][0].starts_with("pem api.example.com inline:"),
+            "{seen:?}"
+        );
+        assert!(
+            seen[0][1].starts_with("deferred idp.example.com"),
+            "{seen:?}"
+        );
     }
 
     // Review Focus 3.
     #[tokio::test]
     async fn a_request_to_another_domain_never_calls_the_vault() {
         let executor = Arc::new(CertificateRecordingExecutor::default());
-        let fetcher =
-            FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok), ("idp-cert", FakeExport::Ok)]);
+        let fetcher = FakeCertificateFetcher::new(&[
+            ("client-a", FakeExport::Ok),
+            ("idp-cert", FakeExport::Ok),
+        ]);
         let svc = service(executor.clone(), fetcher.clone());
 
         svc.execute(input("https://elsewhere.example.org/", Auth::None))
@@ -806,14 +824,19 @@ mod wiring_tests {
 
         assert!(fetcher.calls().is_empty());
         let seen = executor.seen();
-        assert!(seen[0].iter().all(|line| line.starts_with("deferred ")), "{seen:?}");
+        assert!(
+            seen[0].iter().all(|line| line.starts_with("deferred ")),
+            "{seen:?}"
+        );
     }
 
     #[tokio::test]
     async fn a_client_credentials_send_also_fetches_the_certificate_for_the_token_url() {
         let executor = Arc::new(CertificateRecordingExecutor::default());
-        let fetcher =
-            FakeCertificateFetcher::new(&[("client-a", FakeExport::Ok), ("idp-cert", FakeExport::Ok)]);
+        let fetcher = FakeCertificateFetcher::new(&[
+            ("client-a", FakeExport::Ok),
+            ("idp-cert", FakeExport::Ok),
+        ]);
         let svc = service(executor.clone(), fetcher.clone());
 
         svc.execute(input(
@@ -871,7 +894,8 @@ mod wiring_tests {
 
         let sent = sent.expect("the request is recorded");
         assert!(
-            describe_all(&sent.options.client_certificates)[0].starts_with("deferred api.example.com"),
+            describe_all(&sent.options.client_certificates)[0]
+                .starts_with("deferred api.example.com"),
             "history and scripts see names only"
         );
         assert!(executor.seen()[0][0].starts_with("pem api.example.com inline:"));
@@ -880,7 +904,9 @@ mod wiring_tests {
     fn oauth2_service(provider: Arc<RecordingTokenClientProvider>) -> OAuth2Service {
         OAuth2Service::new(
             Box::new(StaticEnvRepo(environment())),
-            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(Collection::new("c")))),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+                Collection::new("c"),
+            ))),
         )
         .with_token_client_provider(provider)
     }
@@ -910,15 +936,23 @@ mod wiring_tests {
             .get_token_direct(&config)
             .await
             .expect_err("the provider stops before the network");
-        assert!(err.to_string().contains("stopped before the network"), "{err}");
+        assert!(
+            err.to_string().contains("stopped before the network"),
+            "{err}"
+        );
 
         assert_eq!(fetcher.calls(), vec!["prod-vault/idp-cert/pkcs12"]);
         let seen = provider.seen.lock().expect("lock").clone();
         // The API entry is for another domain and stays deferred.
-        assert!(seen[0][0].starts_with("deferred api.example.com"), "{seen:?}");
+        assert!(
+            seen[0][0].starts_with("deferred api.example.com"),
+            "{seen:?}"
+        );
         assert_eq!(seen[0][1], pkcs12_line("idp.example.com"));
         // The resolved config still holds names only.
-        assert!(describe_all(&config.client_certificates)[1].starts_with("deferred idp.example.com"));
+        assert!(
+            describe_all(&config.client_certificates)[1].starts_with("deferred idp.example.com")
+        );
     }
 
     #[tokio::test]

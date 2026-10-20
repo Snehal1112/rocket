@@ -1,6 +1,6 @@
 use rocket_collection::{
-    GraphQlBody, GraphQlRequest, GrpcRequest, Request, WebSocketMessage, WebSocketMessageKind, WebSocketRequest,
-    WebSocketScript,
+    GraphQlBody, GraphQlRequest, GrpcRequest, Request, WebSocketMessage, WebSocketMessageKind,
+    WebSocketRequest, WebSocketScript,
 };
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod};
 
@@ -139,7 +139,11 @@ pub fn convert_websocket(doc: &BruDocument) -> (WebSocketRequest, Vec<SkipReason
         Some("inherit") => Auth::Inherit,
         Some("none") => Auth::None,
         _ if !skipped.is_empty() => Auth::None,
-        _ => doc.auth.as_ref().map(bru_auth_to_domain).unwrap_or(Auth::None),
+        _ => doc
+            .auth
+            .as_ref()
+            .map(bru_auth_to_domain)
+            .unwrap_or(Auth::None),
     };
 
     if let Some(code) = &doc.pre_request_script {
@@ -586,15 +590,35 @@ mod websocket_tests {
 
     fn ws_doc() -> BruDocument {
         BruDocument {
-            meta: Some(BruMeta { name: "Echo".into(), request_type: "ws".into(), seq: Some(2) }),
+            meta: Some(BruMeta {
+                name: "Echo".into(),
+                request_type: "ws".into(),
+                seq: Some(2),
+            }),
             url: Some("wss://echo.websocket.org".into()),
             headers: vec![
-                BruKeyValue { key: "X-Trace".into(), value: "abc".into(), disabled: false },
-                BruKeyValue { key: "X-Off".into(), value: "1".into(), disabled: true },
+                BruKeyValue {
+                    key: "X-Trace".into(),
+                    value: "abc".into(),
+                    disabled: false,
+                },
+                BruKeyValue {
+                    key: "X-Off".into(),
+                    value: "1".into(),
+                    disabled: true,
+                },
             ],
             ws_messages: vec![
-                BruWsMessage { name: "message 1".into(), kind: "json".into(), content: "{}".into() },
-                BruWsMessage { name: "message 2".into(), kind: "yaml".into(), content: "x".into() },
+                BruWsMessage {
+                    name: "message 1".into(),
+                    kind: "json".into(),
+                    content: "{}".into(),
+                },
+                BruWsMessage {
+                    name: "message 2".into(),
+                    kind: "yaml".into(),
+                    content: "x".into(),
+                },
             ],
             ..BruDocument::default()
         }
@@ -636,10 +660,16 @@ mod websocket_tests {
         assert_eq!(convert_websocket(&doc).0.auth, Auth::None);
 
         doc.ws_auth_mode = Some("bearer".into());
-        assert_eq!(convert_websocket(&doc).0.auth, Auth::Bearer { token: "t".into() });
+        assert_eq!(
+            convert_websocket(&doc).0.auth,
+            Auth::Bearer { token: "t".into() }
+        );
 
         doc.ws_auth_mode = None;
-        assert_eq!(convert_websocket(&doc).0.auth, Auth::Bearer { token: "t".into() });
+        assert_eq!(
+            convert_websocket(&doc).0.auth,
+            Auth::Bearer { token: "t".into() }
+        );
     }
 
     #[test]
@@ -678,7 +708,11 @@ mod websocket_tests {
         assert!(matches!(item, Some(Converted::WebSocket(ref w)) if w.name == "Echo"));
 
         let http = BruDocument {
-            meta: Some(BruMeta { name: "A".into(), request_type: "http".into(), seq: None }),
+            meta: Some(BruMeta {
+                name: "A".into(),
+                request_type: "http".into(),
+                seq: None,
+            }),
             method: Some(BruMethod::Get),
             url: Some("https://x".into()),
             ..BruDocument::default()

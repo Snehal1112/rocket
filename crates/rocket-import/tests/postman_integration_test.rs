@@ -163,7 +163,10 @@ fn imports_environment_with_separator_in_name() {
     svc.import_postman_environment(&json, "default", "ws")
         .expect("second import");
     let repo = FsEnvironmentRepo::new(ws.path().join("collections/default/environments"));
-    assert_eq!(repo.get("Staging - EU").expect("first").name, "Staging - EU");
+    assert_eq!(
+        repo.get("Staging - EU").expect("first").name,
+        "Staging - EU"
+    );
     assert_eq!(
         repo.get("Staging - EU (2)").expect("second").name,
         "Staging - EU (2)"

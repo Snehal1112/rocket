@@ -5,9 +5,9 @@ pub(crate) mod parser;
 pub(crate) mod sampler;
 pub(crate) mod schema;
 
+pub(crate) use ast::{BindingStyle, PartKind, SoapVersion, WsdlOperation, WsdlPort};
 #[cfg(test)]
 pub(crate) use ast::{QName, WsdlModel};
-pub(crate) use ast::{BindingStyle, PartKind, SoapVersion, WsdlOperation, WsdlPort};
 pub(crate) use parser::parse_wsdl_file;
 #[cfg(test)]
 pub(crate) use parser::parse_wsdl_str;

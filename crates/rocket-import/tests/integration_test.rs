@@ -453,9 +453,7 @@ fn bru_graphql_file_imports_as_graphql_item() {
 
     let workspace_dir = TempDir::new().expect("tempdir");
     let service = make_service(workspace_dir.path());
-    let report = service
-        .import_collection(&src, "default")
-        .expect("import");
+    let report = service.import_collection(&src, "default").expect("import");
 
     assert_eq!(report.total_files, 2);
     assert_eq!(report.imported, 2, "skipped: {:?}", report.skipped);
@@ -465,7 +463,11 @@ fn bru_graphql_file_imports_as_graphql_item() {
     let g: GraphQlRequest = repo
         .get_graphql_request(&report.created_collections[0], "users.yml")
         .expect("users.yml is a graphql item");
-    assert!(g.body.query.contains("users(first: $n)"), "{}", g.body.query);
+    assert!(
+        g.body.query.contains("users(first: $n)"),
+        "{}",
+        g.body.query
+    );
     assert!(g
         .body
         .variables
@@ -500,9 +502,7 @@ fn opencollection_graphql_yml_keeps_variants_scripts_and_auth() {
 
     let workspace_dir = TempDir::new().expect("tempdir");
     let service = make_service(workspace_dir.path());
-    let report = service
-        .import_collection(&src, "default")
-        .expect("import");
+    let report = service.import_collection(&src, "default").expect("import");
     assert_eq!(report.imported, 1, "skipped: {:?}", report.skipped);
     assert!(report.skipped.is_empty(), "{:?}", report.skipped);
 
@@ -544,8 +544,9 @@ fn legacy_bru_websocket_imports_as_a_websocket_item_not_http() {
     assert!(report.skipped.is_empty(), "{:?}", report.skipped);
 
     let repo = FsCollectionRepo::new_standalone(workspace.path().join("collections"));
-    let ws = rocket_collection::CollectionRepository::get_websocket_request(&repo, "ws-col", "echo.yml")
-        .expect("saved as a websocket request");
+    let ws =
+        rocket_collection::CollectionRepository::get_websocket_request(&repo, "ws-col", "echo.yml")
+            .expect("saved as a websocket request");
     assert_eq!(ws.name, "Echo");
     assert_eq!(ws.url, "wss://echo.websocket.org");
     assert_eq!(ws.headers[0].key, "X-Trace");
@@ -554,7 +555,10 @@ fn legacy_bru_websocket_imports_as_a_websocket_item_not_http() {
 
     // It must not also exist as an HTTP request.
     let http = rocket_collection::CollectionRepository::get_request(&repo, "ws-col", "echo.yml");
-    assert!(http.is_err(), "the file must be a websocket file, not an http one");
+    assert!(
+        http.is_err(),
+        "the file must be a websocket file, not an http one"
+    );
 }
 
 #[test]
@@ -632,7 +636,11 @@ fn opencollection_grpc_collection_imports_with_its_proto() {
     let src = TempDir::new().unwrap();
     let root = src.path().join("oc-grpc");
     std::fs::create_dir_all(root.join("protos")).unwrap();
-    std::fs::write(root.join("opencollection.yml"), "opencollection: 1.0.0\ninfo:\n  name: oc-grpc\n").unwrap();
+    std::fs::write(
+        root.join("opencollection.yml"),
+        "opencollection: 1.0.0\ninfo:\n  name: oc-grpc\n",
+    )
+    .unwrap();
     std::fs::write(root.join("protos/greeter.proto"), "syntax = \"proto3\";\n").unwrap();
     std::fs::write(
         root.join("say-hello.yml"),
@@ -643,7 +651,10 @@ fn opencollection_grpc_collection_imports_with_its_proto() {
     let workspace_dir = TempDir::new().unwrap();
     let service = make_service(workspace_dir.path());
     let report = service.import_collection(&root, "default").unwrap();
-    assert_eq!(report.imported, 1, "the proto file is not counted as a request");
+    assert_eq!(
+        report.imported, 1,
+        "the proto file is not counted as a request"
+    );
 
     let name = &report.created_collections[0];
     let repo = FsCollectionRepo::new_standalone(workspace_dir.path().join("collections"));
@@ -680,10 +691,14 @@ fn bru_file_of_an_unsupported_type_is_skipped_not_imported_as_an_empty_get() {
     let report = service.import_collection(&root, "default").unwrap();
 
     assert_eq!(report.imported, 0);
-    assert!(matches!(
-        report.skipped.as_slice(),
-        [item] if matches!(&item.reason, SkipReason::UnsupportedRequestType(t) if t == "mqtt")
-    ), "{:?}", report.skipped);
+    assert!(
+        matches!(
+            report.skipped.as_slice(),
+            [item] if matches!(&item.reason, SkipReason::UnsupportedRequestType(t) if t == "mqtt")
+        ),
+        "{:?}",
+        report.skipped
+    );
     assert!(!workspace_dir
         .path()
         .join("collections")
@@ -708,17 +723,27 @@ fn a_symlinked_proto_is_not_copied_and_does_not_abort_a_bruno_import() {
     let secret = src.path().join("id_rsa");
     std::fs::write(&secret, "PRIVATE KEY").expect("write");
     std::os::unix::fs::symlink(&secret, root.join("protos/leak.proto")).expect("symlink");
-    std::os::unix::fs::symlink(src.path().join("missing"), root.join("protos/dangling.proto"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        src.path().join("missing"),
+        root.join("protos/dangling.proto"),
+    )
+    .expect("symlink");
 
     let workspace_dir = TempDir::new().expect("tempdir");
     let service = make_service(workspace_dir.path());
     let report = service.import_collection(&root, "default").expect("import");
 
     let name = &report.created_collections[0];
-    let copied = workspace_dir.path().join("collections").join(name).join("protos");
+    let copied = workspace_dir
+        .path()
+        .join("collections")
+        .join(name)
+        .join("protos");
     assert!(copied.join("real.proto").exists());
-    assert!(!copied.join("leak.proto").exists(), "a symlink is not followed");
+    assert!(
+        !copied.join("leak.proto").exists(),
+        "a symlink is not followed"
+    );
     assert!(!copied.join("dangling.proto").exists());
     let skipped: Vec<&str> = report.skipped.iter().map(|s| s.path.as_str()).collect();
     assert!(
@@ -741,16 +766,26 @@ fn a_symlinked_proto_is_not_copied_by_an_opencollection_import() {
     let secret = src.path().join("id_rsa");
     std::fs::write(&secret, "PRIVATE KEY").expect("write");
     std::os::unix::fs::symlink(&secret, root.join("protos/leak.proto")).expect("symlink");
-    std::os::unix::fs::symlink(src.path().join("missing"), root.join("protos/dangling.proto"))
-        .expect("symlink");
+    std::os::unix::fs::symlink(
+        src.path().join("missing"),
+        root.join("protos/dangling.proto"),
+    )
+    .expect("symlink");
 
     let workspace_dir = TempDir::new().expect("tempdir");
     let service = make_service(workspace_dir.path());
     let report = service.import_collection(&root, "default").expect("import");
 
     let name = &report.created_collections[0];
-    let copied = workspace_dir.path().join("collections").join(name).join("protos");
-    assert!(!copied.join("leak.proto").exists(), "a symlink is not followed");
+    let copied = workspace_dir
+        .path()
+        .join("collections")
+        .join(name)
+        .join("protos");
+    assert!(
+        !copied.join("leak.proto").exists(),
+        "a symlink is not followed"
+    );
     assert!(!copied.join("dangling.proto").exists());
 }
 
@@ -785,8 +820,14 @@ fn opencollection_import_keeps_collection_level_defaults_and_docs() {
             .join("opencollection.yml"),
     )
     .expect("read");
-    assert!(saved.contains("X-Tenant"), "collection headers kept: {saved}");
-    assert!(saved.contains("// collection script"), "scripts kept: {saved}");
+    assert!(
+        saved.contains("X-Tenant"),
+        "collection headers kept: {saved}"
+    );
+    assert!(
+        saved.contains("// collection script"),
+        "scripts kept: {saved}"
+    );
     assert!(saved.contains("x-meta"), "metadata kept: {saved}");
     assert!(saved.contains("Collection notes"), "docs kept: {saved}");
     // The destination keeps its own identity, even when the name was changed on a conflict.
@@ -797,7 +838,6 @@ fn opencollection_import_keeps_collection_level_defaults_and_docs() {
     assert_eq!(settings.headers.len(), 1);
     assert_eq!(settings.docs.as_deref(), Some("Collection notes"));
 }
-
 
 // ──────────────────────────────────────────────────────────
 // Shared `.js` script files travel with the collection
@@ -852,16 +892,26 @@ fn legacy_bruno_import_does_not_copy_node_modules() {
     let root = src.path().join("js-api");
     legacy_js_collection(&root);
     std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
-    std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports = 1;").unwrap();
+    std::fs::write(
+        root.join("node_modules/pkg/index.js"),
+        "module.exports = 1;",
+    )
+    .unwrap();
 
     let ws = TempDir::new().unwrap();
     let report = make_service(ws.path())
         .import_collection(&root, "default")
         .unwrap();
 
-    let col = ws.path().join("collections").join(&report.created_collections[0]);
+    let col = ws
+        .path()
+        .join("collections")
+        .join(&report.created_collections[0]);
     assert!(col.join("shared-scripts/util.js").exists());
-    assert!(!col.join("node_modules").exists(), "node_modules is never imported");
+    assert!(
+        !col.join("node_modules").exists(),
+        "node_modules is never imported"
+    );
 }
 
 #[test]
@@ -872,7 +922,11 @@ fn opencollection_import_copies_js_files_and_skips_node_modules() {
     std::fs::create_dir_all(root.join("shared-scripts")).unwrap();
     std::fs::write(root.join("shared-scripts/util.js"), UTIL_JS).unwrap();
     std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
-    std::fs::write(root.join("node_modules/pkg/index.js"), "module.exports = 1;").unwrap();
+    std::fs::write(
+        root.join("node_modules/pkg/index.js"),
+        "module.exports = 1;",
+    )
+    .unwrap();
 
     let ws = TempDir::new().unwrap();
     let report = make_service(ws.path())
@@ -880,8 +934,14 @@ fn opencollection_import_copies_js_files_and_skips_node_modules() {
         .unwrap();
 
     assert_eq!(report.imported, 2, "js files are not requests");
-    let col = ws.path().join("collections").join(&report.created_collections[0]);
-    assert_eq!(std::fs::read(col.join("shared-scripts/util.js")).unwrap(), UTIL_JS);
+    let col = ws
+        .path()
+        .join("collections")
+        .join(&report.created_collections[0]);
+    assert_eq!(
+        std::fs::read(col.join("shared-scripts/util.js")).unwrap(),
+        UTIL_JS
+    );
     assert!(!col.join("node_modules").exists());
 }
 
@@ -900,7 +960,10 @@ fn symlinked_js_file_is_skipped_and_reported() {
         .import_collection(&root, "default")
         .unwrap();
 
-    let col = ws.path().join("collections").join(&report.created_collections[0]);
+    let col = ws
+        .path()
+        .join("collections")
+        .join(&report.created_collections[0]);
     assert!(!col.join("shared-scripts/link.js").exists());
     assert!(
         report.skipped.iter().any(|s| s.path.ends_with("link.js")),

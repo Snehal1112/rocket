@@ -8,9 +8,7 @@ use std::time::Duration;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rocket_collection::WebSocketMessageKind;
 use rocket_environment::resolve;
-use rocket_http::websocket::{
-    WebSocketConnectRequest, WebSocketFrame, DEFAULT_CONNECT_TIMEOUT_MS,
-};
+use rocket_http::websocket::{WebSocketConnectRequest, WebSocketFrame, DEFAULT_CONNECT_TIMEOUT_MS};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Header};
 use serde::Deserialize;
@@ -109,7 +107,11 @@ fn apply_auth(
             headers.push(("Authorization".into(), format!("Bearer {token}")));
             Ok(())
         }
-        Auth::ApiKey { key, value, placement } => match placement.as_str() {
+        Auth::ApiKey {
+            key,
+            value,
+            placement,
+        } => match placement.as_str() {
             "header" => {
                 headers.push((key.clone(), value.clone()));
                 Ok(())
@@ -140,7 +142,10 @@ impl RequestExecutionService {
     ) -> DomainResult<WebSocketConnectRequest> {
         let scope = &input.scope;
         let secrets = self
-            .resolve_external_secrets(scope.collection.as_deref(), scope.environment_name.as_deref())
+            .resolve_external_secrets(
+                scope.collection.as_deref(),
+                scope.environment_name.as_deref(),
+            )
             .await?;
         let vars = self.build_variable_context_with_process_env(
             scope.global_env_name.as_deref(),
@@ -165,7 +170,12 @@ impl RequestExecutionService {
         let mut wire_headers: Vec<(String, String)> = headers
             .iter()
             .filter(|h| h.enabled && !h.key.trim().is_empty())
-            .map(|h| (resolve(&h.key, &vars).output, resolve(&h.value, &vars).output))
+            .map(|h| {
+                (
+                    resolve(&h.key, &vars).output,
+                    resolve(&h.value, &vars).output,
+                )
+            })
             .collect();
         apply_auth(&auth, &mut url, &mut wire_headers)?;
 
@@ -246,7 +256,9 @@ mod tests {
             Box::new(StaticEnvRepo(env)),
             RecordingExecutor::new(),
             Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
-            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(collection))),
+            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+                collection,
+            ))),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -266,9 +278,9 @@ mod tests {
             Box::new(StaticEnvRepo(env)),
             RecordingExecutor::new(),
             Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
-            Box::new(SharedCollectionRepo(InMemoryCollectionRepo::with_folder_chain(
-                collection, folders, None,
-            ))),
+            Box::new(SharedCollectionRepo(
+                InMemoryCollectionRepo::with_folder_chain(collection, folders, None),
+            )),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
             Box::new(EmptySecretManagerRepo),
@@ -316,8 +328,13 @@ mod tests {
     #[tokio::test]
     async fn collection_headers_and_auth_apply_and_request_values_win() {
         let settings = CollectionSettings {
-            headers: vec![Header::new("X-Team", "core"), Header::new("X-Token", "collection")],
-            auth: Some(Auth::Bearer { token: "from-collection".into() }),
+            headers: vec![
+                Header::new("X-Team", "core"),
+                Header::new("X-Token", "collection"),
+            ],
+            auth: Some(Auth::Bearer {
+                token: "from-collection".into(),
+            }),
             ..CollectionSettings::default()
         };
         let svc = service(dev_env(), settings);
@@ -329,19 +346,29 @@ mod tests {
 
         assert_eq!(header(&resolved, "X-Team"), Some("core"));
         assert_eq!(header(&resolved, "X-Token"), Some("request"));
-        assert_eq!(header(&resolved, "Authorization"), Some("Bearer from-collection"));
+        assert_eq!(
+            header(&resolved, "Authorization"),
+            Some("Bearer from-collection")
+        );
     }
 
     #[tokio::test]
     async fn folder_headers_and_auth_apply_between_collection_and_request() {
         let settings = CollectionSettings {
-            headers: vec![Header::new("X-Team", "core"), Header::new("X-Env", "collection")],
-            auth: Some(Auth::Bearer { token: "from-collection".into() }),
+            headers: vec![
+                Header::new("X-Team", "core"),
+                Header::new("X-Env", "collection"),
+            ],
+            auth: Some(Auth::Bearer {
+                token: "from-collection".into(),
+            }),
             ..CollectionSettings::default()
         };
         let folder = FolderSettings {
             headers: vec![Header::new("X-Env", "{{host}}")],
-            auth: Some(Auth::Bearer { token: "{{token}}".into() }),
+            auth: Some(Auth::Bearer {
+                token: "{{token}}".into(),
+            }),
             ..FolderSettings::default()
         };
         let svc = service_with_folders(dev_env(), settings, vec![folder]);
@@ -364,7 +391,10 @@ mod tests {
         let svc = service(dev_env(), CollectionSettings::default())
             .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let mut i = input("wss://h/ws");
-        i.headers = vec![Header::new("X-Token", "{{process.env.ROCKET_WS_TEST_TOKEN}}")];
+        i.headers = vec![Header::new(
+            "X-Token",
+            "{{process.env.ROCKET_WS_TEST_TOKEN}}",
+        )];
 
         let resolved = svc.resolve_websocket(&i).await.expect("resolve");
 
@@ -377,7 +407,10 @@ mod tests {
         // The default store denies everything, as a clone or import would be.
         let svc = service(dev_env(), CollectionSettings::default());
         let mut i = input("wss://h/ws");
-        i.headers = vec![Header::new("X-Token", "{{process.env.ROCKET_WS_GATED_TOKEN}}")];
+        i.headers = vec![Header::new(
+            "X-Token",
+            "{{process.env.ROCKET_WS_GATED_TOKEN}}",
+        )];
         let resolved = svc.resolve_websocket(&i).await.expect("resolve");
         assert_eq!(
             header(&resolved, "X-Token"),
@@ -439,7 +472,8 @@ mod tests {
             &std::collections::HashMap::new(),
         );
         assert_eq!(
-            vars.get("process.env.ROCKET_WS_SCRATCH_TOKEN").map(String::as_str),
+            vars.get("process.env.ROCKET_WS_SCRATCH_TOKEN")
+                .map(String::as_str),
             Some("from-os")
         );
     }
@@ -481,23 +515,42 @@ mod tests {
         let svc = service(dev_env(), CollectionSettings::default());
 
         let mut basic = input("wss://h/ws");
-        basic.auth = Some(Auth::Basic { username: "u".into(), password: "p".into() });
+        basic.auth = Some(Auth::Basic {
+            username: "u".into(),
+            password: "p".into(),
+        });
         let r = svc.resolve_websocket(&basic).await.expect("basic");
         assert_eq!(header(&r, "Authorization"), Some("Basic dTpw"));
 
         let mut bearer = input("wss://h/ws");
-        bearer.auth = Some(Auth::Bearer { token: "{{token}}".into() });
+        bearer.auth = Some(Auth::Bearer {
+            token: "{{token}}".into(),
+        });
         let r = svc.resolve_websocket(&bearer).await.expect("bearer");
         assert_eq!(header(&r, "Authorization"), Some("Bearer abc123"));
 
         let mut key_header = input("wss://h/ws");
-        key_header.auth = Some(Auth::ApiKey { key: "X-Key".into(), value: "k".into(), placement: "header".into() });
-        let r = svc.resolve_websocket(&key_header).await.expect("api key header");
+        key_header.auth = Some(Auth::ApiKey {
+            key: "X-Key".into(),
+            value: "k".into(),
+            placement: "header".into(),
+        });
+        let r = svc
+            .resolve_websocket(&key_header)
+            .await
+            .expect("api key header");
         assert_eq!(header(&r, "X-Key"), Some("k"));
 
         let mut key_query = input("wss://h/ws?a=1");
-        key_query.auth = Some(Auth::ApiKey { key: "api_key".into(), value: "k 1".into(), placement: "query".into() });
-        let r = svc.resolve_websocket(&key_query).await.expect("api key query");
+        key_query.auth = Some(Auth::ApiKey {
+            key: "api_key".into(),
+            value: "k 1".into(),
+            placement: "query".into(),
+        });
+        let r = svc
+            .resolve_websocket(&key_query)
+            .await
+            .expect("api key query");
         assert_eq!(r.url, "wss://h/ws?a=1&api_key=k+1");
         assert_eq!(header(&r, "api_key"), None);
     }
@@ -506,9 +559,15 @@ mod tests {
     async fn an_unsupported_auth_type_is_an_explicit_error_not_an_anonymous_connect() {
         let svc = service(dev_env(), CollectionSettings::default());
         let mut i = input("wss://h/ws");
-        i.auth = Some(Auth::Digest { username: "u".into(), password: "p".into() });
+        i.auth = Some(Auth::Digest {
+            username: "u".into(),
+            password: "p".into(),
+        });
 
-        let err = svc.resolve_websocket(&i).await.expect_err("digest is unsupported");
+        let err = svc
+            .resolve_websocket(&i)
+            .await
+            .expect_err("digest is unsupported");
 
         assert!(err.to_string().contains("Digest"), "{err}");
         assert!(err.to_string().contains("not supported"), "{err}");
@@ -518,8 +577,14 @@ mod tests {
     async fn timeouts_and_tls_default_sensibly_and_zero_means_off() {
         let svc = service(dev_env(), CollectionSettings::default());
 
-        let defaults = svc.resolve_websocket(&input("wss://h/ws")).await.expect("defaults");
-        assert_eq!(defaults.connect_timeout, Some(std::time::Duration::from_millis(30_000)));
+        let defaults = svc
+            .resolve_websocket(&input("wss://h/ws"))
+            .await
+            .expect("defaults");
+        assert_eq!(
+            defaults.connect_timeout,
+            Some(std::time::Duration::from_millis(30_000))
+        );
         assert_eq!(defaults.keep_alive_interval, None);
         assert!(defaults.verify_ssl);
 
@@ -529,7 +594,10 @@ mod tests {
         custom.verify_ssl = Some(false);
         let r = svc.resolve_websocket(&custom).await.expect("custom");
         assert_eq!(r.connect_timeout, None);
-        assert_eq!(r.keep_alive_interval, Some(std::time::Duration::from_millis(2500)));
+        assert_eq!(
+            r.keep_alive_interval,
+            Some(std::time::Duration::from_millis(2500))
+        );
         assert!(!r.verify_ssl);
     }
 

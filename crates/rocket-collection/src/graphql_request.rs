@@ -143,7 +143,8 @@ mod tests {
 
     #[test]
     fn json_without_optional_fields_still_loads() {
-        let json = r#"{"uid":"u1","name":"A","method":"POST","url":"https://x","body":{"query":"{ a }"}}"#;
+        let json =
+            r#"{"uid":"u1","name":"A","method":"POST","url":"https://x","body":{"query":"{ a }"}}"#;
         let g: GraphQlRequest = serde_json::from_str(json).expect("old shape loads");
         assert_eq!(g.body.query, "{ a }");
         assert!(g.body.variables.is_none());

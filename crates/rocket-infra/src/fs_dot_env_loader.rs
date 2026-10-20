@@ -32,9 +32,8 @@ impl DotEnvLoader for FsDotEnvLoader {
         let path = resolve_dot_env_path(raw_path, base)?;
         let bytes = std::fs::read(&path)
             .map_err(|e| format!("Could not read the .env file {}: {e}", path.display()))?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| {
-            format!("The .env file {} is not valid UTF-8.", path.display())
-        })?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| format!("The .env file {} is not valid UTF-8.", path.display()))?;
         let mut pairs = Vec::new();
         for item in dotenvy::Iter::new(text.as_bytes()) {
             match item {

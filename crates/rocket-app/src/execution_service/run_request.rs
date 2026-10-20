@@ -172,14 +172,26 @@ mod tests {
             }
             other => panic!("expected an HTTP target, got {other:?}"),
         }
-        assert!(matches!(find_run_target(&collection(), "main"), RunTarget::Http(_)));
+        assert!(matches!(
+            find_run_target(&collection(), "main"),
+            RunTarget::Http(_)
+        ));
     }
 
     #[test]
     fn find_run_target_skips_other_protocols_and_misses_unknown_paths() {
-        assert!(matches!(find_run_target(&collection(), "socket"), RunTarget::Skipped));
-        assert!(matches!(find_run_target(&collection(), "auth/nope"), RunTarget::NotFound));
-        assert!(matches!(find_run_target(&collection(), "login"), RunTarget::NotFound));
+        assert!(matches!(
+            find_run_target(&collection(), "socket"),
+            RunTarget::Skipped
+        ));
+        assert!(matches!(
+            find_run_target(&collection(), "auth/nope"),
+            RunTarget::NotFound
+        ));
+        assert!(matches!(
+            find_run_target(&collection(), "login"),
+            RunTarget::NotFound
+        ));
     }
 
     #[test]

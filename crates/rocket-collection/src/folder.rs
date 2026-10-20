@@ -166,10 +166,12 @@ mod tests {
         use crate::graphql_request::GraphQlRequest;
         let mut folder = Folder::new("api");
         folder.add_request(Request::new("A", HttpMethod::Get, "/a"));
-        folder.items.push(CollectionItem::GraphQl(Box::new(GraphQlRequest::new(
-            "Q",
-            "https://x/graphql",
-        ))));
+        folder
+            .items
+            .push(CollectionItem::GraphQl(Box::new(GraphQlRequest::new(
+                "Q",
+                "https://x/graphql",
+            ))));
         assert_eq!(folder.request_count(), 2);
         let v = serde_json::to_value(&folder.items[1]).expect("serialize");
         assert_eq!(v["type"], "graphql");
@@ -226,10 +228,11 @@ mod tests {
     #[test]
     fn grpc_item_counts_as_a_request_and_serializes_with_the_grpc_tag() {
         let mut root = Folder::new("root");
-        root.items.push(CollectionItem::Grpc(Box::new(crate::GrpcRequest::new(
-            "Say Hello",
-            "localhost:50051",
-        ))));
+        root.items
+            .push(CollectionItem::Grpc(Box::new(crate::GrpcRequest::new(
+                "Say Hello",
+                "localhost:50051",
+            ))));
         assert_eq!(root.request_count(), 1);
         let v = serde_json::to_value(&root.items[0]).expect("serialize");
         assert_eq!(v["type"], "grpc");
