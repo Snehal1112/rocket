@@ -1668,10 +1668,13 @@ impl RequestExecutionService {
             Some(e) => e,
             None => return ScriptResult::default(),
         };
+        // The engine does not mask uncaught error text, so mask it here.
+        let secrets = ctx.variables.secret_values.clone();
         match engine.execute_with_host(ctx, host).await {
             Ok(mut result) => {
                 if let Some(err) = result.error.take() {
-                    let message = script.attribute(phase, &err);
+                    let message =
+                        script.attribute(phase, &crate::redaction::redact_secrets(&err, &secrets));
                     self.events.publish(DomainEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: phase.to_string(),
@@ -1683,7 +1686,10 @@ impl RequestExecutionService {
                 result
             }
             Err(e) => {
-                let message = script.attribute(phase, &e.to_string());
+                let message = script.attribute(
+                    phase,
+                    &crate::redaction::redact_secrets(&e.to_string(), &secrets),
+                );
                 self.events.publish(DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
@@ -1771,7 +1777,10 @@ impl RequestExecutionService {
                     self.events.publish(DomainEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: format!("action:{phase_str}"),
-                        message: e.to_string(),
+                        message: crate::redaction::redact_secrets(
+                            &e.to_string(),
+                            &var_ctx.secret_values,
+                        ),
                     });
                     continue;
                 }
@@ -1780,7 +1789,7 @@ impl RequestExecutionService {
                 self.events.publish(DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: format!("action:{phase_str}"),
-                    message: err,
+                    message: crate::redaction::redact_secrets(&err, &var_ctx.secret_values),
                 });
                 continue;
             }
@@ -2879,6 +2888,7 @@ impl RequestExecutionService {
             }
         };
 
+        let mask = secret_values.clone();
         let mut var_ctx = VariableContext {
             secret_values,
             ..Default::default()
@@ -2913,8 +2923,11 @@ impl RequestExecutionService {
         };
         let logs = result.console_entries;
         if let Some(err) = result.error {
+            // The engine does not mask uncaught error text, so mask it here.
             return (
-                Err(rocket_shared::error::DomainError::InvalidInput(err)),
+                Err(rocket_shared::error::DomainError::InvalidInput(
+                    crate::redaction::redact_secrets(&err, &mask),
+                )),
                 logs,
             );
         }
@@ -10601,6 +10614,95 @@ mod tests {
             .script_error
             .expect("a timed-out script must populate script_error, not just fire an event");
         assert!(err.contains("timed out"), "unexpected message: {err}");
+    }
+
+    /// Engine that fails the script with a message holding a secret value,
+    /// either as an `Ok` result error or as an `Err`.
+    struct LeakyErrorEngine {
+        as_err: bool,
+    }
+
+    #[async_trait]
+    impl ScriptEngine for LeakyErrorEngine {
+        async fn execute(&self, _ctx: ScriptContext) -> DomainResult<ScriptResult> {
+            let message = "Error: token=sk-live-abcdef123 rejected".to_string();
+            if self.as_err {
+                return Err(DomainError::Internal(message));
+            }
+            Ok(ScriptResult {
+                error: Some(message),
+                ..Default::default()
+            })
+        }
+    }
+
+    /// Runs a request whose pre-request script fails with a secret in the
+    /// message. Returns the output and the published script error messages.
+    async fn run_leaky_script(as_err: bool) -> (ExecuteRequestOutput, Vec<String>) {
+        struct SharedPub(Arc<RecordingPublisher>);
+        impl rocket_shared::events::EventPublisher for SharedPub {
+            fn publish(&self, event: DomainEvent) {
+                self.0.publish(event);
+            }
+        }
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("API_KEY", "sk-live-abcdef123"));
+        let publisher = Arc::new(RecordingPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPub(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(LeakyErrorEngine { as_err }));
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("throw new Error('x')".into());
+        let output = svc.execute(input).await.expect("execute failed");
+        let messages = publisher
+            .events
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter_map(|e| match e {
+                DomainEvent::ScriptError { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
+        (output, messages)
+    }
+
+    #[tokio::test]
+    async fn script_error_result_masks_secret_in_event_and_output() {
+        let (output, messages) = run_leaky_script(false).await;
+        assert_eq!(messages.len(), 1);
+        assert!(
+            !messages[0].contains("sk-live-abcdef123"),
+            "event: {}",
+            messages[0]
+        );
+        assert_eq!(messages[0], "Error: token=•••••• rejected");
+        let err = output.script_error.expect("script_error");
+        assert!(!err.contains("sk-live-abcdef123"), "output: {err}");
+    }
+
+    #[tokio::test]
+    async fn script_engine_err_masks_secret_in_event_and_output() {
+        let (output, messages) = run_leaky_script(true).await;
+        assert_eq!(messages.len(), 1);
+        assert!(
+            !messages[0].contains("sk-live-abcdef123"),
+            "event: {}",
+            messages[0]
+        );
+        let err = output.script_error.expect("script_error");
+        assert!(!err.contains("sk-live-abcdef123"), "output: {err}");
     }
 
     /// Script engine that reports the execution mode string it was given and

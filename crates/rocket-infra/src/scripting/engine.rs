@@ -2156,6 +2156,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn uncaught_error_message_still_carries_the_raw_secret() {
+        // The engine does not mask `result.error`; the app layer does.
+        let engine = DenoScriptEngine::new();
+        let mut vars = VariableContext::default();
+        vars.env
+            .insert("API_KEY".into(), "sk-live-abcdef123".into());
+        vars.secret_values.insert("sk-live-abcdef123".into());
+        let mut ctx = minimal_ctx("throw new Error('token=' + rok.getEnvVar('API_KEY'))");
+        ctx.variables = vars;
+        let result = engine.execute(ctx).await.expect("execute");
+        let err = result.error.expect("script error");
+        assert!(err.contains("sk-live-abcdef123"), "got: {err}");
+    }
+
+    #[tokio::test]
     async fn non_secret_variable_value_is_not_redacted() {
         let engine = DenoScriptEngine::new();
         let mut vars = VariableContext::default();
