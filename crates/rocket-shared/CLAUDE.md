@@ -55,6 +55,12 @@ cargo check -p rocket-shared
 - `ClientCertificate` — tagged enum (`type` field): `pem` or `pkcs12`.
 - `Proxy` / `ProxyConnectionConfig` / `ProxyAuth` — proxy settings; `auth` serializes as `false` when absent (matching the OpenCollection wire format).
 
+### DomainEvent wire format (pinned)
+- The `type` tag is camelCase (`collectionCreated`). Variant fields are deliberately snake_case (`session_id`). Nested helper DTOs (for example `FlowCallbackInfo`, `LoadTestProgressEvent`) are camelCase.
+- This mix is kept on purpose. Renaming any of it breaks the frontend listeners and needs its own decision.
+- The `wire_contract_*` tests in `events.rs` assert exact key sets, so an accidental rename fails the build.
+- `TauriEventBus` adds `seq` (process-wide counter) and `tsMs` (unix ms) at emit time. Do not add top-level fields with those names to a variant.
+
 ## Patterns and Conventions
 
 - **Custom serde visitors** are used wherever the JSON wire format is polymorphic (plain string vs. object). See `Description`, `VariableValue`, and `ProxyAuth`. This is intentional to stay compatible with the OpenCollection format.

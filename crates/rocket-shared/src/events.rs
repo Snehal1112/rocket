@@ -285,6 +285,15 @@ pub struct FlowRewriteFailure {
     pub message: String,
 }
 
+/// Every event the backend publishes.
+///
+/// Wire format, pinned by the `wire_contract_*` tests below:
+/// - The `type` tag is camelCase.
+/// - Variant fields are deliberately snake_case.
+/// - Nested helper DTOs (`FlowCallbackInfo` and similar) are camelCase.
+///
+/// Renaming any of these is a breaking change for the frontend listeners
+/// and needs its own decision. The bus adds `seq` and `tsMs` at emit time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
@@ -2269,5 +2278,174 @@ mod tests {
         assert_eq!(value["type"], "loadTestComplete");
         assert_eq!(value["totalRequests"], 3);
         assert_eq!(value["requestLog"], serde_json::json!([]));
+    }
+
+    fn sorted_keys(event: &DomainEvent) -> Vec<String> {
+        let value = serde_json::to_value(event).expect("serialize");
+        let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    fn assert_keys(event: &DomainEvent, expected: &[&str]) {
+        let mut want: Vec<String> = expected.iter().map(|k| k.to_string()).collect();
+        want.sort();
+        assert_eq!(sorted_keys(event), want);
+    }
+
+    // Wire contract: tag is camelCase, fields stay snake_case. A rename here
+    // breaks the frontend listeners and needs its own decision.
+    #[test]
+    fn wire_contract_collection_and_git_events() {
+        assert_keys(
+            &DomainEvent::CollectionRenamed {
+                old_name: "a".into(),
+                new_name: "b".into(),
+            },
+            &["type", "old_name", "new_name"],
+        );
+        assert_keys(
+            &DomainEvent::GitCommit {
+                collection: "c".into(),
+                message: "m".into(),
+                sha: "s".into(),
+            },
+            &["type", "collection", "message", "sha"],
+        );
+        assert_keys(
+            &DomainEvent::BranchSwitched {
+                collection: "c".into(),
+                branch: "b".into(),
+            },
+            &["type", "collection", "branch"],
+        );
+        assert_keys(&DomainEvent::HistoryCleared, &["type"]);
+    }
+
+    #[test]
+    fn wire_contract_flow_acp_and_watcher_events() {
+        assert_keys(
+            &DomainEvent::FlowStepProgress {
+                run_id: "r".into(),
+                node_id: "n".into(),
+                attempt: None,
+                max_attempts: None,
+                message: "m".into(),
+                live: None,
+            },
+            &[
+                "type",
+                "run_id",
+                "node_id",
+                "attempt",
+                "max_attempts",
+                "message",
+            ],
+        );
+        assert_keys(
+            &DomainEvent::AcpSessionChunk {
+                session_id: "s".into(),
+                text: "t".into(),
+            },
+            &["type", "session_id", "text"],
+        );
+        assert_keys(
+            &DomainEvent::AcpUsage {
+                session_id: "s".into(),
+                used: 1,
+                size: 2,
+                cost_usd: None,
+            },
+            &["type", "session_id", "used", "size", "cost_usd"],
+        );
+        assert_keys(
+            &DomainEvent::FileWatcherFailed {
+                message: "m".into(),
+            },
+            &["type", "message"],
+        );
+    }
+
+    #[test]
+    fn wire_contract_stream_events() {
+        assert_keys(
+            &DomainEvent::GrpcSessionMessage {
+                session_id: "s".into(),
+                index: 0,
+                json: "{}".into(),
+            },
+            &["type", "session_id", "index", "json"],
+        );
+        assert_keys(
+            &DomainEvent::WebSocketMessage {
+                session_id: "s".into(),
+                direction: WebSocketDirection::Out,
+                kind: WebSocketPayloadKind::Text,
+                data: "d".into(),
+                size: 1,
+                timestamp_ms: 0,
+            },
+            &[
+                "type",
+                "session_id",
+                "direction",
+                "kind",
+                "data",
+                "size",
+                "timestamp_ms",
+            ],
+        );
+    }
+
+    #[test]
+    fn wire_contract_load_test_events_are_camel_case() {
+        let progress = DomainEvent::LoadTestProgress(LoadTestProgressEvent {
+            elapsed_ms: 0,
+            completed: 0,
+            active_concurrent: 0,
+            succeeded: 0,
+            failed_status: 0,
+            failed_transport: 0,
+            requests_per_second: 0.0,
+            p50_ms: 0.0,
+            p95_ms: 0.0,
+            p99_ms: 0.0,
+            current_phase_index: 0,
+            recent_log: vec![],
+        });
+        assert_keys(
+            &progress,
+            &[
+                "type",
+                "elapsedMs",
+                "completed",
+                "activeConcurrent",
+                "succeeded",
+                "failedStatus",
+                "failedTransport",
+                "requestsPerSecond",
+                "p50Ms",
+                "p95Ms",
+                "p99Ms",
+                "currentPhaseIndex",
+                "recentLog",
+            ],
+        );
+    }
+
+    // The envelope keys the bus adds must not collide with a top-level field.
+    #[test]
+    fn wire_contract_envelope_keys_are_free() {
+        for event in [
+            DomainEvent::HistoryCleared,
+            DomainEvent::FileWatcherFailed {
+                message: "m".into(),
+            },
+        ] {
+            let keys = sorted_keys(&event);
+            for reserved in ["seq", "tsMs", "ts_ms", "workspaceId"] {
+                assert!(!keys.iter().any(|k| k == reserved));
+            }
+        }
     }
 }

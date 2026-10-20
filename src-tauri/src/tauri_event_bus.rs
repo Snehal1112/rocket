@@ -1,5 +1,16 @@
 use rocket_shared::events::{DomainEvent, EventPublisher};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
+
+/// Process-wide event counter, shared by every `TauriEventBus` instance.
+static NEXT_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// Failed emits per channel, used to rate-limit the warning.
+static EMIT_FAILURES: Mutex<BTreeMap<&'static str, u64>> = Mutex::new(BTreeMap::new());
 
 pub struct TauriEventBus {
     app: AppHandle,
@@ -9,12 +20,30 @@ impl TauriEventBus {
     pub fn new(app: AppHandle) -> Self {
         Self { app }
     }
+
+    fn emit_value(&self, channel: &'static str, payload: &Value) {
+        if let Err(err) = self.app.emit(channel, payload) {
+            // The payload is left out on purpose, it may hold secrets. The
+            // `backend-log` emitter does not use this bus, so this cannot loop.
+            if let Some(count) = failure_to_log(&EMIT_FAILURES, channel) {
+                tracing::warn!(channel, failures = count, error = %err, "event emit failed");
+            }
+        }
+    }
 }
 
 impl EventPublisher for TauriEventBus {
     fn publish(&self, event: DomainEvent) {
         let event_name = channel_for(&event);
-        let _ = self.app.emit(event_name, &event);
+        let seq = next_seq();
+        let payload = match envelope(&event, seq, now_ms()) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(channel = event_name, error = %err, "event serialize failed");
+                return;
+            }
+        };
+        self.emit_value(event_name, &payload);
         // A branch switch replaces the working-tree content visible to the
         // collection sidebar, so also fire "collection-changed" so that any
         // expanded CollectionNode re-fetches its request tree.
@@ -22,9 +51,49 @@ impl EventPublisher for TauriEventBus {
             &event,
             DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. }
         ) {
-            let _ = self.app.emit("collection-changed", &event);
+            self.emit_value("collection-changed", &payload);
         }
     }
+}
+
+/// The next process-wide sequence number. It starts at 1 and only grows.
+fn next_seq() -> u64 {
+    NEXT_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Unix time in milliseconds. A clock before the epoch reads as 0.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
+/// The event as a JSON object plus the `seq` and `tsMs` envelope keys.
+/// A key the event already has is never overwritten.
+fn envelope(event: &DomainEvent, seq: u64, ts_ms: u64) -> Result<Value, serde_json::Error> {
+    Ok(add_envelope(serde_json::to_value(event)?, seq, ts_ms))
+}
+
+/// Adds `seq` and `tsMs` to a JSON object unless it has those keys already.
+fn add_envelope(mut value: Value, seq: u64, ts_ms: u64) -> Value {
+    if let Value::Object(map) = &mut value {
+        map.entry("seq").or_insert_with(|| Value::from(seq));
+        map.entry("tsMs").or_insert_with(|| Value::from(ts_ms));
+    }
+    value
+}
+
+/// Counts one failure on `channel`. Returns the count when it should be
+/// logged: the first failure, then every 100th.
+fn failure_to_log(
+    failures: &Mutex<BTreeMap<&'static str, u64>>,
+    channel: &'static str,
+) -> Option<u64> {
+    let mut map = failures.lock().unwrap_or_else(|e| e.into_inner());
+    let count = map.entry(channel).or_insert(0);
+    *count += 1;
+    (*count == 1 || count.is_multiple_of(100)).then_some(*count)
 }
 
 /// The frontend channel for each event.
@@ -243,5 +312,63 @@ mod tests {
             channel_for(&DomainEvent::LoadTestComplete(result)),
             "load_test_complete"
         );
+    }
+
+    #[test]
+    fn envelope_adds_seq_and_ts_ms_to_the_event_object() {
+        let event = DomainEvent::FileWatcherFailed {
+            message: "m".into(),
+        };
+        let value = envelope(&event, 7, 1234).expect("envelope");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "type": "fileWatcherFailed",
+                "message": "m",
+                "seq": 7,
+                "tsMs": 1234,
+            })
+        );
+    }
+
+    #[test]
+    fn envelope_keeps_unit_variants_as_objects() {
+        let value = envelope(&DomainEvent::HistoryCleared, 1, 2).expect("envelope");
+        assert_eq!(value["type"], "historyCleared");
+        assert_eq!(value["seq"], 1);
+    }
+
+    #[test]
+    fn envelope_does_not_overwrite_existing_keys() {
+        let value = add_envelope(serde_json::json!({ "seq": "own", "tsMs": "own" }), 9, 9);
+        assert_eq!(value["seq"], "own");
+        assert_eq!(value["tsMs"], "own");
+    }
+
+    #[test]
+    fn seq_is_strictly_increasing() {
+        let a = next_seq();
+        let b = next_seq();
+        let c = next_seq();
+        assert!(a < b && b < c);
+        assert!(a >= 1);
+    }
+
+    #[test]
+    fn now_ms_is_after_2020() {
+        assert!(now_ms() > 1_577_836_800_000);
+    }
+
+    #[test]
+    fn failure_log_is_first_then_every_hundredth_per_channel() {
+        let failures = Mutex::new(BTreeMap::new());
+        assert_eq!(failure_to_log(&failures, "a"), Some(1));
+        for _ in 2..100 {
+            assert_eq!(failure_to_log(&failures, "a"), None);
+        }
+        assert_eq!(failure_to_log(&failures, "a"), Some(100));
+        assert_eq!(failure_to_log(&failures, "a"), None);
+        // Another channel counts on its own.
+        assert_eq!(failure_to_log(&failures, "b"), Some(1));
     }
 }
