@@ -313,6 +313,10 @@ pub fn run() {
 
             // Event buses — publish domain events to the frontend.
             let watcher_bus = Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone()));
+            // Every TauriEventBus records in-app collection writes here, and
+            // the file watcher drops its echo of them.
+            let recent_writes = Arc::new(rocket_infra::RecentWrites::new());
+            app.manage(Arc::clone(&recent_writes));
 
             // Security audit: tamper-evident event log + compliance profile.
             // Lives under data_dir (not workspace) so the log persists across
@@ -858,7 +862,7 @@ pub fn run() {
 
             // Start filesystem watcher for the collections directory.
             let watcher_started = std::time::Instant::now();
-            let watcher = NotifyFileWatcher::new();
+            let watcher = NotifyFileWatcher::with_echo_guard(recent_writes);
             match watcher.start(collections_dir.clone(), watcher_bus.clone()) {
                 Ok(()) => tracing::info!(
                     elapsed_ms = watcher_started.elapsed().as_millis() as u64,

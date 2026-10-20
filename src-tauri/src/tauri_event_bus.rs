@@ -1,10 +1,11 @@
+use rocket_infra::RecentWrites;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Process-wide event counter, shared by every `TauriEventBus` instance.
 static NEXT_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -34,6 +35,11 @@ impl TauriEventBus {
 
 impl EventPublisher for TauriEventBus {
     fn publish(&self, event: DomainEvent) {
+        // Record in-app collection writes first, so the file watcher can
+        // drop its own report of the same write.
+        if let Some(writes) = self.app.try_state::<Arc<RecentWrites>>() {
+            writes.record(&event);
+        }
         let event_name = channel_for(&event);
         let seq = next_seq();
         let payload = match envelope(&event, seq, now_ms()) {

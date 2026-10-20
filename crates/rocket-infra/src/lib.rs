@@ -57,7 +57,7 @@ pub use clone_destination_capabilities::{
     DEFAULT_CLONE_DESTINATION_MAX_ENTRIES,
 };
 pub use cookie_store::RepoCookieStore;
-pub use file_watcher::NotifyFileWatcher;
+pub use file_watcher::{NotifyFileWatcher, RecentWrites};
 pub use fs_agent_config_repo::FsAgentConfigRepo;
 pub use fs_audit_log_repo::FsAuditLogRepo;
 pub use fs_collection::FsCollectionRepo;
