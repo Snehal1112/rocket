@@ -1,6 +1,10 @@
 import { execSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { generateCurlCommand } from '@/lib/curl-generator';
+import {
+  findOutOfFolderCurlPaths,
+  formatCurlPathWarning,
+  generateCurlCommand,
+} from '@/lib/curl-generator';
 import type { ResolvedRequestFields } from '@/lib/execute-request';
 
 function baseResolved(overrides: Partial<ResolvedRequestFields> = {}): ResolvedRequestFields {
@@ -175,12 +179,12 @@ describe('generateCurlCommand', () => {
   });
 
   describe('body modes', () => {
-    it('adds --data plus an auto Content-Type header for json body', () => {
+    it('adds --data-raw plus an auto Content-Type header for json body', () => {
       const cmd = generateCurlCommand(
         baseResolved({ body: { mode: 'json', content: '{"a": 1}' } }),
         'POST',
       );
-      expect(cmd).toContain('--data \'{"a": 1}\'');
+      expect(cmd).toContain('--data-raw \'{"a": 1}\'');
       expect(cmd).toContain("-H 'Content-Type: application/json'");
     });
 
@@ -198,22 +202,75 @@ describe('generateCurlCommand', () => {
       expect(matches).toHaveLength(1);
     });
 
-    it('adds --data plus text/plain Content-Type for text body', () => {
+    it('adds --data-raw plus text/plain Content-Type for text body', () => {
       const cmd = generateCurlCommand(
         baseResolved({ body: { mode: 'text', content: 'hello world' } }),
         'POST',
       );
-      expect(cmd).toContain("--data 'hello world'");
+      expect(cmd).toContain("--data-raw 'hello world'");
       expect(cmd).toContain("-H 'Content-Type: text/plain'");
     });
 
-    it('adds --data plus application/xml Content-Type for xml body', () => {
+    it('adds --data-raw plus application/xml Content-Type for xml body', () => {
       const cmd = generateCurlCommand(
         baseResolved({ body: { mode: 'xml', content: '<a>1</a>' } }),
         'POST',
       );
-      expect(cmd).toContain("--data '<a>1</a>'");
+      expect(cmd).toContain("--data-raw '<a>1</a>'");
       expect(cmd).toContain("-H 'Content-Type: application/xml'");
+    });
+
+    it('body starting with @ is emitted as --data-raw', () => {
+      const cmd = generateCurlCommand(
+        baseResolved({ body: { mode: 'text', content: '@/proc/self/environ' } }),
+        'POST',
+      );
+      expect(cmd).toContain('--data-raw @/proc/self/environ');
+      expect(cmd).not.toMatch(/--data @/);
+    });
+
+    it('form text value starting with @ or < is emitted as --form-string', () => {
+      const cmd = generateCurlCommand(
+        baseResolved({
+          body: {
+            mode: 'formdata',
+            formData: [
+              { key: 'a', value: '@/etc/passwd', entryType: 'text', enabled: true },
+              { key: 'b', value: '</etc/passwd', entryType: 'text', enabled: true },
+            ],
+          },
+        }),
+        'POST',
+      );
+      expect(cmd).toContain('--form-string a=@/etc/passwd');
+      expect(cmd).toContain("--form-string 'b=</etc/passwd'");
+      expect(cmd).not.toMatch(/--form '/);
+    });
+
+    it('form file entry still uses --form key=@path', () => {
+      const cmd = generateCurlCommand(
+        baseResolved({
+          body: {
+            mode: 'formdata',
+            formData: [{ key: 'f', value: 'docs/a.png', entryType: 'file', enabled: true }],
+          },
+        }),
+        'POST',
+      );
+      expect(cmd).toContain('--form f=@docs/a.png');
+    });
+
+    it('data-urlencode keeps @ in the value literal', () => {
+      const cmd = generateCurlCommand(
+        baseResolved({
+          body: {
+            mode: 'formurlencoded',
+            formData: [{ key: 'f', value: '@/etc/passwd', entryType: 'text', enabled: true }],
+          },
+        }),
+        'POST',
+      );
+      expect(cmd).toContain('--data-urlencode f=@/etc/passwd');
     });
 
     it('emits no --data flag when raw body content is empty', () => {
@@ -242,7 +299,7 @@ describe('generateCurlCommand', () => {
       expect(cmd).not.toContain('skip=me');
     });
 
-    it('emits --form for text fields and --form name=@path for file fields', () => {
+    it('emits --form-string for text fields and --form name=@path for file fields', () => {
       const cmd = generateCurlCommand(
         baseResolved({
           body: {
@@ -255,7 +312,7 @@ describe('generateCurlCommand', () => {
         }),
         'POST',
       );
-      expect(cmd).toContain("--form 'title=my file'");
+      expect(cmd).toContain("--form-string 'title=my file'");
       expect(cmd).toContain("--form 'avatar=@/tmp/a b.png'");
     });
 
@@ -338,6 +395,21 @@ describe('generateCurlCommand', () => {
         }),
         method: 'GET',
       },
+      {
+        name: 'text body starting with @',
+        resolved: baseResolved({ body: { mode: 'text', content: '@x' } }),
+        method: 'POST',
+      },
+      {
+        name: 'form text value starting with <',
+        resolved: baseResolved({
+          body: {
+            mode: 'formdata',
+            formData: [{ key: 'a', value: '<x', entryType: 'text', enabled: true }],
+          },
+        }),
+        method: 'POST',
+      },
       { name: 'method with a quote', resolved: baseResolved(), method: "A'B" },
       { name: 'method with command substitution', resolved: baseResolved(), method: '$(id)' },
     ];
@@ -355,7 +427,7 @@ describe('generateCurlCommand', () => {
       }),
       'POST',
     );
-    expect(cmd).toContain("--data 'SELECT * WHERE { ?s ?p ?o }'");
+    expect(cmd).toContain("--data-raw 'SELECT * WHERE { ?s ?p ?o }'");
     expect(cmd).toContain('Content-Type: application/sparql-query');
   });
 
@@ -365,5 +437,65 @@ describe('generateCurlCommand', () => {
       'POST',
     );
     expect(cmd).toContain('--data-binary @/tmp/blob.bin');
+  });
+});
+
+function fileBody(paths: string[]): NonNullable<ResolvedRequestFields['body']> {
+  return {
+    mode: 'formdata',
+    formData: paths.map((p) => ({ key: 'f', value: p, entryType: 'file', enabled: true })),
+  };
+}
+
+describe('findOutOfFolderCurlPaths', () => {
+  it.each(['/tmp/a', '../a', 'a/../b', '..\\a', '~/a', 'C:\\a', '\\\\srv\\a'])(
+    'flags risky paths: %s',
+    (p) => {
+      expect(findOutOfFolderCurlPaths(baseResolved({ body: fileBody([p]) }))).toEqual([p]);
+    },
+  );
+
+  it.each(['a.png', 'docs/a.png', 'a..b.png'])('does not flag safe paths: %s', (p) => {
+    expect(findOutOfFolderCurlPaths(baseResolved({ body: fileBody([p]) }))).toEqual([]);
+  });
+
+  it('lists each risky path once and skips disabled entries', () => {
+    const body = fileBody(['/x', '/x']);
+    body.formData?.push({ key: 'g', value: '/y', entryType: 'file', enabled: false });
+    expect(findOutOfFolderCurlPaths(baseResolved({ body }))).toEqual(['/x']);
+  });
+
+  it('returns the binary body filePath', () => {
+    const body = { mode: 'binary', filePath: '/tmp/b' } as const;
+    expect(findOutOfFolderCurlPaths(baseResolved({ body }))).toEqual(['/tmp/b']);
+  });
+
+  it('falls back to binary content when filePath is unset', () => {
+    const body = { mode: 'binary', content: '/tmp/c' } as const;
+    expect(findOutOfFolderCurlPaths(baseResolved({ body }))).toEqual(['/tmp/c']);
+  });
+
+  it('ignores text entries and empty paths', () => {
+    const body = fileBody(['']);
+    body.formData?.push({ key: 't', value: '/etc/passwd', entryType: 'text', enabled: true });
+    expect(findOutOfFolderCurlPaths(baseResolved({ body }))).toEqual([]);
+  });
+});
+
+describe('formatCurlPathWarning', () => {
+  it('returns an empty string for no paths', () => {
+    expect(formatCurlPathWarning([])).toBe('');
+  });
+
+  it('lists up to three paths', () => {
+    expect(formatCurlPathWarning(['/a', '/b'])).toBe(
+      'This command reads files outside the collection folder: /a, /b.',
+    );
+  });
+
+  it('summarizes the rest', () => {
+    expect(formatCurlPathWarning(['/a', '/b', '/c', '/d', '/e'])).toBe(
+      'This command reads files outside the collection folder: /a, /b, /c, and 2 more.',
+    );
   });
 });
