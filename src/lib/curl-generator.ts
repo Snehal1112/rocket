@@ -122,7 +122,7 @@ function buildBodyParts(body: Body | undefined, headers: Header[]): BodyParts {
     case 'text':
     case 'sparql': {
       if (!body.content) return { lines: [] };
-      const lines = [`--data ${shellQuote(body.content)}`];
+      const lines = [`--data-raw ${shellQuote(body.content)}`];
       let extraHeaderLine: string | undefined;
       if (!hasContentTypeHeader(headers)) {
         const contentType = contentTypeFor(body.mode);
@@ -145,7 +145,7 @@ function buildBodyParts(body: Body | undefined, headers: Header[]): BodyParts {
         .map((e) =>
           e.entryType === 'file'
             ? `--form ${shellQuote(`${e.key}=@${e.value}`)}`
-            : `--form ${shellQuote(`${e.key}=${e.value}`)}`,
+            : `--form-string ${shellQuote(`${e.key}=${e.value}`)}`,
         );
       return { lines };
     }
@@ -180,4 +180,33 @@ export function generateCurlCommand(resolved: ResolvedRequestFields, method: str
   parts.push(...bodyLines);
 
   return parts.join(' \\\n  ');
+}
+
+function isOutOfFolderPath(p: string): boolean {
+  if (/^[/\\~]/.test(p) || /^[A-Za-z]:/.test(p)) return true;
+  return p.split(/[/\\]/).includes('..');
+}
+
+// Lists file paths in the body that point outside the collection folder.
+export function findOutOfFolderCurlPaths(resolved: ResolvedRequestFields): string[] {
+  const body = resolved.body;
+  if (!body) return [];
+  const candidates: string[] = [];
+  if (body.mode === 'formdata') {
+    for (const entry of body.formData ?? []) {
+      if (entry.enabled && entry.entryType === 'file') candidates.push(entry.value);
+    }
+  } else if (body.mode === 'binary') {
+    candidates.push(body.filePath ?? body.content ?? '');
+  }
+  return [...new Set(candidates.filter((p) => p !== '' && isOutOfFolderPath(p)))];
+}
+
+// Builds the warning text for risky paths, or an empty string when there are none.
+export function formatCurlPathWarning(paths: string[]): string {
+  if (paths.length === 0) return '';
+  const shown = paths.slice(0, 3).join(', ');
+  const rest = paths.length - 3;
+  const tail = rest > 0 ? `, and ${rest} more` : '';
+  return `This command reads files outside the collection folder: ${shown}${tail}.`;
 }

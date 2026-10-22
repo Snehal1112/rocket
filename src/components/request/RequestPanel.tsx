@@ -51,7 +51,11 @@ import { useSelectedOperationKind } from '@/hooks/useSelectedOperationKind';
 import { authStateForType } from '@/lib/auth-type-defaults';
 import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type-options';
 import { copyTextAsync } from '@/lib/clipboard';
-import { generateCurlCommand } from '@/lib/curl-generator';
+import {
+  findOutOfFolderCurlPaths,
+  formatCurlPathWarning,
+  generateCurlCommand,
+} from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
 import { resolveRequestFields } from '@/lib/execute-request';
 import {
@@ -463,9 +467,13 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     try {
       // The write starts now, so the click's user activation is still valid.
       await copyTextAsync(
-        resolveRequestFields(tab.id, request).then((resolved) =>
-          generateCurlCommand(resolved, request.method),
-        ),
+        resolveRequestFields(tab.id, request).then((resolved) => {
+          const riskyPaths = findOutOfFolderCurlPaths(resolved);
+          if (riskyPaths.length > 0) {
+            toast.warning(formatCurlPathWarning(riskyPaths));
+          }
+          return generateCurlCommand(resolved, request.method);
+        }),
       );
       toast.success('Copied as cURL');
     } catch (err) {
