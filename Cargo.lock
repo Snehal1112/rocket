@@ -5711,10 +5711,12 @@ dependencies = [
 name = "rocket-export"
 version = "0.1.0"
 dependencies = [
+ "rocket-collection",
  "rocket-shared",
  "serde",
  "serde_json",
  "serde_yaml",
+ "uuid",
  "zip 2.4.2",
 ]
 

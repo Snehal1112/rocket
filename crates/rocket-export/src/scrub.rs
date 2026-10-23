@@ -4,6 +4,8 @@
 //! structs, so unknown keys survive.
 
 use crate::report::{ExportAction, ExportNote};
+use rocket_shared::oauth2::OAuth2Flow;
+use rocket_shared::types::{Auth, Header};
 use serde_yaml::{Mapping, Value};
 
 /// Whether a header's value is always a credential, whatever it contains.
@@ -78,12 +80,12 @@ fn walk(rel_path: &str, value: &mut Value, notes: &mut Vec<ExportNote>) {
                 match key.as_str() {
                     Some("auth") => {
                         if let Value::Mapping(auth) = child {
-                            scrub_auth(rel_path, auth, notes);
+                            yaml_scrub_auth(rel_path, auth, notes);
                         }
                     }
                     Some("headers") => scrub_headers(rel_path, child, notes),
                     Some("variables") => scrub_variables(rel_path, child, notes),
-                    Some("url") => scrub_url(rel_path, child, notes),
+                    Some("url") => yaml_scrub_url(rel_path, child, notes),
                     _ => {}
                 }
                 walk(rel_path, child, notes);
@@ -98,7 +100,7 @@ fn walk(rel_path: &str, value: &mut Value, notes: &mut Vec<ExportNote>) {
     }
 }
 
-fn scrub_auth(rel_path: &str, auth: &mut Mapping, notes: &mut Vec<ExportNote>) {
+fn yaml_scrub_auth(rel_path: &str, auth: &mut Mapping, notes: &mut Vec<ExportNote>) {
     let is_apikey = auth.get("type").and_then(Value::as_str) == Some("apikey");
     let mut direct = vec![
         "password",
@@ -188,7 +190,7 @@ fn scrub_variables(rel_path: &str, variables: &mut Value, notes: &mut Vec<Export
     }
 }
 
-fn scrub_url(rel_path: &str, url: &mut Value, notes: &mut Vec<ExportNote>) {
+fn yaml_scrub_url(rel_path: &str, url: &mut Value, notes: &mut Vec<ExportNote>) {
     let Value::String(text) = url else { return };
     let Some(scheme_end) = text.find("://") else {
         return;
@@ -213,6 +215,106 @@ fn scrub_url(rel_path: &str, url: &mut Value, notes: &mut Vec<ExportNote>) {
     let pw_end = pw_start + password.len();
     text.replace_range(pw_start..pw_end, "");
     notes.push(blank_note(rel_path, "URL password", "url"));
+}
+
+/// Typed scrub of an `Auth` value: blanks literal credentials, keeps `{{refs}}`.
+pub fn scrub_auth(auth: &Auth, path: &str, notes: &mut Vec<ExportNote>) -> Auth {
+    let mut out = auth.clone();
+    let mut blank = |slot: &mut String, field: &str| {
+        if !slot.is_empty() && !is_variable_reference(slot) {
+            slot.clear();
+            notes.push(blank_note(path, "Credential", &format!("auth.{field}")));
+        }
+    };
+    match &mut out {
+        Auth::Basic { password, .. }
+        | Auth::Digest { password, .. }
+        | Auth::Wsse { password, .. }
+        | Auth::Ntlm { password, .. } => blank(password, "password"),
+        Auth::Bearer { token } => blank(token, "token"),
+        Auth::ApiKey { value, .. } => blank(value, "value"),
+        Auth::AwsSigV4 {
+            secret_key,
+            session_token,
+            ..
+        } => {
+            blank(secret_key, "secretKey");
+            if let Some(t) = session_token {
+                blank(t, "sessionToken");
+            }
+        }
+        Auth::OAuth2(flow) => match flow.as_mut() {
+            OAuth2Flow::ClientCredentials { credentials, .. }
+            | OAuth2Flow::AuthorizationCode { credentials, .. } => {
+                blank(&mut credentials.client_secret, "clientSecret")
+            }
+            OAuth2Flow::ResourceOwnerPassword {
+                credentials,
+                resource_owner,
+                ..
+            } => {
+                blank(&mut credentials.client_secret, "clientSecret");
+                if let Some(ro) = resource_owner {
+                    blank(&mut ro.password, "password");
+                }
+            }
+            OAuth2Flow::Implicit { .. } => {}
+        },
+        Auth::OAuth1(o) => {
+            for (slot, name) in [
+                (&mut o.consumer_secret, "consumerSecret"),
+                (&mut o.access_token_secret, "accessTokenSecret"),
+            ] {
+                if let Some(v) = slot {
+                    blank(v, name);
+                }
+            }
+            if let Some(k) = &mut o.private_key {
+                blank(&mut k.value, "privateKey");
+            }
+        }
+        Auth::None | Auth::Inherit => {}
+    }
+    out
+}
+
+/// Blanks literal values of sensitive headers. References are kept.
+pub fn scrub_header_values(
+    headers: Vec<Header>,
+    path: &str,
+    notes: &mut Vec<ExportNote>,
+) -> Vec<Header> {
+    headers
+        .into_iter()
+        .map(|mut h| {
+            if is_sensitive_header(&h.key) && !h.value.is_empty() && !is_variable_reference(&h.value)
+            {
+                h.value.clear();
+                notes.push(blank_note(path, "Credential", &format!("header {}", h.key)));
+            }
+            h
+        })
+        .collect()
+}
+
+/// Blanks a literal password in the URL userinfo.
+pub fn scrub_url(url: &str, path: &str, notes: &mut Vec<ExportNote>) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    let Some((userinfo, host)) = authority.rsplit_once('@') else {
+        return url.to_string();
+    };
+    let Some((user, password)) = userinfo.split_once(':') else {
+        return url.to_string();
+    };
+    if password.is_empty() || is_variable_reference(password) {
+        return url.to_string();
+    }
+    notes.push(blank_note(path, "Credential", "url password"));
+    format!("{scheme}://{user}:@{host}{tail}")
 }
 
 #[cfg(test)]
