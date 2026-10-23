@@ -145,6 +145,7 @@ function App() {
         void reloadGlobalEnvironments(qc);
         qc.invalidateQueries({ queryKey: collectionTrustKeys.all });
         qc.invalidateQueries({ queryKey: environmentKeys.processAll });
+        qc.invalidateQueries({ queryKey: environmentKeys.dotEnvAll });
         clearWorkspaceScopedCaches(qc);
       }),
       listen<{ id: string; newName: string }>('workspace-renamed', () => {

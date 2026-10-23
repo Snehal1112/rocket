@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
 import { makeTrust } from '@/test/trust-fixtures';
+import { environmentKeys } from '../environment-queries';
 import { useCollectionTrust, useCollectionTrustEvents } from '../collection-trust-queries';
 
 vi.mock('@/lib/tauri-api', async () => {
@@ -56,5 +57,15 @@ describe('collection trust queries', () => {
     await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledTimes(3));
     vi.mocked(tauriApi.onGitChanged).mock.calls[0]?.[0]();
     await waitFor(() => expect(tauriApi.getCollectionTrust).toHaveBeenCalledTimes(4));
+  });
+
+  it('invalidates the process and .env status queries on a trust event', async () => {
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    renderHook(() => useCollectionTrustEvents(), { wrapper });
+    await waitFor(() => expect(tauriApi.onCollectionTrustChanged).toHaveBeenCalled());
+    vi.mocked(tauriApi.onCollectionTrustChanged).mock.calls[0]?.[0]({ collection: 'c' });
+    const keys = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toContainEqual(environmentKeys.processAll);
+    expect(keys).toContainEqual(environmentKeys.dotEnvAll);
   });
 });
