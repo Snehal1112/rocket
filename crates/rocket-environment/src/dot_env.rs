@@ -8,6 +8,9 @@ use crate::Environment;
 /// Reads one `.env` file. The `Err` text is a warning message.
 pub trait DotEnvLoader: Send + Sync {
     fn load(&self, raw_path: &str, base: Option<&Path>) -> Result<Vec<(String, String)>, String>;
+
+    /// Reads `<base>/.env`. A missing file or no base is an empty list, not an error.
+    fn load_default(&self, base: Option<&Path>) -> Result<Vec<(String, String)>, String>;
 }
 
 /// The layered `.env` values plus non-fatal warnings.
@@ -52,6 +55,16 @@ pub fn collect_dot_env(
     out
 }
 
+/// Reads the default `.env` file of the base folder. An error becomes a warning.
+pub fn collect_default_dot_env(loader: &dyn DotEnvLoader, base: Option<&Path>) -> DotEnvValues {
+    let mut out = DotEnvValues::default();
+    match loader.load_default(base) {
+        Ok(pairs) => out.values = pairs,
+        Err(message) => out.warnings.push(message),
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +87,16 @@ mod tests {
                 .get(raw)
                 .cloned()
                 .ok_or_else(|| format!("cannot read {raw}"))
+        }
+
+        fn load_default(&self, base: Option<&Path>) -> Result<Vec<(String, String)>, String> {
+            if let Ok(mut b) = self.bases.lock() {
+                b.push(base.map(Path::to_path_buf));
+            }
+            self.files
+                .get(".env")
+                .cloned()
+                .ok_or_else(|| "cannot read default".to_string())
         }
     }
 
@@ -173,5 +196,21 @@ mod tests {
         run(&envs, "c", &fake, Some(&base));
         let seen = fake.bases.lock().map(|b| b.clone()).unwrap_or_default();
         assert_eq!(seen, vec![Some(base)]);
+    }
+
+    #[test]
+    fn collect_default_dot_env_returns_the_loader_values() {
+        let mut fake = Fake::default();
+        fake.files.insert(".env".into(), pairs(&[("A", "1")]));
+        let out = collect_default_dot_env(&fake, None);
+        assert_eq!(out.values, pairs(&[("A", "1")]));
+        assert!(out.warnings.is_empty());
+    }
+
+    #[test]
+    fn collect_default_dot_env_turns_an_error_into_a_warning() {
+        let out = collect_default_dot_env(&Fake::default(), None);
+        assert!(out.values.is_empty());
+        assert_eq!(out.warnings, vec!["cannot read default".to_string()]);
     }
 }

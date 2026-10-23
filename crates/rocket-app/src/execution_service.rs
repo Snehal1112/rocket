@@ -7163,6 +7163,13 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| format!("{raw_path} missing"))
         }
+
+        fn load_default(
+            &self,
+            _base: Option<&std::path::Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            Ok(Vec::new())
+        }
     }
 
     /// A global environment repo that knows its own `.env` base folder.

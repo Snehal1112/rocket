@@ -30,24 +30,40 @@ pub(crate) fn resolve_dot_env_path(raw: &str, base: Option<&Path>) -> Result<Pat
 impl DotEnvLoader for FsDotEnvLoader {
     fn load(&self, raw_path: &str, base: Option<&Path>) -> Result<Vec<(String, String)>, String> {
         let path = resolve_dot_env_path(raw_path, base)?;
-        let bytes = std::fs::read(&path)
-            .map_err(|e| format!("Could not read the .env file {}: {e}", path.display()))?;
-        let text = std::str::from_utf8(&bytes)
-            .map_err(|_| format!("The .env file {} is not valid UTF-8.", path.display()))?;
-        let mut pairs = Vec::new();
-        for item in dotenvy::Iter::new(text.as_bytes()) {
-            match item {
-                Ok(pair) => pairs.push(pair),
-                Err(e) => {
-                    return Err(format!(
-                        "The .env file {} could not be parsed: {e}",
-                        path.display()
-                    ))
-                }
+        read_pairs(&path)
+    }
+
+    fn load_default(&self, base: Option<&Path>) -> Result<Vec<(String, String)>, String> {
+        let Some(base) = base else {
+            return Ok(Vec::new());
+        };
+        let path = base.join(".env");
+        match std::fs::metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            _ => read_pairs(&path),
+        }
+    }
+}
+
+/// Reads and parses one file. The `Err` text is a warning message.
+fn read_pairs(path: &Path) -> Result<Vec<(String, String)>, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("Could not read the .env file {}: {e}", path.display()))?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| format!("The .env file {} is not valid UTF-8.", path.display()))?;
+    let mut pairs = Vec::new();
+    for item in dotenvy::Iter::new(text.as_bytes()) {
+        match item {
+            Ok(pair) => pairs.push(pair),
+            Err(e) => {
+                return Err(format!(
+                    "The .env file {} could not be parsed: {e}",
+                    path.display()
+                ))
             }
         }
-        Ok(pairs)
     }
+    Ok(pairs)
 }
 
 #[cfg(test)]
@@ -130,5 +146,40 @@ mod tests {
         let got = load_text("ROCKET_DOT_ENV_PROBE_KEY=1\n").expect("ok");
         assert_eq!(got.len(), 1);
         assert!(std::env::var("ROCKET_DOT_ENV_PROBE_KEY").is_err());
+    }
+
+    #[test]
+    fn load_default_reads_dot_env_in_the_base() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".env"), "A=1\n").expect("write");
+        let got = FsDotEnvLoader.load_default(Some(dir.path())).expect("ok");
+        assert_eq!(got, vec![("A".to_string(), "1".to_string())]);
+    }
+
+    #[test]
+    fn load_default_of_a_missing_file_is_empty_not_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let got = FsDotEnvLoader.load_default(Some(dir.path())).expect("ok");
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn load_default_with_no_base_is_empty() {
+        let got = FsDotEnvLoader.load_default(None).expect("ok");
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn load_default_of_a_directory_named_dot_env_is_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join(".env")).expect("mkdir");
+        assert!(FsDotEnvLoader.load_default(Some(dir.path())).is_err());
+    }
+
+    #[test]
+    fn load_default_of_a_malformed_file_is_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".env"), "A=\"unterminated\n").expect("write");
+        assert!(FsDotEnvLoader.load_default(Some(dir.path())).is_err());
     }
 }

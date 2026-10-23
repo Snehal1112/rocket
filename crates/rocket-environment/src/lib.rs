@@ -19,7 +19,7 @@ pub use client_certificate_validation::{
     validate_client_certificates, validate_vault_certificate_providers,
 };
 pub use context::VariableContext;
-pub use dot_env::{collect_dot_env, DotEnvLoader, DotEnvValues};
+pub use dot_env::{collect_default_dot_env, collect_dot_env, DotEnvLoader, DotEnvValues};
 pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};
 pub use flatten::{
