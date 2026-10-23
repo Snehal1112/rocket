@@ -604,4 +604,32 @@ describe('CollectionsSidebar request examples', () => {
     );
     expect(parkedLeft).toEqual([]);
   });
+
+  it('moving_a_request_also_closes_its_parked_example_tabs', async () => {
+    const store = usePaneStore.getState();
+    store.openExampleTab('col', 'login.yml', '200 OK');
+    store.openExampleTab('col', 'logout.yml', '200 OK');
+    const root = usePaneStore.getState().root;
+    if (root.type !== 'leaf') throw new Error('Expected a single leaf');
+    const [parked, live] = [root.tabs[0], root.tabs[1]];
+    usePaneStore.setState({
+      collectionTabState: { col: { tabs: [parked], activeTabId: parked.id } } as never,
+      root: { ...root, tabs: [live], activeTabId: live.id },
+    });
+    render(<CollectionsSidebar />, { wrapper });
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for Login' }));
+    const moveTo = await screen.findByText('Move to...');
+    await userEvent.hover(moveTo);
+    await userEvent.keyboard('{ArrowRight}');
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'other' }));
+    await waitFor(() =>
+      expect(tauriApi.moveItem).toHaveBeenCalledWith('col', 'login.yml', 'other', ''),
+    );
+    await waitFor(() =>
+      expect(
+        Object.values(usePaneStore.getState().collectionTabState).flatMap((e) => e.tabs),
+      ).toEqual([]),
+    );
+    expect(exampleTabPaths()).toEqual(['logout.yml']);
+  });
 });

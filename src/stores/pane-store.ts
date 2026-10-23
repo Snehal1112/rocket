@@ -352,7 +352,12 @@ export interface PaneState {
   /** Closes example tabs of every request at or under a folder path, live and parked. */
   closeExampleTabsUnder: (collection: string, folderPath: string) => void;
   /** Rewrites example tab paths after a folder or request move, by whole path segments. */
-  renameExampleTabPaths: (collection: string, oldPath: string, newPath: string) => void;
+  renameExampleTabPaths: (
+    collection: string,
+    oldPath: string,
+    newPath: string,
+    includeSelf?: boolean,
+  ) => void;
   /** Retargets an open example tab after the example is renamed. */
   retitleExampleTab: (collection: string, path: string, oldName: string, newName: string) => void;
 
@@ -1704,23 +1709,23 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     if (parked !== get().collectionTabState) set({ collectionTabState: parked });
   },
 
-  renameExampleTabPaths(collection, oldPath, newPath) {
+  renameExampleTabPaths(collection, oldPath, newPath, includeSelf = true) {
     const state = get();
+    // Without includeSelf only paths below oldPath match, not oldPath itself.
+    const inScope = (path: string) =>
+      includeSelf ? isPathWithin(path, oldPath) : path.startsWith(`${oldPath}/`);
     const ids = [
       ...collectAllTabs(state.root),
       ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
     ]
       .filter(
-        (t) =>
-          isExampleTab(t) &&
-          t.source.collection === collection &&
-          isPathWithin(t.source.path, oldPath),
+        (t) => isExampleTab(t) && t.source.collection === collection && inScope(t.source.path),
       )
       .map((t) => t.id);
     let next: Pick<PaneState, 'root' | 'collectionTabState'> = state;
     for (const id of ids) {
       next = updateTabEverywhere(next as PaneState, id, (tab) =>
-        isExampleTab(tab) && isPathWithin(tab.source.path, oldPath)
+        isExampleTab(tab) && inScope(tab.source.path)
           ? {
               ...tab,
               source: {
