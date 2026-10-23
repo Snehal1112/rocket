@@ -232,6 +232,12 @@ fn mask_xml_text(text: &str) -> (String, usize) {
         let after = &rest[open + 1..];
         let Some(close) = after.find('>') else { break };
         let name = &after[..close];
+        // A long name or one holding `<` is never a plain tag, so skip it without allocating.
+        if name.len() > 128 || name.contains('<') {
+            out.push_str(&rest[..open + 1]);
+            rest = after;
+            continue;
+        }
         let plain = !name.is_empty()
             && !name.starts_with(['/', '?', '!'])
             && !name.ends_with('/')
@@ -537,6 +543,21 @@ examples:
         data: |-
           {"message": "Forbidden", "refresh_token": "r"}
 "#;
+
+    #[test]
+    fn xml_scan_survives_a_body_of_open_brackets() {
+        let text = format!("{}>", "<".repeat(200_000));
+        let (out, count) = mask_xml_text(&text);
+        assert_eq!(count, 0);
+        assert_eq!(out, text);
+    }
+
+    #[test]
+    fn xml_masks_a_plain_secret_tag() {
+        let (out, count) = mask_xml_text("<a><token>abc</token></a>");
+        assert_eq!(count, 1);
+        assert_eq!(out, "<a><token>[masked]</token></a>");
+    }
 
     #[test]
     fn masks_only_the_examples_block() {
