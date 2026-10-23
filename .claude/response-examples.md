@@ -4,7 +4,7 @@ A request can hold named examples of a response (`examples:` in its `.yml`). The
 
 ## Save and view
 
-- Send an HTTP request, then press Save as example in the response toolbar. The button is disabled with a reason when the request is not saved ("Save the request first"), has no response ("Send the request first") or is a Try tab ("Temporary tab: not saved").
+- Send an HTTP request, then press Save as example in the response toolbar. The button sits in the response toolbar, so it shows only once a response exists. It is disabled with a reason when the request is not saved ("Save the request first") or is a Try tab ("Temporary tab: not saved").
 - Saving an example does not mark the request dirty and does not call `save_request`. It calls `add_request_example`.
 - Open an example from the sidebar for a read-only tab (`ExampleTab`, `ExampleTabView`). Rename and delete it from the sidebar. An open tab is retitled or closed with it.
 
