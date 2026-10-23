@@ -70,6 +70,20 @@ pub fn collect_dot_env(
     out
 }
 
+/// The `.env` path `collect_dot_env` would read for `env`: the nearest layer of the extends
+/// chain, child first, with a non-blank path. A cycle ends the walk like it does there.
+pub fn nearest_dot_env_path(
+    env: &Environment,
+    lookup: &dyn Fn(&str) -> Option<Environment>,
+) -> Option<String> {
+    walk_chain(env, lookup)
+        .layers
+        .iter()
+        .filter_map(|layer| layer.dot_env_file_path.as_deref())
+        .find(|p| !p.trim().is_empty())
+        .map(str::to_string)
+}
+
 /// Reads the default `.env` file of the base folder. An error becomes a warning.
 pub fn collect_default_dot_env(loader: &dyn DotEnvLoader, base: Option<&Path>) -> DotEnvValues {
     let mut out = DotEnvValues::default();

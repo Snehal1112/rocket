@@ -20,7 +20,8 @@ pub use client_certificate_validation::{
 };
 pub use context::VariableContext;
 pub use dot_env::{
-    collect_default_dot_env, collect_dot_env, DotEnvFileInfo, DotEnvLoader, DotEnvValues,
+    collect_default_dot_env, collect_dot_env, nearest_dot_env_path, DotEnvFileInfo, DotEnvLoader,
+    DotEnvValues,
 };
 pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};

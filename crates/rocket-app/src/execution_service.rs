@@ -1163,10 +1163,8 @@ impl RequestExecutionService {
                 Some(_) => self.regular_env_repo(collection),
                 None => self.global_env_repo(),
             };
-            repo.get(name)
-                .ok()
-                .and_then(|env| env.dot_env_file_path)
-                .filter(|p| !p.trim().is_empty())
+            let env = repo.get(name).ok()?;
+            rocket_environment::nearest_dot_env_path(&env, &|n| repo.get(n).ok())
         });
         let info = match self.dot_env_loader.as_deref() {
             Some(loader) => loader.describe(raw_path.as_deref(), base.as_deref()),
@@ -7385,6 +7383,59 @@ mod tests {
             calls[0],
             (None, Some(std::path::PathBuf::from("/work/api")))
         );
+    }
+
+    struct ChainEnvRepo(Vec<Environment>);
+
+    impl rocket_environment::EnvironmentRepository for ChainEnvRepo {
+        fn list(&self) -> DomainResult<Vec<Environment>> {
+            Ok(self.0.clone())
+        }
+        fn get(&self, name: &str) -> DomainResult<Environment> {
+            self.0
+                .iter()
+                .find(|e| e.name == name)
+                .cloned()
+                .ok_or_else(|| DomainError::NotFound(name.into()))
+        }
+        fn save(&self, _: &Environment) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    fn chain_status(child_path: Option<&str>) -> (DotEnvStatus, Arc<FakeDotEnv>) {
+        let mut parent = Environment::new("parent");
+        parent.dot_env_file_path = Some("dev.env".into());
+        let mut child = Environment::new("child");
+        child.extends = Some("parent".into());
+        child.dot_env_file_path = child_path.map(str::to_string);
+        let fake = FakeDotEnv::new(&[]);
+        let svc = dot_env_svc(
+            Box::new(ChainEnvRepo(vec![child, parent])),
+            None,
+            Some(&fake),
+            true,
+        );
+        (svc.dot_env_status(None, Some("child")), fake)
+    }
+
+    #[test]
+    fn dot_env_status_follows_the_extends_chain_to_the_parent_path() {
+        let (status, fake) = chain_status(None);
+        assert!(!status.uses_default);
+        let calls = fake.describe_calls.lock().expect("calls");
+        assert_eq!(calls[0].0.as_deref(), Some("dev.env"));
+    }
+
+    #[test]
+    fn dot_env_status_prefers_the_child_path_over_the_parent_path() {
+        let (status, fake) = chain_status(Some("child.env"));
+        assert!(!status.uses_default);
+        let calls = fake.describe_calls.lock().expect("calls");
+        assert_eq!(calls[0].0.as_deref(), Some("child.env"));
     }
 
     #[test]
