@@ -71,11 +71,16 @@ fn full_tree() -> CollectionExportTree {
             value: "42".into(),
             description: None,
         }];
-        r.query_params = vec![Header::new("page", "1"), Header::disabled("debug", "on")];
+        r.query_params = vec![
+            Header::new("page", "1"),
+            Header::disabled("debug", "on"),
+            Header::new("api_key", "literal-key"),
+        ];
         r.headers = vec![
             Header::new("X-Trace", "abc"),
             Header::disabled("X-Off", "1"),
             Header::new("Authorization", "Bearer literal"),
+            Header::new("X-Auth-Token", "literal-token"),
         ];
         r.body = Some(b);
         bodies.push(ExportItem::Request(Box::new(r)));
@@ -88,6 +93,7 @@ fn full_tree() -> CollectionExportTree {
     enc.form_data = Some(vec![
         entry("a", "1", FormDataType::Text, true),
         entry("b", "2", FormDataType::Text, false),
+        entry("client_secret", "literal-cs", FormDataType::Text, true),
     ]);
     add("urlencoded", enc);
     let mut fd = body(BodyMode::FormData, "");
@@ -208,6 +214,7 @@ fn full_tree() -> CollectionExportTree {
                 var("baseUrl", "https://api.example.com", false, true),
                 var("apiSecret", "top-secret", true, true),
                 var("off", "x", false, false),
+                var("api_token", "literal-api", false, true),
             ],
             ..Default::default()
         },

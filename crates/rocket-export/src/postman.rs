@@ -14,7 +14,11 @@ use serde_json::{json, Map, Value};
 
 use crate::events::{folder_events, request_events};
 use crate::postman_auth::{noauth_block, postman_auth, PostmanAuth};
-use crate::scrub::{is_variable_reference, scrub_auth, scrub_header_values, scrub_url};
+use crate::scrub::{
+    is_variable_reference, scrub_auth, scrub_form_entries, scrub_header_values, scrub_typed_rows,
+    scrub_url,
+};
+use crate::sensitive::is_sensitive_name;
 use crate::report::{ExportAction, ExportNote, ExportReport};
 use crate::tree::{CollectionExportTree, ExportFolder, ExportItem};
 
@@ -87,13 +91,18 @@ fn variables_json(
             } else {
                 v.value.clone()
             };
-            if v.secret && !value.is_empty() && !is_variable_reference(&value) {
+            let by_name = !v.secret && is_sensitive_name(&v.key);
+            if (v.secret || by_name) && !value.is_empty() && !is_variable_reference(&value) {
                 value.clear();
                 report.items.push(ExportNote {
                     path: path.to_string(),
-                    feature: "Secret variable".into(),
+                    feature: if v.secret { "Secret variable" } else { "Variable" }.into(),
                     action: ExportAction::Blanked,
-                    detail: Some(v.key.clone()),
+                    detail: Some(if v.secret {
+                        v.key.clone()
+                    } else {
+                        format!("{} (by name)", v.key)
+                    }),
                 });
             }
             let mut o = Map::new();
@@ -262,7 +271,8 @@ fn request_item(
     report: &mut ExportReport,
 ) -> Value {
     let mut headers = merged_headers(inherited, &r.headers);
-    let body = r.body.as_ref().and_then(|b| body_json(b, &mut headers));
+    let clean_body = r.body.as_ref().map(|b| scrub_body(b, path, &mut report.items));
+    let body = clean_body.as_ref().and_then(|b| body_json(b, &mut headers));
     let headers = scrub_header_values(headers, path, &mut report.items);
     let mut req = Map::new();
     req.insert("method".into(), json!(r.method.to_string()));
@@ -274,7 +284,8 @@ fn request_item(
         req.insert("body".into(), b);
     }
     let url = scrub_url(&r.url, path, &mut report.items);
-    req.insert("url".into(), postman_url(&url, &r.query_params, &r.path_params));
+    let query = scrub_typed_rows(r.query_params.clone(), "Query parameter", path, &mut report.items);
+    req.insert("url".into(), postman_url(&url, &query, &r.path_params));
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
         req.insert("description".into(), d);
     }
@@ -321,7 +332,8 @@ fn graphql_item(
         }),
     );
     let url = scrub_url(&r.url, path, &mut report.items);
-    req.insert("url".into(), postman_url(&url, &r.query_params, &r.path_params));
+    let query = scrub_typed_rows(r.query_params.clone(), "Query parameter", path, &mut report.items);
+    req.insert("url".into(), postman_url(&url, &query, &r.path_params));
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
         req.insert("description".into(), d);
     }
@@ -333,6 +345,15 @@ fn graphql_item(
         item.insert("variable".into(), Value::Array(vars));
     }
     Value::Object(item)
+}
+
+/// Blanks secret-like text entries of a form body. Other bodies are returned as they are.
+fn scrub_body(body: &Body, path: &str, notes: &mut Vec<ExportNote>) -> Body {
+    let mut out = body.clone();
+    if matches!(out.mode, BodyMode::FormUrlEncoded | BodyMode::FormData) {
+        out.form_data = out.form_data.take().map(|e| scrub_form_entries(e, path, notes));
+    }
+    out
 }
 
 fn body_json(body: &Body, headers: &mut Vec<Header>) -> Option<Value> {
@@ -994,5 +1015,143 @@ mod tests {
         let doc = one(r);
         assert_eq!(doc["item"][0]["request"]["method"], "POST");
         assert_eq!(doc["item"][0]["request"]["description"], "docs");
+    }
+
+    fn blanked_details(report: &ExportReport) -> Vec<(String, Option<String>)> {
+        report
+            .items
+            .iter()
+            .filter(|n| n.action == ExportAction::Blanked)
+            .map(|n| (n.feature.clone(), n.detail.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn query_pairs_are_scrubbed_by_name_in_raw_and_query() {
+        let r = req("q", "https://x.test/p?access_token=abc&token_type=Bearer&a=1");
+        let (doc, report) = export(&tree_with(vec![ExportItem::Request(Box::new(r))]));
+        let url = &doc["item"][0]["request"]["url"];
+        assert_eq!(url["raw"], "https://x.test/p?access_token=&token_type=Bearer&a=1");
+        assert_eq!(url["query"][0]["key"], "access_token");
+        assert_eq!(url["query"][0]["value"], "");
+        assert_eq!(url["query"][1]["value"], "Bearer");
+        assert_eq!(
+            blanked_details(&report),
+            vec![("URL query".to_string(), Some("access_token (by name)".to_string()))]
+        );
+    }
+
+    #[test]
+    fn query_table_rows_are_scrubbed_by_name() {
+        let mut r = req("q", "https://x.test/p");
+        r.query_params = vec![Header::new("api_key", "abc"), Header::disabled("debug", "x")];
+        let doc = one(r);
+        let url = &doc["item"][0]["request"]["url"];
+        assert_eq!(url["raw"], "https://x.test/p?api_key=");
+        assert_eq!(url["query"][0]["value"], "");
+        assert_eq!(url["query"][1]["value"], "x");
+    }
+
+    #[test]
+    fn references_are_kept_in_query_rows() {
+        let mut r = req("q", "https://x.test/p?access_token={{t}}");
+        r.query_params = vec![Header::new("api_key", "{{k}}")];
+        let (doc, report) = export(&tree_with(vec![ExportItem::Request(Box::new(r))]));
+        let url = &doc["item"][0]["request"]["url"];
+        assert_eq!(url["raw"], "https://x.test/p?access_token={{t}}&api_key={{k}}");
+        assert!(blanked_details(&report).is_empty());
+    }
+
+    #[test]
+    fn form_entries_are_scrubbed_by_name() {
+        let mut enc = body_of(BodyMode::FormUrlEncoded, "");
+        enc.form_data = Some(vec![
+            entry("client_secret", "s", FormDataType::Text, true),
+            entry("grant_type", "password", FormDataType::Text, true),
+        ]);
+        let mut fd = body_of(BodyMode::FormData, "");
+        fd.form_data = Some(vec![
+            entry("password", "p", FormDataType::Text, true),
+            entry("secret_file", "/tmp/s.bin", FormDataType::File, true),
+        ]);
+        let doc = one(body_req(enc));
+        let b = &doc["item"][0]["request"]["body"];
+        assert_eq!(b["urlencoded"][0]["value"], "");
+        assert_eq!(b["urlencoded"][1]["value"], "password");
+        let doc = one(body_req(fd));
+        let b = &doc["item"][0]["request"]["body"];
+        assert_eq!(b["formdata"][0]["value"], "");
+        assert_eq!(b["formdata"][1]["src"], "/tmp/s.bin");
+    }
+
+    #[test]
+    fn header_rows_use_the_name_rule() {
+        let mut r = req("h", "https://x.test");
+        r.headers = vec![Header::new("X-Auth-Token", "abc"), Header::new("X-Request-Id", "1")];
+        let doc = one(r);
+        let h = &doc["item"][0]["request"]["header"];
+        assert_eq!(h[0]["value"], "");
+        assert_eq!(h[1]["value"], "1");
+    }
+
+    #[test]
+    fn oauth_urls_are_scrubbed() {
+        use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
+        let mut r = req("o", "https://x.test");
+        r.auth = Auth::OAuth2(Box::new(OAuth2Flow::AuthorizationCode {
+            authorization_url: "https://idp.test/auth?state=s".into(),
+            access_token_url: "https://u:pw@idp.test/token?client_secret=x&a=1".into(),
+            refresh_token_url: None,
+            callback_url: Some("https://u:pw@app.test/cb".into()),
+            credentials: OAuth2ClientCredentials {
+                client_id: "cid".into(),
+                client_secret: "{{cs}}".into(),
+                placement: None,
+            },
+            scope: None,
+            state: None,
+            pkce: None,
+            additional_parameters: None,
+            token_config: None,
+            settings: None,
+        }));
+        let doc = one(r);
+        let rows = doc["item"][0]["request"]["auth"]["oauth2"].as_array().expect("rows");
+        let get = |k: &str| rows.iter().find(|r| r["key"] == k).expect("row")["value"].clone();
+        assert_eq!(get("accessTokenUrl"), "https://u:@idp.test/token?client_secret=&a=1");
+        assert_eq!(get("authUrl"), "https://idp.test/auth?state=s");
+        assert_eq!(get("redirect_uri"), "https://u:@app.test/cb");
+    }
+
+    #[test]
+    fn variables_are_blanked_by_name_and_secret_refs_kept() {
+        use rocket_collection::CollectionVariable;
+        let var = |k: &str, v: &str, secret| CollectionVariable {
+            key: k.into(),
+            value: v.into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret,
+        };
+        let mut t = tree_with(vec![]);
+        t.settings.variables = vec![
+            var("api_token", "abc", false),
+            var("plain_name", "abc", false),
+            var("s1", "{{ref}}", true),
+            var("s2", "top", true),
+        ];
+        let (doc, report) = export(&t);
+        let v = &doc["variable"];
+        assert_eq!(v[0]["value"], "");
+        assert_eq!(v[1]["value"], "abc");
+        assert_eq!(v[2]["value"], "{{ref}}");
+        assert_eq!(v[3]["value"], "");
+        assert_eq!(
+            blanked_details(&report),
+            vec![
+                ("Variable".to_string(), Some("api_token (by name)".to_string())),
+                ("Secret variable".to_string(), Some("s2".to_string())),
+            ]
+        );
     }
 }

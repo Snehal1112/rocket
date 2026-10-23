@@ -6,7 +6,7 @@
 use crate::report::{ExportAction, ExportNote};
 use crate::sensitive::is_sensitive_name;
 use rocket_shared::oauth2::OAuth2Flow;
-use rocket_shared::types::{Auth, Header};
+use rocket_shared::types::{Auth, FormDataEntry, FormDataType, Header};
 use serde_yaml::{Mapping, Value};
 
 /// Whether a header's value is a credential by its name (see `is_sensitive_name`).
@@ -307,9 +307,10 @@ fn scrub_url_password(rel_path: &str, text: &mut String, notes: &mut Vec<ExportN
 }
 
 /// Blanks the value of each `name=value` query pair whose name is secret-like.
-/// The fragment and pairs without `=` stay as they are.
-fn scrub_url_query(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote>) {
-    let Some(q) = text.find('?') else { return };
+/// The fragment and pairs without `=` stay as they are. Returns the new text and the
+/// blanked names, or `None` when nothing changed. Both the YAML and the typed scrub use it.
+fn blank_query_values(text: &str) -> Option<(String, Vec<String>)> {
+    let q = text.find('?')?;
     let query_start = q + 1;
     let query_end = text[query_start..]
         .find('#')
@@ -328,9 +329,18 @@ fn scrub_url_query(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote
         })
         .collect();
     if blanked.is_empty() {
-        return;
+        return None;
     }
-    text.replace_range(query_start..query_end, &pairs.join("&"));
+    let mut out = text.to_string();
+    out.replace_range(query_start..query_end, &pairs.join("&"));
+    Some((out, blanked))
+}
+
+fn scrub_url_query(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote>) {
+    let Some((clean, blanked)) = blank_query_values(text) else {
+        return;
+    };
+    *text = clean;
     for name in blanked {
         notes.push(blank_note(rel_path, "URL query", &format!("{name} (by name)")));
     }
@@ -339,6 +349,7 @@ fn scrub_url_query(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote
 /// Typed scrub of an `Auth` value: blanks literal credentials, keeps `{{refs}}`.
 pub fn scrub_auth(auth: &Auth, path: &str, notes: &mut Vec<ExportNote>) -> Auth {
     let mut out = auth.clone();
+    scrub_auth_urls(&mut out, path, notes);
     let mut blank = |slot: &mut String, field: &str| {
         if !slot.is_empty() && !is_variable_reference(slot) {
             slot.clear();
@@ -397,6 +408,54 @@ pub fn scrub_auth(auth: &Auth, path: &str, notes: &mut Vec<ExportNote>) -> Auth 
     out
 }
 
+/// Scrubs the URL fields of OAuth2 flows and the OAuth1 callback like a request URL.
+fn scrub_auth_urls(auth: &mut Auth, path: &str, notes: &mut Vec<ExportNote>) {
+    let mut fix = |slot: &mut String| {
+        if !slot.is_empty() {
+            *slot = scrub_url(slot, path, notes);
+        }
+    };
+    match auth {
+        Auth::OAuth2(flow) => match flow.as_mut() {
+            OAuth2Flow::ClientCredentials {
+                access_token_url,
+                refresh_token_url,
+                ..
+            }
+            | OAuth2Flow::ResourceOwnerPassword {
+                access_token_url,
+                refresh_token_url,
+                ..
+            } => {
+                fix(access_token_url);
+                refresh_token_url.iter_mut().for_each(&mut fix);
+            }
+            OAuth2Flow::AuthorizationCode {
+                authorization_url,
+                access_token_url,
+                refresh_token_url,
+                callback_url,
+                ..
+            } => {
+                fix(authorization_url);
+                fix(access_token_url);
+                refresh_token_url.iter_mut().for_each(&mut fix);
+                callback_url.iter_mut().for_each(&mut fix);
+            }
+            OAuth2Flow::Implicit {
+                authorization_url,
+                callback_url,
+                ..
+            } => {
+                fix(authorization_url);
+                callback_url.iter_mut().for_each(&mut fix);
+            }
+        },
+        Auth::OAuth1(o) => o.callback_url.iter_mut().for_each(&mut fix),
+        _ => {}
+    }
+}
+
 /// Blanks literal values of sensitive headers. References are kept.
 pub fn scrub_header_values(
     headers: Vec<Header>,
@@ -416,8 +475,21 @@ pub fn scrub_header_values(
         .collect()
 }
 
-/// Blanks a literal password in the URL userinfo.
+/// Blanks a literal password in the URL userinfo and the value of each secret-like query pair.
 pub fn scrub_url(url: &str, path: &str, notes: &mut Vec<ExportNote>) -> String {
+    let url = scrub_userinfo_password(url, path, notes);
+    match blank_query_values(&url) {
+        Some((clean, blanked)) => {
+            for name in blanked {
+                notes.push(blank_note(path, "URL query", &format!("{name} (by name)")));
+            }
+            clean
+        }
+        None => url,
+    }
+}
+
+fn scrub_userinfo_password(url: &str, path: &str, notes: &mut Vec<ExportNote>) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_string();
     };
@@ -434,6 +506,48 @@ pub fn scrub_url(url: &str, path: &str, notes: &mut Vec<ExportNote>) -> String {
     }
     notes.push(blank_note(path, "Credential", "url password"));
     format!("{scheme}://{user}:@{host}{tail}")
+}
+
+/// Blanks the value of each row whose key is secret-like, disabled rows too.
+/// A value that is only a `{{variable}}` reference is kept.
+pub fn scrub_typed_rows(
+    rows: Vec<Header>,
+    feature: &str,
+    path: &str,
+    notes: &mut Vec<ExportNote>,
+) -> Vec<Header> {
+    rows.into_iter()
+        .map(|mut h| {
+            if is_sensitive_name(&h.key) && !h.value.is_empty() && !is_variable_reference(&h.value)
+            {
+                h.value.clear();
+                notes.push(blank_note(path, feature, &format!("{} (by name)", h.key)));
+            }
+            h
+        })
+        .collect()
+}
+
+/// Blanks text entries of a form body by key. File entries hold a path and stay as they are.
+pub fn scrub_form_entries(
+    entries: Vec<FormDataEntry>,
+    path: &str,
+    notes: &mut Vec<ExportNote>,
+) -> Vec<FormDataEntry> {
+    entries
+        .into_iter()
+        .map(|mut e| {
+            if e.entry_type == FormDataType::Text
+                && is_sensitive_name(&e.key)
+                && !e.value.is_empty()
+                && !is_variable_reference(&e.value)
+            {
+                e.value.clear();
+                notes.push(blank_note(path, "Form field", &format!("{} (by name)", e.key)));
+            }
+            e
+        })
+        .collect()
 }
 
 #[cfg(test)]
