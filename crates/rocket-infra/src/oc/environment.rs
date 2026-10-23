@@ -34,6 +34,9 @@ pub struct OcExternalSecretBinding {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OcEnvironment {
+    /// Bruno 3 names an environment by its file name, so its YAML has no `name`. An empty name
+    /// is replaced by the file stem when the file is read.
+    #[serde(default)]
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,

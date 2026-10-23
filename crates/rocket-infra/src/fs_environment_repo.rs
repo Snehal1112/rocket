@@ -201,6 +201,10 @@ impl EnvironmentRepository for FsEnvironmentRepo {
                 DomainError::Internal(format!("Failed to parse environment YAML: {e}"))
             })?
         };
+        // A Bruno environment file has no `name` key, so the file name is its name.
+        if env.name.is_empty() {
+            env.name = name.to_string();
+        }
         self.hydrate_secrets(&mut env);
         Ok(env)
     }
@@ -702,6 +706,54 @@ mod tests {
             api_key.value, "plaintext-token",
             "a store miss must not destroy existing data"
         );
+    }
+
+    // Bruno 3 names an environment by its file name, so its YAML has no `name:` key.
+    const BRUNO_ENV: &str = "variables:\n  - name: baseUrl\n    value: https://qa.example.test\n  - name: client_id\n    value: abc\n";
+
+    #[test]
+    fn bruno_environment_without_a_name_loads_with_the_file_stem() {
+        let (dir, repo) = setup();
+        let file = "QA - Sage Network connector sage50US";
+        std::fs::write(dir.path().join(format!("{file}.yml")), BRUNO_ENV).expect("write env");
+
+        let listed = repo.list().expect("list");
+        assert_eq!(listed.len(), 1, "the file must not be skipped as corrupt");
+        assert_eq!(listed[0].name, file);
+        assert_eq!(
+            listed[0].get_value("baseUrl"),
+            Some("https://qa.example.test")
+        );
+
+        let strict = repo.list_strict().expect("list_strict");
+        assert_eq!(strict.len(), 1);
+
+        let loaded = repo.get(file).expect("get");
+        assert_eq!(loaded.name, file);
+        assert_eq!(loaded.get_value("client_id"), Some("abc"));
+    }
+
+    #[test]
+    fn saving_a_bruno_environment_writes_its_name() {
+        let (dir, repo) = setup();
+        std::fs::write(dir.path().join("QA.yml"), BRUNO_ENV).expect("write env");
+
+        let mut env = repo.get("QA").expect("get");
+        env.set_variable(Variable::new("extra", "1"));
+        repo.save(&env).expect("save");
+
+        let text = std::fs::read_to_string(dir.path().join("QA.yml")).expect("read back");
+        assert!(text.contains("name: QA"), "saved file must carry a name: {text}");
+        assert_eq!(repo.get("QA").expect("reload").get_value("extra"), Some("1"));
+    }
+
+    #[test]
+    fn a_file_with_a_broken_variables_list_is_still_reported_corrupt() {
+        let (dir, repo) = setup();
+        std::fs::write(dir.path().join("bad.yml"), "variables: not-a-list\n").expect("write env");
+
+        assert!(repo.list().expect("list").is_empty());
+        assert!(repo.list_strict().is_err());
     }
 
     #[test]
