@@ -48,7 +48,7 @@ fn script_lines(
             path,
             format!("script call {name}"),
             ExportAction::Skipped,
-            Some("no Postman equivalent, kept with a marker".into()),
+            Some("no Postman equivalent, kept as written".into()),
         ));
     }
     lines_of(&translated.text)

@@ -76,28 +76,110 @@ fn skip_space(chars: &[char], from: usize) -> usize {
     j
 }
 
+/// Index after the string literal that starts at `chars[i]`. A template literal
+/// skips over its `${}` expressions, which may hold strings of their own.
+fn skip_string(chars: &[char], mut i: usize) -> usize {
+    let quote = chars[i];
+    i += 1;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            i += 2;
+        } else if c == quote {
+            return i + 1;
+        } else if quote == '`' && c == '$' && chars.get(i + 1) == Some(&'{') {
+            i = find_expr_end(chars, i + 2) + 1;
+        } else if c == '\n' && quote != '`' {
+            return i;
+        } else {
+            i += 1;
+        }
+    }
+    chars.len()
+}
+
+/// Index of the `}` that closes a `${` whose body starts at `i`.
+fn find_expr_end(chars: &[char], mut i: usize) -> usize {
+    let mut depth = 1usize;
+    while i < chars.len() {
+        match chars[i] {
+            '\'' | '"' | '`' => {
+                i = skip_string(chars, i);
+                continue;
+            }
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    chars.len()
+}
+
+/// What the scanner collects while it runs.
+struct Scan {
+    untranslated: Vec<String>,
+    aliased: bool,
+}
+
 /// Copy a string literal starting at `chars[i]` (the quote) and return the index after it.
-fn copy_string(chars: &[char], mut i: usize, out: &mut String, line_no: &mut usize) -> usize {
+/// Text of a template literal is copied as is, while its `${}` expressions are code and
+/// are translated (without marker lines, which would change the string).
+fn copy_string(
+    chars: &[char],
+    mut i: usize,
+    out: &mut String,
+    line_no: &mut usize,
+    scan: &mut Scan,
+) -> usize {
     let quote = chars[i];
     out.push(quote);
     i += 1;
     while i < chars.len() {
         let c = chars[i];
-        out.push(c);
-        i += 1;
-        if c == '\\' && i < chars.len() {
-            out.push(chars[i]);
+        if c == '\\' {
+            out.push(c);
+            if let Some(next) = chars.get(i + 1) {
+                out.push(*next);
+            }
+            i += 2;
+        } else if quote == '`' && c == '$' && chars.get(i + 1) == Some(&'{') {
+            let end = find_expr_end(chars, i + 2);
+            let inner: String = chars[i + 2..end.min(chars.len())].iter().collect();
+            *line_no += inner.matches('\n').count();
+            let translated = translate_inner(&inner, false);
+            out.push_str("${");
+            out.push_str(&translated.text);
+            scan.aliased |= translated.aliased;
+            for name in translated.untranslated {
+                if !scan.untranslated.contains(&name) {
+                    scan.untranslated.push(name);
+                }
+            }
+            if end < chars.len() {
+                out.push('}');
+            }
+            i = end + 1;
+        } else {
+            out.push(c);
             i += 1;
-        } else if c == quote {
-            break;
-        } else if c == '\n' {
-            *line_no += 1;
-            if quote != '`' {
+            if c == quote {
                 break;
+            }
+            if c == '\n' {
+                *line_no += 1;
+                if quote != '`' {
+                    break;
+                }
             }
         }
     }
-    i
+    i.min(chars.len())
 }
 
 /// Insert the marker line above the current output line, once per input line.
@@ -115,15 +197,23 @@ fn insert_marker(out: &mut String, line_no: usize, marked: &mut HashSet<usize>) 
 
 /// Rewrite the exact Rocket call paths of `src` to `pm.*`.
 ///
-/// A single pass skips string literals, template literals and comments, so text in
+/// A single pass skips string literals, template literal text and comments, so text in
 /// them is never changed. Aliases and computed access are not followed: a script that
 /// copies a mapped name keeps its original text and sets `aliased`.
 pub fn translate_script(src: &str) -> ScriptTranslation {
+    translate_inner(src, true)
+}
+
+/// `markers` is false inside a `${}` expression, where a marker line would change the string.
+fn translate_inner(src: &str, markers: bool) -> ScriptTranslation {
     let chars: Vec<char> = src.chars().collect();
     let mut out = String::with_capacity(src.len());
-    let mut untranslated: Vec<String> = Vec::new();
+    let mut scan = Scan {
+        untranslated: Vec::new(),
+        aliased: false,
+    };
     let mut marked: HashSet<usize> = HashSet::new();
-    let mut aliased = false;
+    let mut shadowed: HashSet<&'static str> = HashSet::new();
     let mut line_no = 0usize;
     let mut prev_sig: Option<char> = None;
     let mut prev_word = String::new();
@@ -138,7 +228,7 @@ pub fn translate_script(src: &str) -> ScriptTranslation {
             out.push(c);
             i += 1;
         } else if matches!(c, '\'' | '"' | '`') {
-            i = copy_string(&chars, i, &mut out, &mut line_no);
+            i = copy_string(&chars, i, &mut out, &mut line_no, &mut scan);
             prev_sig = Some(c);
             prev_word.clear();
         } else if c == '/' && chars.get(i + 1) == Some(&'/') {
@@ -173,12 +263,30 @@ pub fn translate_script(src: &str) -> ScriptTranslation {
                 }
             }
             let chain: String = chars[start..i].iter().collect();
-            let member_access = prev_sig == Some('.') || prev_word == "function";
+            let host = ["res", "req"]
+                .into_iter()
+                .find(|h| chain == *h || chain.starts_with(&format!("{h}.")));
+            let declaring = host.is_some()
+                && chain.len() == 3
+                && matches!(prev_word.as_str(), "const" | "let" | "var");
+            if declaring {
+                shadowed.extend(host);
+            }
+            let member_access = prev_sig == Some('.') || prev_word == "function" || declaring;
+            let local_host = host.is_some_and(|h| shadowed.contains(h));
             let j = skip_space(&chars, i);
             let is_call = chars.get(j) == Some(&'(');
             let entry = TABLE.iter().find(|(k, _)| *k == chain).map(|(_, r)| *r);
             let is_rok = chain == "rok" || chain.starts_with("rok.");
-            if member_access {
+            let report = |out: &mut String, scan: &mut Scan, marked: &mut HashSet<usize>| {
+                if markers {
+                    insert_marker(out, line_no, marked);
+                }
+                if !scan.untranslated.contains(&chain) {
+                    scan.untranslated.push(chain.clone());
+                }
+            };
+            if member_access || local_host {
                 out.push_str(&chain);
             } else if let Some(rewrite) = entry {
                 match rewrite {
@@ -190,26 +298,27 @@ pub fn translate_script(src: &str) -> ScriptTranslation {
                             out.push_str(to);
                             i = k + 1;
                         } else {
+                            report(&mut out, &mut scan, &mut marked);
                             out.push_str(&chain);
                         }
                     }
                     _ => {
                         let bare = chain == "test" || chain == "expect";
                         if !bare || prev_sig == Some('=') {
-                            aliased = true;
+                            scan.aliased = true;
                         }
                         out.push_str(&chain);
                     }
                 }
             } else if is_rok {
                 if chain == "rok" || (!is_call && prev_sig == Some('=')) {
-                    aliased = true;
+                    scan.aliased = true;
                 } else {
-                    insert_marker(&mut out, line_no, &mut marked);
-                    if !untranslated.contains(&chain) {
-                        untranslated.push(chain.clone());
-                    }
+                    report(&mut out, &mut scan, &mut marked);
                 }
+                out.push_str(&chain);
+            } else if host.is_some() && chain.len() > 3 {
+                report(&mut out, &mut scan, &mut marked);
                 out.push_str(&chain);
             } else {
                 out.push_str(&chain);
@@ -223,7 +332,7 @@ pub fn translate_script(src: &str) -> ScriptTranslation {
             prev_word.clear();
         }
     }
-    if aliased {
+    if scan.aliased {
         return ScriptTranslation {
             text: src.to_string(),
             untranslated: Vec::new(),
@@ -232,7 +341,7 @@ pub fn translate_script(src: &str) -> ScriptTranslation {
     }
     ScriptTranslation {
         text: out,
-        untranslated,
+        untranslated: scan.untranslated,
         aliased: false,
     }
 }
@@ -426,11 +535,63 @@ mod tests {
     }
 
     #[test]
-    fn get_body_with_arguments_is_left_alone() {
-        let src = "const raw = res.getBody({ raw: true });";
+    fn get_body_with_arguments_is_reported() {
+        let out = translate_script("const raw = res.getBody({ raw: true });");
+        assert_eq!(
+            out.text,
+            "// rok: not translated\nconst raw = res.getBody({ raw: true });"
+        );
+        assert_eq!(out.untranslated, ["res.getBody"]);
+    }
+
+    #[test]
+    fn unmapped_response_helpers_get_marker_and_are_listed() {
+        let out = translate_script("const t = res.getResponseTime();\nreq.setHeader('a', 'b');");
+        assert_eq!(
+            out.text,
+            "// rok: not translated\nconst t = res.getResponseTime();\n// rok: not translated\nreq.setHeader('a', 'b');"
+        );
+        assert_eq!(out.untranslated, ["res.getResponseTime", "req.setHeader"]);
+    }
+
+    #[test]
+    fn local_res_variable_is_not_treated_as_the_response() {
+        let src = "const res = await rok.sendRequest({});\nconsole.log(res.status, res.data);";
+        let out = translate_script(src);
+        assert_eq!(
+            out.text,
+            "// rok: not translated\nconst res = await rok.sendRequest({});\nconsole.log(res.status, res.data);"
+        );
+        assert_eq!(out.untranslated, ["rok.sendRequest"]);
+    }
+
+    #[test]
+    fn rok_call_inside_template_expression_is_translated() {
+        let out = translate_script("const u = `${rok.getEnvVar('base')}/users`;");
+        assert_eq!(out.text, "const u = `${pm.environment.get('base')}/users`;");
+        assert!(out.untranslated.is_empty());
+    }
+
+    #[test]
+    fn unmapped_call_inside_template_expression_is_listed_without_a_marker() {
+        let src = "const u = `line1\n${rok.sendRequest({})}`;";
+        let out = translate_script(src);
+        assert_eq!(out.text, src);
+        assert_eq!(out.untranslated, ["rok.sendRequest"]);
+    }
+
+    #[test]
+    fn nested_template_text_is_not_rewritten() {
+        let src = "const x = `a ${c ? `rok.setVar('a')` : ''}`;";
         let out = translate_script(src);
         assert_eq!(out.text, src);
         assert!(out.untranslated.is_empty());
+    }
+
+    #[test]
+    fn template_with_literal_dollar_and_braces_is_left_alone() {
+        let src = "const x = `price $5 {not code} ${a}`;";
+        assert_eq!(translate_script(src).text, src);
     }
 
     #[test]

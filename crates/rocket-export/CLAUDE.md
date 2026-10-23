@@ -41,9 +41,9 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 | `req.getUrl()` | `pm.request.url.toString()` |
 | `req.getMethod()` | `pm.request.method` |
 
-- An unmapped `rok.` call stays, gets a `// rok: not translated` line above it and a `Skipped` note.
+- An unmapped `rok.`, `res.` or `req.` member (for example `rok.sendRequest`, `res.getResponseTime()`, `req.setHeader(...)`, `res.getBody({ raw: true })`) stays, gets a `// rok: not translated` line above it and a `Skipped` note. A script that declares its own `res` or `req` (`const res = ...`) is not treated as the response or request.
+- The `${}` expressions of a template literal are code and are translated. Text inside the template and nested template text are never changed. An unmapped call inside `${}` gets a `Skipped` note but no marker line, because a marker would change the string.
 - A script that copies a mapped name (`const g = rok.getVar;`, `const { getVar } = rok;`) is kept whole and gets a `Preserved` note. Aliases and computed access are never followed.
-- `res.getBody({ raw: true })` and other calls with arguments that are not in the table are left as written.
 - Regex literals are not understood by the scanner. A `/` is treated as a plain character.
 - Assertions: `eq` `.to.eql`, `neq` `.to.not.eql`, `gt` `.to.be.above`, `gte` `.to.be.at.least`, `lt` `.to.be.below`, `lte` `.to.be.at.most`, `contains` `.to.include`. Another operator is `Skipped`. A disabled assertion is dropped without a note. The expression `res.body` (the raw text) becomes `pm.response.text()`, while `res.body.a.0.b` becomes `pm.response.json().a[0].b`.
 - After-response set-variable actions become `pm.collectionVariables.set`, `pm.environment.set` or `pm.variables.set` lines. Before-request actions have no Postman form and are `Skipped`.
