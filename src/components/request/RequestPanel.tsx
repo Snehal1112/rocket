@@ -19,6 +19,7 @@ import { EnvironmentDialog } from '@/components/environments/EnvironmentDialog';
 import { RocketLiftOff } from '@/components/illustrations';
 import { LoadTestDialog } from '@/components/request/LoadTestDialog';
 import { ResponseBodyViewer } from '@/components/response/ResponseBodyViewer';
+import { SaveExampleDialog } from '@/components/response/SaveExampleDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +58,7 @@ import {
   generateCurlCommand,
 } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
+import { buildExampleSnapshot, defaultExampleName } from '@/lib/example-snapshot';
 import { resolveRequestFields } from '@/lib/execute-request';
 import {
   graphqlSendMode,
@@ -77,6 +79,7 @@ import {
   getCollectionSettings,
   getFolderVariables,
   getRequestVariables,
+  listRequestExamples,
   updateRequestDocs,
 } from '@/lib/tauri-api';
 import { buildUrl, extractPathParams, parseQueryParams, splitUrl } from '@/lib/url-params';
@@ -201,6 +204,8 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const [requestVariables, setRequestVariables] = useState<CollectionVariable[]>([]);
   const [curlImported, setCurlImported] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  const [saveExampleOpen, setSaveExampleOpen] = useState(false);
+  const [existingExampleNames, setExistingExampleNames] = useState<string[]>([]);
 
   // Resizable split: request height as percentage.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -283,6 +288,28 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       setFolderVariables([]);
     }
   }, [tab.source?.collection, tab.source?.path]);
+
+  // The example snapshot is built from the request as it is now, edits included.
+  const exampleSnapshot = useMemo(
+    () => (response ? buildExampleSnapshot(request, response) : null),
+    [request, response],
+  );
+  const saveExampleDisabledReason =
+    request.requestType !== 'http' || !tab.source
+      ? 'Save the request first'
+      : !response
+        ? 'Send the request first'
+        : null;
+
+  const openSaveExample = useCallback(() => {
+    const source = tab.source;
+    if (!source) return;
+    setExistingExampleNames([]);
+    setSaveExampleOpen(true);
+    listRequestExamples(source.collection, source.path)
+      .then((examples) => setExistingExampleNames(examples.map((e) => e.name)))
+      .catch(() => setExistingExampleNames([]));
+  }, [tab.source]);
 
   // Keyboard handler for the separator: ArrowUp/ArrowDown adjust split in 5% steps.
   const handleSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -1521,7 +1548,24 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       <p className='text-sm text-muted-foreground'>Sending request...</p>
     </div>
   ) : response ? (
-    <ResponseBodyViewer response={response} />
+    <>
+      <ResponseBodyViewer
+        response={response}
+        onSaveAsExample={request.requestType === 'http' ? openSaveExample : undefined}
+        saveExampleDisabledReason={saveExampleDisabledReason}
+      />
+      {tab.source && exampleSnapshot && (
+        <SaveExampleDialog
+          open={saveExampleOpen}
+          onOpenChange={setSaveExampleOpen}
+          collection={tab.source.collection}
+          requestPath={tab.source.path}
+          snapshot={exampleSnapshot}
+          defaultName={defaultExampleName(response)}
+          existingNames={existingExampleNames}
+        />
+      )}
+    </>
   ) : (
     <div className='flex flex-1 flex-col items-center justify-center gap-3'>
       <RocketLiftOff className='w-24 h-24' />
