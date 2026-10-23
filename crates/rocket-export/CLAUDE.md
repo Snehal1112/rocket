@@ -58,14 +58,14 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 
 ## Secret scrub
 
-- Literal credentials in auth, `secret` variable values and a password in URL userinfo are blanked. A value that is exactly one `{{variable}}` reference is kept everywhere, also in a secret variable and in Postman environments (decision 4). URL userinfo without a `:` is not blanked.
+- Literal credentials in auth, `secret` variable values and a password in URL userinfo are blanked. A value that is exactly one `{{variable}}` reference is kept, also in a secret variable, in Bruno files and in Postman collection, folder and request variables (decision 4). Postman environments differ, see below. URL userinfo without a `:` is not blanked.
 - `sensitive.rs` holds the name rule `is_sensitive_name`. It matches the last word of a name (token, secret, password, passwd, credential(s), authorization, cookie, signature, apikey, `api key`, `private key`, `secret key`, `client assertion`, single `pass` and `pwd`), never a substring. Allow-list: `token_type`, `page_token`, `next_token`, `prev_token`, `previous_token`, `max_tokens`. It blanks literal values of headers, metadata, query pairs, form fields, OAuth2 additional parameters, OAuth URL fields and variables, in both formats. The five old headers still match.
 - Identifiers stay: basic, digest and NTLM usernames, awsv4 `accessKeyId`, OAuth2 `clientId`. OAuth1 `accessToken` is blanked.
 - Postman `auth_value` adds scrub notes only for auths it exports. OAuth1 and WSSE become `noauth` and give only a `Skipped` note.
 - The Bruno ZIP scrub walks the YAML by key. It also blanks gRPC `metadata` rows with a sensitive name, the `passphrase` of every `clientCertificates` entry (collection and environment files), OAuth1 `accessToken`, and the `data` of a typed secret variable (`value: {type, data}`). A number or boolean in a credential slot counts as a literal and is blanked.
 - The Bruno ZIP drops saved request examples (captured responses may hold tokens) with one `Skipped` note per file, and leaves out `flows/` and hidden directories such as `.rocket/` (one `Skipped` note per directory), because Bruno cannot read them.
 - Bodies, scripts and descriptions are not scanned.
-- Environments are written with `type: "secret"`. A secret variable keeps a lone `{{ref}}` and otherwise gets an empty value. The service clears hydrated values right after the read. A non-secret variable with a sensitive name is blanked (note `Variable`, `<key> (by name)`).
+- Environments are written with `type: "secret"`. Secret values come from the keychain and the service clears them right after the read, so a secret environment value is always exported empty. The keep-a-ref rule in `postman_env.rs` only matters when the function is called with a ref directly. A non-secret variable with a sensitive name is blanked (note `Variable`, `<key> (by name)`).
 
 ## Tests
 

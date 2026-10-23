@@ -7,7 +7,7 @@ Closes the gap where the collection export (Bruno ZIP and Postman v2.1) still wr
 1. One shared name rule decides whether a key/value row holds a secret. It matches the **last word** of a name, never a substring.
 2. The rule applies to key/value rows and to the values in them, in both formats.
 3. Non-secret variables whose name matches the rule are blanked too. The note says "by name".
-4. A secret variable whose value is a lone `{{variable}}` reference keeps the reference, in every output (Bruno files, Postman collection, folder and request variables, Postman environments).
+4. A secret variable whose value is a lone `{{variable}}` reference keeps the reference in Bruno files and in Postman collection, folder and request variables. Postman environments are the exception: secret values come from the keychain and the service clears them right after the read, so a secret environment value is always exported empty. The keep-a-ref rule in `postman_env.rs` only matters when the function is called with a ref directly.
 5. URL userinfo without a `:` (`https://TOKEN@host`) is not blanked. It is documented only, because blanking it would also blank plain usernames.
 6. Request bodies, scripts, descriptions, `.js` and `.proto` files stay as written and are not scanned.
 7. Identifiers stay: basic/digest/NTLM usernames, awsv4 `accessKeyId`, OAuth2 `clientId`.

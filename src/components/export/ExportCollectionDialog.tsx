@@ -89,8 +89,8 @@ export function ExportCollectionDialog({
           <DialogDescription>
             Auth fields, secret variables, URL passwords, and the values of headers, query
             parameters, form fields, OAuth2 parameters and variables whose name ends in token,
-            secret, password, key or similar (for example Authorization, X-Api-Key, access_token)
-            are blanked. Variable references are kept. Request bodies, scripts and descriptions are
+            secret, password or api key (for example Authorization, X-Api-Key, access_token) are
+            blanked. Variable references are kept. Request bodies, scripts and descriptions are
             exported as written and are not scanned for secrets.
           </DialogDescription>
         </DialogHeader>

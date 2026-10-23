@@ -82,6 +82,7 @@ describe('ExportCollectionDialog', () => {
       'OAuth2',
       'variables',
       'ends in token',
+      'api key',
     ]) {
       expect(text).toContain(name);
     }

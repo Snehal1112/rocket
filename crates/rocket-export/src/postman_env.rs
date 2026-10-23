@@ -26,7 +26,8 @@ fn exported_value(v: &Variable) -> &str {
 }
 
 /// One Postman environment document. A secret variable keeps its key and
-/// `type: "secret"`, and its value only when that is a variable reference.
+/// `type: "secret"`, and its value only when that is a variable reference. The
+/// service clears secret values before this call, so they are normally empty.
 pub fn postman_environment(
     name: &str,
     vars: &[Variable],
