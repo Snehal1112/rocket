@@ -15,7 +15,8 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const handleSave = useCallback(async () => {
-    if (!tab.source) return;
+    // A temporary Try tab shares its parent's source, so it must never save.
+    if (!tab.source || tab.transient) return;
     try {
       await saveTabRequest(tab.source.collection, tab.source.path, tab);
       markRequestSaved(tab.id, tab.request);
@@ -40,6 +41,21 @@ export function SaveRequestButton({ tab }: SaveRequestButtonProps) {
   }, [tab.id, handleSave]);
 
   if (!tab.source) return null;
+
+  if (tab.transient) {
+    return (
+      <Button
+        size='sm'
+        variant='outline'
+        className='h-8 px-3'
+        disabled
+        title='Temporary tab: not saved'
+      >
+        <Save className='mr-1 h-3.5 w-3.5' />
+        Save
+      </Button>
+    );
+  }
 
   return (
     <div className='flex items-center gap-1.5'>

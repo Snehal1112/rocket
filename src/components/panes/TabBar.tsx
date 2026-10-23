@@ -32,15 +32,21 @@ import { Input } from '@/components/ui/input';
 import { collectLeafGroupIds, findTabInTree } from '@/lib/pane-utils';
 import { saveFlowTab, saveScriptTab } from '@/lib/save-tab';
 import { usePaneStore } from '@/stores/pane-store';
-import type { LeafNode } from '@/types/pane-types';
+import type { LeafNode, Tab } from '@/types/pane-types';
 import {
   isExampleTab,
   isFlowTab,
   isFolderTab,
+  isRequestTab,
   isScriptTab,
   isWorkspaceTab,
 } from '@/types/pane-types';
 import { TabItem } from './TabItem';
+
+// A temporary Try tab is titled by its example, so it is not renamed.
+function isTemporary(tab: Tab): boolean {
+  return isRequestTab(tab) && tab.transient === true;
+}
 
 // Request tab bar matching legacy RequestTabs styling.
 export function TabBar({
@@ -132,7 +138,13 @@ export function TabBar({
                   onDoubleClick={() => {
                     // Script and folder tabs take their title from the file or folder name.
                     // An example is renamed from the sidebar, never from its tab.
-                    if (isScriptTab(tab) || isFolderTab(tab) || isExampleTab(tab)) return;
+                    if (
+                      isScriptTab(tab) ||
+                      isFolderTab(tab) ||
+                      isExampleTab(tab) ||
+                      isTemporary(tab)
+                    )
+                      return;
                     setRenamingTabId(tab.id);
                     setRenameValue(tab.title);
                   }}
@@ -146,11 +158,13 @@ export function TabBar({
               const savesInPlace = isScriptTab(tab) || isFlowTab(tab) || isFolderTab(tab);
               const isActive = tab.id === node.activeTabId;
               const showSave = !!tab.source || savesInPlace;
+              // A temporary Try tab is never saved.
+              const isTry = isRequestTab(tab) && tab.transient === true;
               // A folder tab saves through its mounted pane, so only the active one can.
               const folderNotActive = isFolderTab(tab) && !isActive;
               return (
                 <ContextMenuItem
-                  disabled={(!tab.isDirty && showSave) || folderNotActive}
+                  disabled={(!tab.isDirty && showSave) || folderNotActive || isTry}
                   onClick={() => {
                     // Only the active tab has a mounted pane listening for the event.
                     // The menu's tab object can be stale, so save the current one.
@@ -183,7 +197,9 @@ export function TabBar({
               );
             })()}
             <ContextMenuItem
-              disabled={isScriptTab(tab) || isFolderTab(tab) || isExampleTab(tab)}
+              disabled={
+                isScriptTab(tab) || isFolderTab(tab) || isExampleTab(tab) || isTemporary(tab)
+              }
               onClick={() => {
                 setRenamingTabId(tab.id);
                 setRenameValue(tab.title);

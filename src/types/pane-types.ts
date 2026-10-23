@@ -23,6 +23,8 @@ interface BaseTab {
   title: string;
   isDirty: boolean;
   source?: { collection: string; path: string };
+  /** A temporary Try tab. It carries its parent's source but is never saved to it. */
+  transient?: boolean;
 }
 
 export interface RequestTab extends BaseTab {

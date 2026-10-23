@@ -294,8 +294,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     () => (response ? buildExampleSnapshot(request, response) : null),
     [request, response],
   );
-  const saveExampleDisabledReason =
-    request.requestType !== 'http' || !tab.source
+  const saveExampleDisabledReason = tab.transient
+    ? 'Temporary tab: not saved'
+    : request.requestType !== 'http' || !tab.source
       ? 'Save the request first'
       : !response
         ? 'Send the request first'
@@ -692,6 +693,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const handleSaveDocs = useCallback(
     async (docs: string | null) => {
       if (!tab.source) return;
+      // A temporary Try tab keeps its docs in memory, because the parent file is not its own.
+      if (tab.transient) {
+        updateRequest(tab.id, { docs });
+        return;
+      }
       try {
         await updateRequestDocs(tab.source.collection, tab.source.path, docs);
         updateRequest(tab.id, { docs });
@@ -699,7 +705,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
         console.error('[RequestPanel] save docs failed:', err);
       }
     },
-    [tab.id, tab.source, updateRequest],
+    [tab.id, tab.source, tab.transient, updateRequest],
   );
 
   const handleNavigateToSource = useCallback(
@@ -1134,6 +1140,11 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           </>
         )}
 
+        {tab.transient && (
+          <Badge variant='secondary' className='h-6 text-xs font-normal'>
+            Temporary
+          </Badge>
+        )}
         <SaveRequestButton tab={tab} groupId={_groupId} />
       </div>
       {urlError && <p className='text-xs text-destructive px-3 py-1'>{urlError}</p>}
@@ -1326,7 +1337,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           />
         )}
         {activeSection === 'variables' &&
-          (tab.source?.collection && tab.source?.path ? (
+          (tab.source?.collection && tab.source?.path && !tab.transient ? (
             <RequestVariablesPanel
               collection={tab.source.collection}
               requestPath={tab.source.path}
@@ -1339,10 +1350,12 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               </div>
               <div className='space-y-1.5'>
                 <p className='text-xs font-medium text-muted-foreground/70'>
-                  No collection attached
+                  {tab.transient ? 'Temporary tab' : 'No collection attached'}
                 </p>
                 <p className='text-[11px] text-muted-foreground/40 max-w-50 leading-relaxed'>
-                  Save this request to a collection to define request-scoped variables.
+                  {tab.transient
+                    ? 'Edit request variables on the saved request. This tab is not saved.'
+                    : 'Save this request to a collection to define request-scoped variables.'}
                 </p>
               </div>
             </div>

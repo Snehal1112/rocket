@@ -205,7 +205,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   const handleCloseTab = (tabId: string) => {
     const tab = node.tabs.find((t) => t.id === tabId);
     // Guard only if the tab has unsaved edits.
-    const needsGuard = tab?.isDirty ?? false;
+    // A temporary Try tab is never saved, so closing it never asks.
+    const needsGuard = (tab?.isDirty ?? false) && !(tab && isRequestTab(tab) && tab.transient);
     if (tab && needsGuard) {
       setPendingCloseTabId(tabId);
     } else {

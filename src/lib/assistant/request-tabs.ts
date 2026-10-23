@@ -2,7 +2,8 @@ import { collectAllTabs } from '@/lib/pane-utils';
 import { isRequestTab, type PaneNode, type RequestTab } from '@/types/pane-types';
 
 /**
- * The open request tab that shows `path` of `collection`, in any pane. Its request
+ * The open request tab that shows `path` of `collection`, in any pane. A temporary Try tab is
+ * not that request, so it is skipped. Its request
  * state holds the user's unsaved edits, scripts included.
  */
 export function findRequestTab(
@@ -12,6 +13,9 @@ export function findRequestTab(
 ): RequestTab | undefined {
   return collectAllTabs(root).find(
     (tab): tab is RequestTab =>
-      isRequestTab(tab) && tab.source?.collection === collection && tab.source.path === path,
+      isRequestTab(tab) &&
+      !tab.transient &&
+      tab.source?.collection === collection &&
+      tab.source.path === path,
   );
 }

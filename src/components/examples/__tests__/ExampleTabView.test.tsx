@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExampleTabView } from '@/components/examples/ExampleTabView';
 import type { CollectionChangedEvent, RequestExample } from '@/lib/tauri-api';
 import { listRequestExamples, onCollectionChanged } from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
 import type { ExampleTab } from '@/types/pane-types';
 
 vi.mock('@/lib/tauri-api', async () => {
@@ -55,6 +56,16 @@ describe('ExampleTabView', () => {
       changeHandler = handler;
       return () => undefined;
     });
+  });
+
+  it('try_opens_a_temporary_tab_with_the_example', async () => {
+    vi.mocked(listRequestExamples).mockResolvedValue([full]);
+    const openTryTab = vi.fn().mockResolvedValue(undefined);
+    usePaneStore.setState({ openTryTab });
+    render(<ExampleTabView tab={tab} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Try' }));
+    expect(openTryTab).toHaveBeenCalledWith('col', 'users.yml', full);
   });
 
   it('renders_request_and_response_panes', async () => {

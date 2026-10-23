@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { cancelAutoSave, scheduleAutoSave } from '@/lib/auto-save';
+import { exampleToRequestState } from '@/lib/example-to-request';
 import {
   emptyHistory,
   type FlowWriteOptions,
@@ -25,6 +26,7 @@ import {
   findScriptTabsWithin,
   findTabInTree,
   isPathWithin,
+  mapApiRequestToState,
   removeLeaf,
   splitLeaf,
   updateLeaf,
@@ -40,6 +42,8 @@ import {
   type FlowNodeStatus,
   getCollection,
   getFlow,
+  getRequest,
+  type RequestExample,
   readScriptFile,
   renameRequest,
 } from '@/lib/tauri-api';
@@ -149,6 +153,12 @@ function removeParkedTabs(
 }
 
 // True when the tab is the example tab for this request path and example name.
+// True when a tab holds unsaved edits that belong in its request file.
+// A temporary Try tab shares its parent's source but must never write to it.
+function savesToFile(tab: Tab): tab is RequestTab & { source: NonNullable<RequestTab['source']> } {
+  return isRequestTab(tab) && tab.isDirty && !!tab.source && !tab.transient;
+}
+
 function isExampleTabFor(tab: Tab, collection: string, path: string, name: string): boolean {
   return (
     isExampleTab(tab) &&
@@ -347,6 +357,11 @@ export interface PaneState {
 
   /** Opens or focuses the read-only tab of a saved example. */
   openExampleTab: (collection: string, path: string, exampleName: string) => void;
+  /**
+   * Opens an editable temporary copy of an example's request. It carries the parent's source, so
+   * variables, inherited auth and scripts resolve as for the parent, and never saves to it.
+   */
+  openTryTab: (collection: string, path: string, example: RequestExample) => Promise<void>;
   /** Closes the example tabs of a request, or only the one named. Parked tabs go too. */
   closeExampleTabs: (collection: string, path: string, exampleName?: string) => void;
   /** Closes example tabs of every request at or under a folder path, live and parked. */
@@ -501,7 +516,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Save the tab before closing if it's dirty.
     const { root } = get();
     const found = findTabInTree(root, tabId);
-    if (found?.tab.isDirty && found.tab.source && isRequestTab(found.tab)) {
+    if (found && savesToFile(found.tab)) {
       scheduleAutoSave(
         tabId,
         found.tab.source.collection,
@@ -570,7 +585,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const leaf = findActiveLeaf(root, groupId);
     if (leaf.groupId === groupId) {
       const prevTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
-      if (prevTab?.isDirty && prevTab.source && isRequestTab(prevTab)) {
+      if (prevTab && savesToFile(prevTab)) {
         scheduleAutoSave(
           prevTab.id,
           prevTab.source.collection,
@@ -651,7 +666,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
     const newRoot = updateTabInTree(root, tabId, (tab) => {
       if (!isRequestTab(tab)) return tab;
-      return { ...tab, request: { ...tab.request, ...patch }, isDirty: true };
+      // A temporary Try tab never turns dirty, so nothing offers to save it.
+      return { ...tab, request: { ...tab.request, ...patch }, isDirty: !tab.transient };
     });
     set({ root: newRoot });
   },
@@ -667,7 +683,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   markDirty(tabId) {
     const { root } = get();
-    set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: true })) });
+    set({
+      root: updateTabInTree(root, tabId, (tab) =>
+        isRequestTab(tab) && tab.transient ? tab : { ...tab, isDirty: true },
+      ),
+    });
   },
 
   markRequestSaved(tabId, saved) {
@@ -758,6 +778,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const state = get();
     const isTarget = (tab: Tab): tab is RequestTab =>
       isRequestTab(tab) &&
+      !tab.transient &&
       tab.tabType === 'request' &&
       tab.request.requestType === 'http' &&
       tab.source?.collection === collection &&
@@ -812,7 +833,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           if (!isTarget(tab) || !tab.source) return tab;
           const target = `${newPath}${tab.source.path.slice(oldPath.length)}`;
           const moved = { ...tab, source: { collection, path: target } };
-          if (tab.isDirty) resave.push(moved);
+          if (savesToFile(tab)) resave.push(moved);
           return moved;
         }),
       };
@@ -1407,7 +1428,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const flush = (node: PaneNode): void => {
       if (node.type === 'leaf') {
         for (const tab of node.tabs) {
-          if (tab.isDirty && tab.source && isRequestTab(tab)) {
+          if (savesToFile(tab)) {
             scheduleAutoSave(
               tab.id,
               tab.source.collection,
@@ -1487,7 +1508,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     for (const tab of collectAllTabs(root)) {
       if (!saveDirty) {
         cancelAutoSave(tab.id);
-      } else if (tab.isDirty && tab.source && isRequestTab(tab)) {
+      } else if (savesToFile(tab)) {
         scheduleAutoSave(tab.id, tab.source.collection, tab.source.path, tab.title, tab.request);
       }
     }
@@ -1495,9 +1516,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   dirtyRequestTabs() {
-    return collectAllTabs(get().root).filter(
-      (tab): tab is RequestTab => isRequestTab(tab) && tab.isDirty && !!tab.source,
-    );
+    return collectAllTabs(get().root).filter((tab): tab is RequestTab => savesToFile(tab));
   },
 
   updateTabSource(tabId, source) {
@@ -1529,7 +1548,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Persist rename to disk. The file watcher detects the write and
     // emits collection-changed, which refreshes the sidebar automatically.
     // Script files are renamed from the sidebar, never through the request rename.
-    if (found?.tab.source && !isScriptTab(found.tab)) {
+    // A temporary Try tab only retitles itself, because renaming would rename its parent.
+    const isTry = !!found && isRequestTab(found.tab) && found.tab.transient === true;
+    if (found?.tab.source && !isScriptTab(found.tab) && !isTry) {
       renameRequest(found.tab.source.collection, found.tab.source.path, title).catch((err) =>
         console.error('[pane-store] rename failed:', err),
       );
@@ -1663,6 +1684,25 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       source: { collection, path },
       exampleName,
       isDirty: false,
+    };
+    get().openTab(tab);
+  },
+
+  async openTryTab(collection, path, example) {
+    if (!get().isWorkspaceMode() && get().activeCollection !== collection) {
+      get().switchCollection(collection);
+    }
+    const parent = await getRequest(collection, path);
+    const request = exampleToRequestState(example, mapApiRequestToState(parent, true));
+    const tab: RequestTab = {
+      id: crypto.randomUUID(),
+      title: `Try: ${example.name}`,
+      tabType: 'request',
+      request,
+      response: null,
+      isDirty: false,
+      source: { collection, path },
+      transient: true,
     };
     get().openTab(tab);
   },

@@ -9,7 +9,10 @@ vi.mock('@/lib/tauri-api', () => ({
 const markRequestSaved = vi.fn();
 vi.mock('@/stores/pane-store', () => ({
   usePaneStore: {
-    getState: () => ({ markRequestSaved }),
+    getState: () => ({
+      markRequestSaved,
+      root: { type: 'leaf', id: 'leaf', groupId: 'g', tabs: [], activeTabId: '' },
+    }),
   },
 }));
 

@@ -1,7 +1,9 @@
-import { FileText } from 'lucide-react';
+import { FileText, Play } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { ResponseHeadersTable } from '@/components/response/ResponseHeadersTable';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -15,6 +17,7 @@ import { METHOD_BADGE_COLOR, statusBadgeColor } from '@/lib/colors';
 import type { RequestExample } from '@/lib/tauri-api';
 import { listRequestExamples, onCollectionChanged } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { usePaneStore } from '@/stores/pane-store';
 import type { ExampleTab } from '@/types/pane-types';
 
 const MonacoWrapper = lazy(() =>
@@ -140,6 +143,7 @@ const PANEL_TAB_CLASS = 'h-7 px-2 text-xs';
 export function ExampleTabView({ tab }: { tab: ExampleTab }) {
   const { collection, path } = tab.source;
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const openTryTab = usePaneStore((s) => s.openTryTab);
 
   const load = useCallback(async () => {
     try {
@@ -174,6 +178,16 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
   }, [collection, path, load]);
 
   const example = state.status === 'ready' ? state.example : null;
+
+  // Opens an editable temporary copy of the example's request.
+  const handleTry = useCallback(() => {
+    if (!example) return;
+    openTryTab(collection, path, example).catch((err) => {
+      toast.error(
+        `Could not open the request: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }, [example, openTryTab, collection, path]);
   const request = example?.request;
   const response = example?.response;
   const params = request?.params ?? [];
@@ -217,14 +231,18 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
             {method}
           </span>
         )}
+        <Button size='sm' variant='outline' className='ml-auto h-7' onClick={handleTry}>
+          <Play className='mr-1 h-3.5 w-3.5' aria-hidden='true' />
+          Try
+        </Button>
         {statusText ? (
           <span
-            className={`ml-auto inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold ${statusBadgeColor(response?.status ?? 0)}`}
+            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold ${statusBadgeColor(response?.status ?? 0)}`}
           >
             {statusText}
           </span>
         ) : (
-          <span className='ml-auto text-xs text-muted-foreground'>No status</span>
+          <span className='text-xs text-muted-foreground'>No status</span>
         )}
       </div>
 

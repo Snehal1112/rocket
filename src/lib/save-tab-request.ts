@@ -21,6 +21,8 @@ export async function saveTabRequest(
   tab: RequestTab,
   overrides?: RequestSavePayloadOverrides,
 ): Promise<{ fileName?: string }> {
+  // A temporary Try tab shares its parent's source, so a save would overwrite the parent.
+  if (tab.transient) throw new Error('A temporary tab cannot be saved.');
   if (tab.request.requestType === 'graphql') {
     return saveGraphQlRequest(collection, path, buildGraphQlSavePayload(tab, overrides));
   }
