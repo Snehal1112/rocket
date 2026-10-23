@@ -1,8 +1,10 @@
 // src/components/environments/EnvironmentDialog.tsx
 
-import { AlertTriangle } from 'lucide-react';
+import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
+import { AlertTriangle, FolderOpen } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -23,6 +25,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { validateClientCertificates } from '@/lib/certificate-validation';
+import { toStoredDotEnvPath } from '@/lib/dot-env-path';
 import { validateExternalSecretBindings } from '@/lib/external-secrets';
 import {
   useDeleteEnvironment,
@@ -298,6 +301,18 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     selectedEnv?.name ?? null,
     selectedEnv?.dotEnvFilePath,
   );
+  const dotEnvBaseDir = dotEnvStatus?.baseDir ?? null;
+
+  const pickDotEnvFile = useCallback(async () => {
+    const picked = await openFilePicker({
+      multiple: false,
+      directory: false,
+      defaultPath: dotEnvBaseDir ?? undefined,
+    });
+    if (typeof picked !== 'string') return;
+    updateEnvField({ dotEnvFilePath: toStoredDotEnvPath(picked, dotEnvBaseDir) });
+  }, [dotEnvBaseDir, updateEnvField]);
+
   const dotEnvLine = dotEnvStatus ? dotEnvStatusLine(dotEnvStatus) : null;
 
   // Inherited rows come from the saved, flattened environment. Rows the child
@@ -578,6 +593,16 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                       updateEnvField({ dotEnvFilePath: e.target.value || undefined })
                     }
                   />
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='icon'
+                    className='h-7 w-7 shrink-0'
+                    aria-label='Pick .env file'
+                    onClick={() => void pickDotEnvFile()}
+                  >
+                    <FolderOpen className='h-3.5 w-3.5' />
+                  </Button>
                 </div>
                 {dotEnvLine && (
                   <p

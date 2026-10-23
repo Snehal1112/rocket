@@ -36,6 +36,11 @@ vi.mock('@/lib/tauri-api', async () => {
   };
 });
 
+const mockOpen = vi.fn();
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: (...args: unknown[]) => mockOpen(...args),
+}));
+
 vi.mock('@tauri-apps/plugin-os', () => ({ type: vi.fn(() => 'linux') }));
 
 // CodeMirror does not run in jsdom, so the variable-aware field is replaced by a plain input.
@@ -638,5 +643,48 @@ describe('EnvironmentDialog .env status line', () => {
     await vi.waitFor(() =>
       expect(vi.mocked(tauriApi.getDotEnvStatus).mock.calls.length).toBeGreaterThan(before),
     );
+  });
+});
+
+describe('EnvironmentDialog .env file picker', () => {
+  beforeEach(() => {
+    mockOpen.mockReset();
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([prodEnv]);
+    vi.mocked(tauriApi.getDotEnvStatus).mockResolvedValue({
+      baseDir: '/col',
+      path: '/col/.env',
+      exists: true,
+      keyCount: 1,
+      error: null,
+      blocked: false,
+      usesDefault: true,
+    });
+  });
+
+  it('the_pick_button_sets_the_stored_path', async () => {
+    mockOpen.mockResolvedValue('/col/.env.prod');
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+    await screen.findByText('Found .env, 1 key');
+
+    await user.click(screen.getByRole('button', { name: 'Pick .env file' }));
+
+    expect(await screen.findByDisplayValue('.env.prod')).toBeInTheDocument();
+    expect(mockOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ multiple: false, directory: false, defaultPath: '/col' }),
+    );
+  });
+
+  it('cancelling_the_picker_changes_nothing', async () => {
+    mockOpen.mockResolvedValue(null);
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+
+    await user.click(screen.getByRole('button', { name: 'Pick .env file' }));
+
+    await vi.waitFor(() => expect(mockOpen).toHaveBeenCalled());
+    expect(screen.getByLabelText('.env file path')).toHaveValue('');
   });
 });
