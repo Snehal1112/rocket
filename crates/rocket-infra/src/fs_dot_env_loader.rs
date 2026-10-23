@@ -2,7 +2,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use rocket_environment::DotEnvLoader;
+use rocket_environment::{DotEnvFileInfo, DotEnvLoader};
 use rocket_shared::paths::expand_tilde;
 
 /// Filesystem implementation of `DotEnvLoader`.
@@ -41,6 +41,48 @@ impl DotEnvLoader for FsDotEnvLoader {
         match std::fs::metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
             _ => read_pairs(&path),
+        }
+    }
+
+    fn describe(&self, raw_path: Option<&str>, base: Option<&Path>) -> DotEnvFileInfo {
+        let path = match raw_path {
+            Some(raw) => match resolve_dot_env_path(raw, base) {
+                Ok(p) => p,
+                Err(message) => {
+                    return DotEnvFileInfo {
+                        error: Some(message),
+                        ..DotEnvFileInfo::default()
+                    }
+                }
+            },
+            None => match base {
+                Some(base) => base.join(".env"),
+                None => return DotEnvFileInfo::default(),
+            },
+        };
+        let shown = Some(path.display().to_string());
+        if let Err(e) = std::fs::metadata(&path) {
+            let error = (e.kind() != std::io::ErrorKind::NotFound)
+                .then(|| format!("Could not read the .env file {}: {e}", path.display()));
+            return DotEnvFileInfo {
+                path: shown,
+                error,
+                ..DotEnvFileInfo::default()
+            };
+        }
+        match read_pairs(&path) {
+            Ok(pairs) => DotEnvFileInfo {
+                path: shown,
+                exists: true,
+                key_count: pairs.len(),
+                error: None,
+            },
+            Err(message) => DotEnvFileInfo {
+                path: shown,
+                exists: true,
+                key_count: 0,
+                error: Some(message),
+            },
         }
     }
 }
@@ -181,5 +223,53 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join(".env"), "A=\"unterminated\n").expect("write");
         assert!(FsDotEnvLoader.load_default(Some(dir.path())).is_err());
+    }
+
+    #[test]
+    fn describe_reports_path_exists_and_key_count() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("a.env"), "A=1\nB=2\n").expect("write");
+        let info = FsDotEnvLoader.describe(Some("a.env"), Some(dir.path()));
+        assert!(info.exists);
+        assert_eq!(info.key_count, 2);
+        assert_eq!(info.error, None);
+        assert_eq!(
+            info.path,
+            Some(dir.path().join("a.env").display().to_string())
+        );
+        let default = FsDotEnvLoader.describe(None, Some(dir.path()));
+        assert!(!default.exists);
+        std::fs::write(dir.path().join(".env"), "X=1\n").expect("write");
+        let default = FsDotEnvLoader.describe(None, Some(dir.path()));
+        assert!(default.exists);
+        assert_eq!(default.key_count, 1);
+    }
+
+    #[test]
+    fn describe_of_a_missing_file_is_not_an_error_and_exists_false() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let info = FsDotEnvLoader.describe(Some("nope.env"), Some(dir.path()));
+        assert!(!info.exists);
+        assert_eq!(info.key_count, 0);
+        assert_eq!(info.error, None);
+        assert!(info.path.is_some());
+    }
+
+    #[test]
+    fn describe_of_a_dotdot_path_reports_the_refusal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let info = FsDotEnvLoader.describe(Some("../x.env"), Some(dir.path()));
+        assert!(!info.exists);
+        let error = info.error.expect("error");
+        assert!(error.contains("contains '..' and is refused"));
+    }
+
+    #[test]
+    fn describe_never_contains_values() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(".env"), "TOKEN=supersecretvalue\n").expect("write");
+        let info = FsDotEnvLoader.describe(None, Some(dir.path()));
+        assert_eq!(info.key_count, 1);
+        assert!(!format!("{info:?}").contains("supersecretvalue"));
     }
 }

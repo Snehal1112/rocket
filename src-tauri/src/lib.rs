@@ -1001,6 +1001,7 @@ pub fn run() {
             commands::environments::get_global_environment_name,
             commands::environments::set_global_environment,
             commands::environments::get_process_env_vars,
+            commands::environments::get_dot_env_status,
             commands::environments::get_resolved_environment,
             commands::environments::list_global_environments,
             commands::environments::get_global_environment,

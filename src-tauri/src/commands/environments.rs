@@ -301,6 +301,41 @@ pub fn get_resolved_environment(
     Ok(to_resolved_dto(&name, &flat))
 }
 
+/// The state of a `.env` file. It never holds a value, only path, existence and key count.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DotEnvStatusDto {
+    pub base_dir: Option<String>,
+    pub path: Option<String>,
+    pub exists: bool,
+    pub key_count: usize,
+    pub error: Option<String>,
+    pub blocked: bool,
+    pub uses_default: bool,
+}
+
+fn to_dot_env_status_dto(status: rocket_app::DotEnvStatus) -> DotEnvStatusDto {
+    DotEnvStatusDto {
+        base_dir: status.base_dir,
+        path: status.info.path,
+        exists: status.info.exists,
+        key_count: status.info.key_count,
+        error: status.info.error,
+        blocked: status.blocked,
+        uses_default: status.uses_default,
+    }
+}
+
+/// Describes the `.env` file of an environment, or the default one. No value is returned.
+#[tauri::command]
+pub fn get_dot_env_status(
+    collection: Option<String>,
+    environment: Option<String>,
+    exec: State<'_, RequestExecutionService>,
+) -> DotEnvStatusDto {
+    to_dot_env_status_dto(exec.dot_env_status(collection.as_deref(), environment.as_deref()))
+}
+
 /// The host environment for `{{process.env.*}}`. With a `collection` that is not allowed
 /// host environment access on this computer, the map is empty. Without a collection (a
 /// scratch request, a preview) it is the full map. `.env` files of the active
@@ -358,6 +393,30 @@ mod tests {
             dot_env_keys: vec!["A".into()],
         }))?;
         assert_eq!(json["dotEnvKeys"][0], "A");
+        Ok(())
+    }
+
+    #[test]
+    fn status_dto_serialises_in_camel_case() -> TestResult {
+        let status = rocket_app::DotEnvStatus {
+            base_dir: Some("/b".into()),
+            info: rocket_environment::DotEnvFileInfo {
+                path: Some("/b/.env".into()),
+                exists: true,
+                key_count: 2,
+                error: None,
+            },
+            blocked: false,
+            uses_default: true,
+        };
+        let json = serde_json::to_value(to_dot_env_status_dto(status))?;
+        assert_eq!(json["baseDir"], "/b");
+        assert_eq!(json["path"], "/b/.env");
+        assert_eq!(json["exists"], true);
+        assert_eq!(json["keyCount"], 2);
+        assert!(json["error"].is_null());
+        assert_eq!(json["blocked"], false);
+        assert_eq!(json["usesDefault"], true);
         Ok(())
     }
 

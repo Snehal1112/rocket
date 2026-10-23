@@ -5,12 +5,27 @@ use std::path::Path;
 use crate::flatten::walk_chain;
 use crate::Environment;
 
+/// What a `.env` file looks like, without its values.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DotEnvFileInfo {
+    /// The resolved path, when it could be resolved.
+    pub path: Option<String>,
+    pub exists: bool,
+    pub key_count: usize,
+    /// Why the file could not be resolved or read. A missing file is not an error.
+    pub error: Option<String>,
+}
+
 /// Reads one `.env` file. The `Err` text is a warning message.
 pub trait DotEnvLoader: Send + Sync {
     fn load(&self, raw_path: &str, base: Option<&Path>) -> Result<Vec<(String, String)>, String>;
 
     /// Reads `<base>/.env`. A missing file or no base is an empty list, not an error.
     fn load_default(&self, base: Option<&Path>) -> Result<Vec<(String, String)>, String>;
+
+    /// Describes one file without returning its values. `None` for `raw_path` means the
+    /// default `<base>/.env`.
+    fn describe(&self, raw_path: Option<&str>, base: Option<&Path>) -> DotEnvFileInfo;
 }
 
 /// The layered `.env` values plus non-fatal warnings.
@@ -97,6 +112,10 @@ mod tests {
                 .get(".env")
                 .cloned()
                 .ok_or_else(|| "cannot read default".to_string())
+        }
+
+        fn describe(&self, _raw: Option<&str>, _base: Option<&Path>) -> DotEnvFileInfo {
+            DotEnvFileInfo::default()
         }
     }
 

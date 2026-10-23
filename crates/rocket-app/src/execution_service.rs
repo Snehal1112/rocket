@@ -404,6 +404,17 @@ impl PhaseState {
     }
 }
 
+/// What the `.env` file of an environment looks like, without its values.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DotEnvStatus {
+    pub base_dir: Option<String>,
+    pub info: rocket_environment::DotEnvFileInfo,
+    /// The host environment gate denies, so the file was not touched.
+    pub blocked: bool,
+    /// The environment sets no path, so the default `<base>/.env` is described.
+    pub uses_default: bool,
+}
+
 /// The `process.env` values of one send. `dot_env_keys` names the keys whose value came
 /// from a `.env` file, so they can be masked.
 #[derive(Debug, Clone, Default)]
@@ -1127,6 +1138,46 @@ impl RequestExecutionService {
         let mut vars = file_values;
         vars.extend(os);
         ProcessEnv { vars, dot_env_keys }
+    }
+
+    /// Describes the `.env` file of an environment: its own path, or the default
+    /// `<base>/.env`. The base is the collection folder, or the workspace base without a
+    /// collection. A denied gate returns `blocked` and touches no file. No value is returned.
+    pub fn dot_env_status(
+        &self,
+        collection: Option<&str>,
+        environment: Option<&str>,
+    ) -> DotEnvStatus {
+        if !self.process_env_allowed(collection) {
+            return DotEnvStatus {
+                blocked: true,
+                ..DotEnvStatus::default()
+            };
+        }
+        let base = match collection {
+            Some(c) => self.pinned_collection_dir(c),
+            None => self.global_env_repo().dot_env_base(),
+        };
+        let raw_path = environment.and_then(|name| {
+            let repo = match collection {
+                Some(_) => self.regular_env_repo(collection),
+                None => self.global_env_repo(),
+            };
+            repo.get(name)
+                .ok()
+                .and_then(|env| env.dot_env_file_path)
+                .filter(|p| !p.trim().is_empty())
+        });
+        let info = match self.dot_env_loader.as_deref() {
+            Some(loader) => loader.describe(raw_path.as_deref(), base.as_deref()),
+            None => rocket_environment::DotEnvFileInfo::default(),
+        };
+        DotEnvStatus {
+            base_dir: base.map(|b| b.display().to_string()),
+            info,
+            blocked: false,
+            uses_default: raw_path.is_none(),
+        }
     }
 
     /// Same as `build_variable_context`, plus the OS environment as `process.env.NAME`
@@ -7135,6 +7186,7 @@ mod tests {
         calls: Mutex<Vec<(String, Option<std::path::PathBuf>)>>,
         defaults: Mutex<std::collections::HashMap<std::path::PathBuf, Vec<(String, String)>>>,
         default_calls: Mutex<Vec<Option<std::path::PathBuf>>>,
+        describe_calls: Mutex<Vec<(Option<String>, Option<std::path::PathBuf>)>>,
     }
 
     impl FakeDotEnv {
@@ -7154,6 +7206,7 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 defaults: Mutex::new(std::collections::HashMap::new()),
                 default_calls: Mutex::new(Vec::new()),
+                describe_calls: Mutex::new(Vec::new()),
             })
         }
         /// Sets the default `.env` pairs returned for one base folder.
@@ -7207,6 +7260,28 @@ mod tests {
             Ok(base
                 .and_then(|b| self.0.defaults.lock().expect("defaults").get(b).cloned())
                 .unwrap_or_default())
+        }
+
+        fn describe(
+            &self,
+            raw_path: Option<&str>,
+            base: Option<&std::path::Path>,
+        ) -> rocket_environment::DotEnvFileInfo {
+            self.0
+                .describe_calls
+                .lock()
+                .expect("describe calls")
+                .push((raw_path.map(str::to_string), base.map(|b| b.to_path_buf())));
+            rocket_environment::DotEnvFileInfo {
+                path: Some(format!(
+                    "{}/{}",
+                    base.map(|b| b.display().to_string()).unwrap_or_default(),
+                    raw_path.unwrap_or(".env")
+                )),
+                exists: true,
+                key_count: 3,
+                error: None,
+            }
         }
     }
 
@@ -7272,6 +7347,65 @@ mod tests {
             svc = svc.with_dot_env_loader(Box::new(SharedDotEnv(Arc::clone(l))));
         }
         svc
+    }
+
+    #[test]
+    fn dot_env_status_is_blocked_when_the_gate_denies_and_reads_nothing() {
+        let fake = FakeDotEnv::new(&[]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            false,
+        );
+        let status = svc.dot_env_status(Some("api"), Some("dev"));
+        assert!(status.blocked);
+        assert_eq!(status.info, rocket_environment::DotEnvFileInfo::default());
+        assert_eq!(fake.describe_calls.lock().expect("calls").len(), 0);
+        assert_eq!(fake.call_count(), 0);
+        assert_eq!(fake.default_call_count(), 0);
+    }
+
+    #[test]
+    fn dot_env_status_uses_the_default_when_no_path_is_set() {
+        let fake = FakeDotEnv::new(&[]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(Environment::new("dev")),
+            Some(&fake),
+            true,
+        );
+        let status = svc.dot_env_status(Some("api"), Some("dev"));
+        assert!(!status.blocked);
+        assert!(status.uses_default);
+        assert_eq!(status.base_dir.as_deref(), Some("/work/api"));
+        assert_eq!(status.info.key_count, 3);
+        let calls = fake.describe_calls.lock().expect("calls");
+        assert_eq!(
+            calls[0],
+            (None, Some(std::path::PathBuf::from("/work/api")))
+        );
+    }
+
+    #[test]
+    fn dot_env_status_uses_the_explicit_path_of_the_environment() {
+        let fake = FakeDotEnv::new(&[]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", "dev.env")),
+            Some(&fake),
+            true,
+        );
+        let status = svc.dot_env_status(Some("api"), Some("dev"));
+        assert!(!status.uses_default);
+        let calls = fake.describe_calls.lock().expect("calls");
+        assert_eq!(
+            calls[0],
+            (
+                Some("dev.env".to_string()),
+                Some(std::path::PathBuf::from("/work/api"))
+            )
+        );
     }
 
     #[test]
