@@ -1,11 +1,13 @@
 //! Collection export: report types, file-source port, YAML scrub and ZIP builder.
 
 pub mod bruno;
+pub mod events;
 pub mod names;
 pub mod ports;
 pub mod postman;
 pub mod postman_auth;
 pub mod report;
+pub mod scripts;
 pub mod scrub;
 pub mod tree;
 

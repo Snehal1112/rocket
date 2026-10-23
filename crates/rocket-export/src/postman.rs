@@ -10,6 +10,7 @@ use rocket_shared::types::{
 use rocket_shared::error::DomainResult;
 use serde_json::{json, Map, Value};
 
+use crate::events::{folder_events, request_events};
 use crate::postman_auth::{noauth_block, postman_auth, PostmanAuth};
 use crate::scrub::{is_variable_reference, scrub_auth, scrub_header_values, scrub_url};
 use crate::report::{ExportAction, ExportNote, ExportReport};
@@ -27,7 +28,7 @@ pub struct PostmanOptions {
 /// Serialize a tree to a Postman Collection v2.1 document and its report.
 pub fn postman_collection(
     tree: &CollectionExportTree,
-    _opts: &PostmanOptions,
+    opts: &PostmanOptions,
 ) -> DomainResult<(Value, ExportReport)> {
     let mut report = ExportReport::default();
     let mut info = Map::new();
@@ -38,7 +39,7 @@ pub fn postman_collection(
     }
     info.insert("schema".into(), json!(POSTMAN_SCHEMA));
 
-    let items = folder_items(&tree.root, &[], &tree.settings.headers, tree, &mut report, "");
+    let items = folder_items(&tree.root, &[], &tree.settings.headers, tree, opts, &mut report, "");
     let mut doc = Map::new();
     doc.insert("info".into(), Value::Object(info));
     doc.insert("item".into(), Value::Array(items));
@@ -128,6 +129,7 @@ fn folder_items(
     chain: &[FolderSettings],
     collection_headers: &[Header],
     tree: &CollectionExportTree,
+    opts: &PostmanOptions,
     report: &mut ExportReport,
     path: &str,
 ) -> Vec<Value> {
@@ -142,8 +144,15 @@ fn folder_items(
                 let child_path = join(path, &name);
                 let mut child_chain = chain.to_vec();
                 child_chain.push(f.settings.clone());
-                let children =
-                    folder_items(f, &child_chain, collection_headers, tree, report, &child_path);
+                let children = folder_items(
+                    f,
+                    &child_chain,
+                    collection_headers,
+                    tree,
+                    opts,
+                    report,
+                    &child_path,
+                );
                 let mut obj = Map::new();
                 obj.insert("name".into(), json!(name));
                 if let Some(d) = &f.settings.docs {
@@ -153,6 +162,10 @@ fn folder_items(
                     if let Some(v) = auth_value(a, &child_path, report) {
                         obj.insert("auth".into(), v);
                     }
+                }
+                let events = folder_events(&f.settings, opts, &child_path, &mut report.items);
+                if !events.is_empty() {
+                    obj.insert("event".into(), Value::Array(events));
                 }
                 obj.insert("item".into(), Value::Array(children));
                 out.push(Value::Object(obj));
@@ -168,7 +181,7 @@ fn folder_items(
                         detail: None,
                     });
                 }
-                out.push(request_item(&name, r, &headers, &join(path, &name), report));
+                out.push(request_item(&name, r, &headers, opts, &join(path, &name), report));
                 report.exported += 1;
             }
             ExportItem::GraphQl(r) => {
@@ -232,6 +245,7 @@ fn request_item(
     name: &str,
     r: &Request,
     inherited: &[Header],
+    opts: &PostmanOptions,
     path: &str,
     report: &mut ExportReport,
 ) -> Value {
@@ -252,7 +266,14 @@ fn request_item(
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
         req.insert("description".into(), d);
     }
-    json!({ "name": name, "request": Value::Object(req) })
+    let mut item = Map::new();
+    item.insert("name".into(), json!(name));
+    let events = request_events(r, opts, path, &mut report.items);
+    if !events.is_empty() {
+        item.insert("event".into(), Value::Array(events));
+    }
+    item.insert("request".into(), Value::Object(req));
+    Value::Object(item)
 }
 
 fn graphql_item(
@@ -774,6 +795,61 @@ mod tests {
             .items
             .iter()
             .any(|n| n.feature.contains("oauth1") && n.action == ExportAction::Skipped));
+    }
+
+    #[test]
+    fn scripts_become_request_and_folder_events() {
+        let mut r = req("r", "https://x.test");
+        r.pre_request_script = Some("rok.setVar('a', 1);".into());
+        let t = tree_with(vec![ExportItem::Folder(ExportFolder {
+            name: "f".into(),
+            settings: FolderSettings {
+                tests_script: Some("test('t', () => {});".into()),
+                ..Default::default()
+            },
+            items: vec![ExportItem::Request(Box::new(r)), ExportItem::Request(Box::new(req("plain", "https://x.test")))],
+        })]);
+        let (doc, _) = export(&t);
+        let folder = &doc["item"][0];
+        assert_eq!(folder["event"][0]["listen"], "test");
+        // Requests sort by name, so "plain" comes before "r".
+        assert!(folder["item"][0].get("event").is_none());
+        let scripted = &folder["item"][1];
+        assert_eq!(scripted["event"][0]["listen"], "prerequest");
+        assert_eq!(
+            scripted["event"][0]["script"]["exec"],
+            json!(["pm.variables.set('a', 1);"])
+        );
+        assert!(doc.get("event").is_none());
+    }
+
+    #[test]
+    fn preserve_scripts_option_reaches_events() {
+        let mut r = req("r", "https://x.test");
+        r.pre_request_script = Some("rok.setVar('a', 1);".into());
+        let t = tree_with(vec![ExportItem::Request(Box::new(r))]);
+        let (doc, _) =
+            postman_collection(&t, &PostmanOptions { preserve_scripts: true }).expect("export");
+        assert_eq!(
+            doc["item"][0]["event"][0]["script"]["exec"],
+            json!(["rok.setVar('a', 1);"])
+        );
+    }
+
+    #[test]
+    fn script_notes_reach_the_report_with_the_item_path() {
+        let mut r = req("r", "https://x.test");
+        r.pre_request_script = Some("rok.sendRequest({});".into());
+        let t = tree_with(vec![ExportItem::Folder(ExportFolder {
+            name: "f".into(),
+            settings: Default::default(),
+            items: vec![ExportItem::Request(Box::new(r))],
+        })]);
+        let (_, report) = export(&t);
+        assert!(report
+            .items
+            .iter()
+            .any(|n| n.path == "f/r" && n.action == ExportAction::Skipped));
     }
 
     #[test]
