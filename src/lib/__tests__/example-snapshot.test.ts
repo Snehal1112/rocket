@@ -115,6 +115,20 @@ describe('buildExampleSnapshot', () => {
     expect(snap.notes).toHaveLength(1);
   });
 
+  it('multibyte_response_body_is_measured_in_bytes', () => {
+    const snap = buildExampleSnapshot(request(), response({ body: '€'.repeat(200000) }));
+    expect(snap.response.body).toEqual({ type: 'binary', data: '' });
+    expect(snap.notes).toHaveLength(1);
+  });
+
+  it('response_body_limit_is_exactly_524288_bytes', () => {
+    const kept = buildExampleSnapshot(request(), response({ body: 'a'.repeat(524288) }));
+    expect(kept.response.body?.type).toBe('json');
+    expect(kept.notes).toEqual([]);
+    const dropped = buildExampleSnapshot(request(), response({ body: 'a'.repeat(524289) }));
+    expect(dropped.response.body).toEqual({ type: 'binary', data: '' });
+  });
+
   it('status_and_headers_are_copied', () => {
     const snap = buildExampleSnapshot(request(), response({ status: 201, statusText: 'Created' }));
     expect(snap.response.status).toBe(201);

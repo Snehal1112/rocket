@@ -8,7 +8,7 @@ export interface ExampleSnapshot {
   notes: string[];
 }
 
-/** A response body above this many characters is not stored. */
+/** A response body above this many UTF-8 bytes is not stored. */
 const MAX_RESPONSE_BODY = 512 * 1024;
 
 const TEXT_BODY_MODES: RequestState['body']['mode'][] = ['json', 'text', 'xml', 'sparql'];
@@ -62,7 +62,9 @@ export function buildExampleSnapshot(
     ...(body ? { body } : {}),
   };
 
-  const dropped = response.isBinary === true || response.body.length > MAX_RESPONSE_BODY;
+  const dropped =
+    response.isBinary === true ||
+    new TextEncoder().encode(response.body).length > MAX_RESPONSE_BODY;
   if (dropped) {
     notes.push('The response body is not saved because it is binary or larger than 512 KB.');
   }
