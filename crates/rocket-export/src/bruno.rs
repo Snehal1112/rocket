@@ -138,9 +138,6 @@ pub fn bruno_zip(
             note_rok_scripts(rel, &value, &mut report.items);
             let text = serde_yaml::to_string(&value)
                 .map_err(|e| DomainError::Internal(format!("{rel}: cannot write YAML: {e}")))?;
-            if !in_env {
-                report.exported += 1;
-            }
             entries.push((rel.to_string(), text.into_bytes()));
         } else {
             entries.push((rel.to_string(), file.bytes));
@@ -155,6 +152,8 @@ pub fn bruno_zip(
         });
     }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
+    // Every file in the ZIP counts: requests, folders, scripts, protos and environments.
+    report.exported = entries.len();
 
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default();
@@ -227,6 +226,19 @@ mod tests {
                 "my-api/users/get.yml"
             ]
         );
+        // Every file in the ZIP counts, environments included.
+        assert_eq!(report.exported, 4);
+    }
+
+    #[test]
+    fn bruno_zip_counts_proto_and_js_files_too() {
+        let files = vec![
+            file("opencollection.yml", "info:\n  name: a\n"),
+            file("protos/a.proto", "syntax = \"proto3\";"),
+            file("shared/util.js", "x"),
+        ];
+        let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
+        assert_eq!(report.exported, names(&bytes).len());
         assert_eq!(report.exported, 3);
     }
 

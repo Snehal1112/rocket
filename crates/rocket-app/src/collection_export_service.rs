@@ -237,7 +237,7 @@ impl CollectionExportService {
         let (bytes, report) = bruno_zip(files, &stem, include_environments)?;
         Ok(ExportOutput {
             bytes,
-            file_name: format!("{stem}.zip"),
+            file_name: format!("{}.zip", slug(collection)),
             report,
         })
     }
@@ -561,6 +561,13 @@ mod tests {
             service(repo).export_postman("My API", &env_options()),
             Err(DomainError::Internal(_))
         ));
+    }
+
+    #[test]
+    fn export_bruno_file_name_uses_the_slug_like_postman() {
+        let service = CollectionExportService::new(Box::new(OneFile));
+        let out = service.export_bruno("My API", true).expect("exports");
+        assert_eq!(out.file_name, "my-api.zip");
     }
 
     #[test]

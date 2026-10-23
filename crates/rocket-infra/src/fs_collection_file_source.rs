@@ -1,8 +1,9 @@
 //! Reads the raw files of a collection for export.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use rocket_collection::Collection;
 use rocket_export::{CollectionFileSource, SourceFile};
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -16,19 +17,28 @@ impl FsCollectionFileSource {
     }
 }
 
+/// The collection name must follow the domain rule and be one plain path component. A
+/// component check (not a character list) also refuses a Windows drive prefix such as
+/// `C:x`, which makes `Path::join` drop the workspace path.
 fn validate_name(name: &str) -> DomainResult<()> {
-    let bad = name.is_empty()
-        || name.contains('\0')
-        || name.contains('/')
-        || name.contains('\\')
-        || name == "."
-        || name == "..";
-    if bad {
-        return Err(DomainError::InvalidInput(
-            "Invalid collection name".to_string(),
-        ));
+    let invalid = || DomainError::InvalidInput("Invalid collection name".to_string());
+    if name.contains('\0') || name == "." || name == ".." {
+        return Err(invalid());
     }
-    Ok(())
+    Collection::validate_name(name).map_err(|_| invalid())?;
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        _ => Err(invalid()),
+    }
+}
+
+/// Only these files go into an export, so nothing else is read into memory.
+fn is_exportable(name: &str) -> bool {
+    matches!(
+        name.rsplit_once('.').map(|(_, ext)| ext),
+        Some("yml" | "yaml" | "proto" | "js")
+    )
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<SourceFile>) -> DomainResult<()> {
@@ -49,7 +59,7 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<SourceFile>) -> DomainResult<()>
         };
         if file_type.is_dir() {
             walk(&entry.path(), &rel, out)?;
-        } else if file_type.is_file() {
+        } else if file_type.is_file() && is_exportable(&rel) {
             out.push(SourceFile {
                 rel_path: rel,
                 bytes: std::fs::read(entry.path())?,
@@ -123,10 +133,47 @@ mod tests {
     }
 
     #[test]
+    fn file_source_reads_only_exportable_files() {
+        let ws = tempfile::tempdir().expect("tempdir");
+        let root = ws.path().join("collections/my-api");
+        std::fs::create_dir_all(root.join("protos")).expect("mkdir");
+        std::fs::create_dir_all(root.join("shared")).expect("mkdir");
+        std::fs::create_dir_all(root.join("images")).expect("mkdir");
+        for (path, bytes) in [
+            ("opencollection.yml", "a: 1"),
+            ("a.yaml", "b: 2"),
+            ("protos/a.proto", "syntax = \"proto3\";"),
+            ("shared/util.js", "x"),
+            ("big.bin", "binary fixture"),
+            ("images/logo.png", "png"),
+            ("notes.txt", "text"),
+        ] {
+            std::fs::write(root.join(path), bytes).expect("write");
+        }
+        let source = FsCollectionFileSource::new(Arc::new(Mutex::new(ws.path().to_path_buf())));
+        let files = source.list_files("my-api").expect("lists");
+        let paths: Vec<_> = files.iter().map(|f| f.rel_path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "a.yaml",
+                "opencollection.yml",
+                "protos/a.proto",
+                "shared/util.js"
+            ]
+        );
+    }
+
+    #[test]
     fn file_source_rejects_unsafe_collection_name() {
         let ws = tempfile::tempdir().expect("tempdir");
         let source = FsCollectionFileSource::new(Arc::new(Mutex::new(ws.path().to_path_buf())));
-        for name in ["../x", "a/b", "a\\b", ""] {
+        let mut names = vec!["../x", "a/b", "a\\b", "", ".hidden", "."];
+        if cfg!(windows) {
+            // A drive prefix makes `Path::join` drop the workspace path on Windows.
+            names.extend(["C:x", "C:\\x"]);
+        }
+        for name in names {
             assert!(
                 matches!(source.list_files(name), Err(DomainError::InvalidInput(_))),
                 "name {name:?} must be refused"

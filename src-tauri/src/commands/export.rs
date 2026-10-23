@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use rocket_app::collection_export_service::{CollectionExportService, PostmanExportOptions};
+use rocket_app::collection_export_service::{
+    CollectionExportService, ExportOutput, PostmanExportOptions,
+};
 use rocket_export::ExportReport;
 use rocket_infra::{FsCollectionFileSource, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo};
 use rocket_shared::error::DomainError;
@@ -17,6 +19,22 @@ pub struct ExportResultDto {
     pub report: ExportReport,
 }
 
+/// Runs a blocking export on a worker thread, so reading a large collection never
+/// stalls the async runtime, and maps the output to the IPC result.
+async fn run_export<F>(job: F) -> Result<ExportResultDto, DomainError>
+where
+    F: FnOnce() -> Result<ExportOutput, DomainError> + Send + 'static,
+{
+    let out = tauri::async_runtime::spawn_blocking(job)
+        .await
+        .map_err(|e| DomainError::Internal(format!("export task failed: {e}")))??;
+    Ok(ExportResultDto {
+        data_base64: STANDARD.encode(&out.bytes),
+        file_name: out.file_name,
+        report: out.report,
+    })
+}
+
 /// Export a collection as a Bruno ZIP. Returns the bytes as base64.
 #[tauri::command]
 pub async fn export_collection_bruno(
@@ -24,15 +42,12 @@ pub async fn export_collection_bruno(
     include_environments: bool,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<ExportResultDto, DomainError> {
-    let service = CollectionExportService::new(Box::new(FsCollectionFileSource::new(Arc::clone(
-        &*workspace_path,
-    ))));
-    let out = service.export_bruno(&collection, include_environments)?;
-    Ok(ExportResultDto {
-        data_base64: STANDARD.encode(&out.bytes),
-        file_name: out.file_name,
-        report: out.report,
+    let workspace = Arc::clone(&*workspace_path);
+    run_export(move || {
+        let service = CollectionExportService::new(Box::new(FsCollectionFileSource::new(workspace)));
+        service.export_bruno(&collection, include_environments)
     })
+    .await
 }
 
 /// Choices of a Postman export, as the dialog sends them.
@@ -60,22 +75,20 @@ pub async fn export_collection_postman(
     options: PostmanExportOptionsDto,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
 ) -> Result<ExportResultDto, DomainError> {
-    let service = CollectionExportService::new(Box::new(FsCollectionFileSource::new(Arc::clone(
-        &*workspace_path,
-    ))))
-    .with_collections(Box::new(SharedPathCollectionRepo::new(Arc::clone(
-        &*workspace_path,
-    ))))
-    .with_environments(Box::new(SharedCollectionEnvironmentRepo::with_secret_store(
-        Arc::clone(&*workspace_path),
-        crate::env_secret_store(),
-    )));
-    let out = service.export_postman(&collection, &options.into())?;
-    Ok(ExportResultDto {
-        data_base64: STANDARD.encode(&out.bytes),
-        file_name: out.file_name,
-        report: out.report,
+    let workspace = Arc::clone(&*workspace_path);
+    let options = PostmanExportOptions::from(options);
+    run_export(move || {
+        let service = CollectionExportService::new(Box::new(FsCollectionFileSource::new(
+            Arc::clone(&workspace),
+        )))
+        .with_collections(Box::new(SharedPathCollectionRepo::new(Arc::clone(&workspace))))
+        .with_environments(Box::new(SharedCollectionEnvironmentRepo::with_secret_store(
+            workspace,
+            crate::env_secret_store(),
+        )));
+        service.export_postman(&collection, &options)
     })
+    .await
 }
 
 #[cfg(test)]
