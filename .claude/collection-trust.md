@@ -35,7 +35,7 @@ First start after the upgrade grandfathers every existing collection once. `Trus
 
 ## Commands
 
-`get_collection_trust`, `set_collection_capability`, `set_collection_context_roots`, `grant_requested_capabilities`, `revoke_collection_trust`, `get_trust_migration_notice`, `dismiss_trust_migration_notice`, `get_process_env_vars`. The event is `collection-trust-changed`.
+`get_collection_trust`, `set_collection_capability`, `set_collection_context_roots`, `grant_requested_capabilities`, `revoke_collection_trust`, `get_trust_migration_notice`, `dismiss_trust_migration_notice`, `get_process_env_vars`, `get_dot_env_status` (gated: a denied gate returns `blocked` and reads no file, only the base folder is filled). The event is `collection-trust-changed`.
 
 ## Follow-ups
 

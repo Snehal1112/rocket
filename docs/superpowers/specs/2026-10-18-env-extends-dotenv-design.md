@@ -37,12 +37,15 @@ Make the stored `extends` and `dotEnvFilePath` fields on an environment do what 
 - The values appear as `{{process.env.NAME}}`, only when the host environment gate allows it for the collection. The real OS environment wins on a name clash with a `.env` value.
 - The active environment is needed to find the file, so the process env lookup takes the active environment name as well as the collection.
 - The Console masks every `.env` value as a secret, fail closed, with the existing reveal toggle. No `.env` value is written to history or to a saved file.
+- Default file (amendment): a `.env` in the collection folder is read with no path set, and a `.env` in the workspace folder is read for global environments. A missing default file is silent. It is read even when no environment is selected. A denied gate reads no default file either.
+- Layer order, lowest first: workspace `.env`, collection `.env`, then the explicit `dotEnvFilePath` layers (parent under child). The real OS environment still wins over all of them.
 
 ### UI
 
 - The environment dialog gets an "Inherits from" picker (single parent, never itself, never a cycle) and a `.env` path field.
 - Inherited rows are shown read-only and labelled with their source environment. A missing parent shows a warning and does not block the dialog.
 - Saving never writes inherited rows into the child.
+- Status and picker (amendment): a status line under the `.env` field shows the resolved path, whether the file exists and a key count, never a value. It describes the saved path, so an unsaved path shows "Save to check this file." A denied gate shows "not read". Parse errors never quote file text. The picker stores a path inside the base folder as relative and a path outside as absolute (`..` stays refused). It is disabled until the status has loaded, so the base folder is known.
 
 ### Docs
 

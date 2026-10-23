@@ -76,7 +76,7 @@ Notes: `.claude/rok-api-parity-notes.md` (its status table is stale, update it w
 | R-26 | OAuth2: implicit grant, OIDC discovery, JWKS verification, multi-token management and persistence | open | `execute-request.ts:464`, `oauth2_service.rs:20` | Implicit is stubbed. |
 | R-27 | GitHub issue #20: OAuth2 flows other than client_credentials silently skipped | open | issue #20 | Verify against R-26 first. |
 | R-28 | GitHub issue #21: mTLS certificates saved but never loaded | done | issue #21 | Fixed on main by the environment client certificate series. Guarded by `mutual_tls_in_process_*` in rocket-infra. WebSocket and gRPC mTLS are listed as later plans in the issue #21 spec. |
-| R-29 | GitHub issue #22: environment `extends` and `.env` have no effect | open | issue #22 | Default `.env` from the workspace and collection folders is read (plan 1 of dotenv-default-and-picker). |
+| R-29 | GitHub issue #22: environment `extends` and `.env` have no effect | open | issue #22 | Default `.env` from the workspace and collection folders is read (plan 1 of dotenv-default-and-picker). The dialog shows a `.env` status line and a file picker (plan 2). |
 | R-30 | Insomnia import | open | none | No spec. |
 
 ## 7. Load test
