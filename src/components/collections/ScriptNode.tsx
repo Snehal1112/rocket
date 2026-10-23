@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { TREE_ICON, TREE_ICON_STROKE, TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { renameScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { DeleteTarget } from './tree-utils';
@@ -68,16 +68,12 @@ export function ScriptNode({ name, collectionName, path, onDelete }: ScriptNodeP
   return (
     <div className='group relative flex items-center'>
       <TreeItem value={`script-${collectionName}-${path}`} className='w-full'>
-        <TreeItemContent
-          className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
-          onClick={() => void open()}
-          aria-label={`Open script ${name}`}
-        >
-          <FileCode aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+        <TreeItemContent onClick={() => void open()} aria-label={`Open script ${name}`}>
+          <FileCode aria-hidden='true' strokeWidth={TREE_ICON_STROKE} className={TREE_ICON} />
           {isRenaming ? (
             <Input
               autoFocus
-              className='h-6 text-sm flex-1'
+              className='h-6 text-[13px] flex-1'
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => {

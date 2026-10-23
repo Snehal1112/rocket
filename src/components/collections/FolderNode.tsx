@@ -1,5 +1,4 @@
 import {
-  ChevronRight,
   FileCode,
   Folder,
   FolderOpen,
@@ -31,13 +30,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import {
+  TREE_CHILDREN,
+  TREE_ICON,
+  TREE_ICON_STROKE,
+  TreeChevron,
+  TreeItem,
+  TreeItemContent,
+} from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { createRequest, moveItem } from '@/lib/tauri-api';
-import { cn } from '@/lib/utils';
 import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FolderSection } from '@/types/pane-types';
@@ -200,9 +205,14 @@ export function FolderNode({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className='group relative flex items-center'>
-            <TreeItem value={basePath} open={open} onOpenChange={setOpen} className='flex-1'>
+            <TreeItem
+              value={basePath}
+              open={open}
+              onOpenChange={setOpen}
+              leading='none'
+              className='flex-1'
+            >
               <TreeItemContent
-                className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
                 onClick={() => {
                   // A row click opens the settings and expands. Only the chevron collapses.
                   openSettings();
@@ -215,7 +225,7 @@ export function FolderNode({
                   tabIndex={0}
                   aria-label={`${open ? 'Collapse' : 'Expand'} ${name}`}
                   aria-expanded={open}
-                  className='flex h-4 w-4 shrink-0 items-center justify-center rounded-sm hover:bg-accent'
+                  className='rounded-sm hover:bg-accent'
                   onClick={(e) => {
                     e.stopPropagation();
                     setOpen((prev) => !prev);
@@ -228,20 +238,21 @@ export function FolderNode({
                     }
                   }}
                 >
-                  <ChevronRight
-                    aria-hidden='true'
-                    className={cn('h-3 w-3 transition-transform', open && 'rotate-90')}
-                  />
+                  <TreeChevron open={open} />
                 </span>
                 {open ? (
-                  <FolderOpen aria-hidden='true' strokeWidth={10} className='h-5 w-5 shrink-0' />
+                  <FolderOpen
+                    aria-hidden='true'
+                    strokeWidth={TREE_ICON_STROKE}
+                    className={TREE_ICON}
+                  />
                 ) : (
-                  <Folder aria-hidden='true' strokeWidth={10} className='h-5 w-5 shrink-0 ' />
+                  <Folder aria-hidden='true' strokeWidth={TREE_ICON_STROKE} className={TREE_ICON} />
                 )}
                 {isRenaming ? (
                   <Input
                     autoFocus
-                    className='h-6 text-xs flex-1'
+                    className='h-6 text-[13px] flex-1'
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
                     onKeyDown={(e) => {
@@ -379,7 +390,7 @@ export function FolderNode({
 
       {open && (
         // Indentation guide line.
-        <div className='pl-1.5 border-l border-border/70 ml-2'>
+        <div className={TREE_CHILDREN}>
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
               const folderDirName = item.dirName ?? item.name;

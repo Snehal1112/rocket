@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { TREE_ICON, TREE_ICON_STROKE, TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { deleteRequestExample, renameRequestExample } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 
@@ -103,20 +103,16 @@ export function ExampleNode({ collectionName, requestPath, name }: ExampleNodePr
           <div className='flex-1 min-w-0'>
             <TreeItem value={`example-${collectionName}-${requestPath}-${name}`} className='w-full'>
               <TreeItemContent
-                className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
                 onClick={() => {
                   if (!isRenaming) openExampleTab(collectionName, requestPath, name);
                 }}
                 aria-label={`Open example ${name}`}
               >
-                <FileText
-                  aria-hidden='true'
-                  className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
-                />
+                <FileText aria-hidden='true' strokeWidth={TREE_ICON_STROKE} className={TREE_ICON} />
                 {isRenaming ? (
                   <Input
                     autoFocus
-                    className='h-6 text-sm flex-1'
+                    className='h-6 text-[13px] flex-1'
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
                     onKeyDown={(e) => {
@@ -157,7 +153,7 @@ export function ExampleNode({ collectionName, requestPath, name }: ExampleNodePr
             variant='ghost'
             size='icon'
             aria-label={`Actions for ${name}`}
-            className='absolute right-1 top-1 h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+            className='absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
             onClick={(e) => e.stopPropagation()}
           >
             <MoreHorizontal aria-hidden='true' className='h-3 w-3' />

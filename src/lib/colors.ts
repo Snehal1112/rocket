@@ -11,6 +11,9 @@ export const METHOD_TEXT_COLOR: Record<string, string> = {
   DELETE: 'text-red-500 dark:text-red-400',
   OPTIONS: 'text-cyan-500 dark:text-cyan-400',
   HEAD: 'text-pink-500 dark:text-pink-400',
+  WS: 'text-teal-500 dark:text-teal-400',
+  GRPC: 'text-teal-500 dark:text-teal-400',
+  GQL: 'text-fuchsia-500 dark:text-fuchsia-400',
 };
 
 /** Full badge color (text + bg + border) for method badges with backgrounds. */

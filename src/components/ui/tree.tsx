@@ -2,6 +2,15 @@ import { ChevronRight } from 'lucide-react';
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
+// Shared metrics so every node type lines up on the same grid.
+// Row: 28px tall. Chevron slot: 16px. Icon: 16px. Children are guided by a hairline
+// sitting under the parent chevron.
+const TREE_CONTENT = 'flex w-full items-center gap-1.5 h-7 px-1.5 text-[13px] cursor-pointer';
+const TREE_ICON = 'size-4 shrink-0 text-muted-foreground';
+const TREE_ICON_STROKE = 1.75;
+const TREE_CHILDREN =
+  'ml-[14px] flex flex-col gap-px border-l border-border/50 hover:border-border transition-colors';
+
 // Context shared between Tree and all TreeItem descendants.
 type TreeContextValue = {
   value: string | undefined;
@@ -29,7 +38,7 @@ function Tree({
       <div
         role='tree'
         data-slot='tree'
-        className={cn('flex flex-col gap-0.5', className)}
+        className={cn('flex flex-col gap-px', className)}
         {...props}
       >
         {children}
@@ -52,6 +61,7 @@ function TreeItem({
   open: openProp,
   onOpenChange,
   active,
+  leading = 'auto',
   children,
   ...props
 }: React.ComponentProps<'li'> & {
@@ -59,6 +69,8 @@ function TreeItem({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   active?: boolean;
+  // 'none' means the node draws its own chevron, so the item adds no leading slot.
+  leading?: 'auto' | 'none';
 }) {
   const [openState, setOpenState] = React.useState(false);
   // Use controlled open when the caller provides it, otherwise fall back to
@@ -112,12 +124,14 @@ function TreeItem({
           data-selected={isSelected || undefined}
           data-active={active || undefined}
           className={cn(
-            'flex items-center gap-1 px-1 py-1 text-sm cursor-pointer pl-(--tree-indent) w-full text-left bg-transparent border-l-2 border-transparent',
+            'relative flex items-center w-full min-w-0 text-left bg-transparent rounded-sm cursor-pointer',
             'hover:bg-list-hover-bg',
             'data-selected:bg-list-inactive-bg',
-            'data-active:border-list-highlight-fg data-active:bg-list-active-bg data-active:text-list-active-fg',
+            'data-active:bg-list-active-bg data-active:text-list-active-fg',
+            // Accent bar for the open item, inset so the row keeps its rounded corners.
+            'data-active:shadow-[inset_2px_0_0_hsl(var(--list-highlight-fg))]',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring',
           )}
-          style={{ '--tree-indent': `${(depth + 1) * 8}px` } as React.CSSProperties}
           onClick={handleSelect}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -126,30 +140,43 @@ function TreeItem({
             }
           }}
         >
-          {/* Expand/collapse chevron, shown only for items with sub-trees. */}
-          {hasChildren ? (
-            <ChevronRight
-              className={cn(
-                'size-3 shrink-0 text-foreground transition-transform',
-                open && 'rotate-90',
-              )}
-            />
-          ) : (
-            // Spacer to keep content aligned when there is no chevron.
-            <span className='size-3 shrink-0' />
-          )}
+          {/* Leading slot: chevron for items with sub-trees, a spacer for leaves. */}
+          {leading === 'auto' &&
+            (hasChildren ? (
+              <TreeChevron open={open} className='ml-1.5 -mr-1' />
+            ) : (
+              <span className='ml-1.5 -mr-1 size-4 shrink-0' />
+            ))}
           {contentChildren}
         </button>
 
         {/* Nested tree, rendered only when the item is open. */}
         {hasChildren && open && (
           // biome-ignore lint/a11y/useSemanticElements: ul+role=group is standard WAI-ARIA tree widget nested group markup
-          <ul role='group' className='flex flex-col gap-0.5'>
+          <ul role='group' className={TREE_CHILDREN}>
             {subTreeChildren}
           </ul>
         )}
       </li>
     </TreeItemContext.Provider>
+  );
+}
+
+// Single chevron used by every expandable node.
+function TreeChevron({ open, className }: { open: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden='true'
+      className={cn('flex size-4 shrink-0 items-center justify-center', className)}
+    >
+      <ChevronRight
+        className={cn(
+          'size-3.5 text-muted-foreground transition-transform duration-150',
+          open && 'rotate-90',
+        )}
+        strokeWidth={2}
+      />
+    </span>
   );
 }
 
@@ -161,7 +188,7 @@ function TreeItemContent({ className, children, ...props }: React.ComponentProps
   return (
     <div
       data-slot='tree-item-content'
-      className={cn('flex min-w-0 flex-1 items-center gap-2', className)}
+      className={cn(TREE_CONTENT, 'min-w-0 flex-1', className)}
       {...props}
     >
       {children}
@@ -169,4 +196,13 @@ function TreeItemContent({ className, children, ...props }: React.ComponentProps
   );
 }
 
-export { Tree, TreeItem, TreeItemContent };
+export {
+  TREE_CHILDREN,
+  TREE_CONTENT,
+  TREE_ICON,
+  TREE_ICON_STROKE,
+  Tree,
+  TreeChevron,
+  TreeItem,
+  TreeItemContent,
+};

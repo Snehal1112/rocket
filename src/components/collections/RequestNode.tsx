@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tree, TreeItem, TreeItemContent } from '@/components/ui/tree';
-import { METHOD_BADGE_COLOR } from '@/lib/colors';
+import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import {
   encodeFlowRequestDragPayload,
   FLOW_REQUEST_DRAG_MIME,
@@ -298,15 +298,11 @@ export function RequestNode({
               e.dataTransfer.effectAllowed = 'copy';
             }}
           >
-            <TreeItemContent
-              className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
-              onClick={handleClick}
-              aria-label={`Open ${badge} ${name}`}
-            >
+            <TreeItemContent onClick={handleClick} aria-label={`Open ${badge} ${name}`}>
               <span
                 className={cn(
-                  'shrink-0 text-[10px] font-semibold uppercase px-1 py-0.5 rounded border',
-                  METHOD_BADGE_COLOR[badge.toUpperCase()] ?? METHOD_BADGE_COLOR['GET'],
+                  'w-9 shrink-0 text-[10px] font-semibold uppercase tracking-tight',
+                  METHOD_TEXT_COLOR[badge.toUpperCase()] ?? METHOD_TEXT_COLOR['GET'],
                 )}
               >
                 {badge}
@@ -314,7 +310,7 @@ export function RequestNode({
               {isRenaming ? (
                 <Input
                   autoFocus
-                  className='h-6 text-sm flex-1'
+                  className='h-6 text-[13px] flex-1'
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -346,7 +342,7 @@ export function RequestNode({
               )}
             </TreeItemContent>
             {exampleNames.length > 0 && (
-              <Tree aria-label={`Examples of ${name}`} className='pl-3'>
+              <Tree aria-label={`Examples of ${name}`}>
                 {exampleNames.map((exampleName) => (
                   <ExampleNode
                     key={exampleName}
@@ -365,7 +361,7 @@ export function RequestNode({
               <button
                 type='button'
                 aria-label={`Actions for ${name}`}
-                className='absolute right-1 top-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
+                className='absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />

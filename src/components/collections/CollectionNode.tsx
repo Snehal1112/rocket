@@ -1,8 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import {
   BoxIcon,
-  ChevronDown,
-  ChevronRight,
   CircleAlert,
   Download,
   FileCode,
@@ -39,7 +37,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import {
+  TREE_CHILDREN,
+  TREE_ICON_STROKE,
+  TreeChevron,
+  TreeItem,
+  TreeItemContent,
+} from '@/components/ui/tree';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { createDefaultRequest } from '@/lib/pane-utils';
@@ -366,29 +370,22 @@ export function CollectionNode({
             value={summary.uid}
             open={open}
             onOpenChange={setOpen}
+            leading='none'
             className='flex-1'
             data-testid={`collection-item-${summary.name}`}
           >
             <TreeItemContent
-              className='flex gap-2 w-full  py-1 cursor-pointer'
+              className='font-medium'
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
-              {open ? (
-                <ChevronDown
-                  aria-hidden='true'
-                  className='h-5 w-5 flex-none text-muted-foreground'
-                  strokeWidth={1.5}
-                />
-              ) : (
-                <ChevronRight
-                  aria-hidden='true'
-                  className='h-5 w-5 flex-none text-muted-foreground'
-                  strokeWidth={1.5}
-                />
-              )}
-              <BoxIcon aria-hidden='true' className='h-5 w-5 shrink-0' />
+              <TreeChevron open={open} />
+              <BoxIcon
+                aria-hidden='true'
+                className='size-4 shrink-0 text-foreground'
+                strokeWidth={TREE_ICON_STROKE}
+              />
               {isRenaming ? (
                 <Input
                   autoFocus
@@ -595,7 +592,7 @@ export function CollectionNode({
       </ContextMenuContent>
 
       {open && collection && (
-        <div className='border-l border-border/70 ml-8'>
+        <div className={TREE_CHILDREN}>
           {filteredItems.map((item) => {
             if (item.type === 'folder') {
               const folderDirName = item.dirName ?? item.name;
