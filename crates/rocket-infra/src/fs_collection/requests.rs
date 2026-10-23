@@ -94,16 +94,22 @@ pub(super) fn save_request(
 
     let mut oc = request_to_oc_http_request(request);
 
-    // Preserve variables stored by save_request_variables: the IPC payload
-    // does not carry them, so they would otherwise be silently erased.
-    if request.variables.is_empty() && file_path.exists() {
+    // Preserve what the IPC payload does not carry. Variables come from
+    // save_request_variables, and examples have no editor yet, so a save would
+    // otherwise erase both.
+    if (request.variables.is_empty() || request.examples.is_empty()) && file_path.exists() {
         if let Ok(existing_content) = fs::read_to_string(&file_path) {
             if let Ok(existing_oc) = serde_yaml::from_str::<OcHttpRequest>(&existing_content) {
-                if let Some(existing_runtime) = existing_oc.runtime {
-                    if !existing_runtime.variables.is_empty() {
-                        let runtime = oc.runtime.get_or_insert_with(Default::default);
-                        runtime.variables = existing_runtime.variables;
+                if request.variables.is_empty() {
+                    if let Some(existing_runtime) = existing_oc.runtime {
+                        if !existing_runtime.variables.is_empty() {
+                            let runtime = oc.runtime.get_or_insert_with(Default::default);
+                            runtime.variables = existing_runtime.variables;
+                        }
                     }
+                }
+                if request.examples.is_empty() && existing_oc.examples.is_some() {
+                    oc.examples = existing_oc.examples;
                 }
             }
         }

@@ -809,6 +809,40 @@ fn save_request_preserves_variables_written_by_save_request_variables() {
 }
 
 #[test]
+fn save_request_preserves_examples_when_payload_carries_none() {
+    // Regression: the frontend payload has no examples field, so a save must keep
+    // the examples already in the file.
+    let (_dir, repo) = setup();
+    repo.create("my-api").expect("create collection");
+    let req = rocket_collection::Request::new("Get Users", HttpMethod::Get, "/users");
+    repo.save_request("my-api", "get-users.yml", &req)
+        .expect("initial save");
+
+    let path = repo.collection_path("my-api").join("get-users.yml");
+    let mut yaml = std::fs::read_to_string(&path).expect("read file");
+    yaml.push_str(
+        "\nexamples:\n  - name: example\n    response:\n      status: 403\n      statusText: Forbidden\n",
+    );
+    std::fs::write(&path, yaml).expect("write examples");
+
+    let mut payload = repo
+        .get_request("my-api", "get-users.yml")
+        .expect("load request");
+    assert_eq!(payload.examples.len(), 1);
+    payload.examples = vec![];
+    payload.pre_request_script = Some("console.log('pre');".into());
+    repo.save_request("my-api", "get-users.yml", &payload)
+        .expect("save request");
+
+    let reloaded = repo
+        .get_request("my-api", "get-users.yml")
+        .expect("reload request");
+    assert_eq!(reloaded.examples.len(), 1, "examples must survive a save");
+    assert_eq!(reloaded.examples[0].name, "example");
+    assert!(reloaded.pre_request_script.is_some());
+}
+
+#[test]
 fn save_request_script_only_touches_the_targeted_phase() {
     let (_dir, repo) = setup();
     repo.create("my-api").expect("create collection");
