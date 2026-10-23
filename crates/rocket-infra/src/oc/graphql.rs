@@ -25,6 +25,7 @@ pub struct OcGraphQLRequestInfo {
 /// GraphQL body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcGraphQLBody {
+    #[serde(default)]
     pub query: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variables: Option<String>,
@@ -52,6 +53,7 @@ pub enum OcGraphQLBodyOrVariants {
 pub struct OcGraphQLRequestDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
+    #[serde(default)]
     pub url: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<OcHttpRequestHeader>,

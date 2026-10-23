@@ -20,9 +20,21 @@ Because `OcItem` and `OcAuth` are untagged enums, one missing field inside a req
 ## Known and not fixed
 
 - **Saving collection settings rewrites an object `docs` as a plain string** (the `type` is dropped; the text is kept). Folder docs keep the object form when the text did not change (`docs_to_oc`); the collection and requests do not yet.
-- **Other required fields Bruno could omit when empty** (audit of `oc/`, risk HIGH): WebSocket message `data` (`websocket.rs`), GraphQL `query`, `url` on blank GraphQL, gRPC and WebSocket requests, gRPC message variant `message`, and `value` on headers, params, form fields and gRPC metadata. MEDIUM: auth credential strings (`username`, `password`, `token`, `key`), OAuth2 `clientId`, script `code`, example response `type`, variant `title` fields.
+- **Fixed on 2026-10-24:** `value` on headers, params, form fields, response headers and gRPC metadata, WebSocket message `data`, GraphQL `query`, gRPC message variant `message`, and `url` on GraphQL, gRPC and WebSocket requests now default to empty (`#[serde(default)]` in `oc/`). A header without a `name` still fails.
+- **Still strict (MEDIUM):** auth credential strings (`username`, `password`, `token`, `key`), OAuth2 `clientId`, script `code`, example response `type`, variant `title` fields.
 - **Import-time check (added 2026-10-23).** After the copy, `import_modern_collection` reads every copied file back with Rocket's readers (`report_files_that_cannot_open`: collection settings, environments, `folder.yml`, and each request by kind). A failure is added to `ImportReport.skipped` as `ParseError("copied, but Rocket cannot open it: ...")`. The file stays on disk and still counts in `imported`. The UI shows these under the skipped list.
 - **The `protoFiles` shape** in the spec reference (`{type, path}`) differs from Rocket's `filePath`. Not checked.
+
+## Round-trip checks (2026-10-24)
+
+`crates/rocket-import/tests/roundtrip_test.rs` exports a collection as a Bruno ZIP, imports it again and checks that no import-time "cannot open" entry appears, that the file count matches (Rocket-only `flows/` and `.rocket/` are expected to be left out) and that every HTTP request keeps its name, method, URL, header and query names, non-form body, scripts, assertion count and order. `crates/rocket-app/tests/postman_round_trip.rs` does the Postman export and import and compares request counts. Both have fixture tests and an ignored test for a real workspace:
+
+```bash
+ROCKET_ROUNDTRIP_WORKSPACE=~/.rocket-api/<workspace> cargo test -j4 -p rocket-import --test roundtrip_test -- --ignored --nocapture
+ROCKET_ROUNDTRIP_WORKSPACE=~/.rocket-api/<workspace> cargo test -j4 -p rocket-app --test postman_round_trip -- --ignored --nocapture
+```
+
+They only read the workspace. On 2026-10-24 RocketVault, CollectionTest and Lockstep-Inbox all passed (Bruno: 128, 56, 58, 67 and 585 request files; Postman: 109, 43, 45, 56 and 453 requests). Not covered: content of gRPC, WebSocket and GraphQL requests, form bodies and credential values (the export blanks them on purpose), environments through Postman, and Postman requests that Rocket cannot represent.
 
 ## How to check a collection
 

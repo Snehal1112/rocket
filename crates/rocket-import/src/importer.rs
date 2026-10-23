@@ -2027,7 +2027,7 @@ mod open_check_tests {
 
     const GOOD: &str =
         "info:\n  name: Good\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n";
-    const BAD: &str = "info:\n  name: Bad\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n  headers:\n    - name: X-A\n";
+    const BAD: &str = "info:\n  name: Bad\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n  headers:\n    - value: orphan\n";
 
     fn import(files: &[(&str, &str)]) -> ImportReport {
         let src_dir = TempDir::new().expect("tmp");

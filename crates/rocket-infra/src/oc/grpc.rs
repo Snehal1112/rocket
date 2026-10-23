@@ -26,6 +26,7 @@ pub struct OcGrpcRequestInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcGrpcMetadata {
     pub name: String,
+    #[serde(default)]
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
@@ -39,6 +40,7 @@ pub struct OcGrpcMessageVariant {
     pub title: String,
     #[serde(default)]
     pub selected: bool,
+    #[serde(default)]
     pub message: String,
 }
 
@@ -54,6 +56,7 @@ pub enum OcGrpcMessageOrVariants {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OcGrpcRequestDetails {
+    #[serde(default)]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,

@@ -131,6 +131,39 @@ fn request_docs_written_as_an_object_are_read_for_every_request_kind() {
     assert_eq!(websocket.docs.as_deref(), Some("Notes"));
 }
 
+// ---- strings Bruno 3 omits when they are empty ----
+
+#[test]
+fn http_rows_without_a_value_read_as_empty() {
+    let yaml = "info:\n  name: A\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n  headers:\n    - name: X-A\n  params:\n    - name: q\n      type: query\n  body:\n    type: form-urlencoded\n    data:\n      - name: f\n";
+    let oc: OcHttpRequest = serde_yaml::from_str(yaml).expect("rows without value");
+    let request = oc_http_request_to_request(oc);
+    assert_eq!(request.headers[0].key, "X-A");
+    assert_eq!(request.headers[0].value, "");
+    assert_eq!(request.query_params[0].value, "");
+}
+
+#[test]
+fn graphql_without_query_or_url_reads_as_empty() {
+    let yaml = "info:\n  name: A\n  type: graphql\ngraphql:\n  body: {}\n";
+    let oc: OcGraphQLRequest = serde_yaml::from_str(yaml).expect("blank graphql");
+    assert_eq!(oc.graphql.url, "");
+    let yaml = "info:\n  name: A\n  type: graphql\ngraphql:\n  url: https://x.test\n  body:\n    variables: '{}'\n";
+    serde_yaml::from_str::<OcGraphQLRequest>(yaml).expect("graphql body without query");
+}
+
+#[test]
+fn websocket_message_without_data_and_blank_url_read() {
+    let yaml = "info:\n  name: A\n  type: websocket\nwebsocket:\n  message:\n    type: text\n";
+    serde_yaml::from_str::<OcWebSocketRequest>(yaml).expect("blank websocket with message");
+}
+
+#[test]
+fn grpc_without_url_message_or_metadata_value_reads() {
+    let yaml = "info:\n  name: A\n  type: grpc\ngrpc:\n  metadata:\n    - name: m\n  message:\n    - title: One\n";
+    serde_yaml::from_str::<OcGrpcRequest>(yaml).expect("blank grpc");
+}
+
 #[test]
 fn request_docs_written_as_a_string_or_absent_still_read() {
     let http = format!("{}docs: Plain\n", request_yaml_with_body_type("json"));

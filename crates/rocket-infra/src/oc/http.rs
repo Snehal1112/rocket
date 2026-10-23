@@ -25,6 +25,7 @@ pub struct OcHttpRequestInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcHttpRequestParam {
     pub name: String,
+    #[serde(default)]
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
@@ -38,6 +39,7 @@ pub struct OcHttpRequestParam {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcHttpRequestHeader {
     pub name: String,
+    #[serde(default)]
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,
@@ -49,6 +51,7 @@ pub struct OcHttpRequestHeader {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OcHttpResponseHeader {
     pub name: String,
+    #[serde(default)]
     pub value: String,
 }
 
@@ -56,6 +59,7 @@ pub struct OcHttpResponseHeader {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcFormField {
     pub name: String,
+    #[serde(default)]
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<OcDescription>,

@@ -26,6 +26,7 @@ pub struct OcWebSocketRequestInfo {
 pub struct OcWebSocketMessage {
     #[serde(rename = "type")]
     pub message_type: String, // "text" | "json" | "xml" | "binary"
+    #[serde(default)]
     pub data: String,
 }
 
@@ -49,6 +50,7 @@ pub enum OcWebSocketMessageOrVariants {
 /// WebSocket request protocol details.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OcWebSocketRequestDetails {
+    #[serde(default)]
     pub url: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<OcHttpRequestHeader>,
