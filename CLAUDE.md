@@ -68,6 +68,7 @@ The software factory is the standalone project `~/data/rocket/rocket-factory` (h
 See `.claude/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
 See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
 See `.claude/flow-request-refs.md` for how flows follow request moves (rewrite, event, delete dialog).
+See `.claude/collection-export.md` for the collection export to Bruno and Postman (outputs, decisions, known losses, manual checks).
 See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.

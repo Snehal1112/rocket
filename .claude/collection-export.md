@@ -1,0 +1,50 @@
+# Collection export
+
+Export a collection from the collection context menu (`Export...`) as a Bruno ZIP or a Postman Collection v2.1 file. Spec: `docs/superpowers/specs/2026-10-23-collection-export-design.md`. Crate guide: `crates/rocket-export/CLAUDE.md`.
+
+## What exists
+
+| Output | Content |
+|---|---|
+| Bruno ZIP | Scrubbed copy of the collection folder under one root folder. `Include environments` adds `environments/*.yml` |
+| Postman collection | One `<slug>.postman_collection.json` |
+| Postman collection with environments | One `<slug>-postman.zip` holding the collection file and `environments/<env-slug>.postman_environment.json`. With no environments the result is the plain JSON file |
+
+Dialog options: format, `Preserve scripts` (Postman only), `Include environments` (default on). After the save the dialog lists the report grouped by action.
+
+Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`src-tauri/src/commands/export.rs`), then `CollectionExportService` (`crates/rocket-app/src/collection_export_service.rs`), then the pure converters in `rocket-export`.
+
+## Decisions
+
+- Credentials are always blanked. No option exports them.
+- The common `rok.*` subset is translated to `pm.*`. `Preserve scripts` keeps the text.
+- Environments are optional and on by default. Workspace-level environments are not exported.
+- No legacy `.bru` output and no single-file OpenCollection YAML.
+- Saved request examples are not exported, because captured responses may hold tokens.
+- The Bruno ZIP removes the `extensions.rocketapi` subtree and the trust-gate keys and keeps other `extensions.*` keys.
+- A Postman export with environments is one ZIP, so the dialog needs one save.
+- Environments are read with `list_strict`. A keychain or read error fails the export.
+
+## Known losses
+
+- Flows, gRPC and WebSocket requests, client certificates, proxy, per-request settings and the trust-gate keys are not exported. Each is reported.
+- OAuth1 and WSSE auth become `noauth` in Postman and are reported.
+- Collection-level scripts do not exist in the Rocket model.
+- Scripts that use an alias, computed access or a `rok.` call without a mapping are not fully translated. They keep a marker or their original text and a report entry.
+- Assertion operators other than `eq`, `neq`, `gt`, `gte`, `lt`, `lte` and `contains` are skipped. An assertion value is sent as a number when it is a JSON number and as text otherwise.
+- Before-request set-variable actions have no Postman form.
+- The script scanner does not understand regex literals.
+- Bodies, scripts and descriptions are not scanned for secrets. The dialog says so.
+
+## Unverified
+
+These need the manual checks in `.claude/manual-tests/collection-export.md`:
+
+- The v2.1 draft-07 schema validation of the output.
+- The OAuth2 key names, which follow Bruno's exporter and not a real Postman export.
+- That Postman and Bruno 3 open the files.
+- The `// Tests` marker layout in Postman's test tab.
+
+## Follow-ups
+
+Roadmap row R-65 in `.claude/roadmap.md`: lossless Postman round trip in the importer, single-file OpenCollection YAML, Insomnia and Postman Data Export targets.
