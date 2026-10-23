@@ -64,6 +64,13 @@ describe('ExportCollectionDialog', () => {
     expect(Array.from(bytes as Uint8Array)).toEqual([1, 2]);
   });
 
+  it('says that bodies, scripts and descriptions are not scanned for secrets', () => {
+    renderDialog();
+    expect(
+      screen.getByText(/bodies, scripts and descriptions are exported as written/i),
+    ).toBeInTheDocument();
+  });
+
   it('shows the report items grouped by action after a successful export', async () => {
     mockExport.mockResolvedValue(result);
     mockSaveBinary.mockResolvedValue(true);
@@ -102,23 +109,58 @@ describe('ExportCollectionDialog', () => {
     await userEvent.click(await screen.findByRole('option', { name: /postman collection/i }));
   }
 
-  it('postman option calls exportCollectionPostman and saves a .json file', async () => {
+  it('postman option calls exportCollectionPostman with both options and saves a .json file', async () => {
     mockExportPostman.mockResolvedValue({ ...result, fileName: 'demo.postman_collection.json' });
     mockSaveBinary.mockResolvedValue(true);
     render(<ExportCollectionDialog open collectionName='demo' onClose={vi.fn()} />);
     await selectPostman();
     await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
     await waitFor(() => expect(mockSaveBinary).toHaveBeenCalled());
-    expect(mockExportPostman).toHaveBeenCalledWith('demo');
+    expect(mockExportPostman).toHaveBeenCalledWith('demo', {
+      preserveScripts: false,
+      includeEnvironments: true,
+    });
     const [name, , filters] = mockSaveBinary.mock.calls[0];
     expect(name).toMatch(/\.postman_collection\.json$/);
     expect(filters).toEqual([{ name: 'JSON file', extensions: ['json'] }]);
   });
 
-  it('shows a note that Postman environments are not included yet', async () => {
+  it('passes Preserve scripts and Include environments to the Postman export', async () => {
+    mockExportPostman.mockResolvedValue({ ...result, fileName: 'demo.postman_collection.json' });
+    mockSaveBinary.mockResolvedValue(true);
+    render(<ExportCollectionDialog open collectionName='demo' onClose={vi.fn()} />);
+    await selectPostman();
+    await userEvent.click(screen.getByRole('checkbox', { name: /preserve scripts/i }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /include environments/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    await waitFor(() => expect(mockExportPostman).toHaveBeenCalled());
+    expect(mockExportPostman).toHaveBeenCalledWith('demo', {
+      preserveScripts: true,
+      includeEnvironments: false,
+    });
+  });
+
+  it('hides Preserve scripts for the Bruno ZIP format', () => {
+    renderDialog();
+    expect(screen.queryByRole('checkbox', { name: /preserve scripts/i })).toBeNull();
+  });
+
+  it('no longer says Postman environments come in a later version', async () => {
     renderDialog();
     await selectPostman();
-    expect(screen.queryByRole('checkbox', { name: /include environments/i })).toBeNull();
-    expect(screen.getByText(/environments are exported in a later version/i)).toBeInTheDocument();
+    expect(screen.queryByText(/environments are exported in a later version/i)).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /include environments/i })).toBeChecked();
+  });
+
+  it('saves a ZIP with a zip filter when the Postman result file name ends with .zip', async () => {
+    mockExportPostman.mockResolvedValue({ ...result, fileName: 'demo-postman.zip' });
+    mockSaveBinary.mockResolvedValue(true);
+    render(<ExportCollectionDialog open collectionName='demo' onClose={vi.fn()} />);
+    await selectPostman();
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    await waitFor(() => expect(mockSaveBinary).toHaveBeenCalled());
+    const [name, , filters] = mockSaveBinary.mock.calls[0];
+    expect(name).toBe('demo-postman.zip');
+    expect(filters).toEqual([{ name: 'ZIP archive', extensions: ['zip'] }]);
   });
 });

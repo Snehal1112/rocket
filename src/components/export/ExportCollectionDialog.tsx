@@ -48,6 +48,7 @@ export function ExportCollectionDialog({
 }: ExportCollectionDialogProps) {
   const [format, setFormat] = useState('bruno');
   const [includeEnvironments, setIncludeEnvironments] = useState(true);
+  const [preserveScripts, setPreserveScripts] = useState(false);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<ExportReport | null>(null);
 
@@ -57,11 +58,12 @@ export function ExportCollectionDialog({
     try {
       const isPostman = format === 'postman';
       const result = isPostman
-        ? await exportCollectionPostman(collectionName)
+        ? await exportCollectionPostman(collectionName, { preserveScripts, includeEnvironments })
         : await exportCollectionBruno(collectionName, includeEnvironments);
-      const filter = isPostman
-        ? { name: 'JSON file', extensions: ['json'] }
-        : { name: 'ZIP archive', extensions: ['zip'] };
+      // A Postman export with environments comes back as a ZIP, otherwise as one JSON file.
+      const filter = result.fileName.endsWith('.zip')
+        ? { name: 'ZIP archive', extensions: ['zip'] }
+        : { name: 'JSON file', extensions: ['json'] };
       const saved = await saveBinaryFile(result.fileName, base64ToBytes(result.dataBase64), [
         filter,
       ]);
@@ -85,7 +87,9 @@ export function ExportCollectionDialog({
         <DialogHeader>
           <DialogTitle>Export {collectionName}</DialogTitle>
           <DialogDescription>
-            Credentials are blanked in the exported files. Variable references are kept.
+            Credentials are blanked in the exported files. Variable references are kept. Request
+            bodies, scripts and descriptions are exported as written and are not scanned for
+            secrets.
           </DialogDescription>
         </DialogHeader>
         <div className='space-y-4'>
@@ -101,20 +105,24 @@ export function ExportCollectionDialog({
               </SelectContent>
             </Select>
           </div>
-          {format === 'postman' ? (
-            <p className='text-sm text-muted-foreground'>
-              Environments are exported in a later version.
-            </p>
-          ) : (
+          {format === 'postman' && (
             <div className='flex items-center gap-2'>
               <Checkbox
-                id='export-include-environments'
-                checked={includeEnvironments}
-                onCheckedChange={(v) => setIncludeEnvironments(v === true)}
+                id='export-preserve-scripts'
+                checked={preserveScripts}
+                onCheckedChange={(v) => setPreserveScripts(v === true)}
               />
-              <Label htmlFor='export-include-environments'>Include environments</Label>
+              <Label htmlFor='export-preserve-scripts'>Preserve scripts</Label>
             </div>
           )}
+          <div className='flex items-center gap-2'>
+            <Checkbox
+              id='export-include-environments'
+              checked={includeEnvironments}
+              onCheckedChange={(v) => setIncludeEnvironments(v === true)}
+            />
+            <Label htmlFor='export-include-environments'>Include environments</Label>
+          </div>
           {report && (
             <div className='max-h-64 space-y-3 overflow-y-auto text-sm'>
               <p className='text-muted-foreground'>Exported {report.exported} files.</p>
