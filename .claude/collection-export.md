@@ -16,7 +16,11 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 
 ## Decisions
 
-- Credentials are always blanked. No option exports them.
+- Literal credentials are always blanked. No option exports them. A secret variable whose value is a lone `{{variable}}` reference keeps the reference in every output (decision 4 of the name-scrub spec).
+- One name rule (`is_sensitive_name`) matches the last word of a name: token, secret, password, passwd, credential(s), authorization, cookie, signature, apikey, `api key`, `private key`, `secret key`, `client assertion`, and the single words `pass` and `pwd`. It is never a substring match. Allow-list: `token_type`, `page_token`, `next_token`, `prev_token`, `previous_token`, `max_tokens`.
+- The rule blanks the literal values of headers, gRPC and WebSocket metadata, query parameters (rows and URL pairs), form-urlencoded and multipart text fields, OAuth2 additional parameters, OAuth URL fields and variables (including non-secret variables and environments). The note says `<name> (by name)`.
+- Identifiers stay: basic, digest and NTLM usernames, awsv4 `accessKeyId`, OAuth2 `clientId`.
+- URL userinfo without a `:` (`https://TOKEN@host`) is not blanked, because that would also blank plain usernames.
 - The common `rok.*` subset is translated to `pm.*`. `Preserve scripts` keeps the text.
 - Environments are optional and on by default. Workspace-level environments are not exported.
 - No legacy `.bru` output and no single-file OpenCollection YAML.
@@ -36,6 +40,7 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 - Before-request set-variable actions have no Postman form.
 - The script scanner does not understand regex literals.
 - Bodies, scripts and descriptions are not scanned for secrets. The dialog says so.
+- A credential with a harmless name (for example `session_id`) is exported as written. The name rule cannot see it.
 
 ## Unverified
 

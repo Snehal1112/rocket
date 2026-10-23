@@ -393,6 +393,7 @@ pub fn scrub_auth(auth: &Auth, path: &str, notes: &mut Vec<ExportNote>) -> Auth 
         Auth::OAuth1(o) => {
             for (slot, name) in [
                 (&mut o.consumer_secret, "consumerSecret"),
+                (&mut o.access_token, "accessToken"),
                 (&mut o.access_token_secret, "accessTokenSecret"),
             ] {
                 if let Some(v) = slot {
@@ -560,6 +561,22 @@ mod tests {
 
     fn empty() -> Value {
         Value::String(String::new())
+    }
+
+    #[test]
+    fn oauth1_access_token_is_blanked() {
+        let auth = Auth::OAuth1(Box::new(rocket_shared::types::OAuth1Auth {
+            access_token: Some("abc".into()),
+            ..Default::default()
+        }));
+        let mut notes = Vec::new();
+        let clean = scrub_auth(&auth, "r.yml", &mut notes);
+        let Auth::OAuth1(o) = clean else {
+            panic!("expected oauth1");
+        };
+        assert!(o.access_token.as_deref().unwrap_or("").is_empty());
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].action, ExportAction::Blanked);
     }
 
     #[test]

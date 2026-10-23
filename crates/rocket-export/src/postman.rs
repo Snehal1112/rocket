@@ -63,10 +63,18 @@ pub fn postman_collection(
 
 /// Scrub and map an auth value. `None` means the `auth` key is omitted.
 fn auth_value(auth: &Auth, path: &str, report: &mut ExportReport) -> Option<Value> {
-    let clean = scrub_auth(auth, path, &mut report.items);
+    let mut scrub_notes = Vec::new();
+    let clean = scrub_auth(auth, path, &mut scrub_notes);
     match postman_auth(&clean) {
-        PostmanAuth::Omit => None,
-        PostmanAuth::Value(v) => Some(v),
+        PostmanAuth::Omit => {
+            report.items.append(&mut scrub_notes);
+            None
+        }
+        PostmanAuth::Value(v) => {
+            report.items.append(&mut scrub_notes);
+            Some(v)
+        }
+        // A skipped auth is not exported, so its scrub notes are dropped.
         PostmanAuth::Skipped(kind) => {
             report.items.push(ExportNote {
                 path: path.to_string(),
@@ -938,6 +946,34 @@ mod tests {
             .items
             .iter()
             .any(|n| n.feature == "request examples" && n.action == ExportAction::Skipped));
+    }
+
+    #[test]
+    fn skipped_auth_has_no_blanked_note() {
+        let mut a = req("a", "https://x.test");
+        a.auth = Auth::OAuth1(Box::new(rocket_shared::types::OAuth1Auth {
+            consumer_secret: Some("literal".into()),
+            ..Default::default()
+        }));
+        let mut b = req("b", "https://x.test");
+        b.auth = Auth::Wsse {
+            username: "u".into(),
+            password: "literal".into(),
+        };
+        let (doc, report) = export(&tree_with(vec![
+            ExportItem::Request(Box::new(a)),
+            ExportItem::Request(Box::new(b)),
+        ]));
+        for i in 0..2 {
+            assert_eq!(doc["item"][i]["request"]["auth"], json!({"type": "noauth"}));
+        }
+        let skipped = report
+            .items
+            .iter()
+            .filter(|n| n.action == ExportAction::Skipped && n.feature.starts_with("auth "))
+            .count();
+        assert_eq!(skipped, 2);
+        assert!(report.items.iter().all(|n| n.action != ExportAction::Blanked));
     }
 
     #[test]
