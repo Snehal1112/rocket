@@ -70,6 +70,7 @@ See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Ge
 See `.claude/flow-request-refs.md` for how flows follow request moves (rewrite, event, delete dialog).
 See `.claude/collection-export.md` for the collection export to Bruno and Postman (outputs, decisions, known losses, manual checks).
 See `.claude/example-masking.md` for how saved request examples get their secrets masked in a git commit.
+See `.claude/bruno-import-strictness.md` for Bruno 3 imports (files are copied as they are), what Rocket's readers now tolerate, and the known gaps.
 See `.claude/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
 See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 

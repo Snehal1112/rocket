@@ -274,6 +274,8 @@ disabled: bool
 - `MultipartFormBody`: `{ type: "multipart-form", data: [{ name, type: "text"|"file", value: string|string[], description?, disabled? }] }`
 - `FileBody`: `{ type: "file", data: [{ filePath, contentType, selected }] }`
 
+Rocket reads a body with a `type` and no `data` key as an empty body (empty string or empty list), on every variant above and on an example's response body. Bruno 3 writes a body that way when it has no content, and a file copied from it keeps that shape. Rocket still always writes `data`.
+
 #### GraphQLBody
 ```yaml
 query: string
