@@ -76,20 +76,12 @@ fn blank_string(slot: &mut Value) -> bool {
     }
 }
 
-/// Clears a secret variable value whatever its form: text, number, boolean, or the typed
-/// form `{type, data}`, where only `data` is cleared. A reference is blanked too.
+/// Clears a variable value whatever its form: text, number, boolean, or the typed form
+/// `{type, data}`, where only `data` is cleared. A lone `{{ref}}` is kept (design decision 4).
 fn clear_secret_value(slot: &mut Value) -> bool {
     match slot {
-        Value::String(s) if !s.is_empty() => {
-            s.clear();
-            true
-        }
-        Value::Number(_) | Value::Bool(_) => {
-            *slot = Value::String(String::new());
-            true
-        }
         Value::Mapping(typed) => typed.get_mut("data").is_some_and(clear_secret_value),
-        _ => false,
+        _ => blank_string(slot),
     }
 }
 
@@ -156,6 +148,11 @@ fn yaml_scrub_auth(rel_path: &str, auth: &mut Mapping, notes: &mut Vec<ExportNot
             if blank_string(slot) {
                 notes.push(blank_note(rel_path, "Credential", &format!("auth.{key}")));
             }
+        }
+    }
+    for key in ["accessTokenUrl", "refreshTokenUrl", "authorizationUrl", "callbackUrl"] {
+        if let Some(slot) = auth.get_mut(key) {
+            yaml_scrub_url(rel_path, slot, notes);
         }
     }
     for (parent, child) in [
@@ -251,24 +248,28 @@ fn scrub_variables(rel_path: &str, variables: &mut Value, notes: &mut Vec<Export
     };
     for item in items {
         let Value::Mapping(row) = item else { continue };
-        if row.get("secret").and_then(Value::as_bool) != Some(true) {
-            continue;
-        }
         let name = row
             .get("name")
             .or_else(|| row.get("key"))
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        let secret = row.get("secret").and_then(Value::as_bool) == Some(true);
+        if !secret && !is_sensitive_name(&name) {
+            continue;
+        }
         let mut changed = false;
         for field in ["value", "initial"] {
             if let Some(slot) = row.get_mut(field) {
-                // Secret values are always blanked, even a reference, per the spec.
                 changed |= clear_secret_value(slot);
             }
         }
         if changed {
-            notes.push(blank_note(rel_path, "Secret variable", &name));
+            notes.push(if secret {
+                blank_note(rel_path, "Secret variable", &name)
+            } else {
+                blank_note(rel_path, "Variable", &format!("{name} (by name)"))
+            });
         }
     }
 }
@@ -825,5 +826,61 @@ request:
             c["http"]["url"],
             Value::String("https://u:@x.test/p?access_token=#frag".into())
         );
+    }
+
+    #[test]
+    fn oauth_url_fields_are_scrubbed() {
+        let mut v = yaml(
+            "http:\n  auth:\n    type: oauth2\n    accessTokenUrl: \"https://u:pw@idp.test/token?client_secret=x&a=1\"\n    authorizationUrl: \"https://idp.test/auth?state=s\"\n    refreshTokenUrl: \"{{base}}/r?token={{t}}\"\n",
+        );
+        let mut o1 = yaml("http:\n  auth:\n    type: oauth1\n    callbackUrl: \"https://u:pw@app.test/cb\"\n");
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        scrub_yaml("r.yml", &mut o1, &mut notes);
+        let a = &v["http"]["auth"];
+        assert_eq!(
+            a["accessTokenUrl"],
+            Value::String("https://u:@idp.test/token?client_secret=&a=1".into())
+        );
+        assert_eq!(a["authorizationUrl"], Value::String("https://idp.test/auth?state=s".into()));
+        assert_eq!(a["refreshTokenUrl"], Value::String("{{base}}/r?token={{t}}".into()));
+        assert_eq!(
+            o1["http"]["auth"]["callbackUrl"],
+            Value::String("https://u:@app.test/cb".into())
+        );
+    }
+
+    #[test]
+    fn secret_variable_keeps_reference_and_blanks_literal() {
+        let mut v = yaml(
+            "request:\n  variables:\n    - {name: a, secret: true, value: \"{{ref}}\"}\n    - {name: b, secret: true, value: top, initial: top}\n    - name: c\n      secret: true\n      value: {type: secret, data: lit}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        let vars = &v["request"]["variables"];
+        assert_eq!(vars[0]["value"], Value::String("{{ref}}".into()));
+        assert_eq!(vars[1]["value"], empty());
+        assert_eq!(vars[1]["initial"], empty());
+        assert_eq!(vars[2]["value"]["data"], empty());
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().all(|n| n.feature == "Secret variable"));
+    }
+
+    #[test]
+    fn variables_are_blanked_by_name() {
+        let rows = "    - {name: api_token, value: abc}\n    - {name: plain_name, value: abc}\n    - {name: db_password, value: \"{{ref}}\"}\n";
+        let mut coll = yaml(&format!("request:\n  variables:\n{rows}"));
+        let mut env = yaml(&format!("name: dev\nvariables:\n{}", rows.replace("    -", "  -")));
+        let mut notes = Vec::new();
+        scrub_yaml("opencollection.yml", &mut coll, &mut notes);
+        scrub_yaml("environments/dev.yml", &mut env, &mut notes);
+        for vars in [&coll["request"]["variables"], &env["variables"]] {
+            assert_eq!(vars[0]["value"], empty());
+            assert_eq!(vars[1]["value"], Value::String("abc".into()));
+            assert_eq!(vars[2]["value"], Value::String("{{ref}}".into()));
+        }
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().all(|n| n.feature == "Variable"));
+        assert_eq!(notes[0].detail.as_deref(), Some("api_token (by name)"));
     }
 }
