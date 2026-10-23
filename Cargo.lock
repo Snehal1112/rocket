@@ -5640,6 +5640,7 @@ dependencies = [
  "rocket-grpc",
  "rocket-history",
  "rocket-http",
+ "rocket-import",
  "rocket-infra",
  "rocket-scripting",
  "rocket-shared",
@@ -5811,6 +5812,7 @@ version = "0.1.0"
 dependencies = [
  "rocket-collection",
  "rocket-environment",
+ "rocket-export",
  "rocket-infra",
  "rocket-shared",
  "rocket-workspace",

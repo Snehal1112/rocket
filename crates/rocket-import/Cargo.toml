@@ -19,3 +19,4 @@ roxmltree = "0.20"
 
 [dev-dependencies]
 rocket-infra = { path = "../rocket-infra" }
+rocket-export.workspace = true
