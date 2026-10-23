@@ -102,6 +102,13 @@ fn full_tree() -> CollectionExportTree {
 
     let mut gql = GraphQlRequest::new("graphql", "https://api.example.com/graphql");
     gql.seq = Some(20);
+    gql.variables = vec![CollectionVariable {
+        key: "gqlVar".into(),
+        value: "g".into(),
+        initial_value: String::new(),
+        enabled: true,
+        secret: false,
+    }];
     gql.body = GraphQlBody {
         query: "{ me { id } }".into(),
         variables: Some("{\"a\":1}".into()),
@@ -217,13 +224,20 @@ fn full_tree() -> CollectionExportTree {
                             password: "literal".into(),
                         }),
                         docs: Some("Folder docs".into()),
+                        variables: vec![
+                            var("folderVar", "f1", false, true),
+                            var("folderSecret", "hidden", true, true),
+                        ],
                         ..Default::default()
                     },
                     items: bodies,
                 }),
                 ExportItem::Folder(ExportFolder {
                     name: "Auth".into(),
-                    settings: FolderSettings::default(),
+                    settings: FolderSettings {
+                        auth: Some(Auth::None),
+                        ..Default::default()
+                    },
                     items: auths,
                 }),
                 ExportItem::Skipped {

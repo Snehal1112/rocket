@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use rocket_collection::{inherited_headers, FolderSettings, GraphQlRequest, Request};
+use rocket_collection::{
+    inherited_headers, CollectionVariable, FolderSettings, GraphQlRequest, Request,
+};
 use rocket_shared::description::Description;
 use rocket_shared::types::{
     Auth, Body, BodyMode, FormDataType, Header, PathParam, QueryParam,
@@ -48,7 +50,7 @@ pub fn postman_collection(
             doc.insert("auth".into(), a);
         }
     }
-    let vars = variables_json(tree, &mut report);
+    let vars = variables_json(&tree.settings.variables, "(collection)", &mut report);
     if !vars.is_empty() {
         doc.insert("variable".into(), Value::Array(vars));
     }
@@ -73,10 +75,12 @@ fn auth_value(auth: &Auth, path: &str, report: &mut ExportReport) -> Option<Valu
     }
 }
 
-fn variables_json(tree: &CollectionExportTree, report: &mut ExportReport) -> Vec<Value> {
-    tree.settings
-        .variables
-        .iter()
+fn variables_json(
+    vars: &[CollectionVariable],
+    path: &str,
+    report: &mut ExportReport,
+) -> Vec<Value> {
+    vars.iter()
         .map(|v| {
             let mut value = if v.value.is_empty() {
                 v.initial_value.clone()
@@ -86,7 +90,7 @@ fn variables_json(tree: &CollectionExportTree, report: &mut ExportReport) -> Vec
             if v.secret && !value.is_empty() && !is_variable_reference(&value) {
                 value.clear();
                 report.items.push(ExportNote {
-                    path: "(collection)".into(),
+                    path: path.to_string(),
                     feature: "Secret variable".into(),
                     action: ExportAction::Blanked,
                     detail: Some(v.key.clone()),
@@ -156,10 +160,20 @@ fn folder_items(
                 if let Some(d) = &f.settings.docs {
                     obj.insert("description".into(), json!(d));
                 }
-                if let Some(a) = f.settings.auth.as_ref() {
+                // A folder with `None` auth carries no auth, like `Inherit`.
+                if let Some(a) = f
+                    .settings
+                    .auth
+                    .as_ref()
+                    .filter(|a| !matches!(a, Auth::None | Auth::Inherit))
+                {
                     if let Some(v) = auth_value(a, &child_path, report) {
                         obj.insert("auth".into(), v);
                     }
+                }
+                let vars = variables_json(&f.settings.variables, &child_path, report);
+                if !vars.is_empty() {
+                    obj.insert("variable".into(), Value::Array(vars));
                 }
                 let events = folder_events(&f.settings, opts, &child_path, &mut report.items);
                 if !events.is_empty() {
@@ -226,7 +240,7 @@ fn header_json(h: &Header) -> Value {
 fn merged_headers(inherited: &[Header], own: &[Header]) -> Vec<Header> {
     let mut out: Vec<Header> = inherited
         .iter()
-        .filter(|i| !own.iter().any(|o| o.enabled && o.key == i.key))
+        .filter(|i| !own.iter().any(|o| o.enabled && o.key.eq_ignore_ascii_case(&i.key)))
         .cloned()
         .collect();
     out.extend(own.iter().cloned());
@@ -271,6 +285,10 @@ fn request_item(
         item.insert("event".into(), Value::Array(events));
     }
     item.insert("request".into(), Value::Object(req));
+    let vars = variables_json(&r.variables, path, report);
+    if !vars.is_empty() {
+        item.insert("variable".into(), Value::Array(vars));
+    }
     Value::Object(item)
 }
 
@@ -307,7 +325,14 @@ fn graphql_item(
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
         req.insert("description".into(), d);
     }
-    json!({ "name": name, "request": Value::Object(req) })
+    let mut item = Map::new();
+    item.insert("name".into(), json!(name));
+    item.insert("request".into(), Value::Object(req));
+    let vars = variables_json(&r.variables, path, report);
+    if !vars.is_empty() {
+        item.insert("variable".into(), Value::Array(vars));
+    }
+    Value::Object(item)
 }
 
 fn body_json(body: &Body, headers: &mut Vec<Header>) -> Option<Value> {
@@ -786,6 +811,77 @@ mod tests {
         assert_eq!(doc["variable"][0]["value"], "1");
         assert_eq!(doc["variable"][1]["value"], "");
         assert_eq!(report.items.len(), 1);
+    }
+
+    #[test]
+    fn folder_with_none_auth_omits_auth_block() {
+        let mut r = req("r", "https://x.test");
+        r.auth = Auth::Inherit;
+        let mut t = tree_with(vec![ExportItem::Folder(ExportFolder {
+            name: "f".into(),
+            settings: FolderSettings {
+                auth: Some(Auth::None),
+                ..Default::default()
+            },
+            items: vec![ExportItem::Request(Box::new(r))],
+        })]);
+        t.settings.auth = Some(Auth::Bearer { token: "{{t}}".into() });
+        let (doc, _) = export(&t);
+        assert!(doc["item"][0].get("auth").is_none());
+        assert_eq!(doc["auth"]["type"], "bearer");
+    }
+
+    #[test]
+    fn request_header_overrides_inherited_case_insensitively() {
+        let mut t = tree_with(vec![ExportItem::Request(Box::new({
+            let mut r = req("r", "https://x.test");
+            r.headers = vec![Header::new("authorization", "Bearer {{b}}")];
+            r
+        }))]);
+        t.settings.headers = vec![Header::new("Authorization", "Bearer {{a}}")];
+        let (doc, _) = export(&t);
+        let headers = doc["item"][0]["request"]["header"]
+            .as_array()
+            .expect("header array");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0]["value"], "Bearer {{b}}");
+    }
+
+    #[test]
+    fn folder_and_request_variables_are_exported() {
+        use rocket_collection::CollectionVariable;
+        let var = |k: &str, v: &str, secret| CollectionVariable {
+            key: k.into(),
+            value: v.into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret,
+        };
+        let mut r = req("r", "https://x.test");
+        r.variables = vec![var("r", "2", false)];
+        let t = tree_with(vec![ExportItem::Folder(ExportFolder {
+            name: "f".into(),
+            settings: FolderSettings {
+                variables: vec![var("a", "1", false), var("s", "top", true)],
+                ..Default::default()
+            },
+            items: vec![ExportItem::Request(Box::new(r))],
+        })]);
+        let (doc, report) = export(&t);
+        let folder = &doc["item"][0];
+        assert_eq!(folder["variable"][0]["key"], "a");
+        assert_eq!(folder["variable"][0]["value"], "1");
+        assert_eq!(folder["variable"][1]["key"], "s");
+        assert_eq!(folder["variable"][1]["value"], "");
+        assert_eq!(folder["item"][0]["variable"][0]["key"], "r");
+        assert_eq!(folder["item"][0]["variable"][0]["value"], "2");
+        let blanked: Vec<_> = report
+            .items
+            .iter()
+            .filter(|n| n.action == ExportAction::Blanked && n.feature == "Secret variable")
+            .collect();
+        assert_eq!(blanked.len(), 1);
+        assert!(blanked[0].path.starts_with("f"));
     }
 
     #[test]

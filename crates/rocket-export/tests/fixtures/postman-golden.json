@@ -1022,10 +1022,29 @@
               "protocol": "https",
               "raw": "https://api.example.com/graphql"
             }
-          }
+          },
+          "variable": [
+            {
+              "key": "gqlVar",
+              "type": "string",
+              "value": "g"
+            }
+          ]
         }
       ],
-      "name": "Bodies"
+      "name": "Bodies",
+      "variable": [
+        {
+          "key": "folderVar",
+          "type": "string",
+          "value": "f1"
+        },
+        {
+          "key": "folderSecret",
+          "type": "string",
+          "value": ""
+        }
+      ]
     }
   ],
   "variable": [
@@ -1047,3 +1066,4 @@
     }
   ]
 }
+
