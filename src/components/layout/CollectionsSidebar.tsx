@@ -3,10 +3,11 @@ import { FilePlus, Layers, LayoutDashboard, Plus, Search, Upload } from 'lucide-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { CollectionNode } from '@/components/collections/CollectionNode';
+import { CollectionTreeSkeleton } from '@/components/collections/CollectionTreeSkeleton';
 import type { DeleteTarget } from '@/components/collections/tree-utils';
 import { findAffectedTabs, hasDirtyScriptTabs } from '@/components/collections/tree-utils';
 import { HistoryPanel } from '@/components/history/HistoryPanel';
-import { RocketBook } from '@/components/illustrations';
+import { RocketFolder } from '@/components/illustrations';
 import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
 import {
   AlertDialog,
@@ -19,6 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tree } from '@/components/ui/tree';
@@ -52,7 +54,12 @@ import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
 export function CollectionsSidebar() {
-  const { data: summaries = [] } = useCollections();
+  const {
+    data: summaries = [],
+    isPending: collectionsPending,
+    isError: collectionsFailed,
+    refetch: refetchCollections,
+  } = useCollections();
   const [searchQuery, setSearchQuery] = useState('');
   const filter = searchQuery.toLowerCase().trim();
   const [selectedId, setSelectedId] = useState<string>('');
@@ -533,8 +540,8 @@ export function CollectionsSidebar() {
 
           {/* Collection tree. */}
           {multiWorkspaceMode ? (
-            <ScrollArea className='flex-1'>
-              <div className='px-1 pb-2 space-y-1'>
+            <ScrollArea horizontal className='flex-1'>
+              <div className='w-max min-w-full px-1 pb-2 space-y-1'>
                 {workspaces.map((ws) => (
                   <WorkspaceSection
                     key={ws.id}
@@ -564,25 +571,30 @@ export function CollectionsSidebar() {
               </div>
             </ScrollArea>
           ) : (
-            <ScrollArea className='flex-1'>
+            <ScrollArea horizontal className='flex-1'>
               <Tree value={selectedId} onValueChange={setSelectedId}>
-                <div className='px-1 pb-2'>
-                  {summaries.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center py-8 px-4'>
-                      <RocketBook className='w-32 h-32' />
-                      <p className='text-sm text-muted-foreground mb-3'>No collections yet.</p>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        className='text-sm'
-                        onClick={() => setIsCreating(true)}
-                      >
-                        <Plus className='h-3.5 w-3.5 mr-1.5' />
-                        Create Collection
-                      </Button>
-                    </div>
-                  ) : (
-                    summaries.map((s) => (
+                {collectionsPending ? (
+                  <CollectionTreeSkeleton />
+                ) : summaries.length === 0 && collectionsFailed ? (
+                  <EmptyState
+                    size='compact'
+                    cause='unavailable'
+                    title="Couldn't load collections"
+                    reason='Check the Console for details, then try again.'
+                    action={{ label: 'Try again', onClick: () => void refetchCollections() }}
+                  />
+                ) : summaries.length === 0 ? (
+                  <EmptyState
+                    size='compact'
+                    cause='none-yet'
+                    illustration={<RocketFolder className='h-20 w-20' />}
+                    title='No collections yet'
+                    reason='Create a collection to group and save requests.'
+                    action={{ label: 'Create collection', onClick: () => setIsCreating(true) }}
+                  />
+                ) : (
+                  <div className='w-max min-w-full px-1 pb-2'>
+                    {summaries.map((s) => (
                       <CollectionNode
                         key={s.name}
                         summary={s}
@@ -593,9 +605,9 @@ export function CollectionsSidebar() {
                         onDelete={setDeleteTarget}
                         onDuplicate={handleDuplicate}
                       />
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                )}
               </Tree>
             </ScrollArea>
           )}

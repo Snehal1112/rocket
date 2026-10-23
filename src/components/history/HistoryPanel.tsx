@@ -1,6 +1,7 @@
 import { Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -79,6 +80,8 @@ export function HistoryPanel() {
   const [method, setMethod] = useState<MethodOption>('All');
   const [statusLabel, setStatusLabel] = useState<StatusLabel>('All');
   const [source, setSource] = useState<SourceOption>('all');
+  // True when the last load failed, so an empty list is not shown as "no history".
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Debounce timer ref so we can clear it on each keystroke.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,8 +104,10 @@ export function HistoryPanel() {
           });
           setEntries(results);
         }
+        setLoadFailed(false);
       } catch (err) {
         console.error('[HistoryPanel] fetch error', err);
+        setLoadFailed(true);
       }
     },
     [],
@@ -125,6 +130,19 @@ export function HistoryPanel() {
     debounceRef.current = setTimeout(() => {
       void fetchEntries(value, method, statusLabel, source);
     }, 300);
+  }
+
+  const hasFilters =
+    urlQuery !== '' || method !== 'All' || statusLabel !== 'All' || source !== 'all';
+
+  // Resets every filter and reloads the full list.
+  function clearFilters() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setUrlQuery('');
+    setMethod('All');
+    setStatusLabel('All');
+    setSource('all');
+    void fetchEntries('', 'All', 'All', 'all');
   }
 
   // Opens a history entry as a read-only history tab in the active pane.
@@ -207,9 +225,33 @@ export function HistoryPanel() {
       {/* Entry list. */}
       <div className='flex-1 overflow-y-auto'>
         {entries.length === 0 ? (
-          <p className='p-4 text-center text-sm text-muted-foreground'>
-            No history yet. Execute a request to see it here.
-          </p>
+          loadFailed ? (
+            <EmptyState
+              size='compact'
+              cause='unavailable'
+              title="Couldn't load history"
+              reason='Check the Console for details, then try again.'
+              action={{
+                label: 'Try again',
+                onClick: () => void fetchEntries(urlQuery, method, statusLabel, source),
+              }}
+            />
+          ) : hasFilters ? (
+            <EmptyState
+              size='compact'
+              cause='filtered'
+              title='No matching history'
+              reason='No request in your history matches these filters.'
+              action={{ label: 'Clear filters', onClick: clearFilters }}
+            />
+          ) : (
+            <EmptyState
+              size='compact'
+              cause='none-yet'
+              title='No history yet'
+              reason='Requests you send appear here.'
+            />
+          )
         ) : (
           <ul>
             {entries.map((entry) => (

@@ -361,7 +361,7 @@ export function RequestNode({
               <button
                 type='button'
                 aria-label={`Actions for ${name}`}
-                className='absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
+                className='sticky right-1 -ml-6 shrink-0 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />

@@ -5,8 +5,12 @@ import { cn } from '@/lib/utils';
 function ScrollArea({
   className,
   children,
+  horizontal = false,
   ...props
-}: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
+}: React.ComponentProps<typeof ScrollAreaPrimitive.Root> & {
+  // Adds a horizontal scrollbar. Content must be wider than the area to scroll.
+  horizontal?: boolean;
+}) {
   return (
     <ScrollAreaPrimitive.Root
       data-slot='scroll-area'
@@ -21,6 +25,7 @@ function ScrollArea({
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />
+      {horizontal && <ScrollBar orientation='horizontal' />}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   );

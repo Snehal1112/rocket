@@ -1,5 +1,6 @@
 import { BoxIcon, Check, Loader2, Save, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CollectionOverviewSkeleton } from '@/components/collections/CollectionOverviewSkeleton';
 import { CollectionTrustBanner } from '@/components/collections/CollectionTrustBanner';
 import { CollectionTrustSection } from '@/components/collections/CollectionTrustSection';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
@@ -295,13 +296,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     [auth],
   );
 
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
-        Loading...
-      </div>
-    );
-  }
+  if (loading) return <CollectionOverviewSkeleton />;
 
   if (error || !collection) {
     return (

@@ -47,6 +47,7 @@ import { useContractStore } from '@/stores/contract-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FolderSection } from '@/types/pane-types';
 import { RequestNode } from './RequestNode';
+import { TreeHint } from './TreeHint';
 import type { DeleteTarget } from './tree-utils';
 
 const EMPTY_CONTRACTS: import('@/lib/tauri-api').Contract[] = [];
@@ -281,7 +282,7 @@ export function FolderNode({
                 <button
                   type='button'
                   aria-label={`Actions for ${name}`}
-                  className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
+                  className='sticky right-1 -ml-6 shrink-0 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                   onClick={(e) => e.stopPropagation()}
                 >
                   <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
@@ -450,6 +451,10 @@ export function FolderNode({
               />
             );
           })}
+          {/* A folder with nothing left under a filter is hidden above, so this is a real empty folder. */}
+          {filteredItems.length === 0 && !creatingRequest && (
+            <TreeHint>This folder is empty.</TreeHint>
+          )}
           {creatingRequest && (
             <div className='flex items-center gap-1 px-2 py-1 text-xs'>
               <Input

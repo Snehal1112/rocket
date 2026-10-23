@@ -95,6 +95,38 @@ describe('CollectionsSidebar History panel deferred mount', () => {
   });
 });
 
+describe('CollectionsSidebar empty state', () => {
+  beforeEach(() => {
+    vi.mocked(tauriApi.listCollections).mockResolvedValue([]);
+    vi.mocked(tauriApi.listWorkspaces).mockResolvedValue([]);
+  });
+
+  it('shows a loading skeleton, not the empty message, while collections load', async () => {
+    vi.mocked(tauriApi.listCollections).mockReturnValue(new Promise(() => {}));
+    render(<CollectionsSidebar />, { wrapper });
+    expect(await screen.findByText('Loading collections')).toBeInTheDocument();
+    expect(screen.queryByText('No collections yet')).not.toBeInTheDocument();
+  });
+
+  it('reports a failed load and retries on request', async () => {
+    vi.mocked(tauriApi.listCollections).mockRejectedValueOnce(new Error('boom'));
+    render(<CollectionsSidebar />, { wrapper });
+    const state = await screen.findByText("Couldn't load collections");
+    expect(state.closest('[data-slot="empty-state"]')).toHaveAttribute('data-cause', 'unavailable');
+    expect(screen.queryByText('No collections yet')).not.toBeInTheDocument();
+    vi.mocked(tauriApi.listCollections).mockResolvedValue([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('No collections yet')).toBeInTheDocument();
+  });
+
+  it('says there are no collections and offers to create one', async () => {
+    render(<CollectionsSidebar />, { wrapper });
+    const state = await screen.findByText('No collections yet');
+    expect(state.closest('[data-slot="empty-state"]')).toHaveAttribute('data-cause', 'none-yet');
+    expect(screen.getByRole('button', { name: 'Create collection' })).toBeInTheDocument();
+  });
+});
+
 describe('CollectionsSidebar script delete', () => {
   const summary: tauriApi.CollectionSummary = {
     uid: 'c1',

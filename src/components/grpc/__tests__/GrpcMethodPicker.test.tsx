@@ -97,6 +97,22 @@ describe('GrpcMethodPicker', () => {
     expect(tauriApi.grpcListServices).toHaveBeenCalledWith(input, false);
   });
 
+  it('blames the proto file when it defines no services', async () => {
+    vi.mocked(tauriApi.grpcListServices).mockResolvedValue([]);
+    renderPicker({ protoFilePath: 'protos/empty.proto' });
+    await userEvent.click(screen.getByLabelText('Method'));
+    expect(await screen.findByText('The proto file defines no services.')).toBeInTheDocument();
+  });
+
+  it('blames reflection and suggests a proto file when no file is set', async () => {
+    vi.mocked(tauriApi.grpcListServices).mockResolvedValue([]);
+    renderPicker({ protoFilePath: '' });
+    await userEvent.click(screen.getByLabelText('Method'));
+    expect(
+      await screen.findByText(/The server lists no services through reflection/),
+    ).toBeInTheDocument();
+  });
+
   it('reports the picked method with its call shape', async () => {
     vi.mocked(tauriApi.grpcListServices).mockResolvedValue(services);
     const { props } = renderPicker();

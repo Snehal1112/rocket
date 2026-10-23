@@ -168,7 +168,11 @@ export function GrpcMethodPicker({
               </SelectGroup>
             ))}
             {services !== null && services.length === 0 && !loading && (
-              <div className='px-2 py-1.5 text-xs text-muted-foreground'>No services found</div>
+              <div className='px-2 py-1.5 text-xs text-muted-foreground'>
+                {protoFilePath.trim()
+                  ? 'The proto file defines no services.'
+                  : 'The server lists no services through reflection. Set a .proto file instead.'}
+              </div>
             )}
           </SelectContent>
         </Select>

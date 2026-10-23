@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CollectionNode } from '@/components/collections/CollectionNode';
 import type { CollectionSummary } from '@/lib/tauri-api';
@@ -287,5 +288,49 @@ describe('CollectionNode full-tree gRPC items', () => {
       expect(screen.getByTestId('request-item-GET-List Orders')).toBeInTheDocument();
     });
     expect(screen.queryByText('Say Hello')).not.toBeInTheDocument();
+  });
+});
+
+describe('CollectionNode empty hints', () => {
+  const emptyCollection: tauriApi.Collection = {
+    name: 'my-collection',
+    root: { uid: 'root', name: 'my-collection', items: [] },
+    settings: { headers: [], variables: [], sandboxMode: 'safe' },
+  };
+
+  function renderWithFilter(filter: string) {
+    return render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <CollectionNode
+          summary={summary}
+          filter={filter}
+          summaries={[summary]}
+          onNewFolder={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={vi.fn()}
+          onDuplicate={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue(emptyCollection);
+    usePaneStore.setState({ activeCollection: summary.name });
+  });
+
+  it('blames the filter when it leaves the collection with nothing to list', async () => {
+    renderWithFilter('zzz');
+    expect(await screen.findByText('No matches for "zzz".')).toBeInTheDocument();
+    expect(screen.queryByText('This collection is empty.')).not.toBeInTheDocument();
+  });
+
+  it('says the collection is empty when there is no filter', async () => {
+    renderWithFilter('');
+    // Without a filter the collection starts closed, so open it first.
+    await userEvent.click(screen.getByTestId('collection-item-my-collection').querySelector('button') as HTMLElement);
+    expect(await screen.findByText('This collection is empty.')).toBeInTheDocument();
   });
 });

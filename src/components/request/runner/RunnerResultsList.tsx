@@ -8,9 +8,11 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { TestsPanel } from '@/components/response/TestsPanel';
+import { EmptyState } from '@/components/ui/empty-state';
 import { METHOD_TEXT_COLOR, statusTextColor } from '@/lib/colors';
 import { cn } from '@/lib/utils';
 import type { RunnerRequestEntry, RunnerTab } from '@/types/pane-types';
+import { runnerScopeLabel } from './runner-scope';
 
 function StatusIcon({ status }: { status: RunnerRequestEntry['status'] }) {
   switch (status) {
@@ -89,9 +91,12 @@ function ResultRow({ entry }: { entry: RunnerRequestEntry }) {
 export function RunnerResultsList({ tab }: { tab: RunnerTab }) {
   if (tab.requests.length === 0) {
     return (
-      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
-        No requests found in this collection/folder.
-      </div>
+      <EmptyState
+        size='compact'
+        cause='none-yet'
+        title='Nothing was run'
+        reason={`${runnerScopeLabel(tab)} has no requests.`}
+      />
     );
   }
 

@@ -533,3 +533,36 @@ describe('EnvironmentDialog certificates tab', () => {
     expect(screen.getByRole('combobox', { name: 'Binding for certificate 1' })).toBeInTheDocument();
   });
 });
+
+describe('EnvironmentDialog empty states', () => {
+  function renderWithCollection(collection: string | null) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    useEnvStore.setState({ activeCollection: collection, activeEnvId: null });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <EnvironmentDialog open onOpenChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('asks for a collection instead of claiming there are no environments', async () => {
+    renderWithCollection(null);
+    expect(await screen.findByText('No collection selected')).toBeInTheDocument();
+    expect(screen.queryByText('No environments yet')).not.toBeInTheDocument();
+  });
+
+  it('points at the + button when the collection has no environments', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([]);
+    renderWithCollection('my-collection');
+    expect(await screen.findByText('No environments yet')).toBeInTheDocument();
+    expect(screen.getByText('Use the + button in the list to create one.')).toBeInTheDocument();
+    expect(screen.queryByText('No environment selected')).not.toBeInTheDocument();
+  });
+
+  it('does not say there are no environments while they are loading', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockReturnValue(new Promise(() => {}));
+    renderWithCollection('my-collection');
+    expect(await screen.findByText('Loading environments')).toBeInTheDocument();
+    expect(screen.queryByText('No environments yet')).not.toBeInTheDocument();
+  });
+});

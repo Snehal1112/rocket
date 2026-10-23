@@ -1336,6 +1336,26 @@ html, body {
 .c-sb { display: flex; align-items: center; gap: 8px; width: 320px; max-width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-md); font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
 .c-sb.is-error { border-color: color-mix(in srgb, var(--destructive) 50%, transparent); }
 .c-sb-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 9999px; background: var(--muted-foreground); }
+
+/* Empty state: centered art, title, reason, one action. */
+.c-es-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.c-es { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 24px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); }
+.c-es-art { display: flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 9999px; background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary); opacity: 0.8; }
+.c-es-art svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.c-es-art.is-error { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--destructive); }
+.c-es-title { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--foreground); margin: 0; }
+.c-es-reason { font-size: 12px; line-height: 1.625; color: var(--muted-foreground); max-width: 280px; margin: 0; }
+
+/* Skeleton: a quiet pulse in the shape of the real content. */
+.c-sk { display: block; border-radius: var(--radius-md); background: var(--muted); animation: c-sk-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+@keyframes c-sk-pulse { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .c-sk { animation: none; } }
+.c-sk-tree { display: flex; flex-direction: column; width: 260px; max-width: 100%; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); }
+.c-sk-row { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; }
+.c-sk-guide { margin-left: 14px; border-left: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.c-sk-cards { display: flex; flex-direction: column; width: 320px; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card, var(--background)); }
+.c-sk-card { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.c-sk-card:last-child { border-bottom: 0; }
 .c-sb-dot.is-loading { animation: c-sb-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 .c-sb-dot.is-empty { background: color-mix(in srgb, var(--muted-foreground) 50%, transparent); }
 .c-sb-dot.is-error { background: var(--destructive); }
@@ -1384,6 +1404,8 @@ html, body {
 /* ─── overlays (DSM sections) ─── */
 /* ─── Overlays fragment (o- prefix). Sizes mirror stock Tailwind v4 in src/components/ui. ─── */
 .o-code { font-family: var(--font-mono); background: var(--muted); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+.o-code-block { margin: 0; padding: 12px; overflow-x: auto; background: var(--muted); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; color: var(--foreground); }
+.o-code-block code { background: none; padding: 0; font-size: inherit; }
 .o-stack { display: flex; flex-direction: column; gap: 16px; }
 .o-ic { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .o-ic-12 { width: 12px; height: 12px; }
@@ -1474,20 +1496,23 @@ html, body {
 .o-vg-add .o-ic { width: 14px; height: 14px; }
 
 /* Tree: ui/tree.tsx row + sidebar node content (CollectionNode / FolderNode / RequestNode). */
-.o-tree { display: flex; flex-direction: column; gap: 2px; max-width: 360px; }
-.o-tree ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.o-tree { display: flex; flex-direction: column; gap: 1px; max-width: 360px; }
+.o-tree ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .o-tree li { display: flex; flex-direction: column; }
-.o-row { position: relative; display: flex; align-items: center; gap: 4px; width: 100%; box-sizing: border-box; padding: 4px 4px 4px var(--indent, 8px); font-size: 14px; line-height: 20px; border-left: 2px solid transparent; background: transparent; color: var(--foreground); }
+/* Row: h-7, px-1.5, gap-1.5, text-[13px], rounded-sm. Active adds an inset 2px accent bar. */
+.o-row { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; height: 28px; padding: 0 6px; font-size: 13px; line-height: 20px; border-radius: 4px; background: transparent; color: var(--foreground); }
 .o-row:hover { background: var(--list-hover-bg); }
 .o-row.o-selected { background: var(--list-inactive-selection-bg); }
-.o-row.o-active { border-left-color: var(--list-highlight-fg); background: var(--list-active-selection-bg); color: var(--list-active-selection-fg); }
-.o-chev { width: 12px; height: 12px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.o-row.o-active { box-shadow: inset 2px 0 0 var(--list-highlight-fg); background: var(--list-active-selection-bg); color: var(--list-active-selection-fg); }
+/* Chevron slot: 16px box, 14px muted icon, rotates 90deg when open. */
+.o-chev-slot { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; }
+.o-chev { width: 14px; height: 14px; flex-shrink: 0; fill: none; stroke: var(--muted-foreground); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 150ms; }
 .o-chev.o-open { transform: rotate(90deg); }
-.o-spacer { width: 12px; height: 12px; flex-shrink: 0; }
-.o-content { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; }
-.o-tree-collection { padding-top: 4px; padding-bottom: 4px; }
-.o-node-ic { width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.o-node-ic.o-muted { color: var(--muted-foreground); }
+.o-spacer { width: 16px; height: 16px; flex-shrink: 0; }
+.o-content { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
+.o-tree-collection .o-name { font-weight: 500; }
+.o-node-ic { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: var(--muted-foreground); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.o-node-ic.o-strong { stroke: var(--foreground); }
 .o-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
 .o-lock { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; color: var(--primary); flex-shrink: 0; }
 .o-lock .o-ic { width: 10px; height: 10px; }
@@ -1497,12 +1522,13 @@ html, body {
 .o-row:hover .o-kebab, .o-row.o-showkebab .o-kebab { display: flex; }
 .o-kebab:hover { background: var(--muted); }
 .o-row:hover .o-lock, .o-row.o-showkebab .o-lock { margin-right: 24px; }
-.o-guide { border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); margin-left: 32px; }  /* collection children: ml-8 */
-.o-guide-folder { margin-left: 8px; padding-left: 6px; }                                                 /* folder children: ml-2 pl-1.5 */
-.o-req { display: flex; align-items: center; gap: 4px; width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 14px; line-height: 20px; border-radius: 4px; }
-.o-req-method { flex-shrink: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 2px 4px; border-radius: 4px; border: 1px solid; line-height: 16px; }
-.o-m-get { color: var(--chart-2); border-color: color-mix(in srgb, var(--chart-2) 40%, transparent); background: color-mix(in srgb, var(--chart-2) 12%, transparent); }
-.o-m-post { color: var(--chart-3); border-color: color-mix(in srgb, var(--chart-3) 40%, transparent); background: color-mix(in srgb, var(--chart-3) 12%, transparent); }
+/* Indent guide: one hairline under the parent chevron, shared by every level (TREE_CHILDREN). */
+.o-guide { border-left: 1px solid color-mix(in srgb, var(--border) 50%, transparent); margin-left: 14px; transition: border-color 150ms; }
+.o-guide:hover { border-left-color: var(--border); }
+/* Request method: fixed-width colored text, no pill. */
+.o-req-method { flex-shrink: 0; width: 36px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: -0.025em; line-height: 16px; }
+.o-m-get { color: var(--chart-2); }
+.o-m-post { color: var(--chart-3); }
 .o-dot { margin-left: auto; width: 7px; height: 7px; border-radius: 9999px; flex-shrink: 0; background: var(--warning); }
 
 /* ScrollArea: bar w-2.5 (10px), p-[1px], thumb rounded-full bg-border. */
@@ -1726,6 +1752,8 @@ html, body {
       <a class="nav-item" href="#secret-field" onclick="scrollTo('secret-field',this)"><span class="dot"></span> Secret field</a>
       <a class="nav-item" href="#key-value-rows" onclick="scrollTo('key-value-rows',this)"><span class="dot"></span> Key and value rows</a>
       <a class="nav-item" href="#dialog-body" onclick="scrollTo('dialog-body',this)"><span class="dot"></span> Dialog body</a>
+      <a class="nav-item" href="#empty-state" onclick="scrollTo('empty-state',this)"><span class="dot"></span> Empty state</a>
+      <a class="nav-item" href="#skeleton" onclick="scrollTo('skeleton',this)"><span class="dot"></span> Skeleton</a>
     </nav>
   </aside>
 
@@ -2427,16 +2455,16 @@ html, body {
 <section class="dsm-section" id="tree">
         <div class="section-title">23 — Components</div>
         <div class="section-heading">Tree</div>
-        <p class="section-desc">Custom <code class="o-code">ui/tree.tsx</code> row: <code class="o-code">px-1 py-1 text-sm gap-1</code> with a 2px transparent left border and indent <code class="o-code">(depth + 1) * 8px</code>. The active row takes <code class="o-code">list-highlight-fg</code> on the left border and <code class="o-code">list-active-selection-bg</code>. Collection nodes add 20px icons, a lock badge, an <code class="o-code">ext</code> pill and a hover kebab.</p>
+        <p class="section-desc">Custom <code class="o-code">ui/tree.tsx</code> primitive (shadcn has no tree). Every node type shares one grid: a <code class="o-code">h-7</code> row at <code class="o-code">text-[13px]</code>, a 16px chevron slot, a 16px icon, then the label. Leaf rows keep the chevron slot so labels line up under their folder. The open item is a rounded row with <code class="o-code">list-active-selection-bg</code> and a 2px inset <code class="o-code">list-highlight-fg</code> bar. Children sit behind one hairline guide under the parent chevron.</p>
 
         <div class="dsm-card">
           <div class="o-tree">
             <ul>
               <li>
-                <div class="o-row" style="--indent:8px">
-                  <svg class="o-chev o-open" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                <div class="o-row">
+                  <span class="o-chev-slot"><svg class="o-chev o-open" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
                   <div class="o-content o-tree-collection">
-                    <svg class="o-node-ic" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                    <svg class="o-node-ic o-strong" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
                     <span class="o-name">Sage Network Desktop</span>
                     <span class="o-lock"><svg class="o-ic" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>2</span>
                   </div>
@@ -2445,17 +2473,17 @@ html, body {
                 <div class="o-guide">
                   <ul>
                     <li>
-                      <div class="o-row" style="--indent:16px">
-                        <svg class="o-chev o-open" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                      <div class="o-row">
+                        <span class="o-chev-slot"><svg class="o-chev o-open" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
                         <div class="o-content">
-                          <svg class="o-node-ic o-muted" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+                          <svg class="o-node-ic" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
                           <span class="o-name">Auth</span>
                         </div>
                       </div>
-                      <div class="o-guide o-guide-folder">
+                      <div class="o-guide">
                         <ul>
-                          <li><div class="o-req o-row o-active" style="padding-left:8px"><span class="o-req-method o-m-post">POST</span><span class="o-name">Get token</span><span class="o-dot"></span></div></li>
-                          <li><div class="o-req o-row o-showkebab" style="padding-left:8px"><span class="o-req-method o-m-get">GET</span><span class="o-name">Refresh</span><span class="o-kebab"><svg class="o-ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></span></div></li>
+                          <li><div class="o-row o-active"><span class="o-spacer"></span><span class="o-req-method o-m-post">POST</span><span class="o-name">Get token</span><span class="o-dot"></span></div></li>
+                          <li><div class="o-row o-showkebab"><span class="o-spacer"></span><span class="o-req-method o-m-get">GET</span><span class="o-name">Refresh</span><span class="o-kebab"><svg class="o-ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></span></div></li>
                         </ul>
                       </div>
                     </li>
@@ -2463,10 +2491,10 @@ html, body {
                 </div>
               </li>
               <li>
-                <div class="o-row o-selected" style="--indent:8px">
-                  <svg class="o-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+                <div class="o-row o-selected">
+                  <span class="o-chev-slot"><svg class="o-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
                   <div class="o-content o-tree-collection">
-                    <svg class="o-node-ic" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                    <svg class="o-node-ic o-strong" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
                     <span class="o-name">Shared auth (external)</span>
                     <span class="o-pill">ext</span>
                   </div>
@@ -2480,20 +2508,36 @@ html, body {
           <table class="o-spec">
             <thead><tr><th>Part</th><th>Real classes</th><th>Source</th></tr></thead>
             <tbody>
-              <tr><td>Tree / group</td><td><code>flex flex-col gap-0.5</code></td><td><span class="o-src">ui/tree.tsx:32, 147</span></td></tr>
-              <tr><td>Row</td><td><code>flex items-center gap-1 px-1 py-1 text-sm pl-(--tree-indent) border-l-2 border-transparent</code>; indent <code>(depth+1)*8px</code></td><td><span class="o-src">ui/tree.tsx:115-120</span></td></tr>
-              <tr><td>Row states</td><td><code>hover:bg-list-hover-bg</code>, <code>data-selected:bg-list-inactive-bg</code>, <code>data-active:border-list-highlight-fg bg-list-active-bg</code></td><td><span class="o-src">ui/tree.tsx:116-118</span></td></tr>
-              <tr><td>Chevron</td><td><code>size-3 text-foreground</code>, rotate-90 when open; empty spacer <code>size-3</code></td><td><span class="o-src">ui/tree.tsx:131-140</span></td></tr>
-              <tr><td>Content slot</td><td><code>flex min-w-0 flex-1 items-center gap-2</code></td><td><span class="o-src">ui/tree.tsx:164</span></td></tr>
-              <tr><td>Collection node</td><td>content <code>flex gap-2 w-full py-1</code>; chevron and box icons <code>h-5 w-5</code>; name <code>truncate text-foreground</code></td><td><span class="o-src">collections/CollectionNode.tsx:348-382</span></td></tr>
-              <tr><td>Lock badge</td><td><code>ml-auto gap-[3px] text-[10px] font-semibold text-primary</code>, icons <code>w-[10px] h-[10px]</code>, <code>group-hover:mr-6</code></td><td><span class="o-src">CollectionNode.tsx:400-423</span></td></tr>
-              <tr><td>Count pill (ext)</td><td><code>ml-auto text-2xs text-foreground bg-muted px-1.5 py-0.5 rounded</code></td><td><span class="o-src">CollectionNode.tsx:434</span></td></tr>
-              <tr><td>Kebab</td><td><code>absolute right-1 h-5 w-5 rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted</code>, <code>MoreHorizontal h-3 w-3</code></td><td><span class="o-src">CollectionNode.tsx:448</span>, <span class="o-src">FolderNode.tsx:221-224</span></td></tr>
-              <tr><td>Folder row</td><td><code>flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm</code>, icon <code>h-5 w-5</code></td><td><span class="o-src">collections/FolderNode.tsx:181-187</span></td></tr>
-              <tr><td>Request row</td><td>same row; method chip <code>text-[10px] font-semibold uppercase px-1 py-0.5 rounded border</code>; status dot <code>w-[7px] h-[7px]</code></td><td><span class="o-src">collections/RequestNode.tsx:259-267</span></td></tr>
-              <tr><td>Guide lines</td><td>collection children <code>border-l border-border/70 ml-8</code>; folder children <code>pl-1.5 border-l border-border/70 ml-2</code></td><td><span class="o-src">CollectionNode.tsx:561</span>, <span class="o-src">FolderNode.tsx:327</span></td></tr>
+              <tr><td>Shared metrics</td><td><code>TREE_CONTENT</code> <code>flex w-full items-center gap-1.5 h-7 px-1.5 text-[13px] cursor-pointer</code>; <code>TREE_ICON</code> <code>size-4 shrink-0 text-muted-foreground</code> with stroke <code>1.75</code></td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Tree / group</td><td><code>flex flex-col gap-px</code></td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Row</td><td><code>relative flex items-center w-full min-w-0 rounded-sm cursor-pointer</code>; no depth-based indent</td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Row states</td><td><code>hover:bg-list-hover-bg</code>, <code>data-selected:bg-list-inactive-bg</code>, <code>data-active:bg-list-active-bg</code> plus <code>data-active:shadow-[inset_2px_0_0_hsl(var(--list-highlight-fg))]</code>, <code>focus-visible:ring-1 ring-inset ring-ring</code></td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Chevron</td><td><code>TreeChevron</code>: 16px slot, <code>size-3.5 text-muted-foreground</code>, <code>rotate-90</code> when open, <code>duration-150</code>. <code>TreeItem</code> draws it for items with a sub-tree and a 16px spacer for leaves; <code>leading="none"</code> skips both when the node draws its own</td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Guide line</td><td><code>TREE_CHILDREN</code>: <code>ml-[14px] flex flex-col gap-px border-l border-border/50 hover:border-border</code>. Used by nested <code>TreeItem</code>, <code>CollectionNode</code> and <code>FolderNode</code></td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Content slot</td><td><code>TreeItemContent</code> applies <code>TREE_CONTENT</code> plus <code>min-w-0 flex-1</code>; nodes pass no padding or text classes</td><td><span class="o-src">ui/tree.tsx</span></td></tr>
+              <tr><td>Collection node</td><td>name <code>font-medium</code>; box icon <code>size-4 text-foreground</code>; lock badge <code>ml-auto text-[10px] font-semibold text-primary</code>; ext pill <code>text-2xs bg-muted px-1.5 py-0.5 rounded</code></td><td><span class="o-src">collections/CollectionNode.tsx</span></td></tr>
+              <tr><td>Folder node</td><td>chevron in a button-role span, <code>Folder</code> / <code>FolderOpen</code> with <code>TREE_ICON</code></td><td><span class="o-src">collections/FolderNode.tsx</span></td></tr>
+              <tr><td>Request node</td><td>method <code>w-9 text-[10px] font-semibold uppercase tracking-tight</code> with <code>METHOD_TEXT_COLOR</code>; status dot <code>w-[7px] h-[7px]</code></td><td><span class="o-src">collections/RequestNode.tsx</span>, <span class="o-src">lib/colors.ts</span></td></tr>
+              <tr><td>Kebab</td><td><code>absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted</code>, <code>MoreHorizontal h-3 w-3</code></td><td><span class="o-src">collections/RequestNode.tsx</span></td></tr>
             </tbody>
           </table>
+        </div>
+
+        <div class="dsm-card" style="margin-top:16px">
+          <p class="section-desc" style="margin:0 0 8px">Reuse. Import from <code class="o-code">@/components/ui/tree</code>: <code class="o-code">Tree</code>, <code class="o-code">TreeItem</code>, <code class="o-code">TreeItemContent</code>, <code class="o-code">TreeChevron</code> and the <code class="o-code">TREE_*</code> constants. Put a nested <code class="o-code">Tree</code> inside a <code class="o-code">TreeItem</code> for an expandable node, or render your own children under a <code class="o-code">TREE_CHILDREN</code> wrapper with <code class="o-code">leading="none"</code>.</p>
+          <pre class="o-code-block"><code>&lt;Tree value={selectedId} onValueChange={setSelectedId}&gt;
+  &lt;TreeItem value="auth" open={open} onOpenChange={setOpen}&gt;
+    &lt;TreeItemContent&gt;
+      &lt;Folder className={TREE_ICON} strokeWidth={TREE_ICON_STROKE} /&gt;
+      &lt;span className="truncate"&gt;Auth&lt;/span&gt;
+    &lt;/TreeItemContent&gt;
+    &lt;Tree&gt;
+      &lt;TreeItem value="auth/token"&gt;
+        &lt;TreeItemContent&gt;Get token&lt;/TreeItemContent&gt;
+      &lt;/TreeItem&gt;
+    &lt;/Tree&gt;
+  &lt;/TreeItem&gt;
+&lt;/Tree&gt;</code></pre>
         </div>
       </section>
 
@@ -2915,6 +2959,53 @@ node scripts/sync-dsm-tokens.cjs</div>
         <div class="section-heading">Dialog body</div>
         <p class="section-desc">A scrolling region for long forms inside a dialog. <code class="o-code">DialogContent</code> keeps <code class="o-code">max-w-lg</code>. For a long form pass <code class="o-code">className="flex max-h-[85vh] flex-col"</code> to DialogContent, so the header and footer stay put while the body scrolls. The footer stays right aligned.</p>
 <div class="dsm-card"><div class="component-label">Header and footer fixed, body scrolls</div><div class="c-db"><div class="c-cs-title">Edit agent</div><div class="c-db-body"><p>Long form content. The body scrolls when it is taller than the dialog.</p><p>Agent section.</p><p>Credential section.</p><p>Advanced section.</p><p>More content.</p><p>More content.</p></div><div class="c-db-foot"><span class="c-btn c-btn-outline">Cancel</span><span class="c-btn c-btn-default">Save</span></div></div><div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Body</td><td>-mx-1 min-h-0 flex-1 overflow-auto px-1 (data-slot="dialog-body"). The 4px inset keeps the 3px focus ring of full-width fields from being clipped.</td><td>dialog.tsx:73-81</td></tr><tr><td>Content (caller)</td><td>keeps max-w-lg; add flex max-h-[85vh] flex-col for a scrolling dialog</td><td>dialog.tsx:38</td></tr><tr><td>Footer</td><td>flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 (unchanged)</td><td>dialog.tsx:63-71</td></tr></tbody></table></div></div>
+      </section>
+
+<section class="dsm-section" id="empty-state">
+        <div class="section-title">44 — Feedback</div>
+        <div class="section-heading">Empty state</div>
+        <p class="section-desc">A centered block for a panel, list or dialog that has nothing to show. It always names the <strong>cause</strong>, so a user is never told to create something that exists, or that nothing exists when a filter or a failed load is hiding it. Pass <code class="o-code">cause</code>, <code class="o-code">title</code>, an optional <code class="o-code">reason</code> and one <code class="o-code">action</code>. <code class="o-code">unavailable</code> uses <code class="o-code">role="alert"</code>, the others use <code class="o-code">role="status"</code>. The illustration comes from the cause and can be replaced, or hidden with <code class="o-code">illustration={false}</code> in a short panel.</p>
+<div class="dsm-card"><div class="component-label">The four causes</div>
+<div class="c-es-grid">
+<div class="c-es" role="status"><span class="c-es-art"><svg viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></svg></span><p class="c-es-title">No collections yet</p><p class="c-es-reason">Create a collection to group and save requests.</p><span class="c-btn c-btn-outline c-btn-sm" style="height:28px">Create collection</span></div>
+<div class="c-es" role="status"><span class="c-es-art"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span><p class="c-es-title">No matching history</p><p class="c-es-reason">No request in your history matches these filters.</p><span class="c-btn c-btn-outline c-btn-sm" style="height:28px">Clear filters</span></div>
+<div class="c-es" role="status"><span class="c-es-art"><svg viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg></span><p class="c-es-title">No collection selected</p><p class="c-es-reason">Open a collection to manage its environments.</p></div>
+<div class="c-es" role="alert"><span class="c-es-art is-error"><svg viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span><p class="c-es-title">Couldn't load history</p><p class="c-es-reason">Check the Console for details, then try again.</p><span class="c-btn c-btn-outline c-btn-sm" style="height:28px">Try again</span></div>
+</div>
+<div class="component-label" style="margin-top:16px">Illustration slot</div>
+<p class="section-desc" style="margin:0">The tiles above stand in for the rocket illustrations in <code class="o-code">components/illustrations</code>. The real art is the blue rocket with a prop for the cause. Defaults: <code class="o-code">RocketIdle</code> for none-yet, <code class="o-code">RocketSearch</code> for filtered, <code class="o-code">RocketPlug</code> for needs-setup, <code class="o-code">RocketError</code> for unavailable. A surface can pass a closer fit, such as <code class="o-code">RocketFolder</code> for collections.</p>
+<div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody><tr><td>Root</td><td>flex h-full flex-col items-center justify-center text-center; compact gap-2 px-4 py-6, full gap-4 px-6 py-8</td><td>empty-state.tsx</td></tr><tr><td>Illustration</td><td>aria-hidden, opacity-80; compact h-16 w-16, full h-24 w-24; false hides it</td><td>empty-state.tsx</td></tr><tr><td>Title</td><td>text-sm font-medium text-foreground</td><td>empty-state.tsx</td></tr><tr><td>Reason</td><td>mx-auto max-w-[280px] break-words text-xs leading-relaxed text-muted-foreground</td><td>empty-state.tsx</td></tr><tr><td>Action</td><td>Button outline sm, h-7 text-xs. One action only.</td><td>empty-state.tsx</td></tr><tr><td>Roles</td><td>unavailable role="alert", every other cause role="status"; data-cause records the cause</td><td>empty-state.tsx</td></tr></tbody></table></div>
+<div class="component-label" style="margin-top:16px">Message rules</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Cause</th><th>Say</th><th>Do not</th></tr></thead><tbody>
+<tr><td>none-yet</td><td>What this holds and the one action that creates it. "No history yet. Requests you send appear here."</td><td>Say "not found" for something that was never made.</td></tr>
+<tr><td>filtered</td><td>That a filter hides everything, and offer to clear it. "No matching history."</td><td>Say "No X yet" while a filter or a hidden option is the reason.</td></tr>
+<tr><td>needs-setup</td><td>What is missing and where to set it up. "Open a collection to manage its environments."</td><td>Tell the user to pick from a list that is empty.</td></tr>
+<tr><td>unavailable</td><td>That the load failed, where to look, and a retry. "Couldn't load history."</td><td>Show an empty list as if it were the real answer.</td></tr>
+<tr><td>Loading</td><td>Say it is loading. "Loading environments."</td><td>Show a none-yet message while data is still arriving.</td></tr>
+</tbody></table></div>
+<div class="component-label" style="margin-top:16px">Smaller places</div>
+<p class="section-desc" style="margin:0">Inside a dense tree, use one muted line (<code class="o-code">TreeHint</code>, <code class="o-code">px-2 py-1 text-xs text-muted-foreground</code>), such as "This folder is empty." or "No matches for "orders".". Inside a form, use State block. Inside a Select list, use one muted line that names the cause.</p>
+</div>
+      </section>
+
+<section class="dsm-section" id="skeleton">
+        <div class="section-title">45 — Feedback</div>
+        <div class="section-heading">Skeleton</div>
+        <p class="section-desc">A loading placeholder in the <strong>shape of the real content</strong>, so nothing jumps when data arrives. Use <code class="o-code">SkeletonRegion</code> around the shapes. It gives screen readers a status label at once and draws the shapes only after 150 ms, so a fast local load never flashes. The pulse is <code class="o-code">motion-safe</code> and stays still for reduced motion. While data loads, never show an empty-state message: "No collections yet" is false until the list has loaded.</p>
+<div class="dsm-card"><div class="component-label">Collection tree and workspace collection list</div>
+<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start"><div class="c-sk-tree" role="status" aria-busy="true"><span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Loading collections</span><div class="c-sk-row"><span class="c-sk" style="width:12px;height:12px;border-radius:2px;margin:0 2px"></span><span class="c-sk" style="width:16px;height:16px;border-radius:2px"></span><span class="c-sk" style="width:128px;height:12px;"></span></div><div class="c-sk-guide"><div class="c-sk-row"><span class="c-sk" style="width:12px;height:12px;border-radius:2px;margin:0 2px"></span><span class="c-sk" style="width:16px;height:16px;border-radius:2px"></span><span class="c-sk" style="width:96px;height:12px;"></span></div><div class="c-sk-row"><span class="c-sk" style="width:12px;height:12px;border-radius:2px;margin:0 2px"></span><span class="c-sk" style="width:16px;height:16px;border-radius:2px"></span><span class="c-sk" style="width:112px;height:12px;"></span></div><div class="c-sk-row"><span style="width:16px"></span><span class="c-sk" style="width:32px;height:10px;"></span><span class="c-sk" style="width:128px;height:12px;"></span></div><div class="c-sk-row"><span style="width:16px"></span><span class="c-sk" style="width:32px;height:10px;"></span><span class="c-sk" style="width:80px;height:12px;"></span></div></div><div class="c-sk-row"><span class="c-sk" style="width:12px;height:12px;border-radius:2px;margin:0 2px"></span><span class="c-sk" style="width:16px;height:16px;border-radius:2px"></span><span class="c-sk" style="width:112px;height:12px;"></span></div><div class="c-sk-row"><span class="c-sk" style="width:12px;height:12px;border-radius:2px;margin:0 2px"></span><span class="c-sk" style="width:16px;height:16px;border-radius:2px"></span><span class="c-sk" style="width:144px;height:12px;"></span></div></div><div class="c-sk-cards" role="status" aria-busy="true"><div class="c-sk-card"><span class="c-sk" style="width:20px;height:20px"></span><div style="flex:1;display:flex;flex-direction:column;gap:6px"><span class="c-sk" style="width:160px;height:14px;"></span><span class="c-sk" style="width:200px;height:12px;"></span></div><span class="c-sk" style="width:40px;height:12px;"></span></div><div class="c-sk-card"><span class="c-sk" style="width:20px;height:20px"></span><div style="flex:1;display:flex;flex-direction:column;gap:6px"><span class="c-sk" style="width:128px;height:14px;"></span><span class="c-sk" style="width:200px;height:12px;"></span></div><span class="c-sk" style="width:40px;height:12px;"></span></div><div class="c-sk-card"><span class="c-sk" style="width:20px;height:20px"></span><div style="flex:1;display:flex;flex-direction:column;gap:6px"><span class="c-sk" style="width:192px;height:14px;"></span><span class="c-sk" style="width:200px;height:12px;"></span></div><span class="c-sk" style="width:40px;height:12px;"></span></div></div></div>
+<div class="component-label" style="margin-top:16px">Spec</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Part</th><th>Tailwind classes</th><th>Source</th></tr></thead><tbody>
+<tr><td>Shape</td><td>aria-hidden motion-safe:animate-pulse rounded-md bg-muted; size it with h-* and w-*</td><td>skeleton.tsx</td></tr>
+<tr><td>Region</td><td>role="status" aria-busy; a sr-only label ("Loading collections"); children render after delayMs, default 150</td><td>skeleton.tsx</td></tr>
+<tr><td>Tree</td><td>Rows use TREE_CONTENT (h-7) with a 16px chevron slot and icon, and the TREE_CHILDREN guide, so the rows match the loaded tree</td><td>CollectionTreeSkeleton.tsx</td></tr>
+<tr><td>Collection overview</td><td>Header with icon and title, stats line, tab bar, then two Card blocks of rows</td><td>CollectionOverviewSkeleton.tsx</td></tr>
+<tr><td>Workspace overview</td><td>Count numbers become h-9 w-8 shapes; the collection list is three rows like the real cards</td><td>WorkspaceCollectionsSkeleton.tsx</td></tr>
+<tr><td>Other tabs</td><td>PanelSkeleton (title row, toolbar, content rows) for tabs that are not code editors. EditorSkeleton stays for code, diff and script tabs.</td><td>PanelSkeleton.tsx, EditorSkeleton.tsx</td></tr>
+</tbody></table></div>
+<div class="component-label" style="margin-top:16px">Rules</div><div class="c-spec-wrap"><table class="c-spec"><thead><tr><th>Topic</th><th>Do</th><th>Do not</th></tr></thead><tbody>
+<tr><td>Shape</td><td>Match the loaded layout: same row height, indent and column widths.</td><td>Draw a generic grey box, or a code editor for a page that is not code.</td></tr>
+<tr><td>Empty or loading</td><td>Skeleton while a query is pending, then Empty state once loaded, or Empty state "unavailable" if it failed.</td><td>Default the data to an empty list and show "No X yet" while it loads.</td></tr>
+<tr><td>Widths</td><td>Use fixed widths that vary a little, so rows read as names.</td><td>Randomise widths, which makes the page jitter between renders.</td></tr>
+</tbody></table></div></div>
       </section>
 
 <div style="height:48px"></div>

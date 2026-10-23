@@ -3,7 +3,6 @@
 import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { RocketIdle } from '@/components/illustrations';
 import {
   Dialog,
   DialogContent,
@@ -11,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -121,7 +121,8 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const setActiveEnvId = useEnvStore((s) => s.setActiveEnvId);
 
-  const { data: rawEnvironments = EMPTY_ENVS } = useEnvironments(activeCollection);
+  const { data: rawEnvironments = EMPTY_ENVS, isPending: environmentsPending } =
+    useEnvironments(activeCollection);
   const environments = useMemo(() => rawEnvironments.map(normalizeEnv), [rawEnvironments]);
   const saveMutation = useSaveEnvironment(activeCollection);
   const deleteMutation = useDeleteEnvironment(activeCollection);
@@ -628,14 +629,31 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 </TabsContent>
               </Tabs>
             ) : (
-              <div className='flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 bg-gradient-to-b from-background to-card/60'>
-                <RocketIdle className='w-24 h-24 opacity-70' />
-                <div className='space-y-1'>
-                  <p className='text-sm font-medium text-foreground'>No environment selected</p>
-                  <p className='text-xs text-muted-foreground leading-relaxed'>
-                    Pick one from the list or create a new environment.
-                  </p>
-                </div>
+              <div className='flex flex-1 flex-col bg-gradient-to-b from-background to-card/60'>
+                {!activeCollection ? (
+                  <EmptyState
+                    className='flex-1'
+                    cause='needs-setup'
+                    title='No collection selected'
+                    reason='Open a collection to manage its environments.'
+                  />
+                ) : environmentsPending ? (
+                  <EmptyState className='flex-1' cause='none-yet' title='Loading environments' />
+                ) : environments.length === 0 ? (
+                  <EmptyState
+                    className='flex-1'
+                    cause='none-yet'
+                    title='No environments yet'
+                    reason='Use the + button in the list to create one.'
+                  />
+                ) : (
+                  <EmptyState
+                    className='flex-1'
+                    cause='none-yet'
+                    title='No environment selected'
+                    reason='Choose one from the list to edit its variables.'
+                  />
+                )}
               </div>
             )}
           </div>

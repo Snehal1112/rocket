@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { statusTextColor } from '@/lib/colors';
@@ -245,6 +246,10 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
   if (!isOpen) return null;
 
   const filtered = search ? visible.filter((e) => matchesSearch(e, search, revealedId)) : visible;
+  // INFO logs the switch hides, so an empty list can say they exist.
+  const hiddenInfoCount = showInfoLogs
+    ? 0
+    : logEntries.filter((l) => l.level === 'INFO' && l.target !== 'agent').length;
 
   const handleDragDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -313,9 +318,33 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       {/* Entry list. */}
       <div className='flex-1 overflow-y-auto font-mono text-2xs'>
         {filtered.length === 0 ? (
-          <div className='flex items-center justify-center h-full text-muted-foreground text-sm'>
-            No console activity yet
-          </div>
+          search ? (
+            <EmptyState
+              size='compact'
+              illustration={false}
+              cause='filtered'
+              title='No matching entries'
+              reason={`Nothing matches "${search}".`}
+              action={{ label: 'Clear filter', onClick: () => setSearch('') }}
+            />
+          ) : hiddenInfoCount > 0 ? (
+            <EmptyState
+              size='compact'
+              illustration={false}
+              cause='filtered'
+              title='No warnings or errors'
+              reason={`${hiddenInfoCount} INFO ${hiddenInfoCount === 1 ? 'log is' : 'logs are'} hidden.`}
+              action={{ label: 'Show INFO logs', onClick: () => setShowInfoLogs(true) }}
+            />
+          ) : (
+            <EmptyState
+              size='compact'
+              illustration={false}
+              cause='none-yet'
+              title='No console activity yet'
+              reason='Requests, script output and backend warnings appear here.'
+            />
+          )
         ) : (
           filtered.map((entry) => {
             if (entry.kind === 'log') {

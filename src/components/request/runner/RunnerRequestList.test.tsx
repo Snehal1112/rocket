@@ -38,7 +38,7 @@ describe('RunnerRequestList', () => {
 
   it('shows an empty state when there are no requests', () => {
     render(<RunnerRequestList tab={tab([])} />);
-    expect(screen.getByText(/no requests/i)).toBeInTheDocument();
+    expect(screen.getByText('No requests to run')).toBeInTheDocument();
   });
 
   it('renders one row per request with method and name', () => {

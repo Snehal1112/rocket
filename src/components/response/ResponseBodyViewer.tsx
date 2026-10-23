@@ -5,16 +5,17 @@ import {
   Clock,
   Copy,
   FileText,
+  FileX,
   Hash,
   LayoutPanelLeft,
   Search,
   Wifi,
-  WifiOff,
   Zap,
 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { statusBadgeColor, timeColor } from '@/lib/colors';
 import { parseGraphQlResponse } from '@/lib/graphql-response';
@@ -176,13 +177,17 @@ function BodySearchBar({
   );
 }
 
-// Empty state shown when there is no response body.
-function EmptyBody({ label }: { label: string }) {
+// Shown when the response has no body. A body-less response is a normal answer, so the
+// icon is a blank file and not an offline icon, and the reason says where the status is.
+function EmptyBody({ title, reason }: { title: string; reason: string }) {
   return (
-    <div className='flex h-full flex-col items-center justify-center gap-2 text-muted-foreground'>
-      <WifiOff className='h-8 w-8 opacity-20' />
-      <span className='text-xs'>{label}</span>
-    </div>
+    <EmptyState
+      size='compact'
+      cause='none-yet'
+      illustration={<FileX className='h-8 w-8 text-muted-foreground/40' />}
+      title={title}
+      reason={reason}
+    />
   );
 }
 
@@ -490,7 +495,10 @@ export function ResponseBodyViewer({
               <MonacoWrapper value={prettyBody} language={language} readOnly height='100%' />
             </Suspense>
           ) : (
-            <EmptyBody label='No response body' />
+            <EmptyBody
+              title='The response has no body'
+              reason='The server sent a status and headers but no content. See the Headers tab.'
+            />
           ))}
 
         {/* Raw tab — with optional line-level search overlay. */}
@@ -518,7 +526,10 @@ export function ResponseBodyViewer({
               </Suspense>
             )
           ) : (
-            <EmptyBody label='No response body' />
+            <EmptyBody
+              title='The response has no body'
+              reason='The server sent a status and headers but no content. See the Headers tab.'
+            />
           ))}
 
         {/* Preview tab — sandboxed iframe. */}
@@ -536,7 +547,7 @@ export function ResponseBodyViewer({
                 title='Response preview'
               />
             ) : (
-              <EmptyBody label='No response body to preview' />
+              <EmptyBody title='Nothing to preview' reason='The response has no body.' />
             )}
           </div>
         )}
@@ -558,7 +569,10 @@ export function ResponseBodyViewer({
               <MonacoWrapper value={dataBody} language='json' readOnly height='100%' />
             </Suspense>
           ) : (
-            <EmptyBody label='No data in the response' />
+            <EmptyBody
+              title='No data in the response'
+              reason='The server returned no data. If the request failed, see the Errors tab.'
+            />
           ))}
         {activeView === 'errors' && graphqlView && (
           <GraphQlErrorsPanel errors={graphqlView.errors} />

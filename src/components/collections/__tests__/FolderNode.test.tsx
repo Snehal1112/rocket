@@ -217,3 +217,37 @@ describe('FolderNode new request name collision', () => {
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already exists'));
   });
 });
+
+describe('FolderNode empty states', () => {
+  function renderFolder(filter: string) {
+    render(
+      <Tree aria-label='tree'>
+        <FolderNode
+          name='parent'
+          items={[]}
+          collectionName='col'
+          collectionRoot='/ws/col'
+          basePath='parent'
+          depth={0}
+          filter={filter}
+          summaries={[]}
+          onNewFolder={vi.fn()}
+          onMove={vi.fn()}
+          onDelete={vi.fn()}
+          onDuplicate={vi.fn()}
+        />
+      </Tree>,
+    );
+  }
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+  });
+
+  it('says an opened folder is empty when it has no items', async () => {
+    renderFolder('');
+    expect(screen.queryByText('This folder is empty.')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Expand parent' }));
+    expect(screen.getByText('This folder is empty.')).toBeInTheDocument();
+  });
+});

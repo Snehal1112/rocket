@@ -59,10 +59,30 @@ describe('ConsolePanel backend logs', () => {
     expect(screen.getByText('method=GET status=500')).toBeInTheDocument();
   });
 
-  it('shows the empty state when only hidden INFO logs exist', () => {
+  it('says INFO logs are hidden instead of claiming there is no activity', () => {
     addLog('INFO', 'request started');
     renderPanel();
+    expect(screen.getByText('No warnings or errors')).toBeInTheDocument();
+    expect(screen.getByText('1 INFO log is hidden.')).toBeInTheDocument();
+    expect(screen.queryByText('No console activity yet')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show INFO logs' }));
+    expect(screen.getByText('request started')).toBeInTheDocument();
+  });
+
+  it('says there is no activity only when the console is really empty', () => {
+    renderPanel();
     expect(screen.getByText('No console activity yet')).toBeInTheDocument();
+  });
+
+  it('blames the filter when a search matches nothing', () => {
+    addLog('WARN', 'slow upstream');
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText('Filter by URL or message'), {
+      target: { value: 'zzz' },
+    });
+    expect(screen.getByText('No matching entries')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+    expect(screen.getByText('slow upstream')).toBeInTheDocument();
   });
 
   it('clear removes log entries', () => {

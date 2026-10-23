@@ -98,7 +98,7 @@ export function ScriptNode({ name, collectionName, path, onDelete }: ScriptNodeP
             variant='ghost'
             size='icon'
             aria-label={`Actions for ${name}`}
-            className='absolute right-1 h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+            className='sticky right-1 -ml-6 shrink-0 h-5 w-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
             onClick={(e) => e.stopPropagation()}
           >
             <MoreHorizontal aria-hidden='true' className='h-3 w-3' />

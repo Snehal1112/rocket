@@ -1,17 +1,22 @@
 import { Checkbox } from '@/components/ui/checkbox';
+import { EmptyState } from '@/components/ui/empty-state';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { cn } from '@/lib/utils';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RunnerTab } from '@/types/pane-types';
+import { runnerScopeLabel } from './runner-scope';
 
 export function RunnerRequestList({ tab }: { tab: RunnerTab }) {
   const toggleRunnerEntry = usePaneStore((s) => s.toggleRunnerEntry);
 
   if (tab.requests.length === 0) {
     return (
-      <div className='flex items-center justify-center h-full text-sm text-muted-foreground'>
-        No requests found in this collection/folder.
-      </div>
+      <EmptyState
+        size='compact'
+        cause='none-yet'
+        title='No requests to run'
+        reason={`${runnerScopeLabel(tab)} has no requests. Add one, then open the runner again.`}
+      />
     );
   }
 

@@ -4,6 +4,7 @@ import { FolderSettingsTab } from '@/components/collections/FolderSettingsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
 import { ExampleTabView } from '@/components/examples/ExampleTabView';
 import { WebSocketPanel } from '@/components/request/websocket/WebSocketPanel';
+import { PanelSkeleton } from './PanelSkeleton';
 
 // Lazy-load tabs that aren't shown on a default/cold launch, so their code
 // (and anything heavy they pull in, e.g. GitPanel's diff libs or RunnerPane's
@@ -264,7 +265,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               <RequestPanel tab={activeTab} groupId={node.groupId} />
             )
           ) : isGitTab(activeTab) ? (
-            <Suspense fallback={<EditorSkeleton />}>
+            <Suspense fallback={<PanelSkeleton label='Loading Git' />}>
               <GitPanel
                 key={activeTab.repositoryId}
                 repositoryId={activeTab.repositoryId}
@@ -272,7 +273,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
               />
             </Suspense>
           ) : isContractTab(activeTab) ? (
-            <Suspense fallback={<EditorSkeleton />}>
+            <Suspense fallback={<PanelSkeleton label='Loading contracts' />}>
               <ContractsTab
                 collectionId={activeTab.collectionRoot}
                 collectionName={activeTab.collectionName}
@@ -293,24 +294,24 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             activeTab.activeSection === 'overview' ? (
               <WorkspaceOverviewTab workspaceId={activeTab.workspaceId} />
             ) : activeTab.activeSection === 'environments' ? (
-              <Suspense fallback={<EditorSkeleton />}>
+              <Suspense fallback={<PanelSkeleton label='Loading environments' />}>
                 <WorkspaceEnvironmentsTab />
               </Suspense>
             ) : activeTab.activeSection === 'git' ? (
-              <Suspense fallback={<EditorSkeleton />}>
+              <Suspense fallback={<PanelSkeleton label='Loading Git' />}>
                 <WorkspaceGitTab workspaceId={activeTab.workspaceId} />
               </Suspense>
             ) : activeTab.activeSection === 'audit' ? (
-              <Suspense fallback={<EditorSkeleton />}>
+              <Suspense fallback={<PanelSkeleton label='Loading audit log' />}>
                 <AuditLogTab />
               </Suspense>
             ) : null
           ) : isRunnerTab(activeTab) ? (
-            <Suspense fallback={<EditorSkeleton />}>
+            <Suspense fallback={<PanelSkeleton label='Loading runner' />}>
               <RunnerPane tab={activeTab} groupId={node.groupId} />
             </Suspense>
           ) : isFlowTab(activeTab) ? (
-            <Suspense fallback={<EditorSkeleton />}>
+            <Suspense fallback={<PanelSkeleton label='Loading flow' />}>
               <FlowPane key={activeTab.id} tab={activeTab} groupId={node.groupId} />
             </Suspense>
           ) : isFolderTab(activeTab) ? (

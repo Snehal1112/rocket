@@ -85,3 +85,44 @@ describe('HistoryPanel run source', () => {
     expect(tauriApi.searchHistory).not.toHaveBeenCalled();
   });
 });
+
+describe('HistoryPanel empty states', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(tauriApi.listHistory).mockResolvedValue([]);
+    vi.mocked(tauriApi.searchHistory).mockResolvedValue([]);
+  });
+
+  it('says there is no history yet when nothing was sent and no filter is set', async () => {
+    render(<HistoryPanel />);
+    const state = await screen.findByText('No history yet');
+    expect(state.closest('[data-slot="empty-state"]')).toHaveAttribute('data-cause', 'none-yet');
+  });
+
+  it('blames the filter, not the history, when a filter hides every entry', async () => {
+    render(<HistoryPanel />);
+    await screen.findByText('No history yet');
+    await userEvent.type(screen.getByPlaceholderText(/search/i), 'orders');
+    const state = await screen.findByText('No matching history');
+    expect(state.closest('[data-slot="empty-state"]')).toHaveAttribute('data-cause', 'filtered');
+    expect(screen.queryByText('No history yet')).toBeNull();
+  });
+
+  it('clears the filters and reloads the full list', async () => {
+    render(<HistoryPanel />);
+    await userEvent.type(await screen.findByPlaceholderText(/search/i), 'orders');
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => expect(screen.getByPlaceholderText(/search/i)).toHaveValue(''));
+    expect(tauriApi.listHistory).toHaveBeenLastCalledWith(200);
+  });
+
+  it('reports a failed load instead of claiming there is no history', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(tauriApi.listHistory).mockRejectedValueOnce(new Error('boom'));
+    render(<HistoryPanel />);
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load history");
+    expect(screen.queryByText('No history yet')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('No history yet')).toBeInTheDocument();
+  });
+});

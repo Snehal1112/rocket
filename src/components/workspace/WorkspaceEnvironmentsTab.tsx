@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { EnvironmentSidebar } from '@/components/environments/EnvironmentSidebar';
 import { extendsCandidates } from '@/components/environments/extends-candidates';
 import { VariableTable } from '@/components/environments/VariableTable';
-import { RocketIdle } from '@/components/illustrations';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -36,7 +36,8 @@ const EMPTY_ROWS: ResolvedVariable[] = [];
 const NO_PARENT = '__none__';
 
 export function WorkspaceEnvironmentsTab() {
-  const { data: environments = EMPTY_ENVS } = useGlobalEnvironments();
+  const { data: environments = EMPTY_ENVS, isPending: environmentsPending } =
+    useGlobalEnvironments();
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const saveMutation = useSaveGlobalEnvironment();
   const deleteMutation = useDeleteGlobalEnvironment();
@@ -282,14 +283,24 @@ export function WorkspaceEnvironmentsTab() {
             />
           </>
         ) : (
-          <div className='flex-1 flex flex-col items-center justify-center gap-5 text-center px-8 bg-linear-to-b from-background to-card/60'>
-            <RocketIdle className='w-36 h-36 opacity-70' />
-            <div className='space-y-1.5'>
-              <p className='text-sm font-medium text-foreground'>No environment selected</p>
-              <p className='text-xs text-muted-foreground leading-relaxed'>
-                Choose an environment from the list, or create one to start managing variables.
-              </p>
-            </div>
+          <div className='flex flex-1 flex-col bg-linear-to-b from-background to-card/60'>
+            {environmentsPending ? (
+              <EmptyState className='flex-1' cause='none-yet' title='Loading environments' />
+            ) : environments.length === 0 ? (
+              <EmptyState
+                className='flex-1'
+                cause='none-yet'
+                title='No global environments yet'
+                reason='Use the + button in the list to create one.'
+              />
+            ) : (
+              <EmptyState
+                className='flex-1'
+                cause='none-yet'
+                title='No environment selected'
+                reason='Choose one from the list to edit its variables.'
+              />
+            )}
           </div>
         )}
       </div>

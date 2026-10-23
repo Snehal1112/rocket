@@ -126,7 +126,8 @@ describe('RunnerPane', () => {
       root: { ...s.root, type: 'leaf', tabs: [tab], activeTabId: tab.id } as typeof s.root,
     }));
     render(<RunnerPane tab={tab} groupId='g1' />);
-    expect(screen.getByText('No requests found in this collection/folder.')).toBeInTheDocument(); // RunnerRequestList empty state
+    expect(screen.getByText('No requests to run')).toBeInTheDocument(); // RunnerRequestList empty state
+    expect(screen.getByText(/The collection "demo" has no requests/)).toBeInTheDocument();
   });
 
   it('shows RunnerResultsList once the run is done', () => {
@@ -135,6 +136,6 @@ describe('RunnerPane', () => {
       root: { ...s.root, type: 'leaf', tabs: [tab], activeTabId: tab.id } as typeof s.root,
     }));
     render(<RunnerPane tab={tab} groupId='g1' />);
-    expect(screen.getByText('No requests found in this collection/folder.')).toBeInTheDocument(); // RunnerResultsList empty state
+    expect(screen.getByText('Nothing was run')).toBeInTheDocument(); // RunnerResultsList empty state
   });
 });

@@ -12,7 +12,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useSaveButton } from '@/hooks/use-save-button';
 import { collectionKeys, useCollections } from '@/lib/queries/collection-queries';
 import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
@@ -27,6 +29,7 @@ import {
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
+import { WorkspaceCollectionsSkeleton } from './WorkspaceCollectionsSkeleton';
 
 interface WorkspaceOverviewTabProps {
   workspaceId: string;
@@ -38,14 +41,19 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
   const workspace = workspaces.find((w) => w.id === (workspaceId || activeWorkspaceId));
   const updateDescriptionMutation = useUpdateWorkspaceDescription();
   const openTab = usePaneStore((s) => s.openTab);
-  const { data: globalEnvironments = [] } = useGlobalEnvironments();
+  const { data: globalEnvironments = [], isPending: environmentsPending } = useGlobalEnvironments();
 
   // useCollections() reads the same shared query cache CollectionsSidebar
   // reads and invalidates. Freshness on collection-changed / git-changed
   // events is CollectionsSidebar's responsibility (it's always mounted in
   // the app shell); this component does not need its own listener because
   // invalidating the shared key anywhere refetches it for every consumer.
-  const { data: summaries = [] } = useCollections();
+  const {
+    data: summaries = [],
+    isPending: collectionsPending,
+    isError: collectionsFailed,
+    refetch: refetchCollections,
+  } = useCollections();
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -132,15 +140,23 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
             {/* Stats */}
             <div className='flex gap-8 pb-5 border-b border-border'>
               <div className='flex flex-col gap-1'>
-                <span className='text-3xl font-bold leading-tight tabular-nums'>
-                  {collectionCount}
-                </span>
+                {collectionsPending ? (
+                  <Skeleton className='h-9 w-8' />
+                ) : (
+                  <span className='text-3xl font-bold leading-tight tabular-nums'>
+                    {collectionCount}
+                  </span>
+                )}
                 <span className='text-xs text-muted-foreground'>Collections</span>
               </div>
               <div className='flex flex-col gap-1'>
-                <span className='text-3xl font-bold leading-tight tabular-nums'>
-                  {globalEnvironments.length}
-                </span>
+                {environmentsPending ? (
+                  <Skeleton className='h-9 w-8' />
+                ) : (
+                  <span className='text-3xl font-bold leading-tight tabular-nums'>
+                    {globalEnvironments.length}
+                  </span>
+                )}
                 <span className='text-xs text-muted-foreground'>Environments</span>
               </div>
             </div>
@@ -224,7 +240,9 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
               <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3'>
                 Collections
               </p>
-              {summaries.length > 0 ? (
+              {collectionsPending ? (
+                <WorkspaceCollectionsSkeleton />
+              ) : summaries.length > 0 ? (
                 summaries.map((col) => (
                   <Card
                     key={col.name}
@@ -290,6 +308,14 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                     </CardContent>
                   </Card>
                 ))
+              ) : collectionsFailed ? (
+                <EmptyState
+                  size='compact'
+                  cause='unavailable'
+                  title="Couldn't load collections"
+                  reason='Check the Console for details, then try again.'
+                  action={{ label: 'Try again', onClick: () => void refetchCollections() }}
+                />
               ) : (
                 <div className='flex flex-col items-center justify-center py-12 gap-6 rounded-lg border border-dashed border-border/60 bg-muted/10 text-center px-8'>
                   <RocketBook className='w-32 h-32 opacity-90' />

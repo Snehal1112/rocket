@@ -51,3 +51,24 @@ describe('ResponseBodyViewer save as example', () => {
     expect(screen.queryByRole('button', { name: 'Save as example' })).toBeNull();
   });
 });
+
+describe('ResponseBodyViewer empty body', () => {
+  const noBody: ResponseState = { ...response, status: 204, statusText: 'No Content', body: '' };
+
+  it('says the response has no body and points to the headers', () => {
+    render(<ResponseBodyViewer response={noBody} />);
+    expect(screen.getByText('The response has no body')).toBeInTheDocument();
+    expect(screen.getByText(/See the Headers tab/)).toBeInTheDocument();
+  });
+
+  it('does not use an offline icon for a body-less answer', () => {
+    const { container } = render(<ResponseBodyViewer response={noBody} />);
+    expect(container.querySelector('.lucide-wifi-off')).toBeNull();
+  });
+
+  it('says there is nothing to preview on the Preview tab', async () => {
+    render(<ResponseBodyViewer response={noBody} />);
+    await userEvent.click(screen.getByRole('tab', { name: /preview/i }));
+    expect(screen.getByText('Nothing to preview')).toBeInTheDocument();
+  });
+});

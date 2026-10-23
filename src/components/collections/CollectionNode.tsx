@@ -63,6 +63,7 @@ import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
 import { FolderNode } from './FolderNode';
 import { RequestNode } from './RequestNode';
+import { TreeHint } from './TreeHint';
 import type { DeleteTarget } from './tree-utils';
 
 // Stable empty references to keep Zustand selector output identity-stable.
@@ -467,7 +468,7 @@ export function CollectionNode({
               <button
                 type='button'
                 aria-label={`Actions for ${summary.name}`}
-                className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
+                className='sticky right-1 -ml-6 shrink-0 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
@@ -661,6 +662,11 @@ export function CollectionNode({
                 />
               ))}
             </div>
+          )}
+          {filteredItems.length === 0 && filteredFlows.length === 0 && !creatingRequest && (
+            <TreeHint>
+              {filter ? `No matches for "${filter}".` : 'This collection is empty.'}
+            </TreeHint>
           )}
           {creatingRequest && (
             <div className='flex items-center gap-1 px-2 py-1 text-sm'>
