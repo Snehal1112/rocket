@@ -9,6 +9,7 @@ use rocket_collection::{
     CollectionVariable, FolderSettings, GrantSource, GraphQlRequest, GrpcRequest, Request,
     RequestKind, RequestScriptPhase, WebSocketRequest,
 };
+use rocket_shared::action::HttpRequestExample;
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher, FlowRewriteFailure};
@@ -739,6 +740,62 @@ impl CollectionService {
             request_path: request_path.to_string(),
         });
         Ok(())
+    }
+
+    /// Lists the saved examples of an HTTP request. Publishes nothing.
+    pub fn list_request_examples(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<HttpRequestExample>> {
+        self.repo.list_request_examples(collection, request_path)
+    }
+
+    /// Adds an example to an HTTP request, then tells listeners the request changed.
+    pub fn add_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        example: HttpRequestExample,
+    ) -> DomainResult<()> {
+        self.repo
+            .add_request_example(collection, request_path, example)?;
+        self.publish_request_saved(collection, request_path);
+        Ok(())
+    }
+
+    /// Renames an example of an HTTP request, then tells listeners the request changed.
+    pub fn rename_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> DomainResult<()> {
+        self.repo
+            .rename_request_example(collection, request_path, old_name, new_name)?;
+        self.publish_request_saved(collection, request_path);
+        Ok(())
+    }
+
+    /// Deletes an example of an HTTP request, then tells listeners the request changed.
+    pub fn delete_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        name: &str,
+    ) -> DomainResult<()> {
+        self.repo
+            .delete_request_example(collection, request_path, name)?;
+        self.publish_request_saved(collection, request_path);
+        Ok(())
+    }
+
+    fn publish_request_saved(&self, collection: &str, request_path: &str) {
+        self.events.publish(DomainEvent::RequestSaved {
+            collection: collection.to_string(),
+            path: request_path.to_string(),
+        });
     }
 }
 

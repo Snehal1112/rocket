@@ -37,6 +37,7 @@ touches the filesystem or any I/O directly — those concerns live in
 - `rename_request` — mutates only the `name` field inside the JSON; the filename stays the same, producing a single `Modify` filesystem event.
 - `move_item` — moves a request or folder between collections or paths.
 - `reorder_items` — reorders items within a folder by supplying the new name order.
+- `list_request_examples` / `add_request_example` / `rename_request_example` / `delete_request_example` — saved examples of one HTTP request, stored in the request file's `examples` list. Add, rename and delete publish `RequestSaved` only after the repo call succeeds; list publishes nothing. Names are trimmed, 1 to 120 characters, no control characters, unique case-insensitively (`InvalidInput`, `AlreadyExists`). One example is at most 1 MiB as YAML. Non-HTTP files are `InvalidInput`.
 - `get_settings` / `save_settings` — read and write per-collection settings (auth, headers, variables).
 
 ### WorkspaceService

@@ -19,6 +19,8 @@ pub(crate) mod conversation_secrets;
 pub mod conversation_service;
 pub mod cookie_service;
 #[cfg(test)]
+mod collection_service_examples_tests;
+#[cfg(test)]
 mod duplicate_request_e2e_tests;
 pub mod env_audit;
 pub mod environment_service;
