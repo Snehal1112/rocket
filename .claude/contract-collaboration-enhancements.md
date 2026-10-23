@@ -19,12 +19,12 @@ Read this from the docs only. The code was not re-checked, so verify before
 building on it.
 
 - Lifecycle states: Draft, Active, Drift, Breach, InReview, Paused,
-  ExpiringIn30Days, Expired, Archived. See `docs/contract-state-machine.md`.
+  ExpiringIn30Days, Expired, Archived. See `docs/architecture/contract-state-machine.md`.
 - Specs under `docs/superpowers/specs/`: contract lock, lock enhancement,
   tab UI, diff pane, DTO/persistence split, lifecycle gaps, OpenAPI export.
 - Pitch pain points the feature should answer: informal contracts, drift,
   breaking changes found late, no ownership or dependency visibility
-  (`docs/svp-api-collaboration-pitch.md`).
+  (`docs/product/svp-api-collaboration-pitch.md`).
 
 ## Enhancements, ranked
 
