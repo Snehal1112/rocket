@@ -31,7 +31,7 @@ cargo test -p rocket-environment <test_name>
 | `repository.rs` | `EnvironmentRepository` trait — `list`, `get`, `save`, `delete` returning `DomainResult<T>` |
 | `client_certificate_validation.rs` | `validate_client_certificates(certs, bindings)` — save-time rules for certificate entries (one source per piece, references match the environment's bindings, no key text in path or reference fields, non-empty domain) |
 | `flatten.rs` | `flatten_environment` / `flatten_with_repo` merge an environment with its `extends` chain (furthest ancestor first, child wins) and tag each `FlatVariable` with its source; `find_extends_cycle` rejects a self or cyclic parent on save |
-| `dot_env.rs` | `collect_dot_env` layers the `.env` files of the chain through the `DotEnvLoader` trait (parent under child, child wins); the file I/O is in `rocket-infra` |
+| `dot_env.rs` | `collect_dot_env` layers the `.env` files of the chain through the `DotEnvLoader` trait (parent under child, child wins); `collect_default_dot_env` reads the default `.env` of a base folder through `DotEnvLoader::load_default` (a failure is a warning); the file I/O is in `rocket-infra` |
 | `invalid.rs` | `pub(crate) invalid(message)` — the one way this crate builds `DomainError::InvalidInput`; used by `client_certificate_validation.rs` and `external_secret.rs` |
 
 ### Key Design Points

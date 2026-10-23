@@ -25,7 +25,7 @@ A collection file only requests elevated access. `~/.rocket-api/trust.yml` holds
 - Backend (WebSocket, GraphQL subscriptions, gRPC): `build_variable_context_with_process_env` fills `process.env.*` only when `RequestExecutionService::process_env_allowed(collection)`.
 - HTTP: `get_process_env_vars(collection?)` returns an empty map when the collection is not allowed. `useProcessEnvVars(collection)` and `execute-request.ts` pass the collection.
 - A request with no collection (scratch) keeps full access.
-- `.env` files named by an environment's `dotEnvFilePath` (and its parents') are read only when this gate allows host environment access. A denied gate means the file is not read at all. The real OS environment wins over a `.env` value with the same name, and every `.env` value is masked in the Console (reveal toggle shows it).
+- `.env` files named by an environment's `dotEnvFilePath` (and its parents') are read only when this gate allows host environment access. The default `<collection>/.env` (and the workspace base `.env`) is read under the same gate, with no environment selected, as the lowest layers. A denied gate means no file is read at all. The real OS environment wins over a `.env` value with the same name, and every `.env` value is masked in the Console (reveal toggle shows it).
 - Before a send, `warnIfProcessEnvWithheld` (`src/lib/process-env-gate.ts`) adds a console line and a toast when the text uses a placeholder and access is withheld. The send is never blocked.
 - Who has it: collections that existed at the upgrade (grandfathered), collections created in Rocket. Clones and imports have none until allowed.
 

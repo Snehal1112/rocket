@@ -545,7 +545,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     id='env-dotenv-path'
                     aria-label='.env file path'
                     className='h-7 min-w-0 flex-1 text-xs font-mono'
-                    placeholder='.env'
+                    placeholder='.env (default: collection .env)'
                     value={selectedEnv.dotEnvFilePath ?? ''}
                     onChange={(e) =>
                       updateEnvField({ dotEnvFilePath: e.target.value || undefined })

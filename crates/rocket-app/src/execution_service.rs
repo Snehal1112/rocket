@@ -1060,7 +1060,8 @@ impl RequestExecutionService {
         rocket_environment::flatten_with_repo(&env, repo.as_ref())
     }
 
-    /// The `process.env` values for a send: `.env` files layered global first, then the
+    /// The `process.env` values for a send: default `.env` files (workspace, then collection
+    /// folder), then the environments' `.env` files global first, then the
     /// collection environment, with the real OS environment on top. A denied gate returns
     /// nothing and reads no file.
     pub fn process_env_for(
@@ -1075,6 +1076,18 @@ impl RequestExecutionService {
         let mut file_values: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         if let Some(loader) = self.dot_env_loader.as_deref() {
+            // Default `.env` files are the lowest layers: workspace first, then collection.
+            let default_bases = [
+                self.global_env_repo().dot_env_base(),
+                collection.and_then(|c| self.pinned_collection_dir(c)),
+            ];
+            for base in default_bases.into_iter().flatten() {
+                let collected = rocket_environment::collect_default_dot_env(loader, Some(&base));
+                for warning in &collected.warnings {
+                    tracing::warn!("{warning}");
+                }
+                file_values.extend(collected.values);
+            }
             let mut layers: Vec<(
                 Box<dyn EnvironmentRepository + '_>,
                 &str,
@@ -7120,6 +7133,8 @@ mod tests {
     struct FakeDotEnv {
         files: std::collections::HashMap<String, Vec<(String, String)>>,
         calls: Mutex<Vec<(String, Option<std::path::PathBuf>)>>,
+        defaults: Mutex<std::collections::HashMap<std::path::PathBuf, Vec<(String, String)>>>,
+        default_calls: Mutex<Vec<Option<std::path::PathBuf>>>,
     }
 
     impl FakeDotEnv {
@@ -7137,7 +7152,23 @@ mod tests {
                     })
                     .collect(),
                 calls: Mutex::new(Vec::new()),
+                defaults: Mutex::new(std::collections::HashMap::new()),
+                default_calls: Mutex::new(Vec::new()),
             })
+        }
+        /// Sets the default `.env` pairs returned for one base folder.
+        fn with_default(self: Arc<Self>, base: &str, pairs: &[(&str, &str)]) -> Arc<Self> {
+            self.defaults.lock().expect("defaults").insert(
+                std::path::PathBuf::from(base),
+                pairs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            );
+            self
+        }
+        fn default_call_count(&self) -> usize {
+            self.default_calls.lock().expect("default calls").len()
         }
         fn call_count(&self) -> usize {
             self.calls.lock().expect("calls").len()
@@ -7166,9 +7197,16 @@ mod tests {
 
         fn load_default(
             &self,
-            _base: Option<&std::path::Path>,
+            base: Option<&std::path::Path>,
         ) -> Result<Vec<(String, String)>, String> {
-            Ok(Vec::new())
+            self.0
+                .default_calls
+                .lock()
+                .expect("default calls")
+                .push(base.map(|b| b.to_path_buf()));
+            Ok(base
+                .and_then(|b| self.0.defaults.lock().expect("defaults").get(b).cloned())
+                .unwrap_or_default())
         }
     }
 
@@ -7329,6 +7367,102 @@ mod tests {
         assert_eq!(pe.vars.get("ROCKET_DOT_G").map(String::as_str), Some("g"));
         let calls = fake.calls.lock().expect("calls");
         assert_eq!(calls[0].1, Some(std::path::PathBuf::from("/ws")));
+    }
+
+    #[test]
+    fn process_env_reads_the_collection_default_file_without_an_environment() {
+        let fake = FakeDotEnv::new(&[]).with_default("/work/api", &[("ROCKET_DEF_A", "1")]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(Environment::new("unused")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), None, None);
+        assert_eq!(pe.vars.get("ROCKET_DEF_A").map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn process_env_default_file_is_overridden_by_an_explicit_dot_env_path() {
+        let fake = FakeDotEnv::new(&[(".env.dev", &[("ROCKET_DEF_B", "explicit")])])
+            .with_default("/work/api", &[("ROCKET_DEF_B", "default")]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env.dev")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), Some("dev"), None);
+        assert_eq!(
+            pe.vars.get("ROCKET_DEF_B").map(String::as_str),
+            Some("explicit")
+        );
+    }
+
+    #[test]
+    fn process_env_workspace_default_is_under_the_collection_default() {
+        let fake = FakeDotEnv::new(&[])
+            .with_default("/ws", &[("ROCKET_DEF_C", "ws"), ("ROCKET_DEF_W", "ws")])
+            .with_default("/work/api", &[("ROCKET_DEF_C", "collection")]);
+        let global = BaseEnvRepo {
+            inner: MockEnvRepo::empty(),
+            base: std::path::PathBuf::from("/ws"),
+        };
+        let svc = dot_env_svc(
+            Box::new(global),
+            Some(Environment::new("unused")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), None, None);
+        assert_eq!(
+            pe.vars.get("ROCKET_DEF_C").map(String::as_str),
+            Some("collection")
+        );
+        assert_eq!(pe.vars.get("ROCKET_DEF_W").map(String::as_str), Some("ws"));
+    }
+
+    #[test]
+    fn process_env_denied_gate_reads_no_default_file() {
+        let fake = FakeDotEnv::new(&[]).with_default("/work/api", &[("ROCKET_DEF_A", "1")]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(Environment::new("unused")),
+            Some(&fake),
+            false,
+        );
+        let pe = svc.process_env_for(Some("api"), None, None);
+        assert!(pe.vars.is_empty());
+        assert_eq!(fake.default_call_count(), 0);
+        assert_eq!(fake.call_count(), 0);
+    }
+
+    #[test]
+    fn process_env_default_file_keys_are_listed_in_dot_env_keys() {
+        let fake = FakeDotEnv::new(&[]).with_default("/work/api", &[("ROCKET_DEF_K", "1")]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(Environment::new("unused")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), None, None);
+        assert_eq!(pe.dot_env_keys, vec!["ROCKET_DEF_K".to_string()]);
+    }
+
+    #[test]
+    fn process_env_os_value_beats_the_default_file() {
+        let os = std::env::var("PATH").expect("PATH should be set");
+        let fake = FakeDotEnv::new(&[]).with_default("/work/api", &[("PATH", "from-file")]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(Environment::new("unused")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for(Some("api"), None, None);
+        assert_eq!(pe.vars.get("PATH"), Some(&os));
+        assert!(!pe.dot_env_keys.contains(&"PATH".to_string()));
     }
 
     #[test]

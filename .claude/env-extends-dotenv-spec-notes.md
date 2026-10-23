@@ -31,6 +31,7 @@ The spec lists these as `Decided by: call`. Re-check them against the shipped be
 
 - A disabled child variable shadows the parent's variable with the same key.
 - A collection's `.env` file wins over the global environment's file, and the OS environment wins over both.
+- The default `.env` of the workspace base and of the collection folder is read even with no environment selected, under the same gate. These are the lowest layers (workspace, then collection), the environments' explicit `.env` files override them, and the OS environment wins over all.
 - A `.env` value shorter than 6 characters stays visible in the Console, because the existing minimum applies.
 
 ## Follow-ups already in the spec
