@@ -20,7 +20,8 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 - The common `rok.*` subset is translated to `pm.*`. `Preserve scripts` keeps the text.
 - Environments are optional and on by default. Workspace-level environments are not exported.
 - No legacy `.bru` output and no single-file OpenCollection YAML.
-- Saved request examples are not exported, because captured responses may hold tokens.
+- Saved request examples are not exported in either format, because captured responses may hold tokens. The Bruno ZIP removes the `examples` key and reports it.
+- The Bruno ZIP leaves out Rocket-only files (`flows/` and hidden directories such as `.rocket/`) and reports them.
 - The Bruno ZIP removes the `extensions.rocketapi` subtree and the trust-gate keys and keeps other `extensions.*` keys.
 - A Postman export with environments is one ZIP, so the dialog needs one save.
 - Environments are read with `list_strict`. A keychain or read error fails the export.

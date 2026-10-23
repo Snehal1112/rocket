@@ -62,13 +62,35 @@ fn blank_note(rel_path: &str, feature: &str, detail: &str) -> ExportNote {
     }
 }
 
-/// Blanks a string value unless it is empty or a variable reference.
+/// Blanks a credential slot unless it is empty or a variable reference. A number or a
+/// boolean is a literal credential too (an unquoted `token: 123456`), so it is blanked.
 fn blank_string(slot: &mut Value) -> bool {
     match slot {
         Value::String(s) if !s.is_empty() && !is_variable_reference(s) => {
             s.clear();
             true
         }
+        Value::Number(_) | Value::Bool(_) => {
+            *slot = Value::String(String::new());
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Clears a secret variable value whatever its form: text, number, boolean, or the typed
+/// form `{type, data}`, where only `data` is cleared. A reference is blanked too.
+fn clear_secret_value(slot: &mut Value) -> bool {
+    match slot {
+        Value::String(s) if !s.is_empty() => {
+            s.clear();
+            true
+        }
+        Value::Number(_) | Value::Bool(_) => {
+            *slot = Value::String(String::new());
+            true
+        }
+        Value::Mapping(typed) => typed.get_mut("data").is_some_and(clear_secret_value),
         _ => false,
     }
 }
@@ -83,7 +105,9 @@ fn walk(rel_path: &str, value: &mut Value, notes: &mut Vec<ExportNote>) {
                             yaml_scrub_auth(rel_path, auth, notes);
                         }
                     }
-                    Some("headers") => scrub_headers(rel_path, child, notes),
+                    // gRPC metadata rows have the same name and value shape as headers.
+                    Some("headers" | "metadata") => scrub_headers(rel_path, child, notes),
+                    Some("clientCertificates") => scrub_certificates(rel_path, child, notes),
                     Some("variables") => scrub_variables(rel_path, child, notes),
                     Some("url") => yaml_scrub_url(rel_path, child, notes),
                     _ => {}
@@ -108,6 +132,7 @@ fn yaml_scrub_auth(rel_path: &str, auth: &mut Mapping, notes: &mut Vec<ExportNot
         "secretAccessKey",
         "sessionToken",
         "consumerSecret",
+        "accessToken",
         "accessTokenSecret",
     ];
     if is_apikey {
@@ -157,6 +182,25 @@ fn scrub_headers(rel_path: &str, headers: &mut Value, notes: &mut Vec<ExportNote
     }
 }
 
+/// Blanks the passphrase of each client certificate. A `{{variable}}` reference is kept.
+fn scrub_certificates(rel_path: &str, certs: &mut Value, notes: &mut Vec<ExportNote>) {
+    let Value::Sequence(items) = certs else {
+        return;
+    };
+    for item in items {
+        let Value::Mapping(cert) = item else { continue };
+        if let Some(slot) = cert.get_mut("passphrase") {
+            if blank_string(slot) {
+                notes.push(blank_note(
+                    rel_path,
+                    "Certificate passphrase",
+                    "clientCertificates.passphrase",
+                ));
+            }
+        }
+    }
+}
+
 fn scrub_variables(rel_path: &str, variables: &mut Value, notes: &mut Vec<ExportNote>) {
     let Value::Sequence(items) = variables else {
         return;
@@ -176,12 +220,7 @@ fn scrub_variables(rel_path: &str, variables: &mut Value, notes: &mut Vec<Export
         for field in ["value", "initial"] {
             if let Some(slot) = row.get_mut(field) {
                 // Secret values are always blanked, even a reference, per the spec.
-                if let Value::String(s) = slot {
-                    if !s.is_empty() {
-                        s.clear();
-                        changed = true;
-                    }
-                }
+                changed |= clear_secret_value(slot);
             }
         }
         if changed {
@@ -505,5 +544,82 @@ request:
         assert!(is_sensitive_header("X-API-Key"));
         assert!(is_sensitive_header("Set-Cookie"));
         assert!(!is_sensitive_header("Accept"));
+    }
+
+    #[test]
+    fn blanks_sensitive_grpc_metadata_and_keeps_others() {
+        let mut v = yaml(
+            "grpc:\n  metadata:\n    - name: authorization\n      value: Bearer LEAK1\n    - name: x-trace\n      value: keep\n    - name: Cookie\n      value: \"{{c}}\"\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("rpc/get.yml", &mut v, &mut notes);
+        assert_eq!(v["grpc"]["metadata"][0]["value"], empty());
+        assert_eq!(v["grpc"]["metadata"][1]["value"], Value::String("keep".into()));
+        assert_eq!(v["grpc"]["metadata"][2]["value"], Value::String("{{c}}".into()));
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].action, ExportAction::Blanked);
+    }
+
+    #[test]
+    fn blanks_client_certificate_passphrase_in_collection_and_environment() {
+        let mut collection = yaml(
+            "config:\n  clientCertificates:\n    - type: pkcs12\n      domain: a.test\n      passphrase: LEAK3\n    - type: pem\n      domain: b.test\n      passphrase: \"{{vault.p}}\"\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("opencollection.yml", &mut collection, &mut notes);
+        let certs = &collection["config"]["clientCertificates"];
+        assert_eq!(certs[0]["passphrase"], empty());
+        assert_eq!(certs[0]["domain"], Value::String("a.test".into()));
+        assert_eq!(certs[1]["passphrase"], Value::String("{{vault.p}}".into()));
+        assert_eq!(notes.len(), 1);
+
+        let mut env = yaml(
+            "name: prod\nclientCertificates:\n  - type: pkcs12\n    domain: a.test\n    passphrase: LEAK4\n",
+        );
+        let mut env_notes = Vec::new();
+        scrub_yaml("environments/prod.yml", &mut env, &mut env_notes);
+        assert_eq!(env["clientCertificates"][0]["passphrase"], empty());
+        assert_eq!(env_notes.len(), 1);
+    }
+
+    #[test]
+    fn blanks_typed_secret_variable_data_and_keeps_its_type() {
+        let mut v = yaml(
+            "request:\n  variables:\n    - name: k\n      secret: true\n      value:\n        type: string\n        data: LEAK2\n    - name: plain\n      value:\n        type: string\n        data: keep\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("a.yml", &mut v, &mut notes);
+        let vars = &v["request"]["variables"];
+        assert_eq!(vars[0]["value"]["data"], empty());
+        assert_eq!(vars[0]["value"]["type"], Value::String("string".into()));
+        assert_eq!(vars[1]["value"]["data"], Value::String("keep".into()));
+        assert_eq!(notes.len(), 1);
+    }
+
+    #[test]
+    fn blanks_non_string_scalars_in_credential_slots() {
+        let mut v = yaml("http:\n  auth:\n    type: bearer\n    token: 123456789\n");
+        let mut notes = Vec::new();
+        scrub_yaml("a.yml", &mut v, &mut notes);
+        assert_eq!(v["http"]["auth"]["token"], empty());
+        assert_eq!(notes.len(), 1);
+
+        let mut b = yaml("http:\n  auth:\n    type: basic\n    username: u\n    password: true\n");
+        let mut b_notes = Vec::new();
+        scrub_yaml("b.yml", &mut b, &mut b_notes);
+        assert_eq!(b["http"]["auth"]["password"], empty());
+    }
+
+    #[test]
+    fn blanks_oauth1_access_token() {
+        let mut v = yaml(
+            "http:\n  auth:\n    type: oauth1\n    consumerKey: ck\n    accessToken: LEAK7\n    accessTokenSecret: LEAK9\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("a.yml", &mut v, &mut notes);
+        assert_eq!(v["http"]["auth"]["accessToken"], empty());
+        assert_eq!(v["http"]["auth"]["accessTokenSecret"], empty());
+        assert_eq!(v["http"]["auth"]["consumerKey"], Value::String("ck".into()));
+        assert_eq!(notes.len(), 2);
     }
 }

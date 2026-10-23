@@ -59,6 +59,8 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 ## Secret scrub
 
 - Literal credentials in auth, `secret` variable values, the sensitive headers (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, case-insensitive) and a password in URL userinfo are blanked. A value that is exactly one `{{variable}}` reference is kept.
+- The Bruno ZIP scrub walks the YAML by key. It also blanks gRPC `metadata` rows with a sensitive name, the `passphrase` of every `clientCertificates` entry (collection and environment files), OAuth1 `accessToken`, and the `data` of a typed secret variable (`value: {type, data}`). A number or boolean in a credential slot counts as a literal and is blanked.
+- The Bruno ZIP drops saved request examples (captured responses may hold tokens) with one `Skipped` note per file, and leaves out `flows/` and hidden directories such as `.rocket/` (one `Skipped` note per directory), because Bruno cannot read them.
 - Bodies, scripts and descriptions are not scanned.
 - Environments are written with `type: "secret"` and an empty value for secret variables. The service clears hydrated values right after the read.
 

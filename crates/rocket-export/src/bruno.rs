@@ -1,5 +1,6 @@
 //! Bruno collection ZIP builder.
 
+use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 
 use rocket_shared::error::{DomainError, DomainResult};
@@ -18,6 +19,33 @@ fn is_noise(rel_path: &str) -> bool {
     rel_path
         .split('/')
         .any(|part| part == ".git" || part == "node_modules")
+}
+
+/// The top-level directory of a Rocket-only file, which Bruno cannot read: `flows/` and
+/// any hidden directory such as `.rocket/` (contract snapshots).
+fn rocket_only_root(rel_path: &str) -> Option<&str> {
+    let (first, _) = rel_path.split_once('/')?;
+    (first == "flows" || first.starts_with('.')).then_some(first)
+}
+
+/// Removes saved request examples, which hold captured responses that may contain
+/// tokens. Returns true when something was removed.
+fn drop_examples(value: &mut Value) -> bool {
+    match value {
+        Value::Mapping(map) => {
+            let mut removed = false;
+            if matches!(map.get("examples"), Some(Value::Sequence(_))) {
+                map.remove("examples");
+                removed = true;
+            }
+            for (_, child) in map.iter_mut() {
+                removed |= drop_examples(child);
+            }
+            removed
+        }
+        Value::Sequence(items) => items.iter_mut().fold(false, |acc, i| drop_examples(i) | acc),
+        _ => false,
+    }
 }
 
 fn extension(rel_path: &str) -> &str {
@@ -73,10 +101,15 @@ pub fn bruno_zip(
 ) -> DomainResult<(Vec<u8>, ExportReport)> {
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     let mut report = ExportReport::default();
+    let mut rocket_only: BTreeSet<String> = BTreeSet::new();
 
     for file in files {
         let rel = file.rel_path.as_str();
         if is_noise(rel) {
+            continue;
+        }
+        if let Some(root) = rocket_only_root(rel) {
+            rocket_only.insert(root.to_string());
             continue;
         }
         let ext = extension(rel);
@@ -91,6 +124,16 @@ pub fn bruno_zip(
             let mut value: Value = serde_yaml::from_slice(&file.bytes)
                 .map_err(|e| DomainError::InvalidInput(format!("{rel}: invalid YAML: {e}")))?;
             strip_rocket_namespace(&mut value);
+            if drop_examples(&mut value) {
+                report.items.push(ExportNote {
+                    path: rel.to_string(),
+                    feature: "Examples".to_string(),
+                    action: ExportAction::Skipped,
+                    detail: Some(
+                        "Saved responses can hold tokens, so they are not exported.".to_string(),
+                    ),
+                });
+            }
             scrub_yaml(rel, &mut value, &mut report.items);
             note_rok_scripts(rel, &value, &mut report.items);
             let text = serde_yaml::to_string(&value)
@@ -102,6 +145,14 @@ pub fn bruno_zip(
         } else {
             entries.push((rel.to_string(), file.bytes));
         }
+    }
+    for root in rocket_only {
+        report.items.push(ExportNote {
+            path: root,
+            feature: "Rocket-only files".to_string(),
+            action: ExportAction::Skipped,
+            detail: Some("Bruno cannot read these files, so they are not exported.".to_string()),
+        });
     }
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -185,6 +236,46 @@ mod tests {
         assert!(names(&bytes)
             .iter()
             .all(|n| !n.starts_with("my-api/environments/")));
+    }
+
+    #[test]
+    fn bruno_zip_drops_saved_examples_and_reports_them() {
+        let files = vec![file(
+            "users/login.yml",
+            "info:\n  name: login\nhttp:\n  method: POST\n  url: https://x\nexamples:\n  - name: ok\n    response:\n      body:\n        data: '{\"access_token\":\"LEAK8\"}'\n",
+        )];
+        let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
+        let text = read(&bytes, "a/users/login.yml");
+        assert!(!text.contains("LEAK8"));
+        assert!(!text.contains("examples"));
+        let note = report
+            .items
+            .iter()
+            .find(|n| n.feature == "Examples")
+            .expect("examples note");
+        assert_eq!(note.path, "users/login.yml");
+        assert_eq!(note.action, ExportAction::Skipped);
+    }
+
+    #[test]
+    fn bruno_zip_skips_rocket_only_directories_and_reports_them() {
+        let files = vec![
+            file("opencollection.yml", "info:\n  name: a\n"),
+            file("users/get.yml", "info:\n  name: get\nhttp:\n  method: GET\n  url: https://x\n"),
+            file("flows/f.yml", "name: f\n"),
+            file("flows/deep/g.yml", "name: g\n"),
+            file(".rocket/contracts/a.yml", "name: c\n"),
+        ];
+        let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
+        assert_eq!(names(&bytes), vec!["a/opencollection.yml", "a/users/get.yml"]);
+        assert_eq!(report.exported, 2);
+        let skipped: Vec<&str> = report
+            .items
+            .iter()
+            .filter(|n| n.feature == "Rocket-only files")
+            .map(|n| n.path.as_str())
+            .collect();
+        assert_eq!(skipped, [".rocket", "flows"]);
     }
 
     #[test]
