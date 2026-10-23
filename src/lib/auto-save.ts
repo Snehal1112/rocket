@@ -1,7 +1,8 @@
+import { findTabInTree } from '@/lib/pane-utils';
 import { saveTabRequest } from '@/lib/save-tab-request';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import type { RequestState, RequestTab } from '@/types/pane-types';
+import { isRequestTab, type RequestState, type RequestTab } from '@/types/pane-types';
 
 interface PendingSave {
   timer: ReturnType<typeof setTimeout>;
@@ -68,6 +69,9 @@ export function scheduleAutoSave(
   request: RequestState,
 ) {
   cancelAutoSave(tabId);
+  // A temporary Try tab shares its parent's source but never writes to it.
+  const live = findTabInTree(usePaneStore.getState().root, tabId)?.tab;
+  if (live && isRequestTab(live) && live.transient) return;
   // Stamped now, so a save that fires after a workspace switch is dropped.
   const workspaceId = activeWorkspaceId();
   const run = () => runSave(tabId, collection, path, title, request, workspaceId);
@@ -93,7 +97,7 @@ export function cancelAutoSave(tabId: string) {
 export async function flushAutoSaves(dirtyTabs: RequestTab[] = []): Promise<number> {
   const workspaceId = activeWorkspaceId();
   for (const tab of dirtyTabs) {
-    if (!tab.source) continue;
+    if (!tab.source || tab.transient) continue;
     cancelAutoSave(tab.id);
     const { collection, path } = tab.source;
     void track(runSave(tab.id, collection, path, tab.title, tab.request, workspaceId));

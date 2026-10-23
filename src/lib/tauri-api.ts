@@ -274,6 +274,8 @@ export interface RequestSummary {
   fileName?: string;
   /** Which protocol the file holds. Absent means HTTP. */
   kind?: RequestKind;
+  /** Names of the saved examples, in file order. Only HTTP requests have them. */
+  exampleNames?: string[];
 }
 
 /** Non-HTTP item (GraphQL, gRPC, WebSocket) kept as raw YAML. Not shown or editable in the UI yet. */
@@ -1733,6 +1735,42 @@ export const saveFolderSettings = (
   folderPath: string,
   settings: FolderSettings,
 ) => invoke<void>('save_folder_settings', { collection, folderPath, settings });
+
+// Request examples
+export interface ExampleRequestSnapshot {
+  url?: string;
+  method?: string;
+  headers?: { name: string; value: string }[];
+  params?: { name: string; value: string; type?: 'query' | 'path' }[];
+  body?: { type: string; data: string | { name: string; value: string }[] };
+}
+export interface ExampleResponseSnapshot {
+  status?: number;
+  statusText?: string;
+  headers?: { name: string; value: string }[];
+  body?: { type: string; data: string };
+}
+export interface RequestExample {
+  name: string;
+  description?: unknown;
+  request?: ExampleRequestSnapshot;
+  response?: ExampleResponseSnapshot;
+}
+export const listRequestExamples = (collection: string, requestPath: string) =>
+  invoke<RequestExample[]>('list_request_examples', { collection, requestPath });
+export const addRequestExample = (
+  collection: string,
+  requestPath: string,
+  example: RequestExample,
+) => invoke<void>('add_request_example', { collection, requestPath, example });
+export const renameRequestExample = (
+  collection: string,
+  requestPath: string,
+  oldName: string,
+  newName: string,
+) => invoke<void>('rename_request_example', { collection, requestPath, oldName, newName });
+export const deleteRequestExample = (collection: string, requestPath: string, name: string) =>
+  invoke<void>('delete_request_example', { collection, requestPath, name });
 
 // Request variables
 export const getRequestVariables = (collection: string, requestPath: string) =>

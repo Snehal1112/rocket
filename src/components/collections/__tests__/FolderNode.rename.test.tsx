@@ -8,7 +8,7 @@ import type { CollectionItem, CollectionSummary } from '@/lib/tauri-api';
 import { moveItem } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { FolderTab } from '@/types/pane-types';
-import { isFolderTab } from '@/types/pane-types';
+import { isExampleTab, isFolderTab } from '@/types/pane-types';
 
 vi.mock('@/lib/auto-save', () => ({ scheduleAutoSave: vi.fn() }));
 vi.mock('@/lib/tauri-api', async () => {
@@ -82,5 +82,25 @@ describe('FolderNode rename', () => {
     expect(moveItem).toHaveBeenCalledWith('col', 'parent', 'col', 'renamed');
     expect(folderTabs()[0].id).toBe(id);
     expect(folderTabs()[0].title).toBe('renamed');
+  });
+
+  it('retargets example tabs under the renamed folder and leaves similar prefixes alone', async () => {
+    usePaneStore.getState().openExampleTab('col', 'parent/login.yml', '200 OK');
+    usePaneStore.getState().openExampleTab('col', 'parentage/x.yml', '200 OK');
+    renderNode();
+
+    fireEvent.click(screen.getByText('Rename'));
+    const input = await screen.findByDisplayValue('parent');
+    fireEvent.change(input, { target: { value: 'renamed' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(
+        collectAllTabs(usePaneStore.getState().root)
+          .filter(isExampleTab)
+          .map((t) => t.source.path)
+          .sort(),
+      ).toEqual(['parentage/x.yml', 'renamed/login.yml']),
+    );
   });
 });

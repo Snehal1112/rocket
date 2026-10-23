@@ -3,6 +3,7 @@ import {
   ChevronRight,
   FileCode,
   FileLock,
+  FileText,
   FolderOpen,
   GitBranch,
   Globe,
@@ -38,6 +39,7 @@ import {
   isContractDiffTab,
   isContractTab,
   isDiffTab,
+  isExampleTab,
   isFlowTab,
   isFolderTab,
   isGitTab,
@@ -500,6 +502,14 @@ function deriveSegments(
           onSelect: (item) => nav.updateFolderSection(tab.id, item.id as FolderSection),
         },
       },
+    ];
+  }
+
+  if (isExampleTab(tab)) {
+    return [
+      { label: tab.source.collection },
+      { label: tab.source.path },
+      { label: tab.exampleName, icon: <FileText className='h-3 w-3' /> },
     ];
   }
 

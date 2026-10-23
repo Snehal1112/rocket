@@ -610,3 +610,63 @@ describe('RequestNode Duplicate', () => {
     expect(screen.queryByText('Duplicate')).toBeNull();
   });
 });
+
+describe('RequestNode examples', () => {
+  const withExamples: Extract<CollectionItem, { type: 'request' } | { type: 'summary' }> = {
+    type: 'summary',
+    uid: 'req-ex',
+    name: 'List Users',
+    method: 'GET',
+    url: 'https://api.example.com/users',
+    exampleNames: ['200 OK', '401'],
+  };
+
+  beforeEach(() => {
+    const leaf = createDefaultLeaf();
+    usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
+    vi.mocked(tauriApi.getRequest).mockResolvedValue({
+      uid: 'req-ex',
+      name: 'List Users',
+      method: 'GET',
+      url: 'https://api.example.com/users',
+      headers: [],
+      auth: { authType: 'none' },
+    });
+  });
+
+  it('request_with_examples_shows_a_chevron_and_nested_rows', async () => {
+    renderNode(withExamples, 'users.yml');
+    const row = screen.getByTestId('request-item-GET-List Users');
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('401')).toBeNull();
+    await userEvent.click(screen.getByLabelText('Open GET List Users'));
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByText('200 OK')).toBeInTheDocument();
+    expect(screen.getByText('401')).toBeInTheDocument();
+  });
+
+  it('a_request_without_examples_shows_no_chevron', () => {
+    const { unmount } = renderNode(summaryItem, 'orders.yml');
+    expect(screen.getByTestId('request-item-GET-List Orders')).not.toHaveAttribute(
+      'aria-expanded',
+    );
+    unmount();
+    renderNode({ ...summaryItem, exampleNames: [] }, 'orders.yml');
+    expect(screen.getByTestId('request-item-GET-List Orders')).not.toHaveAttribute(
+      'aria-expanded',
+    );
+  });
+
+  it('a_non_http_request_never_shows_examples', () => {
+    renderNode({ ...withExamples, uid: 'g-ex', name: 'Gql Ex', kind: 'graphql' }, 'g.yml');
+    expect(screen.getByTestId('request-item-GQL-Gql Ex')).not.toHaveAttribute('aria-expanded');
+  });
+
+  it('fifty_examples_render_as_fifty_rows', async () => {
+    const names = Array.from({ length: 50 }, (_, i) => `Example ${i + 1}`);
+    renderNode({ ...withExamples, uid: 'req-50', exampleNames: names }, 'big.yml');
+    await userEvent.click(screen.getByLabelText('Open GET List Users'));
+    expect(await screen.findByText('Example 50')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/^Open example Example /)).toHaveLength(50);
+  });
+});

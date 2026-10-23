@@ -522,3 +522,74 @@ fn read_order_list_is_none_for_garbage_a_directory_or_no_file() {
     write(&dir, "e/other.yml", "x");
     assert_eq!(read_order_list(&dir.path().join("e")), None);
 }
+
+#[test]
+fn summaries_list_example_names_in_order() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    save(&repo, "a.yml", "A");
+    let path = dir.path().join("col").join("a.yml");
+    let mut text = fs::read_to_string(&path).expect("read request");
+    text.push_str("examples:\n  - name: 200 OK\n  - name: '401'\n");
+    fs::write(&path, text).expect("write examples");
+
+    let summaries = repo.get_summaries("col").expect("summaries load");
+    let names: Vec<_> = summaries
+        .root
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            CollectionItem::Summary(s) => Some(s.example_names.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, vec![vec!["200 OK".to_string(), "401".to_string()]]);
+}
+
+/// Saves request `A`, appends `tail` to its file and returns the example names of every
+/// summary in the root, so a corrupt `examples` block can be checked not to hide the request.
+fn example_names_after_appending(tail: &str) -> Vec<Vec<String>> {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    save(&repo, "a.yml", "A");
+    let path = dir.path().join("col").join("a.yml");
+    let mut text = fs::read_to_string(&path).expect("read request");
+    text.push_str(tail);
+    fs::write(&path, text).expect("write examples");
+    let summaries = repo.get_summaries("col").expect("summaries load");
+    summaries
+        .root
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            CollectionItem::Summary(s) => Some(s.example_names.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn summaries_skip_an_example_without_a_name() {
+    let names = example_names_after_appending(
+        "examples:\n  - name: first\n  - response:\n      status: 200\n  - name: last\n",
+    );
+    assert_eq!(names, vec![vec!["first".to_string(), "last".to_string()]]);
+}
+
+#[test]
+fn summaries_skip_an_example_with_a_non_string_name() {
+    let names = example_names_after_appending("examples:\n  - name: 200\n  - name: ok\n");
+    assert_eq!(names, vec![vec!["ok".to_string()]]);
+}
+
+#[test]
+fn summaries_keep_the_request_when_examples_is_not_a_list() {
+    let names = example_names_after_appending("examples: nope\n");
+    assert_eq!(names, vec![Vec::<String>::new()]);
+}
+
+#[test]
+fn summaries_keep_the_request_when_examples_is_empty() {
+    let names = example_names_after_appending("examples: []\n");
+    assert_eq!(names, vec![Vec::<String>::new()]);
+}

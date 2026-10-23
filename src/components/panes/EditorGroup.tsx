@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { CollectionOverviewTab } from '@/components/collections/CollectionOverviewTab';
 import { FolderSettingsTab } from '@/components/collections/FolderSettingsTab';
 import { EditorSkeleton } from '@/components/editor/EditorSkeleton';
+import { ExampleTabView } from '@/components/examples/ExampleTabView';
 import { WebSocketPanel } from '@/components/request/websocket/WebSocketPanel';
 
 // Lazy-load tabs that aren't shown on a default/cold launch, so their code
@@ -67,6 +68,7 @@ import {
   isContractDiffTab,
   isContractTab,
   isDiffTab,
+  isExampleTab,
   isFlowTab,
   isFolderTab,
   isGitTab,
@@ -203,7 +205,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
   const handleCloseTab = (tabId: string) => {
     const tab = node.tabs.find((t) => t.id === tabId);
     // Guard only if the tab has unsaved edits.
-    const needsGuard = tab?.isDirty ?? false;
+    // A temporary Try tab is never saved, so closing it never asks.
+    const needsGuard = (tab?.isDirty ?? false) && !(tab && isRequestTab(tab) && tab.transient);
     if (tab && needsGuard) {
       setPendingCloseTabId(tabId);
     } else {
@@ -312,6 +315,8 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             </Suspense>
           ) : isFolderTab(activeTab) ? (
             <FolderSettingsTab key={activeTab.id} tab={activeTab} />
+          ) : isExampleTab(activeTab) ? (
+            <ExampleTabView key={activeTab.id} tab={activeTab} />
           ) : (
             <CollectionOverviewTab tab={activeTab} />
           )

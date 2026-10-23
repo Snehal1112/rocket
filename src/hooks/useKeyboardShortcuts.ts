@@ -57,6 +57,8 @@ export function useKeyboardShortcuts() {
         e.preventDefault();
         const tab = activeLeaf.tabs.find((t) => t.id === activeLeaf.activeTabId);
         if (!tab) return;
+        // A temporary Try tab is never saved, and it has no collection to save to.
+        if (isRequestTab(tab) && tab.transient) return;
         if (isRequestTab(tab) && !tab.source) {
           window.dispatchEvent(
             new CustomEvent('rocket:save-to-collection', { detail: { tabId: tab.id } }),

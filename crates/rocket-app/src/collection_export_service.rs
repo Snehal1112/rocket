@@ -348,6 +348,7 @@ mod tests {
             url: "/".into(),
             file_name: None,
             kind: RequestKind::Http,
+            example_names: Vec::new(),
         })];
         let err = service(NullCollectionRepo::new().on_get_strict(move |_| Ok(c.clone())))
             .build_tree("demo")

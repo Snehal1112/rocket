@@ -8,7 +8,7 @@ import type { AgentProposal } from '@/lib/tauri-api';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { makeProposal, makeRequest } from '@/test/assistant-fixtures';
-import { isRequestTab, type RequestTab } from '@/types/pane-types';
+import { type ExampleTab, isExampleTab, isRequestTab, type RequestTab } from '@/types/pane-types';
 import { acceptProposal, hasDirtyAffectedTab, rejectProposal } from '../proposal-actions';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
@@ -283,5 +283,82 @@ describe('proposal actions', () => {
     ];
     expect(folder.folderPath).toBe('people');
     expect(script.scriptPath).toBe('people/a.js');
+  });
+
+  describe('example tabs', () => {
+    function exampleTab(path: string, id: string): ExampleTab {
+      return {
+        id,
+        title: '200 OK',
+        tabType: 'example',
+        source: { collection: 'orders', path },
+        exampleName: '200 OK',
+        isDirty: false,
+      };
+    }
+
+    function livePaths(): string[] {
+      const { root } = usePaneStore.getState();
+      const tabs = root.type === 'leaf' ? root.tabs : [];
+      return tabs
+        .filter(isExampleTab)
+        .map((t) => t.source.path)
+        .sort();
+    }
+
+    function parkedPaths(): string[] {
+      return Object.values(usePaneStore.getState().collectionTabState)
+        .flatMap((e) => e.tabs)
+        .filter(isExampleTab)
+        .map((t) => t.source.path)
+        .sort();
+    }
+
+    function openExamples(live: string[], parked: string[]): void {
+      live.forEach((p, i) => usePaneStore.getState().openTab(exampleTab(p, `live:${i}`)));
+      const tabs = parked.map((p, i) => exampleTab(p, `parked:${i}`));
+      usePaneStore.setState({
+        collectionTabState: { orders: { tabs, activeTabId: tabs[0]?.id ?? '' } },
+      });
+    }
+
+    async function accept(change: AgentProposal['change']): Promise<void> {
+      const proposal = makeProposal({ change });
+      useAssistantStore.getState().upsertProposal(proposal);
+      vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...proposal, status: 'accepted' });
+      vi.mocked(api.getRequest).mockResolvedValue(makeRequest({ name: 'New name' }));
+      await acceptProposal(proposal);
+    }
+
+    it('a request rename leaves example tab paths alone, live and parked', async () => {
+      openExamples(['login.yml'], ['login.yml']);
+      await accept({ op: 'renameItem', collection: 'orders', path: 'login.yml', newName: 'newname' });
+      expect(livePaths()).toEqual(['login.yml']);
+      expect(parkedPaths()).toEqual(['login.yml']);
+    });
+
+    it('a folder rename rewrites example tabs under it and not a similar prefix', async () => {
+      openExamples(['auth/login.yml', 'author/x.yml'], ['auth/me.yml']);
+      vi.mocked(api.getRequest).mockRejectedValue(new Error('not a request'));
+      const change: AgentProposal['change'] = {
+        op: 'renameItem',
+        collection: 'orders',
+        path: 'auth',
+        newName: 'identity',
+      };
+      const proposal = makeProposal({ change });
+      useAssistantStore.getState().upsertProposal(proposal);
+      vi.mocked(api.acceptAgentProposal).mockResolvedValue({ ...proposal, status: 'accepted' });
+      await acceptProposal(proposal);
+      expect(livePaths()).toEqual(['author/x.yml', 'identity/login.yml']);
+      expect(parkedPaths()).toEqual(['identity/me.yml']);
+    });
+
+    it('a request move rewrites that request own example tabs', async () => {
+      openExamples(['login.yml', 'other.yml'], ['login.yml']);
+      await accept({ op: 'moveItem', collection: 'orders', fromPath: 'login.yml', toFolder: 'archive' });
+      expect(livePaths()).toEqual(['archive/login.yml', 'other.yml']);
+      expect(parkedPaths()).toEqual(['archive/login.yml']);
+    });
   });
 });

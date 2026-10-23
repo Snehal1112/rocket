@@ -262,6 +262,19 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
             uid: Option<String>,
             info: MinInfo,
             http: MinHttp,
+            // Read leniently: a broken `examples` block must never hide the request.
+            #[serde(default)]
+            examples: Option<serde_yaml::Value>,
+        }
+        /// Takes the string `name` of each mapping in a sequence. Any other shape gives none.
+        fn example_names(value: Option<serde_yaml::Value>) -> Vec<String> {
+            let Some(serde_yaml::Value::Sequence(items)) = value else {
+                return Vec::new();
+            };
+            items
+                .iter()
+                .filter_map(|item| item.get("name")?.as_str().map(str::to_string))
+                .collect()
         }
         #[derive(serde::Deserialize)]
         struct MinInfo {
@@ -281,6 +294,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                     url: min.http.url,
                     file_name: Some(entry_name.to_string()),
                     kind: RequestKind::Http,
+                    example_names: example_names(min.examples),
                 }))
             }
             Err(e) => e,
@@ -293,6 +307,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 url: gql.graphql.url,
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::GraphQl,
+                example_names: Vec::new(),
             })),
             Ok(OcItem::WebSocket(ws)) => Ok(Some(RequestSummary {
                 uid: ws
@@ -305,6 +320,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 url: ws.websocket.url,
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::WebSocket,
+                example_names: Vec::new(),
             })),
             // A gRPC file is small, so the summary reads the few fields the sidebar needs.
             Ok(OcItem::Grpc(grpc)) => Ok(Some(RequestSummary {
@@ -317,6 +333,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 url: grpc.grpc.url,
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::Grpc,
+                example_names: Vec::new(),
             })),
             Ok(OcItem::Http(_)) | Ok(OcItem::Folder(_)) | Err(_) => Err(DomainError::Internal(
                 format!("Failed to parse request summary: {min_err}"),
@@ -334,6 +351,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
             url: req.url,
             file_name: Some(entry_name.to_string()),
             kind: RequestKind::Http,
+            example_names: Vec::new(),
         }))
     }
 }

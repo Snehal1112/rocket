@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  BookmarkPlus,
   Check,
   Clock,
   Copy,
@@ -33,6 +34,10 @@ const MonacoWrapper = lazy(() =>
 
 interface ResponseBodyViewerProps {
   response: ResponseState;
+  /** Opens the save-as-example flow. The button is hidden without it. */
+  onSaveAsExample?: () => void;
+  /** Why saving is not possible now. Null or undefined means it is. */
+  saveExampleDisabledReason?: string | null;
 }
 
 function formatBody(body: string): { formatted: string; isJson: boolean } {
@@ -181,7 +186,11 @@ function EmptyBody({ label }: { label: string }) {
   );
 }
 
-export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
+export function ResponseBodyViewer({
+  response,
+  onSaveAsExample,
+  saveExampleDisabledReason,
+}: ResponseBodyViewerProps) {
   const [activeView, setActiveView] = useState<ViewTab>(response.activeView ?? 'pretty');
   const [copied, setCopied] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -415,6 +424,20 @@ export function ResponseBodyViewer({ response }: ResponseBodyViewerProps) {
                 disabled
               >
                 <LayoutPanelLeft className='h-3.5 w-3.5' />
+              </Button>
+            )}
+
+            {onSaveAsExample && (
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-6 w-6'
+                title={saveExampleDisabledReason ?? 'Save as example'}
+                aria-label='Save as example'
+                disabled={Boolean(saveExampleDisabledReason)}
+                onClick={onSaveAsExample}
+              >
+                <BookmarkPlus className='h-3.5 w-3.5' />
               </Button>
             )}
 

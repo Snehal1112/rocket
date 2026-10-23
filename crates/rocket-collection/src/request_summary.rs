@@ -15,6 +15,9 @@ pub struct RequestSummary {
     /// Which protocol the file holds. Absent in older JSON, which means HTTP.
     #[serde(default, skip_serializing_if = "RequestKind::is_http")]
     pub kind: RequestKind,
+    /// Names of the saved examples, in file order. Only HTTP requests have them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub example_names: Vec<String>,
 }
 
 #[cfg(test)]
@@ -29,6 +32,22 @@ mod tests {
     }
 
     #[test]
+    fn summary_item_serializes_example_names_in_camel_case() {
+        let item = crate::CollectionItem::Summary(RequestSummary {
+            uid: "u".into(),
+            name: "A".into(),
+            method: "GET".into(),
+            url: "/a".into(),
+            file_name: Some("A.yml".into()),
+            kind: RequestKind::Http,
+            example_names: vec!["200 OK".into()],
+        });
+        let json = serde_json::to_value(&item).expect("ser");
+        assert_eq!(json["fileName"], "A.yml");
+        assert_eq!(json["exampleNames"][0], "200 OK");
+    }
+
+    #[test]
     fn http_summary_omits_kind_and_graphql_summary_keeps_it() {
         let mut s = RequestSummary {
             uid: "u".into(),
@@ -37,6 +56,7 @@ mod tests {
             url: "/a".into(),
             file_name: None,
             kind: RequestKind::Http,
+            example_names: Vec::new(),
         };
         assert!(serde_json::to_value(&s).expect("ser").get("kind").is_none());
         s.kind = RequestKind::GraphQl;

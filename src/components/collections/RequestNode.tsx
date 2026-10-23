@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { TreeItem, TreeItemContent } from '@/components/ui/tree';
+import { Tree, TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_BADGE_COLOR } from '@/lib/colors';
 import {
   encodeFlowRequestDragPayload,
@@ -60,6 +60,7 @@ import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState, RequestTab } from '@/types/pane-types';
+import { ExampleNode } from './ExampleNode';
 import type { DeleteTarget } from './tree-utils';
 import { isActiveRequest } from './tree-utils';
 
@@ -107,6 +108,10 @@ export function RequestNode({
   // The badge shows the protocol for GraphQL, gRPC and WebSocket, the HTTP verb otherwise.
   const badge =
     kind === 'graphql' ? 'GQL' : kind === 'grpc' ? 'gRPC' : kind === 'websocket' ? 'WS' : method;
+  // Only HTTP summaries carry examples. A full request item has no example names.
+  const exampleNames =
+    kind === 'http' && itemData.type === 'summary' ? (itemData.exampleNames ?? []) : [];
+  const [examplesOpen, setExamplesOpen] = useState(false);
   const root = usePaneStore((s) => s.root);
   const activeGroupId = usePaneStore((s) => s.activeGroupId);
   const openTab = usePaneStore((s) => s.openTab);
@@ -276,6 +281,8 @@ export function RequestNode({
           <TreeItem
             value={uid}
             active={active}
+            open={exampleNames.length > 0 ? examplesOpen : undefined}
+            onOpenChange={setExamplesOpen}
             className='flex-1'
             data-testid={`request-item-${badge}-${name}`}
             draggable={kind === 'http'}
@@ -338,6 +345,18 @@ export function RequestNode({
                 />
               )}
             </TreeItemContent>
+            {exampleNames.length > 0 && (
+              <Tree aria-label={`Examples of ${name}`} className='pl-3'>
+                {exampleNames.map((exampleName) => (
+                  <ExampleNode
+                    key={exampleName}
+                    collectionName={collectionName}
+                    requestPath={path}
+                    name={exampleName}
+                  />
+                ))}
+              </Tree>
+            )}
           </TreeItem>
 
           {/* "..." action menu, visible on hover. */}
@@ -346,7 +365,7 @@ export function RequestNode({
               <button
                 type='button'
                 aria-label={`Actions for ${name}`}
-                className='absolute right-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
+                className='absolute right-1 top-1 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />

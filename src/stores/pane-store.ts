@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { cancelAutoSave, scheduleAutoSave } from '@/lib/auto-save';
+import { exampleToRequestState } from '@/lib/example-to-request';
 import {
   emptyHistory,
   type FlowWriteOptions,
@@ -25,6 +26,7 @@ import {
   findScriptTabsWithin,
   findTabInTree,
   isPathWithin,
+  mapApiRequestToState,
   removeLeaf,
   splitLeaf,
   updateLeaf,
@@ -40,6 +42,8 @@ import {
   type FlowNodeStatus,
   getCollection,
   getFlow,
+  getRequest,
+  type RequestExample,
   readScriptFile,
   renameRequest,
 } from '@/lib/tauri-api';
@@ -49,6 +53,7 @@ import type {
   CollectionSection,
   CollectionTab,
   ContractTab,
+  ExampleTab,
   FlowLastRun,
   FlowNodeDetail,
   FlowRunRecord,
@@ -68,7 +73,14 @@ import type {
   WorkspaceTab,
   WorkspaceTabSection,
 } from '@/types/pane-types';
-import { isFlowTab, isFolderTab, isRequestTab, isRunnerTab, isScriptTab } from '@/types/pane-types';
+import {
+  isExampleTab,
+  isFlowTab,
+  isFolderTab,
+  isRequestTab,
+  isRunnerTab,
+  isScriptTab,
+} from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
@@ -138,6 +150,22 @@ function removeParkedTabs(
     next[key] = { ...entry, tabs, activeTabId };
   }
   return changed ? next : state;
+}
+
+// True when a tab holds unsaved edits that belong in its request file.
+// A temporary Try tab shares its parent's source but must never write to it.
+function savesToFile(tab: Tab): tab is RequestTab & { source: NonNullable<RequestTab['source']> } {
+  return isRequestTab(tab) && tab.isDirty && !!tab.source && !tab.transient;
+}
+
+// True when the tab is the example tab for this request path and example name.
+function isExampleTabFor(tab: Tab, collection: string, path: string, name: string): boolean {
+  return (
+    isExampleTab(tab) &&
+    tab.source.collection === collection &&
+    tab.source.path === path &&
+    tab.exampleName === name
+  );
 }
 
 // Applies an updater to one tab by id in the live pane tree and in every
@@ -327,6 +355,27 @@ export interface PaneState {
   /** Retargets open folder tabs when a folder is renamed, matching whole path segments. */
   renameFolderTabs: (collection: string, oldPath: string, newPath: string) => void;
 
+  /** Opens or focuses the read-only tab of a saved example. */
+  openExampleTab: (collection: string, path: string, exampleName: string) => void;
+  /**
+   * Opens an editable temporary copy of an example's request. It carries the parent's source, so
+   * variables, inherited auth and scripts resolve as for the parent, and never saves to it.
+   */
+  openTryTab: (collection: string, path: string, example: RequestExample) => Promise<void>;
+  /** Closes the example tabs of a request, or only the one named. Parked tabs go too. */
+  closeExampleTabs: (collection: string, path: string, exampleName?: string) => void;
+  /** Closes example tabs of every request at or under a folder path, live and parked. */
+  closeExampleTabsUnder: (collection: string, folderPath: string) => void;
+  /** Rewrites example tab paths after a folder or request move, by whole path segments. */
+  renameExampleTabPaths: (
+    collection: string,
+    oldPath: string,
+    newPath: string,
+    includeSelf?: boolean,
+  ) => void;
+  /** Retargets an open example tab after the example is renamed. */
+  retitleExampleTab: (collection: string, path: string, oldName: string, newName: string) => void;
+
   /** Rewrites saved request paths in open and parked flow tabs of a collection. Never touches isDirty. */
   rewriteFlowRequestPaths: (collection: string, from: string, to: string) => void;
 
@@ -467,7 +516,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Save the tab before closing if it's dirty.
     const { root } = get();
     const found = findTabInTree(root, tabId);
-    if (found?.tab.isDirty && found.tab.source && isRequestTab(found.tab)) {
+    if (found && savesToFile(found.tab)) {
       scheduleAutoSave(
         tabId,
         found.tab.source.collection,
@@ -536,7 +585,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const leaf = findActiveLeaf(root, groupId);
     if (leaf.groupId === groupId) {
       const prevTab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
-      if (prevTab?.isDirty && prevTab.source && isRequestTab(prevTab)) {
+      if (prevTab && savesToFile(prevTab)) {
         scheduleAutoSave(
           prevTab.id,
           prevTab.source.collection,
@@ -617,7 +666,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
     const newRoot = updateTabInTree(root, tabId, (tab) => {
       if (!isRequestTab(tab)) return tab;
-      return { ...tab, request: { ...tab.request, ...patch }, isDirty: true };
+      // A temporary Try tab never turns dirty, so nothing offers to save it.
+      return { ...tab, request: { ...tab.request, ...patch }, isDirty: !tab.transient };
     });
     set({ root: newRoot });
   },
@@ -633,7 +683,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
 
   markDirty(tabId) {
     const { root } = get();
-    set({ root: updateTabInTree(root, tabId, (tab) => ({ ...tab, isDirty: true })) });
+    set({
+      root: updateTabInTree(root, tabId, (tab) =>
+        isRequestTab(tab) && tab.transient ? tab : { ...tab, isDirty: true },
+      ),
+    });
   },
 
   markRequestSaved(tabId, saved) {
@@ -724,6 +778,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const state = get();
     const isTarget = (tab: Tab): tab is RequestTab =>
       isRequestTab(tab) &&
+      !tab.transient &&
       tab.tabType === 'request' &&
       tab.request.requestType === 'http' &&
       tab.source?.collection === collection &&
@@ -778,7 +833,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           if (!isTarget(tab) || !tab.source) return tab;
           const target = `${newPath}${tab.source.path.slice(oldPath.length)}`;
           const moved = { ...tab, source: { collection, path: target } };
-          if (tab.isDirty) resave.push(moved);
+          if (savesToFile(tab)) resave.push(moved);
           return moved;
         }),
       };
@@ -1373,7 +1428,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const flush = (node: PaneNode): void => {
       if (node.type === 'leaf') {
         for (const tab of node.tabs) {
-          if (tab.isDirty && tab.source && isRequestTab(tab)) {
+          if (savesToFile(tab)) {
             scheduleAutoSave(
               tab.id,
               tab.source.collection,
@@ -1453,7 +1508,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     for (const tab of collectAllTabs(root)) {
       if (!saveDirty) {
         cancelAutoSave(tab.id);
-      } else if (tab.isDirty && tab.source && isRequestTab(tab)) {
+      } else if (savesToFile(tab)) {
         scheduleAutoSave(tab.id, tab.source.collection, tab.source.path, tab.title, tab.request);
       }
     }
@@ -1461,9 +1516,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   },
 
   dirtyRequestTabs() {
-    return collectAllTabs(get().root).filter(
-      (tab): tab is RequestTab => isRequestTab(tab) && tab.isDirty && !!tab.source,
-    );
+    return collectAllTabs(get().root).filter((tab): tab is RequestTab => savesToFile(tab));
   },
 
   updateTabSource(tabId, source) {
@@ -1480,6 +1533,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
     // Find the tab to check if it has a collection source.
     const found = findTabInTree(root, tabId);
+    // An example tab is titled by its example name, which is renamed from the sidebar.
+    if (found && isExampleTab(found.tab)) return;
     // Skip if the title hasn't actually changed.
     if (found?.tab.title === title) return;
     set({
@@ -1493,7 +1548,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // Persist rename to disk. The file watcher detects the write and
     // emits collection-changed, which refreshes the sidebar automatically.
     // Script files are renamed from the sidebar, never through the request rename.
-    if (found?.tab.source && !isScriptTab(found.tab)) {
+    // A temporary Try tab only retitles itself, because renaming would rename its parent.
+    const isTry = !!found && isRequestTab(found.tab) && found.tab.transient === true;
+    if (found?.tab.source && !isScriptTab(found.tab) && !isTry) {
       renameRequest(found.tab.source.collection, found.tab.source.path, title).catch((err) =>
         console.error('[pane-store] rename failed:', err),
       );
@@ -1605,6 +1662,142 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       };
     }
     set({ root: next.root, collectionTabState: next.collectionTabState });
+  },
+
+  openExampleTab(collection, path, exampleName) {
+    // Switch first, so a tab parked in another collection's snapshot is found and not duplicated.
+    if (!get().isWorkspaceMode() && get().activeCollection !== collection) {
+      get().switchCollection(collection);
+    }
+    const existing = collectAllTabs(get().root).find((t) =>
+      isExampleTabFor(t, collection, path, exampleName),
+    );
+    if (existing) {
+      // The id is all openTab reads for an open tab, so it only activates it.
+      get().openTab(existing);
+      return;
+    }
+    const tab: ExampleTab = {
+      id: `example:${crypto.randomUUID()}`,
+      title: exampleName,
+      tabType: 'example',
+      source: { collection, path },
+      exampleName,
+      isDirty: false,
+    };
+    get().openTab(tab);
+  },
+
+  async openTryTab(collection, path, example) {
+    if (!get().isWorkspaceMode() && get().activeCollection !== collection) {
+      get().switchCollection(collection);
+    }
+    const parent = await getRequest(collection, path);
+    const request = exampleToRequestState(example, mapApiRequestToState(parent, true));
+    const tab: RequestTab = {
+      id: crypto.randomUUID(),
+      title: `Try: ${example.name}`,
+      tabType: 'request',
+      request,
+      response: null,
+      isDirty: false,
+      source: { collection, path },
+      transient: true,
+    };
+    get().openTab(tab);
+  },
+
+  closeExampleTabs(collection, path, exampleName) {
+    const matches = (t: Tab) =>
+      isExampleTab(t) &&
+      t.source.collection === collection &&
+      t.source.path === path &&
+      (exampleName === undefined || t.exampleName === exampleName);
+    // Closing by group keeps the pane collapse and active-tab logic of closeTab.
+    const closing: { id: string; groupId: string }[] = [];
+    const visit = (node: PaneNode): void => {
+      if (node.type !== 'leaf') {
+        visit(node.children[0]);
+        visit(node.children[1]);
+        return;
+      }
+      for (const t of node.tabs) if (matches(t)) closing.push({ id: t.id, groupId: node.groupId });
+    };
+    visit(get().root);
+    for (const { id, groupId } of closing) get().closeTab(id, groupId);
+    const parked = removeParkedTabs(get().collectionTabState, matches);
+    if (parked !== get().collectionTabState) set({ collectionTabState: parked });
+  },
+
+  closeExampleTabsUnder(collection, folderPath) {
+    const matches = (t: Tab) =>
+      isExampleTab(t) &&
+      t.source.collection === collection &&
+      isPathWithin(t.source.path, folderPath);
+    const closing: { id: string; groupId: string }[] = [];
+    const visit = (node: PaneNode): void => {
+      if (node.type !== 'leaf') {
+        visit(node.children[0]);
+        visit(node.children[1]);
+        return;
+      }
+      for (const t of node.tabs) if (matches(t)) closing.push({ id: t.id, groupId: node.groupId });
+    };
+    visit(get().root);
+    for (const { id, groupId } of closing) get().closeTab(id, groupId);
+    const parked = removeParkedTabs(get().collectionTabState, matches);
+    if (parked !== get().collectionTabState) set({ collectionTabState: parked });
+  },
+
+  renameExampleTabPaths(collection, oldPath, newPath, includeSelf = true) {
+    const state = get();
+    // Without includeSelf only paths below oldPath match, not oldPath itself.
+    const inScope = (path: string) =>
+      includeSelf ? isPathWithin(path, oldPath) : path.startsWith(`${oldPath}/`);
+    const ids = [
+      ...collectAllTabs(state.root),
+      ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
+    ]
+      .filter(
+        (t) => isExampleTab(t) && t.source.collection === collection && inScope(t.source.path),
+      )
+      .map((t) => t.id);
+    let next: Pick<PaneState, 'root' | 'collectionTabState'> = state;
+    for (const id of ids) {
+      next = updateTabEverywhere(next as PaneState, id, (tab) =>
+        isExampleTab(tab) && inScope(tab.source.path)
+          ? {
+              ...tab,
+              source: {
+                ...tab.source,
+                path: `${newPath}${tab.source.path.slice(oldPath.length)}`,
+              },
+            }
+          : tab,
+      );
+    }
+    if (next.root !== state.root || next.collectionTabState !== state.collectionTabState) {
+      set({ root: next.root, collectionTabState: next.collectionTabState });
+    }
+  },
+
+  retitleExampleTab(collection, path, oldName, newName) {
+    const state = get();
+    const ids = [
+      ...collectAllTabs(state.root),
+      ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
+    ]
+      .filter((t) => isExampleTabFor(t, collection, path, oldName))
+      .map((t) => t.id);
+    let next: Pick<PaneState, 'root' | 'collectionTabState'> = state;
+    for (const id of ids) {
+      next = updateTabEverywhere(next as PaneState, id, (tab) =>
+        isExampleTab(tab) ? { ...tab, exampleName: newName, title: newName } : tab,
+      );
+    }
+    if (next.root !== state.root || next.collectionTabState !== state.collectionTabState) {
+      set({ root: next.root, collectionTabState: next.collectionTabState });
+    }
   },
 
   rewriteFlowRequestPaths(collection, from, to) {

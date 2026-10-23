@@ -8,6 +8,7 @@ use rocket_collection::{
     FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind, RequestScriptPhase,
     WebSocketRequest,
 };
+use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::DomainResult;
 
 use crate::FsCollectionRepo;
@@ -344,6 +345,45 @@ impl CollectionRepository for SharedPathCollectionRepo {
     ) -> DomainResult<()> {
         self.repo()
             .save_request_script(collection, request_path, phase, body)
+    }
+
+    fn list_request_examples(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<HttpRequestExample>> {
+        self.repo().list_request_examples(collection, request_path)
+    }
+
+    fn add_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        example: HttpRequestExample,
+    ) -> DomainResult<()> {
+        self.repo()
+            .add_request_example(collection, request_path, example)
+    }
+
+    fn rename_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> DomainResult<()> {
+        self.repo()
+            .rename_request_example(collection, request_path, old_name, new_name)
+    }
+
+    fn delete_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        name: &str,
+    ) -> DomainResult<()> {
+        self.repo()
+            .delete_request_example(collection, request_path, name)
     }
 }
 

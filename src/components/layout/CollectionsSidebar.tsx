@@ -156,6 +156,14 @@ export function CollectionsSidebar() {
       }
       // Close open tabs for deleted items, matching whole path segments.
       const store = usePaneStore.getState();
+      // Example tabs of a deleted request go too, including ones parked by a collection switch.
+      if (deleteTarget.type === 'request' && deleteTarget.path) {
+        store.closeExampleTabs(deleteTarget.collection, deleteTarget.path);
+      }
+      // A deleted folder takes the example tabs of its requests, live and parked.
+      if (deleteTarget.type === 'folder' && deleteTarget.path) {
+        store.closeExampleTabsUnder(deleteTarget.collection, deleteTarget.path);
+      }
       for (const { tab, groupId } of findAffectedTabs(store.root, deleteTarget)) {
         store.closeTab(tab.id, groupId);
       }
@@ -221,6 +229,9 @@ export function CollectionsSidebar() {
     async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
       try {
         await moveItem(srcCollection, srcPath, dstCollection, dstPath);
+        // The example tabs point at the old path, so they close, parked ones too.
+        // Re-open them from the new row.
+        usePaneStore.getState().closeExampleTabsUnder(srcCollection, srcPath);
       } catch (err) {
         console.error('[CollectionsSidebar] move failed:', err);
       }

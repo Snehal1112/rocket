@@ -8,9 +8,11 @@ use rocket_collection::{
     CollectionVariable, FolderSettings, GraphQlRequest, GrpcRequest, Request, RequestKind,
     RequestScriptPhase, WebSocketRequest,
 };
+use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::{DomainError, DomainResult};
 
 pub(crate) mod folder_file;
+mod examples;
 mod folder_settings;
 mod folders;
 mod paths;
@@ -436,5 +438,41 @@ impl CollectionRepository for FsCollectionRepo {
         body: String,
     ) -> DomainResult<()> {
         variables::save_request_script(self, collection, request_path, phase, body)
+    }
+
+    fn list_request_examples(
+        &self,
+        collection: &str,
+        request_path: &str,
+    ) -> DomainResult<Vec<HttpRequestExample>> {
+        examples::list_request_examples(self, collection, request_path)
+    }
+
+    fn add_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        example: HttpRequestExample,
+    ) -> DomainResult<()> {
+        examples::add_request_example(self, collection, request_path, example)
+    }
+
+    fn rename_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> DomainResult<()> {
+        examples::rename_request_example(self, collection, request_path, old_name, new_name)
+    }
+
+    fn delete_request_example(
+        &self,
+        collection: &str,
+        request_path: &str,
+        name: &str,
+    ) -> DomainResult<()> {
+        examples::delete_request_example(self, collection, request_path, name)
     }
 }

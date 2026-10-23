@@ -5,6 +5,7 @@ use rocket_collection::{
     Collection, CollectionSummary, CollectionVariable, FolderSettings, GraphQlRequest, GrpcRequest,
     Request, WebSocketRequest,
 };
+use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::DomainError;
 use rocket_workspace::RepositoryId;
 use serde::Serialize;
@@ -608,6 +609,46 @@ pub fn save_request_variables(
     svc: State<'_, CollectionService>,
 ) -> Result<(), DomainError> {
     svc.save_request_variables(&collection, &request_path, vars)
+}
+
+#[tauri::command]
+pub fn list_request_examples(
+    collection: String,
+    request_path: String,
+    svc: State<'_, CollectionService>,
+) -> Result<Vec<HttpRequestExample>, DomainError> {
+    svc.list_request_examples(&collection, &request_path)
+}
+
+#[tauri::command]
+pub fn add_request_example(
+    collection: String,
+    request_path: String,
+    example: HttpRequestExample,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.add_request_example(&collection, &request_path, example)
+}
+
+#[tauri::command]
+pub fn rename_request_example(
+    collection: String,
+    request_path: String,
+    old_name: String,
+    new_name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.rename_request_example(&collection, &request_path, &old_name, &new_name)
+}
+
+#[tauri::command]
+pub fn delete_request_example(
+    collection: String,
+    request_path: String,
+    name: String,
+    svc: State<'_, CollectionService>,
+) -> Result<(), DomainError> {
+    svc.delete_request_example(&collection, &request_path, &name)
 }
 
 #[tauri::command]
