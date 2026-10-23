@@ -313,7 +313,14 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     updateEnvField({ dotEnvFilePath: toStoredDotEnvPath(picked, dotEnvBaseDir) });
   }, [dotEnvBaseDir, updateEnvField]);
 
-  const dotEnvLine = dotEnvStatus ? dotEnvStatusLine(dotEnvStatus) : null;
+  // The status describes the saved path, so a draft path that differs has no status yet.
+  const savedDotEnvPath = environments.find((e) => e.name === selectedEnv?.name)?.dotEnvFilePath;
+  const dotEnvUnsaved = (selectedEnv?.dotEnvFilePath ?? '') !== (savedDotEnvPath ?? '');
+  const dotEnvLine = dotEnvUnsaved
+    ? { text: 'Save to check this file.', warn: false }
+    : dotEnvStatus
+      ? dotEnvStatusLine(dotEnvStatus)
+      : null;
 
   // Inherited rows come from the saved, flattened environment. Rows the child
   // defines (saved or in-flight) are its own, so they are not listed here.
@@ -587,7 +594,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     id='env-dotenv-path'
                     aria-label='.env file path'
                     className='h-7 min-w-0 flex-1 text-xs font-mono'
-                    placeholder='.env (default: collection .env)'
+                    placeholder={`.env (default: ${activeCollection ? 'collection' : 'workspace'} .env)`}
                     value={selectedEnv.dotEnvFilePath ?? ''}
                     onChange={(e) =>
                       updateEnvField({ dotEnvFilePath: e.target.value || undefined })
@@ -599,6 +606,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     size='icon'
                     className='h-7 w-7 shrink-0'
                     aria-label='Pick .env file'
+                    disabled={!dotEnvStatus}
                     onClick={() => void pickDotEnvFile()}
                   >
                     <FolderOpen className='h-3.5 w-3.5' />

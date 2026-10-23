@@ -681,10 +681,47 @@ describe('EnvironmentDialog .env file picker', () => {
     renderDialog();
     const user = userEvent.setup();
     await screen.findByLabelText('Variable key 1');
+    await screen.findByText('Found .env, 1 key');
 
     await user.click(screen.getByRole('button', { name: 'Pick .env file' }));
 
     await vi.waitFor(() => expect(mockOpen).toHaveBeenCalled());
     expect(screen.getByLabelText('.env file path')).toHaveValue('');
+  });
+
+  it('the_pick_button_is_disabled_while_the_status_loads', async () => {
+    vi.mocked(tauriApi.getDotEnvStatus).mockReturnValue(new Promise(() => undefined));
+    renderDialog();
+    await screen.findByLabelText('Variable key 1');
+    expect(screen.getByRole('button', { name: 'Pick .env file' })).toBeDisabled();
+  });
+
+  it('shows_save_to_check_for_an_unsaved_path_then_the_status_after_save', async () => {
+    mockOpen.mockResolvedValue('/col/.env.prod');
+    vi.mocked(tauriApi.saveEnvironment).mockReset().mockResolvedValue(undefined);
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByText('Found .env, 1 key');
+
+    await user.click(screen.getByRole('button', { name: 'Pick .env file' }));
+    expect(await screen.findByText('Save to check this file.')).toBeInTheDocument();
+    expect(screen.queryByText('Found .env, 1 key')).not.toBeInTheDocument();
+
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([
+      { ...prodEnv, dotEnvFilePath: '.env.prod' },
+    ]);
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+
+    expect(await screen.findByText('Found .env, 1 key')).toBeInTheDocument();
+    expect(screen.queryByText('Save to check this file.')).not.toBeInTheDocument();
+  });
+
+  it('the_placeholder_names_the_collection_with_an_active_collection', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([prodEnv]);
+    renderDialog();
+    await screen.findByLabelText('Variable key 1');
+    const input = screen.getByLabelText('.env file path');
+    expect(input).toHaveAttribute('placeholder', '.env (default: collection .env)');
   });
 });

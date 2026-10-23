@@ -1148,16 +1148,18 @@ impl RequestExecutionService {
         collection: Option<&str>,
         environment: Option<&str>,
     ) -> DotEnvStatus {
-        if !self.process_env_allowed(collection) {
-            return DotEnvStatus {
-                blocked: true,
-                ..DotEnvStatus::default()
-            };
-        }
+        // The base lookup does no file I/O, so it is safe before the gate check.
         let base = match collection {
             Some(c) => self.pinned_collection_dir(c),
             None => self.global_env_repo().dot_env_base(),
         };
+        if !self.process_env_allowed(collection) {
+            return DotEnvStatus {
+                blocked: true,
+                base_dir: base.map(|b| b.display().to_string()),
+                ..DotEnvStatus::default()
+            };
+        }
         let raw_path = environment.and_then(|name| {
             let repo = match collection {
                 Some(_) => self.regular_env_repo(collection),
@@ -7358,6 +7360,7 @@ mod tests {
         );
         let status = svc.dot_env_status(Some("api"), Some("dev"));
         assert!(status.blocked);
+        assert!(status.base_dir.is_some());
         assert_eq!(status.info, rocket_environment::DotEnvFileInfo::default());
         assert_eq!(fake.describe_calls.lock().expect("calls").len(), 0);
         assert_eq!(fake.call_count(), 0);
