@@ -142,9 +142,16 @@ fn push_word(out: &mut String, word: &str) -> usize {
 
 // Masks secret-named values in `a=b&c=d` text. Returns `None` when the text is not form-shaped.
 fn mask_form_text(text: &str) -> Option<(String, usize)> {
-    if text.chars().any(char::is_whitespace) || !text.split('&').all(|part| part.contains('=')) {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.chars().any(char::is_whitespace)
+        || !trimmed.split('&').all(|part| part.contains('='))
+    {
         return None;
     }
+    let lead = &text[..text.len() - text.trim_start().len()];
+    let trail = &text[text.trim_end().len()..];
+    let text = trimmed;
     let mut count = 0;
     let parts: Vec<String> = text
         .split('&')
@@ -156,7 +163,7 @@ fn mask_form_text(text: &str) -> Option<(String, usize)> {
             _ => part.to_string(),
         })
         .collect();
-    Some((parts.join("&"), count))
+    Some((format!("{lead}{}{trail}", parts.join("&")), count))
 }
 
 // Masks the text of secret-named elements such as `<token>abc</token>`.
@@ -510,6 +517,29 @@ examples:
         assert!(masked.contains("password=[masked]"), "{masked}");
         assert!(masked.contains("user=ann"));
         assert!(masked.contains("page=2"));
+    }
+
+    #[test]
+    fn form_text_with_trailing_newline_is_masked() {
+        let (masked, count) = mask_text_body("user=ann&password=hunter2\n");
+        assert_eq!(count, 1);
+        assert_eq!(masked, "user=ann&password=[masked]\n");
+        assert_eq!(mask_text_body(&masked).1, 0);
+    }
+
+    #[test]
+    fn form_text_with_leading_newline_is_masked() {
+        let (masked, count) = mask_text_body("\nuser=ann&password=hunter2");
+        assert_eq!(count, 1);
+        assert_eq!(masked, "\nuser=ann&password=[masked]");
+    }
+
+    #[test]
+    fn masked_form_body_in_a_file_is_stable() {
+        let file = file_with_body("request", "text", "user=ann&password=hunter2\n");
+        let (once, _) = mask_examples(&file).expect("masked");
+        assert!(!once.contains("hunter2"));
+        assert_eq!(mask_examples(&once), None);
     }
 
     #[test]
