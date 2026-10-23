@@ -594,6 +594,50 @@ fn summaries_keep_the_request_when_examples_is_empty() {
     assert_eq!(names, vec![Vec::<String>::new()]);
 }
 
+// ---- `docs` written as an object (Bruno 3 writes `docs: {content, type}`) ----
+
+const BRUNO_ROOT_WITH_DOCS_OBJECT: &str = "opencollection: 1.0.0\nuid: a0acef0c-62a3-4a42-96f2-28db33bbe99b\ninfo:\n  name: col\ndocs:\n  content: |-\n    ## Introduction\n\n    Some text.\n  type: markdown\nbundled: false\nextensions:\n  bruno:\n    ignore:\n      - node_modules\n";
+
+/// A collection `col` whose root file is `root_yaml`.
+fn collection_with_root(root_yaml: &str) -> (TempDir, FsCollectionRepo) {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    write(&dir, "col/opencollection.yml", root_yaml);
+    (dir, repo)
+}
+
+#[test]
+fn collection_docs_written_as_an_object_are_read() {
+    let (_dir, repo) = collection_with_root(BRUNO_ROOT_WITH_DOCS_OBJECT);
+    let settings = repo.get_settings("col").expect("settings must load");
+    assert_eq!(settings.docs.as_deref(), Some("## Introduction\n\nSome text."));
+    repo.get_strict("col").expect("strict load must work");
+}
+
+#[test]
+fn collection_docs_written_as_a_string_or_null_still_read() {
+    let (_dir, repo) = collection_with_root("opencollection: 1.0.0\ninfo:\n  name: col\ndocs: Plain\n");
+    assert_eq!(
+        repo.get_settings("col").expect("settings").docs.as_deref(),
+        Some("Plain")
+    );
+    let (_dir2, repo2) = collection_with_root("opencollection: 1.0.0\ninfo:\n  name: col\ndocs:\n");
+    assert_eq!(repo2.get_settings("col").expect("settings").docs, None);
+}
+
+#[test]
+fn saving_settings_keeps_the_content_of_object_docs() {
+    let (dir, repo) = collection_with_root(BRUNO_ROOT_WITH_DOCS_OBJECT);
+    let settings = repo.get_settings("col").expect("settings");
+    repo.save_settings("col", &settings).expect("save");
+
+    let reloaded = repo.get_settings("col").expect("reload");
+    assert_eq!(reloaded.docs, settings.docs);
+    let text = fs::read_to_string(dir.path().join("col/opencollection.yml")).expect("read root");
+    assert!(text.contains("Some text."), "docs content must survive: {text}");
+    assert!(text.contains("node_modules"), "other extensions must survive: {text}");
+}
+
 // ---- uid-less HTTP requests (Bruno imports have no `uid` key) ----
 
 const UIDLESS_REQUEST: &str = "info:\n  name: Status\n  type: http\n  seq: 1\n\nhttp:\n  method: GET\n  url: https://example.test/status\n";

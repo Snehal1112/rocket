@@ -99,23 +99,48 @@ pub struct OcFileBodyVariant {
 }
 
 /// HTTP request body — discriminated by `type` field.
+///
+/// `data` defaults to empty on every variant. Bruno 3 writes a body with only a `type` when the
+/// body has no content, so a file imported from it has no `data` key. Rocket still always writes
+/// `data`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OcHttpRequestBody {
     #[serde(rename = "json")]
-    Json { data: String },
+    Json {
+        #[serde(default)]
+        data: String,
+    },
     #[serde(rename = "text")]
-    Text { data: String },
+    Text {
+        #[serde(default)]
+        data: String,
+    },
     #[serde(rename = "xml")]
-    Xml { data: String },
+    Xml {
+        #[serde(default)]
+        data: String,
+    },
     #[serde(rename = "sparql")]
-    Sparql { data: String },
+    Sparql {
+        #[serde(default)]
+        data: String,
+    },
     #[serde(rename = "form-urlencoded")]
-    FormUrlEncoded { data: Vec<OcFormField> },
+    FormUrlEncoded {
+        #[serde(default)]
+        data: Vec<OcFormField>,
+    },
     #[serde(rename = "multipart-form")]
-    MultipartForm { data: Vec<OcMultipartFormPart> },
+    MultipartForm {
+        #[serde(default)]
+        data: Vec<OcMultipartFormPart>,
+    },
     #[serde(rename = "file")]
-    File { data: Vec<OcFileBodyVariant> },
+    File {
+        #[serde(default)]
+        data: Vec<OcFileBodyVariant>,
+    },
 }
 
 /// HTTP request body variant (named variant with title + selected).
@@ -198,6 +223,8 @@ pub struct OcHttpRequestRuntime {
 pub struct OcExampleResponseBody {
     #[serde(rename = "type")]
     pub body_type: String, // "json" | "text" | "xml" | "html" | "binary"
+    /// Empty when the file has no `data` key, like a request body.
+    #[serde(default)]
     pub data: String,
 }
 
@@ -271,6 +298,10 @@ pub struct OcHttpRequest {
     pub settings: Option<OcHttpRequestSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub examples: Option<Vec<OcHttpRequestExample>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::docs_text"
+    )]
     pub docs: Option<String>,
 }

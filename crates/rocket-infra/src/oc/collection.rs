@@ -83,7 +83,11 @@ pub struct OcCollection {
     pub items: Option<Vec<OcItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<OcRequestDefaults>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::docs_text"
+    )]
     pub docs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundled: Option<bool>,

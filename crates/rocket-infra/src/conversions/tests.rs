@@ -12,6 +12,145 @@ use rocket_shared::types::{
 };
 use rocket_shared::variable_value::VariableValue;
 
+// ---- A body with a type and no `data` key (Bruno 3 omits `data` for an empty body) ----
+
+/// A request file shaped like a Bruno 3 export whose body has only a `type`.
+fn request_yaml_with_body_type(body_type: &str) -> String {
+    format!(
+        "info:\n  name: Authorise\n  type: http\n  seq: 4\n\nhttp:\n  method: GET\n  url: https://example.test/authorize\n  headers:\n    - name: Accept\n      value: text/plain\n  body:\n    type: {body_type}\n  auth:\n    type: oauth2\n    flow: authorization_code\n    authorizationUrl: https://example.test/authorize\n    accessTokenUrl: https://example.test/token\n    callbackUrl: https://example.test/callback\n    credentials:\n      clientId: abc\n      placement: body\n    pkce:\n      disabled: true\n"
+    )
+}
+
+fn parse_request_with_body_type(body_type: &str) -> OcHttpRequest {
+    serde_yaml::from_str(&request_yaml_with_body_type(body_type))
+        .unwrap_or_else(|e| panic!("body type {body_type} without data must parse: {e}"))
+}
+
+#[test]
+fn body_with_a_type_and_no_data_parses_as_an_empty_body() {
+    for (body_type, mode) in [
+        ("json", BodyMode::Json),
+        ("text", BodyMode::Text),
+        ("xml", BodyMode::Xml),
+        ("sparql", BodyMode::Sparql),
+        ("form-urlencoded", BodyMode::FormUrlEncoded),
+        ("multipart-form", BodyMode::FormData),
+        ("file", BodyMode::Binary),
+    ] {
+        let request = oc_http_request_to_request(parse_request_with_body_type(body_type));
+        let body = request
+            .body
+            .unwrap_or_else(|| panic!("{body_type}: the body must be kept"));
+        assert_eq!(body.mode, mode, "{body_type}");
+        assert!(
+            body.content.as_deref().unwrap_or("").is_empty(),
+            "{body_type}: no content"
+        );
+        assert!(
+            body.form_data.as_ref().is_none_or(|rows| rows.is_empty()),
+            "{body_type}: no rows"
+        );
+        assert!(body.file_path.is_none(), "{body_type}: no file");
+    }
+}
+
+#[test]
+fn the_rest_of_a_request_with_an_empty_typed_body_is_kept() {
+    let request = oc_http_request_to_request(parse_request_with_body_type("form-urlencoded"));
+    assert_eq!(request.url, "https://example.test/authorize");
+    assert_eq!(request.headers.len(), 1);
+    assert!(matches!(request.auth, Auth::OAuth2 { .. }));
+}
+
+#[test]
+fn a_body_with_data_still_parses_as_before() {
+    let yaml = request_yaml_with_body_type("json").replace(
+        "    type: json\n",
+        "    type: json\n    data: '{\"a\": 1}'\n",
+    );
+    let oc: OcHttpRequest = serde_yaml::from_str(&yaml).expect("body with data parses");
+    let body = oc_http_request_to_request(oc).body.expect("body");
+    assert_eq!(body.content.as_deref(), Some("{\"a\": 1}"));
+}
+
+#[test]
+fn a_body_with_no_type_is_still_rejected() {
+    let yaml = request_yaml_with_body_type("json").replace("    type: json\n", "    data: x\n");
+    let result = serde_yaml::from_str::<OcHttpRequest>(&yaml);
+    assert!(result.is_err(), "a body needs a type");
+}
+
+#[test]
+fn an_unknown_body_type_is_still_rejected() {
+    let yaml = request_yaml_with_body_type("graphql-ish");
+    assert!(serde_yaml::from_str::<OcHttpRequest>(&yaml).is_err());
+}
+
+#[test]
+fn rocket_still_writes_data_for_an_empty_body() {
+    // Rocket keeps writing `data`, so its own files stay valid for other OpenCollection tools.
+    let mut request = oc_http_request_to_request(parse_request_with_body_type("form-urlencoded"));
+    request.uid = "u1".into();
+    let yaml = serde_yaml::to_string(&request_to_oc_http_request(&request)).expect("serialize");
+    assert!(yaml.contains("type: form-urlencoded"), "{yaml}");
+    assert!(yaml.contains("data: []"), "{yaml}");
+}
+
+#[test]
+fn example_response_body_with_a_type_and_no_data_parses() {
+    let yaml = "name: Empty\nresponse:\n  status: 204\n  body:\n    type: text\n";
+    let example: OcHttpRequestExample = serde_yaml::from_str(yaml).expect("example parses");
+    let body = example.response.expect("response").body.expect("body");
+    assert_eq!(body.body_type, "text");
+    assert_eq!(body.data, "");
+}
+
+// ---- `docs` written as an object (Bruno 3 writes `docs: {content, type}`) ----
+
+const DOCS_OBJECT: &str = "docs:\n  content: Notes\n  type: markdown\n";
+
+#[test]
+fn request_docs_written_as_an_object_are_read_for_every_request_kind() {
+    let http = format!("{}{DOCS_OBJECT}", request_yaml_with_body_type("json"));
+    let http: OcHttpRequest = serde_yaml::from_str(&http).expect("http request with object docs");
+    assert_eq!(http.docs.as_deref(), Some("Notes"));
+    let request = oc_http_request_to_request(http);
+    assert_eq!(request.docs, Some(Description::text("Notes")));
+
+    let graphql = format!("info:\n  name: A\n  type: graphql\ngraphql:\n  url: https://x.test\n{DOCS_OBJECT}");
+    let graphql: OcGraphQLRequest = serde_yaml::from_str(&graphql).expect("graphql with object docs");
+    assert_eq!(graphql.docs.as_deref(), Some("Notes"));
+
+    let grpc = format!("info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\n{DOCS_OBJECT}");
+    let grpc: OcGrpcRequest = serde_yaml::from_str(&grpc).expect("grpc with object docs");
+    assert_eq!(grpc.docs.as_deref(), Some("Notes"));
+
+    let websocket = format!("info:\n  name: A\n  type: websocket\nwebsocket:\n  url: ws://x.test\n{DOCS_OBJECT}");
+    let websocket: OcWebSocketRequest =
+        serde_yaml::from_str(&websocket).expect("websocket with object docs");
+    assert_eq!(websocket.docs.as_deref(), Some("Notes"));
+}
+
+#[test]
+fn request_docs_written_as_a_string_or_absent_still_read() {
+    let http = format!("{}docs: Plain\n", request_yaml_with_body_type("json"));
+    let http: OcHttpRequest = serde_yaml::from_str(&http).expect("string docs");
+    assert_eq!(http.docs.as_deref(), Some("Plain"));
+    let none: OcHttpRequest =
+        serde_yaml::from_str(&request_yaml_with_body_type("json")).expect("no docs");
+    assert_eq!(none.docs, None);
+}
+
+#[test]
+fn docs_are_still_written_as_a_plain_string() {
+    let http = format!("{}{DOCS_OBJECT}", request_yaml_with_body_type("json"));
+    let request = oc_http_request_to_request(serde_yaml::from_str(&http).expect("parse"));
+    let mut request = request;
+    request.uid = "u1".into();
+    let yaml = serde_yaml::to_string(&request_to_oc_http_request(&request)).expect("serialize");
+    assert!(yaml.contains("docs: Notes"), "{yaml}");
+}
+
 #[test]
 fn header_oc_to_domain() {
     let oc = OcHttpRequestHeader {

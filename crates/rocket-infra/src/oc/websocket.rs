@@ -92,6 +92,10 @@ pub struct OcWebSocketRequest {
     pub runtime: Option<OcWebSocketRequestRuntime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<OcWebSocketRequestSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::docs_text"
+    )]
     pub docs: Option<String>,
 }
