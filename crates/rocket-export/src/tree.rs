@@ -19,6 +19,8 @@ pub struct ExportFolder {
 }
 
 /// One item in a folder.
+// Folders are rare next to requests, so boxing them would only add churn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum ExportItem {
     Request(Box<Request>),

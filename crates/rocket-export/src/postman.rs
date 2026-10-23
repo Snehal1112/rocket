@@ -39,7 +39,7 @@ pub fn postman_collection(
     }
     info.insert("schema".into(), json!(POSTMAN_SCHEMA));
 
-    let items = folder_items(&tree.root, &[], &tree.settings.headers, tree, opts, &mut report, "");
+    let items = folder_items(&tree.root, &[], &tree.settings.headers, opts, &mut report, "");
     let mut doc = Map::new();
     doc.insert("info".into(), Value::Object(info));
     doc.insert("item".into(), Value::Array(items));
@@ -128,7 +128,6 @@ fn folder_items(
     folder: &ExportFolder,
     chain: &[FolderSettings],
     collection_headers: &[Header],
-    tree: &CollectionExportTree,
     opts: &PostmanOptions,
     report: &mut ExportReport,
     path: &str,
@@ -148,7 +147,6 @@ fn folder_items(
                     f,
                     &child_chain,
                     collection_headers,
-                    tree,
                     opts,
                     report,
                     &child_path,
