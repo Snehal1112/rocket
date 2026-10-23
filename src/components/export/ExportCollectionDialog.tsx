@@ -20,7 +20,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { base64ToBytes, saveBinaryFile } from '@/lib/save-file';
-import { type ExportNote, type ExportReport, exportCollectionBruno } from '@/lib/tauri-api';
+import {
+  type ExportNote,
+  type ExportReport,
+  exportCollectionBruno,
+  exportCollectionPostman,
+} from '@/lib/tauri-api';
 
 interface ExportCollectionDialogProps {
   open: boolean;
@@ -50,9 +55,15 @@ export function ExportCollectionDialog({
     setBusy(true);
     setReport(null);
     try {
-      const result = await exportCollectionBruno(collectionName, includeEnvironments);
+      const isPostman = format === 'postman';
+      const result = isPostman
+        ? await exportCollectionPostman(collectionName)
+        : await exportCollectionBruno(collectionName, includeEnvironments);
+      const filter = isPostman
+        ? { name: 'JSON file', extensions: ['json'] }
+        : { name: 'ZIP archive', extensions: ['zip'] };
       const saved = await saveBinaryFile(result.fileName, base64ToBytes(result.dataBase64), [
-        { name: 'ZIP archive', extensions: ['zip'] },
+        filter,
       ]);
       if (saved) setReport(result.report);
     } catch (err) {
@@ -86,17 +97,24 @@ export function ExportCollectionDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value='bruno'>Bruno collection (ZIP)</SelectItem>
+                <SelectItem value='postman'>Postman collection (v2.1)</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className='flex items-center gap-2'>
-            <Checkbox
-              id='export-include-environments'
-              checked={includeEnvironments}
-              onCheckedChange={(v) => setIncludeEnvironments(v === true)}
-            />
-            <Label htmlFor='export-include-environments'>Include environments</Label>
-          </div>
+          {format === 'postman' ? (
+            <p className='text-sm text-muted-foreground'>
+              Environments are exported in a later version.
+            </p>
+          ) : (
+            <div className='flex items-center gap-2'>
+              <Checkbox
+                id='export-include-environments'
+                checked={includeEnvironments}
+                onCheckedChange={(v) => setIncludeEnvironments(v === true)}
+              />
+              <Label htmlFor='export-include-environments'>Include environments</Label>
+            </div>
+          )}
           {report && (
             <div className='max-h-64 space-y-3 overflow-y-auto text-sm'>
               <p className='text-muted-foreground'>Exported {report.exported} files.</p>

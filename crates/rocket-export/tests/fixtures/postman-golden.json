@@ -1,0 +1,1021 @@
+{
+  "auth": {
+    "bearer": [
+      {
+        "key": "token",
+        "type": "string",
+        "value": "{{rootToken}}"
+      }
+    ],
+    "type": "bearer"
+  },
+  "info": {
+    "_postman_id": "<uuid>",
+    "description": "Collection docs",
+    "name": "Full",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "bearer",
+          "request": {
+            "auth": {
+              "bearer": [
+                {
+                  "key": "token",
+                  "type": "string",
+                  "value": "{{token}}"
+                }
+              ],
+              "type": "bearer"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "basic",
+          "request": {
+            "auth": {
+              "basic": [
+                {
+                  "key": "username",
+                  "type": "string",
+                  "value": "u"
+                },
+                {
+                  "key": "password",
+                  "type": "string",
+                  "value": ""
+                }
+              ],
+              "type": "basic"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "digest",
+          "request": {
+            "auth": {
+              "digest": [
+                {
+                  "key": "username",
+                  "type": "string",
+                  "value": "u"
+                },
+                {
+                  "key": "password",
+                  "type": "string",
+                  "value": "{{pw}}"
+                }
+              ],
+              "type": "digest"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "ntlm",
+          "request": {
+            "auth": {
+              "ntlm": [
+                {
+                  "key": "username",
+                  "type": "string",
+                  "value": "u"
+                },
+                {
+                  "key": "password",
+                  "type": "string",
+                  "value": "{{pw}}"
+                },
+                {
+                  "key": "domain",
+                  "type": "string",
+                  "value": "corp"
+                }
+              ],
+              "type": "ntlm"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "apikey",
+          "request": {
+            "auth": {
+              "apikey": [
+                {
+                  "key": "key",
+                  "type": "string",
+                  "value": "X-Key"
+                },
+                {
+                  "key": "value",
+                  "type": "string",
+                  "value": "{{key}}"
+                },
+                {
+                  "key": "in",
+                  "type": "string",
+                  "value": "query"
+                }
+              ],
+              "type": "apikey"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "aws",
+          "request": {
+            "auth": {
+              "awsv4": [
+                {
+                  "key": "accessKey",
+                  "type": "string",
+                  "value": "AKIA"
+                },
+                {
+                  "key": "secretKey",
+                  "type": "string",
+                  "value": ""
+                },
+                {
+                  "key": "sessionToken",
+                  "type": "string",
+                  "value": "{{st}}"
+                },
+                {
+                  "key": "service",
+                  "type": "string",
+                  "value": "s3"
+                },
+                {
+                  "key": "region",
+                  "type": "string",
+                  "value": "us-east-1"
+                }
+              ],
+              "type": "awsv4"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "oauth2-cc",
+          "request": {
+            "auth": {
+              "oauth2": [
+                {
+                  "key": "grant_type",
+                  "type": "string",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "type": "string",
+                  "value": "https://auth.example.com/token"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "type": "string",
+                  "value": ""
+                },
+                {
+                  "key": "clientId",
+                  "type": "string",
+                  "value": "cid"
+                },
+                {
+                  "key": "clientSecret",
+                  "type": "string",
+                  "value": ""
+                },
+                {
+                  "key": "scope",
+                  "type": "string",
+                  "value": "read"
+                },
+                {
+                  "key": "tokenName",
+                  "type": "string",
+                  "value": "My token"
+                },
+                {
+                  "key": "addTokenTo",
+                  "type": "string",
+                  "value": "header"
+                },
+                {
+                  "key": "headerPrefix",
+                  "type": "string",
+                  "value": "Bearer"
+                },
+                {
+                  "key": "client_authentication",
+                  "type": "string",
+                  "value": "body"
+                }
+              ],
+              "type": "oauth2"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "oauth2-pkce",
+          "request": {
+            "auth": {
+              "oauth2": [
+                {
+                  "key": "grant_type",
+                  "type": "string",
+                  "value": "authorization_code_with_pkce"
+                },
+                {
+                  "key": "authUrl",
+                  "type": "string",
+                  "value": "https://auth.example.com/authorize"
+                },
+                {
+                  "key": "accessTokenUrl",
+                  "type": "string",
+                  "value": "https://auth.example.com/token"
+                },
+                {
+                  "key": "refreshTokenUrl",
+                  "type": "string",
+                  "value": ""
+                },
+                {
+                  "key": "redirect_uri",
+                  "type": "string",
+                  "value": "https://app.example.com/cb"
+                },
+                {
+                  "key": "clientId",
+                  "type": "string",
+                  "value": "cid"
+                },
+                {
+                  "key": "clientSecret",
+                  "type": "string",
+                  "value": ""
+                },
+                {
+                  "key": "scope",
+                  "type": "string",
+                  "value": ""
+                },
+                {
+                  "key": "state",
+                  "type": "string",
+                  "value": "xyz"
+                },
+                {
+                  "key": "client_authentication",
+                  "type": "string",
+                  "value": "header"
+                }
+              ],
+              "type": "oauth2"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "oauth1",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        },
+        {
+          "name": "inherit",
+          "request": {
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              }
+            ],
+            "method": "GET",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "auth"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/auth"
+            }
+          }
+        }
+      ],
+      "name": "Auth"
+    },
+    {
+      "auth": {
+        "basic": [
+          {
+            "key": "username",
+            "type": "string",
+            "value": "fu"
+          },
+          {
+            "key": "password",
+            "type": "string",
+            "value": ""
+          }
+        ],
+        "type": "basic"
+      },
+      "description": "Folder docs",
+      "item": [
+        {
+          "name": "json",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\"a\":1}"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "xml",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              },
+              "raw": "<a/>"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/xml"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "text",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              },
+              "raw": "hi"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              },
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "sparql",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              },
+              "raw": "SELECT *"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/sparql-query"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "urlencoded",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "a",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "b",
+                  "value": "2"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "formdata",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "formdata": [
+                {
+                  "key": "t",
+                  "type": "text",
+                  "value": "v"
+                },
+                {
+                  "disabled": true,
+                  "key": "f",
+                  "src": "/tmp/f.txt",
+                  "type": "file"
+                }
+              ],
+              "mode": "formdata"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "binary",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "file": {
+                "src": "data.bin"
+              },
+              "mode": "file"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "X-Trace",
+                "value": "abc"
+              },
+              {
+                "disabled": true,
+                "key": "X-Off",
+                "value": "1"
+              },
+              {
+                "key": "Authorization",
+                "value": ""
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "disabled": true,
+                  "key": "debug",
+                  "value": "on"
+                }
+              ],
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "42"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "graphql",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "graphql": {
+                "query": "{ me { id } }",
+                "variables": "{\"a\":1}"
+              },
+              "mode": "graphql"
+            },
+            "header": [
+              {
+                "key": "X-Root",
+                "value": "1"
+              },
+              {
+                "key": "X-Folder",
+                "value": "f"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "api",
+                "example",
+                "com"
+              ],
+              "path": [
+                "graphql"
+              ],
+              "protocol": "https",
+              "raw": "https://api.example.com/graphql"
+            }
+          }
+        }
+      ],
+      "name": "Bodies"
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "type": "string",
+      "value": "https://api.example.com"
+    },
+    {
+      "key": "apiSecret",
+      "type": "string",
+      "value": ""
+    },
+    {
+      "disabled": true,
+      "key": "off",
+      "type": "string",
+      "value": "x"
+    }
+  ]
+}

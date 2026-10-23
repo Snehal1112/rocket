@@ -760,6 +760,8 @@ pub struct NullCollectionRepo {
     save_request: SaveRequestHook,
     delete_request: Hook2<()>,
     get_settings: Hook1<CollectionSettings>,
+    get_strict: Hook1<Collection>,
+    get_folder_settings: Hook2<FolderSettings>,
     move_item: Option<MoveItemHook>,
     get_folder_chain_variables: Hook2<Vec<CollectionVariable>>,
     get_request_variables: Hook2<Vec<CollectionVariable>>,
@@ -792,6 +794,8 @@ impl NullCollectionRepo {
             save_request: None,
             delete_request: None,
             get_settings: None,
+            get_strict: None,
+            get_folder_settings: None,
             move_item: None,
             get_folder_chain_variables: None,
             get_request_variables: None,
@@ -897,6 +901,20 @@ impl NullCollectionRepo {
         f: impl Fn(&str) -> DomainResult<CollectionSettings> + Send + Sync + 'static,
     ) -> Self {
         self.get_settings = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_strict(
+        mut self,
+        f: impl Fn(&str) -> DomainResult<Collection> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_strict = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_folder_settings(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<FolderSettings> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_folder_settings = Some(Box::new(f));
         self
     }
     pub fn on_get_folder_chain_variables(
@@ -1064,6 +1082,22 @@ impl CollectionRepository for NullCollectionRepo {
         }
         self.gate(CollectionMethod::GetSettings);
         Ok(CollectionSettings::default())
+    }
+    fn get_strict(&self, name: &str) -> DomainResult<Collection> {
+        if let Some(f) = &self.get_strict {
+            return f(name);
+        }
+        self.get(name)
+    }
+    fn get_folder_settings(
+        &self,
+        collection: &str,
+        folder_path: &str,
+    ) -> DomainResult<FolderSettings> {
+        if let Some(f) = &self.get_folder_settings {
+            return f(collection, folder_path);
+        }
+        Ok(FolderSettings::default())
     }
     fn save_settings(&self, _: &str, _: &CollectionSettings) -> DomainResult<()> {
         self.gate(CollectionMethod::SaveSettings);
