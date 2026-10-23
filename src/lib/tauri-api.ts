@@ -668,6 +668,8 @@ export interface CommitInfo {
   authorEmail: string;
   timestamp: string;
   filesChanged: number;
+  /** Files whose saved examples had secrets masked in this commit. */
+  maskedFiles?: string[];
 }
 
 export interface GitIdentity {

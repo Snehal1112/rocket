@@ -6,6 +6,7 @@ pub mod diff;
 pub mod git2_service;
 pub mod remote;
 mod remote_verification;
+pub mod sanitize;
 pub mod service;
 pub mod stash;
 pub mod status;

@@ -380,6 +380,7 @@ mod tests {
                 author_email: "t@example.com".into(),
                 timestamp: chrono::Utc::now(),
                 files_changed: 1,
+                masked_files: Vec::new(),
             })
         }
         fn log(&self, _: &str, _: usize) -> DomainResult<Vec<CommitInfo>> {

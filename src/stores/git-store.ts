@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   type BranchList,
@@ -455,7 +456,13 @@ export function createGitStore(): StoreApi<GitState> {
       const { repositoryId } = get();
       if (!repositoryId) return;
       try {
-        await gitCommit(repositoryId, message);
+        const info = await gitCommit(repositoryId, message);
+        const masked = info.maskedFiles ?? [];
+        if (masked.length > 0) {
+          toast.info(
+            `Masked secrets in the saved examples of ${masked.length} file(s) in this commit. Your local files are unchanged.`,
+          );
+        }
         await get().refreshStatus();
         await get().refreshLog();
       } catch (e) {

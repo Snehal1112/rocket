@@ -526,6 +526,38 @@ mod tests {
     }
 
     #[test]
+    fn commit_masks_example_secrets_but_keeps_the_working_tree() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        let yaml = "info:\n  name: A\nhttp:\n  url: https://x.io\nexamples:\n  - name: example\n    response:\n      status: 200\n      headers:\n        - name: set-cookie\n          value: sid=1\n";
+        fs::write(dir.path().join("a.yml"), yaml).unwrap();
+        fs::write(dir.path().join("b.yml"), "info:\n  name: B\n").unwrap();
+        svc.stage(&path, &["a.yml", "b.yml"]).unwrap();
+        let info = svc.commit(&path, "add requests").unwrap();
+
+        assert_eq!(info.masked_files, vec!["a.yml".to_string()]);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let blob = repo
+            .find_blob(tree.get_name("a.yml").unwrap().id())
+            .unwrap();
+        let committed = std::str::from_utf8(blob.content()).unwrap();
+        assert!(committed.contains("[masked]"));
+        assert!(!committed.contains("sid=1"));
+        assert_eq!(fs::read_to_string(dir.path().join("a.yml")).unwrap(), yaml);
+    }
+
+    #[test]
+    fn commit_leaves_files_without_secrets_alone() {
+        let (dir, path) = setup_repo();
+        let svc = Git2Service::new();
+        fs::write(dir.path().join("c.yml"), "info:\n  name: C\n").unwrap();
+        svc.stage(&path, &["c.yml"]).unwrap();
+        let info = svc.commit(&path, "add c").unwrap();
+        assert!(info.masked_files.is_empty());
+    }
+
+    #[test]
     fn log_respects_limit() {
         let (dir, path) = setup_repo();
         let svc = Git2Service::new();

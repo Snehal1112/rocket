@@ -11,4 +11,7 @@ pub struct CommitInfo {
     pub author_email: String,
     pub timestamp: DateTime<Utc>,
     pub files_changed: usize,
+    /// Files whose saved examples had secrets masked in this commit.
+    #[serde(default)]
+    pub masked_files: Vec<String>,
 }

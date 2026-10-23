@@ -5744,6 +5744,7 @@ dependencies = [
  "rocket-shared",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "ssh2",
  "tempfile",

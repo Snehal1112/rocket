@@ -294,6 +294,54 @@ fn cleanup_directory_best_effort(path: &Path) {
     let _ = std::fs::remove_dir_all(path);
 }
 
+// Masks secrets in the saved examples of staged request files. Only the index
+// copy changes, so the working tree keeps the real values. Returns the masked paths.
+fn mask_staged_examples(
+    repo: &git2::Repository,
+    index: &mut git2::Index,
+) -> DomainResult<Vec<String>> {
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let entries: Vec<git2::IndexEntry> = index.iter().collect();
+    let mut masked_files = Vec::new();
+
+    for entry in entries {
+        let is_yaml = entry.path.ends_with(b".yml") || entry.path.ends_with(b".yaml");
+        // Stage bits 12-13 are non-zero for conflict entries.
+        if !is_yaml || entry.flags & 0x3000 != 0 {
+            continue;
+        }
+        let Ok(path) = std::str::from_utf8(&entry.path) else {
+            continue;
+        };
+        let unchanged = head_tree
+            .as_ref()
+            .and_then(|tree| tree.get_path(Path::new(path)).ok())
+            .is_some_and(|head_entry| head_entry.id() == entry.id);
+        if unchanged {
+            continue;
+        }
+        let Ok(blob) = repo.find_blob(entry.id) else {
+            continue;
+        };
+        let Ok(content) = std::str::from_utf8(blob.content()) else {
+            continue;
+        };
+        if let Some((masked, _)) = crate::sanitize::mask_examples(content) {
+            index
+                .add_frombuffer(&entry, masked.as_bytes())
+                .map_err(|e| DomainError::Internal(e.to_string()))?;
+            masked_files.push(path.to_string());
+        }
+    }
+
+    if !masked_files.is_empty() {
+        index
+            .write()
+            .map_err(|e| DomainError::Internal(e.to_string()))?;
+    }
+    Ok(masked_files)
+}
+
 #[tracing::instrument(name = "git_commit", fields(repo_path = %path, message = %message.get(..50).unwrap_or(message)))]
 pub(super) fn commit(path: &str, message: &str) -> DomainResult<CommitInfo> {
     let repo = open_repo(path)?;
@@ -304,6 +352,7 @@ pub(super) fn commit(path: &str, message: &str) -> DomainResult<CommitInfo> {
     let mut index = repo
         .index()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
+    let masked_files = mask_staged_examples(&repo, &mut index)?;
     let tree_id = index
         .write_tree()
         .map_err(|e| DomainError::Internal(e.to_string()))?;
@@ -341,6 +390,7 @@ pub(super) fn commit(path: &str, message: &str) -> DomainResult<CommitInfo> {
         author_email: sig.email().unwrap_or("").to_string(),
         timestamp: chrono::Utc::now(),
         files_changed,
+        masked_files,
     })
 }
 
@@ -451,6 +501,7 @@ pub(super) fn log(path: &str, limit: usize) -> DomainResult<Vec<CommitInfo>> {
             author_email: commit.author().email().unwrap_or("").to_string(),
             timestamp,
             files_changed,
+            masked_files: Vec::new(),
         });
     }
     Ok(commits)
