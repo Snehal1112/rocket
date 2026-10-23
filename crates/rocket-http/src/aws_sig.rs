@@ -189,7 +189,7 @@ fn canonical_path(path: &str, service: &str) -> String {
         return path.to_string();
     }
     path.split('/')
-        .map(|segment| crate::util::percent_encode(segment))
+        .map(crate::util::percent_encode)
         .collect::<Vec<_>>()
         .join("/")
 }

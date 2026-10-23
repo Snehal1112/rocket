@@ -47,7 +47,7 @@ pub(crate) fn read_dir_by_mtime(dir: &Path) -> DomainResult<Vec<(std::time::Syst
             paths.push((mtime, path));
         }
     }
-    paths.sort_by(|a, b| b.0.cmp(&a.0));
+    paths.sort_by_key(|p| std::cmp::Reverse(p.0));
     Ok(paths)
 }
 

@@ -455,7 +455,7 @@ impl OAuth2Service {
         let client_id = r(&req.client_id);
         let client_secret = r(req.client_secret.as_deref().unwrap_or_default());
         let refresh_token = r(&req.refresh_token);
-        let scope = req.scope.as_deref().map(&r).filter(|s| !s.is_empty());
+        let scope = req.scope.as_deref().map(r).filter(|s| !s.is_empty());
         let client_auth = req
             .client_authentication
             .clone()
@@ -619,8 +619,8 @@ impl OAuth2Service {
             callback_url: ru(req.callback_url.as_deref().unwrap_or_default()),
             client_id: r(&req.client_id),
             client_secret: r(req.client_secret.as_deref().unwrap_or_default()),
-            scope: req.scope.as_deref().map(&r).filter(|s| !s.is_empty()),
-            state: req.state.as_deref().map(&r).filter(|s| !s.is_empty()),
+            scope: req.scope.as_deref().map(r).filter(|s| !s.is_empty()),
+            state: req.state.as_deref().map(r).filter(|s| !s.is_empty()),
             username: r(req.username.as_deref().unwrap_or_default()),
             password: r(req.password.as_deref().unwrap_or_default()),
             client_authentication: req

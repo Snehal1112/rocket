@@ -407,7 +407,7 @@ pub fn scan_collections_in_path(path: String) -> Result<Vec<CollectionScanResult
             });
         }
     }
-    results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    results.sort_by_key(|r| r.name.to_lowercase());
     Ok(results)
 }
 
@@ -519,7 +519,7 @@ fn scan_opencollection_dirs(dir: &Path) -> Result<Vec<CollectionScanResult>, Dom
             });
         }
     }
-    results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    results.sort_by_key(|r| r.name.to_lowercase());
     Ok(results)
 }
 
