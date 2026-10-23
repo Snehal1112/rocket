@@ -540,6 +540,10 @@
                 "value": ""
               },
               {
+                "key": "X-Auth-Token",
+                "value": ""
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
@@ -548,6 +552,10 @@
             "url": {
               "query": [
                 {
+                  "key": "x",
+                  "value": "1"
+                },
+                {
                   "key": "page",
                   "value": "1"
                 },
@@ -555,9 +563,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -605,6 +617,10 @@
                 "value": ""
               },
               {
+                "key": "X-Auth-Token",
+                "value": ""
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/xml"
               }
@@ -613,6 +629,10 @@
             "url": {
               "query": [
                 {
+                  "key": "x",
+                  "value": "1"
+                },
+                {
                   "key": "page",
                   "value": "1"
                 },
@@ -620,9 +640,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -670,6 +694,10 @@
                 "value": ""
               },
               {
+                "key": "X-Auth-Token",
+                "value": ""
+              },
+              {
                 "key": "Content-Type",
                 "value": "text/plain"
               }
@@ -678,6 +706,10 @@
             "url": {
               "query": [
                 {
+                  "key": "x",
+                  "value": "1"
+                },
+                {
                   "key": "page",
                   "value": "1"
                 },
@@ -685,9 +717,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -735,6 +771,10 @@
                 "value": ""
               },
               {
+                "key": "X-Auth-Token",
+                "value": ""
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/sparql-query"
               }
@@ -743,6 +783,10 @@
             "url": {
               "query": [
                 {
+                  "key": "x",
+                  "value": "1"
+                },
+                {
                   "key": "page",
                   "value": "1"
                 },
@@ -750,9 +794,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -779,6 +827,10 @@
                   "disabled": true,
                   "key": "b",
                   "value": "2"
+                },
+                {
+                  "key": "client_secret",
+                  "value": ""
                 }
               ]
             },
@@ -803,11 +855,19 @@
               {
                 "key": "Authorization",
                 "value": ""
+              },
+              {
+                "key": "X-Auth-Token",
+                "value": ""
               }
             ],
             "method": "POST",
             "url": {
               "query": [
+                {
+                  "key": "x",
+                  "value": "1"
+                },
                 {
                   "key": "page",
                   "value": "1"
@@ -816,9 +876,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -871,11 +935,19 @@
               {
                 "key": "Authorization",
                 "value": ""
+              },
+              {
+                "key": "X-Auth-Token",
+                "value": ""
               }
             ],
             "method": "POST",
             "url": {
               "query": [
+                {
+                  "key": "x",
+                  "value": "1"
+                },
                 {
                   "key": "page",
                   "value": "1"
@@ -884,9 +956,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -929,11 +1005,19 @@
               {
                 "key": "Authorization",
                 "value": ""
+              },
+              {
+                "key": "X-Auth-Token",
+                "value": ""
               }
             ],
             "method": "POST",
             "url": {
               "query": [
+                {
+                  "key": "x",
+                  "value": "1"
+                },
                 {
                   "key": "page",
                   "value": "1"
@@ -942,9 +1026,13 @@
                   "disabled": true,
                   "key": "debug",
                   "value": "on"
+                },
+                {
+                  "key": "api_key",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/items/:id?x=1&page=1",
+              "raw": "{{baseUrl}}/items/:id?x=1&page=1&api_key=",
               "variable": [
                 {
                   "key": "id",
@@ -994,10 +1082,29 @@
               "protocol": "https",
               "raw": "https://api.example.com/graphql"
             }
-          }
+          },
+          "variable": [
+            {
+              "key": "gqlVar",
+              "type": "string",
+              "value": "g"
+            }
+          ]
         }
       ],
-      "name": "Bodies"
+      "name": "Bodies",
+      "variable": [
+        {
+          "key": "folderVar",
+          "type": "string",
+          "value": "f1"
+        },
+        {
+          "key": "folderSecret",
+          "type": "string",
+          "value": ""
+        }
+      ]
     }
   ],
   "variable": [
@@ -1016,6 +1123,12 @@
       "key": "off",
       "type": "string",
       "value": "x"
+    },
+    {
+      "key": "api_token",
+      "type": "string",
+      "value": ""
     }
   ]
 }
+

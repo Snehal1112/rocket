@@ -741,7 +741,7 @@ impl McpToolService {
                     && entry.request_name.as_deref() == Some(request.name.as_str())
             })
             .collect();
-        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
         entries.truncate(history_limit(limit));
         let briefs: Vec<HistoryBrief> = entries.iter().map(HistoryBrief::from_entry).collect();
         self.publish_tool_invoked(

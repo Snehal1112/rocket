@@ -87,8 +87,11 @@ export function ExportCollectionDialog({
         <DialogHeader>
           <DialogTitle>Export {collectionName}</DialogTitle>
           <DialogDescription>
-            Credentials are blanked in the exported files. Variable references are kept. Request
-            bodies, scripts and descriptions are exported as written and are not scanned for
+            Auth fields, secret variables, URL passwords, and the values of headers, query
+            parameters, form fields, OAuth2 parameters and variables whose name ends in a secret
+            word such as token, secret, password, authorization, cookie or api key (for example
+            Authorization, X-Api-Key, access_token) are blanked. Variable references are kept.
+            Request bodies, scripts and descriptions are exported as written and are not scanned for
             secrets.
           </DialogDescription>
         </DialogHeader>

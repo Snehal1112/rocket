@@ -16,11 +16,16 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 
 ## Decisions
 
-- Credentials are always blanked. No option exports them.
+- Literal credentials are always blanked. No option exports them. A secret variable whose value is a lone `{{variable}}` reference keeps the reference in Bruno files and in Postman collection, folder and request variables (decision 4 of the name-scrub spec). Postman environments are the exception: secret values come from the keychain and the service clears them right after the read, so a secret environment value is always exported empty.
+- One name rule (`is_sensitive_name`) matches the last word of a name: token, secret, password, passwd, credential(s), authorization, cookie, signature, apikey, `api key`, `private key`, `secret key`, `client assertion`, and the single words `pass` and `pwd`. It is never a substring match. Allow-list: `token_type`, `page_token`, `next_token`, `prev_token`, `previous_token`, `max_tokens`.
+- The rule blanks the literal values of headers, gRPC and WebSocket metadata, query parameters (rows and URL pairs), path parameters, form-urlencoded and multipart text fields, OAuth2 additional parameters, OAuth URL fields and variables (including non-secret variables and environments). The note says `<name> (by name)`.
+- Identifiers stay: basic, digest and NTLM usernames, awsv4 `accessKeyId`, OAuth2 `clientId`.
+- URL userinfo without a `:` (`https://TOKEN@host`) is not blanked, because that would also blank plain usernames.
 - The common `rok.*` subset is translated to `pm.*`. `Preserve scripts` keeps the text.
 - Environments are optional and on by default. Workspace-level environments are not exported.
 - No legacy `.bru` output and no single-file OpenCollection YAML.
-- Saved request examples are not exported, because captured responses may hold tokens.
+- Saved request examples are not exported in either format, because captured responses may hold tokens. The Bruno ZIP removes the `examples` key and reports it.
+- The Bruno ZIP leaves out Rocket-only files (`flows/` and hidden directories such as `.rocket/`) and reports them.
 - The Bruno ZIP removes the `extensions.rocketapi` subtree and the trust-gate keys and keeps other `extensions.*` keys.
 - A Postman export with environments is one ZIP, so the dialog needs one save.
 - Environments are read with `list_strict`. A keychain or read error fails the export.
@@ -35,6 +40,7 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 - Before-request set-variable actions have no Postman form.
 - The script scanner does not understand regex literals.
 - Bodies, scripts and descriptions are not scanned for secrets. The dialog says so.
+- A credential with a harmless name (for example `session_id`) is exported as written. The name rule cannot see it.
 
 ## Unverified
 

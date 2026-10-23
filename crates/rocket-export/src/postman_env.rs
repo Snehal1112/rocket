@@ -9,9 +9,25 @@ use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 use crate::report::{ExportAction, ExportNote};
+use crate::scrub::is_variable_reference;
+use crate::sensitive::is_sensitive_name;
+
+/// The exported value of a variable: a secret keeps only a lone reference, and a
+/// plain variable with a secret-like name is blanked.
+fn exported_value(v: &Variable) -> &str {
+    let keep_ref = is_variable_reference(&v.value);
+    if v.secret {
+        if keep_ref { v.value.as_str() } else { "" }
+    } else if is_sensitive_name(&v.key) && !keep_ref {
+        ""
+    } else {
+        v.value.as_str()
+    }
+}
 
 /// One Postman environment document. A secret variable keeps its key and
-/// `type: "secret"` but never its value, even when the caller hydrated it.
+/// `type: "secret"`, and its value only when that is a variable reference. The
+/// service clears secret values before this call, so they are normally empty.
 pub fn postman_environment(
     name: &str,
     vars: &[Variable],
@@ -23,7 +39,7 @@ pub fn postman_environment(
         .map(|v| {
             json!({
                 "key": v.key,
-                "value": if v.secret { "" } else { v.value.as_str() },
+                "value": exported_value(v),
                 "type": if v.secret { "secret" } else { "default" },
                 "enabled": v.enabled,
             })
@@ -39,18 +55,27 @@ pub fn postman_environment(
     })
 }
 
-/// Report notes of one environment: every blanked secret and every
+/// Report notes of one environment: every blanked value and every
 /// `{{process.env.X}}` reference that stays as text.
 pub fn environment_notes(name: &str, vars: &[Variable]) -> Vec<ExportNote> {
     let path = format!("environments/{name}");
     let mut notes = Vec::new();
     for v in vars {
         if v.secret {
+            if !is_variable_reference(&v.value) {
+                notes.push(ExportNote {
+                    path: path.clone(),
+                    feature: "Secret variable".into(),
+                    action: ExportAction::Blanked,
+                    detail: Some(v.key.clone()),
+                });
+            }
+        } else if is_sensitive_name(&v.key) && !v.value.is_empty() && !is_variable_reference(&v.value) {
             notes.push(ExportNote {
                 path: path.clone(),
-                feature: "Secret variable".into(),
+                feature: "Variable".into(),
                 action: ExportAction::Blanked,
-                detail: Some(v.key.clone()),
+                detail: Some(format!("{} (by name)", v.key)),
             });
         } else if v.value.contains("{{process.env.") {
             notes.push(ExportNote {
@@ -119,6 +144,29 @@ mod tests {
         assert_eq!(doc["_postman_exported_at"], STAMP);
         assert_eq!(doc["name"], "prod");
         assert!(!doc.to_string().contains("hydrated-value"));
+    }
+
+    #[test]
+    fn environment_secret_ref_is_kept_and_names_are_scrubbed() {
+        let vars = [
+            secret("A", "{{ref}}"),
+            secret("B", "hydrated-value"),
+            Variable::new("api_token", "abc"),
+            Variable::new("HOST", "x.test"),
+        ];
+        let doc = postman_environment("e", &vars, STAMP, "1");
+        assert_eq!(doc["values"][0]["value"], "{{ref}}");
+        assert_eq!(doc["values"][0]["type"], "secret");
+        assert_eq!(doc["values"][1]["value"], "");
+        assert_eq!(doc["values"][2]["value"], "");
+        assert_eq!(doc["values"][3]["value"], "x.test");
+        let notes = environment_notes("e", &vars);
+        let details: Vec<&str> = notes
+            .iter()
+            .filter(|n| n.action == ExportAction::Blanked)
+            .filter_map(|n| n.detail.as_deref())
+            .collect();
+        assert_eq!(details, ["B", "api_token (by name)"]);
     }
 
     #[test]

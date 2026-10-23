@@ -71,6 +71,24 @@ describe('ExportCollectionDialog', () => {
     ).toBeInTheDocument();
   });
 
+  it('states which values are blanked and which are exported as written', () => {
+    renderDialog();
+    const text = screen.getByText(/are blanked/i).textContent ?? '';
+    for (const name of [
+      'Authorization',
+      'URL passwords',
+      'query parameters',
+      'form fields',
+      'OAuth2',
+      'variables',
+      'secret word such as token',
+      'api key',
+    ]) {
+      expect(text).toContain(name);
+    }
+    expect(text).toMatch(/bodies, scripts and descriptions are exported as written/);
+  });
+
   it('shows the report items grouped by action after a successful export', async () => {
     mockExport.mockResolvedValue(result);
     mockSaveBinary.mockResolvedValue(true);
