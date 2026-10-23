@@ -96,6 +96,10 @@ fn clear_secret_value(slot: &mut Value) -> bool {
 fn walk(rel_path: &str, value: &mut Value, notes: &mut Vec<ExportNote>) {
     match value {
         Value::Mapping(map) => {
+            let is_form_body = matches!(
+                map.get("type").and_then(Value::as_str),
+                Some("form-urlencoded" | "multipart-form")
+            );
             for (key, child) in map.iter_mut() {
                 match key.as_str() {
                     Some("auth") => {
@@ -105,6 +109,17 @@ fn walk(rel_path: &str, value: &mut Value, notes: &mut Vec<ExportNote>) {
                     }
                     // gRPC metadata rows have the same name and value shape as headers.
                     Some("headers" | "metadata") => scrub_headers(rel_path, child, notes),
+                    Some("params") => scrub_rows(rel_path, child, "Query parameter", notes),
+                    Some("data") if is_form_body => {
+                        scrub_rows(rel_path, child, "Form field", notes);
+                    }
+                    Some("additionalParameters") => {
+                        if let Value::Mapping(groups) = child {
+                            for (_, rows) in groups.iter_mut() {
+                                scrub_rows(rel_path, rows, "OAuth2 parameter", notes);
+                            }
+                        }
+                    }
                     Some("clientCertificates") => scrub_certificates(rel_path, child, notes),
                     Some("variables") => scrub_variables(rel_path, child, notes),
                     Some("url") => yaml_scrub_url(rel_path, child, notes),
@@ -180,6 +195,37 @@ fn scrub_headers(rel_path: &str, headers: &mut Value, notes: &mut Vec<ExportNote
     }
 }
 
+/// True for a multipart file part, whose value is a path and not a secret.
+fn is_file_part(row: &Mapping) -> bool {
+    row.get("type").and_then(Value::as_str) == Some("file") || row.contains_key("filePath")
+}
+
+/// Blanks the `value` of each row whose `name` is secret-like. Disabled rows are blanked too.
+/// A multipart value may be a list of texts, and each one is blanked.
+fn scrub_rows(rel_path: &str, rows: &mut Value, feature: &str, notes: &mut Vec<ExportNote>) {
+    let Value::Sequence(items) = rows else {
+        return;
+    };
+    for item in items {
+        let Value::Mapping(row) = item else { continue };
+        if is_file_part(row) {
+            continue;
+        }
+        let name = match row.get("name").and_then(Value::as_str) {
+            Some(n) if is_sensitive_name(n) => n.to_string(),
+            _ => continue,
+        };
+        let changed = match row.get_mut("value") {
+            Some(Value::Sequence(parts)) => parts.iter_mut().fold(false, |c, p| blank_string(p) | c),
+            Some(slot) => blank_string(slot),
+            None => false,
+        };
+        if changed {
+            notes.push(blank_note(rel_path, feature, &format!("{name} (by name)")));
+        }
+    }
+}
+
 /// Blanks the passphrase of each client certificate. A `{{variable}}` reference is kept.
 fn scrub_certificates(rel_path: &str, certs: &mut Value, notes: &mut Vec<ExportNote>) {
     let Value::Sequence(items) = certs else {
@@ -229,6 +275,11 @@ fn scrub_variables(rel_path: &str, variables: &mut Value, notes: &mut Vec<Export
 
 fn yaml_scrub_url(rel_path: &str, url: &mut Value, notes: &mut Vec<ExportNote>) {
     let Value::String(text) = url else { return };
+    scrub_url_password(rel_path, text, notes);
+    scrub_url_query(rel_path, text, notes);
+}
+
+fn scrub_url_password(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote>) {
     let Some(scheme_end) = text.find("://") else {
         return;
     };
@@ -252,6 +303,36 @@ fn yaml_scrub_url(rel_path: &str, url: &mut Value, notes: &mut Vec<ExportNote>) 
     let pw_end = pw_start + password.len();
     text.replace_range(pw_start..pw_end, "");
     notes.push(blank_note(rel_path, "URL password", "url"));
+}
+
+/// Blanks the value of each `name=value` query pair whose name is secret-like.
+/// The fragment and pairs without `=` stay as they are.
+fn scrub_url_query(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote>) {
+    let Some(q) = text.find('?') else { return };
+    let query_start = q + 1;
+    let query_end = text[query_start..]
+        .find('#')
+        .map_or(text.len(), |h| query_start + h);
+    let mut blanked = Vec::new();
+    let pairs: Vec<String> = text[query_start..query_end]
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((name, value))
+                if !value.is_empty() && !is_variable_reference(value) && is_sensitive_name(name) =>
+            {
+                blanked.push(name.to_string());
+                format!("{name}=")
+            }
+            _ => pair.to_string(),
+        })
+        .collect();
+    if blanked.is_empty() {
+        return;
+    }
+    text.replace_range(query_start..query_end, &pairs.join("&"));
+    for name in blanked {
+        notes.push(blank_note(rel_path, "URL query", &format!("{name} (by name)")));
+    }
 }
 
 /// Typed scrub of an `Auth` value: blanks literal credentials, keeps `{{refs}}`.
@@ -632,5 +713,117 @@ request:
         assert_eq!(v["http"]["auth"]["accessTokenSecret"], empty());
         assert_eq!(v["http"]["auth"]["consumerKey"], Value::String("ck".into()));
         assert_eq!(notes.len(), 2);
+    }
+
+    #[test]
+    fn params_are_scrubbed_by_name() {
+        let mut v = yaml(
+            "http:\n  params:\n    - {name: access_token, value: abc, type: query}\n    - {name: page_token, value: p1, type: query}\n    - {name: author, value: me, type: query}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        let p = &v["http"]["params"];
+        assert_eq!(p[0]["value"], empty());
+        assert_eq!(p[1]["value"], Value::String("p1".into()));
+        assert_eq!(p[2]["value"], Value::String("me".into()));
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].action, ExportAction::Blanked);
+        assert_eq!(notes[0].feature, "Query parameter");
+        assert_eq!(notes[0].detail.as_deref(), Some("access_token (by name)"));
+    }
+
+    #[test]
+    fn references_in_sensitive_rows_are_kept() {
+        let mut v = yaml(
+            "http:\n  url: \"https://x.test/p?access_token={{t}}\"\n  params:\n    - {name: api_key, value: \"{{k}}\", type: query}\n  headers:\n    - {name: X-Auth-Token, value: \"{{t}}\"}\n",
+        );
+        let before = v.clone();
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        assert_eq!(v, before);
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn headers_are_blanked_by_name() {
+        let mut v = yaml(
+            "http:\n  headers:\n    - {name: X-Auth-Token, value: abc}\n    - {name: X-Request-Id, value: \"1\"}\n    - {name: Authorization, value: Bearer abc}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        let h = &v["http"]["headers"];
+        assert_eq!(h[0]["value"], empty());
+        assert_eq!(h[1]["value"], Value::String("1".into()));
+        assert_eq!(h[2]["value"], empty());
+        assert_eq!(notes.len(), 2);
+    }
+
+    #[test]
+    fn grpc_and_websocket_rows_use_the_name_rule() {
+        let mut v = yaml(
+            "grpc:\n  metadata:\n    - {name: x-auth-token, value: abc}\nwebsocket:\n  headers:\n    - {name: Cookie, value: a=b}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        assert_eq!(v["grpc"]["metadata"][0]["value"], empty());
+        assert_eq!(v["websocket"]["headers"][0]["value"], empty());
+        assert_eq!(notes.len(), 2);
+    }
+
+    #[test]
+    fn form_rows_are_scrubbed_by_name() {
+        let mut url = yaml(
+            "http:\n  body:\n    type: form-urlencoded\n    data:\n      - {name: client_secret, value: s}\n      - {name: grant_type, value: password}\n",
+        );
+        let mut multi = yaml(
+            "http:\n  body:\n    type: multipart-form\n    data:\n      - {name: password, type: text, value: p}\n      - {name: secret_file, type: file, value: [a.bin]}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("a.yml", &mut url, &mut notes);
+        scrub_yaml("b.yml", &mut multi, &mut notes);
+        let u = &url["http"]["body"]["data"];
+        assert_eq!(u[0]["value"], empty());
+        assert_eq!(u[1]["value"], Value::String("password".into()));
+        let m = &multi["http"]["body"]["data"];
+        assert_eq!(m[0]["value"], empty());
+        assert_eq!(m[1]["value"][0], Value::String("a.bin".into()));
+        assert_eq!(notes.len(), 2);
+        assert!(notes.iter().all(|n| n.feature == "Form field"));
+    }
+
+    #[test]
+    fn additional_parameters_are_scrubbed_by_name() {
+        let mut v = yaml(
+            "http:\n  auth:\n    type: oauth2\n    flow: client_credentials\n    additionalParameters:\n      accessTokenRequest:\n        - {name: client_assertion, value: jwt, placement: body, enabled: true}\n        - {name: audience, value: api}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        let rows = &v["http"]["auth"]["additionalParameters"]["accessTokenRequest"];
+        assert_eq!(rows[0]["value"], empty());
+        assert_eq!(rows[1]["value"], Value::String("api".into()));
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].feature, "OAuth2 parameter");
+    }
+
+    #[test]
+    fn url_query_pairs_are_scrubbed_by_name() {
+        let mut a = yaml("http:\n  url: \"https://x.test/p?a=1&access_token=abc&token_type=Bearer&sig=ok\"\n");
+        let mut b = yaml("http:\n  url: \"https://x.test/p\"\n");
+        let mut c = yaml("http:\n  url: \"https://u:pw@x.test/p?access_token=abc#frag\"\n");
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut a, &mut notes);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].feature, "URL query");
+        scrub_yaml("r.yml", &mut b, &mut notes);
+        scrub_yaml("r.yml", &mut c, &mut notes);
+        assert_eq!(
+            a["http"]["url"],
+            Value::String("https://x.test/p?a=1&access_token=&token_type=Bearer&sig=ok".into())
+        );
+        assert_eq!(b["http"]["url"], Value::String("https://x.test/p".into()));
+        assert_eq!(
+            c["http"]["url"],
+            Value::String("https://u:@x.test/p?access_token=#frag".into())
+        );
     }
 }
