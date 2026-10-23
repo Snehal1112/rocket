@@ -3,7 +3,7 @@ import { flushAutoSaves, scheduleAutoSave } from '@/lib/auto-save';
 import { collectAllTabs } from '@/lib/pane-utils';
 import { saveTabRequest } from '@/lib/save-tab-request';
 import type { Request } from '@/lib/tauri-api';
-import { getRequest, saveRequest } from '@/lib/tauri-api';
+import { getRequest, renameRequest, saveRequest } from '@/lib/tauri-api';
 import type { RequestTab } from '@/types/pane-types';
 import { isRequestTab } from '@/types/pane-types';
 import { usePaneStore } from '../pane-store';
@@ -16,6 +16,7 @@ vi.mock('@/lib/tauri-api', async () => {
     endAgentSession: vi.fn(),
     getRequest: vi.fn(),
     saveRequest: vi.fn().mockResolvedValue({}),
+    renameRequest: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -116,5 +117,26 @@ describe('pane-store try tabs', () => {
       vi.useRealTimers();
     }
     expect(saveRequest).not.toHaveBeenCalled();
+  });
+
+  it('renaming_a_transient_tab_never_renames_the_parent_request', async () => {
+    const tab = await openTry();
+    vi.mocked(renameRequest).mockClear();
+    usePaneStore.getState().updateTabTitle(tab.id, 'My copy');
+    expect(tryTabs()[0].title).toBe('My copy');
+    expect(renameRequest).not.toHaveBeenCalled();
+
+    // A normal saved tab still renames its file.
+    usePaneStore.getState().openTab({
+      id: 'normal',
+      title: 'Users',
+      tabType: 'request',
+      request: tab.request,
+      response: null,
+      isDirty: false,
+      source: { collection: 'col', path: 'other.yml' },
+    });
+    usePaneStore.getState().updateTabTitle('normal', 'Renamed');
+    expect(renameRequest).toHaveBeenCalledWith('col', 'other.yml', 'Renamed');
   });
 });

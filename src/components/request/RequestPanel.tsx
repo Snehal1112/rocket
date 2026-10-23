@@ -304,13 +304,13 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const openSaveExample = useCallback(() => {
     const source = tab.source;
-    if (!source) return;
+    if (!source || tab.transient) return;
     setExistingExampleNames([]);
     setSaveExampleOpen(true);
     listRequestExamples(source.collection, source.path)
       .then((examples) => setExistingExampleNames(examples.map((e) => e.name)))
       .catch(() => setExistingExampleNames([]));
-  }, [tab.source]);
+  }, [tab.source, tab.transient]);
 
   // Keyboard handler for the separator: ArrowUp/ArrowDown adjust split in 5% steps.
   const handleSeparatorKeyDown = useCallback((e: React.KeyboardEvent) => {

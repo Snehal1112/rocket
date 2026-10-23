@@ -158,13 +158,12 @@ export function TabBar({
               const savesInPlace = isScriptTab(tab) || isFlowTab(tab) || isFolderTab(tab);
               const isActive = tab.id === node.activeTabId;
               const showSave = !!tab.source || savesInPlace;
-              // A temporary Try tab is never saved.
-              const isTry = isRequestTab(tab) && tab.transient === true;
               // A folder tab saves through its mounted pane, so only the active one can.
               const folderNotActive = isFolderTab(tab) && !isActive;
+              // A temporary Try tab is never saved, so its Save item is disabled.
               return (
                 <ContextMenuItem
-                  disabled={(!tab.isDirty && showSave) || folderNotActive || isTry}
+                  disabled={(!tab.isDirty && showSave) || folderNotActive || isTemporary(tab)}
                   onClick={() => {
                     // Only the active tab has a mounted pane listening for the event.
                     // The menu's tab object can be stale, so save the current one.

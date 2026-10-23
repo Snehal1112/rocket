@@ -13,7 +13,7 @@ function rows(items: NameValue[]): KeyValueEntry[] {
   }));
 }
 
-// Maps a stored body to the editor body. A body of a kind the editor cannot show keeps the base.
+// Maps a stored body to the editor body. A body of a kind the editor cannot show is no body.
 function bodyFrom(
   stored: NonNullable<RequestExample['request']>['body'],
   fallback: BodyState,
@@ -38,7 +38,8 @@ function bodyFrom(
 /**
  * Builds the request a Try tab starts from. Method, URL, params, headers and body come from the
  * example, with `{{vars}}` kept as written. Auth, scripts, settings, assertions and actions stay
- * the parent's. A part the example does not hold keeps the base value.
+ * the parent's. An example with no `request` keeps the base. Inside a request, an absent part
+ * means empty, so Try never mixes in the parent's headers or body.
  */
 export function exampleToRequestState(example: RequestExample, base: RequestState): RequestState {
   const request = example.request;
@@ -53,17 +54,15 @@ export function exampleToRequestState(example: RequestExample, base: RequestStat
     method: (request.method?.toUpperCase() as RequestState['method'] | undefined) ?? base.method,
     url,
     // The stored URL keeps its query string, so the rows come from it.
-    queryParams: request.url === undefined ? base.queryParams : parseQueryParams(url),
-    pathParams:
-      request.url === undefined && !request.params
-        ? base.pathParams
-        : extractPathParams(url).map((name) => ({
-            id: crypto.randomUUID(),
-            key: name,
-            value: pathValues.get(name) ?? '',
-            enabled: true,
-          })),
-    headers: request.headers ? rows(request.headers) : base.headers,
-    body: bodyFrom(request.body, base.body),
+    queryParams: parseQueryParams(url),
+    pathParams: extractPathParams(url).map((name) => ({
+      id: crypto.randomUUID(),
+      key: name,
+      value: pathValues.get(name) ?? '',
+      enabled: true,
+    })),
+    // The saved file omits empty headers, params and body, so absent means empty.
+    headers: rows(request.headers ?? []),
+    body: bodyFrom(request.body, { mode: 'none', content: '', formData: [] }),
   };
 }

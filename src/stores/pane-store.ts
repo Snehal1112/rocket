@@ -152,13 +152,13 @@ function removeParkedTabs(
   return changed ? next : state;
 }
 
-// True when the tab is the example tab for this request path and example name.
 // True when a tab holds unsaved edits that belong in its request file.
 // A temporary Try tab shares its parent's source but must never write to it.
 function savesToFile(tab: Tab): tab is RequestTab & { source: NonNullable<RequestTab['source']> } {
   return isRequestTab(tab) && tab.isDirty && !!tab.source && !tab.transient;
 }
 
+// True when the tab is the example tab for this request path and example name.
 function isExampleTabFor(tab: Tab, collection: string, path: string, name: string): boolean {
   return (
     isExampleTab(tab) &&

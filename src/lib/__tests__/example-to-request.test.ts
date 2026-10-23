@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RequestExample } from '@/lib/tauri-api';
 import type { RequestState } from '@/types/pane-types';
 import { exampleToRequestState } from '../example-to-request';
+import { buildExampleSnapshot } from '../example-snapshot';
 import { createDefaultRequest } from '../pane-utils';
 
 function base(extra: Partial<RequestState> = {}): RequestState {
@@ -81,5 +82,47 @@ describe('exampleToRequestState', () => {
     );
     expect(result.url).toBe('{{base}}/users/:id');
     expect(result.headers[0].value).toBe('Bearer {{token}}');
+  });
+
+  it('an_example_request_without_headers_or_body_does_not_inherit_the_parents', () => {
+    const parent = base({
+      headers: [{ id: 'h', key: 'Authorization', value: 'Bearer x', enabled: true }],
+      body: { mode: 'json', content: '{"parent":true}', formData: [] },
+      queryParams: [{ id: 'q', key: 'p', value: '1', enabled: true }],
+    });
+    const result = exampleToRequestState({ name: 'n', request: { url: 'https://api.test/x' } }, parent);
+    expect(result.headers).toEqual([]);
+    expect(result.body).toMatchObject({ mode: 'none', content: '' });
+    expect(result.queryParams).toEqual([]);
+  });
+
+  it('an_example_without_a_request_keeps_the_base', () => {
+    const parent = base({ headers: [{ id: 'h', key: 'K', value: 'V', enabled: true }] });
+    expect(exampleToRequestState({ name: 'n' }, parent)).toEqual(parent);
+  });
+
+  it('a_saved_snapshot_with_no_headers_and_no_body_round_trips_to_none', () => {
+    const sent = base({ headers: [], body: { mode: 'formdata', content: '', formData: [] } });
+    const snap = buildExampleSnapshot(sent, {
+      status: 200,
+      statusText: 'OK',
+      headers: [],
+      body: '',
+      durationMs: 1,
+      ttfbMs: 1,
+      sizeBytes: 0,
+      activeView: 'pretty',
+    });
+    // On disk the empty headers and params are omitted, so drop them as the file does.
+    const { headers, params, ...rest } = snap.request;
+    expect(headers).toEqual([]);
+    expect(params).toEqual([]);
+    const parent = base({
+      headers: [{ id: 'h', key: 'Authorization', value: 'Bearer x', enabled: true }],
+      body: { mode: 'json', content: '{"parent":true}', formData: [] },
+    });
+    const result = exampleToRequestState({ name: 'n', request: rest }, parent);
+    expect(result.headers).toEqual([]);
+    expect(result.body.mode).toBe('none');
   });
 });
