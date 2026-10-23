@@ -5568,6 +5568,7 @@ dependencies = [
  "rocket-audit",
  "rocket-collection",
  "rocket-environment",
+ "rocket-export",
  "rocket-flow",
  "rocket-git",
  "rocket-grpc",
@@ -5633,6 +5634,7 @@ dependencies = [
  "rocket-audit",
  "rocket-collection",
  "rocket-environment",
+ "rocket-export",
  "rocket-flow",
  "rocket-git",
  "rocket-grpc",
@@ -5703,6 +5705,17 @@ dependencies = [
  "tokio",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "rocket-export"
+version = "0.1.0"
+dependencies = [
+ "rocket-shared",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -5841,6 +5854,7 @@ dependencies = [
  "rocket-audit",
  "rocket-collection",
  "rocket-environment",
+ "rocket-export",
  "rocket-flow",
  "rocket-grpc",
  "rocket-history",
