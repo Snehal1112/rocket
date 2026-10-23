@@ -537,8 +537,63 @@ impl ImportService {
 
         let dest_root = self.workspace_path.join("collections").join(&resolved_name);
         self.copy_collection_files(src, src, &dest_root, &mut report)?;
+        self.report_files_that_cannot_open(&resolved_name, &dest_root, &mut report);
 
         Ok(report)
+    }
+
+    /// Reads every copied file back with Rocket's own readers. A file that fails is still on
+    /// disk, but it is reported so the user knows it will not open.
+    fn report_files_that_cannot_open(
+        &self,
+        collection: &str,
+        dest_root: &Path,
+        report: &mut ImportReport,
+    ) {
+        let mut failures: Vec<(String, String)> = Vec::new();
+        if let Err(e) = self.collection_repo.get_settings(collection) {
+            failures.push(("opencollection.yml".into(), e.to_string()));
+        }
+        if let Err(e) = self.env_factory.make(collection).list_strict() {
+            failures.push(("environments".into(), e.to_string()));
+        }
+        let mut files = Vec::new();
+        collect_yml_files(dest_root, dest_root, &mut files);
+        files.sort();
+        for rel in files {
+            let in_environments = rel.starts_with("environments/");
+            if in_environments || rel == "opencollection.yml" {
+                continue;
+            }
+            let result = if rel == "folder.yml" || rel.ends_with("/folder.yml") {
+                let dir = rel.trim_end_matches("folder.yml").trim_end_matches('/');
+                self.collection_repo
+                    .get_folder_settings(collection, dir)
+                    .map(|_| ())
+            } else {
+                self.open_request(collection, &rel)
+            };
+            if let Err(e) = result {
+                failures.push((rel, e.to_string()));
+            }
+        }
+        for (path, why) in failures {
+            report.skipped.push(SkippedItem {
+                path,
+                reason: SkipReason::ParseError(format!("copied, but Rocket cannot open it: {why}")),
+            });
+        }
+    }
+
+    fn open_request(&self, collection: &str, rel: &str) -> rocket_shared::error::DomainResult<()> {
+        use rocket_collection::RequestKind;
+        let repo = &self.collection_repo;
+        match repo.request_kind(collection, rel)? {
+            RequestKind::Http => repo.get_request(collection, rel).map(|_| ()),
+            RequestKind::GraphQl => repo.get_graphql_request(collection, rel).map(|_| ()),
+            RequestKind::Grpc => repo.get_grpc_request(collection, rel).map(|_| ()),
+            RequestKind::WebSocket => repo.get_websocket_request(collection, rel).map(|_| ()),
+        }
     }
 
     /// Import a Postman Collection JSON (v2.0 or v2.1) into the workspace.
@@ -883,6 +938,27 @@ impl ImportService {
             }
         }
         Ok(())
+    }
+}
+
+/// Collects the `.yml` and `.yaml` files under `dir` as `/`-separated paths relative to `root`.
+fn collect_yml_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_yml_files(root, &path, out);
+            continue;
+        }
+        if !matches!(path.extension().and_then(|e| e.to_str()), Some("yml" | "yaml")) {
+            continue;
+        }
+        if let Ok(rel) = path.strip_prefix(root) {
+            let parts: Vec<_> = rel.iter().map(|p| p.to_string_lossy()).collect();
+            out.push(parts.join("/"));
+        }
     }
 }
 
@@ -1941,5 +2017,48 @@ mod proto_path_tests {
             outside.path().file_name().expect("name").to_string_lossy()
         );
         assert_eq!(rebase_proto_path(dir.path(), &calls, &escaping), None);
+    }
+}
+
+#[cfg(test)]
+mod open_check_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    const GOOD: &str =
+        "info:\n  name: Good\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n";
+    const BAD: &str = "info:\n  name: Bad\n  type: http\nhttp:\n  method: GET\n  url: https://x.test\n  headers:\n    - name: X-A\n";
+
+    fn import(files: &[(&str, &str)]) -> ImportReport {
+        let src_dir = TempDir::new().expect("tmp");
+        let src = src_dir.path().join("col");
+        std::fs::create_dir_all(src.join("sub")).expect("mkdir");
+        std::fs::write(
+            src.join("opencollection.yml"),
+            "opencollection: \"1.0.0\"\ninfo:\n  name: col\n",
+        )
+        .expect("root");
+        for (name, text) in files {
+            std::fs::write(src.join(name), text).expect("write");
+        }
+        let ws = TempDir::new().expect("ws");
+        ImportService::new_with_workspace_path(ws.path())
+            .import_modern_collection(&src, "default", None)
+            .expect("import")
+    }
+
+    #[test]
+    fn a_copied_request_that_cannot_open_is_reported() {
+        let report = import(&[("good.yml", GOOD), ("sub/bad.yml", BAD)]);
+        assert_eq!(report.imported, 2);
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].path, "sub/bad.yml");
+        assert!(matches!(report.skipped[0].reason, SkipReason::ParseError(_)));
+    }
+
+    #[test]
+    fn requests_that_open_add_nothing_to_the_report() {
+        let report = import(&[("good.yml", GOOD)]);
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
     }
 }

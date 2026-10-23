@@ -21,7 +21,7 @@ Because `OcItem` and `OcAuth` are untagged enums, one missing field inside a req
 
 - **Saving collection settings rewrites an object `docs` as a plain string** (the `type` is dropped; the text is kept). Folder docs keep the object form when the text did not change (`docs_to_oc`); the collection and requests do not yet.
 - **Other required fields Bruno could omit when empty** (audit of `oc/`, risk HIGH): WebSocket message `data` (`websocket.rs`), GraphQL `query`, `url` on blank GraphQL, gRPC and WebSocket requests, gRPC message variant `message`, and `value` on headers, params, form fields and gRPC metadata. MEDIUM: auth credential strings (`username`, `password`, `token`, `key`), OAuth2 `clientId`, script `code`, example response `type`, variant `title` fields.
-- **No check at import time.** The importer cannot tell the user that a copied file will not open. A parse check after the copy, reported in `ImportReport.skipped`, would show it.
+- **Import-time check (added 2026-10-23).** After the copy, `import_modern_collection` reads every copied file back with Rocket's readers (`report_files_that_cannot_open`: collection settings, environments, `folder.yml`, and each request by kind). A failure is added to `ImportReport.skipped` as `ParseError("copied, but Rocket cannot open it: ...")`. The file stays on disk and still counts in `imported`. The UI shows these under the skipped list.
 - **The `protoFiles` shape** in the spec reference (`{type, path}`) differs from Rocket's `filePath`. Not checked.
 
 ## How to check a collection
