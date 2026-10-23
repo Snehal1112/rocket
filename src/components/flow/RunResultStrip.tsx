@@ -21,11 +21,11 @@ function describeRun(result: FlowLastRun): { text: string; Icon: LucideIcon; ton
         ? {
             text: `Run finished with ${result.failedCount} failed${took}`,
             Icon: XCircle,
-            tone: 'text-red-600',
+            tone: 'text-destructive',
           }
         : { text: `Run completed${took}`, Icon: CheckCircle2, tone: 'text-green-600' };
     case 'error':
-      return { text: `Run ended with an error${took}`, Icon: XCircle, tone: 'text-red-600' };
+      return { text: `Run ended with an error${took}`, Icon: XCircle, tone: 'text-destructive' };
     default:
       return {
         text: `Run stopped (${result.stoppedReason})${took}`,

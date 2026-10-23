@@ -42,7 +42,7 @@ function KindChip({ kind }: { kind: ChangelogEntryType['kind'] }) {
   }
   if (kind === 'remove') {
     return (
-      <span className='text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-destructive/15 text-destructive'>
+      <span className='text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-destructive/10 text-destructive'>
         REM
       </span>
     );
@@ -90,7 +90,7 @@ export function ChangelogEntry({
           <PenLine className='w-3 h-3 text-muted-foreground shrink-0' aria-hidden='true' />
         )}
         {entry.isBreaking && !isSign && (
-          <span className='bg-destructive/20 text-destructive text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex items-center gap-0.5'>
+          <span className='bg-destructive/10 text-destructive text-[10px] font-bold uppercase px-1.5 py-0.5 rounded flex items-center gap-0.5'>
             <AlertTriangle className='w-2.5 h-2.5' aria-hidden='true' />
             BREAKING
           </span>

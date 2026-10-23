@@ -18,7 +18,7 @@ function SeverityIcon({ severity }: { severity: FlowIssue['severity'] }) {
     <Icon
       className={cn(
         'mt-0.5 h-3.5 w-3.5 shrink-0',
-        severity === 'error' ? 'text-red-500' : 'text-amber-500',
+        severity === 'error' ? 'text-destructive' : 'text-amber-500',
       )}
       aria-hidden='true'
     />

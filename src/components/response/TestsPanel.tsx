@@ -33,7 +33,7 @@ export function TestsPanel({ results }: TestsPanelProps) {
         {failed > 0 && (
           <Badge
             variant='outline'
-            className='gap-1 text-red-600 border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800 dark:text-red-400'
+            className='gap-1 text-destructive border-destructive/30 bg-destructive/10'
           >
             <XCircle className='h-3 w-3' />
             {failed} failed
@@ -50,7 +50,7 @@ export function TestsPanel({ results }: TestsPanelProps) {
             {result.status === 'passed' ? (
               <CheckCircle2 className='h-4 w-4 text-green-500 mt-0.5 shrink-0' />
             ) : (
-              <XCircle className='h-4 w-4 text-red-500 mt-0.5 shrink-0' />
+              <XCircle className='h-4 w-4 text-destructive mt-0.5 shrink-0' />
             )}
             <div className='flex flex-col gap-0.5 min-w-0'>
               <span
@@ -59,7 +59,7 @@ export function TestsPanel({ results }: TestsPanelProps) {
                 {result.name}
               </span>
               {result.error && (
-                <span className='text-xs text-red-500 font-mono break-all'>{result.error}</span>
+                <span className='text-xs text-destructive font-mono break-all'>{result.error}</span>
               )}
             </div>
           </div>

@@ -204,7 +204,7 @@ describe('FlowPane save', () => {
 
     await waitFor(() => {
       const cards = screen.getAllByTestId('output-node-card');
-      const flagged = cards.filter((c) => c.className.includes('ring-red-500'));
+      const flagged = cards.filter((c) => c.className.includes('ring-destructive'));
       expect(flagged.map((c) => c.textContent)).toEqual([
         'Out aRun whenValue—',
         'Out bRun whenValue—',
@@ -239,7 +239,7 @@ describe('FlowPane save', () => {
 
     await waitFor(() => {
       const cards = screen.getAllByTestId('output-node-card');
-      const flagged = cards.filter((c) => c.className.includes('ring-red-500'));
+      const flagged = cards.filter((c) => c.className.includes('ring-destructive'));
       expect(flagged.map((c) => c.textContent)).toEqual(['Out bRun whenValue—']);
     });
   });

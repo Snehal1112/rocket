@@ -83,8 +83,8 @@ export function RocketError({ className = '' }: Props) {
 
       {/* Warning triangle. */}
       <g transform='translate(45, 55)'>
-        <path d='M15 0 L30 26 H0Z' className='fill-destructive/80' />
-        <path d='M15 3 L27 24 H3Z' className='fill-destructive' />
+        <path d='M15 0 L30 26 H0Z' className='fill-destructive-solid/80' />
+        <path d='M15 3 L27 24 H3Z' className='fill-destructive-solid' />
         {/* Exclamation mark. */}
         <rect x='13.5' y='10' width='3' height='8' rx='1' className='fill-destructive-foreground' />
         <circle cx='15' cy='21' r='1.8' className='fill-destructive-foreground' />

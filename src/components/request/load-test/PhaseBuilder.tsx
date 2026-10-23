@@ -119,7 +119,7 @@ export function PhaseBuilder({ phases, onChange, disabled, unit }: Props) {
             <Button
               variant='ghost'
               size='icon'
-              className='h-6 w-6 text-destructive hover:text-destructive'
+              className='h-6 w-6 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
               onClick={() => remove(i)}
               disabled={disabled}
               aria-label='Remove phase'

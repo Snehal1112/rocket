@@ -85,7 +85,7 @@ export function WaitForCallbackEditor({
           className='h-8 font-mono text-xs'
         />
         {!isValidCallbackName(kind.name) && (
-          <p data-testid='callback-name-hint' className='text-xs text-red-600'>
+          <p data-testid='callback-name-hint' className='text-xs text-destructive'>
             Use letters, digits and _ only.
           </p>
         )}

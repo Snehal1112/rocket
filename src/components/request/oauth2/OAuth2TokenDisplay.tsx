@@ -102,7 +102,7 @@ export function OAuth2TokenDisplay({ oauth2: o }: OAuth2TokenDisplayProps) {
               <span className='font-medium text-foreground/90'>Access Token</span>
             </span>
             <span
-              className={`rounded px-2 py-0.5 text-xs font-medium ${expired ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground'}`}
+              className={`rounded px-2 py-0.5 text-xs font-medium ${expired ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground'}`}
             >
               {tokenExpiryDisplay(o.expiresIn, o.tokenAcquiredAt)}
             </span>

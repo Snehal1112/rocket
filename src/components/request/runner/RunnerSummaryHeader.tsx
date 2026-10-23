@@ -23,9 +23,7 @@ export function RunnerSummaryHeader({ tab }: { tab: RunnerTab }) {
       {summary.passed > 0 && (
         <span className='text-green-600 dark:text-green-400'>{summary.passed} passed</span>
       )}
-      {summary.failed > 0 && (
-        <span className='text-red-600 dark:text-red-400'>{summary.failed} failed</span>
-      )}
+      {summary.failed > 0 && <span className='text-destructive'>{summary.failed} failed</span>}
       {summary.skipped > 0 && (
         <span className='text-muted-foreground'>{summary.skipped} skipped</span>
       )}

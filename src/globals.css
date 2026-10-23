@@ -45,6 +45,8 @@
     --accent-foreground: 0 0% 12.5%;
     /* VSCode 2026 Light: inputValidation.errorBorder #ad0707 */
     --destructive: 3 93% 35%;
+    /* Fill behind destructive-foreground text. Same as --destructive in light. */
+    --destructive-solid: 3 93% 35%;
     --destructive-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 98%;
@@ -225,8 +227,12 @@
     /* VSCode 2026 Dark: editorWidget.background #252526 — matches VSCode nested surface */
     --accent: 210 3% 15%;
     --accent-foreground: 0 0% 82%;
-    /* VSCode 2026 Dark: inputValidation.errorBorder #BE1100 */
-    --destructive: 5 99% 37%;
+    /* Red for text, icons, borders and dots on dark surfaces: 5.3:1 or more on every dark surface.
+       Deliberately lighter than VSCode inputValidation.errorBorder #BE1100, which was 2.7:1
+       on the sidebar. */
+    --destructive: 6 82% 64%;
+    /* Fill behind destructive-foreground text: 5.4:1 with white, 3:1 against the editor. */
+    --destructive-solid: 4 70% 46%;
     --destructive-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 10%;

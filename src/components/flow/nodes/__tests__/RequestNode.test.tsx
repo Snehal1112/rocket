@@ -162,7 +162,7 @@ describe('RequestNode', () => {
       status: 'idle',
       issues: [{ code: 'save', severity: 'error', nodeId: 'n1', message: 'Rejected.' }],
     });
-    expect(screen.getByTestId('request-node-card').className).toContain('ring-red-500');
+    expect(screen.getByTestId('request-node-card').className).toContain('ring-destructive');
   });
 
   it('outlines the card in amber, not red, when the node only has a warning', () => {
@@ -173,7 +173,7 @@ describe('RequestNode', () => {
     });
     const cls = screen.getByTestId('request-node-card').className;
     expect(cls).toContain('ring-amber-500');
-    expect(cls).not.toContain('ring-red-500');
+    expect(cls).not.toContain('ring-destructive');
   });
 
   it('shows a debug badge only while debug mode is on', () => {

@@ -96,7 +96,7 @@ export function RequestNode({ id, data, isConnectable }: NodeProps & { data: Req
       )}
       {/* A failed poll also shows how many attempts it made. */}
       {status === 'failed' && (
-        <div className='px-2 pt-1 text-red-600'>
+        <div className='px-2 pt-1 text-destructive'>
           {data.attempts === undefined
             ? `✕ ${statusCode ?? 'Error'} · ${error ?? `${durationMs}ms`}`
             : `✕ ${statusCode ?? 'Error'} · ${attemptsLabel(data.attempts)} · ${error ?? msToSecondsLabel(durationMs ?? 0)}`}

@@ -51,7 +51,7 @@ function ResolvedValue({ resolved, field }: { resolved: WireResolved; field: str
     return (
       <p
         data-testid='wire-error'
-        className='select-text whitespace-pre-wrap break-words text-red-600'
+        className='select-text whitespace-pre-wrap break-words text-destructive'
       >
         {resolved.error}
       </p>
@@ -124,7 +124,7 @@ function Row({
       className={cn(
         'flex items-start gap-1.5 rounded-md border px-2 py-1.5',
         row.notTaken && 'opacity-50',
-        row.failed && 'border-red-500/60 bg-red-500/5',
+        row.failed && 'border-destructive/60 bg-destructive/5',
       )}
     >
       <div className='min-w-0 flex-1 space-y-0.5'>

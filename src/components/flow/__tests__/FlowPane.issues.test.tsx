@@ -132,7 +132,7 @@ describe('FlowPane issues', () => {
     // The If node has no input (a client error). The backend adds two warnings.
     expect(await screen.findByRole('button', { name: '1 error, 2 warnings' })).toBeInTheDocument();
     const card = screen.getByTestId('if-node-card');
-    expect(card.className).toContain('ring-red-500');
+    expect(card.className).toContain('ring-destructive');
     expect(within(card).getByTestId('node-issue-badge')).toHaveAttribute('data-severity', 'error');
   });
 
@@ -160,8 +160,8 @@ describe('FlowPane issues', () => {
     render(<Harness />);
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('button', { name: '2 errors, 2 warnings' });
-    expect(screen.getByTestId('output-node-card').className).toContain('ring-red-500');
-    expect(screen.getByTestId('input-node-card').className).not.toContain('ring-red-500');
+    expect(screen.getByTestId('output-node-card').className).toContain('ring-destructive');
+    expect(screen.getByTestId('input-node-card').className).not.toContain('ring-destructive');
   });
 
   const REJECTED_SAVE =
@@ -185,13 +185,13 @@ describe('FlowPane issues', () => {
     render(<Harness />);
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('button', { name: '2 errors, 2 warnings' });
-    expect(screen.getByTestId('output-node-card').className).toContain('ring-red-500');
+    expect(screen.getByTestId('output-node-card').className).toContain('ring-destructive');
 
     act(() => {
       usePaneStore.getState().updateFlowEdges(tabId, []);
     });
     await waitFor(() =>
-      expect(screen.getByTestId('output-node-card').className).not.toContain('ring-red-500'),
+      expect(screen.getByTestId('output-node-card').className).not.toContain('ring-destructive'),
     );
     // Only the If node's own error is left.
     expect(screen.getByRole('button', { name: /^1 error,/ })).toBeInTheDocument();
@@ -206,7 +206,7 @@ describe('FlowPane issues', () => {
     act(() => {
       usePaneStore.getState().updateFlowNodes(tabId, movedBy(40)());
     });
-    expect(screen.getByTestId('output-node-card').className).toContain('ring-red-500');
+    expect(screen.getByTestId('output-node-card').className).toContain('ring-destructive');
     expect(screen.getByRole('button', { name: '2 errors, 2 warnings' })).toBeInTheDocument();
   });
 

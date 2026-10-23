@@ -220,7 +220,7 @@ export function GitRemotesDialog({ open, onOpenChange }: Props) {
                         <Button
                           size='sm'
                           variant='ghost'
-                          className='h-7 w-7 p-0 text-destructive hover:text-destructive'
+                          className='h-7 w-7 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
                           aria-label='Delete remote'
                           onClick={() => setDeletingRemote(remote.name)}
                         >

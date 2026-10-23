@@ -23,7 +23,7 @@ export function NodeStatusCaption({
       <div
         data-testid='node-error'
         title={message}
-        className='line-clamp-3 break-words px-2 pt-1 text-red-600'
+        className='line-clamp-3 break-words px-2 pt-1 text-destructive'
       >
         ✕ {message}
         {cached ? ' · from an earlier run' : ''}

@@ -110,7 +110,7 @@ describe('FlowCanvas issue badges', () => {
     renderCanvas(nodes.map((n) => issueFor(n.id, 'error')));
     for (const id of cardIds) {
       const el = card(id);
-      expect(el?.className, id).toContain('ring-red-500');
+      expect(el?.className, id).toContain('ring-destructive');
       const badge = el?.querySelector('[data-testid="node-issue-badge"]');
       expect(badge, id).toHaveAttribute('data-severity', 'error');
       expect(badge, id).toHaveAttribute('aria-label', 'Error: Boom.');
@@ -122,7 +122,7 @@ describe('FlowCanvas issue badges', () => {
     for (const id of cardIds) {
       const el = card(id);
       expect(el?.className, id).toContain('ring-amber-500');
-      expect(el?.className, id).not.toContain('ring-red-500');
+      expect(el?.className, id).not.toContain('ring-destructive');
       expect(el?.querySelector('[data-testid="node-issue-badge"]'), id).toHaveAttribute(
         'data-severity',
         'warning',
@@ -132,7 +132,7 @@ describe('FlowCanvas issue badges', () => {
 
   it('marks only the nodes that have issues', () => {
     renderCanvas([issueFor('out', 'error')]);
-    expect(card('output-node-card')?.className).toContain('ring-red-500');
+    expect(card('output-node-card')?.className).toContain('ring-destructive');
     expect(card('input-node-card')?.className).not.toContain('ring-');
   });
 });

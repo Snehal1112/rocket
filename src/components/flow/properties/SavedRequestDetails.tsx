@@ -25,7 +25,7 @@ export function SavedRequestDetails({
 }) {
   const { preview, error, loading } = useSavedRequestPreview(collection, requestPath);
   if (error) {
-    return <p className='text-xs text-red-600'>Could not load request: {error}</p>;
+    return <p className='text-xs text-destructive'>Could not load request: {error}</p>;
   }
   if (loading || !preview) {
     return <p className='text-xs text-muted-foreground'>Loading request…</p>;

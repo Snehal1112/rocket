@@ -173,9 +173,9 @@ describe('FlowPane partial runs', () => {
     render(<Harness />);
     await runThisNode('Result');
     await waitFor(() =>
-      expect(screen.getByTestId('input-node-card').className).toContain('ring-red-500'),
+      expect(screen.getByTestId('input-node-card').className).toContain('ring-destructive'),
     );
-    expect(screen.getByTestId('output-node-card').className).not.toContain('ring-red-500');
+    expect(screen.getByTestId('output-node-card').className).not.toContain('ring-destructive');
     expect(getFlowTab().runId).toBe('run-0');
     expect(getFlowTab().nodeDetail?.in1?.value).toBe('alice');
   });
@@ -187,7 +187,7 @@ describe('FlowPane partial runs', () => {
     render(<Harness />);
     await runThisNode('Result');
     await waitFor(() =>
-      expect(screen.getByTestId('input-node-card').className).toContain('ring-red-500'),
+      expect(screen.getByTestId('input-node-card').className).toContain('ring-destructive'),
     );
     vi.mocked(runFlow).mockImplementation(() => new Promise(() => undefined));
     await user().click(screen.getByRole('button', { name: 'Run' }));
@@ -200,7 +200,7 @@ describe('FlowPane partial runs', () => {
       total_nodes: 2,
     });
     await waitFor(() =>
-      expect(screen.getByTestId('input-node-card').className).not.toContain('ring-red-500'),
+      expect(screen.getByTestId('input-node-card').className).not.toContain('ring-destructive'),
     );
   });
 });

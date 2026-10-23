@@ -84,7 +84,7 @@ export function InlineEnvName({
         <Button
           variant='ghost'
           size='icon'
-          className='h-6 w-6 shrink-0 text-destructive hover:text-destructive/80'
+          className='h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground'
           onMouseDown={(e) => e.preventDefault()}
           onClick={cancel}
           title='Cancel rename'

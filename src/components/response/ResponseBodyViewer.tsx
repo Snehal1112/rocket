@@ -336,7 +336,7 @@ export function ResponseBodyViewer({
                 Errors
                 <span
                   className={`ml-1 text-2xs ${
-                    graphqlView.errors.length > 0 ? 'text-red-500' : 'text-muted-foreground'
+                    graphqlView.errors.length > 0 ? 'text-destructive' : 'text-muted-foreground'
                   }`}
                 >
                   ({graphqlView.errors.length})
@@ -390,7 +390,7 @@ export function ResponseBodyViewer({
               <span
                 className={`ml-1 text-2xs ${
                   response.testResults?.some((r) => r.status === 'failed')
-                    ? 'text-red-500'
+                    ? 'text-destructive'
                     : 'text-green-500'
                 }`}
               >

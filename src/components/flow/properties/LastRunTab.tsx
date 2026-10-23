@@ -54,7 +54,7 @@ const badgeClass: Record<FlowNodeStatus, string> = {
   idle: '',
   running: 'bg-blue-500/15 text-blue-600',
   success: 'bg-green-500/15 text-green-600',
-  failed: 'bg-red-500/15 text-red-600',
+  failed: 'bg-destructive/10 text-destructive',
   skipped: 'bg-muted text-muted-foreground',
 };
 
@@ -187,7 +187,7 @@ function ExchangeSections({
       {exchange.error && exchange.error !== shownError && (
         <div
           data-testid='last-run-send-error'
-          className='select-text whitespace-pre-wrap break-words rounded-md border border-red-500/40 bg-red-500/5 p-2 text-red-600'
+          className='select-text whitespace-pre-wrap break-words rounded-md border border-destructive/40 bg-destructive/5 p-2 text-destructive'
         >
           {exchange.error}
         </div>
@@ -246,7 +246,7 @@ function ExchangeSections({
 const logClass: Record<FlowLogEntry['level'], string> = {
   log: '',
   warn: 'text-amber-600 dark:text-amber-400',
-  error: 'text-red-600',
+  error: 'text-destructive',
 };
 
 function ValueSection({ value, truncated = false }: { value: string; truncated?: boolean }) {
@@ -274,7 +274,7 @@ function WireValueText({ wire }: { wire: FlowWireValue }) {
     return (
       <p
         data-testid='last-run-input-error'
-        className='select-text whitespace-pre-wrap break-words text-red-600'
+        className='select-text whitespace-pre-wrap break-words text-destructive'
       >
         {wire.error}
       </p>
@@ -317,7 +317,7 @@ function InputsSection({
             data-failed={failed ? 'true' : undefined}
             className={cn(
               'space-y-1 rounded-md border px-2 py-1.5',
-              failed && 'border-red-500/60 bg-red-500/5',
+              failed && 'border-destructive/60 bg-destructive/5',
             )}
           >
             <p className='[overflow-wrap:anywhere]'>
@@ -510,7 +510,7 @@ export function LastRunTab({ node, status, detail, nodes, callbackUrl }: LastRun
       {status === 'failed' && detail?.error && (
         <div
           data-testid='last-run-error'
-          className='select-text whitespace-pre-wrap break-words rounded-md border border-red-500/40 bg-red-500/5 p-2 text-red-600'
+          className='select-text whitespace-pre-wrap break-words rounded-md border border-destructive/40 bg-destructive/5 p-2 text-destructive'
         >
           {detail.error}
         </div>

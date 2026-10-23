@@ -150,7 +150,10 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
               aria-invalid={dupes.has(c.matches)}
               value={c.matches}
               onChange={(e) => setCase(c.id, { matches: e.target.value })}
-              className={cn('h-6 px-1 font-mono text-xs', dupes.has(c.matches) && 'border-red-500')}
+              className={cn(
+                'h-6 px-1 font-mono text-xs',
+                dupes.has(c.matches) && 'border-destructive',
+              )}
             />
             <Button
               variant='ghost'
@@ -174,7 +177,7 @@ export function SwitchNode({ id, data, isConnectable }: NodeProps & { data: Swit
         ))}
 
         {dupes.size > 0 && (
-          <div role='alert' className='text-[10px] text-red-600'>
+          <div role='alert' className='text-[10px] text-destructive'>
             Two cases match the same value.
           </div>
         )}

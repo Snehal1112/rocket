@@ -334,7 +334,7 @@ describe('LastRunTab per kind', () => {
     const logs = screen.getByTestId('last-run-logs');
     expect(logs).toHaveTextContent('wire data: {}');
     expect(logs).toHaveTextContent('boom');
-    expect(screen.getByText('boom').className).toContain('text-red-600');
+    expect(screen.getByText('boom').className).toContain('text-destructive');
   });
 
   it('shows no logs section without logs', () => {

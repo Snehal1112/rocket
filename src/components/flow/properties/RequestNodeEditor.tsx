@@ -166,7 +166,7 @@ export function RequestNodeEditor({
       )}
 
       {loadError && (
-        <p role='alert' className='text-xs text-red-600'>
+        <p role='alert' className='text-xs text-destructive'>
           {loadError}
         </p>
       )}

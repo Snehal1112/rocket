@@ -69,7 +69,7 @@ export function RequestPicker({
         {error ? (
           <div
             role='alert'
-            className='flex items-center justify-between gap-2 text-xs text-red-600'
+            className='flex items-center justify-between gap-2 text-xs text-destructive'
           >
             <span>Could not load requests: {error}</span>
             <Button

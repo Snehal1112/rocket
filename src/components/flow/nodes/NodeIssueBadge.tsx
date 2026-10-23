@@ -21,7 +21,7 @@ export function NodeIssueBadge({ issues }: { issues?: FlowIssue[] }) {
             data-severity={severity}
             className={cn(
               'inline-flex shrink-0',
-              severity === 'error' ? 'text-red-500' : 'text-amber-500',
+              severity === 'error' ? 'text-destructive' : 'text-amber-500',
             )}
           >
             <Icon className='h-3.5 w-3.5' aria-hidden='true' />

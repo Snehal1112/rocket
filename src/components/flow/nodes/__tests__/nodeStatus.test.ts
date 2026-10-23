@@ -10,7 +10,7 @@ describe('nodeStatusClassName', () => {
   it('keeps the existing per-status styles', () => {
     expect(nodeStatusClassName('idle')).toBe('border-border');
     expect(nodeStatusClassName('success')).toContain('border-green-500');
-    expect(nodeStatusClassName('failed')).toContain('border-red-500');
+    expect(nodeStatusClassName('failed')).toContain('border-destructive');
     expect(nodeStatusClassName('running')).toContain('animate-pulse');
   });
 
@@ -51,14 +51,14 @@ describe('issueRingClassName', () => {
   const warning = { code: 'b', severity: 'warning' as const, nodeId: 'n', message: 'm' };
 
   it('draws a red ring for an error, even next to a warning', () => {
-    expect(issueRingClassName([error])).toContain('ring-red-500');
-    expect(issueRingClassName([warning, error])).toContain('ring-red-500');
+    expect(issueRingClassName([error])).toContain('ring-destructive');
+    expect(issueRingClassName([warning, error])).toContain('ring-destructive');
   });
 
   it('draws an amber ring, and no red, for a warning', () => {
     const cls = issueRingClassName([warning]);
     expect(cls).toContain('ring-amber-500');
-    expect(cls).not.toContain('ring-red-500');
+    expect(cls).not.toContain('ring-destructive');
   });
 
   it('draws no ring without issues', () => {

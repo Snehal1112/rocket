@@ -108,7 +108,7 @@ export function EnvironmentSidebar({
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-7 w-7 text-destructive hover:text-destructive'
+                className='h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
                 onClick={onDelete}
                 disabled={!canDelete}
                 aria-label='Delete environment'

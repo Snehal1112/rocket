@@ -103,7 +103,7 @@ function HttpEntryDetail({ entry, revealed, onToggleReveal }: HttpEntryDetailPro
 const scriptLevelColor: Record<ScriptLogEntry['level'], string> = {
   log: 'text-foreground/80',
   warn: 'text-yellow-500',
-  error: 'text-red-500',
+  error: 'text-destructive',
 };
 
 const scriptLevelLabel: Record<ScriptLogEntry['level'], string> = {
@@ -142,7 +142,7 @@ function TestResultRow({ entry }: { entry: TestResultEntry }) {
       {entry.status === 'passed' ? (
         <CheckCircle2 className='h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0' />
       ) : (
-        <XCircle className='h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0' />
+        <XCircle className='h-3.5 w-3.5 text-destructive mt-0.5 shrink-0' />
       )}
       <span className='text-muted-foreground shrink-0 truncate max-w-[8rem]'>
         {entry.requestName}
@@ -150,11 +150,13 @@ function TestResultRow({ entry }: { entry: TestResultEntry }) {
       <span
         className={cn(
           'flex-1 break-all',
-          entry.status === 'passed' ? 'text-green-500' : 'text-red-400',
+          entry.status === 'passed' ? 'text-green-500' : 'text-destructive',
         )}
       >
         {entry.name}
-        {entry.error && <span className='block text-red-400 font-mono mt-0.5'>{entry.error}</span>}
+        {entry.error && (
+          <span className='block text-destructive font-mono mt-0.5'>{entry.error}</span>
+        )}
       </span>
     </div>
   );
@@ -165,7 +167,7 @@ type PanelEntry = ConsoleEntry | LogConsoleEntry;
 const logLevelColor: Record<BackendLogLevel, string> = {
   INFO: 'text-sky-500',
   WARN: 'text-yellow-500',
-  ERROR: 'text-red-500',
+  ERROR: 'text-destructive',
 };
 
 function LogRow({ entry }: { entry: LogConsoleEntry }) {

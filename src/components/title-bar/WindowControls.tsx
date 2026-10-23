@@ -53,7 +53,7 @@ export function WindowControls() {
       <Button
         variant='ghost'
         size='icon'
-        className='h-10 w-12 rounded-none text-muted-foreground hover:bg-destructive hover:text-destructive-foreground'
+        className='h-10 w-12 rounded-none text-muted-foreground hover:bg-destructive-solid hover:text-destructive-foreground'
         onClick={() => win.close()}
         aria-label='Close'
       >

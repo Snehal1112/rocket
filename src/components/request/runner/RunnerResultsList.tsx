@@ -19,7 +19,7 @@ function StatusIcon({ status }: { status: RunnerRequestEntry['status'] }) {
     case 'passed':
       return <CheckCircle2 className='h-4 w-4 text-green-500 shrink-0' />;
     case 'failed':
-      return <XCircle className='h-4 w-4 text-red-500 shrink-0' />;
+      return <XCircle className='h-4 w-4 text-destructive shrink-0' />;
     case 'skipped':
       return <SkipForward className='h-4 w-4 text-muted-foreground shrink-0' />;
     default:
@@ -62,7 +62,7 @@ function ResultRow({ entry }: { entry: RunnerRequestEntry }) {
           <span className='ml-2 text-xs text-muted-foreground'>skipped</span>
         )}
         {entry.error && (
-          <span className='ml-auto shrink-0 text-xs text-red-500 font-mono break-all'>
+          <span className='ml-auto shrink-0 text-xs text-destructive font-mono break-all'>
             {entry.error}
           </span>
         )}

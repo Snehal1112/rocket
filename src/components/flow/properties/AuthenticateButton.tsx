@@ -136,7 +136,7 @@ export function AuthenticateButton({
         </Badge>
       </div>
       {message?.kind === 'error' && (
-        <p role='alert' className='break-words text-xs text-red-600'>
+        <p role='alert' className='break-words text-xs text-destructive'>
           {message.text}
         </p>
       )}

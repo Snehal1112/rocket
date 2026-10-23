@@ -8,7 +8,7 @@ export const METHOD_TEXT_COLOR: Record<string, string> = {
   POST: 'text-amber-500 dark:text-amber-400',
   PUT: 'text-blue-500 dark:text-blue-400',
   PATCH: 'text-violet-500 dark:text-violet-400',
-  DELETE: 'text-red-500 dark:text-red-400',
+  DELETE: 'text-destructive',
   OPTIONS: 'text-cyan-500 dark:text-cyan-400',
   HEAD: 'text-pink-500 dark:text-pink-400',
   WS: 'text-teal-500 dark:text-teal-400',
@@ -23,7 +23,7 @@ export const METHOD_BADGE_COLOR: Record<string, string> = {
   PUT: 'text-blue-500 dark:text-blue-400 border-blue-500/30 bg-blue-500/10 dark:bg-blue-500/20',
   PATCH:
     'text-violet-500 dark:text-violet-400 border-violet-500/30 bg-violet-500/10 dark:bg-violet-500/20',
-  DELETE: 'text-red-500 dark:text-red-400 border-red-500/30 bg-red-500/10 dark:bg-red-500/20',
+  DELETE: 'text-destructive border-destructive/30 bg-destructive/10',
   OPTIONS: 'text-cyan-500 dark:text-cyan-400 border-cyan-500/30 bg-cyan-500/10 dark:bg-cyan-500/20',
   HEAD: 'text-pink-500 dark:text-pink-400 border-pink-500/30 bg-pink-500/10 dark:bg-pink-500/20',
   WS: 'text-teal-500 dark:text-teal-400 border-teal-500/30 bg-teal-500/10 dark:bg-teal-500/20',
@@ -37,7 +37,7 @@ export const METHOD_CHART_COLOR: Record<string, { text: string; bg: string }> = 
   POST: { text: 'text-amber-500 dark:text-amber-400', bg: 'bg-amber-500' },
   PUT: { text: 'text-blue-500 dark:text-blue-400', bg: 'bg-blue-500' },
   PATCH: { text: 'text-violet-500 dark:text-violet-400', bg: 'bg-violet-500' },
-  DELETE: { text: 'text-red-500 dark:text-red-400', bg: 'bg-red-500' },
+  DELETE: { text: 'text-destructive', bg: 'bg-destructive' },
   OPTIONS: { text: 'text-cyan-500 dark:text-cyan-400', bg: 'bg-cyan-500' },
   HEAD: { text: 'text-pink-500 dark:text-pink-400', bg: 'bg-pink-500' },
 };
@@ -46,7 +46,7 @@ export const METHOD_CHART_COLOR: Record<string, { text: string; bg: string }> = 
 
 /** Text-only color for status codes in compact contexts. */
 export function statusTextColor(status: number): string {
-  if (status >= 500 || status === 0) return 'text-red-600 dark:text-red-400';
+  if (status >= 500 || status === 0) return 'text-destructive';
   if (status >= 400) return 'text-amber-600 dark:text-amber-400';
   if (status >= 300) return 'text-blue-600 dark:text-blue-400';
   if (status >= 200) return 'text-emerald-600 dark:text-emerald-400';
@@ -55,22 +55,21 @@ export function statusTextColor(status: number): string {
 
 /** Full badge color for status code badges (text + bg + border). */
 export function statusBadgeColor(status: number): string {
-  if (status >= 500)
-    return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+  if (status >= 500) return 'bg-destructive/10 text-destructive border-destructive/30';
   if (status >= 400)
     return 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800';
   if (status >= 300)
     return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800';
   if (status >= 200)
     return 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800';
-  return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800';
+  return 'bg-destructive/10 text-destructive border-destructive/30';
 }
 
 /** Color for response time indicators. */
 export function timeColor(ms: number): string {
   if (ms <= 200) return 'text-emerald-600 dark:text-emerald-400';
   if (ms <= 1000) return 'text-amber-600 dark:text-amber-400';
-  return 'text-red-600 dark:text-red-400';
+  return 'text-destructive';
 }
 
 // ── Git Status Colors ───────────────────────────────────────────────

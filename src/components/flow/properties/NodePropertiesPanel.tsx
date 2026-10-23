@@ -235,7 +235,7 @@ export function NodePropertiesPanel({
               {saveError && (
                 <p
                   data-testid='node-save-error'
-                  className='break-words rounded border border-red-500/50 bg-red-500/10 p-2 text-xs text-red-600'
+                  className='break-words rounded border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive'
                 >
                   {saveError}
                 </p>
