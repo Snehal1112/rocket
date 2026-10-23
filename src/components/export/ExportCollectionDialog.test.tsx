@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExportCollectionDialog } from './ExportCollectionDialog';
 
 const mockExport = vi.fn();
+const mockExportPostman = vi.fn();
 vi.mock('@/lib/tauri-api', () => ({
   exportCollectionBruno: (...a: unknown[]) => mockExport(...a),
+  exportCollectionPostman: (...a: unknown[]) => mockExportPostman(...a),
 }));
 
 const mockSaveBinary = vi.fn();
@@ -37,6 +39,7 @@ function renderDialog() {
 
 beforeEach(() => {
   mockExport.mockReset();
+  mockExportPostman.mockReset();
   mockSaveBinary.mockReset();
   mockToastError.mockReset();
 });
@@ -87,5 +90,35 @@ describe('ExportCollectionDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
     await waitFor(() => expect(mockSaveBinary).toHaveBeenCalled());
     expect(screen.queryByText('Bearer token')).not.toBeInTheDocument();
+  });
+
+  async function selectPostman() {
+    // jsdom lacks these pointer APIs that Radix Select uses.
+    Element.prototype.hasPointerCapture ??= () => false;
+    Element.prototype.setPointerCapture ??= () => {};
+    Element.prototype.releasePointerCapture ??= () => {};
+    Element.prototype.scrollIntoView ??= () => {};
+    await userEvent.click(screen.getByRole('combobox'));
+    await userEvent.click(await screen.findByRole('option', { name: /postman collection/i }));
+  }
+
+  it('postman option calls exportCollectionPostman and saves a .json file', async () => {
+    mockExportPostman.mockResolvedValue({ ...result, fileName: 'demo.postman_collection.json' });
+    mockSaveBinary.mockResolvedValue(true);
+    render(<ExportCollectionDialog open collectionName='demo' onClose={vi.fn()} />);
+    await selectPostman();
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    await waitFor(() => expect(mockSaveBinary).toHaveBeenCalled());
+    expect(mockExportPostman).toHaveBeenCalledWith('demo');
+    const [name, , filters] = mockSaveBinary.mock.calls[0];
+    expect(name).toMatch(/\.postman_collection\.json$/);
+    expect(filters).toEqual([{ name: 'JSON file', extensions: ['json'] }]);
+  });
+
+  it('shows a note that Postman environments are not included yet', async () => {
+    renderDialog();
+    await selectPostman();
+    expect(screen.queryByRole('checkbox', { name: /include environments/i })).toBeNull();
+    expect(screen.getByText(/environments are exported in a later version/i)).toBeInTheDocument();
   });
 });

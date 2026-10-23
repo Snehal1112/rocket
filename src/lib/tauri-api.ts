@@ -1792,6 +1792,9 @@ export interface ExportResult {
 export const exportCollectionBruno = (collection: string, includeEnvironments: boolean) =>
   invoke<ExportResult>('export_collection_bruno', { collection, includeEnvironments });
 
+export const exportCollectionPostman = (collection: string) =>
+  invoke<ExportResult>('export_collection_postman', { collection });
+
 export const importBruno = (
   path: string,
   targetWorkspaceId: string,
