@@ -4,16 +4,14 @@
 //! structs, so unknown keys survive.
 
 use crate::report::{ExportAction, ExportNote};
+use crate::sensitive::is_sensitive_name;
 use rocket_shared::oauth2::OAuth2Flow;
 use rocket_shared::types::{Auth, Header};
 use serde_yaml::{Mapping, Value};
 
-/// Whether a header's value is always a credential, whatever it contains.
+/// Whether a header's value is a credential by its name (see `is_sensitive_name`).
 pub fn is_sensitive_header(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "authorization" | "proxy-authorization" | "cookie" | "set-cookie" | "x-api-key"
-    )
+    is_sensitive_name(name)
 }
 
 /// True when the text is only a `{{variable}}` reference, optionally after
@@ -366,6 +364,19 @@ mod tests {
 
     fn empty() -> Value {
         Value::String(String::new())
+    }
+
+    #[test]
+    fn is_sensitive_header_covers_the_five_names() {
+        for name in [
+            "authorization",
+            "Proxy-Authorization",
+            "COOKIE",
+            "Set-Cookie",
+            "X-API-KEY",
+        ] {
+            assert!(is_sensitive_header(name), "{name} should be sensitive");
+        }
     }
 
     #[test]
