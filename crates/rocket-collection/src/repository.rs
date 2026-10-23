@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection::Collection;
@@ -398,6 +399,54 @@ pub trait CollectionRepository: Send + Sync {
     ) -> DomainResult<()> {
         Err(DomainError::Internal(
             "saving request scripts is not supported by this repository".into(),
+        ))
+    }
+
+    /// Lists the saved examples of one HTTP request.
+    fn list_request_examples(
+        &self,
+        _collection: &str,
+        _request_path: &str,
+    ) -> DomainResult<Vec<HttpRequestExample>> {
+        Err(DomainError::Internal(
+            "request examples are not supported by this repository".into(),
+        ))
+    }
+
+    /// Adds one example to an HTTP request. A duplicate name (case-insensitive) is `AlreadyExists`.
+    fn add_request_example(
+        &self,
+        _collection: &str,
+        _request_path: &str,
+        _example: HttpRequestExample,
+    ) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "request examples are not supported by this repository".into(),
+        ))
+    }
+
+    /// Renames one example of an HTTP request.
+    fn rename_request_example(
+        &self,
+        _collection: &str,
+        _request_path: &str,
+        _old_name: &str,
+        _new_name: &str,
+    ) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "request examples are not supported by this repository".into(),
+        ))
+    }
+
+    /// Deletes one example of an HTTP request.
+    fn delete_request_example(
+        &self,
+        _collection: &str,
+        _request_path: &str,
+        _name: &str,
+    ) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "request examples are not supported by this repository".into(),
         ))
     }
 

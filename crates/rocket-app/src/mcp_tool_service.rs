@@ -1282,6 +1282,7 @@ mod tests {
             url: format!("https://api.test/{file}"),
             file_name: Some(file.into()),
             kind: Default::default(),
+            example_names: Vec::new(),
         }
     }
 

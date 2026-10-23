@@ -1283,6 +1283,7 @@ mod tests {
             url: String::new(),
             file_name: Some(file.into()),
             kind: Default::default(),
+            example_names: Vec::new(),
         }
     }
 

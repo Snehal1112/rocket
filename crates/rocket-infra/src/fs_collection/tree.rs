@@ -262,6 +262,12 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
             uid: Option<String>,
             info: MinInfo,
             http: MinHttp,
+            #[serde(default)]
+            examples: Vec<MinExample>,
+        }
+        #[derive(serde::Deserialize)]
+        struct MinExample {
+            name: String,
         }
         #[derive(serde::Deserialize)]
         struct MinInfo {
@@ -281,6 +287,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                     url: min.http.url,
                     file_name: Some(entry_name.to_string()),
                     kind: RequestKind::Http,
+                    example_names: min.examples.into_iter().map(|e| e.name).collect(),
                 }))
             }
             Err(e) => e,
@@ -293,6 +300,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 url: gql.graphql.url,
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::GraphQl,
+                example_names: Vec::new(),
             })),
             Ok(OcItem::WebSocket(ws)) => Ok(Some(RequestSummary {
                 uid: ws
@@ -305,6 +313,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 url: ws.websocket.url,
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::WebSocket,
+                example_names: Vec::new(),
             })),
             // A gRPC file is small, so the summary reads the few fields the sidebar needs.
             Ok(OcItem::Grpc(grpc)) => Ok(Some(RequestSummary {
@@ -317,6 +326,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
                 url: grpc.grpc.url,
                 file_name: Some(entry_name.to_string()),
                 kind: RequestKind::Grpc,
+                example_names: Vec::new(),
             })),
             Ok(OcItem::Http(_)) | Ok(OcItem::Folder(_)) | Err(_) => Err(DomainError::Internal(
                 format!("Failed to parse request summary: {min_err}"),
@@ -334,6 +344,7 @@ fn load_request_summary(path: &Path, entry_name: &str) -> DomainResult<Option<Re
             url: req.url,
             file_name: Some(entry_name.to_string()),
             kind: RequestKind::Http,
+            example_names: Vec::new(),
         }))
     }
 }

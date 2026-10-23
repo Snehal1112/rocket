@@ -522,3 +522,26 @@ fn read_order_list_is_none_for_garbage_a_directory_or_no_file() {
     write(&dir, "e/other.yml", "x");
     assert_eq!(read_order_list(&dir.path().join("e")), None);
 }
+
+#[test]
+fn summaries_list_example_names_in_order() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    save(&repo, "a.yml", "A");
+    let path = dir.path().join("col").join("a.yml");
+    let mut text = fs::read_to_string(&path).expect("read request");
+    text.push_str("examples:\n  - name: 200 OK\n  - name: '401'\n");
+    fs::write(&path, text).expect("write examples");
+
+    let summaries = repo.get_summaries("col").expect("summaries load");
+    let names: Vec<_> = summaries
+        .root
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            CollectionItem::Summary(s) => Some(s.example_names.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, vec![vec!["200 OK".to_string(), "401".to_string()]]);
+}

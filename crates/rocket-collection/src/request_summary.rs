@@ -15,6 +15,9 @@ pub struct RequestSummary {
     /// Which protocol the file holds. Absent in older JSON, which means HTTP.
     #[serde(default, skip_serializing_if = "RequestKind::is_http")]
     pub kind: RequestKind,
+    /// Names of the saved examples, in file order. Only HTTP requests have them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub example_names: Vec<String>,
 }
 
 #[cfg(test)]
@@ -37,6 +40,7 @@ mod tests {
             url: "/a".into(),
             file_name: None,
             kind: RequestKind::Http,
+            example_names: Vec::new(),
         };
         assert!(serde_json::to_value(&s).expect("ser").get("kind").is_none());
         s.kind = RequestKind::GraphQl;
