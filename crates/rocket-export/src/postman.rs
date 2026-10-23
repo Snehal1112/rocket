@@ -383,24 +383,33 @@ fn body_json(body: &Body, headers: &mut Vec<Header>) -> Option<Value> {
 
 /// Build a Postman `url` object. `raw` holds the enabled query pairs only.
 pub fn postman_url(url: &str, query: &[QueryParam], path_params: &[PathParam]) -> Value {
-    let enabled: Vec<String> = query
-        .iter()
-        .filter(|q| q.enabled)
-        .map(|q| format!("{}={}", q.key, q.value))
-        .collect();
-    let (base, existing_query) = match url.split_once('?') {
-        Some((b, q)) => (b, Some(q)),
-        None => (url, None),
+    let (base, query_text) = match url.split_once('?') {
+        Some((b, q)) => (b, q),
+        None => (url, ""),
     };
-    let mut raw = base.to_string();
-    let mut sep = '?';
-    if let Some(q) = existing_query {
-        raw.push('?');
-        raw.push_str(q);
-        sep = '&';
+    // Rows from the url bar come first, then table rows that are not already there.
+    let query_text = query_text.split('#').next().unwrap_or("");
+    let mut rows: Vec<Header> = Vec::new();
+    for seg in query_text.split('&').filter(|s| !s.is_empty()) {
+        let (k, v) = seg.split_once('=').unwrap_or((seg, ""));
+        if !k.is_empty() {
+            rows.push(Header::new(k, v));
+        }
     }
+    for q in query {
+        if q.key.is_empty() || rows.iter().any(|r| r.key == q.key && r.value == q.value) {
+            continue;
+        }
+        rows.push(q.clone());
+    }
+    let enabled: Vec<String> = rows
+        .iter()
+        .filter(|r| r.enabled)
+        .map(|r| format!("{}={}", r.key, r.value))
+        .collect();
+    let mut raw = base.to_string();
     if !enabled.is_empty() {
-        raw.push(sep);
+        raw.push('?');
         raw.push_str(&enabled.join("&"));
     }
 
@@ -430,8 +439,8 @@ pub fn postman_url(url: &str, query: &[QueryParam], path_params: &[PathParam]) -
             obj.insert("path".into(), json!(segs));
         }
     }
-    if !query.is_empty() {
-        let rows: Vec<Value> = query.iter().map(header_json).collect();
+    if !rows.is_empty() {
+        let rows: Vec<Value> = rows.iter().map(header_json).collect();
         obj.insert("query".into(), Value::Array(rows));
     }
     if !path_params.is_empty() {
@@ -510,6 +519,37 @@ mod tests {
         assert!(uuid::Uuid::parse_str(id).is_ok());
         assert_eq!(doc["info"]["description"], "hello");
         assert_eq!(doc["info"]["name"], "demo");
+    }
+
+    #[test]
+    fn rocket_shaped_url_query_becomes_url_query_rows() {
+        let url = postman_url("https://x.test/users?page=1&sort=name", &[], &[]);
+        assert_eq!(url["raw"], "https://x.test/users?page=1&sort=name");
+        assert_eq!(
+            url["query"],
+            serde_json::json!([
+                {"key": "page", "value": "1"},
+                {"key": "sort", "value": "name"}
+            ])
+        );
+    }
+
+    #[test]
+    fn typed_and_table_duplicate_pair_appears_once() {
+        let q = vec![Header::new("page", "1"), Header::disabled("debug", "x")];
+        let url = postman_url("https://x.test/users?page=1", &q, &[]);
+        assert_eq!(url["raw"], "https://x.test/users?page=1");
+        assert_eq!(url["query"].as_array().expect("query array").len(), 2);
+        assert_eq!(url["query"][1]["key"], "debug");
+        assert_eq!(url["query"][1]["disabled"], true);
+    }
+
+    #[test]
+    fn empty_key_query_rows_are_skipped() {
+        let q = vec![Header::new("", "orphan"), Header::new("a", "1")];
+        let url = postman_url("https://x.test/p?=skip&b=2", &q, &[]);
+        assert_eq!(url["raw"], "https://x.test/p?b=2&a=1");
+        assert_eq!(url["query"].as_array().expect("query array").len(), 2);
     }
 
     #[test]
