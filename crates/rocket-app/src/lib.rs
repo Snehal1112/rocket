@@ -8,6 +8,7 @@ pub mod assertion_evaluator;
 pub mod assistant_chip_text;
 pub mod callback_listener;
 pub(crate) mod client_certificates;
+pub mod collection_export_service;
 pub mod collection_runner_service;
 pub mod collection_service;
 pub mod collection_trust;
