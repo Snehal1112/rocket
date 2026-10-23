@@ -4,6 +4,8 @@
 export function toStoredDotEnvPath(picked: string, baseDir: string | null): string {
   if (!baseDir) return picked;
   const normalPicked = picked.replace(/\\/g, '/');
+  // A path with a parent segment is never stored in the relative form.
+  if (normalPicked.split('/').includes('..')) return picked;
   const normalBase = baseDir.replace(/\\/g, '/').replace(/\/+$/, '');
   if (!normalBase) return picked;
   // The separator in the prefix keeps a sibling like /col2 outside of /col.

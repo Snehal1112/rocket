@@ -31,4 +31,10 @@ describe('toStoredDotEnvPath', () => {
   it('a_base_with_a_trailing_separator_still_matches', () => {
     expect(toStoredDotEnvPath('/col/a/.env', '/col/')).toBe('a/.env');
   });
+
+  it('a_parent_segment_keeps_the_path_as_picked', () => {
+    expect(toStoredDotEnvPath('/col/../x', '/col')).toBe('/col/../x');
+    expect(toStoredDotEnvPath('/col/a/../../x', '/col')).toBe('/col/a/../../x');
+    expect(toStoredDotEnvPath('C:\\col\\..\\x', 'C:\\col')).toBe('C:\\col\\..\\x');
+  });
 });
