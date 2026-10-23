@@ -60,6 +60,10 @@ interface EnvironmentDialogProps {
 
 const EMPTY_ENVS: Environment[] = [];
 
+const EMPTY_ROWS: ResolvedVariable[] = [];
+// Radix Select forbids an empty item value, so "None" uses a sentinel.
+const NO_PARENT = '__none__';
+
 /** One line that says what happened to the .env file. It never shows a value. */
 function dotEnvStatusLine(status: DotEnvStatus): { text: string; warn: boolean } {
   if (status.blocked) {
@@ -76,9 +80,6 @@ function dotEnvStatusLine(status: DotEnvStatus): { text: string; warn: boolean }
   if (status.usesDefault) return { text: 'No .env file in this folder', warn: false };
   return { text: `Not found${status.path ? `: ${status.path}` : ''}`, warn: false };
 }
-const EMPTY_ROWS: ResolvedVariable[] = [];
-// Radix Select forbids an empty item value, so "None" uses a sentinel.
-const NO_PARENT = '__none__';
 
 // Collapses variables sharing a key, keeping the last-edited row's value and
 // its original position. Backstop for Save: even if a duplicate ever makes
@@ -292,14 +293,15 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       ? selectedEnv.extends
       : null;
 
-  // Inherited rows come from the saved, flattened environment. Rows the child
-  // defines (saved or in-flight) are its own, so they are not listed here.
   const { data: dotEnvStatus } = useDotEnvStatus(
     activeCollection,
     selectedEnv?.name ?? null,
     selectedEnv?.dotEnvFilePath,
   );
   const dotEnvLine = dotEnvStatus ? dotEnvStatusLine(dotEnvStatus) : null;
+
+  // Inherited rows come from the saved, flattened environment. Rows the child
+  // defines (saved or in-flight) are its own, so they are not listed here.
   const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, selectedName);
   const inheritedRows = useMemo(() => {
     if (!selectedEnv) return EMPTY_ROWS;

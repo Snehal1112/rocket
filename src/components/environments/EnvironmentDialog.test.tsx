@@ -623,4 +623,20 @@ describe('EnvironmentDialog .env status line', () => {
     const text = await screen.findByText(/Bad line 3/);
     expect(text.closest('p')).toHaveClass('text-amber-500');
   });
+
+  it('refetches_the_status_after_a_save', async () => {
+    vi.mocked(tauriApi.saveEnvironment).mockReset().mockResolvedValue(undefined);
+    await renderWith({});
+    await screen.findByText('Found .env, 4 keys');
+    const before = vi.mocked(tauriApi.getDotEnvStatus).mock.calls.length;
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('Variable key 1'), 'X');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
+
+    await vi.waitFor(() =>
+      expect(vi.mocked(tauriApi.getDotEnvStatus).mock.calls.length).toBeGreaterThan(before),
+    );
+  });
 });

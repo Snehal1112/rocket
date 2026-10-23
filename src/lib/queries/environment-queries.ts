@@ -107,6 +107,7 @@ export function useResolvedEnvironment(collection: string | null, name: string |
 export function invalidateResolvedEnvironments(qc: QueryClient) {
   void qc.invalidateQueries({ queryKey: environmentKeys.resolvedAll });
   void qc.invalidateQueries({ queryKey: environmentKeys.processAll });
+  void qc.invalidateQueries({ queryKey: environmentKeys.dotEnvAll });
 }
 
 export function useSaveEnvironment(collectionName: string | null) {
