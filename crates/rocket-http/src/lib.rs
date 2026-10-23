@@ -1,3 +1,5 @@
+// The async_trait macro triggers this lint on newer toolchains.
+#![allow(clippy::double_must_use)]
 pub mod aws_sig;
 pub mod client_cert;
 pub mod cookie;

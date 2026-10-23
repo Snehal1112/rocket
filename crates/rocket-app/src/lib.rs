@@ -1,3 +1,5 @@
+// The async_trait macro triggers this lint on newer toolchains.
+#![allow(clippy::double_must_use)]
 // Application services — orchestration layer
 
 pub mod acp_session_service;

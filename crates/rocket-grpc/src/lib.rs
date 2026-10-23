@@ -1,3 +1,5 @@
+// The async_trait macro triggers this lint on newer toolchains.
+#![allow(clippy::double_must_use)]
 //! gRPC protocol engine: parses `.proto` sources into descriptors and converts
 //! JSON to and from protobuf at runtime. It holds no network or file I/O; the
 //! concrete transport and file reader live in `rocket-infra`.

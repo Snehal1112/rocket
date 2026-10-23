@@ -1,3 +1,5 @@
+// The async_trait macro triggers this lint on newer toolchains.
+#![allow(clippy::double_must_use)]
 pub mod agent_config;
 pub mod conversation;
 pub mod mcp_server_spec;
