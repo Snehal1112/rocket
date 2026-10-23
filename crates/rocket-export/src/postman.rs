@@ -15,8 +15,8 @@ use serde_json::{json, Map, Value};
 use crate::events::{folder_events, request_events};
 use crate::postman_auth::{noauth_block, postman_auth, PostmanAuth};
 use crate::scrub::{
-    is_variable_reference, scrub_auth, scrub_form_entries, scrub_header_values, scrub_typed_rows,
-    scrub_url,
+    is_variable_reference, scrub_auth, scrub_form_entries, scrub_header_values, scrub_path_params,
+    scrub_typed_rows, scrub_url,
 };
 use crate::sensitive::is_sensitive_name;
 use crate::report::{ExportAction, ExportNote, ExportReport};
@@ -293,7 +293,8 @@ fn request_item(
     }
     let url = scrub_url(&r.url, path, &mut report.items);
     let query = scrub_typed_rows(r.query_params.clone(), "Query parameter", path, &mut report.items);
-    req.insert("url".into(), postman_url(&url, &query, &r.path_params));
+    let path_params = scrub_path_params(r.path_params.clone(), path, &mut report.items);
+    req.insert("url".into(), postman_url(&url, &query, &path_params));
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
         req.insert("description".into(), d);
     }
@@ -341,7 +342,8 @@ fn graphql_item(
     );
     let url = scrub_url(&r.url, path, &mut report.items);
     let query = scrub_typed_rows(r.query_params.clone(), "Query parameter", path, &mut report.items);
-    req.insert("url".into(), postman_url(&url, &query, &r.path_params));
+    let path_params = scrub_path_params(r.path_params.clone(), path, &mut report.items);
+    req.insert("url".into(), postman_url(&url, &query, &path_params));
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
         req.insert("description".into(), d);
     }
@@ -634,6 +636,30 @@ mod tests {
         assert!(!url.contains_key("path"));
         assert_eq!(url["raw"], "{{baseUrl}}/users/:id");
         assert_eq!(url["variable"], json!([{"key": "id", "value": "42"}]));
+    }
+
+    #[test]
+    fn path_params_are_scrubbed_by_name() {
+        let pp = |n: &str, v: &str| PathParam {
+            name: n.into(),
+            value: v.into(),
+            description: None,
+        };
+        let mut r = req("U", "https://x.test/reset/:token/:id/:key");
+        r.path_params = vec![pp("token", "abc"), pp("id", "42"), pp("api_key", "{{t}}")];
+        let (doc, report) = export(&tree_with(vec![ExportItem::Request(Box::new(r))]));
+        let vars = &doc["item"][0]["request"]["url"]["variable"];
+        assert_eq!(vars[0]["value"], "");
+        assert_eq!(vars[1]["value"], "42");
+        assert_eq!(vars[2]["value"], "{{t}}");
+        let blanked: Vec<_> = report
+            .items
+            .iter()
+            .filter(|n| n.action == ExportAction::Blanked)
+            .collect();
+        assert_eq!(blanked.len(), 1);
+        assert_eq!(blanked[0].feature, "Path parameter");
+        assert_eq!(blanked[0].detail.as_deref(), Some("token (by name)"));
     }
 
     #[test]

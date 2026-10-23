@@ -6,7 +6,7 @@
 use crate::report::{ExportAction, ExportNote};
 use crate::sensitive::is_sensitive_name;
 use rocket_shared::oauth2::OAuth2Flow;
-use rocket_shared::types::{Auth, FormDataEntry, FormDataType, Header};
+use rocket_shared::types::{Auth, FormDataEntry, FormDataType, Header, PathParam};
 use serde_yaml::{Mapping, Value};
 
 /// Whether a header's value is a credential by its name (see `is_sensitive_name`).
@@ -218,6 +218,9 @@ fn scrub_rows(rel_path: &str, rows: &mut Value, feature: &str, notes: &mut Vec<E
             None => false,
         };
         if changed {
+            // A params row of type path is a path parameter, not a query one.
+            let is_path = row.get("type").and_then(Value::as_str) == Some("path");
+            let feature = if is_path { "Path parameter" } else { feature };
             notes.push(blank_note(rel_path, feature, &format!("{name} (by name)")));
         }
     }
@@ -525,6 +528,26 @@ pub fn scrub_typed_rows(
                 notes.push(blank_note(path, feature, &format!("{} (by name)", h.key)));
             }
             h
+        })
+        .collect()
+}
+
+/// Blanks the value of each path parameter whose name is secret-like.
+/// A value that is only a `{{variable}}` reference is kept.
+pub fn scrub_path_params(
+    params: Vec<PathParam>,
+    path: &str,
+    notes: &mut Vec<ExportNote>,
+) -> Vec<PathParam> {
+    params
+        .into_iter()
+        .map(|mut p| {
+            if is_sensitive_name(&p.name) && !p.value.is_empty() && !is_variable_reference(&p.value)
+            {
+                p.value.clear();
+                notes.push(blank_note(path, "Path parameter", &format!("{} (by name)", p.name)));
+            }
+            p
         })
         .collect()
 }
@@ -865,15 +888,32 @@ request:
     }
 
     #[test]
-    fn references_in_sensitive_rows_are_kept() {
+    fn path_params_are_scrubbed_by_name() {
         let mut v = yaml(
-            "http:\n  url: \"https://x.test/p?access_token={{t}}\"\n  params:\n    - {name: api_key, value: \"{{k}}\", type: query}\n  headers:\n    - {name: X-Auth-Token, value: \"{{t}}\"}\n",
+            "http:\n  params:\n    - {name: token, value: abc, type: path}\n    - {name: id, value: \"42\", type: path}\n",
         );
-        let before = v.clone();
         let mut notes = Vec::new();
         scrub_yaml("r.yml", &mut v, &mut notes);
-        assert_eq!(v, before);
-        assert!(notes.is_empty());
+        let p = &v["http"]["params"];
+        assert_eq!(p[0]["value"], empty());
+        assert_eq!(p[1]["value"], Value::String("42".into()));
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].feature, "Path parameter");
+        assert_eq!(notes[0].detail.as_deref(), Some("token (by name)"));
+    }
+
+    #[test]
+    fn references_in_sensitive_rows_are_kept() {
+        let mut v = yaml(
+            "http:\n  url: \"https://x.test/p?access_token={{t}}\"\n  params:\n    - {name: api_key, value: \"{{k}}\", type: query}\n  headers:\n    - {name: X-Auth-Token, value: \"{{t}}\"}\n    - {name: X-Other-Token, value: abc}\n",
+        );
+        let mut notes = Vec::new();
+        scrub_yaml("r.yml", &mut v, &mut notes);
+        assert_eq!(v["http"]["url"], Value::String("https://x.test/p?access_token={{t}}".into()));
+        assert_eq!(v["http"]["params"][0]["value"], Value::String("{{k}}".into()));
+        assert_eq!(v["http"]["headers"][0]["value"], Value::String("{{t}}".into()));
+        assert_eq!(v["http"]["headers"][1]["value"], empty());
+        assert_eq!(notes.len(), 1);
     }
 
     #[test]

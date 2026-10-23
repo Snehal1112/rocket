@@ -7,7 +7,8 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 | Module | Role |
 |---|---|
 | `bruno.rs` | `bruno_zip(files, name, include_environments)`: scrubs each YAML file as a `serde_yaml::Value` and zips it under one root folder |
-| `scrub.rs` | Secret rules for every format: `scrub_auth`, `scrub_header_values`, `scrub_url`, `scrub_yaml`, `strip_rocket_namespace`, `is_variable_reference` |
+| `sensitive.rs` | Name rule `is_sensitive_name` (last word of a name, with an allow-list) |
+| `scrub.rs` | Secret rules for every format: `scrub_auth`, `scrub_header_values`, `scrub_typed_rows`, `scrub_form_entries`, `scrub_path_params`, `scrub_url`, `scrub_yaml`, `strip_rocket_namespace`, `is_variable_reference` |
 | `ports.rs` | `CollectionFileSource` and `SourceFile` |
 | `tree.rs` | `CollectionExportTree`, `ExportFolder`, `ExportItem` (typed input of the Postman serializer) |
 | `postman.rs` | `postman_collection(tree, opts)`: items, URLs, headers, bodies, auth, variables, events |
@@ -59,7 +60,7 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 ## Secret scrub
 
 - Literal credentials in auth, `secret` variable values and a password in URL userinfo are blanked. A value that is exactly one `{{variable}}` reference is kept, also in a secret variable, in Bruno files and in Postman collection, folder and request variables (decision 4). Postman environments differ, see below. URL userinfo without a `:` is not blanked.
-- `sensitive.rs` holds the name rule `is_sensitive_name`. It matches the last word of a name (token, secret, password, passwd, credential(s), authorization, cookie, signature, apikey, `api key`, `private key`, `secret key`, `client assertion`, single `pass` and `pwd`), never a substring. Allow-list: `token_type`, `page_token`, `next_token`, `prev_token`, `previous_token`, `max_tokens`. It blanks literal values of headers, metadata, query pairs, form fields, OAuth2 additional parameters, OAuth URL fields and variables, in both formats. The five old headers still match.
+- `sensitive.rs` holds the name rule `is_sensitive_name`. It matches the last word of a name (token, secret, password, passwd, credential(s), authorization, cookie, signature, apikey, `api key`, `private key`, `secret key`, `client assertion`, single `pass` and `pwd`), never a substring. Allow-list: `token_type`, `page_token`, `next_token`, `prev_token`, `previous_token`, `max_tokens`. It blanks literal values of headers, query pairs, path parameters, form fields, OAuth URL fields and variables, in both formats. gRPC and WebSocket metadata and OAuth2 `additionalParameters` exist only in the Bruno ZIP, because Postman does not export them. The five old headers still match.
 - Identifiers stay: basic, digest and NTLM usernames, awsv4 `accessKeyId`, OAuth2 `clientId`. OAuth1 `accessToken` is blanked.
 - Postman `auth_value` adds scrub notes only for auths it exports. OAuth1 and WSSE become `noauth` and give only a `Skipped` note.
 - The Bruno ZIP scrub walks the YAML by key. It also blanks gRPC `metadata` rows with a sensitive name, the `passphrase` of every `clientCertificates` entry (collection and environment files), OAuth1 `accessToken`, and the `data` of a typed secret variable (`value: {type, data}`). A number or boolean in a credential slot counts as a literal and is blanked.

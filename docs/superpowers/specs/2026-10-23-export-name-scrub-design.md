@@ -31,6 +31,7 @@ A value is blanked only when it is a non-empty literal and not `is_variable_refe
 
 | Location | Bruno ZIP | Postman |
 |---|---|---|
+| Path parameters | `params` rows of type path | `url.variable` |
 | Header rows, gRPC and WebSocket metadata | yes | headers |
 | `params` rows and query pairs in the URL string | yes | `url.raw`, `url.query` |
 | Form-urlencoded and multipart text rows | yes | `urlencoded`, `formdata` text rows |

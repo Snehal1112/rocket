@@ -81,7 +81,7 @@ describe('ExportCollectionDialog', () => {
       'form fields',
       'OAuth2',
       'variables',
-      'ends in token',
+      'secret word such as token',
       'api key',
     ]) {
       expect(text).toContain(name);
