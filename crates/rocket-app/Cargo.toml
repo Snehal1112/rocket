@@ -41,3 +41,4 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 tempfile = "3"
 rocket-infra.workspace = true
 wiremock = "0.6"
+zip = "2"

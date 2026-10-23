@@ -47,7 +47,7 @@ pub async fn export_collection_postman(
     .with_collections(Box::new(SharedPathCollectionRepo::new(Arc::clone(
         &*workspace_path,
     ))));
-    let out = service.export_postman(&collection)?;
+    let out = service.export_postman(&collection, &Default::default())?;
     Ok(ExportResultDto {
         data_base64: STANDARD.encode(&out.bytes),
         file_name: out.file_name,

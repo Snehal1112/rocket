@@ -5657,6 +5657,7 @@ dependencies = [
  "which",
  "wiremock",
  "zeroize",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -5712,6 +5713,7 @@ name = "rocket-export"
 version = "0.1.0"
 dependencies = [
  "rocket-collection",
+ "rocket-environment",
  "rocket-shared",
  "serde",
  "serde_json",
