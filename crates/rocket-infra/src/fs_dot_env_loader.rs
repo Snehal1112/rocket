@@ -99,13 +99,23 @@ fn read_pairs(path: &Path) -> Result<Vec<(String, String)>, String> {
             Ok(pair) => pairs.push(pair),
             Err(e) => {
                 return Err(format!(
-                    "The .env file {} could not be parsed: {e}",
-                    path.display()
+                    "The .env file {} could not be parsed{}.",
+                    path.display(),
+                    parse_error_detail(&e)
                 ))
             }
         }
     }
     Ok(pairs)
+}
+
+/// Describes a parse error without any file text, because a line can hold a secret.
+fn parse_error_detail(e: &dotenvy::Error) -> String {
+    match e {
+        dotenvy::Error::LineParse(_, idx) => format!(" near character {idx}"),
+        dotenvy::Error::Io(io) => format!(" ({io})"),
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -271,5 +281,24 @@ mod tests {
         let info = FsDotEnvLoader.describe(None, Some(dir.path()));
         assert_eq!(info.key_count, 1);
         assert!(!format!("{info:?}").contains("supersecretvalue"));
+    }
+
+    #[test]
+    fn a_parse_error_never_contains_file_text() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(".env"),
+            "TOKEN=\"secret\nOTHER=second-value\n",
+        )
+        .expect("write");
+        let base = Some(dir.path());
+        let check = |text: &str| {
+            assert!(!text.contains("secret"), "{text}");
+            assert!(!text.contains("second-value"), "{text}");
+        };
+        check(&FsDotEnvLoader.load_default(base).expect_err("parse"));
+        check(&FsDotEnvLoader.load(".env", base).expect_err("parse"));
+        let info = FsDotEnvLoader.describe(None, base);
+        check(&info.error.expect("error"));
     }
 }
