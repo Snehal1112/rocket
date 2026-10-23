@@ -1771,6 +1771,27 @@ export interface ImportReport {
   detectedType: 'collection' | 'workspace';
 }
 
+export interface ExportNote {
+  path: string;
+  feature: string;
+  action: 'translated' | 'blanked' | 'skipped' | 'preserved';
+  detail?: string;
+}
+
+export interface ExportReport {
+  exported: number;
+  items: ExportNote[];
+}
+
+export interface ExportResult {
+  dataBase64: string;
+  fileName: string;
+  report: ExportReport;
+}
+
+export const exportCollectionBruno = (collection: string, includeEnvironments: boolean) =>
+  invoke<ExportResult>('export_collection_bruno', { collection, includeEnvironments });
+
 export const importBruno = (
   path: string,
   targetWorkspaceId: string,

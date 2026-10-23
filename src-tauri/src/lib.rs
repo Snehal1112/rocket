@@ -1024,6 +1024,7 @@ pub fn run() {
             commands::load_test::run_load_test_command,
             commands::load_test::run_load_test_v2_command,
             commands::load_test::export_load_test,
+            commands::export::export_collection_bruno,
             commands::history::list_history,
             commands::history::get_history_entry,
             commands::history::clear_history,

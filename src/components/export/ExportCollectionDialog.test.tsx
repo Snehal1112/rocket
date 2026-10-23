@@ -1,0 +1,91 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ExportCollectionDialog } from './ExportCollectionDialog';
+
+const mockExport = vi.fn();
+vi.mock('@/lib/tauri-api', () => ({
+  exportCollectionBruno: (...a: unknown[]) => mockExport(...a),
+}));
+
+const mockSaveBinary = vi.fn();
+vi.mock('@/lib/save-file', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/save-file')>('@/lib/save-file');
+  return { ...actual, saveBinaryFile: (...a: unknown[]) => mockSaveBinary(...a) };
+});
+
+const mockToastError = vi.fn();
+vi.mock('sonner', () => ({
+  toast: { error: (...a: unknown[]) => mockToastError(...a), success: vi.fn() },
+}));
+
+const result = {
+  dataBase64: 'AQI=',
+  fileName: 'calc.zip',
+  report: {
+    exported: 3,
+    items: [
+      { path: 'a.yml', feature: 'Bearer token', action: 'blanked' },
+      { path: 'b.yml', feature: 'Rocket settings', action: 'skipped', detail: 'not in Bruno' },
+    ],
+  },
+};
+
+function renderDialog() {
+  return render(<ExportCollectionDialog open collectionName='calc' onClose={vi.fn()} />);
+}
+
+beforeEach(() => {
+  mockExport.mockReset();
+  mockSaveBinary.mockReset();
+  mockToastError.mockReset();
+});
+
+describe('ExportCollectionDialog', () => {
+  it('renders the format choice and an Include environments checkbox on by default', () => {
+    renderDialog();
+    expect(screen.getByText('Bruno collection (ZIP)')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /include environments/i })).toBeChecked();
+  });
+
+  it('export calls exportCollectionBruno with the collection name and the checkbox value, then saves the decoded bytes under the returned file name', async () => {
+    mockExport.mockResolvedValue(result);
+    mockSaveBinary.mockResolvedValue(true);
+    renderDialog();
+    await userEvent.click(screen.getByRole('checkbox', { name: /include environments/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    await waitFor(() => expect(mockSaveBinary).toHaveBeenCalled());
+    expect(mockExport).toHaveBeenCalledWith('calc', false);
+    const [name, bytes] = mockSaveBinary.mock.calls[0];
+    expect(name).toBe('calc.zip');
+    expect(Array.from(bytes as Uint8Array)).toEqual([1, 2]);
+  });
+
+  it('shows the report items grouped by action after a successful export', async () => {
+    mockExport.mockResolvedValue(result);
+    mockSaveBinary.mockResolvedValue(true);
+    renderDialog();
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    expect(await screen.findByText('Bearer token')).toBeInTheDocument();
+    expect(screen.getByText('Rocket settings')).toBeInTheDocument();
+    expect(screen.getByText(/blanked \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/skipped \(1\)/i)).toBeInTheDocument();
+  });
+
+  it('shows an error toast and no report when the export fails', async () => {
+    mockExport.mockRejectedValue(new Error('boom'));
+    renderDialog();
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(screen.queryByText(/blanked \(/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show a report when the save dialog is cancelled', async () => {
+    mockExport.mockResolvedValue(result);
+    mockSaveBinary.mockResolvedValue(false);
+    renderDialog();
+    await userEvent.click(screen.getByRole('button', { name: /^export$/i }));
+    await waitFor(() => expect(mockSaveBinary).toHaveBeenCalled());
+    expect(screen.queryByText('Bearer token')).not.toBeInTheDocument();
+  });
+});

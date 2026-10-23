@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Download,
   FileCode,
   FolderPlus,
   LayoutGrid,
@@ -20,6 +21,7 @@ import { FlowListItem } from '@/components/collections/FlowListItem';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
 import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
+import { ExportCollectionDialog } from '@/components/export/ExportCollectionDialog';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
   ContextMenu,
@@ -111,6 +113,7 @@ export function CollectionNode({
   const [newRequestName, setNewRequestName] = useState('');
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   // Fetch the flow list only while the node is expanded.
   const { data: flowNames = EMPTY_NAMES } = useFlows(summary.name, open);
 
@@ -494,6 +497,9 @@ export function CollectionNode({
               <DropdownMenuItem onClick={() => setNewScriptOpen(true)}>
                 <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setExportOpen(true)}>
+                <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
@@ -552,6 +558,9 @@ export function CollectionNode({
         </ContextMenuItem>
         <ContextMenuItem onClick={() => setNewScriptOpen(true)}>
           <FileCode aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> New Script
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => setExportOpen(true)}>
+          <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -685,6 +694,11 @@ export function CollectionNode({
         collectionName={summary.name}
         folderPath=''
         onClose={() => setNewScriptOpen(false)}
+      />
+      <ExportCollectionDialog
+        open={exportOpen}
+        collectionName={summary.name}
+        onClose={() => setExportOpen(false)}
       />
     </ContextMenu>
   );
