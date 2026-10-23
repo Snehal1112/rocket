@@ -35,6 +35,50 @@ fn looks_like_jwt(text: &str) -> bool {
     text.starts_with("eyJ") && text.matches('.').count() == 2
 }
 
+const TOKEN_PREFIXES: &[&str] = &[
+    "sk_live_",
+    "sk_test_",
+    "ghp_",
+    "gho_",
+    "ghs_",
+    "github_pat_",
+    "xoxb-",
+    "xoxp-",
+    "xoxa-",
+    "xoxr-",
+    "xoxs-",
+];
+
+// True for values with a well-known secret shape, whatever name they sit under.
+fn looks_like_secret_value(text: &str) -> bool {
+    if looks_like_jwt(text) {
+        return true;
+    }
+    for scheme in ["Bearer ", "Basic "] {
+        if let Some(rest) = text.strip_prefix(scheme) {
+            if rest.chars().any(|c| !c.is_whitespace()) {
+                return true;
+            }
+        }
+    }
+    if TOKEN_PREFIXES
+        .iter()
+        .any(|prefix| text.len() > prefix.len() && text.starts_with(prefix))
+    {
+        return true;
+    }
+    if let Some(rest) = text.strip_prefix("AKIA") {
+        if rest.len() == 16
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    text.starts_with("-----BEGIN ") && text.contains("PRIVATE KEY")
+}
+
 /// Masks secrets in the `examples:` block of a request file. Returns the new
 /// file text and the number of masked values, or `None` when nothing changed.
 pub fn mask_examples(yaml: &str) -> Option<(String, usize)> {
@@ -110,28 +154,41 @@ fn mask_body(body: &mut Value) -> usize {
 // Masks a text, XML, HTML or SPARQL body. A mislabelled JSON body is masked as JSON.
 fn mask_text_body(text: &str) -> (String, usize) {
     if text.trim_start().starts_with(['{', '[']) {
-        return mask_json_text(text);
+        let (masked, count) = mask_json_text(text);
+        // Bracketed text such as a log line is not JSON, so it also gets the word pass.
+        if serde_json::from_str::<serde_json::Value>(&masked).is_ok() {
+            return (masked, count);
+        }
+        let (masked, words) = mask_words(&masked);
+        return (masked, count + words);
     }
-    let (shaped, mut count) = match mask_form_text(text) {
+    let (shaped, count) = match mask_form_text(text) {
         Some(result) => result,
         None => mask_xml_text(text),
     };
-    let mut out = String::with_capacity(shaped.len());
+    let (out, words) = mask_words(&shaped);
+    (out, count + words)
+}
+
+// Masks every secret-shaped word. Words end at whitespace, quotes, `=`, `<` and `>`.
+fn mask_words(text: &str) -> (String, usize) {
+    let mut out = String::with_capacity(text.len());
+    let mut count = 0;
     let mut word_start = 0;
-    for (i, c) in shaped.char_indices() {
-        if c.is_whitespace() || c == '"' || c == '\'' {
-            count += push_word(&mut out, &shaped[word_start..i]);
+    for (i, c) in text.char_indices() {
+        if c.is_whitespace() || matches!(c, '"' | '\'' | '=' | '<' | '>') {
+            count += push_word(&mut out, &text[word_start..i]);
             out.push(c);
             word_start = i + c.len_utf8();
         }
     }
-    count += push_word(&mut out, &shaped[word_start..]);
+    count += push_word(&mut out, &text[word_start..]);
     (out, count)
 }
 
-// Pushes the word, or the mask when it is a JWT. Returns 1 when it masked.
+// Pushes the word, or the mask when it is secret-shaped. Returns 1 when it masked.
 fn push_word(out: &mut String, word: &str) -> usize {
-    if looks_like_jwt(word) {
+    if looks_like_secret_value(word) {
         out.push_str(MASK);
         1
     } else {
@@ -207,7 +264,11 @@ fn mask_named_entry(entry: &mut Value) -> usize {
     let secret = entry
         .get("name")
         .and_then(Value::as_str)
-        .is_some_and(is_secret_name);
+        .is_some_and(is_secret_name)
+        || entry
+            .get("value")
+            .and_then(Value::as_str)
+            .is_some_and(looks_like_secret_value);
     if !secret {
         return 0;
     }
@@ -220,13 +281,42 @@ fn mask_named_entry(entry: &mut Value) -> usize {
     }
 }
 
+// Masks `user:pass@` in the authority and secret query values. Host and path stay.
 fn mask_url(url: &str) -> Option<String> {
-    let (base, query) = url.split_once('?')?;
+    let (base, query) = match url.split_once('?') {
+        Some((base, query)) => (base, Some(query)),
+        None => (url, None),
+    };
     let mut changed = false;
+    let mut base = base.to_string();
+    if let Some(scheme_end) = base.find("://") {
+        let authority_start = scheme_end + 3;
+        let authority_len = base[authority_start..]
+            .find(['/', '#'])
+            .unwrap_or(base.len() - authority_start);
+        let authority = &base[authority_start..authority_start + authority_len];
+        if let Some((userinfo, host)) = authority.rsplit_once('@') {
+            if !userinfo.is_empty() && userinfo != MASK {
+                base = format!(
+                    "{}{MASK}@{host}{}",
+                    &base[..authority_start],
+                    &base[authority_start + authority_len..]
+                );
+                changed = true;
+            }
+        }
+    }
+    let Some(query) = query else {
+        return changed.then_some(base);
+    };
     let pairs: Vec<String> = query
         .split('&')
         .map(|pair| match pair.split_once('=') {
-            Some((key, value)) if is_secret_name(key) && !value.is_empty() && value != MASK => {
+            Some((key, value))
+                if (is_secret_name(key) || looks_like_secret_value(value))
+                    && !value.is_empty()
+                    && value != MASK =>
+            {
                 changed = true;
                 format!("{key}={MASK}")
             }
@@ -272,7 +362,7 @@ fn mask_json_text(text: &str) -> (String, usize) {
                 count += 1;
             }
             i = value_end;
-        } else if !is_key && looks_like_jwt(inner) {
+        } else if !is_key && looks_like_secret_value(inner) {
             out.push_str(&text[last..i]);
             out.push_str(MASKED_JSON);
             last = end;
@@ -582,5 +672,103 @@ examples:
         let (masked, count) = mask_examples(file).expect("masked");
         assert_eq!(count, 1);
         assert!(!masked.contains("theme=dark"));
+    }
+
+    #[test]
+    fn secret_shaped_values_are_detected() {
+        for value in [
+            JWT,
+            "Bearer abc123",
+            "Basic dXNlcjpwYXNz",
+            "sk_live_abcdefghij",
+            "ghp_abcdefghijklmnop",
+            "github_pat_abc123",
+            "xoxb-123-abc",
+            "AKIAIOSFODNN7EXAMPLE",
+            "-----BEGIN RSA PRIVATE KEY-----",
+        ] {
+            assert!(looks_like_secret_value(value), "{value}");
+        }
+        for value in [
+            "application/json",
+            "Ann",
+            "550e8400-e29b-41d4-a716-446655440000",
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "Bearer",
+            "Bearer ",
+        ] {
+            assert!(!looks_like_secret_value(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn harmless_header_name_with_secret_value_is_masked() {
+        let file = "examples:\n  - name: e\n    request:\n      headers:\n        - name: X-Tenant\n          value: Bearer abc123\n        - name: X-Trace\n          value: 550e8400-e29b-41d4-a716-446655440000\n";
+        let (masked, count) = mask_examples(file).expect("masked");
+        assert_eq!(count, 1);
+        assert!(!masked.contains("abc123"));
+        assert!(masked.contains("550e8400-e29b-41d4-a716-446655440000"));
+    }
+
+    #[test]
+    fn harmless_json_key_with_secret_value_is_masked() {
+        let text = "{\"data\": \"ghp_abcdefghijklmnop\", \"id\": \"550e8400-e29b-41d4-a716-446655440000\"}";
+        let (masked, count) = mask_json_text(text);
+        assert_eq!(count, 1);
+        assert_eq!(
+            masked,
+            "{\"data\": \"[masked]\", \"id\": \"550e8400-e29b-41d4-a716-446655440000\"}"
+        );
+    }
+
+    #[test]
+    fn url_credentials_are_masked_and_host_kept() {
+        assert_eq!(
+            mask_url("https://ann:pw@api.io/v1?x=1").as_deref(),
+            Some("https://[masked]@api.io/v1?x=1")
+        );
+        assert_eq!(
+            mask_url("https://ann:pw@api.io/v1").as_deref(),
+            Some("https://[masked]@api.io/v1")
+        );
+        assert_eq!(mask_url("https://[masked]@api.io/v1"), None);
+        assert_eq!(mask_url("https://api.io/v1/a@b"), None);
+    }
+
+    #[test]
+    fn url_query_value_with_secret_shape_is_masked() {
+        assert_eq!(
+            mask_url("https://x.io/a?ref=ghp_abcdefghijklmnop&page=1").as_deref(),
+            Some("https://x.io/a?ref=[masked]&page=1")
+        );
+    }
+
+    #[test]
+    fn masking_stays_idempotent_with_new_rules() {
+        let file = format!(
+            "examples:\n  - name: e\n    request:\n      url: https://ann:pw@api.io/v1?ref=ghp_abcdefghijklmnop\n      headers:\n        - name: X-Tenant\n          value: Bearer abc123\n      body:\n        type: json\n        data: '{{\"data\": \"{JWT}\"}}'\n    response:\n      body:\n        type: text\n        data: \"[ERROR] {JWT} a=Bearer\"\n"
+        );
+        let (once, count) = mask_examples(&file).expect("masked");
+        assert_eq!(count, 4);
+        assert!(!once.contains("abc123") && !once.contains(JWT) && !once.contains("pw@"));
+        assert_eq!(mask_examples(&once), None);
+    }
+
+    #[test]
+    fn words_after_equals_and_angle_brackets_are_masked() {
+        let (masked, count) = mask_text_body(&format!("foo={JWT} bar"));
+        assert_eq!((masked.as_str(), count), ("foo=[masked] bar", 1));
+        let (masked, count) = mask_text_body(&format!("<note>{JWT}</note>"));
+        assert_eq!((masked.as_str(), count), ("<note>[masked]</note>", 1));
+        assert_eq!(mask_text_body(&masked).1, 0);
+    }
+
+    #[test]
+    fn bracketed_log_text_is_not_treated_as_json_only() {
+        let (masked, count) = mask_text_body(&format!("[ERROR] {JWT}"));
+        assert_eq!((masked.as_str(), count), ("[ERROR] [masked]", 1));
+        assert_eq!(mask_text_body(&masked).1, 0);
+        let (masked, count) = mask_text_body("{\"token\": \"abc\"}");
+        assert_eq!((masked.as_str(), count), ("{\"token\": \"[masked]\"}", 1));
     }
 }
