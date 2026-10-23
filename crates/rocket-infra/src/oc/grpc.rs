@@ -92,6 +92,10 @@ pub struct OcGrpcRequest {
     pub grpc: OcGrpcRequestDetails,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<OcGrpcRequestRuntime>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::docs_text"
+    )]
     pub docs: Option<String>,
 }

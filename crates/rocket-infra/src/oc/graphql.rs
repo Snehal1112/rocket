@@ -90,6 +90,10 @@ pub struct OcGraphQLRequest {
     pub runtime: Option<OcGraphQLRequestRuntime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<OcGraphQLRequestSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::docs_text"
+    )]
     pub docs: Option<String>,
 }

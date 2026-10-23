@@ -105,6 +105,52 @@ fn example_response_body_with_a_type_and_no_data_parses() {
     assert_eq!(body.data, "");
 }
 
+// ---- `docs` written as an object (Bruno 3 writes `docs: {content, type}`) ----
+
+const DOCS_OBJECT: &str = "docs:\n  content: Notes\n  type: markdown\n";
+
+#[test]
+fn request_docs_written_as_an_object_are_read_for_every_request_kind() {
+    let http = format!("{}{DOCS_OBJECT}", request_yaml_with_body_type("json"));
+    let http: OcHttpRequest = serde_yaml::from_str(&http).expect("http request with object docs");
+    assert_eq!(http.docs.as_deref(), Some("Notes"));
+    let request = oc_http_request_to_request(http);
+    assert_eq!(request.docs, Some(Description::text("Notes")));
+
+    let graphql = format!("info:\n  name: A\n  type: graphql\ngraphql:\n  url: https://x.test\n{DOCS_OBJECT}");
+    let graphql: OcGraphQLRequest = serde_yaml::from_str(&graphql).expect("graphql with object docs");
+    assert_eq!(graphql.docs.as_deref(), Some("Notes"));
+
+    let grpc = format!("info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\n{DOCS_OBJECT}");
+    let grpc: OcGrpcRequest = serde_yaml::from_str(&grpc).expect("grpc with object docs");
+    assert_eq!(grpc.docs.as_deref(), Some("Notes"));
+
+    let websocket = format!("info:\n  name: A\n  type: websocket\nwebsocket:\n  url: ws://x.test\n{DOCS_OBJECT}");
+    let websocket: OcWebSocketRequest =
+        serde_yaml::from_str(&websocket).expect("websocket with object docs");
+    assert_eq!(websocket.docs.as_deref(), Some("Notes"));
+}
+
+#[test]
+fn request_docs_written_as_a_string_or_absent_still_read() {
+    let http = format!("{}docs: Plain\n", request_yaml_with_body_type("json"));
+    let http: OcHttpRequest = serde_yaml::from_str(&http).expect("string docs");
+    assert_eq!(http.docs.as_deref(), Some("Plain"));
+    let none: OcHttpRequest =
+        serde_yaml::from_str(&request_yaml_with_body_type("json")).expect("no docs");
+    assert_eq!(none.docs, None);
+}
+
+#[test]
+fn docs_are_still_written_as_a_plain_string() {
+    let http = format!("{}{DOCS_OBJECT}", request_yaml_with_body_type("json"));
+    let request = oc_http_request_to_request(serde_yaml::from_str(&http).expect("parse"));
+    let mut request = request;
+    request.uid = "u1".into();
+    let yaml = serde_yaml::to_string(&request_to_oc_http_request(&request)).expect("serialize");
+    assert!(yaml.contains("docs: Notes"), "{yaml}");
+}
+
 #[test]
 fn header_oc_to_domain() {
     let oc = OcHttpRequestHeader {

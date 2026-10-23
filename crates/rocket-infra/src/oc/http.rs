@@ -298,6 +298,10 @@ pub struct OcHttpRequest {
     pub settings: Option<OcHttpRequestSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub examples: Option<Vec<OcHttpRequestExample>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::docs_text"
+    )]
     pub docs: Option<String>,
 }

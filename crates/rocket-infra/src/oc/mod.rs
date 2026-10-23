@@ -46,6 +46,18 @@ pub use rocket_shared::variable_value::{
     VariableValue as OcVariableValue, VariableValueVariant as OcVariableValueVariant,
 };
 
+/// Reads a `docs` field as text. Bruno 3 writes `docs: {content, type}`, an older file or a
+/// hand-written one may have a plain string, and a bare `docs:` is null. The domain keeps only
+/// the text, and Rocket writes it back as a plain string.
+pub(crate) fn docs_text<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let docs = Option::<OcDescription>::deserialize(deserializer)?;
+    Ok(docs.and_then(|d| d.content().map(str::to_owned)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
