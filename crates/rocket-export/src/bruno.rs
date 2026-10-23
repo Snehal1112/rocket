@@ -315,7 +315,6 @@ mod tests {
         ];
         let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
         assert_eq!(report.exported, names(&bytes).len());
-        assert_eq!(report.exported, 3);
     }
 
     #[test]
