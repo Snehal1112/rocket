@@ -73,4 +73,49 @@ describe('pane-store example tabs', () => {
     expect(names).toContainEqual(['200 OK', '200 OK']);
     expect(exampleTabs().every((t) => !t.isDirty)).toBe(true);
   });
+
+  // Parks tabs by switching to another collection, as a real collection switch does.
+  function parkTabs(): void {
+    const state = usePaneStore.getState();
+    const root = state.root;
+    if (root.type !== 'leaf') throw new Error('Expected a single leaf');
+    usePaneStore.setState({
+      collectionTabState: {
+        col: { tabs: root.tabs, activeTabId: root.activeTabId },
+      } as never,
+      root: { ...root, tabs: [], activeTabId: '' },
+    });
+  }
+
+  function parkedExampleTabs(): ExampleTab[] {
+    return Object.values(usePaneStore.getState().collectionTabState)
+      .flatMap((entry) => entry.tabs)
+      .filter(isExampleTab);
+  }
+
+  it('renameExampleTabPaths rewrites by whole segment, live and parked', () => {
+    const store = usePaneStore.getState();
+    store.openExampleTab('col', 'auth/login.yml', '200 OK');
+    store.openExampleTab('col', 'author/x.yml', '200 OK');
+    parkTabs();
+    usePaneStore.getState().openExampleTab('col', 'auth', '200 OK');
+    usePaneStore.getState().renameExampleTabPaths('col', 'auth', 'identity');
+    expect(exampleTabs().map((t) => t.source.path)).toEqual(['identity']);
+    expect(parkedExampleTabs().map((t) => t.source.path).sort()).toEqual([
+      'author/x.yml',
+      'identity/login.yml',
+    ]);
+  });
+
+  it('closeExampleTabsUnder closes live and parked tabs under a folder only', () => {
+    const store = usePaneStore.getState();
+    store.openExampleTab('col', 'auth/login.yml', '200 OK');
+    store.openExampleTab('col', 'author/x.yml', '200 OK');
+    parkTabs();
+    usePaneStore.getState().openExampleTab('col', 'auth/me.yml', '200 OK');
+    usePaneStore.getState().openExampleTab('col', 'other.yml', '200 OK');
+    usePaneStore.getState().closeExampleTabsUnder('col', 'auth');
+    expect(exampleTabs().map((t) => t.source.path)).toEqual(['other.yml']);
+    expect(parkedExampleTabs().map((t) => t.source.path)).toEqual(['author/x.yml']);
+  });
 });

@@ -29,6 +29,7 @@ vi.mock('@/lib/tauri-api', async () => {
     listFlows: vi.fn().mockResolvedValue([]),
     deleteFlow: vi.fn(),
     deleteRequest: vi.fn(),
+    deleteFolder: vi.fn(),
     moveItem: vi.fn(),
     duplicateRequest: vi.fn(),
     getCollection: vi.fn(),
@@ -532,6 +533,7 @@ describe('CollectionsSidebar request examples', () => {
                   fileName: 'logout.yml',
                   exampleNames: ['200 OK'],
                 },
+                { type: 'folder', uid: 'f1', name: 'auth', items: [] },
               ]
             : [],
       },
@@ -540,6 +542,7 @@ describe('CollectionsSidebar request examples', () => {
     vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue([]);
     vi.mocked(tauriApi.flowsUsingRequest).mockReset().mockResolvedValue([]);
     vi.mocked(tauriApi.deleteRequest).mockReset().mockResolvedValue(undefined);
+    vi.mocked(tauriApi.deleteFolder).mockReset().mockResolvedValue(undefined);
     vi.mocked(tauriApi.moveItem).mockReset().mockResolvedValue(undefined);
     useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
     usePaneStore.setState({ activeCollection: 'col' });
@@ -575,5 +578,30 @@ describe('CollectionsSidebar request examples', () => {
       expect(tauriApi.moveItem).toHaveBeenCalledWith('col', 'login.yml', 'other', ''),
     );
     await waitFor(() => expect(exampleTabPaths()).toEqual(['logout.yml']));
+  });
+
+  it('deleting_a_folder_closes_live_and_parked_example_tabs_under_it', async () => {
+    const store = usePaneStore.getState();
+    store.openExampleTab('col', 'auth/a.yml', '200 OK');
+    store.openExampleTab('col', 'author/b.yml', '200 OK');
+    const root = usePaneStore.getState().root;
+    if (root.type !== 'leaf') throw new Error('Expected a single leaf');
+    const [parked, live] = [root.tabs[0], root.tabs[1]];
+    // Park the auth tab as a collection switch would.
+    usePaneStore.setState({
+      collectionTabState: { col: { tabs: [parked], activeTabId: parked.id } } as never,
+      root: { ...root, tabs: [live], activeTabId: live.id },
+    });
+    store.openExampleTab('col', 'auth/c.yml', '200 OK');
+    render(<CollectionsSidebar />, { wrapper });
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for auth' }));
+    await userEvent.click(await screen.findByText('Delete'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(tauriApi.deleteFolder).toHaveBeenCalledWith('col', 'auth'));
+    await waitFor(() => expect(exampleTabPaths()).toEqual(['author/b.yml']));
+    const parkedLeft = Object.values(usePaneStore.getState().collectionTabState).flatMap(
+      (e) => e.tabs,
+    );
+    expect(parkedLeft).toEqual([]);
   });
 });

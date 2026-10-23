@@ -76,6 +76,7 @@ function retarget(collection: string, oldPath: string, newPath: string, includeS
   store.retargetRequestTabs(collection, oldPath, newPath, includeSelf);
   store.renameScriptTabs(collection, oldPath, newPath);
   store.renameFolderTabs(collection, oldPath, newPath);
+  store.renameExampleTabPaths(collection, oldPath, newPath);
 }
 
 const DIRTY_WARNING =

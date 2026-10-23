@@ -34,13 +34,20 @@ function languageFor(type: string | undefined): string {
   return 'plaintext';
 }
 
+// Turns a stored body into text. A hand-edited file can hold a number, a list or an object.
+function bodyText(data: unknown): string {
+  if (data === undefined || data === null) return '';
+  return typeof data === 'string' ? data : (JSON.stringify(data, null, 2) ?? '');
+}
+
 // Pretty-prints JSON for display and leaves anything else as stored.
-function displayBody(type: string | undefined, data: string): string {
-  if (type !== 'json') return data;
+function displayBody(type: string | undefined, data: unknown): string {
+  const text = bodyText(data);
+  if (type !== 'json') return text;
   try {
-    return JSON.stringify(JSON.parse(data), null, 2);
+    return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
-    return data;
+    return text;
   }
 }
 
@@ -102,13 +109,18 @@ function BodyEditor({ value, language }: { value: string; language: string }) {
 
 function RequestBody({ body }: { body: NonNullable<RequestExample['request']>['body'] }) {
   if (!body) return <EmptyNote label='No body' />;
-  if (Array.isArray(body.data)) return <NameValueTable rows={body.data} empty='No body' />;
-  if (!body.data) return <EmptyNote label='No body' />;
-  return <BodyEditor value={displayBody(body.type, body.data)} language={languageFor(body.type)} />;
+  if (body.type === 'form-urlencoded' && Array.isArray(body.data)) {
+    const rows = body.data.filter((r) => r && typeof r === 'object');
+    return <NameValueTable rows={rows} empty='No body' />;
+  }
+  const text = displayBody(body.type, body.data);
+  if (!text) return <EmptyNote label='No body' />;
+  return <BodyEditor value={text} language={languageFor(body.type)} />;
 }
 
 function ResponseBody({ body }: { body: NonNullable<RequestExample['response']>['body'] }) {
-  if (!body?.data) {
+  const text = body ? displayBody(body.type, body.data) : '';
+  if (!text) {
     // A binary body is saved empty, so say why nothing shows.
     return (
       <EmptyNote
@@ -120,7 +132,7 @@ function ResponseBody({ body }: { body: NonNullable<RequestExample['response']>[
       />
     );
   }
-  return <BodyEditor value={displayBody(body.type, body.data)} language={languageFor(body.type)} />;
+  return <BodyEditor value={text} language={languageFor(body?.type)} />;
 }
 
 const PANEL_TAB_CLASS = 'h-7 px-2 text-xs';

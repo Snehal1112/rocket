@@ -349,6 +349,10 @@ export interface PaneState {
   openExampleTab: (collection: string, path: string, exampleName: string) => void;
   /** Closes the example tabs of a request, or only the one named. Parked tabs go too. */
   closeExampleTabs: (collection: string, path: string, exampleName?: string) => void;
+  /** Closes example tabs of every request at or under a folder path, live and parked. */
+  closeExampleTabsUnder: (collection: string, folderPath: string) => void;
+  /** Rewrites example tab paths after a folder or request move, by whole path segments. */
+  renameExampleTabPaths: (collection: string, oldPath: string, newPath: string) => void;
   /** Retargets an open example tab after the example is renamed. */
   retitleExampleTab: (collection: string, path: string, oldName: string, newName: string) => void;
 
@@ -1678,6 +1682,58 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     for (const { id, groupId } of closing) get().closeTab(id, groupId);
     const parked = removeParkedTabs(get().collectionTabState, matches);
     if (parked !== get().collectionTabState) set({ collectionTabState: parked });
+  },
+
+  closeExampleTabsUnder(collection, folderPath) {
+    const matches = (t: Tab) =>
+      isExampleTab(t) &&
+      t.source.collection === collection &&
+      isPathWithin(t.source.path, folderPath);
+    const closing: { id: string; groupId: string }[] = [];
+    const visit = (node: PaneNode): void => {
+      if (node.type !== 'leaf') {
+        visit(node.children[0]);
+        visit(node.children[1]);
+        return;
+      }
+      for (const t of node.tabs) if (matches(t)) closing.push({ id: t.id, groupId: node.groupId });
+    };
+    visit(get().root);
+    for (const { id, groupId } of closing) get().closeTab(id, groupId);
+    const parked = removeParkedTabs(get().collectionTabState, matches);
+    if (parked !== get().collectionTabState) set({ collectionTabState: parked });
+  },
+
+  renameExampleTabPaths(collection, oldPath, newPath) {
+    const state = get();
+    const ids = [
+      ...collectAllTabs(state.root),
+      ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
+    ]
+      .filter(
+        (t) =>
+          isExampleTab(t) &&
+          t.source.collection === collection &&
+          isPathWithin(t.source.path, oldPath),
+      )
+      .map((t) => t.id);
+    let next: Pick<PaneState, 'root' | 'collectionTabState'> = state;
+    for (const id of ids) {
+      next = updateTabEverywhere(next as PaneState, id, (tab) =>
+        isExampleTab(tab) && isPathWithin(tab.source.path, oldPath)
+          ? {
+              ...tab,
+              source: {
+                ...tab.source,
+                path: `${newPath}${tab.source.path.slice(oldPath.length)}`,
+              },
+            }
+          : tab,
+      );
+    }
+    if (next.root !== state.root || next.collectionTabState !== state.collectionTabState) {
+      set({ root: next.root, collectionTabState: next.collectionTabState });
+    }
   },
 
   retitleExampleTab(collection, path, oldName, newName) {

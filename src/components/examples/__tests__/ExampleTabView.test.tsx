@@ -127,4 +127,39 @@ describe('ExampleTabView', () => {
     expect(await screen.findByText(/This example no longer exists/)).toBeInTheDocument();
     expect(listRequestExamples).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    ['a number', 42, '42'],
+    ['an object', { a: 1 }, '{\n  "a": 1\n}'],
+    ['a list', [1, 2], '[\n  1,\n  2\n]'],
+  ])('a_hand_written_body_data_that_is_%s_renders_as_text', async (_label, data, shown) => {
+    vi.mocked(listRequestExamples).mockResolvedValue([
+      {
+        name: '401',
+        request: { body: { type: 'json', data } },
+        response: { status: 200, body: { type: 'text', data } },
+      },
+    ] as unknown as RequestExample[]);
+    render(<ExampleTabView tab={tab} />);
+    const response = await screen.findByRole('region', { name: 'Response' });
+    expect(within(response).getByTestId('monaco').textContent).toBe(shown);
+    const request = screen.getByRole('region', { name: 'Request' });
+    await userEvent.click(within(request).getByRole('tab', { name: 'Body' }));
+    expect(within(request).getByTestId('monaco').textContent).toBe(shown);
+  });
+
+  it('a_null_body_data_shows_the_empty_states', async () => {
+    vi.mocked(listRequestExamples).mockResolvedValue([
+      {
+        name: '401',
+        request: { body: { type: 'json', data: null } },
+        response: { status: 200, body: { type: 'json', data: null } },
+      },
+    ] as unknown as RequestExample[]);
+    render(<ExampleTabView tab={tab} />);
+    const request = await screen.findByRole('region', { name: 'Request' });
+    expect(within(screen.getByRole('region', { name: 'Response' })).getByText('No response body')).toBeInTheDocument();
+    await userEvent.click(within(request).getByRole('tab', { name: 'Body' }));
+    expect(within(request).getByText('No body')).toBeInTheDocument();
+  });
 });

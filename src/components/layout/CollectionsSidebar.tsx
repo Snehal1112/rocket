@@ -23,7 +23,6 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tree } from '@/components/ui/tree';
 import { hasDirtyFlow, isFlowRunning } from '@/lib/flow-tabs';
-import { collectAllTabs, isPathWithin } from '@/lib/pane-utils';
 import { collectionKeys, useCollections } from '@/lib/queries/collection-queries';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { flowKeys } from '@/lib/queries/flow-queries';
@@ -49,7 +48,6 @@ import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
-import { isExampleTab } from '@/types/pane-types';
 import { WorkspaceSection } from './WorkspaceSection';
 
 // Sidebar panel with Collections tree and History tabs.
@@ -162,6 +160,10 @@ export function CollectionsSidebar() {
       if (deleteTarget.type === 'request' && deleteTarget.path) {
         store.closeExampleTabs(deleteTarget.collection, deleteTarget.path);
       }
+      // A deleted folder takes the example tabs of its requests, live and parked.
+      if (deleteTarget.type === 'folder' && deleteTarget.path) {
+        store.closeExampleTabsUnder(deleteTarget.collection, deleteTarget.path);
+      }
       for (const { tab, groupId } of findAffectedTabs(store.root, deleteTarget)) {
         store.closeTab(tab.id, groupId);
       }
@@ -227,17 +229,9 @@ export function CollectionsSidebar() {
     async (srcCollection: string, srcPath: string, dstCollection: string, dstPath: string) => {
       try {
         await moveItem(srcCollection, srcPath, dstCollection, dstPath);
-        // The example tabs point at the old path, so they close. Re-open them from the new row.
-        const store = usePaneStore.getState();
-        for (const tab of collectAllTabs(store.root)) {
-          if (
-            isExampleTab(tab) &&
-            tab.source.collection === srcCollection &&
-            isPathWithin(tab.source.path, srcPath)
-          ) {
-            store.closeExampleTabs(srcCollection, tab.source.path);
-          }
-        }
+        // The example tabs point at the old path, so they close, parked ones too.
+        // Re-open them from the new row.
+        usePaneStore.getState().closeExampleTabsUnder(srcCollection, srcPath);
       } catch (err) {
         console.error('[CollectionsSidebar] move failed:', err);
       }
