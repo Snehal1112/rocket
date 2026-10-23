@@ -75,16 +75,124 @@ fn mask_side(side: &mut Value) -> usize {
         }
     }
     if let Some(body) = side.get_mut("body") {
-        let is_json = body.get("type").and_then(Value::as_str) == Some("json");
-        if let (true, Some(Value::String(data))) = (is_json, body.get_mut("data")) {
-            let (masked, masked_count) = mask_json_text(data);
-            if masked_count > 0 {
-                *data = masked;
-                count += masked_count;
-            }
-        }
+        count += mask_body(body);
     }
     count
+}
+
+fn mask_body(body: &mut Value) -> usize {
+    let kind = body.get("type").and_then(Value::as_str).unwrap_or("");
+    if matches!(kind, "binary" | "file") {
+        return 0;
+    }
+    let is_json = kind == "json";
+    match body.get_mut("data") {
+        Some(Value::Sequence(parts)) => parts
+            .iter_mut()
+            .filter(|part| part.get("value").is_some_and(Value::is_string))
+            .map(mask_named_entry)
+            .sum(),
+        Some(Value::String(data)) => {
+            let (masked, count) = if is_json {
+                mask_json_text(data)
+            } else {
+                mask_text_body(data)
+            };
+            if count > 0 {
+                *data = masked;
+            }
+            count
+        }
+        _ => 0,
+    }
+}
+
+// Masks a text, XML, HTML or SPARQL body. A mislabelled JSON body is masked as JSON.
+fn mask_text_body(text: &str) -> (String, usize) {
+    if text.trim_start().starts_with(['{', '[']) {
+        return mask_json_text(text);
+    }
+    let (shaped, mut count) = match mask_form_text(text) {
+        Some(result) => result,
+        None => mask_xml_text(text),
+    };
+    let mut out = String::with_capacity(shaped.len());
+    let mut word_start = 0;
+    for (i, c) in shaped.char_indices() {
+        if c.is_whitespace() || c == '"' || c == '\'' {
+            count += push_word(&mut out, &shaped[word_start..i]);
+            out.push(c);
+            word_start = i + c.len_utf8();
+        }
+    }
+    count += push_word(&mut out, &shaped[word_start..]);
+    (out, count)
+}
+
+// Pushes the word, or the mask when it is a JWT. Returns 1 when it masked.
+fn push_word(out: &mut String, word: &str) -> usize {
+    if looks_like_jwt(word) {
+        out.push_str(MASK);
+        1
+    } else {
+        out.push_str(word);
+        0
+    }
+}
+
+// Masks secret-named values in `a=b&c=d` text. Returns `None` when the text is not form-shaped.
+fn mask_form_text(text: &str) -> Option<(String, usize)> {
+    if text.chars().any(char::is_whitespace) || !text.split('&').all(|part| part.contains('=')) {
+        return None;
+    }
+    let mut count = 0;
+    let parts: Vec<String> = text
+        .split('&')
+        .map(|part| match part.split_once('=') {
+            Some((key, value)) if is_secret_name(key) && !value.is_empty() && value != MASK => {
+                count += 1;
+                format!("{key}={MASK}")
+            }
+            _ => part.to_string(),
+        })
+        .collect();
+    Some((parts.join("&"), count))
+}
+
+// Masks the text of secret-named elements such as `<token>abc</token>`.
+fn mask_xml_text(text: &str) -> (String, usize) {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut count = 0;
+    while let Some(open) = rest.find('<') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('>') else { break };
+        let name = &after[..close];
+        let plain = !name.is_empty()
+            && !name.starts_with(['/', '?', '!'])
+            && !name.ends_with('/')
+            && !name.contains(|c: char| c.is_whitespace() || c == '<');
+        let body = &after[close + 1..];
+        let value_len = body.find('<').unwrap_or(body.len());
+        let value = &body[..value_len];
+        let closing = format!("</{name}>");
+        if plain
+            && is_secret_name(name)
+            && !value.is_empty()
+            && value != MASK
+            && body[value_len..].starts_with(&closing)
+        {
+            out.push_str(&rest[..open + 1 + close + 1]);
+            out.push_str(MASK);
+            rest = &body[value_len..];
+            count += 1;
+        } else {
+            out.push_str(&rest[..open + 1]);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    (out, count)
 }
 
 // A header or param is a `name`/`value` pair. The value is masked when the name looks secret.
@@ -356,5 +464,93 @@ examples:
     fn files_without_examples_are_not_touched() {
         assert_eq!(mask_examples("info:\n  name: A\nhttp:\n  url: x\n"), None);
         assert_eq!(mask_examples("examples: [not valid"), None);
+    }
+
+    // Builds a one-example file with a body on the given side.
+    fn file_with_body(side: &str, kind: &str, data: &str) -> String {
+        let other = if side == "request" {
+            "response"
+        } else {
+            "request"
+        };
+        format!(
+            "examples:\n  - name: e\n    {other}:\n      url: https://x.io\n    {side}:\n      body:\n        type: {kind}\n        data: {data:?}\n"
+        )
+    }
+
+    #[test]
+    fn form_urlencoded_list_masks_secret_named_fields() {
+        let file = "examples:\n  - name: e\n    request:\n      body:\n        type: form-urlencoded\n        data:\n          - name: username\n            value: ann\n          - name: client_secret\n            value: s3\n";
+        let (masked, count) = mask_examples(file).expect("masked");
+        assert_eq!(count, 1);
+        assert!(masked.contains("value: ann"));
+        assert!(masked.contains("[masked]"));
+        assert!(!masked.contains("s3"));
+    }
+
+    #[test]
+    fn text_body_that_holds_json_is_masked_as_json() {
+        let file = file_with_body(
+            "response",
+            "text",
+            "{\"access_token\": \"abc\", \"ok\": true}",
+        );
+        let (masked, _) = mask_examples(&file).expect("masked");
+        assert!(
+            masked.contains("\"access_token\": \"[masked]\""),
+            "{masked}"
+        );
+        assert!(masked.contains("\"ok\": true"));
+    }
+
+    #[test]
+    fn form_shaped_text_body_masks_secret_keys() {
+        let file = file_with_body("request", "text", "user=ann&password=hunter2&page=2");
+        let (masked, _) = mask_examples(&file).expect("masked");
+        assert!(masked.contains("password=[masked]"), "{masked}");
+        assert!(masked.contains("user=ann"));
+        assert!(masked.contains("page=2"));
+    }
+
+    #[test]
+    fn xml_body_masks_secret_named_elements() {
+        let file = file_with_body(
+            "response",
+            "xml",
+            "<r><token>abc</token><name>Ann</name></r>",
+        );
+        let (masked, _) = mask_examples(&file).expect("masked");
+        assert!(masked.contains("<token>[masked]</token>"), "{masked}");
+        assert!(masked.contains("<name>Ann</name>"));
+    }
+
+    #[test]
+    fn jwt_inside_plain_text_is_masked() {
+        let file = file_with_body("response", "text", &format!("got {JWT} ok"));
+        let (masked, _) = mask_examples(&file).expect("masked");
+        assert!(!masked.contains(JWT));
+        assert!(masked.contains("got [masked] ok"), "{masked}");
+    }
+
+    #[test]
+    fn prose_mentioning_a_secret_word_is_not_masked() {
+        let file = file_with_body("response", "text", "the token expired, please log in");
+        assert_eq!(mask_examples(&file), None);
+    }
+
+    #[test]
+    fn binary_and_empty_bodies_are_left_alone() {
+        let file = file_with_body("response", "binary", "AAAA");
+        assert_eq!(mask_examples(&file), None);
+        let file = file_with_body("response", "text", "");
+        assert_eq!(mask_examples(&file), None);
+    }
+
+    #[test]
+    fn set_cookie_value_is_masked_whatever_the_cookie_name() {
+        let file = "examples:\n  - name: e\n    response:\n      headers:\n        - name: Set-Cookie\n          value: theme=dark; Path=/\n";
+        let (masked, count) = mask_examples(file).expect("masked");
+        assert_eq!(count, 1);
+        assert!(!masked.contains("theme=dark"));
     }
 }
