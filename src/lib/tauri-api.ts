@@ -1687,6 +1687,20 @@ export const getProcessEnvVars = (
     globalEnvironment: globalEnvironment ?? null,
   });
 
+/** What the backend knows about the `.env` file of an environment. It never carries values. */
+export interface DotEnvStatus {
+  baseDir: string | null;
+  path: string | null;
+  exists: boolean;
+  keyCount: number;
+  error: string | null;
+  blocked: boolean;
+  usesDefault: boolean;
+}
+
+export const getDotEnvStatus = (collection: string | null, environment: string | null) =>
+  invoke<DotEnvStatus>('get_dot_env_status', { collection, environment });
+
 /** One variable of a flattened environment, with the environment it came from. */
 export interface ResolvedVariable {
   key: string;

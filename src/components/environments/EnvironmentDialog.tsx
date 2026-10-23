@@ -26,6 +26,7 @@ import { validateClientCertificates } from '@/lib/certificate-validation';
 import { validateExternalSecretBindings } from '@/lib/external-secrets';
 import {
   useDeleteEnvironment,
+  useDotEnvStatus,
   useEnvironments,
   useGlobalEnvironment,
   useGlobalEnvironmentName,
@@ -37,6 +38,7 @@ import { useSecretManagerConnections } from '@/lib/queries/secret-manager-querie
 import { canAddVaultCertificate } from '@/lib/secret-providers';
 import type {
   ClientCertificate,
+  DotEnvStatus,
   Environment,
   ExternalSecretBinding,
   ResolvedVariable,
@@ -57,6 +59,23 @@ interface EnvironmentDialogProps {
 }
 
 const EMPTY_ENVS: Environment[] = [];
+
+/** One line that says what happened to the .env file. It never shows a value. */
+function dotEnvStatusLine(status: DotEnvStatus): { text: string; warn: boolean } {
+  if (status.blocked) {
+    return {
+      text: 'The .env file was not read. This collection has no host environment access.',
+      warn: true,
+    };
+  }
+  if (status.error) return { text: status.error, warn: true };
+  if (status.exists) {
+    const keys = status.keyCount === 1 ? '1 key' : `${status.keyCount} keys`;
+    return { text: `Found .env, ${keys}`, warn: false };
+  }
+  if (status.usesDefault) return { text: 'No .env file in this folder', warn: false };
+  return { text: `Not found${status.path ? `: ${status.path}` : ''}`, warn: false };
+}
 const EMPTY_ROWS: ResolvedVariable[] = [];
 // Radix Select forbids an empty item value, so "None" uses a sentinel.
 const NO_PARENT = '__none__';
@@ -275,6 +294,12 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
 
   // Inherited rows come from the saved, flattened environment. Rows the child
   // defines (saved or in-flight) are its own, so they are not listed here.
+  const { data: dotEnvStatus } = useDotEnvStatus(
+    activeCollection,
+    selectedEnv?.name ?? null,
+    selectedEnv?.dotEnvFilePath,
+  );
+  const dotEnvLine = dotEnvStatus ? dotEnvStatusLine(dotEnvStatus) : null;
   const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, selectedName);
   const inheritedRows = useMemo(() => {
     if (!selectedEnv) return EMPTY_ROWS;
@@ -552,6 +577,16 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                     }
                   />
                 </div>
+                {dotEnvLine && (
+                  <p
+                    className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs border-b ${
+                      dotEnvLine.warn ? 'text-amber-500' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {dotEnvLine.warn && <AlertTriangle className='h-3.5 w-3.5 shrink-0' />}
+                    {dotEnvLine.text}
+                  </p>
+                )}
                 {missingParent && (
                   <p className='shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-500 border-b'>
                     <AlertTriangle className='h-3.5 w-3.5 shrink-0' />

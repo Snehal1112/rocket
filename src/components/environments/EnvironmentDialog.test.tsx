@@ -20,6 +20,15 @@ vi.mock('@/lib/tauri-api', async () => {
     getGlobalEnvironmentName: vi.fn().mockResolvedValue(null),
     getGlobalEnvironment: vi.fn().mockResolvedValue(null),
     getProcessEnvVars: vi.fn().mockResolvedValue({}),
+    getDotEnvStatus: vi.fn().mockResolvedValue({
+      baseDir: null,
+      path: null,
+      exists: false,
+      keyCount: 0,
+      error: null,
+      blocked: false,
+      usesDefault: true,
+    }),
     getResolvedEnvironment: vi
       .fn()
       .mockResolvedValue({ name: '', variables: [], warnings: [] }),
@@ -564,5 +573,54 @@ describe('EnvironmentDialog empty states', () => {
     renderWithCollection('my-collection');
     expect(await screen.findByText('Loading environments')).toBeInTheDocument();
     expect(screen.queryByText('No environments yet')).not.toBeInTheDocument();
+  });
+});
+
+describe('EnvironmentDialog .env status line', () => {
+  const status = (patch: Partial<tauriApi.DotEnvStatus>): tauriApi.DotEnvStatus => ({
+    baseDir: '/work/col',
+    path: '/work/col/.env',
+    exists: true,
+    keyCount: 4,
+    error: null,
+    blocked: false,
+    usesDefault: false,
+    ...patch,
+  });
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([prodEnv]);
+  });
+
+  async function renderWith(patch: Partial<tauriApi.DotEnvStatus>) {
+    vi.mocked(tauriApi.getDotEnvStatus).mockResolvedValue(status(patch));
+    renderDialog();
+    await screen.findByLabelText('Variable key 1');
+  }
+
+  it('shows_found_with_the_key_count', async () => {
+    await renderWith({});
+    expect(await screen.findByText('Found .env, 4 keys')).toBeInTheDocument();
+  });
+
+  it('shows_not_found_for_a_missing_explicit_file', async () => {
+    await renderWith({ exists: false, keyCount: 0 });
+    expect(await screen.findByText(/^Not found/)).toBeInTheDocument();
+  });
+
+  it('shows_nothing_extra_for_a_missing_default_file', async () => {
+    await renderWith({ exists: false, keyCount: 0, usesDefault: true });
+    expect(await screen.findByText('No .env file in this folder')).toBeInTheDocument();
+  });
+
+  it('shows_not_read_when_blocked', async () => {
+    await renderWith({ blocked: true, exists: false });
+    expect(await screen.findByText(/host environment access/i)).toBeInTheDocument();
+  });
+
+  it('shows_the_error_text_in_amber', async () => {
+    await renderWith({ error: 'Bad line 3' });
+    const text = await screen.findByText(/Bad line 3/);
+    expect(text.closest('p')).toHaveClass('text-amber-500');
   });
 });

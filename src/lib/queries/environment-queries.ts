@@ -3,6 +3,7 @@ import {
   deleteEnvironment,
   deleteGlobalEnvironment,
   type Environment,
+  getDotEnvStatus,
   getGlobalEnvironment,
   getGlobalEnvironmentName,
   getProcessEnvVars,
@@ -29,6 +30,10 @@ export const environmentKeys = {
     environment: string | null = null,
     globalEnvironment: string | null = null,
   ) => ['environments', 'process', collection, environment, globalEnvironment] as const,
+  /** Prefix of every .env status query, to invalidate them all. */
+  dotEnvAll: ['environments', 'dotEnv'] as const,
+  dotEnv: (collection: string | null, environment: string | null, path: string | undefined) =>
+    ['environments', 'dotEnv', collection, environment, path ?? null] as const,
   /** Prefix of every resolved (flattened) environment query, to invalidate them all. */
   resolvedAll: ['environments', 'resolved'] as const,
   resolved: (collection: string | null, name: string) =>
@@ -73,6 +78,19 @@ export function useProcessEnvVars(collection: string | null | undefined = null) 
     queryFn: () => getProcessEnvVars(scope),
     select: (env) => env.vars,
     staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+/** The status of the .env file of an environment. The path is in the key so an edit refreshes it. */
+export function useDotEnvStatus(
+  collection: string | null,
+  environment: string | null,
+  dotEnvFilePath: string | undefined,
+) {
+  return useQuery({
+    queryKey: environmentKeys.dotEnv(collection, environment, dotEnvFilePath),
+    queryFn: () => getDotEnvStatus(collection, environment),
+    enabled: environment !== null,
   });
 }
 
