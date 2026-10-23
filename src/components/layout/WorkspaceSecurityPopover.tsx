@@ -1,4 +1,4 @@
-import { ShieldAlert } from 'lucide-react';
+import { Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
@@ -24,7 +24,7 @@ export function WorkspaceSecurityPopover() {
           title='Request Guard'
           aria-label='Request Guard'
         >
-          <ShieldAlert
+          <Network
             className={cn(
               'h-4 w-4 transition-colors duration-200',
               blockInternal ? 'text-green-500 dark:text-green-400' : 'text-muted-foreground',
@@ -35,7 +35,7 @@ export function WorkspaceSecurityPopover() {
       <PopoverContent className='w-72 p-0 overflow-hidden' align='end'>
         {/* Header */}
         <div className='flex items-center gap-2 px-4 py-2.5 border-b border-border/60'>
-          <ShieldAlert className='h-3 w-3 shrink-0 text-muted-foreground' />
+          <Network className='h-3 w-3 shrink-0 text-muted-foreground' />
           <p className='text-[11px] font-semibold tracking-wider uppercase text-muted-foreground'>
             Request Guard
           </p>
