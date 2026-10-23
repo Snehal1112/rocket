@@ -49,6 +49,7 @@ import type {
   CollectionSection,
   CollectionTab,
   ContractTab,
+  ExampleTab,
   FlowLastRun,
   FlowNodeDetail,
   FlowRunRecord,
@@ -68,7 +69,14 @@ import type {
   WorkspaceTab,
   WorkspaceTabSection,
 } from '@/types/pane-types';
-import { isFlowTab, isFolderTab, isRequestTab, isRunnerTab, isScriptTab } from '@/types/pane-types';
+import {
+  isExampleTab,
+  isFlowTab,
+  isFolderTab,
+  isRequestTab,
+  isRunnerTab,
+  isScriptTab,
+} from '@/types/pane-types';
 
 // Recursively finds a tab by id and applies an updater function to it.
 function updateTabInTree(node: PaneNode, tabId: string, updater: (tab: Tab) => Tab): PaneNode {
@@ -138,6 +146,16 @@ function removeParkedTabs(
     next[key] = { ...entry, tabs, activeTabId };
   }
   return changed ? next : state;
+}
+
+// True when the tab is the example tab for this request path and example name.
+function isExampleTabFor(tab: Tab, collection: string, path: string, name: string): boolean {
+  return (
+    isExampleTab(tab) &&
+    tab.source.collection === collection &&
+    tab.source.path === path &&
+    tab.exampleName === name
+  );
 }
 
 // Applies an updater to one tab by id in the live pane tree and in every
@@ -326,6 +344,13 @@ export interface PaneState {
   updateFolderSection: (tabId: string, section: FolderSection) => void;
   /** Retargets open folder tabs when a folder is renamed, matching whole path segments. */
   renameFolderTabs: (collection: string, oldPath: string, newPath: string) => void;
+
+  /** Opens or focuses the read-only tab of a saved example. */
+  openExampleTab: (collection: string, path: string, exampleName: string) => void;
+  /** Closes the example tabs of a request, or only the one named. Parked tabs go too. */
+  closeExampleTabs: (collection: string, path: string, exampleName?: string) => void;
+  /** Retargets an open example tab after the example is renamed. */
+  retitleExampleTab: (collection: string, path: string, oldName: string, newName: string) => void;
 
   /** Rewrites saved request paths in open and parked flow tabs of a collection. Never touches isDirty. */
   rewriteFlowRequestPaths: (collection: string, from: string, to: string) => void;
@@ -1480,6 +1505,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const { root } = get();
     // Find the tab to check if it has a collection source.
     const found = findTabInTree(root, tabId);
+    // An example tab is titled by its example name, which is renamed from the sidebar.
+    if (found && isExampleTab(found.tab)) return;
     // Skip if the title hasn't actually changed.
     if (found?.tab.title === title) return;
     set({
@@ -1605,6 +1632,71 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       };
     }
     set({ root: next.root, collectionTabState: next.collectionTabState });
+  },
+
+  openExampleTab(collection, path, exampleName) {
+    // Switch first, so a tab parked in another collection's snapshot is found and not duplicated.
+    if (!get().isWorkspaceMode() && get().activeCollection !== collection) {
+      get().switchCollection(collection);
+    }
+    const existing = collectAllTabs(get().root).find((t) =>
+      isExampleTabFor(t, collection, path, exampleName),
+    );
+    if (existing) {
+      // The id is all openTab reads for an open tab, so it only activates it.
+      get().openTab(existing);
+      return;
+    }
+    const tab: ExampleTab = {
+      id: `example:${crypto.randomUUID()}`,
+      title: exampleName,
+      tabType: 'example',
+      source: { collection, path },
+      exampleName,
+      isDirty: false,
+    };
+    get().openTab(tab);
+  },
+
+  closeExampleTabs(collection, path, exampleName) {
+    const matches = (t: Tab) =>
+      isExampleTab(t) &&
+      t.source.collection === collection &&
+      t.source.path === path &&
+      (exampleName === undefined || t.exampleName === exampleName);
+    // Closing by group keeps the pane collapse and active-tab logic of closeTab.
+    const closing: { id: string; groupId: string }[] = [];
+    const visit = (node: PaneNode): void => {
+      if (node.type !== 'leaf') {
+        visit(node.children[0]);
+        visit(node.children[1]);
+        return;
+      }
+      for (const t of node.tabs) if (matches(t)) closing.push({ id: t.id, groupId: node.groupId });
+    };
+    visit(get().root);
+    for (const { id, groupId } of closing) get().closeTab(id, groupId);
+    const parked = removeParkedTabs(get().collectionTabState, matches);
+    if (parked !== get().collectionTabState) set({ collectionTabState: parked });
+  },
+
+  retitleExampleTab(collection, path, oldName, newName) {
+    const state = get();
+    const ids = [
+      ...collectAllTabs(state.root),
+      ...Object.values(state.collectionTabState).flatMap((entry) => entry.tabs),
+    ]
+      .filter((t) => isExampleTabFor(t, collection, path, oldName))
+      .map((t) => t.id);
+    let next: Pick<PaneState, 'root' | 'collectionTabState'> = state;
+    for (const id of ids) {
+      next = updateTabEverywhere(next as PaneState, id, (tab) =>
+        isExampleTab(tab) ? { ...tab, exampleName: newName, title: newName } : tab,
+      );
+    }
+    if (next.root !== state.root || next.collectionTabState !== state.collectionTabState) {
+      set({ root: next.root, collectionTabState: next.collectionTabState });
+    }
   },
 
   rewriteFlowRequestPaths(collection, from, to) {

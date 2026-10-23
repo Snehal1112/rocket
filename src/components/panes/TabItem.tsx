@@ -2,6 +2,7 @@ import {
   BoxIcon,
   FileCode,
   FileLock,
+  FileText,
   FolderCog,
   GitBranch,
   Globe,
@@ -15,6 +16,7 @@ import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import type { Tab } from '@/types/pane-types';
 import {
   isContractTab,
+  isExampleTab,
   isFolderTab,
   isGitTab,
   isRequestTab,
@@ -112,6 +114,8 @@ export function TabItem({
         <FileLock aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isScriptTab(tab) ? (
         <FileCode aria-hidden='true' className='h-4 w-4 shrink-0' />
+      ) : isExampleTab(tab) ? (
+        <FileText aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isFolderTab(tab) ? (
         <FolderCog aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : (

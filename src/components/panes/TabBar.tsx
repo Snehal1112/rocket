@@ -33,7 +33,13 @@ import { collectLeafGroupIds, findTabInTree } from '@/lib/pane-utils';
 import { saveFlowTab, saveScriptTab } from '@/lib/save-tab';
 import { usePaneStore } from '@/stores/pane-store';
 import type { LeafNode } from '@/types/pane-types';
-import { isFlowTab, isFolderTab, isScriptTab, isWorkspaceTab } from '@/types/pane-types';
+import {
+  isExampleTab,
+  isFlowTab,
+  isFolderTab,
+  isScriptTab,
+  isWorkspaceTab,
+} from '@/types/pane-types';
 import { TabItem } from './TabItem';
 
 // Request tab bar matching legacy RequestTabs styling.
@@ -125,7 +131,8 @@ export function TabBar({
                   onClose={() => (onCloseTab ? onCloseTab(tab.id) : closeTab(tab.id, node.groupId))}
                   onDoubleClick={() => {
                     // Script and folder tabs take their title from the file or folder name.
-                    if (isScriptTab(tab) || isFolderTab(tab)) return;
+                    // An example is renamed from the sidebar, never from its tab.
+                    if (isScriptTab(tab) || isFolderTab(tab) || isExampleTab(tab)) return;
                     setRenamingTabId(tab.id);
                     setRenameValue(tab.title);
                   }}
@@ -176,7 +183,7 @@ export function TabBar({
               );
             })()}
             <ContextMenuItem
-              disabled={isScriptTab(tab) || isFolderTab(tab)}
+              disabled={isScriptTab(tab) || isFolderTab(tab) || isExampleTab(tab)}
               onClick={() => {
                 setRenamingTabId(tab.id);
                 setRenameValue(tab.title);

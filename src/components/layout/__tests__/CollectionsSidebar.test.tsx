@@ -11,7 +11,7 @@ import { setQueryClient } from '@/lib/query-client';
 import * as tauriApi from '@/lib/tauri-api';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
-import { type FlowTab, isFlowTab } from '@/types/pane-types';
+import { type FlowTab, isExampleTab, isFlowTab } from '@/types/pane-types';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -29,6 +29,7 @@ vi.mock('@/lib/tauri-api', async () => {
     listFlows: vi.fn().mockResolvedValue([]),
     deleteFlow: vi.fn(),
     deleteRequest: vi.fn(),
+    moveItem: vi.fn(),
     duplicateRequest: vi.fn(),
     getCollection: vi.fn(),
     saveRequest: vi.fn(),
@@ -486,5 +487,93 @@ describe('CollectionsSidebar delete dialog flow list', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByText('Confirm Delete')).not.toBeInTheDocument());
     expect(tauriApi.flowsUsingRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('CollectionsSidebar request examples', () => {
+  const summary: tauriApi.CollectionSummary = {
+    uid: 'c1',
+    repositoryId: 'r1',
+    name: 'col',
+    path: '/w/col',
+    requestCount: 2,
+  };
+  const other: tauriApi.CollectionSummary = { ...summary, uid: 'c2', name: 'other', path: '/w/o' };
+
+  beforeEach(() => {
+    usePaneStore.getState().reset();
+    vi.mocked(tauriApi.listCollections).mockResolvedValue([summary, other]);
+    vi.mocked(tauriApi.listWorkspaces).mockResolvedValue([
+      { id: 'ws1', repositoryId: 'r1', name: 'WS', path: '/w', pinned: false },
+    ]);
+    vi.mocked(tauriApi.getCollectionSummaries).mockImplementation(async (name: string) => ({
+      name,
+      root: {
+        uid: 'root',
+        name,
+        items:
+          name === 'col'
+            ? [
+                {
+                  type: 'summary',
+                  uid: 'r1',
+                  name: 'Login',
+                  method: 'GET',
+                  url: 'http://x',
+                  fileName: 'login.yml',
+                  exampleNames: ['200 OK'],
+                },
+                {
+                  type: 'summary',
+                  uid: 'r2',
+                  name: 'Logout',
+                  method: 'GET',
+                  url: 'http://x',
+                  fileName: 'logout.yml',
+                  exampleNames: ['200 OK'],
+                },
+              ]
+            : [],
+      },
+      settings: { headers: [], variables: [], sandboxMode: 'safe' },
+    }));
+    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue([]);
+    vi.mocked(tauriApi.flowsUsingRequest).mockReset().mockResolvedValue([]);
+    vi.mocked(tauriApi.deleteRequest).mockReset().mockResolvedValue(undefined);
+    vi.mocked(tauriApi.moveItem).mockReset().mockResolvedValue(undefined);
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
+    usePaneStore.setState({ activeCollection: 'col' });
+  });
+
+  function exampleTabPaths(): string[] {
+    return collectAllTabs(usePaneStore.getState().root)
+      .filter(isExampleTab)
+      .map((t) => t.source.path);
+  }
+
+  it('deleting_a_request_closes_its_example_tabs', async () => {
+    usePaneStore.getState().openExampleTab('col', 'login.yml', '200 OK');
+    usePaneStore.getState().openExampleTab('col', 'logout.yml', '200 OK');
+    render(<CollectionsSidebar />, { wrapper });
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for Login' }));
+    await userEvent.click(await screen.findByText('Delete'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(tauriApi.deleteRequest).toHaveBeenCalledWith('col', 'login.yml'));
+    await waitFor(() => expect(exampleTabPaths()).toEqual(['logout.yml']));
+  });
+
+  it('moving_a_request_closes_its_example_tabs', async () => {
+    usePaneStore.getState().openExampleTab('col', 'login.yml', '200 OK');
+    usePaneStore.getState().openExampleTab('col', 'logout.yml', '200 OK');
+    render(<CollectionsSidebar />, { wrapper });
+    await userEvent.click(await screen.findByRole('button', { name: 'Actions for Login' }));
+    const moveTo = await screen.findByText('Move to...');
+    await userEvent.hover(moveTo);
+    await userEvent.keyboard('{ArrowRight}');
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'other' }));
+    await waitFor(() =>
+      expect(tauriApi.moveItem).toHaveBeenCalledWith('col', 'login.yml', 'other', ''),
+    );
+    await waitFor(() => expect(exampleTabPaths()).toEqual(['logout.yml']));
   });
 });

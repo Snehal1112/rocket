@@ -261,6 +261,17 @@ export function isCollectionTab(tab: Tab): tab is CollectionTab {
   return tab.tabType === 'collection';
 }
 
+/** A saved response example, shown read-only. It is never dirty and never writes to disk. */
+export interface ExampleTab extends BaseTab {
+  tabType: 'example';
+  source: { collection: string; path: string };
+  exampleName: string;
+}
+
+export function isExampleTab(tab: Tab): tab is ExampleTab {
+  return tab.tabType === 'example';
+}
+
 export type Tab =
   | RequestTab
   | CollectionTab
@@ -273,7 +284,8 @@ export type Tab =
   | RunnerTab
   | FlowTab
   | ScriptTab
-  | FolderTab;
+  | FolderTab
+  | ExampleTab;
 
 export function isWorkspaceTab(tab: Tab): tab is WorkspaceTab {
   return tab.tabType === 'workspace';
