@@ -9,7 +9,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::conversions::{
-    derived_grpc_uid, graphql_to_oc, grpc_to_oc, oc_graphql_to_domain, oc_grpc_to_domain,
+    derived_grpc_uid, derived_http_uid, graphql_to_oc, grpc_to_oc, oc_graphql_to_domain, oc_grpc_to_domain,
     oc_http_request_to_request, oc_websocket_to_request, request_to_oc_http_request,
     websocket_to_oc_websocket, with_file_identity,
 };
@@ -48,9 +48,10 @@ pub(super) fn get_request(
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string());
             // Give a uid-less file an in-memory uid only. This is a pure read, so the
-            // file is not rewritten; the uid is persisted by the next save_request.
+            // file is not rewritten; the uid is persisted by the next save_request. The uid
+            // is derived from the path, like the one the sidebar summary shows for this file.
             if req.uid.is_empty() {
-                req.uid = generate_uid();
+                req.uid = derived_http_uid(&yml_path);
             }
             return Ok(req);
         }

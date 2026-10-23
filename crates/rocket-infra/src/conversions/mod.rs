@@ -42,7 +42,7 @@ pub use grpc::{derived_grpc_uid, grpc_to_oc, oc_grpc_to_domain};
 pub use header::*;
 #[allow(unused_imports)]
 pub use param::{merge_params, split_params};
-pub use request::{oc_http_request_to_request, request_to_oc_http_request};
+pub use request::{derived_http_uid, oc_http_request_to_request, request_to_oc_http_request};
 #[allow(unused_imports)]
 pub use variables::*;
 #[allow(unused_imports)]

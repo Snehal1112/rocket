@@ -1,13 +1,14 @@
 use std::fs;
 use std::path::Path;
 
-use rocket_collection::{Collection, CollectionSummary};
+use rocket_collection::{Collection, CollectionItem, CollectionSummary, Folder, RequestKind};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::migration::{
     detect_format, is_migration_interrupted, migrate_collection, CollectionFormat,
 };
+use crate::conversions::derived_http_uid;
 use crate::oc::{OcCollection, OcInfo};
 use rocket_collection::generate_uid;
 
@@ -127,13 +128,35 @@ pub(super) fn get_summaries(repo: &FsCollectionRepo, name: &str) -> DomainResult
     if detect_format(&path) == CollectionFormat::LegacyJson {
         migrate_collection(&path)?;
     }
-    let root = build_folder_tree_summaries(&path)?;
+    let mut root = build_folder_tree_summaries(&path)?;
+    assign_derived_http_uids(&mut root, "");
     let settings = super::settings::get_settings(repo, name).unwrap_or_default();
     Ok(Collection {
         name: name.to_string(),
         root,
         settings,
     })
+}
+
+/// Gives every HTTP summary with no `uid` key the uid `get_request` will give the same file.
+/// `prefix` is the folder path below the collection root, ending in `/` (empty at the root).
+fn assign_derived_http_uids(folder: &mut Folder, prefix: &str) {
+    for item in &mut folder.items {
+        match item {
+            CollectionItem::Folder(child) => {
+                let dir = child.dir_name.clone().unwrap_or_else(|| child.name.clone());
+                assign_derived_http_uids(child, &format!("{prefix}{dir}/"));
+            }
+            CollectionItem::Summary(summary)
+                if summary.uid.is_empty() && summary.kind == RequestKind::Http =>
+            {
+                if let Some(file_name) = summary.file_name.as_deref() {
+                    summary.uid = derived_http_uid(&format!("{prefix}{file_name}"));
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[tracing::instrument(name = "collection_create", skip(repo), fields(collection_name = %name))]

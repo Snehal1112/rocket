@@ -10,6 +10,14 @@ use super::auth::persisted_oc_auth;
 use super::param::{merge_params, split_params};
 use super::request_settings::{domain_settings_to_oc, oc_settings_to_domain};
 
+/// The uid an HTTP request file with no `uid` key gets. It comes from the path relative to the
+/// collection, so it is stable across loads and two files with the same name in different
+/// folders get different uids. The summary load and `get_request` both use it, so a tab opened
+/// from the sidebar keeps the id of the row it came from.
+pub fn derived_http_uid(relative_path: &str) -> String {
+    format!("http-{relative_path}")
+}
+
 /// Convert an OC HTTP request to a domain Request.
 pub fn oc_http_request_to_request(oc: OcHttpRequest) -> Request {
     // Info section.

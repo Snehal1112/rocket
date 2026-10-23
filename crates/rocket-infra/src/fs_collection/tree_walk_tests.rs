@@ -593,3 +593,85 @@ fn summaries_keep_the_request_when_examples_is_empty() {
     let names = example_names_after_appending("examples: []\n");
     assert_eq!(names, vec![Vec::<String>::new()]);
 }
+
+// ---- uid-less HTTP requests (Bruno imports have no `uid` key) ----
+
+const UIDLESS_REQUEST: &str = "info:\n  name: Status\n  type: http\n  seq: 1\n\nhttp:\n  method: GET\n  url: https://example.test/status\n";
+
+/// Collects `(relative path, uid)` of every summary below `folder`.
+fn summary_uids(folder: &Folder, prefix: &str, out: &mut Vec<(String, String)>) {
+    for item in &folder.items {
+        match item {
+            CollectionItem::Folder(f) => {
+                let dir = f.dir_name.as_deref().unwrap_or(&f.name);
+                summary_uids(f, &format!("{prefix}{dir}/"), out);
+            }
+            CollectionItem::Summary(s) => out.push((
+                format!("{prefix}{}", s.file_name.as_deref().unwrap_or("-")),
+                s.uid.clone(),
+            )),
+            _ => {}
+        }
+    }
+}
+
+fn load_summary_uids(repo: &FsCollectionRepo) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    summary_uids(
+        &repo.get_summaries("col").expect("summaries").root,
+        "",
+        &mut found,
+    );
+    found
+}
+
+#[test]
+fn uidless_http_requests_get_distinct_stable_uids_in_summaries() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    // The same file name in two folders and at the root, all without a uid key.
+    write(&dir, "col/a/Status.yml", UIDLESS_REQUEST);
+    write(&dir, "col/b/Status.yml", UIDLESS_REQUEST);
+    write(&dir, "col/Status.yml", UIDLESS_REQUEST);
+
+    let first = load_summary_uids(&repo);
+    assert_eq!(first.len(), 3);
+    for (path, uid) in &first {
+        assert!(!uid.is_empty(), "{path} must not have an empty uid");
+    }
+    let mut uids: Vec<&String> = first.iter().map(|(_, u)| u).collect();
+    uids.sort();
+    uids.dedup();
+    assert_eq!(uids.len(), 3, "uids must be distinct: {first:?}");
+
+    // Stable across loads, so a tab keeps its id.
+    assert_eq!(first, load_summary_uids(&repo));
+
+    // The tab opened from a summary carries the uid of the full request it loads.
+    for (path, uid) in &first {
+        let full = repo.get_request("col", path).expect("get_request");
+        assert_eq!(
+            &full.uid, uid,
+            "{path}: get_request uid must match the summary"
+        );
+    }
+}
+
+#[test]
+fn a_request_with_a_uid_keeps_it() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    write(
+        &dir,
+        "col/Has.yml",
+        &format!("uid: keep-me\n{UIDLESS_REQUEST}"),
+    );
+    assert_eq!(
+        load_summary_uids(&repo),
+        vec![("Has.yml".to_string(), "keep-me".to_string())]
+    );
+    assert_eq!(
+        repo.get_request("col", "Has.yml").expect("get").uid,
+        "keep-me"
+    );
+}
