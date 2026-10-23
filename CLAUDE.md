@@ -70,6 +70,7 @@ See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Ge
 See `.claude/flow-request-refs.md` for how flows follow request moves (rewrite, event, delete dialog).
 See `.claude/collection-export.md` for the collection export to Bruno and Postman (outputs, decisions, known losses, manual checks).
 See `.claude/example-masking.md` for how saved request examples get their secrets masked in a git commit.
+See `.claude/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
 See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
