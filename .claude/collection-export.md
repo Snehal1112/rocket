@@ -26,6 +26,7 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 - No legacy `.bru` output and no single-file OpenCollection YAML.
 - Saved request examples are not exported in either format, because captured responses may hold tokens. The Bruno ZIP removes the `examples` key and reports it.
 - The Bruno ZIP leaves out Rocket-only files (`flows/` and hidden directories such as `.rocket/`) and reports them.
+- The Bruno ZIP converts a legacy flat `folder.yml` (top-level `name`, `type`, `uid`) to the `info` shape, because Bruno reads the folder name only from `info.name` (the name falls back to the directory name). It removes `uid` keys (top level and `info.uid`) because they are not part of the OpenCollection schema. Both give report notes (`Legacy folder.yml` per folder, one `uid` summary).
 - The Bruno ZIP removes the `extensions.rocketapi` subtree and the trust-gate keys and keeps other `extensions.*` keys.
 - A Postman export with environments is one ZIP, so the dialog needs one save.
 - Environments are read with `list_strict`. A keychain or read error fails the export.

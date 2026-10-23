@@ -93,6 +93,60 @@ fn has_rok_script(value: &Value) -> bool {
     }
 }
 
+/// Rebuilds a legacy flat `folder.yml` into the OpenCollection `info` shape, which is the
+/// only place Bruno reads the folder name. Returns true when the file was converted.
+fn normalize_folder_yml(rel_path: &str, fallback_name: &str, value: &mut Value) -> bool {
+    if rel_path.rsplit('/').next() != Some("folder.yml") {
+        return false;
+    }
+    let Value::Mapping(map) = value else {
+        return false;
+    };
+    if matches!(map.get("info"), Some(Value::Mapping(_))) {
+        return false;
+    }
+    let dir_name = rel_path
+        .rsplit('/')
+        .nth(1)
+        .filter(|d| !d.is_empty())
+        .unwrap_or(fallback_name);
+    let name = match map.get("name").and_then(Value::as_str) {
+        Some(n) if !n.is_empty() => n.to_string(),
+        _ => dir_name.to_string(),
+    };
+    let mut info = serde_yaml::Mapping::new();
+    info.insert("name".into(), Value::String(name));
+    info.insert("type".into(), Value::String("folder".to_string()));
+    for key in ["seq", "tags"] {
+        if let Some(v) = map.remove(key) {
+            info.insert(key.into(), v);
+        }
+    }
+    map.remove("name");
+    map.remove("type");
+    map.remove("uid");
+    let mut rebuilt = serde_yaml::Mapping::new();
+    rebuilt.insert("info".into(), Value::Mapping(info));
+    for (k, v) in std::mem::take(map) {
+        rebuilt.insert(k, v);
+    }
+    *map = rebuilt;
+    true
+}
+
+/// Removes the top-level `uid` and `info.uid`, which are not part of the OpenCollection
+/// schema. Returns true when a key was removed.
+fn strip_uids(value: &mut Value) -> bool {
+    let Value::Mapping(map) = value else {
+        return false;
+    };
+    let mut removed = map.remove("uid").is_some();
+    if let Some(Value::Mapping(info)) = map.get_mut("info") {
+        removed |= info.remove("uid").is_some();
+    }
+    removed
+}
+
 /// Builds a Bruno-readable ZIP with one root folder named after the collection.
 pub fn bruno_zip(
     files: Vec<SourceFile>,
@@ -102,6 +156,7 @@ pub fn bruno_zip(
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     let mut report = ExportReport::default();
     let mut rocket_only: BTreeSet<String> = BTreeSet::new();
+    let mut uid_files = 0usize;
 
     for file in files {
         let rel = file.rel_path.as_str();
@@ -123,6 +178,17 @@ pub fn bruno_zip(
         if is_yaml(rel) {
             let mut value: Value = serde_yaml::from_slice(&file.bytes)
                 .map_err(|e| DomainError::InvalidInput(format!("{rel}: invalid YAML: {e}")))?;
+            if normalize_folder_yml(rel, collection_name, &mut value) {
+                report.items.push(ExportNote {
+                    path: rel.to_string(),
+                    feature: "Legacy folder.yml".to_string(),
+                    action: ExportAction::Translated,
+                    detail: Some("converted to the info shape".to_string()),
+                });
+            }
+            if strip_uids(&mut value) {
+                uid_files += 1;
+            }
             strip_rocket_namespace(&mut value);
             if drop_examples(&mut value) {
                 report.items.push(ExportNote {
@@ -142,6 +208,16 @@ pub fn bruno_zip(
         } else {
             entries.push((rel.to_string(), file.bytes));
         }
+    }
+    if uid_files > 0 {
+        report.items.push(ExportNote {
+            path: "(collection)".to_string(),
+            feature: "uid".to_string(),
+            action: ExportAction::Translated,
+            detail: Some(format!(
+                "{uid_files} files had a uid key removed (not part of the OpenCollection schema)"
+            )),
+        });
     }
     for root in rocket_only {
         report.items.push(ExportNote {
@@ -346,5 +422,100 @@ mod tests {
     fn bruno_zip_rejects_unparsable_yaml() {
         let files = vec![file("users/bad.yml", ": : :")];
         assert!(bruno_zip(files, "a", true).is_err());
+    }
+
+    fn yaml(zip_bytes: &[u8], name: &str) -> Value {
+        serde_yaml::from_str(&read(zip_bytes, name)).expect("valid yaml")
+    }
+
+    fn feature_notes<'a>(report: &'a ExportReport, feature: &str) -> Vec<&'a ExportNote> {
+        report.items.iter().filter(|n| n.feature == feature).collect()
+    }
+
+    #[test]
+    fn flat_folder_yml_is_converted_to_the_info_shape() {
+        let files = vec![file("users/folder.yml", "name: users\nuid: u1\ntype: folder\n")];
+        let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
+        let v = yaml(&bytes, "a/users/folder.yml");
+        assert_eq!(v["info"]["name"].as_str(), Some("users"));
+        assert_eq!(v["info"]["type"].as_str(), Some("folder"));
+        assert!(v.get("name").is_none());
+        assert!(v.get("uid").is_none());
+        assert!(v.get("type").is_none());
+        let notes = feature_notes(&report, "Legacy folder.yml");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].action, ExportAction::Translated);
+        assert_eq!(notes[0].path, "users/folder.yml");
+        assert_eq!(notes[0].detail.as_deref(), Some("converted to the info shape"));
+    }
+
+    #[test]
+    fn flat_folder_yml_keeps_seq_tags_request_and_docs() {
+        let files = vec![file(
+            "users/folder.yml",
+            "name: users\ntype: folder\nseq: 3\ntags: [a]\nrequest:\n  auth:\n    type: bearer\n    token: '{{t}}'\ndocs: hello\n",
+        )];
+        let (bytes, _) = bruno_zip(files, "a", true).expect("zip builds");
+        let v = yaml(&bytes, "a/users/folder.yml");
+        assert_eq!(v["info"]["seq"].as_u64(), Some(3));
+        assert_eq!(v["info"]["tags"][0].as_str(), Some("a"));
+        assert!(v.get("seq").is_none());
+        assert!(v.get("tags").is_none());
+        assert_eq!(v["docs"].as_str(), Some("hello"));
+        assert_eq!(v["request"]["auth"]["token"].as_str(), Some("{{t}}"));
+    }
+
+    #[test]
+    fn flat_folder_yml_without_a_name_uses_the_directory_name() {
+        let files = vec![file("reports/folder.yml", "uid: u2\ntype: folder\n")];
+        let (bytes, _) = bruno_zip(files, "a", true).expect("zip builds");
+        let v = yaml(&bytes, "a/reports/folder.yml");
+        assert_eq!(v["info"]["name"].as_str(), Some("reports"));
+    }
+
+    #[test]
+    fn info_form_folder_yml_is_kept_and_loses_its_uid() {
+        let files = vec![file(
+            "keys/folder.yml",
+            "info:\n  name: keys\n  uid: u3\n  type: folder\ndocs: x\n",
+        )];
+        let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
+        let v = yaml(&bytes, "a/keys/folder.yml");
+        assert_eq!(v["info"]["name"].as_str(), Some("keys"));
+        assert_eq!(v["info"]["type"].as_str(), Some("folder"));
+        assert!(v["info"].get("uid").is_none());
+        assert_eq!(v["docs"].as_str(), Some("x"));
+        assert!(feature_notes(&report, "Legacy folder.yml").is_empty());
+    }
+
+    #[test]
+    fn request_and_collection_uid_are_dropped() {
+        let files = vec![
+            file(
+                "get.yml",
+                "uid: r1\ninfo:\n  name: get\n  type: http\nhttp:\n  method: GET\n  url: https://x\n",
+            ),
+            file("opencollection.yml", "uid: c1\ninfo:\n  name: a\n"),
+        ];
+        let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
+        let req = yaml(&bytes, "a/get.yml");
+        assert!(req.get("uid").is_none());
+        assert_eq!(req["info"]["name"].as_str(), Some("get"));
+        assert_eq!(req["http"]["url"].as_str(), Some("https://x"));
+        assert!(yaml(&bytes, "a/opencollection.yml").get("uid").is_none());
+        let notes = feature_notes(&report, "uid");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].action, ExportAction::Translated);
+        assert_eq!(notes[0].path, "(collection)");
+        assert_eq!(
+            notes[0].detail.as_deref(),
+            Some("2 files had a uid key removed (not part of the OpenCollection schema)")
+        );
+    }
+
+    #[test]
+    fn files_without_uid_produce_no_uid_note() {
+        let (_, report) = bruno_zip(sample(), "my-api", true).expect("zip builds");
+        assert!(feature_notes(&report, "uid").is_empty());
     }
 }
