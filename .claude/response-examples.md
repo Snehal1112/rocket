@@ -40,7 +40,11 @@ A Try tab must never write to the parent. Guards:
 - `applyAcceptedRequest` and the assistant's `findRequestTab` skip it.
 - A "Temporary" badge shows in the request bar.
 
-History: a Try send is not special-cased. The send path is the normal one, so it is recorded like any other send of that request.
+An absent `headers`, `params` or `body` in an example means empty. A Try tab never mixes in the parent's headers or body. An example with no `request` at all keeps the parent's request.
+
+History: a Try send is recorded in history under the title `Try: <example name>` with no request path, so a history entry cannot write to the parent.
+
+Known: declarative actions with `scope: request` or `folder` still write variables into the parent request or `folder.yml` during a Try send, exactly as sending the parent does.
 
 ## Not covered
 
