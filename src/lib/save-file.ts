@@ -22,3 +22,23 @@ export async function saveTextFile(
   await writeFile(path, new TextEncoder().encode(text));
   return true;
 }
+
+/** Asks where to save and writes `bytes` there. Returns false when cancelled. */
+export async function saveBinaryFile(
+  defaultName: string,
+  bytes: Uint8Array,
+  filters: FileFilter[],
+): Promise<boolean> {
+  const path = await save({ defaultPath: defaultName, filters });
+  if (!path) return false;
+  await writeFile(path, bytes);
+  return true;
+}
+
+/** Decodes a standard base64 string into bytes. */
+export function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}

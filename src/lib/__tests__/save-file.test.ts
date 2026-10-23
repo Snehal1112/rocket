@@ -5,7 +5,7 @@ const writeFile = vi.fn();
 vi.mock('@tauri-apps/plugin-dialog', () => ({ save: (...a: unknown[]) => save(...a) }));
 vi.mock('@tauri-apps/plugin-fs', () => ({ writeFile: (...a: unknown[]) => writeFile(...a) }));
 
-import { saveTextFile } from '../save-file';
+import { base64ToBytes, saveBinaryFile, saveTextFile } from '../save-file';
 
 const filters = [{ name: 'JSON', extensions: ['json'] }];
 
@@ -39,5 +39,28 @@ describe('saveTextFile', () => {
     save.mockResolvedValue('/tmp/out.json');
     writeFile.mockRejectedValue(new Error('disk full'));
     await expect(saveTextFile('r.json', 'x', filters)).rejects.toThrow('disk full');
+  });
+});
+
+describe('save-file binary helpers', () => {
+  beforeEach(() => {
+    save.mockReset();
+    writeFile.mockReset();
+  });
+
+  it('saveBinaryFile returns false when the dialog is cancelled', async () => {
+    save.mockResolvedValue(null);
+    await expect(saveBinaryFile('a.zip', new Uint8Array([1]), [])).resolves.toBe(false);
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('saveBinaryFile writes the bytes to the chosen path', async () => {
+    save.mockResolvedValue('/tmp/a.zip');
+    await expect(saveBinaryFile('a.zip', new Uint8Array([1, 2]), [])).resolves.toBe(true);
+    expect(writeFile).toHaveBeenCalledWith('/tmp/a.zip', new Uint8Array([1, 2]));
+  });
+
+  it('base64ToBytes decodes standard base64', () => {
+    expect(Array.from(base64ToBytes('AQI='))).toEqual([1, 2]);
   });
 });

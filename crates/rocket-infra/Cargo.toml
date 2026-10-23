@@ -13,6 +13,7 @@ native-tls = "0.2"
 rocket-shared.workspace = true
 rocket-audit.workspace = true
 rocket-collection.workspace = true
+rocket-export.workspace = true
 rocket-environment.workspace = true
 rocket-acp.workspace = true
 rocket-flow.workspace = true

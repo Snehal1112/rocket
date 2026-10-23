@@ -32,6 +32,7 @@ rocket-infra.workspace = true
 rocket-scripting.workspace = true
 rocket-workspace.workspace = true
 rocket-import.workspace = true
+rocket-export.workspace = true
 
 # Tauri
 tauri = { version = "2", features = [] }

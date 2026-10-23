@@ -20,6 +20,7 @@ pub mod graphql_schema;
 pub mod graphql_subscription;
 pub mod grpc;
 pub mod history;
+pub mod export;
 pub mod import;
 pub mod load_test;
 pub mod oauth2;
