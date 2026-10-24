@@ -6,6 +6,7 @@ import { buildTimeline, groupToolRuns } from '@/lib/assistant/timeline';
 import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
 import { AssistantPermissionCard } from './AssistantPermissionCard';
 import { AssistantProposalCard } from './AssistantProposalCard';
+import { CopyCodeButton } from './CopyCodeButton';
 import { ReasoningBlock } from './ReasoningBlock';
 import { ToolRun } from './ToolRun';
 import { WaitingNotice } from './WaitingNotice';
@@ -37,7 +38,11 @@ export function ChatItem({
         <div className='min-w-0 break-words text-sm leading-relaxed'>
           <span className='sr-only'>Assistant: </span>
           {message.text && (
-            <MarkdownRenderer restricted className='assistant-prose'>
+            <MarkdownRenderer
+              restricted
+              className='assistant-prose'
+              renderCodeActions={(code) => <CopyCodeButton code={code} />}
+            >
               {message.text}
             </MarkdownRenderer>
           )}

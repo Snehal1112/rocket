@@ -871,3 +871,16 @@ html .monaco-editor {
 .prose-doc.assistant-prose code {
   font-size: 0.75rem;
 }
+.prose-doc.assistant-prose p,
+.prose-doc.assistant-prose li,
+.prose-doc.assistant-prose blockquote {
+  overflow-wrap: anywhere;
+}
+.prose-doc.assistant-prose code {
+  overflow-wrap: anywhere;
+}
+.prose-doc.assistant-prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
