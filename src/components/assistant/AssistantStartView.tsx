@@ -35,7 +35,7 @@ export function AssistantStartView() {
   const agentConfigId = selectedId || agentConfigs[0]?.id || '';
 
   return (
-    <div className={cn('flex shrink-0 flex-col gap-3 p-3', hasMessages && 'border-t')}>
+    <div className={cn('flex shrink-0 flex-col gap-3 p-4', hasMessages && 'border-t')}>
       {!hasMessages && (
         <>
           <p className='text-xs text-muted-foreground'>

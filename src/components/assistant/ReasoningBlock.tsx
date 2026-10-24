@@ -17,7 +17,7 @@ export function ReasoningBlock() {
         <Button
           variant='ghost'
           size='sm'
-          className='h-7 justify-start gap-1.5 px-1.5 text-xs font-normal text-muted-foreground'
+          className='-ml-1.5 h-7 justify-start gap-1.5 px-1.5 text-xs font-normal text-muted-foreground'
         >
           <Chevron className='h-3 w-3' />
           <Brain className='h-3 w-3' />

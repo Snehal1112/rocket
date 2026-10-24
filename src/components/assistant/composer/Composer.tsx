@@ -221,7 +221,7 @@ export function Composer() {
   };
 
   return (
-    <div className='m-2 shrink-0 rounded-md border bg-dropdown-bg shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30'>
+    <div className='mx-4 mb-4 mt-2 shrink-0 rounded-md border bg-dropdown-bg shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30'>
       {replayChars > 0 && (
         <p className='px-3 pt-2 text-xs text-muted-foreground'>{replaySizeHint(replayChars)}</p>
       )}

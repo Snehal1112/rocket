@@ -57,7 +57,7 @@ export function ToolRun({ tools }: { tools: ToolMessage[] }) {
         <Button
           variant='ghost'
           size='sm'
-          className='h-7 max-w-full justify-start gap-1.5 px-1.5 text-xs font-normal text-muted-foreground'
+          className='-ml-1.5 h-7 max-w-full justify-start gap-1.5 px-1.5 text-xs font-normal text-muted-foreground'
         >
           <Chevron className='h-3.5 w-3.5 shrink-0' aria-hidden='true' />
           {latest && <Loader2 className='h-3 w-3 shrink-0 animate-spin' aria-hidden='true' />}
