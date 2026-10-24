@@ -64,6 +64,30 @@ function activate(sessionId = 's1'): void {
   store().activateSession(token, sessionId, []);
 }
 
+describe('AssistantPanel agent label', () => {
+  beforeEach(() => store().reset());
+
+  it('names the agent of a running session', () => {
+    activate();
+    render(<AssistantPanel />);
+    expect(screen.getByText('Claude', { selector: 'span' })).toBeInTheDocument();
+  });
+
+  it('shows a neutral name when the config was removed', () => {
+    const token = store().beginSession('gone', 'edit');
+    store().activateSession(token, 's1', []);
+    render(<AssistantPanel />);
+    expect(screen.getByText('Agent removed')).toBeInTheDocument();
+    expect(screen.queryByText('gone')).toBeNull();
+  });
+
+  it('shows no agent before a session', () => {
+    render(<AssistantPanel />);
+    expect(screen.queryByText('Agent removed')).toBeNull();
+    expect(screen.getByRole('banner')).not.toHaveTextContent('·');
+  });
+});
+
 describe('AssistantPanel', () => {
   it('switches between the chat and the conversation history', async () => {
     vi.mocked(api.listConversations).mockResolvedValue([]);

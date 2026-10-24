@@ -3,6 +3,7 @@ import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { endAssistantSession } from '@/lib/assistant/assistant-session';
+import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { AssistantChatView } from './AssistantChatView';
@@ -37,6 +38,8 @@ function HeaderTip({ label, children }: { label: string; children: ReactNode }) 
 /** The workspace AI Assistant, docked on the right of the main layout. */
 export function AssistantPanel() {
   const status = useAssistantStore((s) => s.session?.status);
+  const agentConfigId = useAssistantStore((s) => s.session?.agentConfigId);
+  const { data: agentConfigs } = useAgentConfigs();
   const hasMessages = useAssistantStore((s) => s.messages.length > 0);
   const closePanel = useAssistantStore((s) => s.closePanel);
   const storedWidth = useLayoutStore((s) => s.assistantPanelWidth);
@@ -50,6 +53,13 @@ export function AssistantPanel() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // The agent shows only while a session runs. A removed config gets a neutral name, not its id.
+  const running = status === 'active' || status === 'starting';
+  const agentLabel =
+    running && agentConfigs
+      ? (agentConfigs.find((c) => c.id === agentConfigId)?.label ?? 'Agent removed')
+      : undefined;
 
   const width = clampWidth(storedWidth, windowWidth);
   const maxWidth = clampWidth(MAX_WIDTH, windowWidth);
@@ -97,7 +107,15 @@ export function AssistantPanel() {
       />
       <header className='flex h-10 shrink-0 items-center gap-1 border-b px-3'>
         <Sparkles className='h-4 w-4 text-primary' aria-hidden='true' />
-        <span className='flex-1 text-sm font-medium'>AI Assistant</span>
+        <span className='shrink-0 text-sm font-medium'>AI Assistant</span>
+        <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground' title={agentLabel}>
+          {agentLabel && (
+            <>
+              <span aria-hidden='true'>· </span>
+              {agentLabel}
+            </>
+          )}
+        </span>
         <HeaderTip label={showHistory ? 'Back to the chat' : 'Conversation history'}>
           <Button
             variant='ghost'
@@ -110,7 +128,7 @@ export function AssistantPanel() {
           </Button>
         </HeaderTip>
         <AssistantPermissionsPopover />
-        {(status === 'active' || status === 'starting') && (
+        {running && (
           <HeaderTip label='End session'>
             <Button
               variant='ghost'
