@@ -35,6 +35,29 @@ describe('AssistantChatView agent markdown', () => {
   });
 });
 
+describe('AssistantChatView errors', () => {
+  beforeEach(() => {
+    useAssistantStore.getState().reset();
+    startSession();
+  });
+
+  it('shows the error text of a failed reply', () => {
+    useAssistantStore.getState().appendUserMessage('hi');
+    useAssistantStore.getState().appendChunk('s1', 'partial');
+    useAssistantStore.getState().failMessage('s1', 'The agent crashed.', false);
+    render(<AssistantChatView />);
+    expect(screen.getByText('The agent crashed.')).toBeInTheDocument();
+  });
+
+  it('shows a fallback when the error text is empty', () => {
+    useAssistantStore.getState().appendUserMessage('hi');
+    useAssistantStore.getState().appendChunk('s1', 'partial');
+    useAssistantStore.getState().failMessage('s1', '', false);
+    render(<AssistantChatView />);
+    expect(screen.getByText('Something went wrong. Try again.')).toBeInTheDocument();
+  });
+});
+
 describe('AssistantChatView proposals', () => {
   beforeEach(() => {
     useAssistantStore.getState().reset();

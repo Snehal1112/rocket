@@ -33,7 +33,7 @@ export function ChatItem({
       // Only the last streaming segment shows the spinner.
       const waiting = message.streaming && isLastStreaming;
       // A reply segment that got no text before a tool call adds nothing.
-      if (!message.text && !message.error && !waiting) return null;
+      if (!message.text && message.error === undefined && !waiting) return null;
       return (
         <div className='min-w-0 break-words text-sm leading-relaxed'>
           <span className='sr-only'>Assistant: </span>
@@ -52,7 +52,11 @@ export function ChatItem({
               aria-label='Assistant is replying'
             />
           )}
-          {message.error && <p className='text-xs text-destructive'>{message.error}</p>}
+          {message.error !== undefined && (
+            <p className='text-xs text-destructive'>
+              {message.error || 'Something went wrong. Try again.'}
+            </p>
+          )}
         </div>
       );
     }
