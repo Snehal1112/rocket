@@ -23,7 +23,7 @@ export function ChatItem({
   switch (message.kind) {
     case 'user':
       return (
-        <div className='min-w-0 whitespace-pre-wrap break-words rounded-lg bg-muted/60 px-3 py-2 text-sm'>
+        <div className='ml-auto min-w-0 max-w-[85%] whitespace-pre-wrap break-words rounded-lg bg-muted px-3 py-2 text-sm'>
           <span className='sr-only'>You: </span>
           {message.text}
         </div>
@@ -36,7 +36,11 @@ export function ChatItem({
       return (
         <div className='min-w-0 break-words text-sm leading-relaxed'>
           <span className='sr-only'>Assistant: </span>
-          {message.text && <MarkdownRenderer restricted>{message.text}</MarkdownRenderer>}
+          {message.text && (
+            <MarkdownRenderer restricted className='assistant-prose'>
+              {message.text}
+            </MarkdownRenderer>
+          )}
           {waiting && (
             <Loader2
               className='h-3 w-3 animate-spin text-muted-foreground'
