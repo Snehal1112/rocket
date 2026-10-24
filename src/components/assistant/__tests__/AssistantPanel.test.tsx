@@ -186,9 +186,23 @@ describe('AssistantPanel', () => {
     store().completeMessage('s1');
     render(<AssistantPanel />);
     await userEvent.click(screen.getByRole('button', { name: 'End session' }));
+    // The header button is hidden from the accessibility tree while the dialog is open.
+    await userEvent.click(await screen.findByRole('button', { name: 'End session' }));
     expect(api.endAgentSession).toHaveBeenCalledWith('s1');
     expect(screen.getByText('keep me')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start a new session' })).toBeInTheDocument();
+  });
+
+  it('asks before ending the session, and keeps it on cancel', async () => {
+    vi.mocked(api.endAgentSession).mockClear();
+    activate();
+    render(<AssistantPanel />);
+    await userEvent.click(screen.getByRole('button', { name: 'End session' }));
+    expect(await screen.findByText('End this session?')).toBeInTheDocument();
+    expect(api.endAgentSession).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Keep session' }));
+    expect(api.endAgentSession).not.toHaveBeenCalled();
+    expect(store().session?.status).toBe('active');
   });
 
   it('shows the notice of an ended session', () => {

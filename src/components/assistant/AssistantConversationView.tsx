@@ -18,7 +18,7 @@ import {
 import { groupToolRuns, type TimelineEntry, type ToolMessage } from '@/lib/assistant/timeline';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import type { AgentProposalStatus, ConversationRecord, StoredMessage } from '@/lib/tauri-api';
-import type { AssistantMessage } from '@/stores/assistant-store';
+import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
 import { ChatItem } from './AssistantChatView';
 import { ToolRun } from './ToolRun';
 
@@ -101,6 +101,10 @@ function ContinueConversation({
   const [picked, setPicked] = useState('');
   const agentConfigId = picked || (storedAgentExists ? record.agentConfigId : '');
 
+  const liveSession = useAssistantStore(
+    (st) => st.session?.status === 'active' || st.session?.status === 'starting',
+  );
+
   const handleContinue = () => {
     if (!agentConfigId) return;
     // A conversation of another workspace is refused and the history stays open.
@@ -138,6 +142,12 @@ function ContinueConversation({
         Continue
       </Button>
       <p className='text-xs text-muted-foreground'>{CONTINUE_HINT}</p>
+      {liveSession && (
+        <p className='text-xs text-foreground/80'>
+          This ends your running session and saves it to the history. To keep it, use the chat
+          button in the header instead.
+        </p>
+      )}
     </div>
   );
 }

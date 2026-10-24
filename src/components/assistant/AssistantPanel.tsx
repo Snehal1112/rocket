@@ -1,5 +1,15 @@
-import { History, Loader2, Power, Sparkles, X } from 'lucide-react';
+import { History, Loader2, MessageSquare, Power, Sparkles, X } from 'lucide-react';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { endAssistantSession } from '@/lib/assistant/assistant-session';
@@ -46,6 +56,7 @@ export function AssistantPanel() {
   const setStoredWidth = useLayoutStore((s) => s.setAssistantPanelWidth);
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const [showHistory, setShowHistory] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
 
   // The stored width stays the user's choice. Only the shown width follows the window.
   useEffect(() => {
@@ -124,7 +135,11 @@ export function AssistantPanel() {
             aria-label={showHistory ? 'Back to the chat' : 'Conversation history'}
             onClick={() => setShowHistory((shown) => !shown)}
           >
-            <History className='h-4 w-4' aria-hidden='true' />
+            {showHistory ? (
+              <MessageSquare className='h-4 w-4' aria-hidden='true' />
+            ) : (
+              <History className='h-4 w-4' aria-hidden='true' />
+            )}
           </Button>
         </HeaderTip>
         <AssistantPermissionsPopover />
@@ -135,7 +150,7 @@ export function AssistantPanel() {
               size='icon'
               className='h-7 w-7'
               aria-label='End session'
-              onClick={() => void endAssistantSession()}
+              onClick={() => setConfirmEnd(true)}
             >
               <Power className='h-4 w-4' aria-hidden='true' />
             </Button>
@@ -153,6 +168,22 @@ export function AssistantPanel() {
           </Button>
         </HeaderTip>
       </header>
+      <AlertDialog open={confirmEnd} onOpenChange={setConfirmEnd}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>End this session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The conversation is saved to the history. To go on, continue it from there.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep session</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void endAssistantSession()}>
+              End session
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {showHistory && (
         <AssistantHistoryView
           onContinued={() => setShowHistory(false)}

@@ -54,6 +54,26 @@ describe('AssistantConversationView Continue', () => {
     vi.mocked(continueConversation).mockImplementation(() => Promise.resolve());
   });
 
+  it('warns that Continue ends a running session, and only then', () => {
+    useAssistantStore.getState().reset();
+    const view = (
+      <AssistantConversationView
+        record={record}
+        agentLabel='Claude'
+        onBack={vi.fn()}
+        onContinued={vi.fn()}
+      />
+    );
+    const { unmount } = render(view);
+    expect(screen.queryByText(/ends your running session/)).toBeNull();
+    unmount();
+    const token = useAssistantStore.getState().beginSession('agent-1', 'edit');
+    useAssistantStore.getState().activateSession(token, 's1', []);
+    render(view);
+    expect(screen.getByText(/ends your running session/)).toBeInTheDocument();
+    useAssistantStore.getState().reset();
+  });
+
   it('continues with the stored agent and leaves the history', async () => {
     const onContinued = vi.fn();
     render(
