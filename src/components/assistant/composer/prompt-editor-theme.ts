@@ -30,4 +30,7 @@ export const promptEditorTheme = EditorView.theme({
   '.cm-line': {
     padding: '0 10px',
   },
+  '.cm-placeholder': {
+    color: 'hsl(var(--muted-foreground))',
+  },
 });

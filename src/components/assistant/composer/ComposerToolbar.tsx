@@ -173,12 +173,15 @@ export function ComposerToolbar({
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className='px-1 text-xs tabular-nums text-muted-foreground'>
+                <span className='px-1 text-xs tabular-nums text-foreground/80'>
                   <span>{usageView.text}</span>
                   <span className='sr-only'>{` context used, ${usageView.detail}`}</span>
                 </span>
               </TooltipTrigger>
-              <TooltipContent>{usageView.detail}</TooltipContent>
+              <TooltipContent>
+                <p className='font-medium'>{`Context used: ${usageView.percent}%`}</p>
+                <p className='opacity-80'>{usageView.detail}</p>
+              </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         ) : null}

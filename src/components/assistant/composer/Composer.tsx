@@ -232,7 +232,7 @@ export function Composer() {
         onSubmit={() => void handleSend()}
         onStop={handleStop}
         running={running}
-        placeholder='Ask about this workspace. Type # to add context or / for a template.'
+        placeholder='Ask anything. # adds context, / templates.'
         disabled={!sessionActive}
         history={history}
         referenceSource={referenceSource}

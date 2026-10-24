@@ -1,6 +1,7 @@
-import { History, Loader2, Sparkles, X } from 'lucide-react';
-import { type CSSProperties, useEffect, useState } from 'react';
+import { History, Loader2, Power, Sparkles, X } from 'lucide-react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { endAssistantSession } from '@/lib/assistant/assistant-session';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { useLayoutStore } from '@/stores/layout-store';
@@ -19,6 +20,18 @@ const MIN_CONTENT_WIDTH = 480;
 export function clampWidth(width: number, windowWidth: number): number {
   const max = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, windowWidth - MIN_CONTENT_WIDTH));
   return Math.min(max, Math.max(MIN_WIDTH, width));
+}
+
+/** A tooltip for an icon button in the header. */
+function HeaderTip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 /** The workspace AI Assistant, docked on the right of the main layout. */
@@ -85,35 +98,42 @@ export function AssistantPanel() {
       <header className='flex h-10 shrink-0 items-center gap-1 border-b px-3'>
         <Sparkles className='h-4 w-4 text-primary' aria-hidden='true' />
         <span className='flex-1 text-sm font-medium'>AI Assistant</span>
-        <Button
-          variant='ghost'
-          size='icon'
-          className='h-7 w-7'
-          aria-label={showHistory ? 'Back to the chat' : 'Conversation history'}
-          onClick={() => setShowHistory((shown) => !shown)}
-        >
-          <History className='h-4 w-4' aria-hidden='true' />
-        </Button>
-        <AssistantPermissionsPopover />
-        {(status === 'active' || status === 'starting') && (
+        <HeaderTip label={showHistory ? 'Back to the chat' : 'Conversation history'}>
           <Button
             variant='ghost'
-            size='sm'
-            className='h-7 text-xs'
-            onClick={() => void endAssistantSession()}
+            size='icon'
+            className='h-7 w-7'
+            aria-label={showHistory ? 'Back to the chat' : 'Conversation history'}
+            onClick={() => setShowHistory((shown) => !shown)}
           >
-            End session
+            <History className='h-4 w-4' aria-hidden='true' />
           </Button>
+        </HeaderTip>
+        <AssistantPermissionsPopover />
+        {(status === 'active' || status === 'starting') && (
+          <HeaderTip label='End session'>
+            <Button
+              variant='ghost'
+              size='icon'
+              className='h-7 w-7'
+              aria-label='End session'
+              onClick={() => void endAssistantSession()}
+            >
+              <Power className='h-4 w-4' aria-hidden='true' />
+            </Button>
+          </HeaderTip>
         )}
-        <Button
-          variant='ghost'
-          size='icon'
-          className='h-7 w-7'
-          aria-label='Close AI Assistant'
-          onClick={closePanel}
-        >
-          <X className='h-4 w-4' aria-hidden='true' />
-        </Button>
+        <HeaderTip label='Close AI Assistant'>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='h-7 w-7'
+            aria-label='Close AI Assistant'
+            onClick={closePanel}
+          >
+            <X className='h-4 w-4' aria-hidden='true' />
+          </Button>
+        </HeaderTip>
       </header>
       {showHistory && (
         <AssistantHistoryView

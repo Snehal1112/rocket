@@ -2,6 +2,7 @@ import { ShieldCheck } from 'lucide-react';
 import { AgentAutonomyToggle } from '@/components/request/AgentAutonomyToggle';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useCollections } from '@/lib/queries/collection-queries';
 
 /** Lists the workspace's collections, each with its run switch. */
@@ -10,17 +11,23 @@ export function AssistantPermissionsPopover() {
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant='ghost'
-          size='icon'
-          className='h-7 w-7'
-          aria-label='Agent permissions'
-          title='Agent permissions'
-        >
-          <ShieldCheck className='h-4 w-4' aria-hidden='true' />
-        </Button>
-      </PopoverTrigger>
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-7 w-7'
+                aria-label='Agent permissions'
+              >
+                <ShieldCheck className='h-4 w-4' aria-hidden='true' />
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Agent permissions</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <PopoverContent align='end' className='w-80 p-3'>
         <div className='flex flex-col gap-3'>
           <div>
