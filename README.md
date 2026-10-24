@@ -47,25 +47,26 @@
 
 Most API clients are Electron apps — they ship a full copy of Chromium with every install. Rocket uses the OS WebView instead (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows), so there's no bundled browser engine to ship.
 
-These aren't estimates — they're measured, head-to-head, on the same machine (Rocket 0.9.2 release build vs. locally installed Bruno 4.2.0 and Postman 11.71.7):
+Measured on the same Linux machine on 2026-10-21 with the installed builds:
 
-| | Rocket | Bruno | Postman |
+| | Rocket 2.1.1 | Bruno 4.2.0 | Postman 11.71.7 |
 |---|---|---|---|
 | **Runtime** | Rust + OS WebView | Electron | Electron |
-| **Install size** | **38.9 MB** (.deb) | 527 MB | 653 MB |
-| **Startup → window visible** | **6.38 s** | 7.86 s | **0.99 s** |
-| **Idle memory (PSS)** | ~332 MB (3 processes) | **169.6 MB** (6 processes) | 507.7 MB (8 processes) |
+| **Install size (unpacked on disk)** | **146 MB** | 527 MB | 653 MB |
+| **Download size** | **48.4 MB** (.deb) | not measured | 174 MB (snap) |
+| **Idle memory (PSS)** | **~262 MB** (3 processes) | ~566 MB (7 processes) | ~516 MB (7 processes) |
+| **Idle private memory** | **151 MB** | 480 MB | 311 MB |
+| **Idle CPU** | ~1% | **~0%** | ~7% |
+| **Startup → window visible** | 0.43 s (blank) | ~3.5 s | **~1.0 s** |
+| **Startup → UI drawn** | ~10.4 s | ~4.2 s | **~2.2 s** |
 
-**Methodology:** idle memory is PSS (proportional set size, via `/proc/<pid>/smaps_rollup`) summed across each app's full process tree, measured ~15s after its window became viewable with no requests sent — PSS avoids double-counting memory pages shared between an app's own forked processes, which a naive RSS sum would inflate. Startup is wall-clock time from process launch to the app's main window reaching `IsViewable` with real dimensions (verified via `xdotool`/`xwininfo`, filtering out transient placeholder windows some of these apps create first) — not a "process launched" proxy. Rocket's figure was measured in an isolated `systemd-run --user --scope` (`memory.high=max`, confirmed 0 bytes swapped), flat across 20s–180s of idle time; Bruno and Postman were measured back-to-back on the same machine without that isolation, so their numbers carry a smaller version of the caveat below.
+**How it was measured:** idle memory is PSS (proportional set size) summed across each app's full process tree, with no requests sent. PSS avoids double-counting pages shared between an app's own processes. The apps ran one after the other. Postman was already signed in. "Startup → UI drawn" is the first moment the app window shows real content, not just a blank window or a flat loading screen. Full method and per-run numbers are in [.claude/benchmarks.md](.claude/benchmarks.md).
 
 **Takeaways:**
 
-- **Rocket still ships far smaller** (~14–17x) than either Electron competitor, and starts faster than Bruno.
-- **A previous "171 MB" figure for Rocket was a measurement artifact, not a real number.** All development on this machine runs inside a shared cgroup (`memory.high` capped at 2 GB) alongside the tooling doing the measuring, concurrent builds, and other processes. Under that pressure the kernel reclaims and swaps out pages, and PSS only counts resident memory — so a reading taken mid-pressure can come in dramatically lower than the app's real footprint. We proved this directly: the *same running Rocket instance*, with zero user activity, read 292 MB and then 159 MB twenty seconds later purely from swap, with no code change involved. Measured outside that cgroup, Rocket is flat at **~332 MB** from 20 seconds to 180 seconds of idle time, with zero bytes swapped — this is the real number. The original 171 MB figure was a single sample taken immediately after a release build, inside the same pressured cgroup; an empty, freshly-installed Rocket with no data at all already needs more memory than that once actually measured cleanly.
-- **The `WebKitCacheModel::DocumentViewer` and `WEBKIT_DISABLE_COMPOSITING_MODE=1` fixes are still real and still necessary** — with compositing left on, WebKitWebProcess's real footprint (measured the same clean way) balloons to **3.5 GB**, not something visible under cgroup pressure. Keep both.
-- **One small, real optimization did come out of this investigation:** the sidebar kept its History panel permanently mounted (rendering up to 200 entries, ~2,000 DOM nodes — 77% of the app's entire DOM) even when the user was looking at the Collections tab. It's now deferred until the History tab is actually opened.
-- **Startup times used real window-visibility detection** (via `xdotool`/`xwininfo`, filtering decoy placeholder windows) rather than whatever weaker proxy an earlier pass used — this moved Bruno's number up (2.05s → 7.86s) and Postman's down (4.09s → 0.99s) versus previously-published figures, which says more about the old methodology's inconsistency across apps than about either app changing.
-- **Postman required signing in** (via an external OAuth browser flow) during an earlier measurement pass, spawning a separate Brave browser process that was excluded from its footprint; the run reported here reached its idle state without triggering that flow. Bruno and Rocket both work fully offline with no account.
+- **Rocket uses about half the memory of either Electron app** (~262 MB against ~516 MB and ~566 MB, with 3 processes against 7) and takes about 3.6–4.5x less disk space once installed.
+- **Startup is Rocket's weak spot.** The UI is drawn after ~10.4 s, against ~4.2 s for Bruno and ~2.2 s for Postman.
+- **Postman's idle CPU is higher** (~7%), most likely background sync because it was signed in.
 
 **How Rocket stays small:**
 
