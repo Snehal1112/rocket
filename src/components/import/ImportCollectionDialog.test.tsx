@@ -10,6 +10,8 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 const mockImportWsdl = vi.fn();
+const mockImportOpenApiUrl = vi.fn();
+const mockImportOpenApiFile = vi.fn();
 vi.mock('@/lib/tauri-api', () => ({
   createWorkspace: vi.fn(),
   switchWorkspace: vi.fn(),
@@ -19,6 +21,8 @@ vi.mock('@/lib/tauri-api', () => ({
   importPostmanCollection: vi.fn(),
   importPostmanEnvironment: vi.fn(),
   importWsdl: (...args: unknown[]) => mockImportWsdl(...args),
+  importOpenApiUrl: (...args: unknown[]) => mockImportOpenApiUrl(...args),
+  importOpenApiFile: (...args: unknown[]) => mockImportOpenApiFile(...args),
 }));
 
 const report = {
@@ -37,6 +41,8 @@ function renderDialog() {
 beforeEach(() => {
   mockOpen.mockReset();
   mockImportWsdl.mockReset();
+  mockImportOpenApiUrl.mockReset();
+  mockImportOpenApiFile.mockReset();
 });
 
 describe('describeSource', () => {
@@ -89,5 +95,99 @@ describe('ImportCollectionDialog WSDL source', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Import' }));
     expect(await screen.findByText(/not a WSDL 1.1 document/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import' })).toBeInTheDocument();
+  });
+});
+
+const openApiResult = {
+  report,
+  collection: 'petstore',
+  sourceUrl: null,
+  warnings: [] as string[],
+};
+
+async function openOpenApiTab() {
+  await userEvent.click(screen.getByRole('button', { name: 'OpenAPI' }));
+}
+
+describe('ImportCollectionDialog OpenAPI source', () => {
+  it('offers an OpenAPI option', () => {
+    renderDialog();
+    expect(screen.getByRole('button', { name: 'OpenAPI' })).toBeInTheDocument();
+  });
+
+  it('hides the OpenAPI option when creating a workspace', () => {
+    render(<ImportCollectionDialog open onOpenChange={vi.fn()} workspaceId='ws1' createWorkspace />);
+    expect(screen.queryByRole('button', { name: 'OpenAPI' })).not.toBeInTheDocument();
+  });
+
+  it('disables Import until a link is typed', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+  });
+
+  it('imports a pasted link with the default tag layout', async () => {
+    mockImportOpenApiUrl.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), '  https://example.com/o.json ');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith('https://example.com/o.json', 'tags', 'ws1'),
+    );
+  });
+
+  it('sends the path layout when Path is chosen', async () => {
+    mockImportOpenApiUrl.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.click(screen.getByRole('radio', { name: 'Path' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith('https://example.com/o.json', 'paths', 'ws1'),
+    );
+  });
+
+  it('imports a chosen file', async () => {
+    mockOpen.mockResolvedValue('/tmp/o.yaml');
+    mockImportOpenApiFile.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    await userEvent.click(screen.getByRole('button', { name: /choose spec file/i }));
+    expect(mockOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: [{ name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] }],
+      }),
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiFile).toHaveBeenCalledWith('/tmp/o.yaml', 'tags', 'ws1'),
+    );
+  });
+
+  it('shows the error and keeps the link when the import fails', async () => {
+    mockImportOpenApiUrl.mockRejectedValue(new Error('private repositories are not supported yet'));
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(await screen.findByText('private repositories are not supported yet')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('https://example.com/o.json');
+  });
+
+  it('lists warnings on the done screen', async () => {
+    mockImportOpenApiUrl.mockResolvedValue({
+      ...openApiResult,
+      warnings: ['This link points at a commit'],
+    });
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(await screen.findByText('This link points at a commit')).toBeInTheDocument();
   });
 });

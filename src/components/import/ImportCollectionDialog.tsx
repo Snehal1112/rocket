@@ -12,15 +12,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   createWorkspace as apiCreateWorkspace,
   getAppDataDir,
   type ImportReport,
   importBruno,
   importBrunoZip,
+  importOpenApiFile,
+  importOpenApiUrl,
   importPostmanCollection,
   importPostmanEnvironment,
   importWsdl,
+  type OpenApiGroupBy,
 } from '@/lib/tauri-api';
 import { switchWorkspaceSafely } from '@/lib/workspace-switch';
 import { describeSource, type SourceKind } from './importSources';
@@ -34,7 +40,8 @@ interface ImportCollectionDialogProps {
   onImportComplete?: () => void;
 }
 
-type ImportSource = 'bruno' | 'postman' | 'wsdl';
+type ImportSource = 'bruno' | 'postman' | 'wsdl' | 'openapi';
+type OpenApiMode = 'link' | 'file';
 type DialogState = 'picking' | 'importing' | 'done';
 
 const IMPORT_DESCRIPTIONS: Record<ImportSource, string> = {
@@ -42,23 +49,28 @@ const IMPORT_DESCRIPTIONS: Record<ImportSource, string> = {
     'Select a Bruno collection folder or ZIP archive. Collection or workspace is detected automatically.',
   postman: 'Select a Postman Collection JSON file (v2.0 or v2.1).',
   wsdl: 'Select a WSDL 1.1 file. You get one request per SOAP operation, with the envelope and SOAP headers filled in.',
+  openapi:
+    'Import an OpenAPI 3.0, 3.1 or Swagger 2.0 spec (JSON or YAML) from a link or a file. GitHub file links work. Private repositories are not supported yet.',
 };
 
 const EMPTY_HEADLINES: Record<ImportSource, string> = {
   bruno: 'Drop a folder or ZIP here',
   postman: 'Choose a Postman Collection JSON file',
   wsdl: 'Choose a WSDL file',
+  openapi: 'Choose an OpenAPI spec file',
 };
 
 const EMPTY_HINTS: Record<ImportSource, string> = {
   bruno: 'Collection export or extracted directory',
   postman: 'Exported via File → Export in Postman',
   wsdl: 'SOAP 1.1 or 1.2, local XSD imports are followed',
+  openapi: 'JSON or YAML',
 };
 
 /** Glyph for a selected source. WSDL uses an icon, older kinds keep their emoji. */
 function SourceGlyph({ kind }: { kind: SourceKind }) {
-  if (kind === 'wsdl-file') return <FileCode className='h-4 w-4 text-muted-foreground' />;
+  if (kind === 'wsdl-file' || kind === 'openapi-file')
+    return <FileCode className='h-4 w-4 text-muted-foreground' />;
   if (kind === 'zip') return <>🗜️</>;
   if (kind === 'postman-json') return <>📄</>;
   return <>📁</>;
@@ -84,6 +96,13 @@ export function ImportCollectionDialog({
   const [report, setReport] = useState<ImportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skippedOpen, setSkippedOpen] = useState(false);
+  const [openapiMode, setOpenapiMode] = useState<OpenApiMode>('link');
+  const [link, setLink] = useState('');
+  const [groupBy, setGroupBy] = useState<OpenApiGroupBy>('tags');
+  const [warnings, setWarnings] = useState<string[]>([]);
+
+  const isOpenApiLink = importSource === 'openapi' && openapiMode === 'link';
+  const canImport = isOpenApiLink ? link.trim().length > 0 : source !== null;
 
   function handleClose() {
     onOpenChange(false);
@@ -96,6 +115,10 @@ export function ImportCollectionDialog({
       setReport(null);
       setError(null);
       setSkippedOpen(false);
+      setOpenapiMode('link');
+      setLink('');
+      setGroupBy('tags');
+      setWarnings([]);
     }, 200);
   }
 
@@ -108,6 +131,15 @@ export function ImportCollectionDialog({
     setImportSource(next);
     setSource(null);
     setEnvFilePath(null);
+    setError(null);
+    setOpenapiMode('link');
+    setLink('');
+    setGroupBy('tags');
+  }
+
+  function switchOpenApiMode(next: OpenApiMode) {
+    setOpenapiMode(next);
+    setSource(null);
     setError(null);
   }
 
@@ -159,6 +191,19 @@ export function ImportCollectionDialog({
     }
   }
 
+  async function handleChooseOpenApi() {
+    const path = await openFilePicker({
+      directory: false,
+      multiple: false,
+      filters: [{ name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] }],
+    });
+    if (typeof path === 'string') {
+      const name = path.split('/').pop() ?? path;
+      setSource({ path, kind: 'openapi-file', name });
+      setError(null);
+    }
+  }
+
   async function handleChooseEnvJson() {
     const path = await openFilePicker({
       directory: false,
@@ -169,7 +214,7 @@ export function ImportCollectionDialog({
   }
 
   async function handleImport() {
-    if (!source) return;
+    if (!canImport) return;
     setDialogState('importing');
     setError(null);
     try {
@@ -177,7 +222,7 @@ export function ImportCollectionDialog({
       let newWsId: string | null = null;
 
       if (createWorkspace) {
-        const wsName = source.name.replace(/\.(zip|wsdl|xml)$/i, '');
+        const wsName = (source?.name ?? 'import').replace(/\.(zip|wsdl|xml)$/i, '');
         const dataDir = await getAppDataDir();
         const sep = dataDir.includes('\\') ? '\\' : '/';
         const fullPath = dataDir.endsWith(sep) ? dataDir + wsName : dataDir + sep + wsName;
@@ -189,7 +234,17 @@ export function ImportCollectionDialog({
       }
 
       let result: ImportReport;
-      if (importSource === 'wsdl') {
+      let importWarnings: string[] = [];
+      if (importSource === 'openapi') {
+        const imported =
+          openapiMode === 'link'
+            ? await importOpenApiUrl(link.trim(), groupBy, targetWsId)
+            : await importOpenApiFile(source?.path ?? '', groupBy, targetWsId);
+        result = imported.report;
+        importWarnings = imported.warnings;
+      } else if (!source) {
+        return;
+      } else if (importSource === 'wsdl') {
         result = await importWsdl(source.path, targetWsId);
       } else if (importSource === 'postman') {
         result = await importPostmanCollection(source.path, targetWsId);
@@ -206,6 +261,7 @@ export function ImportCollectionDialog({
       if (newWsId) await switchWorkspaceSafely(newWsId);
 
       setReport(result);
+      setWarnings(importWarnings);
       setDialogState('done');
       onImportComplete?.();
     } catch (err) {
@@ -255,112 +311,164 @@ export function ImportCollectionDialog({
                 >
                   WSDL
                 </Button>
+                {!createWorkspace && (
+                  <Button
+                    variant={importSource === 'openapi' ? 'secondary' : 'ghost'}
+                    size='sm'
+                    className='h-7 px-3 text-xs'
+                    onClick={() => switchImportSource('openapi')}
+                  >
+                    OpenAPI
+                  </Button>
+                )}
               </div>
 
               <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
                 Source
               </p>
 
-              {/* Drop zone */}
-              <div
-                className={[
-                  'rounded-lg border-[1.5px] border-dashed px-5 py-6 text-center transition-colors',
-                  source
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-muted-foreground/40',
-                ].join(' ')}
-              >
-                {source ? (
-                  <>
-                    <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-primary/10 mx-auto text-lg'>
-                      <SourceGlyph kind={source.kind} />
-                    </div>
-                    <p className='text-sm font-semibold text-foreground'>{source.name}</p>
-                    <p className='mt-0.5 text-xs text-muted-foreground'>
-                      {describeSource(source.kind)}
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-muted mx-auto'>
-                      {importSource === 'wsdl' ? (
-                        <FileCode className='h-4 w-4 text-muted-foreground' />
-                      ) : (
-                        <Upload className='h-4 w-4 text-muted-foreground' />
-                      )}
-                    </div>
-                    <p className='text-sm font-medium text-muted-foreground'>
-                      {EMPTY_HEADLINES[importSource]}
-                    </p>
-                    <p className='mt-0.5 text-xs text-muted-foreground'>
-                      {EMPTY_HINTS[importSource]}
-                    </p>
-                  </>
-                )}
-
-                <div className='mt-3 flex items-center justify-center gap-1 text-xs text-muted-foreground'>
-                  {importSource === 'bruno' ? (
-                    source ? (
-                      <>
-                        change:
-                        <button
-                          type='button'
-                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                          onClick={() => void handleChooseFolder()}
-                        >
-                          folder
-                        </button>
-                        <span className='text-border'>·</span>
-                        <button
-                          type='button'
-                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                          onClick={() => void handleChooseZip()}
-                        >
-                          ZIP
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        or browse:
-                        <button
-                          type='button'
-                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                          onClick={() => void handleChooseFolder()}
-                        >
-                          choose folder
-                        </button>
-                        <span className='text-border'>·</span>
-                        <button
-                          type='button'
-                          className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                          onClick={() => void handleChooseZip()}
-                        >
-                          choose ZIP
-                        </button>
-                      </>
-                    )
-                  ) : null}
-                  {importSource === 'postman' && (
-                    <button
-                      type='button'
-                      className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
-                      onClick={() => void handleChoosePostmanJson()}
-                    >
-                      {source ? 'change file' : 'choose JSON file'}
-                    </button>
-                  )}
-                  {importSource === 'wsdl' && (
-                    <Button
-                      variant='link'
-                      size='sm'
-                      className='h-auto p-0 text-xs'
-                      onClick={() => void handleChooseWsdl()}
-                    >
-                      {source ? 'change WSDL file' : 'choose WSDL file'}
-                    </Button>
-                  )}
+              {importSource === 'openapi' && (
+                <div className='flex w-fit gap-1 rounded-md border border-border p-0.5'>
+                  <Button
+                    variant={openapiMode === 'link' ? 'secondary' : 'ghost'}
+                    size='sm'
+                    className='h-7 px-3 text-xs'
+                    onClick={() => switchOpenApiMode('link')}
+                  >
+                    Link
+                  </Button>
+                  <Button
+                    variant={openapiMode === 'file' ? 'secondary' : 'ghost'}
+                    size='sm'
+                    className='h-7 px-3 text-xs'
+                    onClick={() => switchOpenApiMode('file')}
+                  >
+                    File
+                  </Button>
                 </div>
-              </div>
+              )}
+
+              {isOpenApiLink && (
+                <Input
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
+                  aria-label='Spec link'
+                />
+              )}
+
+              {/* Drop zone */}
+              {!isOpenApiLink && (
+                <div
+                  className={[
+                    'rounded-lg border-[1.5px] border-dashed px-5 py-6 text-center transition-colors',
+                    source
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-muted-foreground/40',
+                  ].join(' ')}
+                >
+                  {source ? (
+                    <>
+                      <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-primary/10 mx-auto text-lg'>
+                        <SourceGlyph kind={source.kind} />
+                      </div>
+                      <p className='text-sm font-semibold text-foreground'>{source.name}</p>
+                      <p className='mt-0.5 text-xs text-muted-foreground'>
+                        {describeSource(source.kind)}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className='mb-2 flex h-9 w-9 items-center justify-center rounded-lg border bg-muted mx-auto'>
+                        {importSource === 'wsdl' || importSource === 'openapi' ? (
+                          <FileCode className='h-4 w-4 text-muted-foreground' />
+                        ) : (
+                          <Upload className='h-4 w-4 text-muted-foreground' />
+                        )}
+                      </div>
+                      <p className='text-sm font-medium text-muted-foreground'>
+                        {EMPTY_HEADLINES[importSource]}
+                      </p>
+                      <p className='mt-0.5 text-xs text-muted-foreground'>
+                        {EMPTY_HINTS[importSource]}
+                      </p>
+                    </>
+                  )}
+
+                  <div className='mt-3 flex items-center justify-center gap-1 text-xs text-muted-foreground'>
+                    {importSource === 'bruno' ? (
+                      source ? (
+                        <>
+                          change:
+                          <button
+                            type='button'
+                            className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                            onClick={() => void handleChooseFolder()}
+                          >
+                            folder
+                          </button>
+                          <span className='text-border'>·</span>
+                          <button
+                            type='button'
+                            className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                            onClick={() => void handleChooseZip()}
+                          >
+                            ZIP
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          or browse:
+                          <button
+                            type='button'
+                            className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                            onClick={() => void handleChooseFolder()}
+                          >
+                            choose folder
+                          </button>
+                          <span className='text-border'>·</span>
+                          <button
+                            type='button'
+                            className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                            onClick={() => void handleChooseZip()}
+                          >
+                            choose ZIP
+                          </button>
+                        </>
+                      )
+                    ) : null}
+                    {importSource === 'postman' && (
+                      <button
+                        type='button'
+                        className='underline underline-offset-2 text-primary hover:text-primary/80 transition-colors'
+                        onClick={() => void handleChoosePostmanJson()}
+                      >
+                        {source ? 'change file' : 'choose JSON file'}
+                      </button>
+                    )}
+                    {importSource === 'openapi' && (
+                      <Button
+                        variant='link'
+                        size='sm'
+                        className='h-auto p-0 text-xs'
+                        onClick={() => void handleChooseOpenApi()}
+                      >
+                        {source ? 'change spec file' : 'choose spec file'}
+                      </Button>
+                    )}
+                    {importSource === 'wsdl' && (
+                      <Button
+                        variant='link'
+                        size='sm'
+                        className='h-auto p-0 text-xs'
+                        onClick={() => void handleChooseWsdl()}
+                      >
+                        {source ? 'change WSDL file' : 'choose WSDL file'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Selected path row */}
               {source && (
@@ -419,6 +527,33 @@ export function ImportCollectionDialog({
                 </div>
               )}
 
+              {importSource === 'openapi' && (
+                <div className='space-y-1.5'>
+                  <Label className='text-xs font-medium text-muted-foreground'>
+                    Group folders by
+                  </Label>
+                  <RadioGroup
+                    value={groupBy}
+                    onValueChange={(v) => setGroupBy(v as OpenApiGroupBy)}
+                    className='flex gap-4'
+                    aria-label='Group folders by'
+                  >
+                    <div className='flex items-center gap-1.5'>
+                      <RadioGroupItem value='tags' id='openapi-group-tags' />
+                      <Label htmlFor='openapi-group-tags' className='text-xs'>
+                        Tag
+                      </Label>
+                    </div>
+                    <div className='flex items-center gap-1.5'>
+                      <RadioGroupItem value='paths' id='openapi-group-paths' />
+                      <Label htmlFor='openapi-group-paths' className='text-xs'>
+                        Path
+                      </Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              )}
+
               {error && <p className='text-xs text-destructive'>{error}</p>}
             </div>
 
@@ -426,7 +561,7 @@ export function ImportCollectionDialog({
               <Button variant='ghost' onClick={handleClose}>
                 Cancel
               </Button>
-              <Button onClick={() => void handleImport()} disabled={!source}>
+              <Button onClick={() => void handleImport()} disabled={!canImport}>
                 Import
               </Button>
             </DialogFooter>
@@ -520,6 +655,16 @@ export function ImportCollectionDialog({
                     </ul>
                   </CollapsibleContent>
                 </Collapsible>
+              )}
+
+              {warnings.length > 0 && (
+                <ul className='max-h-40 space-y-1 overflow-y-auto'>
+                  {warnings.map((w) => (
+                    <li key={w} className='text-xs text-amber-500'>
+                      {w}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 
