@@ -92,7 +92,7 @@ Design is done for every item here. Plans P1 to P21 are listed in `docs/superpow
 | F-34 | Undo and redo for graph edits (snapshot stack in the pane store). Addresses issue #45 (Ctrl+A then Backspace deletes the flow). | M | done | `FlowPane.tsx:156-170` | |
 | F-35 | Copy, paste and duplicate nodes, with fresh IDs, offset positions and edges between copied nodes. | M | done | `FlowCanvas.tsx:400` | |
 | F-36 | Run history: keep the last N run summaries per tab with a selector. Persisting needs a backend command (L). | M | done | `pane-store.ts:976` | |
-| F-37 | Pre-run issue badges on nodes and an issue count next to Run. Client-side first, then fed by the lint tier. | M | done | `FlowPane.tsx:318-334`; `FlowCanvas.tsx:115` | Pairs with F-20. F-37a (client rules, badges, issue list) built in P12 and merged to local main 2026-10-08; F-37b (backend lint feed) still needs F-20 and P21. |
+| F-37 | Pre-run issue badges on nodes and an issue count next to Run. Client-side first, then fed by the lint tier. | M | done | `FlowPane.tsx:318-334`; `FlowCanvas.tsx:115` | Pairs with F-20. F-37a (client rules, badges, issue list) built in P12 and merged to local main 2026-10-08; F-37b (backend lint feed) built in P21 on top of P23 (F-20) and merged to main 2026-10-09. |
 | F-38 | Show the evaluated If and Switch value and the condition result in the Last run tab. | M | done | `LastRunTab.tsx:297-301`; `IfNode.tsx:61-67` | Backend field needed. |
 | F-39 | Show what each wire resolved to, in the Wires tab. Name the edge, source node and target field in wire errors. | L | done | `WiresTab.tsx`; `flow_execution_service.rs:258-262` | Backend support needed. |
 | F-40 | Richer repeat-until progress: last status code, condition result, time left. Show callback URLs and Wait detail (last rejected call). | M | done | `flow_poll.rs`; `flow_callbacks.rs` | |
@@ -248,7 +248,7 @@ Add `Ruling:` lines here as choices are made.
 |---|---|---|
 | F-120 | The merge-rule tests (client-error-wins over `invalid_graph`, errors first, ghost filter) were written with the code, not seen failing first; the unmount hook test asserts only that console.error is not called. | `flow-lint.ts`, `useBackendFlowLints`. |
 | F-121 | Real-app check of the issue count and popover with backend lint: new unwired If node counts once, opening a past run keeps warnings, deleting a node drops its lints. | |
-| F-122 | F-37b done; F-23 done (2026-10-11, `lint.rs`). F-21, F-22, F-24 and F-25 done on branch worktree-flow-tier2 (2026-10-11); F-26 to F-30 still open. The lint context (`saved_request_exists`, `variable_is_known`) is still a stub that `validate_with_warnings` ignores (`lint.rs:52-72`). | |
+| F-122 | F-37b done; F-23 done (2026-10-11, `lint.rs`). F-21, F-22 and F-24 to F-30 are done on branch worktree-flow-tier2 (2026-10-11), which is not merged to main (23 commits ahead, checked 2026-10-25). On main the lint context (`saved_request_exists`, `variable_is_known`) is still a stub that `validate_with_warnings` ignores (`lint.rs:52-72`). The branch fills it in, so merge it to close the gap. | |
 
 ## Follow-ups from the Tier 1 small-bug branch (2026-10-11)
 
