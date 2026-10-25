@@ -59,13 +59,35 @@ pub(crate) fn convert_operation(
         })
         .collect();
 
+    let scheme = op
+        .security
+        .iter()
+        .find_map(|name| schemes.iter().find(|s| &s.name == name));
+    // The API key the auth block already sends, so a parameter for it is not sent twice.
+    let api_key = match scheme.map(|s| &s.kind) {
+        Some(SecuritySchemeKind::ApiKey {
+            param_name,
+            in_query,
+        }) => Some((param_name.as_str(), *in_query)),
+        _ => None,
+    };
+    let is_api_key = |param: &Parameter, in_query: bool| {
+        api_key.is_some_and(|(name, query)| {
+            query == in_query && name.eq_ignore_ascii_case(&param.name)
+        })
+    };
+
     for param in &op.parameters {
         match param.location {
             ParamLocation::Path => {}
-            ParamLocation::Query => request.query_params.push(row(param)),
+            ParamLocation::Query => {
+                if !is_api_key(param, true) {
+                    request.query_params.push(row(param));
+                }
+            }
             ParamLocation::Header => {
                 // Auth is handled from the security schemes, not from a header parameter.
-                if !param.name.eq_ignore_ascii_case("authorization") {
+                if !param.name.eq_ignore_ascii_case("authorization") && !is_api_key(param, false) {
                     request.headers.push(row(param));
                 }
             }
@@ -84,11 +106,7 @@ pub(crate) fn convert_operation(
         convert_body(&spec.content_type, spec.schema.as_ref(), sample)
     });
 
-    if let Some(scheme) = op
-        .security
-        .iter()
-        .find_map(|name| schemes.iter().find(|s| &s.name == name))
-    {
+    if let Some(scheme) = scheme {
         match auth_for(scheme) {
             Some(auth) => request.auth = auth,
             None => skipped.push(SkipReason::UnsupportedAuthType(scheme.name.clone())),
@@ -630,6 +648,51 @@ mod tests {
         let out = convert_operation(&op, &schemes, 1);
         assert_eq!(out.request.auth, Auth::None);
         assert!(matches!(out.skipped[0], SkipReason::UnsupportedAuthType(_)));
+    }
+
+    #[test]
+    fn parameter_named_like_the_api_key_is_not_imported_as_a_row() {
+        let schemes = vec![
+            scheme(
+                "keyAuth",
+                SecuritySchemeKind::ApiKey {
+                    param_name: "X-Api-Key".into(),
+                    in_query: false,
+                },
+            ),
+            scheme(
+                "qAuth",
+                SecuritySchemeKind::ApiKey {
+                    param_name: "api_key".into(),
+                    in_query: true,
+                },
+            ),
+        ];
+        let mut op = operation(HttpMethod::Get, "/a");
+        let mut header = param("x-api-key", ParamLocation::Header, true);
+        header.example = Some(json!("abc123"));
+        op.parameters.push(header);
+        op.parameters
+            .push(param("X-Trace", ParamLocation::Header, false));
+        let mut query = param("api_key", ParamLocation::Query, true);
+        query.example = Some(json!("abc123"));
+        op.parameters.push(query);
+        op.parameters
+            .push(param("page", ParamLocation::Query, false));
+
+        op.security = vec!["keyAuth".into()];
+        let out = convert_operation(&op, &schemes, 1).request;
+        let header_keys: Vec<&str> = out.headers.iter().map(|h| h.key.as_str()).collect();
+        assert_eq!(header_keys, vec!["X-Trace"]);
+        let query_keys: Vec<&str> = out.query_params.iter().map(|h| h.key.as_str()).collect();
+        assert_eq!(query_keys, vec!["api_key", "page"]);
+
+        op.security = vec!["qAuth".into()];
+        let out = convert_operation(&op, &schemes, 1).request;
+        let header_keys: Vec<&str> = out.headers.iter().map(|h| h.key.as_str()).collect();
+        assert_eq!(header_keys, vec!["x-api-key", "X-Trace"]);
+        let query_keys: Vec<&str> = out.query_params.iter().map(|h| h.key.as_str()).collect();
+        assert_eq!(query_keys, vec!["page"]);
     }
 
     #[test]

@@ -510,6 +510,27 @@ impl ImportService {
         }
     }
 
+    /// Like `resolve_collection_name`, but the name is also safe on every platform: a Windows
+    /// device name such as `CON`, or a name that differs from an existing collection only by
+    /// letter case, gets the next free `-1`, `-2`, ... suffix.
+    fn resolve_portable_collection_name(&self, wanted: &str) -> ImportResult<String> {
+        let base = wsdl_path_segment(wanted);
+        let existing: std::collections::HashSet<String> = self
+            .collection_repo
+            .list()
+            .map_err(ImportError::DomainError)?
+            .into_iter()
+            .map(|s| s.name.to_lowercase())
+            .collect();
+        let mut candidate = base.clone();
+        let mut i = 0u32;
+        while existing.contains(&candidate.to_lowercase()) || is_windows_device_name(&candidate) {
+            i += 1;
+            candidate = format!("{base}-{i}");
+        }
+        Ok(candidate)
+    }
+
     /// Import a Bruno 3.0+ (OpenCollection-compatible) collection by direct file copy.
     ///
     /// Skips parsing — modern Bruno files are already OpenCollection YAML.
@@ -877,7 +898,7 @@ impl ImportService {
             .into_iter()
             .find(|s| !s.is_empty())
             .unwrap_or("openapi");
-        let col_name = self.resolve_collection_name(&wsdl_path_segment(wanted))?;
+        let col_name = self.resolve_portable_collection_name(wanted)?;
         self.collection_repo
             .create(&col_name)
             .map_err(ImportError::DomainError)?;

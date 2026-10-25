@@ -221,6 +221,39 @@ fn name_collision_gets_suffix() {
 }
 
 #[test]
+fn collection_name_avoids_device_names_and_case_only_clashes() {
+    let ws = TempDir::new().expect("tempdir");
+    let service = make_service(ws.path());
+    let device = service
+        .import_openapi_text(
+            "openapi: 3.0.3\ninfo: { title: CON, version: '1' }\npaths: {}\n",
+            "t.yaml",
+            GroupBy::Tags,
+            "default",
+        )
+        .expect("device-named title should import");
+    assert_eq!(device.collection, "CON-1");
+
+    service
+        .import_openapi_text(
+            &fixture("orders-3.0.json"),
+            "orders.json",
+            GroupBy::Tags,
+            "default",
+        )
+        .expect("first import");
+    let lower = service
+        .import_openapi_text(
+            "openapi: 3.0.3\ninfo: { title: orders, version: '1' }\npaths: {}\n",
+            "t.yaml",
+            GroupBy::Tags,
+            "default",
+        )
+        .expect("case-only clash should import");
+    assert_eq!(lower.collection, "orders-1");
+}
+
+#[test]
 fn reserved_and_hostile_names_are_safe() {
     let ws = TempDir::new().expect("tempdir");
     let spec = small_spec(&[

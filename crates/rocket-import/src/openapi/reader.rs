@@ -10,8 +10,13 @@ use serde_json::Value as Json;
 use serde_yaml::Value as Yaml;
 use std::collections::HashSet;
 
-/// Longest `$ref` chain and deepest `$ref` nesting the reader follows.
+/// Longest `$ref` chain the reader follows to one item.
 const MAX_REF_DEPTH: usize = 32;
+/// Deepest `$ref` nesting inlined into one schema. Examples are built to depth 8, so deeper
+/// levels are never read.
+const MAX_INLINE_DEPTH: usize = 10;
+/// Most nodes one schema, parameter or body is expanded to.
+const MAX_SCHEMA_NODES: usize = 10_000;
 
 const METHODS: [(&str, HttpMethod); 8] = [
     ("get", HttpMethod::Get),
@@ -107,7 +112,8 @@ fn servers_v3(root: &Yaml) -> Vec<String> {
                     url = url.replace(&format!("{{{name}}}"), &default);
                 }
             }
-            Some(url)
+            // Request paths start with `/`, so a trailing slash would double it.
+            Some(url.trim_end_matches('/').to_string())
         })
         .collect()
 }
@@ -199,14 +205,21 @@ fn deref<'a>(root: &'a Yaml, value: &'a Yaml, warnings: &mut Vec<String>) -> Opt
 }
 
 /// Convert a YAML value to JSON with local `$ref` objects replaced by their targets.
-/// A reference that loops back on itself, or nests deeper than `MAX_REF_DEPTH`, becomes `{}`.
+/// A reference that loops back on itself, or nests deeper than `MAX_INLINE_DEPTH`, becomes
+/// `{}`. `budget` counts the nodes left to build, so a schema that refers to the next one
+/// several times over cannot grow without bound; once it is spent, values become `null`.
 fn to_json(
     root: &Yaml,
     value: &Yaml,
     depth: usize,
     visiting: &mut Vec<String>,
+    budget: &mut usize,
     warnings: &mut Vec<String>,
 ) -> Json {
+    if *budget == 0 {
+        return Json::Null;
+    }
+    *budget -= 1;
     match value {
         Yaml::Null => Json::Null,
         Yaml::Bool(b) => Json::Bool(*b),
@@ -225,7 +238,7 @@ fn to_json(
         Yaml::Sequence(items) => Json::Array(
             items
                 .iter()
-                .map(|v| to_json(root, v, depth, visiting, warnings))
+                .map(|v| to_json(root, v, depth, visiting, budget, warnings))
                 .collect(),
         ),
         Yaml::Mapping(map) => {
@@ -234,31 +247,35 @@ fn to_json(
                     warnings.push(format!("remote $ref was not followed: {target}"));
                     return Json::Null;
                 }
-                if depth >= MAX_REF_DEPTH || visiting.iter().any(|v| v == target) {
+                if depth >= MAX_INLINE_DEPTH || visiting.iter().any(|v| v == target) {
                     return Json::Object(serde_json::Map::new());
                 }
                 let Some(resolved) = resolve_pointer(root, target) else {
                     return Json::Null;
                 };
                 visiting.push(target.to_string());
-                let out = to_json(root, resolved, depth + 1, visiting, warnings);
+                let out = to_json(root, resolved, depth + 1, visiting, budget, warnings);
                 visiting.pop();
                 return out;
             }
             let mut out = serde_json::Map::new();
             for (k, v) in map {
                 if let Some(key) = k.as_str() {
-                    out.insert(key.to_string(), to_json(root, v, depth, visiting, warnings));
+                    out.insert(
+                        key.to_string(),
+                        to_json(root, v, depth, visiting, budget, warnings),
+                    );
                 }
             }
             Json::Object(out)
         }
-        Yaml::Tagged(tagged) => to_json(root, &tagged.value, depth, visiting, warnings),
+        Yaml::Tagged(tagged) => to_json(root, &tagged.value, depth, visiting, budget, warnings),
     }
 }
 
 fn schema_json(root: &Yaml, value: &Yaml, warnings: &mut Vec<String>) -> Json {
-    to_json(root, value, 0, &mut Vec::new(), warnings)
+    let mut budget = MAX_SCHEMA_NODES;
+    to_json(root, value, 0, &mut Vec::new(), &mut budget, warnings)
 }
 
 fn location_of(raw: &str) -> Option<ParamLocation> {
@@ -605,6 +622,47 @@ paths:
         let doc = parse_openapi(text).expect("spec should parse");
         assert_eq!(doc.operations[0].method, HttpMethod::Trace);
         assert_eq!(doc.operations[0].key, "TRACE /a");
+    }
+
+    #[test]
+    fn schema_chain_that_doubles_each_level_stays_fast() {
+        // Each schema refers to the next one twice, so naive inlining builds 2^20 nodes.
+        let mut text = String::from(
+            "openapi: 3.0.3\ninfo: { title: T, version: '1' }\npaths:\n  /a:\n    post:\n      requestBody:\n        content:\n          application/json:\n            schema: { $ref: '#/components/schemas/S0' }\n      responses: { '200': { description: ok } }\ncomponents:\n  schemas:\n",
+        );
+        for i in 0..20 {
+            text.push_str(&format!(
+                "    S{i}: {{ type: object, properties: {{ a: {{ $ref: '#/components/schemas/S{n}' }}, b: {{ $ref: '#/components/schemas/S{n}' }} }} }}\n",
+                n = i + 1
+            ));
+        }
+        text.push_str("    S20: { type: string }\n");
+        let started = std::time::Instant::now();
+        let doc = parse_openapi(&text).expect("spec should parse");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(doc.operations[0]
+            .request_body
+            .as_ref()
+            .expect("body")
+            .schema
+            .is_some());
+    }
+
+    #[test]
+    fn server_url_loses_its_trailing_slash() {
+        let text = r##"
+openapi: 3.0.3
+info: { title: T, version: '1' }
+servers:
+  - url: https://api.x.com/
+paths: {}
+"##;
+        let doc = parse_openapi(text).expect("spec should parse");
+        assert_eq!(doc.servers, vec!["https://api.x.com".to_string()]);
     }
 
     #[test]
