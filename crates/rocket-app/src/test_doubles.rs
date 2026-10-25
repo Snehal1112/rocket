@@ -418,6 +418,7 @@ pub struct ConfigurableCollectionRepo {
     fail_request_vars: Mutex<bool>,
     missing_request_vars: Mutex<bool>,
     fail_request_read: Mutex<bool>,
+    failing_settings: Mutex<Vec<String>>,
     request_vars: Mutex<Vec<CollectionVariable>>,
     requests: Mutex<HashMap<(String, String), CollectionRequest>>,
     summaries: Mutex<HashMap<String, Collection>>,
@@ -469,6 +470,14 @@ impl ConfigurableCollectionRepo {
             .fail_request_vars
             .lock()
             .expect("lock fail_request_vars") = true;
+    }
+
+    /// Makes `get_settings` fail for one collection.
+    pub fn fail_settings_for(&self, collection: &str) {
+        self.failing_settings
+            .lock()
+            .expect("lock failing_settings")
+            .push(collection.to_string());
     }
 
     /// Makes `get_request` fail with `DomainError::Internal` instead of `NotFound`.
@@ -590,6 +599,15 @@ impl CollectionRepository for ConfigurableCollectionRepo {
         Ok(crate::test_doubles::test_identity(n))
     }
     fn get_settings(&self, name: &str) -> DomainResult<CollectionSettings> {
+        if self
+            .failing_settings
+            .lock()
+            .expect("lock failing_settings")
+            .iter()
+            .any(|c| c == name)
+        {
+            return Err(DomainError::Io("settings unreadable".to_string()));
+        }
         Ok(self
             .settings
             .lock()
