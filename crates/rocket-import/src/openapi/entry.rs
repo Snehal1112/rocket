@@ -8,6 +8,7 @@ use rocket_collection::openapi_source::{OpenApiSourceRepository, SpecLocation};
 use rocket_http::spec_fetch::{
     SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
+use std::io::Read;
 use std::path::Path;
 
 /// What an OpenAPI import from a file or a link gives back.
@@ -26,22 +27,47 @@ pub struct OpenApiImportResult {
 fn describe_fetch_failure(failure: &SpecFetchFailure) -> String {
     match failure {
         SpecFetchFailure::Unauthorized | SpecFetchFailure::NotFound => {
-            "The file was not found or is private. Links to private repositories \
-             are not supported yet."
+            "The file was not found, or it is private or needs a sign-in. \
+             Private links are not supported yet."
                 .to_string()
         }
         other => other.to_string(),
     }
 }
 
-/// True when the ref looks like a commit id (7 to 40 hex characters), so it never changes.
-fn is_commit_ref(location: &SpecLocation) -> bool {
-    match location {
-        SpecLocation::Github { git_ref, .. } => {
-            (7..=40).contains(&git_ref.len()) && git_ref.chars().all(|c| c.is_ascii_hexdigit())
-        }
-        SpecLocation::Https { .. } => false,
+/// How sure we are that a link points to a commit.
+enum CommitRef {
+    /// A full 40 character id, which can never change.
+    Certain,
+    /// 7 to 39 hex characters, which could also be a branch or tag name.
+    Possible,
+}
+
+fn commit_ref(location: &SpecLocation) -> Option<CommitRef> {
+    if location.ref_is_immutable() {
+        return Some(CommitRef::Certain);
     }
+    match location {
+        SpecLocation::Github { git_ref, .. }
+            if (7..40).contains(&git_ref.len())
+                && git_ref.chars().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            Some(CommitRef::Possible)
+        }
+        _ => None,
+    }
+}
+
+/// Reads at most `cap` bytes. One byte more than the cap means the source is too large.
+fn read_capped(reader: impl Read, cap: u64) -> ImportResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.take(cap + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > cap {
+        return Err(ImportError::SpecUnavailable(
+            "The file is larger than the 25 MB limit.".to_string(),
+        ));
+    }
+    Ok(bytes)
 }
 
 /// The last path segment of a link, without its query. Used to name the collection.
@@ -62,13 +88,19 @@ impl ImportService {
         group_by: GroupBy,
         workspace_id: &str,
     ) -> ImportResult<OpenApiImportResult> {
-        let size = std::fs::metadata(path)?.len();
-        if size > DEFAULT_MAX_SPEC_BYTES as u64 {
+        let file = std::fs::File::open(path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(ImportError::SpecUnavailable(
+                "That path is not a regular file.".to_string(),
+            ));
+        }
+        if meta.len() > DEFAULT_MAX_SPEC_BYTES as u64 {
             return Err(ImportError::SpecUnavailable(
                 "The file is larger than the 25 MB limit.".to_string(),
             ));
         }
-        let bytes = std::fs::read(path)?;
+        let bytes = read_capped(file, DEFAULT_MAX_SPEC_BYTES as u64)?;
         let text = String::from_utf8(bytes)
             .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
         let label = path
@@ -122,7 +154,7 @@ impl ImportService {
                 ))
             }
         };
-        let text = String::from_utf8(body.clone())
+        let text = String::from_utf8(body)
             .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
         let display_url = location.display_url();
         let imported = self.import_openapi_text(
@@ -133,17 +165,30 @@ impl ImportService {
         )?;
 
         let mut warnings = Vec::new();
-        let record = source_record(&location, group_by, &body, etag, last_modified, &imported);
+        let record = source_record(
+            &location,
+            group_by,
+            text.as_bytes(),
+            etag,
+            last_modified,
+            &imported,
+        );
         let root = self.collections_root().join(&imported.collection);
         if let Err(e) = sources.save(&root, &record) {
             warnings.push(format!("Sync could not be set up: {e}"));
         }
-        if is_commit_ref(&location) {
-            warnings.push(
+        match commit_ref(&location) {
+            Some(CommitRef::Certain) => warnings.push(
                 "This link points to a commit, so the file will never change and \
                  sync will find nothing new."
                     .to_string(),
-            );
+            ),
+            Some(CommitRef::Possible) => warnings.push(
+                "This link may point to a commit. If it does, the spec will never \
+                 change and sync will find nothing new."
+                    .to_string(),
+            ),
+            None => {}
         }
         Ok(OpenApiImportResult {
             report: imported.report,
@@ -359,7 +404,8 @@ mod tests {
             .await
             .expect("import");
         assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].contains("commit"));
+        assert!(result.warnings[0].contains("points to a commit"));
+        assert!(result.warnings[0].contains("never change"));
 
         let branch = "https://github.com/o/r/blob/main/api.yaml";
         let result = service
@@ -413,6 +459,40 @@ mod tests {
         assert!(describe_fetch_failure(&limited).contains("60"));
         assert!(describe_fetch_failure(&SpecFetchFailure::TooLarge).contains("25 MB"));
         assert!(describe_fetch_failure(&SpecFetchFailure::NotHttps).contains("https"));
+    }
+
+    #[test]
+    fn read_capped_rejects_more_than_the_cap() {
+        let exact = read_capped(std::io::Cursor::new(vec![b'a'; 10]), 10).expect("at the cap");
+        assert_eq!(exact.len(), 10);
+        let err = read_capped(std::io::Cursor::new(vec![b'a'; 11]), 10).expect_err("over");
+        assert!(matches!(err, ImportError::SpecUnavailable(_)), "{err:?}");
+    }
+
+    #[test]
+    fn directory_is_rejected_as_a_spec_file() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let err = service
+            .import_openapi_file(ws.path(), GroupBy::Tags, "ws")
+            .expect_err("should fail");
+        assert!(matches!(err, ImportError::SpecUnavailable(_)), "{err:?}");
+        assert_eq!(collection_count(ws.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn all_hex_branch_name_gets_the_hedged_commit_warning() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        let link = "https://github.com/o/r/blob/deadbeef/api.yaml";
+        let result = service
+            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, link, GroupBy::Tags, "ws")
+            .await
+            .expect("import");
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("may point to a commit"));
+        assert!(!result.warnings[0].contains("points to a commit"));
     }
 
     #[test]

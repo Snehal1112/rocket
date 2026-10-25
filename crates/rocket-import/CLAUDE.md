@@ -153,9 +153,9 @@ Plan 2 of the OpenAPI series (`docs/superpowers/plans/2026-10-25-openapi-import-
 
 Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, warnings }`.
 
-- `import_openapi_file(path, group_by, workspace_id)` checks the file length with `metadata` first (25 MB cap, `ImportError::SpecUnavailable`), then reads it. It writes no source file and `source_url` is `None`.
+- `import_openapi_file(path, group_by, workspace_id)` opens the file once, rejects a non-regular file or a length over 25 MB (`ImportError::SpecUnavailable`), then reads at most the cap with `read_capped`. It writes no source file and `source_url` is `None`.
 - `import_openapi_url(fetcher, sources, link, group_by, workspace_id)` (async) runs `parse_spec_url`, `fetch_target(.., false)` (no token), the fetch, then `import_openapi_text`, then saves the source file. A failed fetch or a `NotModified` answer is `SpecUnavailable` and creates nothing; a body that is not a spec is `NotAnOpenApiSpec`.
-- A source file that cannot be saved is a warning ("Sync could not be set up"), never an error. A GitHub ref of 7 to 40 hex characters adds a warning that the commit never changes.
+- A source file that cannot be saved is a warning ("Sync could not be set up"), never an error. A GitHub ref of 40 hex characters warns that the commit never changes; 7 to 39 hex characters get a hedged warning, because it may be a branch name.
 - `NotFound` and `Unauthorized` share one message, because GitHub answers 404 for a private repository; it says private links are not supported yet.
 - `GroupBy::parse` accepts exactly `tags` and `paths`.
 
