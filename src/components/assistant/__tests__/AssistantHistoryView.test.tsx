@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { canContinueHere, continueConversation } from '@/lib/assistant/assistant-session';
 import * as api from '@/lib/tauri-api';
 import type { ConversationRecord, ConversationSummary } from '@/lib/tauri-api';
 import { useWorkspaceStore } from '@/stores/workspace-store';
@@ -36,6 +37,11 @@ const mocks = vi.hoisted(() => {
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
   ...mocks.api,
+}));
+vi.mock('@/lib/assistant/assistant-session', () => ({
+  CONTINUE_WORKSPACE_MISMATCH: 'Another workspace.',
+  canContinueHere: vi.fn(() => true),
+  continueConversation: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('sonner', () => ({ toast: { error: (m: string) => toastError(m) } }));
 vi.mock('@/lib/queries/agent-config-queries', () => ({
@@ -285,5 +291,32 @@ describe('AssistantHistoryView', () => {
       await screen.findByText('Continued from "Why does login return 401?"'),
     ).toBeInTheDocument();
     expect(screen.getByText('Continued from an earlier conversation')).toBeInTheDocument();
+  });
+
+  it('carries on in the chat when a conversation is picked, with no picker', async () => {
+    vi.mocked(canContinueHere).mockReturnValue(true);
+    const onContinued = vi.fn();
+    render(<AssistantHistoryView onContinued={onContinued} />);
+    await userEvent.click(await screen.findByText('Why does login return 401?'));
+    await waitFor(() => expect(continueConversation).toHaveBeenCalledWith(record, 'agent-1'));
+    expect(onContinued).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+  });
+
+  it('opens a conversation of another workspace read-only', async () => {
+    vi.mocked(canContinueHere).mockReturnValue(false);
+    render(<AssistantHistoryView onContinued={vi.fn()} />);
+    await userEvent.click(await screen.findByText('Why does login return 401?'));
+    expect(await screen.findByText('The token expired.')).toBeInTheDocument();
+    expect(continueConversation).not.toHaveBeenCalled();
+  });
+
+  it('opens read-only so an agent can be picked when the saved agent is gone', async () => {
+    vi.mocked(canContinueHere).mockReturnValue(true);
+    vi.mocked(api.getConversation).mockResolvedValue({ ...record, agentConfigId: 'removed' });
+    render(<AssistantHistoryView onContinued={vi.fn()} />);
+    await userEvent.click(await screen.findByText('Why does login return 401?'));
+    expect(await screen.findByText('The token expired.')).toBeInTheDocument();
+    expect(continueConversation).not.toHaveBeenCalled();
   });
 });

@@ -52,7 +52,9 @@ export function startConversationSaver(): () => void {
     if (!session?.sessionId || !conversationId || tracked?.sessionId !== session.sessionId) return;
     const input = buildConversationInput({
       conversationId,
-      continuedFrom: source.replay?.fromId,
+      continuedFrom: source.replay?.resume
+        ? source.replay.resume.continuedFrom
+        : source.replay?.fromId,
       agentConfigId: session.agentConfigId,
       mode: session.mode,
       workspaceId: tracked.workspaceId,

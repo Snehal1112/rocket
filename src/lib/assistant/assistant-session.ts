@@ -1,5 +1,6 @@
 import { loadRememberedEffort, loadRememberedModel } from '@/lib/assistant/model-memory';
-import { buildReplayPreface } from '@/lib/assistant/replay-preface';
+import { buildReplayPreface, UNLIMITED_REPLAY_LIMITS } from '@/lib/assistant/replay-preface';
+import { storedToChatMessages } from '@/lib/assistant/stored-messages';
 import {
   type ConversationRecord,
   cancelAgentPrompt,
@@ -10,6 +11,7 @@ import {
   startWorkspaceAssistant,
 } from '@/lib/tauri-api';
 import {
+  type AssistantMessage,
   type AssistantMode,
   type ReplaySeed,
   selectTurnRunning,
@@ -57,6 +59,7 @@ export async function startAssistant(
   agentConfigId: string,
   mode: AssistantMode = DEFAULT_ASSISTANT_MODE,
   replay?: ReplaySeed,
+  seedMessages?: AssistantMessage[],
 ): Promise<void> {
   // A session that failed fatally may still have a live agent and MCP server
   // behind it. Ending it before the new start keeps either from leaking.
@@ -64,7 +67,9 @@ export async function startAssistant(
   if (previous?.status === 'error' && previous.sessionId) {
     endInBackground(previous.sessionId, 'the failed session');
   }
-  const token = useAssistantStore.getState().beginSession(agentConfigId, mode, replay);
+  const token = useAssistantStore
+    .getState()
+    .beginSession(agentConfigId, mode, replay, seedMessages);
   try {
     // A sweep still in flight would end the session started below.
     await sweepStaleAssistantSessions();
@@ -175,9 +180,15 @@ export async function continueConversation(
     if (!canContinueHere(record)) {
       throw new Error(CONTINUE_WORKSPACE_MISMATCH);
     }
-    const seed = { fromId: record.id, preface: buildReplayPreface(record) };
+    // The conversation carries on in place: its messages stay in the chat, it is saved
+    // over itself, and the agent gets all of it, with nothing cut.
+    const seed = {
+      fromId: record.id,
+      preface: buildReplayPreface(record, UNLIMITED_REPLAY_LIMITS),
+      resume: { continuedFrom: record.continuedFrom },
+    };
     started = true;
-    await startAssistant(agentConfigId, 'ask', seed);
+    await startAssistant(agentConfigId, 'ask', seed, storedToChatMessages(record.messages));
   } catch (err) {
     throw new ContinueError(err instanceof Error ? err.message : String(err), started);
   }

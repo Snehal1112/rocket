@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { canContinueHere, continueConversation } from '@/lib/assistant/assistant-session';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import { formatRelativeTime } from '@/lib/relative-time';
 import {
@@ -160,7 +161,25 @@ export function AssistantHistoryView({
     openingId.current = id;
     try {
       const record = await getConversation(id);
-      if (mounted.current && request === openRequest.current) setOpen(record);
+      if (!mounted.current || request !== openRequest.current) return;
+      // A conversation of this workspace whose agent still exists carries on in the chat.
+      // Anything else opens read-only, where the agent can be picked.
+      if (
+        onContinued &&
+        canContinueHere(record) &&
+        agentConfigs.some((c) => c.id === record.agentConfigId)
+      ) {
+        onContinued();
+        continueConversation(record, record.agentConfigId).catch((err: unknown) => {
+          toast.error('Could not open this conversation.');
+          // A start that began shows its error in the start view. Otherwise history comes back.
+          if (!(err instanceof Error && 'started' in err && err.started === true)) {
+            onContinueFailed?.();
+          }
+        });
+        return;
+      }
+      setOpen(record);
     } catch {
       if (mounted.current && request === openRequest.current) {
         toast.error('Could not open the conversation.');

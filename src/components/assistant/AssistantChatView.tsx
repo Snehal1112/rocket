@@ -1,6 +1,7 @@
 import { Loader2 } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownRenderer } from '@/components/collections/MarkdownRenderer';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { buildTimeline, groupToolRuns } from '@/lib/assistant/timeline';
 import { type AssistantMessage, useAssistantStore } from '@/stores/assistant-store';
@@ -13,6 +14,9 @@ import { WaitingNotice } from './WaitingNotice';
 
 /** How close to the bottom, in pixels, still counts as following the chat. */
 const PIN_THRESHOLD_PX = 48;
+
+/** How many chat entries show at first, and how many each Load earlier click adds. */
+export const CHAT_PAGE_SIZE = 30;
 
 export function ChatItem({
   message,
@@ -89,6 +93,12 @@ export function AssistantChatView() {
     [messages, proposals, anchors],
   );
   const itemCount = timeline.length + pending.length + permissions.length;
+  // Only the newest entries show. Older ones load when the reader asks.
+  const [shownCount, setShownCount] = useState(CHAT_PAGE_SIZE);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new session starts at the first page.
+  useEffect(() => setShownCount(CHAT_PAGE_SIZE), [sessionId]);
+  const hiddenCount = Math.max(0, timeline.length - shownCount);
+  const visibleTimeline = hiddenCount > 0 ? timeline.slice(hiddenCount) : timeline;
 
   // Changes when an item is added or the last message grows while streaming.
   const lastMessage = messages[messages.length - 1];
@@ -129,7 +139,17 @@ export function AssistantChatView() {
   return (
     <ScrollArea className='min-h-0 flex-1'>
       <div className='flex min-w-0 flex-col gap-5 px-4 py-4'>
-        {timeline.map((entry) => {
+        {hiddenCount > 0 && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='mx-auto h-7 text-xs text-muted-foreground'
+            onClick={() => setShownCount((count) => count + CHAT_PAGE_SIZE)}
+          >
+            {`Load earlier messages (${hiddenCount})`}
+          </Button>
+        )}
+        {visibleTimeline.map((entry) => {
           if (entry.type === 'tools') return <ToolRun key={entry.id} tools={entry.tools} />;
           if (entry.type === 'proposal') {
             return (

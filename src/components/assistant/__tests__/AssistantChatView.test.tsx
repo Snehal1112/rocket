@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAssistantStore } from '@/stores/assistant-store';
 import { makeProposal } from '@/test/assistant-fixtures';
-import { AssistantChatView } from '../AssistantChatView';
+import { AssistantChatView, CHAT_PAGE_SIZE } from '../AssistantChatView';
 
 function startSession(): void {
   const token = useAssistantStore.getState().beginSession('agent-1', 'edit');
@@ -32,6 +32,34 @@ describe('AssistantChatView agent markdown', () => {
     const { container } = render(<AssistantChatView />);
     expect(container.querySelector('a')).toBeNull();
     expect(screen.getByText('(https://evil.test/steal)')).toBeInTheDocument();
+  });
+});
+
+describe('AssistantChatView long chats', () => {
+  beforeEach(() => {
+    useAssistantStore.getState().reset();
+    const token = useAssistantStore
+      .getState()
+      .beginSession(
+        'agent-1',
+        'ask',
+        undefined,
+        Array.from({ length: CHAT_PAGE_SIZE + 5 }, (_, i) => ({
+          kind: 'notice' as const,
+          id: `n${i}`,
+          text: `line ${i}`,
+        })),
+      );
+    useAssistantStore.getState().activateSession(token, 's1', []);
+  });
+
+  it('shows the newest messages and loads earlier ones on request', async () => {
+    render(<AssistantChatView />);
+    expect(screen.queryByText('line 0')).toBeNull();
+    expect(screen.getByText(`line ${CHAT_PAGE_SIZE + 4}`)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Load earlier messages (5)' }));
+    expect(screen.getByText('line 0')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Load earlier/ })).toBeNull();
   });
 });
 

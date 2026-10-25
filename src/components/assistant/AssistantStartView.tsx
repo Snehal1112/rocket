@@ -27,9 +27,16 @@ export function AssistantStartView() {
       state.session?.status === 'error' && !state.session.sessionId ? state.session : undefined;
     const seed =
       failed && state.replay
-        ? { fromId: state.replay.fromId, preface: state.replay.preface }
+        ? {
+            fromId: state.replay.fromId,
+            preface: state.replay.preface,
+            ...(state.replay.resume ? { resume: state.replay.resume } : {}),
+          }
         : undefined;
-    void startAssistant(agentConfigId, failed?.mode, seed);
+    // A conversation that carries on keeps its messages through a retry.
+    const seedMessages = seed?.resume ? state.messages : undefined;
+    if (seedMessages) void startAssistant(agentConfigId, failed?.mode, seed, seedMessages);
+    else void startAssistant(agentConfigId, failed?.mode, seed);
   };
   const [selectedId, setSelectedId] = useState('');
   const agentConfigId = selectedId || agentConfigs[0]?.id || '';

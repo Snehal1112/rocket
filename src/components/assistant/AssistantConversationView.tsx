@@ -81,7 +81,7 @@ function groupStored(messages: StoredMessage[]): StoredItem[] {
 }
 
 export const CONTINUE_HINT =
-  'Continue starts a new session in Ask mode with this conversation as context. The stored conversation is not changed.';
+  'Continue starts a new session in Ask mode with this conversation as context. Your new messages are added to this conversation.';
 
 export const MISSING_AGENT_TEXT =
   'The agent of this conversation is no longer configured. Pick an agent to continue.';

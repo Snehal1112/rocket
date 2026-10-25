@@ -70,13 +70,16 @@ describe('assistant session flows', () => {
     expect(api.startWorkspaceAssistant).toHaveBeenCalledWith('agent-1', 'ask', undefined, undefined);
     expect(store().session).toMatchObject({ sessionId: 's2', status: 'active', mode: 'ask' });
     expect(store().replay).toMatchObject({ fromId: stored.id, sent: false });
+    // The old messages stay in the chat, and the conversation is saved under its own id.
+    expect(store().messages.map((m) => m.kind)).toEqual(['user', 'agent']);
+    expect(store().conversationId).toBe(stored.id);
 
     await sendAssistantMessage('  And now?  ');
     const first = vi.mocked(api.sendAgentPrompt).mock.calls[0][1];
     expect(first.startsWith(REPLAY_PREFACE_HEADER)).toBe(true);
     expect(first).toContain('Assistant: The token expired.');
     expect(first.endsWith('\n\nAnd now?')).toBe(true);
-    expect(store().messages[0]).toMatchObject({ kind: 'user', text: 'And now?' });
+    expect(store().messages[2]).toMatchObject({ kind: 'user', text: 'And now?' });
     expect(store().replay?.sent).toBe(true);
 
     store().completeMessage('s2');
@@ -84,7 +87,7 @@ describe('assistant session flows', () => {
     expect(vi.mocked(api.sendAgentPrompt).mock.calls[1][1]).toBe('Next');
   });
 
-  it('saves a continued chat without the preface and with continuedFrom', async () => {
+  it('saves a continued chat over itself without the preface', async () => {
     vi.useFakeTimers();
     const stopSaver = startConversationSaver();
     try {
@@ -112,8 +115,11 @@ describe('assistant session flows', () => {
       expect(api.saveConversation).toHaveBeenCalledTimes(1);
       const [sessionId, saved] = vi.mocked(api.saveConversation).mock.calls[0];
       expect(sessionId).toBe('s2');
-      expect(saved.continuedFrom).toBe(stored.id);
+      expect(saved.id).toBe(stored.id);
+      expect(saved.continuedFrom).toBeUndefined();
       expect(saved.messages).toEqual([
+        { kind: 'user', text: 'Why 401?' },
+        { kind: 'agent', text: 'The token expired.' },
         { kind: 'user', text: 'And now?' },
         { kind: 'agent', text: 'Here is more.' },
       ]);
@@ -122,6 +128,31 @@ describe('assistant session flows', () => {
       stopSaver();
       vi.useRealTimers();
     }
+  });
+
+  it('sends a long conversation to the agent without cutting it', async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: 'ws-1' });
+    vi.mocked(api.startWorkspaceAssistant).mockResolvedValue({ sessionId: 's2', configOptions: [] });
+    vi.mocked(api.sendAgentPrompt).mockResolvedValue('end_turn');
+    const long = 'x'.repeat(20_000);
+    const record: ConversationRecord = {
+      ...stored,
+      messages: [
+        { kind: 'user', text: 'first question' },
+        { kind: 'agent', text: long },
+        ...Array.from({ length: 10 }, (_, i): ConversationRecord['messages'][number] => ({
+          kind: 'user',
+          text: `question ${i}`,
+        })),
+      ],
+    };
+    await continueConversation(record, 'agent-1');
+    await sendAssistantMessage('more');
+    const sent = vi.mocked(api.sendAgentPrompt).mock.calls[0][1];
+    expect(sent).toContain(long);
+    expect(sent).toContain('User: first question');
+    expect(sent).not.toContain('left out');
+    expect(sent).not.toContain('…cut');
   });
 
   it('passes the remembered model and effort of the agent to the start', async () => {

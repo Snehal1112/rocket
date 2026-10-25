@@ -70,6 +70,11 @@ export interface ReplaySeed {
   fromId: string;
   /** The text put in front of the session's first prompt. */
   preface: string;
+  /**
+   * Set when the stored conversation carries on in place: it keeps its id and is saved
+   * over itself. `continuedFrom` is the link the stored conversation already had.
+   */
+  resume?: { continuedFrom?: string };
 }
 
 export interface ToolActivity {
@@ -122,7 +127,13 @@ export interface AssistantState {
   closePanel: () => void;
   setFocus: (focus: AssistantFocus | undefined) => void;
   /** Puts a new session in 'starting' and returns the token of this start. */
-  beginSession: (agentConfigId: string, mode: AssistantMode, replay?: ReplaySeed) => number;
+  beginSession: (
+    agentConfigId: string,
+    mode: AssistantMode,
+    replay?: ReplaySeed,
+    /** Messages shown from the start, for a conversation that carries on. */
+    seedMessages?: AssistantMessage[],
+  ) => number;
   /** Activates the start with this token. Returns false when that start was
    *  abandoned, so the caller must end the backend session itself. */
   activateSession: (token: number, sessionId: string, configOptions: ConfigOption[]) => boolean;
@@ -209,17 +220,17 @@ export const useAssistantStore = create<AssistantState>()((set, get) => ({
   closePanel: () => set({ panelOpen: false }),
   setFocus: (focus) => set({ focus }),
 
-  beginSession(agentConfigId, mode, replay) {
+  beginSession(agentConfigId, mode, replay, seedMessages) {
     startCounter += 1;
     currentStartToken = startCounter;
     set({
       session: { sessionId: '', agentConfigId, status: 'starting', configOptions: [], mode },
-      messages: [],
+      messages: seedMessages ?? [],
       proposals: [],
       proposalAnchors: {},
       permissions: [],
       usage: undefined,
-      conversationId: undefined,
+      conversationId: replay?.resume ? replay.fromId : undefined,
       replay: replay ? { ...replay, sent: false } : undefined,
     });
     return currentStartToken;
