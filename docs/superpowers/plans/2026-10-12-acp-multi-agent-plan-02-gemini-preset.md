@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (rocket-acp, rocket-app, src-tauri), React + TypeScript, Vitest, Biome. Gemini CLI 0.63.0.
 
-**Spec:** `.claude/acp-multi-agent-support.md` (section "Verified Gemini facts"). Depends on Plan 1 being merged: `docs/superpowers/plans/2026-10-12-acp-multi-agent-plan-01-agent-kind.md`.
+**Spec:** `docs/features/acp-multi-agent-support.md` (section "Verified Gemini facts"). Depends on Plan 1 being merged: `docs/superpowers/plans/2026-10-12-acp-multi-agent-plan-01-agent-kind.md`.
 
 ## Global Constraints
 
@@ -660,7 +660,7 @@ Then invoke the `dev-workflow-skills:1-git-commit` skill. Suggested subject: `fe
 This task has no code. It is the gate before Plan 2 is merged. It needs a real `GEMINI_API_KEY` exported in the shell that starts Rocket. Everything before it ran against a fake model API, so Google's real schema validation and Gemini's real tool use are untested until now.
 
 **Files:**
-- Modify: `.claude/acp-multi-agent-support.md` (append a "Verification log" section)
+- Modify: `docs/features/acp-multi-agent-support.md` (append a "Verification log" section)
 
 **Interfaces:**
 - Consumes: the finished Tasks 4 and 5.
@@ -694,7 +694,7 @@ Expected: the real `~/.gemini` has the same newest change time as in Step 1.
 
 - [ ] **Step 6: Record the result**
 
-Append to `.claude/acp-multi-agent-support.md`:
+Append to `docs/features/acp-multi-agent-support.md`:
 
 ```markdown
 ## Verification log
@@ -707,7 +707,7 @@ Fill every angle bracket with the real result before committing.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add .claude/acp-multi-agent-support.md
+git add docs/features/acp-multi-agent-support.md
 ```
 
 Then invoke the `dev-workflow-skills:1-git-commit` skill. Suggested subject: `docs(acp): record the Gemini verification run`.

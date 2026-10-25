@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`pane-store`), Vitest and Testing Library, shadcn `Button`, lucide-react.
 
-**Spec:** Roadmap item F-31 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P2) and the plan index (`00-plan-index.md`, plan P2).
+**Spec:** Roadmap item F-31 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P2) and the plan index (`00-plan-index.md`, plan P2).
 
 **Depends on P1 (assumed merged).** All edits to `FlowToolbar.tsx` and `FlowPane.tsx` are written against the code after P1: `FlowToolbar` already has the `tabId` prop, the `rocket:flow-run` listener and a disabled-when-idle Stop button; `FlowPane` already imports `flowPayloadFromTab`, mounts `FlowSaveShortcut`, passes `tabId={tab.id}` to `FlowToolbar` and toasts in `handleBeforeRun`. Line numbers in this plan come from HEAD b047bbc6 (before P1) and have shifted, so every edit is anchored by function or prop name.
 

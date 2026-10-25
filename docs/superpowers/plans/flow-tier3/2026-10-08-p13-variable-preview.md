@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, CodeMirror 6 (`@codemirror/view` `hoverTooltip`), Vitest and Testing Library.
 
-**Spec:** Roadmap item F-43 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P13).
+**Spec:** Roadmap item F-43 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P13).
 
 **Depends on:** plan P3 merged (`useCollectionVariableContext`, the `secret` flag on environment entries). Without the P3 flag the hover would show secret environment values.
 
@@ -63,7 +63,7 @@ Failure modes the spec implies but the obvious tests would miss, most likely fir
 | `src/components/editor/extensions/index.ts` (modify) | Export `variableHover`. |
 | `src/components/flow/properties/NodePropertiesPanel.tsx` (modify) | Wraps the Input and Request editors in `FlowVariableScope`. |
 | `src/components/flow/properties/InlineSourceEditor.tsx`, `InputNodeEditor.tsx` (modify) | Pass the context, `readOnlyVariables` and `hoverPreview`. |
-| `.claude/flow-variable-preview.md` (new) | Short note on what the preview can and cannot show. |
+| `docs/features/flow-variable-preview.md` (new) | Short note on what the preview can and cannot show. |
 
 Interfaces:
 
@@ -878,7 +878,7 @@ Suggested subject: `feat(editor): add a variable hover tooltip extension`.
 - Modify: `src/components/flow/properties/InlineSourceEditor.tsx`, `src/components/flow/properties/InputNodeEditor.tsx`
 - Create: `src/components/editor/__tests__/SingleLineEditor.hoverPreview.test.tsx`
 - Modify: `src/components/flow/properties/__tests__/InlineSourceEditor.test.tsx`, `src/components/flow/properties/__tests__/NodePropertiesPanel.test.tsx`
-- Create: `.claude/flow-variable-preview.md`
+- Create: `docs/features/flow-variable-preview.md`
 
 **Interfaces:**
 - Produces: the `hoverPreview` prop.
@@ -979,7 +979,7 @@ In `InlineSourceEditor.tsx`, add `hoverPreview` after `readOnlyVariables` on the
 
 - [ ] **Step 5: Write the scope note**
 
-Create `.claude/flow-variable-preview.md`:
+Create `docs/features/flow-variable-preview.md`:
 
 ```markdown
 # Variable preview in flow editors
@@ -1020,7 +1020,7 @@ Expected: no errors.
 Manual check once in the real app (`yarn tauri dev`): open a flow, select an Input node, type `{{` followed by a known variable name. Highlighting and autocomplete show. Rest the pointer on the token for about 300 ms: a card shows the scope and value. Click the token: the click popover opens, the hover card is gone, and the value field is read-only. Mark the variable secret in its environment: the hover shows `●●●●`. Record the result in the review note.
 
 Commit with the `dev-workflow-skills:1-git-commit` skill. Stage only:
-`src/components/editor/SingleLineEditor.tsx src/components/flow/properties/InlineSourceEditor.tsx src/components/flow/properties/InputNodeEditor.tsx src/components/editor/__tests__/SingleLineEditor.hoverPreview.test.tsx src/components/flow/properties/__tests__/InlineSourceEditor.test.tsx src/components/flow/properties/__tests__/NodePropertiesPanel.test.tsx .claude/flow-variable-preview.md`
+`src/components/editor/SingleLineEditor.tsx src/components/flow/properties/InlineSourceEditor.tsx src/components/flow/properties/InputNodeEditor.tsx src/components/editor/__tests__/SingleLineEditor.hoverPreview.test.tsx src/components/flow/properties/__tests__/InlineSourceEditor.test.tsx src/components/flow/properties/__tests__/NodePropertiesPanel.test.tsx docs/features/flow-variable-preview.md`
 Suggested subject: `feat(flow): show variable values on hover in flow editors`.
 
 ---

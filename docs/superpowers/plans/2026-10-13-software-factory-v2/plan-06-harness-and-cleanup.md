@@ -48,7 +48,7 @@
 | `tools/factory-server/tests/seed-demo.sh` | 2 | Idempotent, refuses foreign folders, explains the sleep. |
 | `tools/factory-server/tests/screenshots.sh` | 3 | New: seeds, serves, screenshots. |
 | `.claude/software-factory.md` | 3 | Dated ruling, open items cleaned, success check. |
-| `.claude/roadmap.md` | 3 | Factory v2 row and decision line. |
+| `docs/roadmaps/roadmap.md` | 3 | Factory v2 row and decision line. |
 
 ## v1 minors triage (E12)
 
@@ -617,7 +617,7 @@ git commit --only -m "fix(factory): harden dashboard rendering and the smoke tes
 
 **Files:**
 - Create: `tools/factory-server/tests/screenshots.sh`
-- Modify: `.claude/software-factory.md`, `.claude/roadmap.md`
+- Modify: `.claude/software-factory.md`, `docs/roadmaps/roadmap.md`
 - Modify only if the screenshots show a real defect: `tools/factory-server/static/dashboard.css`
 
 **Interfaces:**
@@ -764,12 +764,12 @@ Run this once after plans 01 to 06 are merged. It uses a real feature, so it cos
 4. Pass means: no manual intervention, no `needs-human` card, both plans merged, `git status` clean in the main checkout, and `ctl status` showing both jobs merged.
 5. Clean up with `/factory cleanup <id>` for each job and `git branch --list 'factory/*'` to confirm nothing is left.
 
-If something needs a manual step, note which step and open a follow-up row in `.claude/roadmap.md`.
+If something needs a manual step, note which step and open a follow-up row in `docs/roadmaps/roadmap.md`.
 ````
 
 - [ ] **Step 6: Roadmap entry**
 
-Read the last `R-` id in `.claude/roadmap.md` (R-59 at the time of writing) and use the next free number, called `R-NN` below. Add this row to the quality and hygiene table in section 8 (the table that holds R-57 to R-59), after the last row:
+Read the last `R-` id in `docs/roadmaps/roadmap.md` (R-59 at the time of writing) and use the next free number, called `R-NN` below. Add this row to the quality and hygiene table in section 8 (the table that holds R-57 to R-59), after the last row:
 
 ```markdown
 | R-NN | Software factory v2 series (plans 01 to 06): orchestrator robustness, evidence and prompts, main-moved handling, multi-plan series, dashboard and hook fixes, harness and cleanup | built on branch `worktree-software-factory`, not merged; success-check dry run pending (user) | spec `docs/superpowers/specs/2026-10-13-software-factory-v2-design.md`, plans `docs/superpowers/plans/2026-10-13-software-factory-v2/`, design doc `.claude/software-factory.md` | Run the success check in `.claude/software-factory.md`, then merge. Open follow-ups are in its open items list. |
@@ -795,8 +795,8 @@ Run, one per line:
 Invoke the skill `dev-workflow-skills:1-git-commit`, then:
 
 ```bash
-git add tools/factory-server/tests/screenshots.sh .claude/software-factory.md .claude/roadmap.md
-git commit --only -m "docs(factory): record the browser check, sync docs and add the success check" -- tools/factory-server/tests/screenshots.sh .claude/software-factory.md .claude/roadmap.md
+git add tools/factory-server/tests/screenshots.sh .claude/software-factory.md docs/roadmaps/roadmap.md
+git commit --only -m "docs(factory): record the browser check, sync docs and add the success check" -- tools/factory-server/tests/screenshots.sh .claude/software-factory.md docs/roadmaps/roadmap.md
 ```
 
 Add `tools/factory-server/static/dashboard.css` to both path lists if Step 4 changed it.

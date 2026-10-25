@@ -1,6 +1,6 @@
 # Export name-based scrub: design
 
-Closes the gap where the collection export (Bruno ZIP and Postman v2.1) still writes credential-like values as written. Origin: the plan-1 review (Important #1, Minor 8) and the investigation of 2026-10-23 (four read-only checks of the Bruno scrub, the Postman scrub, the data model and false-positive risk). Background: `.claude/collection-export.md`, `crates/rocket-export/CLAUDE.md`.
+Closes the gap where the collection export (Bruno ZIP and Postman v2.1) still writes credential-like values as written. Origin: the plan-1 review (Important #1, Minor 8) and the investigation of 2026-10-23 (four read-only checks of the Bruno scrub, the Postman scrub, the data model and false-positive risk). Background: `docs/features/collection-export.md`, `crates/rocket-export/CLAUDE.md`.
 
 ## Decisions (agreed with the user)
 

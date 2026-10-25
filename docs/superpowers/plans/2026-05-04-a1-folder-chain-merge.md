@@ -1,7 +1,7 @@
 # Fix A1 — Folder-chain variable merge: extract to domain
 
 **Branch:** `worktree-fix-a1-folder-chain-merge`
-**Source:** §2 / A1 of `.claude/reviews/2026-05-04-rocket-infra-synthesis.md`
+**Source:** §2 / A1 of `docs/reports/2026-05-04-rocket-infra-synthesis.md`
 
 ## Problem
 
@@ -141,7 +141,7 @@ FsCollectionRepo into rocket_collection::settings::merge_folder_chain_variables.
 Infra retains the disk walk; the domain owns the rule and is unit-tested
 without filesystem fixtures.
 
-Addresses A1 of the rocket-infra DDD review (.claude/reviews/2026-05-04-rocket-infra-synthesis.md).
+Addresses A1 of the rocket-infra DDD review (docs/reports/2026-05-04-rocket-infra-synthesis.md).
 ```
 
 ## Out-of-scope items to flag, not fix

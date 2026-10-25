@@ -39,7 +39,7 @@ The final whole-branch review after Plan 03 runs on opus.
 - **Cargo:** always `-j4`; never `cargo test --workspace` or `--all`. Give the worktree its own `target/`.
 - **Commits:** every commit through the `dev-workflow-skills:1-git-commit` skill, conventional format, explicit `git add <paths>` and `git commit --only -- <paths>`; never `git add -A`, `--all` or `.`; no bare `git stash`. Dispatched implementers get this rule in their prompt.
 - **OpenCollection:** every backend task starts with "📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`." The store is Rocket-private (spec section 4); no collection, folder, request, environment or `workspace.yml` file changes.
-- **Docs:** tasks update `crates/rocket-acp/CLAUDE.md`, `crates/rocket-infra/CLAUDE.md`, `crates/rocket-app/CLAUDE.md`, `.claude/assistant-conversations.md` (new), `.claude/assistant-composer.md` and one pointer line in the root `CLAUDE.md`. Tasks do not edit the roadmap.
+- **Docs:** tasks update `crates/rocket-acp/CLAUDE.md`, `crates/rocket-infra/CLAUDE.md`, `crates/rocket-app/CLAUDE.md`, `docs/features/assistant-conversations.md` (new), `docs/features/assistant-composer.md` and one pointer line in the root `CLAUDE.md`. Tasks do not edit the roadmap.
 
 ## Rulings (controller, 2026-10-11)
 

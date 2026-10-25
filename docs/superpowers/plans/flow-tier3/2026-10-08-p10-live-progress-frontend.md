@@ -10,7 +10,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`pane-store`), shadcn `Button`, `Collapsible`, `Table`, lucide `Copy`, `Check`, `ChevronRight`, `copyTextAsync` (`src/lib/clipboard.ts`), Vitest with fake timers and Testing Library.
 
-**Spec:** Roadmap item F-40 (frontend) in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P10 Live progress frontend". Backend contract: `docs/superpowers/plans/flow-tier3/2026-10-08-p9-live-progress-backend.md` (Interfaces of each task). Builds on `docs/superpowers/plans/flow-tier3/2026-10-08-p8-step-trace-frontend.md`.
+**Spec:** Roadmap item F-40 (frontend) in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P10 Live progress frontend". Backend contract: `docs/superpowers/plans/flow-tier3/2026-10-08-p9-live-progress-backend.md` (Interfaces of each task). Builds on `docs/superpowers/plans/flow-tier3/2026-10-08-p8-step-trace-frontend.md`.
 
 ## Global Constraints
 

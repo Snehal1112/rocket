@@ -8,7 +8,7 @@ Let a user export a Rocket collection as a Bruno collection ZIP, a Postman Colle
 
 Rocket can import Bruno and Postman collections, but it cannot export to them. A user who wants to share a collection with a colleague on Bruno or Postman, or move away, has to rebuild it by hand.
 
-Research (`.claude/collection-export-report.md`, 2026-10-23) found:
+Research (`docs/features/collection-export-report.md`, 2026-10-23) found:
 
 - Bruno 3 and Rocket use the same OpenCollection YAML layout on disk, so a Bruno export is mostly a scrubbed copy of the collection folder.
 - Postman needs a new Collection v2.1 serializer.
@@ -116,7 +116,7 @@ Flow: collection context menu `Export...` -> dialog (format, options) -> Tauri c
   | `req.getUrl()` | `pm.request.url.toString()` |
   | `req.getMethod()` | `pm.request.method` |
 
-  The builder checks each left-hand name against `src/components/editor/rok-types.ts` and `.claude/rok-api-parity-notes.md`, and drops a row whose Rocket name does not exist. A call that matches no row is left as it is with a `// rok: not translated` comment line above it, and reported.
+  The builder checks each left-hand name against `src/components/editor/rok-types.ts` and `docs/features/rok-api-parity-notes.md`, and drops a row whose Rocket name does not exist. A call that matches no row is left as it is with a `// rok: not translated` comment line above it, and reported.
 - Pre-request script becomes a `prerequest` event; post-response script plus tests become one `test` event (a `// Tests` marker between them), as Bruno does. Assertions become `pm.test` lines for the operators `eq` (`.to.eql`), `neq` (`.to.not.eql`), `gt` (`.to.be.above`), `gte` (`.to.be.at.least`), `lt` (`.to.be.below`), `lte` (`.to.be.at.most`) and `contains` (`.to.include`); any other operator is skipped and reported. The builder reads `crates/rocket-shared/src/assertion.rs` for the real operator names and expression form. Set-variable actions become `pm.collectionVariables.set` lines (scope `collection`), `pm.environment.set` (scope `environment`) or `pm.variables.set` (other scopes).
 - Folder scripts become folder `event[]`. Collection-level scripts do not exist in the Rocket model and are not exported.
 
@@ -179,7 +179,7 @@ Scope: the scrub covers auth fields, `secret` variables, header values for `Auth
 - New: `src-tauri/src/commands/export.rs`; wiring in `src-tauri/src/lib.rs`.
 - Modified: `Cargo.toml` (workspace member), `src/lib/tauri-api.ts`, `src/lib/save-file.ts`, `src/components/collections/CollectionNode.tsx`.
 - New: `src/components/export/ExportCollectionDialog.tsx` and tests.
-- Docs: `crates/rocket-export/CLAUDE.md`, a line in the root `CLAUDE.md`, an item in `.claude/roadmap.md`.
+- Docs: `crates/rocket-export/CLAUDE.md`, a line in the root `CLAUDE.md`, an item in `docs/roadmaps/roadmap.md`.
 
 ## Constraints
 

@@ -54,7 +54,7 @@
 | `.claude/agents/factory-code-reviewer.md` | 2 | Hard-rules checklist for lean mode. |
 | `.claude/agents/factory-spec-writer.md` | 2 | Marked full mode only. |
 | `.claude/software-factory.md` | 3 | Pipeline, Agents, modes, token note, dry run. |
-| `.claude/roadmap.md` | 3 | One note on the factory v2 row. |
+| `docs/roadmaps/roadmap.md` | 3 | One note on the factory v2 row. |
 
 ---
 
@@ -757,7 +757,7 @@ git add .claude/factory/tests/run.sh .claude/commands/factory.md .claude/agents/
 
 **Files:**
 - Modify: `.claude/software-factory.md`
-- Modify: `.claude/roadmap.md`
+- Modify: `docs/roadmaps/roadmap.md`
 - Modify: `.claude/factory/tests/run.sh`
 
 **Interfaces:**
@@ -880,7 +880,7 @@ Run this once after plans 01 to 07 are merged. It uses a real, tiny feature and 
 
 - [ ] **Step 6: Roadmap note**
 
-In `.claude/roadmap.md`, find the row whose text contains `Software factory v2 series` (plan 06 added it). In that row, replace `plans 01 to 06` with `plans 01 to 08` and append to the same cell: `; lean mode is the default and \`/factory --full\` opts into the v1 pipeline (plan 07)`. If the row is missing, add a one-line note under the factory entry of the same file with that text instead. Do not create a new R-id.
+In `docs/roadmaps/roadmap.md`, find the row whose text contains `Software factory v2 series` (plan 06 added it). In that row, replace `plans 01 to 06` with `plans 01 to 08` and append to the same cell: `; lean mode is the default and \`/factory --full\` opts into the v1 pipeline (plan 07)`. If the row is missing, add a one-line note under the factory entry of the same file with that text instead. Do not create a new R-id.
 
 - [ ] **Step 7: Full verification**
 
@@ -902,7 +902,7 @@ Expected: `all passed`, no syntax error, `true`, a diff that touches only the fi
 Invoke the skill `dev-workflow-skills:1-git-commit` for the message, inline, with no helper agents. Suggested: `docs(factory): document lean mode, the token estimate and a dry run`. Then:
 
 ```bash
-git add .claude/software-factory.md .claude/roadmap.md .claude/factory/tests/run.sh && git commit --only -m "<message from the skill>" -- .claude/software-factory.md .claude/roadmap.md .claude/factory/tests/run.sh
+git add .claude/software-factory.md docs/roadmaps/roadmap.md .claude/factory/tests/run.sh && git commit --only -m "<message from the skill>" -- .claude/software-factory.md docs/roadmaps/roadmap.md .claude/factory/tests/run.sh
 ```
 
 The reply must contain: the result of each Step 7 command, the commit shas, and a one-line reminder that the lean dry run in `.claude/software-factory.md` is for the user to run.

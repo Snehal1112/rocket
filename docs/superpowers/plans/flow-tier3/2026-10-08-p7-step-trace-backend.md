@@ -10,7 +10,7 @@
 
 **Tech Stack:** Rust, serde, tokio tests, `rocket-shared` events, `rocket-app` Flow engine.
 
-**Spec:** Roadmap items F-32 (durations), F-38 (route evaluation), F-39 (wire values and edge-named errors) in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P7 Step trace backend".
+**Spec:** Roadmap items F-32 (durations), F-38 (route evaluation), F-39 (wire values and edge-named errors) in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P7 Step trace backend".
 
 ## Global Constraints
 

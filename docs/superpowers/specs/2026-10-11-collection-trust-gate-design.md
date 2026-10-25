@@ -563,7 +563,7 @@ Files:
   `src/components/layout/TrustMigrationNotice.tsx` mounted once at app start;
   `src/lib/collection-settings-save.ts` comment.
 - Docs: `crates/rocket-infra/CLAUDE.md` (store, identity), `.claude/tauri-commands.md` (new
-  commands), `.claude/roadmap.md` (ship entry; add follow-ups: scanner, request-guard from git,
+  commands), `docs/roadmaps/roadmap.md` (ship entry; add follow-ups: scanner, request-guard from git,
   proxy and certificates if ever honoured), mark Section 1 of
   `docs/superpowers/specs/2026-10-07-js-script-security-design.md` as superseded by this spec.
 

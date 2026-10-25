@@ -551,7 +551,7 @@ Expected: PASS.
 
 ### Task 3: `ProposalService` prepare, still-applies and apply
 
-📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md` (sections 2.7, 5, 6) and `.claude/folder-settings.md`.
+📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md` (sections 2.7, 5, 6) and `docs/features/folder-settings.md`.
 
 **Files:**
 - Modify: `crates/rocket-app/src/proposal_service.rs`

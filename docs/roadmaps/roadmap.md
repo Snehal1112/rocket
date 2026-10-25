@@ -12,14 +12,14 @@ Flow has its own detailed file: [flow-roadmap.md](flow-roadmap.md) (F-01 to F-56
 - Plans derived from this file hold at most 3 tasks each, with an index file.
 - Tasks that touch `.yml`, collection or environment models, auth or variable resolution start with:
   "Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`."
-- Related: `.claude/plan-audit-2026-10-02.md`, `.claude/rok-api-parity-notes.md`, `.claude/contract-collaboration-enhancements.md`.
+- Related: `docs/roadmaps/plan-audit-2026-10-02.md`, `docs/features/rok-api-parity-notes.md`, `docs/features/contract-collaboration-enhancements.md`.
 
 ---
 
 ## 1. JavaScript API reference support (`rok.*` parity with Bruno)
 
 Goal: every method on Bruno's JavaScript API Reference works as `rok.*`. No `bru` alias.
-Notes: `.claude/rok-api-parity-notes.md` (its status table is stale, update it when A merges).
+Notes: `docs/features/rok-api-parity-notes.md` (its status table is stale, update it when A merges).
 
 | ID | Item | Status | Where | What remains |
 |---|---|---|---|---|
@@ -33,7 +33,7 @@ Notes: `.claude/rok-api-parity-notes.md` (its status table is stale, update it w
 
 | ID | Item | Status | Where | What remains |
 |---|---|---|---|---|
-| R-06 | JS script security: trust gate and static scanner | in-progress | trust gate done on local main (2026-10-11): `specs/2026-10-11-collection-trust-gate-design.md`, notes `.claude/collection-trust.md`. Old draft `specs/2026-10-07-js-script-security-design.md` is superseded for the gate. | Static scanner is still open. Per-folder revoke of extra script folders is a follow-up. |
+| R-06 | JS script security: trust gate and static scanner | in-progress | trust gate done on local main (2026-10-11): `specs/2026-10-11-collection-trust-gate-design.md`, notes `docs/features/collection-trust.md`. Old draft `specs/2026-10-07-js-script-security-design.md` is superseded for the gate. | Static scanner is still open. Per-folder revoke of extra script folders is a follow-up. |
 | R-07 | Configurable script timeout | open | script-limits spec follow-up | Setting plus UI. |
 | R-08 | Env-var write confirmation dialog | open | env-var write audit spec section 4 | Optional follow-up. |
 | R-09 | Secret-storage follow-ups: "re-save" nudge, `opencollection.yml` gap | open | secret-storage hardening spec section 7 | Decide and ticket. |
@@ -53,12 +53,12 @@ Notes: `.claude/rok-api-parity-notes.md` (its status table is stale, update it w
 
 | ID | Item | Status | Where | What remains |
 |---|---|---|---|---|
-| R-16 | ACP AI assist MCP tool server and the workspace assistant (six plans), plus the follow-up UI and agent config work | done (on local main, not pushed, 2026-10-11) | six plans fast-forwarded at `9666d1a1`; then History run-source badge and filter, agent activity dot and Console tool lines (`50578634`, `824f740d`, `e504bd10`), agent `extra_env`, masked stderr tail, 30 s handshake timeout, name validation (`7516a34d`, `32d3d01c`, `81238937`, `f6cc8d0e`). Plans `plans/acp-mcp-tool-server/`, `plans/workspace-ai-assistant/`. | Open hardening items in `.claude/assistant-followups.md`. |
-| R-17 | Assistant conversation history and resume (archive, then replay into a new session) | done (on local main, not pushed, 2026-10-11) | commits `a5fa5f5b` to `dc34d24a`; spec `specs/2026-10-11-assistant-conversation-history-design.md`, plans `plans/assistant-conversation-history/`, notes `.claude/assistant-conversations.md` | Follow-ups: 0600 file mode, symlinked `assistant/` dirs and non-star `.gitignore`, expected workspace id on clear and delete, linked collections not scrubbed, bidi and zero-width stripping. |
+| R-16 | ACP AI assist MCP tool server and the workspace assistant (six plans), plus the follow-up UI and agent config work | done (on local main, not pushed, 2026-10-11) | six plans fast-forwarded at `9666d1a1`; then History run-source badge and filter, agent activity dot and Console tool lines (`50578634`, `824f740d`, `e504bd10`), agent `extra_env`, masked stderr tail, 30 s handshake timeout, name validation (`7516a34d`, `32d3d01c`, `81238937`, `f6cc8d0e`). Plans `plans/acp-mcp-tool-server/`, `plans/workspace-ai-assistant/`. | Open hardening items in `docs/features/assistant-followups.md`. |
+| R-17 | Assistant conversation history and resume (archive, then replay into a new session) | done (on local main, not pushed, 2026-10-11) | commits `a5fa5f5b` to `dc34d24a`; spec `specs/2026-10-11-assistant-conversation-history-design.md`, plans `plans/assistant-conversation-history/`, notes `docs/features/assistant-conversations.md` | Follow-ups: 0600 file mode, symlinked `assistant/` dirs and non-star `.gitignore`, expected workspace id on clear and delete, linked collections not scrubbed, bidi and zero-width stripping. |
 | R-18 | ACP local credential sources: Rocket environment variable or OS keychain entry, next to RocketVault (one explicit source per config) | done (on local main, not pushed, 2026-10-11; final Opus review ready to merge) | commits `1cb5fea8` to `ae41bfce` (ids as on the branch), spec `specs/2026-10-11-agent-local-credential-design.md`, plans `plans/agent-local-credential/` | User to run the suites and try each source in the app. Follow-ups in `assistant-followups.md`: stale-entry hardening, vault-to-keychain blank field, toast fallback, test gaps. A token file and the agent's CLI login were refused on purpose (isolation). |
 | R-19 | Claude PR review: merge-blocking gate and Claude-written release notes | open | `specs/2026-09-25-claude-pr-review-design.md` | Sub-projects 2 and 3. Also confirm the GitHub App and `CLAUDE_CODE_OAUTH_TOKEN` setup. |
-| R-20 | RocketVault certificate source: confirm API contract | open | `.claude/rocketvault-certificate-export-requirements.md` | Depends on an unpushed RocketVault v4.0.0 branch. |
-| R-21 | Unpushed local main work (folder settings, JS script files, workspace assistant, trust gate, safety fixes, conversation history, folder tools) and the kept worktrees | open | local main at the merge of R-18 (see `git log`), worktree `acp-mcp-tool-server` kept | Run the full suites, then push when the user is ready. Folder-settings follow-ups are in `.claude/folder-settings.md`. |
+| R-20 | RocketVault certificate source: confirm API contract | open | `docs/features/rocketvault-certificate-export-requirements.md` | Depends on an unpushed RocketVault v4.0.0 branch. |
+| R-21 | Unpushed local main work (folder settings, JS script files, workspace assistant, trust gate, safety fixes, conversation history, folder tools) and the kept worktrees | open | local main at the merge of R-18 (see `git log`), worktree `acp-mcp-tool-server` kept | Run the full suites, then push when the user is ready. Folder-settings follow-ups are in `docs/features/folder-settings.md`. |
 
 ## 5. Contracts
 
@@ -66,7 +66,7 @@ Notes: `.claude/rok-api-parity-notes.md` (its status table is stale, update it w
 |---|---|---|---|---|
 | R-22 | Model B warn and block enforcement | open | `rocket-collection/src/contract/types.rs:123-129` | Enum exists. No UI or enforcement. |
 | R-23 | Stubbed `open_review` and `remind_reviewers`, and a `MarkBreaking` command | open | `ContractsTab.tsx`, `state_machine.rs:8,53` | Build commands and UI. |
-| R-24 | Collaboration enhancements (git-only sharing, local first) | open | `.claude/contract-collaboration-enhancements.md` | Ideas only. Needs a spec. |
+| R-24 | Collaboration enhancements (git-only sharing, local first) | open | `docs/features/contract-collaboration-enhancements.md` | Ideas only. Needs a spec. |
 | R-25 | Full legacy contract retirement (CD-006) | open | duplication remediation plan | Blocked on a product decision. |
 
 ## 6. Auth and import
@@ -105,7 +105,7 @@ Notes: `.claude/rok-api-parity-notes.md` (its status table is stale, update it w
 
 ## 8b. Safety and correctness fixes (2026-10-10 to 2026-10-11)
 
-Shipped on local main (not pushed). Details in `.claude/collection-trust.md` and `.claude/assistant-followups.md`.
+Shipped on local main (not pushed). Details in `docs/features/collection-trust.md` and `docs/features/assistant-followups.md`.
 
 | ID | Item | Status | Where | What remains |
 |---|---|---|---|---|
@@ -119,7 +119,7 @@ Shipped on local main (not pushed). Details in `.claude/collection-trust.md` and
 | R-52 | Cookie jar, templates, global envs and OAuth2 repo follow the active workspace | done (`d1c9d291` to `12919577`) | `SharedPath*` repos, `send_pins.rs` | Cookies of a late response go to the new workspace. |
 | R-53 | CI runs checks, Rust cache path fixed | done (`ff81fc0e`) | `.github/workflows` | Confirm it runs green on GitHub. |
 | R-54 | Full test run and manual check after this batch | done (user ran the suites and tried the assistant, 2026-10-11, working as expected) | `cargo test -p rocket-app -j4`, `-p rocket-infra -j4`, `yarn test` | `cargo fmt --check` still flags workspace-wide drift. Run `cargo fmt` once. Later runs: Rust suites green (2026-10-11); a full `yarn test` flakes on 5000 ms timeouts under load, see R-57. |
-| R-55 | Events and IPC rework: missing-event audit, frontend event-to-cache layer, composite backend commands, internal subscribers, activity surface | planned (parked by the user on 2026-10-11, no spec yet) | `.claude/events-and-ipc-rework.md`, GitHub issue #105 | Pick the first sub-project (A or C1) and brainstorm it. Large. |
+| R-55 | Events and IPC rework: missing-event audit, frontend event-to-cache layer, composite backend commands, internal subscribers, activity surface | planned (parked by the user on 2026-10-11, no spec yet) | `docs/engineering/events-and-ipc-rework.md`, GitHub issue #105 | Pick the first sub-project (A or C1) and brainstorm it. Large. |
 
 ## 8d. Environment inheritance and `.env` files (2026-10-18)
 
@@ -128,14 +128,14 @@ Shipped on local main (not pushed). Details in `.claude/collection-trust.md` and
 | R-61 | `extends` and `dotEnvFilePath` on environments: flatten along the parent chain, `.env` as `{{process.env.NAME}}` behind the host environment gate, dialog picker, path field and read-only inherited rows (collection and global) | done (factory job 024, plans 1 to 4) | `rocket-environment` `flatten.rs`, `dot_env.rs`; `EnvironmentDialog.tsx`, `WorkspaceEnvironmentsTab.tsx`; spec `specs/2026-10-18-env-extends-dotenv-design.md` | None. |
 | R-62 | Inherit the parent's external secret bindings and client certificates | open | follow-up of R-61 | Needs a decision on binding alias clashes. |
 | R-63 | Show inherited variables (secrets masked) in the assistant chips and MCP environment views; let backend-executed HTTP (flows, `rok.runRequest`, `run_request`) resolve `{{process.env}}` | open | follow-up of R-61 | Two separate pieces, spec each. |
-| R-65 | Collection export follow-ups: lossless Postman round trip (importer reads `event` scripts, folder auth and variables, oauth2, file and graphql bodies), single-file OpenCollection YAML, Insomnia and Postman Data Export targets | open | follow-up of the collection export (plans 1 to 3); `.claude/collection-export.md`; spec `docs/superpowers/specs/2026-10-23-collection-export-design.md` | Three separate specs. Run the manual checks in `.claude/manual-tests/collection-export.md` first. |
+| R-65 | Collection export follow-ups: lossless Postman round trip (importer reads `event` scripts, folder auth and variables, oauth2, file and graphql bodies), single-file OpenCollection YAML, Insomnia and Postman Data Export targets | open | follow-up of the collection export (plans 1 to 3); `docs/features/collection-export.md`; spec `docs/superpowers/specs/2026-10-23-collection-export-design.md` | Three separate specs. Run the manual checks in `docs/manual-tests/collection-export.md` first. |
 | R-64 | Duplicate request through the backend `duplicate_request` command (fresh uid, source by full path, unique name in the folder, no overwrite) | done | `crates/rocket-app/src/collection_service.rs`; spec `docs/superpowers/specs/2026-10-19-duplicate-request-backend-design.md` | Three follow-ups from the spec: non-HTTP kinds (GraphQL, WebSocket, gRPC), ordering the copy next to the source, duplicate a folder. |
 
 ## 8c. Assistant additions (2026-10-11)
 
 | ID | Item | Status | Where | What remains |
 |---|---|---|---|---|
-| R-56 | Assistant folder tools: `get_folder_settings` read tool and `UpdateFolderSettings` proposal (headers, variables, scripts, docs; never auth) | done (on local main, not pushed; `4b3bb1cd` to `dd639d7e`, final Opus review ready to merge) | spec `specs/2026-10-11-assistant-folder-tools-design.md`, plans `plans/assistant-folder-tools/`, notes in `.claude/folder-settings.md` | Follow-ups in `assistant-followups.md`: lost-update window in apply, parse-failure error names no folder, secret flag lost on re-propose, brief dirty-flag carry-over on a folder switch, two missing tool-server tests. |
+| R-56 | Assistant folder tools: `get_folder_settings` read tool and `UpdateFolderSettings` proposal (headers, variables, scripts, docs; never auth) | done (on local main, not pushed; `4b3bb1cd` to `dd639d7e`, final Opus review ready to merge) | spec `specs/2026-10-11-assistant-folder-tools-design.md`, plans `plans/assistant-folder-tools/`, notes in `docs/features/folder-settings.md` | Follow-ups in `assistant-followups.md`: lost-update window in apply, parse-failure error names no folder, secret flag lost on re-propose, brief dirty-flag carry-over on a folder switch, two missing tool-server tests. |
 | R-57 | `yarn test` flakes on 5000 ms timeouts when the whole suite runs in parallel | open | a full run fails 14 to 16 different files each time; every file passes alone or with `--maxWorkers=2` | Raise `testTimeout` in the Vitest config or cap the workers. Small. |
 | R-58 | Agent edits of folder auth | open | deliberately out of scope of R-56 | Needs the user's security decision first. |
 | R-59 | Tidy-ups from the tool reviews: `cargo fmt` once over the workspace, `/kb-refresh rocketapi`, mark follow-up rows in `assistant-followups.md` | open | | Small, separate commits. |

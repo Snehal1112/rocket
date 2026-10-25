@@ -111,9 +111,9 @@ When the delete target is a request or a folder, `CollectionsSidebar` calls `flo
 ### 8. Docs and roadmap
 
 The roadmap says to update it when work ships. This work:
-- sets F-01 to `done` in `.claude/flow-roadmap.md` and adds follow-up rows at the end of the file (real-app check, the lint after delete, external edits), using the next free IDs;
+- sets F-01 to `done` in `docs/roadmaps/flow-roadmap.md` and adds follow-up rows at the end of the file (real-app check, the lint after delete, external edits), using the next free IDs;
 - adds `request_refs.rs` to the module map of `crates/rocket-flow/CLAUDE.md`;
-- adds `.claude/flow-request-refs.md` (how the rewrite works, the event, the limits) and one reference line in the project `CLAUDE.md`.
+- adds `docs/features/flow-request-refs.md` (how the rewrite works, the event, the limits) and one reference line in the project `CLAUDE.md`.
 
 ## Error handling and edge cases
 
@@ -156,7 +156,7 @@ The roadmap says to update it when work ships. This work:
 - `src-tauri/src/tauri_event_bus.rs`, `lib.rs`, `commands/flow.rs`
 - `crates/rocket-app/src/flow_references.rs` (new), `crates/rocket-app/src/flow_request_ref_e2e_tests.rs` (new), `crates/rocket-app/src/test_doubles.rs`
 - `src/lib/tauri-api.ts`, `src/lib/flow-request-paths.ts` (new), `src/stores/pane-store.ts`, `src/components/layout/CollectionsSidebar.tsx`, `src/hooks/useFlowRequestPathEvents.ts` (new), `src/App.tsx`
-- Docs: `.claude/flow-roadmap.md`, `.claude/flow-request-refs.md` (new), `crates/rocket-flow/CLAUDE.md`, `CLAUDE.md`
+- Docs: `docs/roadmaps/flow-roadmap.md`, `docs/features/flow-request-refs.md` (new), `crates/rocket-flow/CLAUDE.md`, `CLAUDE.md`
 
 ## Constraints
 
@@ -182,7 +182,7 @@ The roadmap says to update it when work ships. This work:
 - With the real file repositories, moving a request or renaming a folder leaves the flow file on disk with the new path, and that path resolves to a saved request (test `flow_request_ref_e2e`).
 - A flow file that cannot be parsed is left byte for byte as it was.
 - `flows_using` rejects an empty path, an absolute path and a `..` path with `InvalidInput`.
-- F-01 is `done` in `.claude/flow-roadmap.md`, with follow-up rows added, and the docs in section 8 exist.
+- F-01 is `done` in `docs/roadmaps/flow-roadmap.md`, with follow-up rows added, and the docs in section 8 exist.
 
 ## Out of scope
 

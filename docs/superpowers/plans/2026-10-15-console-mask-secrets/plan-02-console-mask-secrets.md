@@ -332,7 +332,7 @@ Expected: no errors. If Biome only reports formatting, run `yarn format` once an
 ### Task 2: Documentation and final verification
 
 **Files:**
-- Create: `.claude/console-masking.md`
+- Create: `docs/features/console-masking.md`
 - Modify: `CLAUDE.md` (one reference line in the list that starts with `See .claude/frontend.md`)
 
 **Interfaces:**
@@ -341,7 +341,7 @@ Expected: no errors. If Biome only reports formatting, run `yarn format` once an
 
 - [ ] **Step 1: Write the rule document**
 
-Create `.claude/console-masking.md`:
+Create `docs/features/console-masking.md`:
 
 ```markdown
 # Console secret masking
@@ -374,10 +374,10 @@ Flow rows (`FlowPane.tsx`) and the Runner still write unmasked rows. The Rust re
 
 - [ ] **Step 2: Reference it from `CLAUDE.md`**
 
-In `CLAUDE.md`, add this line after the line that starts with `See .claude/collection-trust.md`:
+In `CLAUDE.md`, add this line after the line that starts with `See docs/features/collection-trust.md`:
 
 ```
-See `.claude/console-masking.md` for the Console secret masking rule (masked copy, reveal toggle, fail-closed, vault values).
+See `docs/features/console-masking.md` for the Console secret masking rule (masked copy, reveal toggle, fail-closed, vault values).
 ```
 
 - [ ] **Step 3: Run the whole frontend verification**
@@ -388,11 +388,11 @@ Expected: all pass.
 - [ ] **Step 4: Confirm the scope**
 
 Run: `git diff --stat main`
-Expected: only the files named in both plans, `.claude/console-masking.md` and `CLAUDE.md`. `FlowPane.tsx` and every Rust file must not appear.
+Expected: only the files named in both plans, `docs/features/console-masking.md` and `CLAUDE.md`. `FlowPane.tsx` and every Rust file must not appear.
 
 - [ ] **Step 5: List the manual check for the merge note**
 
-Do not perform it. Write these three lines at the end of `.claude/console-masking.md` under a heading `## Manual check`, so the reviewer can run them in the app:
+Do not perform it. Write these three lines at the end of `docs/features/console-masking.md` under a heading `## Manual check`, so the reviewer can run them in the app:
 
 ```markdown
 ## Manual check

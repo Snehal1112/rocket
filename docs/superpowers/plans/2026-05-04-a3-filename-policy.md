@@ -1,7 +1,7 @@
 # Fix A3 — Filename policy: domain-owned, drop empty-UID safety net
 
 **Branch:** `worktree-fix-a3-filename-policy`
-**Source:** §2 / A3 of `.claude/reviews/2026-05-04-rocket-infra-synthesis.md`
+**Source:** §2 / A3 of `docs/reports/2026-05-04-rocket-infra-synthesis.md`
 
 ## Problem (refined from synthesis)
 

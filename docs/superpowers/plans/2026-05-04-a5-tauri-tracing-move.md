@@ -1,7 +1,7 @@
 # Fix A5 — Move TauriTracingLayer out of rocket-infra
 
 **Branch:** `worktree-fix-a5-tauri-tracing-move`
-**Source:** §2 / A5 of `.claude/reviews/2026-05-04-rocket-infra-synthesis.md`
+**Source:** §2 / A5 of `docs/reports/2026-05-04-rocket-infra-synthesis.md`
 
 ## Problem
 

@@ -300,7 +300,7 @@ Expected: PASS (existing tests with updated payloads, and the 3 new ones).
 - Modify: `src/components/settings/AgentConfigsDialog.tsx`
 - Modify: `src/components/settings/__tests__/AgentConfigsDialog.test.tsx`
 - Modify: `src/components/assistant/AssistantHistoryView.tsx` (notice text) and the test that pins it
-- Modify: `.claude/assistant-conversations.md` (the "not scrubbed" limit)
+- Modify: `docs/features/assistant-conversations.md` (the "not scrubbed" limit)
 
 **Interfaces:**
 - Consumes: T1's `setAgentCredential`, `clearAgentCredential`, `hasAgentCredential`; T2's form state and `handleSave`.
@@ -486,7 +486,7 @@ so the value is not in the message (`saveErrorMessage` shows the backend's text,
 
 History notice in `AssistantHistoryView.tsx` line 33: change "Vault values and collections linked from outside the workspace are not scrubbed." to "Vault values, agent credentials and collections linked from outside the workspace are not scrubbed." and update the test that pins the old sentence.
 
-Docs: in `.claude/assistant-conversations.md` find the sentence about vault values not being scrubbed and add "and agent credentials from the env or keychain sources".
+Docs: in `docs/features/assistant-conversations.md` find the sentence about vault values not being scrubbed and add "and agent credentials from the env or keychain sources".
 
 - [ ] **Step 4: Run to verify it passes**
 

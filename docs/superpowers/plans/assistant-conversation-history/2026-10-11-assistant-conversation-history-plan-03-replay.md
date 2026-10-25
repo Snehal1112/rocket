@@ -715,8 +715,8 @@ git commit --only -m "feat(assistant): continue a stored conversation in a new s
 **Files:**
 - Modify: `src/components/assistant/composer/Composer.tsx` (selector near `:43-53`; hint above `<ComposerChips ... />` `:214`)
 - Modify: `src/components/assistant/AssistantHistoryView.tsx` (list item, under the meta line)
-- Modify: `.claude/assistant-conversations.md` (add a "Continue" section)
-- Modify: `.claude/assistant-composer.md` (one line under "Toolbar")
+- Modify: `docs/features/assistant-conversations.md` (add a "Continue" section)
+- Modify: `docs/features/assistant-composer.md` (one line under "Toolbar")
 - Test: `src/components/assistant/composer/__tests__/Composer.test.tsx`, `src/components/assistant/__tests__/AssistantHistoryView.test.tsx`
 
 **Interfaces:**
@@ -813,7 +813,7 @@ Expected: PASS (1 new composer test, 1 new History view test, earlier tests unch
 
 - [ ] **Step 6: Document Continue**
 
-Append to `.claude/assistant-conversations.md`:
+Append to `docs/features/assistant-conversations.md`:
 
 ```markdown
 ## Continue (stage 2)
@@ -823,7 +823,7 @@ Append to `.claude/assistant-conversations.md`:
 - `sendAssistantMessage` puts the preface in front of the first prompt only (`replay.sent`, set after a successful send). The chat and the saved conversation keep only the typed text, so prefaces never nest. The new conversation saves with `continued_from`; the old one is not changed. There is no backend limit on prompt text; the composer only shows the size.
 ```
 
-In `.claude/assistant-composer.md`, under "Toolbar", add:
+In `docs/features/assistant-composer.md`, under "Toolbar", add:
 
 ```markdown
 - A continued session shows "Earlier conversation attached as context: N characters" above the chips until the first message goes out (`replaySizeHint`).
@@ -837,8 +837,8 @@ Expected: no errors.
 Commit through the `dev-workflow-skills:1-git-commit` skill:
 
 ```bash
-git add src/components/assistant/composer/Composer.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/composer/__tests__/Composer.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx .claude/assistant-conversations.md .claude/assistant-composer.md
-git commit --only -m "feat(assistant): show replay size and continued-from in history" -- src/components/assistant/composer/Composer.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/composer/__tests__/Composer.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx .claude/assistant-conversations.md .claude/assistant-composer.md
+git add src/components/assistant/composer/Composer.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/composer/__tests__/Composer.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx docs/features/assistant-conversations.md docs/features/assistant-composer.md
+git commit --only -m "feat(assistant): show replay size and continued-from in history" -- src/components/assistant/composer/Composer.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/composer/__tests__/Composer.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx docs/features/assistant-conversations.md docs/features/assistant-composer.md
 ```
 
 ---

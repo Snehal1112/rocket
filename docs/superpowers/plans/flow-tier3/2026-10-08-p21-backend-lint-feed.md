@@ -14,7 +14,7 @@
 
 **Tech Stack:** Rust (`src-tauri`, package `rocket`), React, TypeScript, Vitest with fake timers, Testing Library `renderHook`.
 
-**Spec:** Roadmap items F-37 (split F-37b) and F-20 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` sections "P12" and "P21". F-20 plan: `docs/superpowers/plans/flow-tier3/2026-10-09-p23-flow-lint-tier.md`.
+**Spec:** Roadmap items F-37 (split F-37b) and F-20 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` sections "P12" and "P21". F-20 plan: `docs/superpowers/plans/flow-tier3/2026-10-09-p23-flow-lint-tier.md`.
 
 ## Required from F-20
 

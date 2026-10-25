@@ -1,7 +1,7 @@
 # Agent local credential: design
 
 Date: 2026-10-11. Status: design approved by the user in chat, spec ready for review. Roadmap row R-18.
-Read first: `crates/rocket-acp/CLAUDE.md`, `.claude/assistant-followups.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`.
+Read first: `crates/rocket-acp/CLAUDE.md`, `docs/features/assistant-followups.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`.
 
 ## 1. Summary
 
@@ -112,6 +112,6 @@ Nothing in the messages quotes a value. The agent process receives the value onl
 Plans hold at most 3 tasks each.
 
 - Plan 1 (backend): `CredentialSource` and validation in `rocket-acp` and `AgentConfigService`; the keychain namespace, resolve per source and the set/clear/has methods with the delete and source-change cleanup; the three IPC commands and wiring.
-- Plan 2 (dialog): `tauri-api` types and wrappers; the source choice and fields in `AgentConfigsDialog`; docs (`crates/rocket-acp/CLAUDE.md`, `.claude/assistant-followups.md`, the History notice text).
+- Plan 2 (dialog): `tauri-api` types and wrappers; the source choice and fields in `AgentConfigsDialog`; docs (`crates/rocket-acp/CLAUDE.md`, `docs/features/assistant-followups.md`, the History notice text).
 
 Opus reviews the task that reads and writes credentials.

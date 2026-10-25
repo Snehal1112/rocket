@@ -1,7 +1,7 @@
 # Assistant conversation history and resume: design
 
 Date: 2026-10-11. Status: approved design decisions, spec ready for the user's final review. Roadmap row R-17.
-Read first: `docs/superpowers/specs/opencollection-spec-reference.md`, `.claude/assistant-composer.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`.
+Read first: `docs/superpowers/specs/opencollection-spec-reference.md`, `docs/features/assistant-composer.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`.
 
 ## 1. Summary
 

@@ -49,7 +49,7 @@ Bruno's Postman output (verified in code): top level `info`, `item`, `variable`,
 - **Importers.** `crates/rocket-import`. A modern Bruno (`opencollection.yml`) collection is copied file by file (`importer.rs:516`, `copy_collection_files` at `:827`). So Rocket and Bruno 3 share a disk format. Legacy Bruno goes through a `.bru` parser (no writer exists). The Postman importer (`converter/postman.rs`) maps bearer, basic, apikey, raw/urlencoded/formdata bodies, variables, and environments.
 - **Export plumbing that exists.** None for collections. No ZIP writer anywhere (`zip = "2"` is a rocket-import dependency and only reads). Reusable patterns: `ExportService::export` returns bytes plus an extension (`crates/rocket-app/src/export_service.rs`); `export_load_test` returns base64 (`src-tauri/src/commands/load_test.rs:54`); `src/lib/save-file.ts` `saveTextFile` is text-only (a binary variant is needed; only `fs:allow-write-file` is granted); redaction helpers in `src/lib/flow-export.ts` and `src/lib/sensitive-headers.ts`.
 - **UI.** Import lives in `src/components/import/ImportCollectionDialog.tsx`. The natural Export entry is the collection context menu in `src/components/collections/CollectionNode.tsx` (shadcn `ContextMenu`, items near lines 532-585).
-- **Roadmap.** No export item exists in `.claude/roadmap.md`. R-31 (real PDF export) is unrelated.
+- **Roadmap.** No export item exists in `docs/roadmaps/roadmap.md`. R-31 (real PDF export) is unrelated.
 
 ### Gaps that matter
 
@@ -80,7 +80,7 @@ Minimal valid document: `info` (with `name` and `schema`) and `item`. Details fr
 | Secret and vault references | Env variable with `type:"secret"` and empty value. Never plaintext. Report each one. |
 | Collection, folder, request secret variables (`CollectionVariable.secret`) | Blank the value, keep the key. |
 | Literal auth credentials (basic password, bearer token, API key, AWS secret, OAuth client secret and so on) | Default: blank literals, keep `{{variable}}` references. Report counts. (Bruno exports them in clear text; this is the main safety difference.) |
-| `rok.*` scripts | Not valid in either app. Translate the common subset to `pm.*` (variables, tests, expect); otherwise emit as commented lines with a marker and report. See `.claude/rok-api-parity-notes.md` for the Rocket API surface (not read in this research). |
+| `rok.*` scripts | Not valid in either app. Translate the common subset to `pm.*` (variables, tests, expect); otherwise emit as commented lines with a marker and report. See `docs/features/rok-api-parity-notes.md` for the Rocket API surface (not read in this research). |
 | Assertions, set-variable actions | Translate to `pm.test` or `pm.collectionVariables.set` lines in the `test` event, or skip and report if a mapping is unclear. Operator mapping is unverified. |
 | Dynamic variables (`{{$guid}}` and so on) | Postman resolves its own set; Bruno passes them through as literal text. Keep names Postman knows, report the rest. |
 | Flows | No equivalent. Skip, report. |

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-app`, `rocket-shared`, `rocket-flow`), tokio tests, `std::collections::hash_map::DefaultHasher`, serde_json for canonical fingerprint text.
 
-**Spec:** Roadmap item F-41 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P19 Run from node, backend (F-41)", corrected below.
+**Spec:** Roadmap item F-41 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P19 Run from node, backend (F-41)", corrected below.
 
 **Decisions assumed (plan index, change them before this plan runs):**
 - D1: refuse. A partial run never re-runs ancestors. When a needed input has no usable cached value, the run is refused and the message says "Run the full flow or Run from '<node>'".

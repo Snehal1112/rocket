@@ -670,7 +670,7 @@ Expected: `1 passed`.
 In `crates/rocket-acp/CLAUDE.md`, Module Map, add after the `proposal.rs` row:
 
 ```markdown
-| `conversation.rs` | Stored assistant conversations: `ConversationRecord`, `ConversationSummary`, `StoredMessage`, caps (`MAX_CONVERSATIONS`, `MAX_MESSAGES`, `MAX_MESSAGE_TEXT_BYTES`), `validate_conversation_id` (lowercase UUID) and the `ConversationRepository` trait. Persisted as snake_case YAML by `rocket-infra`; see `.claude/assistant-conversations.md`. |
+| `conversation.rs` | Stored assistant conversations: `ConversationRecord`, `ConversationSummary`, `StoredMessage`, caps (`MAX_CONVERSATIONS`, `MAX_MESSAGES`, `MAX_MESSAGE_TEXT_BYTES`), `validate_conversation_id` (lowercase UUID) and the `ConversationRepository` trait. Persisted as snake_case YAML by `rocket-infra`; see `docs/features/assistant-conversations.md`. |
 ```
 
 - [ ] **Step 11: Check and commit**
@@ -1255,7 +1255,7 @@ Expected: `test result: ok. 15 passed` (14 in `fs_conversation_repo`, 1 in `shar
 In `crates/rocket-infra/CLAUDE.md`, Public types table, after the `SharedPathEnvironmentRepo, SharedPathCookieRepo, SharedPathTemplateRepo` row, add:
 
 ```markdown
-| `FsConversationRepo`, `SharedPathConversationRepo` | `rocket_acp::ConversationRepository` | Stored assistant conversations at `<ws>/assistant/conversations/<id>.yml` (snake_case YAML, `atomic_write`, `<ws>/assistant/.gitignore` = `*` via `create_new`, caps applied on save, oldest evicted beyond 50, unreadable or other-version files skipped with a warning). The shared one resolves the active workspace per call; `pinned()` fixes it for a session. See `.claude/assistant-conversations.md`. |
+| `FsConversationRepo`, `SharedPathConversationRepo` | `rocket_acp::ConversationRepository` | Stored assistant conversations at `<ws>/assistant/conversations/<id>.yml` (snake_case YAML, `atomic_write`, `<ws>/assistant/.gitignore` = `*` via `create_new`, caps applied on save, oldest evicted beyond 50, unreadable or other-version files skipped with a warning). The shared one resolves the active workspace per call; `pinned()` fixes it for a session. See `docs/features/assistant-conversations.md`. |
 ```
 
 - [ ] **Step 8: Check and commit**
@@ -1286,7 +1286,7 @@ git commit --only -m "feat(infra): store assistant conversations per workspace" 
 - Modify: `src-tauri/src/commands/acp_sessions.rs` (imports `:4-7`; command `:111-132`; inner `:144-153` and after `:191-195`)
 - Modify: `src-tauri/src/lib.rs` (build after `mcp_tool_svc` `:646-662`; `app.manage` after `:794`; handlers after `:1054`)
 - Modify: `src-tauri/tests/acp_mcp_start_workspace_assistant.rs` (imports `:19-33`, `Fixture` `:243-250`, `build_fixture` `:256-305`, `start` `:330-342`, one new test)
-- Create: `.claude/assistant-conversations.md`
+- Create: `docs/features/assistant-conversations.md`
 - Modify: `CLAUDE.md` (one "See" line in "Rules and conventions")
 - Test: `crates/rocket-app/src/conversation_service.rs` (`mod tests`), `src-tauri/src/commands/assistant_conversations.rs` (`mod tests`), `src-tauri/tests/acp_mcp_start_workspace_assistant.rs`
 
@@ -2455,7 +2455,7 @@ Expected: every test passes, including `a_started_session_can_save_its_conversat
 
 - [ ] **Step 14: Document the store**
 
-Create `.claude/assistant-conversations.md`:
+Create `docs/features/assistant-conversations.md`:
 
 ```markdown
 # Assistant conversations
@@ -2477,16 +2477,16 @@ Spec: `docs/superpowers/specs/2026-10-11-assistant-conversation-history-design.m
 - Events carry ids only: `assistant-conversation-saved`, `assistant-conversation-deleted`, `assistant-conversations-cleared`.
 ```
 
-In the root `CLAUDE.md`, "Rules and conventions", after the `.claude/assistant-composer.md` line, add:
+In the root `CLAUDE.md`, "Rules and conventions", after the `docs/features/assistant-composer.md` line, add:
 
 ```markdown
-See `.claude/assistant-conversations.md` for stored assistant conversations (storage, pins, masking, caps).
+See `docs/features/assistant-conversations.md` for stored assistant conversations (storage, pins, masking, caps).
 ```
 
 In `crates/rocket-app/CLAUDE.md`, Public Types table, after the `ProposalService` row, add:
 
 ```markdown
-| `ConversationService` | Stored assistant conversations. `pin_session(session_id)` (called by `start_workspace_assistant`) keeps `pinned()` repositories of the workspace active at start (16 pins). `save(session_id, input)` validates (lowercase UUID ids, an agent reply), masks every secret variable value of the pinned workspace with `mask_secret_text` (`conversation_secrets.rs`, fails closed on a read error, no vault), then applies the caps and publishes `AssistantConversationSaved`. `list`/`get`/`delete`/`clear` use the live workspace. See `.claude/assistant-conversations.md`. |
+| `ConversationService` | Stored assistant conversations. `pin_session(session_id)` (called by `start_workspace_assistant`) keeps `pinned()` repositories of the workspace active at start (16 pins). `save(session_id, input)` validates (lowercase UUID ids, an agent reply), masks every secret variable value of the pinned workspace with `mask_secret_text` (`conversation_secrets.rs`, fails closed on a read error, no vault), then applies the caps and publishes `AssistantConversationSaved`. `list`/`get`/`delete`/`clear` use the live workspace. See `docs/features/assistant-conversations.md`. |
 ```
 
 - [ ] **Step 15: Check and commit**
@@ -2499,8 +2499,8 @@ Expected: no warnings in the new files.
 Commit through the `dev-workflow-skills:1-git-commit` skill:
 
 ```bash
-git add crates/rocket-app/src/conversation_secrets.rs crates/rocket-app/src/conversation_service.rs crates/rocket-app/src/lib.rs crates/rocket-app/CLAUDE.md src-tauri/src/commands/assistant_conversations.rs src-tauri/src/commands/mod.rs src-tauri/src/commands/acp_sessions.rs src-tauri/src/lib.rs src-tauri/tests/acp_mcp_start_workspace_assistant.rs .claude/assistant-conversations.md CLAUDE.md
-git commit --only -m "feat(assistant): save masked conversations per workspace" -- crates/rocket-app/src/conversation_secrets.rs crates/rocket-app/src/conversation_service.rs crates/rocket-app/src/lib.rs crates/rocket-app/CLAUDE.md src-tauri/src/commands/assistant_conversations.rs src-tauri/src/commands/mod.rs src-tauri/src/commands/acp_sessions.rs src-tauri/src/lib.rs src-tauri/tests/acp_mcp_start_workspace_assistant.rs .claude/assistant-conversations.md CLAUDE.md
+git add crates/rocket-app/src/conversation_secrets.rs crates/rocket-app/src/conversation_service.rs crates/rocket-app/src/lib.rs crates/rocket-app/CLAUDE.md src-tauri/src/commands/assistant_conversations.rs src-tauri/src/commands/mod.rs src-tauri/src/commands/acp_sessions.rs src-tauri/src/lib.rs src-tauri/tests/acp_mcp_start_workspace_assistant.rs docs/features/assistant-conversations.md CLAUDE.md
+git commit --only -m "feat(assistant): save masked conversations per workspace" -- crates/rocket-app/src/conversation_secrets.rs crates/rocket-app/src/conversation_service.rs crates/rocket-app/src/lib.rs crates/rocket-app/CLAUDE.md src-tauri/src/commands/assistant_conversations.rs src-tauri/src/commands/mod.rs src-tauri/src/commands/acp_sessions.rs src-tauri/src/lib.rs src-tauri/tests/acp_mcp_start_workspace_assistant.rs docs/features/assistant-conversations.md CLAUDE.md
 ```
 
 ---

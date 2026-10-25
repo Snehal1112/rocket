@@ -20,7 +20,7 @@ A user sends a request and sees a response. They want to keep that response as a
 - Editing an example's request or response in place. Examples are snapshots.
 - Bruno's "Create Example without sending" (from the request context menu). Possible follow-up.
 - Examples for non-HTTP kinds (GraphQL, gRPC, WebSocket). HTTP requests only, unless the builder finds GraphQL trivially free.
-- Exporting examples. They stay out of the Bruno and Postman exports, as `.claude/collection-export.md` already documents.
+- Exporting examples. They stay out of the Bruno and Postman exports, as `docs/features/collection-export.md` already documents.
 - Changes to masking beyond the gaps listed under "Decisions made with the user".
 
 ## Anti-goals (a failure even if it technically works)
@@ -33,7 +33,7 @@ A user sends a request and sees a response. They want to keep that response as a
 
 - Placement of saved examples: nested under the request in the sidebar (Bruno style), not a dropdown in the response panel.
 - Secrets: real values stay on disk. Masking happens only at commit (existing `mask_examples`) and examples stay out of exports as today. No mask at save time.
-- Masking scope (user decision, replaces "do not change masking rules"): extend `mask_examples` in `crates/rocket-git/src/sanitize.rs`, with tests, to cover the gaps it has today: non-JSON bodies (form-urlencoded and text with secret-named keys or JWT-shaped values, XML secret-named elements), `Set-Cookie` and `Cookie` values whatever the cookie name, and secrets in JSON keys with harmless names where detectable by value shape (JWT-like, long opaque token-like strings next to a secret-named sibling is the builder's call). Update `.claude/example-masking.md` to match. Anything still uncovered stays listed there as "Not covered".
+- Masking scope (user decision, replaces "do not change masking rules"): extend `mask_examples` in `crates/rocket-git/src/sanitize.rs`, with tests, to cover the gaps it has today: non-JSON bodies (form-urlencoded and text with secret-named keys or JWT-shaped values, XML secret-named elements), `Set-Cookie` and `Cookie` values whatever the cookie name, and secrets in JSON keys with harmless names where detectable by value shape (JWT-like, long opaque token-like strings next to a secret-named sibling is the builder's call). Update `docs/features/example-masking.md` to match. Anything still uncovered stays listed there as "Not covered".
 
 ## Constraints and facts from the code
 
@@ -42,7 +42,7 @@ A user sends a request and sees a response. They want to keep that response as a
   - Saving a request from the UI never touches examples. Keep that.
   - Deleting the last example cannot go through `save_request`, because an empty list means "keep what is on disk". Examples need their own commands.
 - Add dedicated IPC commands for examples (list, add, rename, delete), kept thin, routed through a `rocket-app` service and a `rocket-infra` implementation. Each command reads the request file, changes only `examples`, and writes it back atomically. Builder decides exact command names and DTOs. camelCase only on IPC DTOs, never on persistence structs.
-- Commit masking (`crates/rocket-git/src/sanitize.rs`, see `.claude/example-masking.md`) masks secret-named header and param values, secret query values in the example URL, secret JSON body keys, and JWT-shaped JSON strings. The snapshot shape written by the new save must be one that `mask_examples` already understands. Read `sanitize.rs` and its tests first and match their expectations. If the current shape cannot hold what the UI needs, extend masking in the same change, with tests. Do not guess.
+- Commit masking (`crates/rocket-git/src/sanitize.rs`, see `docs/features/example-masking.md`) masks secret-named header and param values, secret query values in the example URL, secret JSON body keys, and JWT-shaped JSON strings. The snapshot shape written by the new save must be one that `mask_examples` already understands. Read `sanitize.rs` and its tests first and match their expectations. If the current shape cannot hold what the UI needs, extend masking in the same change, with tests. Do not guess.
 - The user's example response in the report was a login reply with `token` and `refresh_token`. Use it as a manual test: after a commit, those values must show as `[masked]` in the commit and stay real on disk.
 - The response toolbar lives in `src/components/response/ResponseBodyViewer.tsx` and its parent in `src/components/request/RequestPanel.tsx`.
 - Rules that apply: shadcn/ui primitives only, lucide-react icons only, Monaco for any multi-line viewer, narrow Zustand selectors, no unwrap in production Rust, this touches collection and request files so read `docs/superpowers/specs/opencollection-spec-reference.md` first, and the new IPC commands need `.claude/tauri-commands.md`.

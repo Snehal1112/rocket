@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 
-Series: see `.claude/rok-api-parity-notes.md`. Depends on part B (`2026-10-07-rok-js-api-parity-b-async-design.md`): C uses B's `ScriptHost` trait, so it is implemented after B.
+Series: see `docs/features/rok-api-parity-notes.md`. Depends on part B (`2026-10-07-rok-js-api-parity-b-async-design.md`): C uses B's `ScriptHost` trait, so it is implemented after B.
 
 ## Goal
 
@@ -72,4 +72,4 @@ Series: see `.claude/rok-api-parity-notes.md`. Depends on part B (`2026-10-07-ro
 
 ## Required reading for implementation
 
-📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also `.claude/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md`.
+📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also `docs/features/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md`.

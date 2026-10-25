@@ -89,7 +89,7 @@ Every field except `uid`, `name`, `seq` and `file_name` is copied as it is: URL,
 
 ### 4. Docs
 
-Add a done row `R-64` at the end of section 8 of `.claude/roadmap.md`: "Duplicate request through the backend `duplicate_request` command", with the commit range left to the driver, and list the follow-ups below.
+Add a done row `R-64` at the end of section 8 of `docs/roadmaps/roadmap.md`: "Duplicate request through the backend `duplicate_request` command", with the commit range left to the driver, and list the follow-ups below.
 
 ## Error handling and edge cases
 
@@ -125,7 +125,7 @@ Add a done row `R-64` at the end of section 8 of `.claude/roadmap.md`: "Duplicat
 - `crates/rocket-app/src/duplicate_request_e2e_tests.rs` (new), declared in `lib.rs`
 - `src-tauri/src/commands/collections.rs`, `src-tauri/src/lib.rs`
 - `src/lib/tauri-api.ts`, `src/components/layout/CollectionsSidebar.tsx`, `src/components/collections/RequestNode.tsx`, `src/components/collections/FolderNode.tsx`, and their tests
-- `.claude/roadmap.md`
+- `docs/roadmaps/roadmap.md`
 
 ## Constraints
 
@@ -148,7 +148,7 @@ Add a done row `R-64` at the end of section 8 of `.claude/roadmap.md`: "Duplicat
 - A failure in the sidebar shows an error toast.
 - The sidebar component holds no duplicate logic, only the command call.
 - The tests in the Testing section exist and pass.
-- `R-64` is in `.claude/roadmap.md`.
+- `R-64` is in `docs/roadmaps/roadmap.md`.
 
 ## Out of scope
 

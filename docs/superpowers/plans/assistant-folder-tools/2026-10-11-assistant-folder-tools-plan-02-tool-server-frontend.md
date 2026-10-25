@@ -450,7 +450,7 @@ Expected: PASS.
 - Modify: `src/lib/assistant/proposal-actions.ts`
 - Modify: `src/components/assistant/AssistantProposalCard.tsx`
 - Modify: `src/components/assistant/__tests__/AssistantProposalCard.test.tsx`
-- Modify: `.claude/folder-settings.md`, `.claude/assistant-followups.md`, `.claude/assistant-composer.md` (only if it lists the tools)
+- Modify: `docs/features/folder-settings.md`, `docs/features/assistant-followups.md`, `docs/features/assistant-composer.md` (only if it lists the tools)
 
 **Interfaces:**
 - Consumes: T2's `updateFolderSettings` change type; `useFolderSettings(collection, folderPath)` internals (`dirtyRef`, `loadedRef`, `baselineRef`, `settingsRef`, `keyRef`).
@@ -659,8 +659,8 @@ Expected: PASS.
 - [ ] **Step 5: Checks.** `yarn tsc --noEmit` and `yarn check`.
 
 - [ ] **Step 6: Docs.**
-  - `.claude/folder-settings.md`: add a section "Assistant edits" under "Rules that are easy to break": the assistant proposes `UpdateFolderSettings` (no auth), the save is read-then-patch through `save_folder_settings`, `folder-edit-store` carries the tab's dirty flag and reload requests, only a mounted tab takes part (an unmounted tab already drops its edits), and a header replaced by a proposal loses its description.
-  - `.claude/assistant-followups.md`: add under open items: folder auth edits (needs a security decision), headers lose their description, a patch replaces whole sections (no per-item merge), gRPC requests do not inherit folder settings, folder tab close still does not warn.
-  - `.claude/assistant-composer.md`: add `get_folder_settings` only if the file lists the read tools.
+  - `docs/features/folder-settings.md`: add a section "Assistant edits" under "Rules that are easy to break": the assistant proposes `UpdateFolderSettings` (no auth), the save is read-then-patch through `save_folder_settings`, `folder-edit-store` carries the tab's dirty flag and reload requests, only a mounted tab takes part (an unmounted tab already drops its edits), and a header replaced by a proposal loses its description.
+  - `docs/features/assistant-followups.md`: add under open items: folder auth edits (needs a security decision), headers lose their description, a patch replaces whole sections (no per-item merge), gRPC requests do not inherit folder settings, folder tab close still does not warn.
+  - `docs/features/assistant-composer.md`: add `get_folder_settings` only if the file lists the read tools.
 
 - [ ] **Step 7: Commit** via the commit skill. Paths: the files above that changed. Message: `feat(assistant): block and refresh folder tabs on accept`.

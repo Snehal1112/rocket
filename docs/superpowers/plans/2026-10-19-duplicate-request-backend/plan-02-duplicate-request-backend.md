@@ -32,7 +32,7 @@
 - Modify `src/components/layout/CollectionsSidebar.tsx`: `handleDuplicate`.
 - Modify `src/components/collections/RequestNode.tsx`, `src/components/collections/FolderNode.tsx`: callback type and call.
 - Tests: `src/components/layout/__tests__/CollectionsSidebar.test.tsx`, `src/components/collections/__tests__/RequestNode.test.tsx`, `src/components/collections/__tests__/FolderNode.test.tsx`.
-- Modify `.claude/roadmap.md`.
+- Modify `docs/roadmaps/roadmap.md`.
 
 ### Task 1: API wrapper and sidebar handler
 
@@ -77,13 +77,13 @@
 ### Task 3: Roadmap
 
 **Files:**
-- Modify: `.claude/roadmap.md` (section `## 8b` and following, after the last row `R-63`)
+- Modify: `docs/roadmaps/roadmap.md` (section `## 8b` and following, after the last row `R-63`)
 
 **Interfaces:**
 - Produces: row `R-64`, status `done`.
 
-- [ ] **Step 1: Read** the end of `.claude/roadmap.md` sections 8c and 8d to find the highest ID (the last row should be `R-63`) and the row layout.
+- [ ] **Step 1: Read** the end of `docs/roadmaps/roadmap.md` sections 8c and 8d to find the highest ID (the last row should be `R-63`) and the row layout.
 - [ ] **Step 2: Add** one row `R-64` in the layout of its neighbours: "Duplicate request through the backend `duplicate_request` command (fresh uid, source by full path, unique name in the folder, no overwrite)", status `done`, Where `crates/rocket-app/src/collection_service.rs`, spec `docs/superpowers/specs/2026-10-19-duplicate-request-backend-design.md`, and What remains: the three follow-ups from the spec (non-HTTP kinds, ordering next to the source, duplicate a folder). If `R-64` is already taken, use the next free ID in the same section.
-- [ ] **Step 3: Verify.** Run `grep -c "duplicate_request" .claude/roadmap.md`. Expected: `1` or more, and the new row ID is unique: `grep -c "^| R-64 " .claude/roadmap.md` prints `1`.
+- [ ] **Step 3: Verify.** Run `grep -c "duplicate_request" docs/roadmaps/roadmap.md`. Expected: `1` or more, and the new row ID is unique: `grep -c "^| R-64 " docs/roadmaps/roadmap.md` prints `1`.
 
 Next plan: none

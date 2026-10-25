@@ -1,7 +1,7 @@
 # Events and IPC rework (proposal, not started)
 
 Status: idea only. Brainstormed on 2026-10-11 and parked by the user to think about later. No spec, no plan, no code.
-Roadmap row: R-55 in `.claude/roadmap.md`.
+Roadmap row: R-55 in `docs/roadmaps/roadmap.md`.
 
 ## The ask
 

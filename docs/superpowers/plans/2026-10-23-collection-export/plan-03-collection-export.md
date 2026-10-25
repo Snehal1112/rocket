@@ -50,8 +50,8 @@ Translation table (left side checked against `src/components/editor/rok-types.ts
 - Create `crates/rocket-export/src/{scripts.rs,events.rs,postman_env.rs}` (`slug` already exists from plan 2)
 - Modify `crates/rocket-export/src/{postman.rs,lib.rs}`, `crates/rocket-app/src/collection_export_service.rs`
 - Modify `src-tauri/src/commands/export.rs`, `src/lib/tauri-api.ts`, `src/components/export/ExportCollectionDialog.tsx` and its test
-- Create `crates/rocket-export/CLAUDE.md`, `.claude/collection-export.md`, `.claude/manual-tests/collection-export.md`
-- Modify root `CLAUDE.md` (one pointer line), `.claude/roadmap.md` (one row)
+- Create `crates/rocket-export/CLAUDE.md`, `docs/features/collection-export.md`, `docs/manual-tests/collection-export.md`
+- Modify root `CLAUDE.md` (one pointer line), `docs/roadmaps/roadmap.md` (one row)
 
 ---
 
@@ -71,7 +71,7 @@ Translation table (left side checked against `src/components/editor/rok-types.ts
   - `fn request_events(req: &Request, opts: &PostmanOptions, path: &str, notes: &mut Vec<ExportNote>) -> Vec<serde_json::Value>`
   - `fn folder_events(settings: &FolderSettings, opts: &PostmanOptions, path: &str, notes: &mut Vec<ExportNote>) -> Vec<serde_json::Value>`
 
-- [ ] **Step 1: Read `src/components/editor/rok-types.ts` (variable, `res`, `req` and bare `test`/`expect` declarations), `.claude/rok-api-parity-notes.md`, `crates/rocket-shared/src/assertion.rs`, `crates/rocket-shared/src/action.rs` and `crates/rocket-app/src/assertion_evaluator.rs:134-236` (operators and expression forms).** Drop any table row whose Rocket name does not exist in `rok-types.ts`.
+- [ ] **Step 1: Read `src/components/editor/rok-types.ts` (variable, `res`, `req` and bare `test`/`expect` declarations), `docs/features/rok-api-parity-notes.md`, `crates/rocket-shared/src/assertion.rs`, `crates/rocket-shared/src/action.rs` and `crates/rocket-app/src/assertion_evaluator.rs:134-236` (operators and expression forms).** Drop any table row whose Rocket name does not exist in `rok-types.ts`.
 
 - [ ] **Step 2: Write the failing tests in `scripts.rs` and `events.rs`.** Example:
 
@@ -161,8 +161,8 @@ fn secret_variable_value_is_empty_even_when_hydrated() {
 ### Task 3: Command, dialog options and documentation
 
 **Files:**
-- Modify: `src-tauri/src/commands/export.rs`, `src-tauri/src/lib.rs`, `src/lib/tauri-api.ts`, `src/components/export/ExportCollectionDialog.tsx`, `src/components/export/ExportCollectionDialog.test.tsx`, root `CLAUDE.md`, `.claude/roadmap.md`
-- Create: `crates/rocket-export/CLAUDE.md`, `.claude/collection-export.md`, `.claude/manual-tests/collection-export.md`
+- Modify: `src-tauri/src/commands/export.rs`, `src-tauri/src/lib.rs`, `src/lib/tauri-api.ts`, `src/components/export/ExportCollectionDialog.tsx`, `src/components/export/ExportCollectionDialog.test.tsx`, root `CLAUDE.md`, `docs/roadmaps/roadmap.md`
+- Create: `crates/rocket-export/CLAUDE.md`, `docs/features/collection-export.md`, `docs/manual-tests/collection-export.md`
 
 **Interfaces:**
 - Consumes: `PostmanExportOptions`, `with_environments`.
@@ -170,7 +170,7 @@ fn secret_variable_value_is_empty_even_when_hydrated() {
   - Rust: `struct PostmanExportOptionsDto { preserve_scripts: bool, include_environments: bool }` (camelCase); `export_collection_postman(collection: String, options: PostmanExportOptionsDto, workspace_path: State<'_, Arc<Mutex<PathBuf>>>) -> Result<ExportResultDto, DomainError>` (replaces the plan 2 signature)
   - TS: `export interface PostmanExportOptions { preserveScripts: boolean; includeEnvironments: boolean }` and `exportCollectionPostman = (collection: string, options: PostmanExportOptions) => invoke<ExportResult>(...)`
 
-- [ ] **Step 1: Read the current dialog and its test, `src-tauri/src/commands/export.rs`, `src-tauri/src/lib.rs` where `SharedCollectionEnvironmentRepo::with_secret_store` is built, `.claude/roadmap.md` (find the next free `R-` number) and one existing `.claude/manual-tests/*.md` file for style.**
+- [ ] **Step 1: Read the current dialog and its test, `src-tauri/src/commands/export.rs`, `src-tauri/src/lib.rs` where `SharedCollectionEnvironmentRepo::with_secret_store` is built, `docs/roadmaps/roadmap.md` (find the next free `R-` number) and one existing `.claude/manual-tests/*.md` file for style.**
 
 - [ ] **Step 2: Write the failing dialog tests.**
 
@@ -190,7 +190,7 @@ Further cases: `Preserve scripts is hidden for the Bruno ZIP format`; `the not-i
 
 - [ ] **Step 3: Run `yarn test ExportCollectionDialog`.** Expected: failures (`exportCollectionPostman` called with one argument, checkbox not found).
 
-- [ ] **Step 4: Implement.** Update the command with the DTO and `with_environments(Box::new(SharedCollectionEnvironmentRepo::with_secret_store(Arc::clone(&*workspace_path), crate::env_secret_store())))`; update the wrapper and dialog; the dialog picks the save filter from the returned file name. Write the docs: `crates/rocket-export/CLAUDE.md` (module map, layering, the translation table, scrub rules, how to add a mapping), `.claude/collection-export.md` (decisions from the spec, known losses, unverified items), one pointer line in root `CLAUDE.md`, one roadmap row for the follow-ups (lossless importer round trip, single-file YAML, Insomnia), and `.claude/manual-tests/collection-export.md` with the checks: ajv validation against the v2.1 draft-07 schema, `newman run` against a local mock, `@usebruno/converters` plus `bru run`, opening the Bruno ZIP in Bruno 3, importing into Postman, and a secret leak grep over the outputs.
+- [ ] **Step 4: Implement.** Update the command with the DTO and `with_environments(Box::new(SharedCollectionEnvironmentRepo::with_secret_store(Arc::clone(&*workspace_path), crate::env_secret_store())))`; update the wrapper and dialog; the dialog picks the save filter from the returned file name. Write the docs: `crates/rocket-export/CLAUDE.md` (module map, layering, the translation table, scrub rules, how to add a mapping), `docs/features/collection-export.md` (decisions from the spec, known losses, unverified items), one pointer line in root `CLAUDE.md`, one roadmap row for the follow-ups (lossless importer round trip, single-file YAML, Insomnia), and `docs/manual-tests/collection-export.md` with the checks: ajv validation against the v2.1 draft-07 schema, `newman run` against a local mock, `@usebruno/converters` plus `bru run`, opening the Bruno ZIP in Bruno 3, importing into Postman, and a secret leak grep over the outputs.
 
 - [ ] **Step 5: Run `yarn test ExportCollectionDialog`, `yarn tsc --noEmit`, `yarn check`, `cargo check -j4 -p <src-tauri package>`, and `cargo test -j4 -p rocket-export`.** Expected: all pass, no type, lint or Rust errors.
 

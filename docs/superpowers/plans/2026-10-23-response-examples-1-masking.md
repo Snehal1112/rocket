@@ -80,7 +80,7 @@ Expected: no errors.
 
 **Files:**
 - Modify: `crates/rocket-git/src/sanitize.rs`
-- Modify: `.claude/example-masking.md`
+- Modify: `docs/features/example-masking.md`
 
 **Interfaces:**
 - Consumes: Task 1's `mask_body`, `mask_text_body`.
@@ -107,7 +107,7 @@ Expected: the new tests FAIL.
 Run: `cargo test -j4 -p rocket-git sanitize` then `cargo test -j4 -p rocket-git masks_only_the_examples_block`
 Expected: PASS.
 
-- [ ] **Step 5: Update `.claude/example-masking.md`.** Rewrite the "Masked" and "Not covered" bullets to match: list the body types now handled, the value shapes (the exact list from Step 3), URL userinfo, and that `Set-Cookie` and `Cookie` headers are masked by header name. Under "Not covered" keep: secrets in non-secret-named keys whose values have no known shape, `http.auth.*` of the request itself, and multipart file parts. Replace the last bullet ("There is no UI to create or edit them yet") with a pointer to `.claude/response-examples.md` (created in Plan 3).
+- [ ] **Step 5: Update `docs/features/example-masking.md`.** Rewrite the "Masked" and "Not covered" bullets to match: list the body types now handled, the value shapes (the exact list from Step 3), URL userinfo, and that `Set-Cookie` and `Cookie` headers are masked by header name. Under "Not covered" keep: secrets in non-secret-named keys whose values have no known shape, `http.auth.*` of the request itself, and multipart file parts. Replace the last bullet ("There is no UI to create or edit them yet") with a pointer to `docs/features/response-examples.md` (created in Plan 3).
 
 - [ ] **Step 6: Run `cargo check -j4 -p rocket-git` and `cargo test -j4 -p rocket-git`**
 Expected: PASS.

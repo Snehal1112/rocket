@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (rocket-acp, rocket-app, src-tauri), React + TypeScript, Vitest, Biome. Claude Code adapter `claude-agent-acp`, Gemini CLI 0.63.0.
 
-**Spec:** `.claude/acp-multi-agent-support.md`; findings in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md` (section "Reasoning findings"). Depends on Plans 1 to 4 being merged.
+**Spec:** `docs/features/acp-multi-agent-support.md`; findings in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md` (section "Reasoning findings"). Depends on Plans 1 to 4 being merged.
 
 ## Global Constraints
 
@@ -710,7 +710,7 @@ Then invoke the `dev-workflow-skills:1-git-commit` skill. Suggested subject: `fe
 **Files:**
 - Modify: `src/components/settings/AgentConfigsDialog.tsx`
 - Modify: `src/components/assistant/composer/Composer.tsx` (remember the effort)
-- Modify: `.claude/acp-multi-agent-support.md` (append the verification log)
+- Modify: `docs/features/acp-multi-agent-support.md` (append the verification log)
 - Test: `src/components/settings/__tests__/AgentConfigsDialog.test.tsx`, `src/components/assistant/composer/__tests__/Composer.test.tsx`
 
 **Interfaces:**
@@ -1009,13 +1009,13 @@ With a real Gemini agent (`GEMINI_API_KEY`): ask the same question. Expected: th
 
 - [ ] **Step 12: Record the results**
 
-Append to `.claude/acp-multi-agent-support.md` under the "Verification log" from Plan 2:
+Append to `docs/features/acp-multi-agent-support.md` under the "Verification log" from Plan 2:
 
 ```markdown
 - <date>, Plan 5: Gemini thinkingConfig reaches the API <pass|fail: log lines>, Claude effort picker starts at high and is remembered <pass|fail>, Reasoning block text <Claude: shown|empty|n/a> <Gemini: shown|empty|n/a>.
 ```
 
-Fill every angle bracket with the real result, then commit with `git add .claude/acp-multi-agent-support.md` and the `dev-workflow-skills:1-git-commit` skill (suggested subject: `docs(acp): record the reasoning verification run`).
+Fill every angle bracket with the real result, then commit with `git add docs/features/acp-multi-agent-support.md` and the `dev-workflow-skills:1-git-commit` skill (suggested subject: `docs(acp): record the reasoning verification run`).
 
 ---
 

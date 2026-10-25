@@ -1,6 +1,6 @@
 # Flow Tier 3 Plan Index
 
-Source: `.claude/flow-roadmap.md` Tier 3 (F-31 to F-47) plus F-57. Design facts come from five read-only investigations on 2026-10-08.
+Source: `docs/roadmaps/flow-roadmap.md` Tier 3 (F-31 to F-47) plus F-57. Design facts come from five read-only investigations on 2026-10-08.
 Each plan holds at most 3 tasks. Plan files are written one at a time just before they run. Status here is the source of truth for plan progress.
 
 Rules for every plan:

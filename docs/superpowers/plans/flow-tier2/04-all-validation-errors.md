@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-flow`, `rocket-app`), React, TypeScript, Vitest, Biome. Run with `cargo -j4` and `yarn`.
 
-**Spec:** `.claude/flow-roadmap.md` row F-28 (Tier 2). F-50 (a structured IPC error) is a later Tier 4 item and is NOT done here. The string stays parseable by the existing regexp, so F-50 can replace it later.
+**Spec:** `docs/roadmaps/flow-roadmap.md` row F-28 (Tier 2). F-50 (a structured IPC error) is a later Tier 4 item and is NOT done here. The string stays parseable by the existing regexp, so F-50 can replace it later.
 
 ## Global Constraints
 
@@ -1848,7 +1848,7 @@ Invoke the `dev-workflow-skills:1-git-commit` skill, then commit with explicit p
 - **Raw reason text in the save message.** The reasons still echo a Switch match value and a bad exit or field name, as they did before. The client masks match values after a `case` or `matches` word. Recommended default: leave it, and give the lints and F-50 the server-side masking. A server-side pass would reuse `sentence` from `lint.rs`.
 - **Reasons that use node ids.** The callback-order reason (V15) still names the Request by id (`Request 'r1' sends ...`). Recommended default: leave it for now. It is a one-line change in `check_callback_order` to look up the label with `display_label`, but `lint.rs` `sentence` matches the `Request '` prefix and would need the same change.
 - **Cycle id lists.** A very large cycle repeats its ids in the problem tag and in the tail. Recommended default: accept it, since the cycle list was already unbounded.
-- **Roadmap.** `.claude/flow-roadmap.md` F-28 should be marked done when this plan merges. It is untracked on main, so the final merge step of the series should update it, not this plan.
+- **Roadmap.** `docs/roadmaps/flow-roadmap.md` F-28 should be marked done when this plan merges. It is untracked on main, so the final merge step of the series should update it, not this plan.
 
 ## Self-review
 

@@ -77,7 +77,7 @@ Today the auto-deny is the only thing stopping Gemini's built-in shell and file 
 
 ## Docs to update when shipped
 
-`.claude/tauri-commands.md` (new command), `.claude/assistant-followups.md` (the Gemini built-in tools follow-up), `.claude/frontend.md` (the store field).
+`.claude/tauri-commands.md` (new command), `docs/features/assistant-followups.md` (the Gemini built-in tools follow-up), `.claude/frontend.md` (the store field).
 
 ## Out of scope
 

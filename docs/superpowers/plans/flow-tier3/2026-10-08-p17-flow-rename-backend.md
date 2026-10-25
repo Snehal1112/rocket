@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-flow`, `rocket-infra`, `rocket-app`, `src-tauri`), `tempfile` fixtures, TypeScript wrapper and a Vitest contract test.
 
-**Spec:** Roadmap item F-46 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section P17.
+**Spec:** Roadmap item F-46 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section P17.
 
 ## Global Constraints
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-flow`, `rocket-app`, `rocket-infra` tests), serde_yaml (fixture), React, TypeScript, Vitest, Biome.
 
-**Spec:** `.claude/flow-roadmap.md` rows F-26 and F-27 (Tier 2). Phase 1 spec section 6 of `docs/superpowers/specs/2026-09-27-flow-visual-workflow-builder-design.md`: "Output nodes have exactly one incoming wire and no outgoing ones".
+**Spec:** `docs/roadmaps/flow-roadmap.md` rows F-26 and F-27 (Tier 2). Phase 1 spec section 6 of `docs/superpowers/specs/2026-09-27-flow-visual-workflow-builder-design.md`: "Output nodes have exactly one incoming wire and no outgoing ones".
 
 ## Global Constraints
 

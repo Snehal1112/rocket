@@ -30,7 +30,7 @@ Run after Task 3, on the finished feature, as the last review of the series. Do 
 - [ ] A secret inherited from the parent shows masked, and the reveal toggle rules for secrets still apply. Evidence: the row in the dialog.
 - [ ] Setting the `.env` path and sending a request that uses `{{process.env.NAME}}` works, and denying the host environment gate in the trust settings stops it. Evidence: the send result in both states.
 - [ ] The same controls work on a global environment. Evidence: the global environments tab.
-- [ ] The docs are accurate: `crates/rocket-environment/CLAUDE.md` no longer claims upstream handling, and `.claude/roadmap.md` lists the two follow-ups. Evidence: the diff of those files.
+- [ ] The docs are accurate: `crates/rocket-environment/CLAUDE.md` no longer claims upstream handling, and `docs/roadmaps/roadmap.md` lists the two follow-ups. Evidence: the diff of those files.
 - [ ] Every acceptance criterion of the spec has evidence from this review or an earlier plan's review. Evidence: a one-line mapping, written into the ledger.
 
 ## Review Focus
@@ -46,7 +46,7 @@ Run after Task 3, on the finished feature, as the last review of the series. Do 
 - Create `src/components/environments/extends-candidates.ts`: `extendsCandidates`.
 - Modify `src/components/environments/EnvironmentDialog.tsx` (picker, path field), `src/components/environments/VariableTable.tsx` (inherited rows).
 - Modify `src/components/workspace/WorkspaceEnvironmentsTab.tsx` (same controls for global environments).
-- Modify `crates/rocket-environment/CLAUDE.md`, `.claude/collection-trust.md`, `.claude/roadmap.md`, `docs/superpowers/specs/opencollection-spec-reference.md` (a short note under the Environment type).
+- Modify `crates/rocket-environment/CLAUDE.md`, `docs/features/collection-trust.md`, `docs/roadmaps/roadmap.md`, `docs/superpowers/specs/opencollection-spec-reference.md` (a short note under the Environment type).
 
 ---
 
@@ -115,7 +115,7 @@ Run after Task 3, on the finished feature, as the last review of the series. Do 
 
 **Files:**
 - Modify: `src/components/workspace/WorkspaceEnvironmentsTab.tsx`
-- Modify: `crates/rocket-environment/CLAUDE.md`, `.claude/collection-trust.md`, `.claude/roadmap.md`, `docs/superpowers/specs/opencollection-spec-reference.md`
+- Modify: `crates/rocket-environment/CLAUDE.md`, `docs/features/collection-trust.md`, `docs/roadmaps/roadmap.md`, `docs/superpowers/specs/opencollection-spec-reference.md`
 - Test: `src/components/workspace/WorkspaceEnvironmentsTab.test.tsx`
 
 **Interfaces:**
@@ -131,8 +131,8 @@ Run after Task 3, on the finished feature, as the last review of the series. Do 
 
 - [ ] **Step 3: Implement the global tab changes, then the docs.**
   - `crates/rocket-environment/CLAUDE.md`: replace the false line about `extends` and `dot_env_file_path` with the real behavior (`flatten.rs`, `dot_env.rs`, what is and is not inherited) and add both modules to the module map.
-  - `.claude/collection-trust.md`: add that `.env` files are read only when the host environment gate allows, that the OS environment wins, and that `.env` values are masked in the Console.
-  - `.claude/roadmap.md`: record the shipped work and the two follow-ups from the spec.
+  - `docs/features/collection-trust.md`: add that `.env` files are read only when the host environment gate allows, that the OS environment wins, and that `.env` values are masked in the Console.
+  - `docs/roadmaps/roadmap.md`: record the shipped work and the two follow-ups from the spec.
   - `docs/superpowers/specs/opencollection-spec-reference.md`: one note under the Environment type that `extends` and `dotEnvFilePath` are acted on, with the same-store and process.env rules.
 
 - [ ] **Step 4: Run to verify they pass:** `yarn test WorkspaceEnvironmentsTab`, `yarn tsc --noEmit`, `yarn check`. Expected: PASS.

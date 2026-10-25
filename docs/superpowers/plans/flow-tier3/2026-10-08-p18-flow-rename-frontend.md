@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, TanStack Query, Zustand (`pane-store`, `flow-auth-store`), shadcn `DropdownMenu`, `AlertDialog`, `Input`, lucide-react, `sonner`, Vitest and Testing Library.
 
-**Spec:** Roadmap item F-46 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section P18. Depends on plan P17, which provides `renameFlow(collection, oldName, newName)` in `src/lib/tauri-api.ts` (command `rename_flow`). `deleteFlow(collection, name)` already exists.
+**Spec:** Roadmap item F-46 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section P18. Depends on plan P17, which provides `renameFlow(collection, oldName, newName)` in `src/lib/tauri-api.ts` (command `rename_flow`). `deleteFlow(collection, name)` already exists.
 
 ## Global Constraints
 

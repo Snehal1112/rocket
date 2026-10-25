@@ -354,7 +354,7 @@ Gotchas:
 - There is no per-certificate enable toggle and no "test connection" button for certificates.
 - A redirect that leaves the certificate's domain is not followed. The 3xx is returned.
 - Certificates also apply to OAuth2 token URLs that match the domain.
-- `.claude/rocketvault-certificate-export-requirements.md` has stale status lines. The `vault` certificate type already exists.
+- `docs/features/rocketvault-certificate-export-requirements.md` has stale status lines. The `vault` certificate type already exists.
 
 Key source locations:
 

@@ -3,7 +3,7 @@
 **Date:** 2026-10-01
 **Status:** Draft for review
 **Scope:** `rocket-shared`, `rocket-http`, `rocket-environment`, `rocket-app`, `rocket-infra`, `src-tauri`, and the frontend environment dialog.
-**Related:** [external secrets spec](2026-09-22-rocketvault-external-secrets-spec.md), [RocketVault export requirements](../../../.claude/rocketvault-certificate-export-requirements.md), [OpenCollection reference](opencollection-spec-reference.md) section 4.
+**Related:** [external secrets spec](2026-09-22-rocketvault-external-secrets-spec.md), [RocketVault export requirements](../../../docs/features/rocketvault-certificate-export-requirements.md), [OpenCollection reference](opencollection-spec-reference.md) section 4.
 
 ## 1. Context
 

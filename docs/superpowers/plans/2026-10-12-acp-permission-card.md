@@ -47,7 +47,7 @@
 | `src/lib/assistant-event-bridge.ts` | modify | route the two events into the store |
 | `src/components/assistant/AssistantPermissionCard.tsx` | create | the card |
 | `src/components/assistant/AssistantChatView.tsx` | modify | render the Permissions section |
-| `.claude/assistant-followups.md` | modify | record the Gemini built-in tools follow-up |
+| `docs/features/assistant-followups.md` | modify | record the Gemini built-in tools follow-up |
 
 ---
 
@@ -1757,7 +1757,7 @@ git commit --only -m "feat(assistant): show agent permission requests as cards" 
 ### Task 7: Manual check with a real Gemini session and follow-up notes
 
 **Files:**
-- Modify: `.claude/assistant-followups.md`
+- Modify: `docs/features/assistant-followups.md`
 
 - [ ] **Step 1: Full verification**
 
@@ -1784,7 +1784,7 @@ Record any deviation as a bug before continuing.
 
 - [ ] **Step 3: Update the follow-ups doc**
 
-Append to `.claude/assistant-followups.md` under its open follow-ups list:
+Append to `docs/features/assistant-followups.md` under its open follow-ups list:
 
 ```markdown
 - **Gemini built-in tools stay on.** Permission cards (2026-10-12) let the user approve Gemini's shell and file tools. Claude sessions drop them with `tools: []`; Gemini has no equivalent in `session/new`. Look for a per-session way to disable them (settings file in the isolated config dir, or `--allowed-tools`) so the card is only ever about Rocket's tools.
@@ -1794,8 +1794,8 @@ Append to `.claude/assistant-followups.md` under its open follow-ups list:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add .claude/assistant-followups.md
-git commit --only -m "docs(assistant): record the permission card follow-ups" -- .claude/assistant-followups.md
+git add docs/features/assistant-followups.md
+git commit --only -m "docs(assistant): record the permission card follow-ups" -- docs/features/assistant-followups.md
 ```
 
 ---

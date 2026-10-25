@@ -32,7 +32,7 @@
 - Create `src/hooks/useFlowRequestPathEvents.ts`, modify `src/App.tsx`.
 - Modify `src/components/layout/CollectionsSidebar.tsx`.
 - Tests: `src/hooks/__tests__/useFlowRequestPathEvents.test.tsx`, `src/components/layout/__tests__/CollectionsSidebar.test.tsx`.
-- Docs: `.claude/flow-roadmap.md`, `.claude/flow-request-refs.md` (new), `crates/rocket-flow/CLAUDE.md`, `CLAUDE.md`.
+- Docs: `docs/roadmaps/flow-roadmap.md`, `docs/features/flow-request-refs.md` (new), `crates/rocket-flow/CLAUDE.md`, `CLAUDE.md`.
 
 ### Task 1: Event hook and toast
 
@@ -80,18 +80,18 @@
 ### Task 3: Docs and roadmap
 
 **Files:**
-- Modify: `.claude/flow-roadmap.md` (F-01 row ~line 27, new section at the end), `crates/rocket-flow/CLAUDE.md` (module map), `CLAUDE.md` (reference lines)
-- Create: `.claude/flow-request-refs.md`
+- Modify: `docs/roadmaps/flow-roadmap.md` (F-01 row ~line 27, new section at the end), `crates/rocket-flow/CLAUDE.md` (module map), `CLAUDE.md` (reference lines)
+- Create: `docs/features/flow-request-refs.md`
 
 **Interfaces:**
 - Produces: F-01 marked `done`, three new follow-up rows, and a feature doc that the project `CLAUDE.md` links.
 
-- [ ] **Step 1: Read** `.claude/flow-roadmap.md` (the F-01 row, the maintain rules, the last section and the highest ID), `crates/rocket-flow/CLAUDE.md` (module map table) and the reference lines in `CLAUDE.md`.
+- [ ] **Step 1: Read** `docs/roadmaps/flow-roadmap.md` (the F-01 row, the maintain rules, the last section and the highest ID), `crates/rocket-flow/CLAUDE.md` (module map table) and the reference lines in `CLAUDE.md`.
 - [ ] **Step 2: Write the docs.**
-  - `.claude/flow-request-refs.md`, under 60 lines: what is rewritten and when (same-collection move, folder prefix, whole segments), what is only reported (cross-collection move, delete), the pieces (`rocket-flow` `request_refs.rs`, `FlowReferenceUpdater`, the `CollectionService` hook, the event `flow-request-paths-rewritten`, `flows_using_request`, `rewriteFlowRequestPaths`, the hook, the dialog line), the limits (outside edits, unparseable flows, run cache, the instant before the tab patch) and where the tests live.
-  - `.claude/flow-roadmap.md`: set the F-01 status to `done` and put the series name `flow-request-ref-rewrite` in its Notes. Add a section `## Follow-ups from F-01 (2026-10-18)` with rows `F-133` (real-app check of move, folder rename, delete dialog and the toast with a flow open), `F-134` (show the dangling-path lint after a delete once `worktree-flow-tier2` merges, F-21) and `F-135` (rewrite or warn on changes made outside the app, such as a git pull), in the file's follow-up table layout. Verify first that `F-133` is the next free ID.
+  - `docs/features/flow-request-refs.md`, under 60 lines: what is rewritten and when (same-collection move, folder prefix, whole segments), what is only reported (cross-collection move, delete), the pieces (`rocket-flow` `request_refs.rs`, `FlowReferenceUpdater`, the `CollectionService` hook, the event `flow-request-paths-rewritten`, `flows_using_request`, `rewriteFlowRequestPaths`, the hook, the dialog line), the limits (outside edits, unparseable flows, run cache, the instant before the tab patch) and where the tests live.
+  - `docs/roadmaps/flow-roadmap.md`: set the F-01 status to `done` and put the series name `flow-request-ref-rewrite` in its Notes. Add a section `## Follow-ups from F-01 (2026-10-18)` with rows `F-133` (real-app check of move, folder rename, delete dialog and the toast with a flow open), `F-134` (show the dangling-path lint after a delete once `worktree-flow-tier2` merges, F-21) and `F-135` (rewrite or warn on changes made outside the app, such as a git pull), in the file's follow-up table layout. Verify first that `F-133` is the next free ID.
   - `crates/rocket-flow/CLAUDE.md`: one module-map row for `request_refs.rs`.
-  - `CLAUDE.md`: one line `See .claude/flow-request-refs.md for how flows follow request moves (rewrite, event, delete dialog).`
-- [ ] **Step 3: Verify.** Run `grep -n "request_refs" crates/rocket-flow/CLAUDE.md`, `grep -n "flow-request-refs" CLAUDE.md` and `grep -nE "^\| F-0?1 \|.*\| done \|" .claude/flow-roadmap.md`. Expected: one or more matches each. Run `grep -c "^| F-13[345] " .claude/flow-roadmap.md`. Expected: `3`. Run `wc -l .claude/flow-request-refs.md`. Expected: under 60.
+  - `CLAUDE.md`: one line `See docs/features/flow-request-refs.md for how flows follow request moves (rewrite, event, delete dialog).`
+- [ ] **Step 3: Verify.** Run `grep -n "request_refs" crates/rocket-flow/CLAUDE.md`, `grep -n "flow-request-refs" CLAUDE.md` and `grep -nE "^\| F-0?1 \|.*\| done \|" docs/roadmaps/flow-roadmap.md`. Expected: one or more matches each. Run `grep -c "^| F-13[345] " docs/roadmaps/flow-roadmap.md`. Expected: `3`. Run `wc -l docs/features/flow-request-refs.md`. Expected: under 60.
 
 Next plan: none

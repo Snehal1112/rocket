@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Rust: no panicking unwrap calls in production paths; `cargo check -j4`, `cargo test -j4 -p <crate> <name>`; no workspace-wide test run.
-- A denied trust gate reads no file at all (`.claude/collection-trust.md`).
+- A denied trust gate reads no file at all (`docs/features/collection-trust.md`).
 - A relative `.env` path with `..` stays refused. The OS environment wins over every `.env` value.
 - `.env` keys are reported in `dot_env_keys` so the Console masks them. Keep that for default-layer keys.
 - Conventional commits; commit through the `dev-workflow-skills:1-git-commit` skill; add explicit paths, never `git add -A`.
@@ -67,7 +67,7 @@
 **Files:**
 - Modify: `crates/rocket-app/src/execution_service.rs` (`process_env_for`, around line 1060)
 - Modify: `src/components/environments/EnvironmentDialog.tsx` (placeholder only, line 548)
-- Modify: `.claude/collection-trust.md`, `.claude/env-extends-dotenv-spec-notes.md`, `crates/rocket-environment/CLAUDE.md`, `.claude/roadmap.md` (R-29 note)
+- Modify: `docs/features/collection-trust.md`, `docs/features/env-extends-dotenv-spec-notes.md`, `crates/rocket-environment/CLAUDE.md`, `docs/roadmaps/roadmap.md` (R-29 note)
 - Test: `crates/rocket-app/src/execution_service.rs` tests module (near line 7187, uses the existing fake loader)
 
 **Interfaces:**
@@ -88,7 +88,7 @@
 
 - [ ] **Step 4: Update the placeholder** in `EnvironmentDialog.tsx` to `.env (default: collection .env)`, and the dialog test that asserts the old placeholder if any (`yarn test EnvironmentDialog`).
 
-- [ ] **Step 5: Update the docs.** In `.claude/collection-trust.md` line about `.env` files: add that the default `<collection>/.env` is read under the same gate. In `crates/rocket-environment/CLAUDE.md` `dot_env.rs` row: mention `collect_default_dot_env`. Add the amendments to `.claude/env-extends-dotenv-spec-notes.md`.
+- [ ] **Step 5: Update the docs.** In `docs/features/collection-trust.md` line about `.env` files: add that the default `<collection>/.env` is read under the same gate. In `crates/rocket-environment/CLAUDE.md` `dot_env.rs` row: mention `collect_default_dot_env`. Add the amendments to `docs/features/env-extends-dotenv-spec-notes.md`.
 
 - [ ] **Step 6: Run to verify they pass:** `cargo test -j4 -p rocket-app process_env_`, `cargo check -j4`, `yarn tsc --noEmit`, `yarn check`. Expected: PASS.
 

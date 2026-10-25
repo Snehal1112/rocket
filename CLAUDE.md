@@ -58,24 +58,24 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 
 Rules in `.claude/rules/` — start with `.claude/rules/00-shortcuts.md` for a pointer map.
 See `.claude/frontend.md` for Zustand/tabs/UI state. See `.claude/tauri-commands.md` for IPC modules.
-See `.claude/script-files.md` for shared .js script files and local require().
-See `.claude/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
-See `.claude/assistant-composer.md` for the AI Assistant composer (PromptEditor keys, chips, masking, storage keys).
-See `.claude/assistant-conversations.md` for stored assistant conversations (storage, pins, masking, caps).
-See `.claude/collection-trust.md` for the collection trust gate (requested vs allowed access, `{{process.env}}` gate).
-See `.claude/console-masking.md` for the Console secret masking rule (masked copy, reveal toggle, fail-closed, vault values).
+See `docs/features/script-files.md` for shared .js script files and local require().
+See `docs/features/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
+See `docs/features/assistant-composer.md` for the AI Assistant composer (PromptEditor keys, chips, masking, storage keys).
+See `docs/features/assistant-conversations.md` for stored assistant conversations (storage, pins, masking, caps).
+See `docs/features/collection-trust.md` for the collection trust gate (requested vs allowed access, `{{process.env}}` gate).
+See `docs/features/console-masking.md` for the Console secret masking rule (masked copy, reveal toggle, fail-closed, vault values).
 The software factory is the standalone project `~/data/rocket/rocket-factory` (home `~/.factory`, project `rocket`, global `/factory` command). Rocket's old in-repo copy is archived in `~/data/rocket/Archive/rocket-tools-factory/`.
-See `.claude/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
-See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
-See `.claude/flow-request-refs.md` for how flows follow request moves (rewrite, event, delete dialog).
-See `.claude/collection-export.md` for the collection export to Bruno and Postman (outputs, decisions, known losses, manual checks).
-See `.claude/example-masking.md` for how saved request examples get their secrets masked in a git commit.
-See `.claude/bruno-import-strictness.md` for Bruno 3 imports (files are copied as they are), what Rocket's readers now tolerate, and the known gaps.
-See `.claude/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
-See `.claude/roadmap.md` for the master roadmap of unimplemented work, and `.claude/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
+See `docs/features/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
+See `docs/features/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
+See `docs/features/flow-request-refs.md` for how flows follow request moves (rewrite, event, delete dialog).
+See `docs/features/collection-export.md` for the collection export to Bruno and Postman (outputs, decisions, known losses, manual checks).
+See `docs/features/example-masking.md` for how saved request examples get their secrets masked in a git commit.
+See `docs/features/bruno-import-strictness.md` for Bruno 3 imports (files are copied as they are), what Rocket's readers now tolerate, and the known gaps.
+See `docs/features/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
+See `docs/roadmaps/roadmap.md` for the master roadmap of unimplemented work, and `docs/roadmaps/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
-See `.claude/subagents.md` for which subagent type and model to use, the cost model and the limits seen in practice.
+See `docs/engineering/subagents.md` for which subagent type and model to use, the cost model and the limits seen in practice.
 
 ---
 

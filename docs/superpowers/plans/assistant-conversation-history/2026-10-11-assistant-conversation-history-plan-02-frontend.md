@@ -916,7 +916,7 @@ git commit --only -m "feat(assistant): save conversations after turns and at ses
 - Create: `src/components/assistant/AssistantHistoryView.tsx`
 - Modify: `src/components/assistant/AssistantPanel.tsx` (imports `:1-10`, header `:83-106`, body `:107-122`)
 - Modify: `src/components/assistant/__tests__/AssistantPanel.test.tsx` (mock list `:21-30`, one new test)
-- Modify: `.claude/assistant-conversations.md` (add a "Frontend" section)
+- Modify: `docs/features/assistant-conversations.md` (add a "Frontend" section)
 - Test: `src/components/assistant/__tests__/AssistantHistoryView.test.tsx`
 
 **Interfaces:**
@@ -1453,7 +1453,7 @@ Expected: PASS (7 History view tests, 1 new panel test, existing tests unchanged
 
 - [ ] **Step 8: Document the frontend**
 
-Append to `.claude/assistant-conversations.md`:
+Append to `docs/features/assistant-conversations.md`:
 
 ```markdown
 ## Frontend
@@ -1472,8 +1472,8 @@ Expected: no errors.
 Commit through the `dev-workflow-skills:1-git-commit` skill:
 
 ```bash
-git add src/components/assistant/AssistantChatView.tsx src/components/assistant/AssistantConversationView.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/AssistantPanel.tsx src/components/assistant/__tests__/AssistantPanel.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx .claude/assistant-conversations.md
-git commit --only -m "feat(assistant): add the conversation history view" -- src/components/assistant/AssistantChatView.tsx src/components/assistant/AssistantConversationView.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/AssistantPanel.tsx src/components/assistant/__tests__/AssistantPanel.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx .claude/assistant-conversations.md
+git add src/components/assistant/AssistantChatView.tsx src/components/assistant/AssistantConversationView.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/AssistantPanel.tsx src/components/assistant/__tests__/AssistantPanel.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx docs/features/assistant-conversations.md
+git commit --only -m "feat(assistant): add the conversation history view" -- src/components/assistant/AssistantChatView.tsx src/components/assistant/AssistantConversationView.tsx src/components/assistant/AssistantHistoryView.tsx src/components/assistant/AssistantPanel.tsx src/components/assistant/__tests__/AssistantPanel.test.tsx src/components/assistant/__tests__/AssistantHistoryView.test.tsx docs/features/assistant-conversations.md
 ```
 
 ---

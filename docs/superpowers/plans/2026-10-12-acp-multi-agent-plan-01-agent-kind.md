@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (rocket-acp, rocket-app, rocket-infra, src-tauri), React + TypeScript, Vitest, Biome.
 
-**Spec:** `.claude/acp-multi-agent-support.md`. Index: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
+**Spec:** `docs/features/acp-multi-agent-support.md`. Index: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
 
 ## Global Constraints
 

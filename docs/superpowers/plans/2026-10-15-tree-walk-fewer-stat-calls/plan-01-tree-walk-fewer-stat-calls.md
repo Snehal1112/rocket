@@ -537,7 +537,7 @@ Expected: pass.
 - Modify: `crates/rocket-infra/benches/support/mod.rs` (add the deep fixture)
 - Modify: `crates/rocket-infra/benches/collection.rs` (add the deep case)
 - Create: `crates/rocket-infra/tests/tree_walk_syscalls.rs`
-- Create: `.claude/perf-tree-walk.md`
+- Create: `docs/engineering/perf-tree-walk.md`
 
 **Interfaces:**
 - Produces, in `benches/support/mod.rs`: `pub const DEEP_PARENTS: usize = 25`, `pub const DEEP_CHILDREN: usize = 19`, `pub const DEEP_REQUESTS: usize = 5`, `pub const DEEP_FOLDERS: usize` (500), `pub fn populate_deep(repo: &FsCollectionRepo, name: &str)` and `pub fn generate_deep() -> Fixture`. Plan 2 Task 3 uses the bench case `collection_tree/get_summaries/deep` and the tests `build_deep_fixture` and `load_deep_fixture_once`.
@@ -656,7 +656,7 @@ Create `crates/rocket-infra/tests/tree_walk_syscalls.rs`:
 
 ```rust
 //! One clean `get_summaries` load of the deep fixture, for `strace`.
-//! Both tests are ignored: run them by hand, see `.claude/perf-tree-walk.md`.
+//! Both tests are ignored: run them by hand, see `docs/engineering/perf-tree-walk.md`.
 
 #[path = "../benches/support/mod.rs"]
 mod support;
@@ -675,14 +675,14 @@ fn fixture_repo() -> FsCollectionRepo {
 
 /// Builds the deep collection `bench-0` in the folder named by `ROCKET_TREE_WALK_FIXTURE`.
 #[test]
-#[ignore = "builds the deep fixture; run by hand, see .claude/perf-tree-walk.md"]
+#[ignore = "builds the deep fixture; run by hand, see docs/engineering/perf-tree-walk.md"]
 fn build_deep_fixture() {
     support::populate_deep(&fixture_repo(), "bench-0");
 }
 
 /// One summaries load of the prebuilt fixture. This is the run that `strace` counts.
 #[test]
-#[ignore = "loads the deep fixture once; run by hand, see .claude/perf-tree-walk.md"]
+#[ignore = "loads the deep fixture once; run by hand, see docs/engineering/perf-tree-walk.md"]
 fn load_deep_fixture_once() {
     let collection = fixture_repo().get_summaries("bench-0").expect("summaries load");
     assert_eq!(collection.request_count(), support::DEEP_FOLDERS * support::DEEP_REQUESTS);
@@ -712,7 +712,7 @@ Expected: the build test passes, the plain load test passes, each `strace` run e
 
 - [ ] **Step 7: Write the measurement document**
 
-Create `.claude/perf-tree-walk.md`. Replace each `<...>` in the table with the real number you measured: the `strace` total, the criterion low, middle and high times. No `<...>` may remain in the file.
+Create `docs/engineering/perf-tree-walk.md`. Replace each `<...>` in the table with the real number you measured: the `strace` total, the criterion low, middle and high times. No `<...>` may remain in the file.
 
 ````markdown
 # Tree walk syscall counts and timing (issue #95)

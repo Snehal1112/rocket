@@ -45,7 +45,7 @@ Flow: dialog, then `export_collection_bruno` or `export_collection_postman` (`sr
 
 ## Unverified
 
-These need the manual checks in `.claude/manual-tests/collection-export.md`:
+These need the manual checks in `docs/manual-tests/collection-export.md`:
 
 - The v2.1 draft-07 schema validation of the output.
 - The OAuth2 key names, which follow Bruno's exporter and not a real Postman export.
@@ -54,4 +54,4 @@ These need the manual checks in `.claude/manual-tests/collection-export.md`:
 
 ## Follow-ups
 
-Roadmap row R-65 in `.claude/roadmap.md`: lossless Postman round trip in the importer, single-file OpenCollection YAML, Insomnia and Postman Data Export targets.
+Roadmap row R-65 in `docs/roadmaps/roadmap.md`: lossless Postman round trip in the importer, single-file OpenCollection YAML, Insomnia and Postman Data Export targets.

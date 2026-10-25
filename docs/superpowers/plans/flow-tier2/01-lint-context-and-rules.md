@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-flow`, `rocket-app`, `src-tauri`), React, TypeScript, Vitest, Biome. Run with `cargo -j4` and `yarn`.
 
-**Spec:** `.claude/flow-roadmap.md` rows F-21 and F-22 (Tier 2). F-20 (the lint tier and the `LintContext` trait) is done. Series index: `docs/superpowers/plans/flow-tier2/`.
+**Spec:** `docs/roadmaps/flow-roadmap.md` rows F-21 and F-22 (Tier 2). F-20 (the lint tier and the `LintContext` trait) is done. Series index: `docs/superpowers/plans/flow-tier2/`.
 
 ## Global Constraints
 
@@ -1825,7 +1825,7 @@ export function useBackendFlowLints(
 
 (`useState`, `useRef`, `useEffect` and `getActiveGlobalEnvName` are already imported in this file. `activeEnvironmentName` is declared above, at ~94. The global environment name is read at render time, like the run toolbar does at click time, so it is picked up on the next render after a switch and not reactively. Open decision 6.)
 
-Roadmap: mark F-21 and F-22 `done` in `.claude/flow-roadmap.md` with the commit ids and the evidence `lint.rs` `dangling_request_lint` and `unknown_variable_lint`, and move the "Run at save and when a flow opens" note to "done via useBackendFlowLints". That file is untracked in this checkout, so edit it but do not include it in the commit.
+Roadmap: mark F-21 and F-22 `done` in `docs/roadmaps/flow-roadmap.md` with the commit ids and the evidence `lint.rs` `dangling_request_lint` and `unknown_variable_lint`, and move the "Run at save and when a flow opens" note to "done via useBackendFlowLints". That file is untracked in this checkout, so edit it but do not include it in the commit.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 

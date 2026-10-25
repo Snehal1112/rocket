@@ -15,7 +15,7 @@ Make the stored `extends` and `dotEnvFilePath` fields on an environment do what 
 - Merging `.env` values into the plain variable scope.
 - Extending an environment from another store (collection to global or the reverse).
 - Showing inherited variables in the assistant chips or MCP environment views (see Follow-ups).
-- Making backend-executed HTTP (flows, `rok.runRequest`, assistant `run_request`) resolve `{{process.env}}`. That limit in `.claude/collection-trust.md` stays.
+- Making backend-executed HTTP (flows, `rok.runRequest`, assistant `run_request`) resolve `{{process.env}}`. That limit in `docs/features/collection-trust.md` stays.
 
 ## Design
 
@@ -49,7 +49,7 @@ Make the stored `extends` and `dotEnvFilePath` fields on an environment do what 
 
 ### Docs
 
-- Correct `crates/rocket-environment/CLAUDE.md` and add the behaviour to the spec reference notes and `.claude/collection-trust.md`.
+- Correct `crates/rocket-environment/CLAUDE.md` and add the behaviour to the spec reference notes and `docs/features/collection-trust.md`.
 
 ## Constraints
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`pane-store`), Vitest and Testing Library, shadcn `AlertDialog`, `sonner` toasts.
 
-**Spec:** Roadmap items F-07 and F-33 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/00-plan-index.md` (plan P1).
+**Spec:** Roadmap items F-07 and F-33 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/00-plan-index.md` (plan P1).
 
 ## Global Constraints
 

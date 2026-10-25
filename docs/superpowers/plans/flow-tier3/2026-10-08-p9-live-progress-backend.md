@@ -10,7 +10,7 @@
 
 **Tech Stack:** Rust, serde, tokio (`select!`, `Instant`), `rocket-shared` events, `rocket-app` Flow engine, `FakeCallbackListener` test double.
 
-**Spec:** Roadmap item F-40 (backend) in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P9 Live progress backend". Builds on `docs/superpowers/plans/flow-tier3/2026-10-08-p7-step-trace-backend.md`.
+**Spec:** Roadmap item F-40 (backend) in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P9 Live progress backend". Builds on `docs/superpowers/plans/flow-tier3/2026-10-08-p7-step-trace-backend.md`.
 
 ## Global Constraints
 

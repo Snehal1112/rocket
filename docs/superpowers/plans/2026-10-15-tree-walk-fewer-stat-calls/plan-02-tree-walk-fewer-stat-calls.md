@@ -327,7 +327,7 @@ Expected: all pass, the two new helper tests included, no Plan 1 test edited, no
 📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`.
 
 **Files:**
-- Modify: `.claude/perf-tree-walk.md` (append the result)
+- Modify: `docs/engineering/perf-tree-walk.md` (append the result)
 
 **Interfaces:**
 - Consumes: the bench case `collection_tree/get_summaries/deep` and the ignored tests `build_deep_fixture` and `load_deep_fixture_once` from Plan 1, and the changes from Tasks 1 and 2.
@@ -385,7 +385,7 @@ Expected: two numbers, the lowest `calls` column of the three runs for each side
 
 - [ ] **Step 6: Record the result**
 
-Append this to `.claude/perf-tree-walk.md`, with the real numbers and the real criterion lines. No `<...>` may remain in the file.
+Append this to `docs/engineering/perf-tree-walk.md`, with the real numbers and the real criterion lines. No `<...>` may remain in the file.
 
 ````markdown
 ## Result of the change (paired run: one worktree, one sitting, Linux)
@@ -412,6 +412,6 @@ cargo test -j4 -p rocket-infra fs_collection
 cargo check -j4 -p rocket-infra --all-targets
 cargo clippy -j4 -p rocket-infra --all-targets -- -D warnings
 ```
-Expected: `git status` shows only your intended changes (the two production files with your versions, the tests and `.claude/perf-tree-walk.md`), the tests pass, and the check passes. If clippy reports warnings in files you changed, fix them. Warnings in files you did not touch are not yours: list them in your reply and leave them.
+Expected: `git status` shows only your intended changes (the two production files with your versions, the tests and `docs/engineering/perf-tree-walk.md`), the tests pass, and the check passes. If clippy reports warnings in files you changed, fix them. Warnings in files you did not touch are not yours: list them in your reply and leave them.
 
 Next plan: none

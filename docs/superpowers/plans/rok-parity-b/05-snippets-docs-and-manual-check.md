@@ -200,7 +200,7 @@ Suggested subject: `feat(editor): add async rok snippets and allow top-level awa
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-07-js-script-security-design.md` (append an addendum)
 - Modify: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md` (append implementation notes)
-- Modify: `.claude/rok-api-parity-notes.md` (the B row and "Notes for B")
+- Modify: `docs/features/rok-api-parity-notes.md` (the B row and "Notes for B")
 - Modify: `crates/rocket-infra/CLAUDE.md` (a "Scripting engine" paragraph)
 - Modify: `crates/rocket-app/CLAUDE.md` (a "Script host" bullet)
 
@@ -242,7 +242,7 @@ The plans in `docs/superpowers/plans/rok-parity-b/` corrected these points after
 
 - [ ] **Step 3: Update the series notes**
 
-In `.claude/rok-api-parity-notes.md`, replace the B row of the status table with:
+In `docs/features/rok-api-parity-notes.md`, replace the B row of the status table with:
 
 ```markdown
 | B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Implemented from `docs/superpowers/plans/rok-parity-b/` (index plus 5 plans). Follow-ups: History badge for script requests, scanner flags for `sendRequest`/`runRequest`, nested runs seeing the caller's unsaved env writes, refreshing `PhaseState.var_ctx.env` after env writes. |
@@ -291,7 +291,7 @@ Expected: all PASS.
 
 - [ ] **Step 6: Commit**
 
-Skill `dev-workflow-skills:1-git-commit`, pathspec commit of: `docs/superpowers/specs/2026-10-07-js-script-security-design.md`, `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`, `.claude/rok-api-parity-notes.md`, `crates/rocket-infra/CLAUDE.md`, `crates/rocket-app/CLAUDE.md`.
+Skill `dev-workflow-skills:1-git-commit`, pathspec commit of: `docs/superpowers/specs/2026-10-07-js-script-security-design.md`, `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`, `docs/features/rok-api-parity-notes.md`, `crates/rocket-infra/CLAUDE.md`, `crates/rocket-app/CLAUDE.md`.
 Suggested subject: `docs: record rok parity B design notes and Safe-mode network access`.
 
 ## Manual check (real app, after all five plans)

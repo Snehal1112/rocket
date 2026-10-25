@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (src-tauri), Markdown.
 
-**Spec:** `.claude/acp-multi-agent-support.md`. Depends on Plans 1 and 2 being merged (the docs describe them).
+**Spec:** `docs/features/acp-multi-agent-support.md`. Depends on Plans 1 and 2 being merged (the docs describe them).
 
 ## Global Constraints
 
@@ -110,7 +110,7 @@ Then invoke the `dev-workflow-skills:1-git-commit` skill. Suggested subject: `fi
 - Modify: `src-tauri/src/mcp/tool_server.rs` (the `propose_changes` tool attribute at line 1026-1029, tests module)
 - Modify: `crates/rocket-app/CLAUDE.md` (the `AcpSessionService` row)
 - Modify: `crates/rocket-acp/CLAUDE.md` (module map and key design points)
-- Modify: `.claude/assistant-followups.md` (open follow-ups)
+- Modify: `docs/features/assistant-followups.md` (open follow-ups)
 - Modify: `CLAUDE.md` (one pointer line)
 - Test: `src-tauri/src/mcp/tool_server.rs`
 
@@ -169,14 +169,14 @@ In the `AcpSessionService` row replace the sentence "start_workspace_session alw
 
 In the module map row for `agent_config.rs` write: "`AgentConfig` struct + `AgentKind` (Claude, Gemini, Generic; per-kind reserved env names and `validate_kind_env`) + `AgentConfigRepository` trait". Under "Key Design Points" add the bullet: "`AgentKind` is persisted on `AgentConfig` with `#[serde(default)]` (old files load as Claude). It decides how `rocket-app`'s `session_plan` isolates and instructs a session. It carries no behavior itself."
 
-- [ ] **Step 7: Update `.claude/assistant-followups.md`**
+- [ ] **Step 7: Update `docs/features/assistant-followups.md`**
 
 Append this section at the end of the file:
 
 ```markdown
 ## Multi-agent support (2026-10-12)
 
-Design and verified Gemini facts: `.claude/acp-multi-agent-support.md`. Plans: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
+Design and verified Gemini facts: `docs/features/acp-multi-agent-support.md`. Plans: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
 
 Open follow-ups:
 
@@ -190,10 +190,10 @@ Open follow-ups:
 
 - [ ] **Step 8: Add the pointer to `CLAUDE.md`**
 
-In the list of `See .claude/...` lines in the project `CLAUDE.md` (after the `.claude/assistant-followups.md` line) add:
+In the list of `See .claude/...` lines in the project `CLAUDE.md` (after the `docs/features/assistant-followups.md` line) add:
 
 ```markdown
-See `.claude/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
+See `docs/features/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
 ```
 
 - [ ] **Step 9: Run the checks**
@@ -205,7 +205,7 @@ Expected: PASS. (`yarn check` covers the Markdown-free TS tree only; it must sta
 
 ```bash
 git add src-tauri/src/mcp/tool_server.rs crates/rocket-app/CLAUDE.md crates/rocket-acp/CLAUDE.md \
-  .claude/assistant-followups.md CLAUDE.md
+  docs/features/assistant-followups.md CLAUDE.md
 ```
 
 Then invoke the `dev-workflow-skills:1-git-commit` skill. Suggested subject: `docs(acp): describe agent kinds and name request docs in propose_changes`.

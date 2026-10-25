@@ -2292,7 +2292,7 @@ Invoke the `dev-workflow-skills:1-git-commit` skill with the message `feat(assis
 - Modify: `src/lib/assistant/assistant-session.ts` (Plan 05: `sendAssistantMessage` gains a `resources` argument; `startAssistant` passes the remembered model to its `startWorkspaceAssistant(` call)
 - Modify: `src/lib/assistant/__tests__/assistant-session.test.ts` and `src/components/assistant/__tests__/AssistantPanel.test.tsx` (Plan 05 tests whose call expectations or stub queries change)
 - Delete: `src/components/assistant/AssistantInputStub.tsx`
-- Create: `.claude/assistant-composer.md`
+- Create: `docs/features/assistant-composer.md`
 - Modify: `CLAUDE.md:62` (add one pointer line after the folder-settings line)
 - Test: `src/components/assistant/composer/__tests__/usage-format.test.ts`
 - Test: `src/lib/assistant/__tests__/model-memory.test.ts`
@@ -3239,7 +3239,7 @@ Apply the remembered model when a session starts. The only call is in `src/lib/a
 
 - [ ] **Step 8: Document the composer**
 
-Create `.claude/assistant-composer.md`:
+Create `docs/features/assistant-composer.md`:
 
 ```markdown
 # AI Assistant composer
@@ -3272,10 +3272,10 @@ Code: `src/components/assistant/composer/` and `src/lib/assistant/`.
 - The context indicator shows `used / size` as a percentage, with tokens and cost on hover. It is hidden when the size is 0.
 ```
 
-In `CLAUDE.md`, after line 62 (`See \`.claude/folder-settings.md\` for the folder settings tab, ...`), add:
+In `CLAUDE.md`, after line 62 (`See \`docs/features/folder-settings.md\` for the folder settings tab, ...`), add:
 
 ```markdown
-See `.claude/assistant-composer.md` for the AI Assistant composer (PromptEditor keys, chips, masking, storage keys).
+See `docs/features/assistant-composer.md` for the AI Assistant composer (PromptEditor keys, chips, masking, storage keys).
 ```
 
 - [ ] **Step 9: Run the tests (for the user to run)**
@@ -3311,7 +3311,7 @@ Expected: both clean, with no reference to `AssistantInputStub` left.
 - [ ] **Step 12: Commit**
 
 ```bash
-git add src/components/assistant/composer/usage-format.ts src/lib/assistant/model-memory.ts src/components/assistant/composer/ComposerToolbar.tsx src/components/assistant/composer/Composer.tsx src/stores/assistant-store.ts src/components/assistant/AssistantPanel.tsx src/components/assistant/AssistantInputStub.tsx .claude/assistant-composer.md CLAUDE.md src/components/assistant/composer/__tests__/usage-format.test.ts src/lib/assistant/__tests__/model-memory.test.ts src/components/assistant/composer/__tests__/ComposerToolbar.test.tsx src/components/assistant/composer/__tests__/Composer.test.tsx src/stores/__tests__/assistant-store.set-mode.test.ts
+git add src/components/assistant/composer/usage-format.ts src/lib/assistant/model-memory.ts src/components/assistant/composer/ComposerToolbar.tsx src/components/assistant/composer/Composer.tsx src/stores/assistant-store.ts src/components/assistant/AssistantPanel.tsx src/components/assistant/AssistantInputStub.tsx docs/features/assistant-composer.md CLAUDE.md src/components/assistant/composer/__tests__/usage-format.test.ts src/lib/assistant/__tests__/model-memory.test.ts src/components/assistant/composer/__tests__/ComposerToolbar.test.tsx src/components/assistant/composer/__tests__/Composer.test.tsx src/stores/__tests__/assistant-store.set-mode.test.ts
 ```
 
 Also add, by explicit path, `src/lib/assistant/assistant-session.ts`, `src/lib/assistant/__tests__/assistant-session.test.ts` and `src/components/assistant/__tests__/AssistantPanel.test.tsx`. `git add` of the deleted stub path stages its removal. Invoke the `dev-workflow-skills:1-git-commit` skill with the message `feat(assistant): add composer toolbar and replace the input stub`.
@@ -3331,7 +3331,7 @@ None. Plan 06 is the last plan of the series ([index](00-plan-index.md)). After 
 
 ## Post-Implementation Review
 
-Before calling the series done, dispatch an Opus-model subagent (Agent tool, `model: "opus"`) to review everything this plan added or changed: `src/lib/assistant/*`, `src/components/assistant/composer/*`, the `setMode` change in `src/stores/assistant-store.ts`, the stub replacement in `src/components/assistant/AssistantPanel.tsx`, the remembered-model change at the `startWorkspaceAssistant(` call, `.claude/assistant-composer.md` and the `CLAUDE.md` line, plus their tests. It reviews the diff file `git diff <plan-06 base>..HEAD > /tmp/plan-06.diff`, not the live tree. It checks:
+Before calling the series done, dispatch an Opus-model subagent (Agent tool, `model: "opus"`) to review everything this plan added or changed: `src/lib/assistant/*`, `src/components/assistant/composer/*`, the `setMode` change in `src/stores/assistant-store.ts`, the stub replacement in `src/components/assistant/AssistantPanel.tsx`, the remembered-model change at the `startWorkspaceAssistant(` call, `docs/features/assistant-composer.md` and the `CLAUDE.md` line, plus their tests. It reviews the diff file `git diff <plan-06 base>..HEAD > /tmp/plan-06.diff`, not the live tree. It checks:
 
 - interface gaps against the index's "Plan 06 — composer" contract and the Plan 01, 03 and 05 names actually consumed (every `Ruling:` line in the ledger is justified);
 - that the five Review Focus items are pinned by the tests named above and that the tests would fail without the guarded code (for example, removing `runningRef` must fail "sends once when Enter is pressed twice quickly");

@@ -1,7 +1,7 @@
 # Fix A2 — UID generation: domain-owned policy, infra calls into it
 
 **Branch:** `worktree-fix-a2-uid-generation`
-**Source:** §2 / A2 of `.claude/reviews/2026-05-04-rocket-infra-synthesis.md`
+**Source:** §2 / A2 of `docs/reports/2026-05-04-rocket-infra-synthesis.md`
 
 ## Problem (refined from synthesis)
 

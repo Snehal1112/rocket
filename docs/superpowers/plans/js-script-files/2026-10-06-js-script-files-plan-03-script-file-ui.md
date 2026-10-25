@@ -46,7 +46,7 @@
 | `src/components/collections/FolderNode.tsx` | modify | same, for folders |
 | `src/components/collections/tree-utils.ts` | modify | `DeleteTarget` gains `'script'` |
 | `src/components/layout/CollectionsSidebar.tsx` | modify | delete a script |
-| `.claude/script-files.md` | create | developer doc |
+| `docs/features/script-files.md` | create | developer doc |
 | `CLAUDE.md` | modify | one-line pointer |
 | `crates/rocket-scripting/CLAUDE.md` | modify | `ScriptFileScope` row |
 
@@ -561,7 +561,7 @@ Suggested subject: `feat(ui): add script file editor tab`
 **Files:**
 - Create: `src/components/collections/ScriptNode.tsx`, `src/components/collections/NewScriptDialog.tsx`
 - Modify: `src/components/collections/CollectionNode.tsx`, `FolderNode.tsx`, `tree-utils.ts`, `src/components/layout/CollectionsSidebar.tsx`
-- Create: `.claude/script-files.md`; modify `CLAUDE.md`, `crates/rocket-scripting/CLAUDE.md`
+- Create: `docs/features/script-files.md`; modify `CLAUDE.md`, `crates/rocket-scripting/CLAUDE.md`
 - Test: `src/components/collections/__tests__/ScriptNode.test.tsx`, `src/components/collections/__tests__/NewScriptDialog.test.tsx`
 
 **Interfaces:**
@@ -1038,7 +1038,7 @@ Expected: PASS, including the pre-existing `CollectionNode` and `RequestNode` te
 
 - [ ] **Step 7: Write the developer doc and pointers**
 
-Create `.claude/script-files.md`:
+Create `docs/features/script-files.md`:
 
 ```markdown
 # Script files
@@ -1059,7 +1059,7 @@ Design: `docs/superpowers/specs/2026-10-06-js-script-files-design.md`.
   a delete warning for referenced scripts.
 ```
 
-Add one line to the end of the "Rules and conventions" section in `CLAUDE.md`: `See .claude/script-files.md for shared .js script files and local require().` Add this row to the key types table in `crates/rocket-scripting/CLAUDE.md`:
+Add one line to the end of the "Rules and conventions" section in `CLAUDE.md`: `See docs/features/script-files.md for shared .js script files and local require().` Add this row to the key types table in `crates/rocket-scripting/CLAUDE.md`:
 
 ```markdown
 | `ScriptFileScope` | `context.rs` | Collection root and extra roots for local-file `require()`; plain data, `rocket-infra` does the I/O |
@@ -1072,7 +1072,7 @@ Expected: all clean and passing.
 
 - [ ] **Step 9: Commit**
 
-Invoke `dev-workflow-skills:1-git-commit` for `src/components/collections src/components/layout/CollectionsSidebar.tsx .claude/script-files.md CLAUDE.md crates/rocket-scripting/CLAUDE.md`.
+Invoke `dev-workflow-skills:1-git-commit` for `src/components/collections src/components/layout/CollectionsSidebar.tsx docs/features/script-files.md CLAUDE.md crates/rocket-scripting/CLAUDE.md`.
 Suggested subject: `feat(ui): add script files to the sidebar`
 
 ---

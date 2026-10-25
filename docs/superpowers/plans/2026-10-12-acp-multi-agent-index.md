@@ -1,6 +1,6 @@
 # ACP Multi-Agent Support: Plan Index
 
-Spec and verified facts: `.claude/acp-multi-agent-support.md`.
+Spec and verified facts: `docs/features/acp-multi-agent-support.md`.
 
 **Goal:** the workspace assistant works with Gemini CLI and, later, other ACP agents, through an `AgentKind` enum and one pure `session_plan` function, and its reasoning is visible, controllable and used to guide and correct the user on an endpoint. Claude behavior does not change except where a plan says so.
 

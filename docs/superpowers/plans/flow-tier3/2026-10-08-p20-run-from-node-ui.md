@@ -12,7 +12,7 @@
 
 **Tech Stack:** Rust (`src-tauri`, package `rocket`), React, TypeScript, Zustand (`pane-store`), Vitest and Testing Library, shadcn `DropdownMenu`, lucide icons.
 
-**Spec:** Roadmap item F-41 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P20". Backend contract: `docs/superpowers/plans/flow-tier3/2026-10-08-p19-run-from-node-backend.md`.
+**Spec:** Roadmap item F-41 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P20". Backend contract: `docs/superpowers/plans/flow-tier3/2026-10-08-p19-run-from-node-backend.md`.
 
 **Assumed F-03 contract:** `runFlow` sends a client-chosen run id and the toolbar matches `flow-run-*` events by that id. If F-03 put the run id in a `RunFlowOptions` object, add the `partial` field from Task 1 to that object instead of adding a sixth parameter; every other step is unchanged. If F-03 renamed `onRunStateChange` or moved event matching, keep F-03's names and apply the same edits at the new place.
 

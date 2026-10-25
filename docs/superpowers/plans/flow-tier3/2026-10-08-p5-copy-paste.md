@@ -10,7 +10,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`pane-store`), `@xyflow/react` 12, Vitest and Testing Library, shadcn `DropdownMenu`, `sonner` toasts.
 
-**Spec:** Roadmap item F-35 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P5) and `00-plan-index.md` (plan P5).
+**Spec:** Roadmap item F-35 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P5) and `00-plan-index.md` (plan P5).
 
 **Depends on P4 (merged first).** Used verbatim from P4: `updateFlowGraph(tabId, nodes, edges)` called without options is exactly one undo step; `undoFlow(tabId)`; `FlowTab.history`; the `handleKeyDown` shape in `FlowCanvas.tsx` (a `const key = e.key.toLowerCase()` followed by one `if (key === ...) { ...; return; }` branch per key); the `CANVAS_HINTS` array in `FlowCanvas.tsx`; `pruneSelection`. P5 adds no store API.
 

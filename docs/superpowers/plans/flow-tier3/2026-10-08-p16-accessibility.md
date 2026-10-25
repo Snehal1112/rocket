@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, `@xyflow/react` 12.12.0, Vitest and Testing Library, lucide-react.
 
-**Spec:** Roadmap item F-45 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P16) and the plan index (`00-plan-index.md`, plan P16).
+**Spec:** Roadmap item F-45 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P16) and the plan index (`00-plan-index.md`, plan P16).
 
 **Independent of other plans.** It edits `FlowCanvas.tsx` (object literals in `toRfNodes` and `toRfEdges`, the `<ReactFlow>` props), `FlowPane.tsx` (one JSX element) and the eight node headers. If plan P12 (issue badges) merged first, `toRfNodes` has an `issues` line and every node header has `<NodeIssueBadge />` above `<NodeMenuButton`; this plan only adds lines and does not touch those. Insert the status icon directly above `<NodeMenuButton`, whatever else is there. If plan P2 merged first, the result strip is a labelled `<section>` region (not a live region) and does not duplicate the announcements here. If plan P11 merged first, pass the announcer the **live** `tab.nodeStatus`, not the viewed run's maps.
 

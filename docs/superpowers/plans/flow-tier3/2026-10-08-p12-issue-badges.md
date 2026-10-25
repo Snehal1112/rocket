@@ -10,7 +10,7 @@
 
 **Tech Stack:** React, TypeScript, `@xyflow/react` 12.12.0, Vitest and Testing Library, shadcn `Popover`, `Tooltip` and `Button`, lucide-react.
 
-**Spec:** Roadmap item F-37 (client part, F-37a) in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P12) and the plan index (`00-plan-index.md`, plan P12).
+**Spec:** Roadmap item F-37 (client part, F-37a) in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P12) and the plan index (`00-plan-index.md`, plan P12).
 
 **Independent of P1 and P2.** This plan touches `FlowPane.tsx` and `FlowCanvas.tsx` but none of the code those plans add. If P1 or P2 has merged first, only the surrounding JSX differs; every anchor below is a prop or function name.
 

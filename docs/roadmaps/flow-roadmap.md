@@ -14,7 +14,7 @@ Statuses re-verified against `main` (commit `9666d1a1`) on 2026-10-11 by reading
 - Plans derived from this file must hold at most 3 tasks each, with an index file. Link each plan in the Batches section.
 - Any task that touches `.yml`, collection or environment models, auth, or variable resolution must start with:
   "Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`."
-- Related notes: `.claude/plan-audit-2026-10-02.md`, `docs/superpowers/specs/*flow*`, `crates/rocket-flow/CLAUDE.md`.
+- Related notes: `docs/roadmaps/plan-audit-2026-10-02.md`, `docs/superpowers/specs/*flow*`, `crates/rocket-flow/CLAUDE.md`.
 
 Sizes: S under half a day, M one to two days, L more than two days or needs a backend and frontend change.
 
@@ -24,7 +24,7 @@ Sizes: S under half a day, M one to two days, L more than two days or needs a ba
 
 | ID | Item | Size | Status | Evidence | Notes |
 |---|---|---|---|---|---|
-| F-01 | Renaming, moving or deleting a collection request silently breaks flows that use it. Add a rewrite hook in the collection service, plus a warning (see F-20). | L | done | `collection_service.rs:179,281,344`; `node.rs:152-155` | Needs the OpenCollection read. Done 2026-10-18, series `flow-request-ref-rewrite`. See `.claude/flow-request-refs.md`. |
+| F-01 | Renaming, moving or deleting a collection request silently breaks flows that use it. Add a rewrite hook in the collection service, plus a warning (see F-20). | L | done | `collection_service.rs:179,281,344`; `node.rs:152-155` | Needs the OpenCollection read. Done 2026-10-18, series `flow-request-ref-rewrite`. See `docs/features/flow-request-refs.md`. |
 | F-02 | Redact step error text. A failed send can quote a query-string API key. Auth follow-up F2. | S | open | `flow_execution_service.rs:1642,1663`; contrast `flow_debug.rs:36` | Reuse `redact_url_secrets`. |
 | F-03 | Let the client choose the run ID. Runs are matched to tabs by collection and flow name, so two tabs can cross-attach and Stop can cancel the wrong run. | M | done | `FlowToolbar.tsx` `handleRun`; `flow_execution_service.rs` `run_with_options` | Done in P22: client UUID in `RunFlowOptions.runId`, backend checks and reserves it first, tab keeps `pendingRunId`. F-05 can build on the early reservation. |
 | F-04 | Stop must interrupt an in-flight HTTP send. Race `execute_capturing` against the cancel token. Also cap each poll attempt at the deadline. | M | open | `flow_execution_service.rs:1361-1363`; `flow_poll.rs:85-87` | A collection timeout of 0 means no timeout. |

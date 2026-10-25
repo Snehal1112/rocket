@@ -12,7 +12,7 @@
 
 **Tech Stack:** Rust (`rocket-flow`, `rocket-app`). No TypeScript, no IPC change (the `lint_flow` command and DTO are P21 Task 1).
 
-**Spec:** Roadmap items F-20 (the tier) and the F-23 rules it needs, in `.claude/flow-roadmap.md` (main checkout). The consumer contract is "Required from F-20" in `docs/superpowers/plans/flow-tier3/2026-10-08-p21-backend-lint-feed.md` (lines 15 to 62). The client rules it replaces are in `src/lib/flow-issues.ts` (plan P12, `2026-10-08-p12-issue-badges.md`). Design notes: `01-design-notes.md`, sections "P12" and "P21".
+**Spec:** Roadmap items F-20 (the tier) and the F-23 rules it needs, in `docs/roadmaps/flow-roadmap.md` (main checkout). The consumer contract is "Required from F-20" in `docs/superpowers/plans/flow-tier3/2026-10-08-p21-backend-lint-feed.md` (lines 15 to 62). The client rules it replaces are in `src/lib/flow-issues.ts` (plan P12, `2026-10-08-p12-issue-badges.md`). Design notes: `01-design-notes.md`, sections "P12" and "P21".
 
 ## What P21 consumes (produced here, exactly)
 
@@ -1519,7 +1519,7 @@ Suggested subject: `feat(flow): lint the canvas graph in the flow service`.
 ## After the plan (main loop, in the main checkout)
 
 These files are untracked and live only in the main checkout, so the implementer does not edit them:
-- `.claude/flow-roadmap.md`: set F-20 to `done` with the commit range. In F-23's notes, record that its exit and reach rules shipped in P23 (the rest of F-23 is done too, so F-23 can be `done` as well). Add follow-ups from the final review.
+- `docs/roadmaps/flow-roadmap.md`: set F-20 to `done` with the commit range. In F-23's notes, record that its exit and reach rules shipped in P23 (the rest of F-23 is done too, so F-23 can be `done` as well). Add follow-ups from the final review.
 - `docs/superpowers/plans/flow-tier3/00-plan-index.md`: add a P23 row (F-20, 3 tasks, needs none, sonnet) and change P21's "Needs" to "P23 (F-20), P12".
 - Apply the P21 changes listed in "Deviations".
 

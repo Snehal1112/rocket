@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 
-Series: see `.claude/rok-api-parity-notes.md`. Part A (sync gaps) is `2026-10-07-rok-js-api-parity-a-sync-design.md`.
+Series: see `docs/features/rok-api-parity-notes.md`. Part A (sync gaps) is `2026-10-07-rok-js-api-parity-a-sync-design.md`.
 
 ## Goal
 
@@ -75,7 +75,7 @@ Async op. Values are clamped to 0 to 60000. Non-numbers reject.
 
 ## Required reading for implementation
 
-📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also `.claude/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md`.
+📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also `docs/features/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md`.
 
 ## Implementation notes (2026-10-08)
 

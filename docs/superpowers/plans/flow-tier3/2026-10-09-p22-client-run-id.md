@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-app`, `src-tauri` package `rocket`), `ulid`, React, TypeScript, Zustand (`pane-store`), Vitest and Testing Library.
 
-**Spec:** Roadmap item F-03 in `.claude/flow-roadmap.md` (F-05 depends on it). Context: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (run matching at "Run matching by collection and flow name", P19 and P20 sections) and `docs/superpowers/plans/flow-tier3/2026-10-08-p20-run-from-node-ui.md` ("Assumed F-03 contract").
+**Spec:** Roadmap item F-03 in `docs/roadmaps/flow-roadmap.md` (F-05 depends on it). Context: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (run matching at "Run matching by collection and flow name", P19 and P20 sections) and `docs/superpowers/plans/flow-tier3/2026-10-08-p20-run-from-node-ui.md` ("Assumed F-03 contract").
 
 ## The bug, verified at HEAD e2bd8487
 
@@ -1451,7 +1451,7 @@ Suggested subject: `fix(flow): match run events to the tab by a client run id`.
 **Files:**
 - Create: `src/components/flow/__tests__/FlowPane.twoTabs.test.tsx`
 - Modify: `crates/rocket-app/CLAUDE.md` (new section after "Flow partial runs")
-- Modify (untracked, not committed): `.claude/flow-roadmap.md` (row F-03), `docs/superpowers/plans/flow-tier3/00-plan-index.md` (P22 row), `docs/superpowers/plans/flow-tier3/2026-10-08-p20-run-from-node-ui.md` (BLOCKED note)
+- Modify (untracked, not committed): `docs/roadmaps/flow-roadmap.md` (row F-03), `docs/superpowers/plans/flow-tier3/00-plan-index.md` (P22 row), `docs/superpowers/plans/flow-tier3/2026-10-08-p20-run-from-node-ui.md` (BLOCKED note)
 
 **Interfaces:**
 - Consumes: `newFlowRunId`, `RunFlowOptions`, `FlowTab.pendingRunId`, `setFlowPendingRun`, toolbar props `onRunRequested`/`tabPendingRunId` (Task 2); backend `runId` (Task 1).
@@ -1792,7 +1792,7 @@ Expected: all pass.
 
 These three files are untracked in git. Edit them in place and do not stage them.
 
-In `.claude/flow-roadmap.md`, replace the F-03 row with:
+In `docs/roadmaps/flow-roadmap.md`, replace the F-03 row with:
 
 ```markdown
 | F-03 | Let the client choose the run ID. Runs are matched to tabs by collection and flow name, so two tabs can cross-attach and Stop can cancel the wrong run. | M | done | `FlowToolbar.tsx` `handleRun`; `flow_execution_service.rs` `run_with_options` | Done in P22: client UUID in `RunFlowOptions.runId`, backend checks and reserves it first, tab keeps `pendingRunId`. F-05 can build on the early reservation. |

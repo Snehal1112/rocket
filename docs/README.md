@@ -1,7 +1,7 @@
 # Rocket docs
 
-All reference and planning docs live here. Do not add `.md` files to `.claude/` unless the
-work needs one (rules and per-crate `CLAUDE.md` files stay where they are).
+All reference and planning docs live here. Do not add loose `.md` files to `.claude/`. Only
+rules, commands, skills and per-crate `CLAUDE.md` files stay where they are, because tools load them.
 
 ## Layout
 
@@ -9,10 +9,14 @@ work needs one (rules and per-crate `CLAUDE.md` files stay where they are).
 |---|---|---|
 | `superpowers/specs/` | One design or spec file per feature, named `YYYY-MM-DD-<topic>-design.md`. | New files only, via the spec workflow. |
 | `superpowers/plans/` | Implementation plans. A dated file is a single plan. A folder is a feature with `00-plan-index.md` and numbered plans. | New files only, via the plan workflow. |
+| `features/` | Per-feature notes: decisions, limits, known gaps (export, trust gate, masking, assistant, folder settings). | Yes. |
+| `roadmaps/` | `roadmap.md` (R-xx), `flow-roadmap.md` (F-xx) and the plan audit. | Yes, update when work ships. |
+| `engineering/` | Subagent guidance, benchmarks, perf notes, the events and IPC rework. | Yes. |
+| `manual-tests/` | Step lists for checks that need the real app. Helper `.sh` scripts stay in `.claude/manual-tests/`. | Yes. |
 | `architecture/` | System diagrams and the contract state machine (HTML, SVG, Markdown). | Yes. |
 | `product/` | Pitches and product writing. | Yes. |
 | `research/` | Notes on other tools (for example the Bruno Git UI blueprint). | Yes. |
-| `reports/` | One-off reviews: `component-duplication/`, `git-integration-review/`. | No, they are snapshots. |
+| `reports/` | One-off reviews: `component-duplication/`, `git-integration-review/`, the infra synthesis. | No, they are snapshots. |
 | `dsm/` | Design system page. `scripts/sync-dsm-tokens.cjs` reads it. | Keep the path. |
 | `archive/` | Unrelated notes. | No. |
 
@@ -23,7 +27,7 @@ many links in `CLAUDE.md`, `.claude/` and the plans point to it.
 
 - Collection, request, environment or auth work: `superpowers/specs/opencollection-spec-reference.md`
   (required read, see `CLAUDE.md`).
-- Collection export (Bruno ZIP, Postman): `.claude/collection-export.md`. Its design spec
+- Collection export (Bruno ZIP, Postman): `docs/features/collection-export.md`. Its design spec
   (`2026-10-23-collection-export-design.md`) is on the export branch and lands in
   `superpowers/specs/` with it.
 - Contracts: `architecture/contract-state-machine.md` and `architecture/contract_state_machine.html`.
@@ -34,7 +38,7 @@ many links in `CLAUDE.md`, `.claude/` and the plans point to it.
 1. Search the spec by topic: `ls docs/superpowers/specs | grep -i <topic>`.
 2. Look for a plan folder with the same topic: `ls docs/superpowers/plans | grep -i <topic>`.
 3. Open its `00-plan-index.md` first. It lists the plans, their order and their status.
-4. For open work, check `.claude/roadmap.md` and `.claude/flow-roadmap.md`.
+4. For open work, check `docs/roadmaps/roadmap.md` and `docs/roadmaps/flow-roadmap.md`.
 
 Plan folders by area:
 

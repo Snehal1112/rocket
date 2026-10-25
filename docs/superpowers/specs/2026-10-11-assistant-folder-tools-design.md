@@ -1,7 +1,7 @@
 # Assistant folder tools: design
 
 Date: 2026-10-11. Status: design approved by the user in chat, spec ready for review.
-Read first: `docs/superpowers/specs/opencollection-spec-reference.md` (sections 2.7, 5, 6), `.claude/folder-settings.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`, `crates/rocket-acp/CLAUDE.md`.
+Read first: `docs/superpowers/specs/opencollection-spec-reference.md` (sections 2.7, 5, 6), `docs/features/folder-settings.md`, `docs/superpowers/specs/2026-10-09-workspace-ai-assistant-design.md`, `crates/rocket-acp/CLAUDE.md`.
 
 ## 1. Summary
 
@@ -96,7 +96,7 @@ Size caps (constants next to the existing ones in `tool_server.rs`): at most 50 
 
 - `AgentProposalDto` / `ProposedChangeDto` in `src-tauri/src/commands/agent_proposals.rs` get `UpdateFolderSettings` (tag `updateFolderSettings`), carrying `collection`, `folderPath` and the sections that changed. Header and variable values are included, because the card already shows request header values the same way. Values the user may not see are masked by the read views, not here, because the agent only ever proposes values it chose.
 - `src/lib/tauri-api.ts` gets the matching type. `proposalTarget`, `proposalPreview` and `loadProposalDiff` handle it: scripts and docs preview as a diff against the stored version, headers and variables as a definition list of the changed sections.
-- `dirtyAffectedTabPlace` also treats an open, dirty Folder Settings tab of that folder as affected, so Accept is blocked with the same wording. A clean open folder tab reloads after the accept (the tab does not listen to `folderSettingsSaved` today; the fix is to reload on the proposal-resolved event for that folder, not a general listener, see `.claude/folder-settings.md`).
+- `dirtyAffectedTabPlace` also treats an open, dirty Folder Settings tab of that folder as affected, so Accept is blocked with the same wording. A clean open folder tab reloads after the accept (the tab does not listen to `folderSettingsSaved` today; the fix is to reload on the proposal-resolved event for that folder, not a general listener, see `docs/features/folder-settings.md`).
 - No new view. The History view shows the proposal as a plain line through its summary.
 
 ## 9. Errors and edge cases
@@ -123,6 +123,6 @@ Size caps (constants next to the existing ones in `tool_server.rs`): at most 50 
 Plans hold at most 3 tasks each.
 
 - Plan 1 (backend): `FolderSettingsPatch` and the variant with fingerprint accessors and summary in `rocket-acp`; `get_folder_settings` in `McpToolService`; `prepare`, `still_applies`, `apply` and masked-value scanning in `ProposalService`.
-- Plan 2 (tool server and frontend): tool schema and params with caps and the read tool wiring; DTO and `tauri-api` type; card preview, dirty-tab handling and reload; docs (`.claude/assistant-followups.md`, `crates/rocket-acp/CLAUDE.md`, the roadmap row).
+- Plan 2 (tool server and frontend): tool schema and params with caps and the read tool wiring; DTO and `tauri-api` type; card preview, dirty-tab handling and reload; docs (`docs/features/assistant-followups.md`, `crates/rocket-acp/CLAUDE.md`, the roadmap row).
 
 Each task runs the usual loop: implementer, review, fix. The proposal safety task gets an Opus review.

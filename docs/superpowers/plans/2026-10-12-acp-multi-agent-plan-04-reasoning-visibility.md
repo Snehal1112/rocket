@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (rocket-acp, rocket-shared, rocket-infra, rocket-app, src-tauri), React + TypeScript, Zustand, Vitest, Biome.
 
-**Spec:** `.claude/acp-multi-agent-support.md`; the reasoning investigation of 2026-10-12 is summarised in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`. Depends on Plans 1 to 3 being merged.
+**Spec:** `docs/features/acp-multi-agent-support.md`; the reasoning investigation of 2026-10-12 is summarised in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`. Depends on Plans 1 to 3 being merged.
 
 ## Global Constraints
 

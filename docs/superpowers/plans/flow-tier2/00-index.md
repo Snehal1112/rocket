@@ -1,6 +1,6 @@
 # Flow Tier 2 plan index: silent failures and detection gaps
 
-Source: `.claude/flow-roadmap.md` Tier 2. F-20 and F-23 are already done. These five plans cover the nine open items F-21, F-22, F-24, F-25, F-26, F-27, F-28, F-29 and F-30. Each plan has 3 tasks, tests first, real code, and one commit per task through the `dev-workflow-skills:1-git-commit` skill.
+Source: `docs/roadmaps/flow-roadmap.md` Tier 2. F-20 and F-23 are already done. These five plans cover the nine open items F-21, F-22, F-24, F-25, F-26, F-27, F-28, F-29 and F-30. Each plan has 3 tasks, tests first, real code, and one commit per task through the `dev-workflow-skills:1-git-commit` skill.
 
 Written 2026-10-11 against `main` at `c188b536` (Tier 1 merged). None of the code in these plans has been compiled or run. Each plan starts its tasks by re-reading the files as the earlier plan left them, because plans were written in parallel.
 
@@ -32,7 +32,7 @@ Next plan to execute: `01-lint-context-and-rules.md`.
 3. Plan 1 makes the `lint_flow` command `async` and adds optional environment arguments. Three existing frontend assertions change shape.
 4. Plan 4's test pins an exact error list in two tests. If Plan 3's new rules also fire on those fixtures, adjust the tests.
 5. The F-22 rule stays silent when the flow has a Saved Request node, no environment is selected, or the environment extends another. It reports only when it is certain, so it will miss some real mistakes.
-6. `.claude/flow-roadmap.md` is untracked on `main`. The plans say to mark items done but to leave that file out of commit pathspecs.
+6. `docs/roadmaps/flow-roadmap.md` is untracked on `main`. The plans say to mark items done but to leave that file out of commit pathspecs.
 
 ## Open decisions (recommended default first)
 

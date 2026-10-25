@@ -10,7 +10,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`pane-store`), Vitest and Testing Library, shadcn `Select` and `Button`, lucide-react.
 
-**Spec:** Roadmap item F-36 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P11) and the plan index (`00-plan-index.md`, plan P11).
+**Spec:** Roadmap item F-36 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P11) and the plan index (`00-plan-index.md`, plan P11).
 
 **Depends on P2 (and so on P1), assumed merged.** This plan edits code as P2 leaves it: `FlowTab.lastRun`, `FlowLastRun`, `FlowRunResult`, the store action `setFlowRunResult`, the toolbar prop `onRunResult`, `FlowPane.handleRunResult`, `RunResultStrip` and the strip block in `FlowPane`'s JSX. Anchors are given by function or prop name because line numbers move.
 

@@ -10,7 +10,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`pane-store`), shadcn `Badge`, `Button`, `Collapsible`, lucide `Timer`, `ChevronRight`, Vitest and Testing Library.
 
-**Spec:** Roadmap items F-32, F-38 and F-39 (frontend) in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P8 Step trace frontend". Backend contract: `docs/superpowers/plans/flow-tier3/2026-10-08-p7-step-trace-backend.md` (Task 1 Interfaces).
+**Spec:** Roadmap items F-32, F-38 and F-39 (frontend) in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` section "P8 Step trace frontend". Backend contract: `docs/superpowers/plans/flow-tier3/2026-10-08-p7-step-trace-backend.md` (Task 1 Interfaces).
 
 ## Global Constraints
 

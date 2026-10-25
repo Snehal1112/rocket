@@ -83,4 +83,4 @@ A script written from Bruno's JavaScript API Reference runs in Rocket with `bru`
 
 ## Required reading for implementation
 
-📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also see `.claude/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md` (trust model for Developer-mode APIs).
+📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. Also see `docs/features/script-files.md` and `docs/superpowers/specs/2026-10-07-js-script-security-design.md` (trust model for Developer-mode APIs).

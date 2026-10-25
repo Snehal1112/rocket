@@ -1,6 +1,6 @@
 # Subagents: which type, when, and what it costs
 
-How to pick a subagent type and model so runs and tokens are not wasted. Model tiers and the dispatch rules for Rocket are in [rules/delegation.md](rules/delegation.md). This file adds the type map, the cost model and the lessons from real runs.
+How to pick a subagent type and model so runs and tokens are not wasted. Model tiers and the dispatch rules for Rocket are in [.claude/rules/delegation.md](../../.claude/rules/delegation.md). This file adds the type map, the cost model and the lessons from real runs.
 
 ## Cost model
 

@@ -1,7 +1,7 @@
 # rok API parity, sub-project B: plan index
 
 **Spec:** `docs/superpowers/specs/2026-10-07-rok-js-api-parity-b-async-design.md`
-**Series notes:** `.claude/rok-api-parity-notes.md`
+**Series notes:** `docs/features/rok-api-parity-notes.md`
 **Ledger:** one per plan, `.superpowers/sdd/rok-parity-b-<plan file name without .md>/progress.md` (create it on the plan's first task; log `Ruling:` lines there).
 
 Run the plans in order. Each plan has at most 3 tasks and produces working, tested software on its own. Each plan file ends with a "Next plan to execute" section: the executing Claude moves on to the next plan on its own when the current one is complete (no consent needed between plans). After plan 05 the next work is sub-project C (cookies), which still needs its own plans.

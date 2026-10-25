@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, Vitest and Testing Library, `@tanstack/react-query` (existing queries), Zustand (`env-store`).
 
-**Spec:** Roadmap items F-57, F-47 (warning half) and the F-43 prerequisite in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P3). Flow auth spec: `docs/superpowers/specs/2026-10-02-flow-auth-node-design.md` (lines 241-244, the plaintext warning).
+**Spec:** Roadmap items F-57, F-47 (warning half) and the F-43 prerequisite in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P3). Flow auth spec: `docs/superpowers/specs/2026-10-02-flow-auth-node-design.md` (lines 241-244, the plaintext warning).
 
 ## What was verified before writing (F-57)
 

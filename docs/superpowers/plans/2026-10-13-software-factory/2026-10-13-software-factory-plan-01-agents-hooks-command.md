@@ -506,7 +506,7 @@ Input: the path of a diff file, the path of the job's `spec.md`, and the worktre
 
 Check:
 
-- the collection trust gate (requested versus allowed access) and the `{{process.env}}` gate, see `.claude/collection-trust.md`
+- the collection trust gate (requested versus allowed access) and the `{{process.env}}` gate, see `docs/features/collection-trust.md`
 - secrets and credentials: not logged, not stored in plain text, masked in conversations and errors
 - auth configuration and variable resolution paths
 - no shelling out to the git CLI, `git2` only

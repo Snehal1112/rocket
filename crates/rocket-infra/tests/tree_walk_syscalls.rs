@@ -1,5 +1,5 @@
 //! One clean `get_summaries` load of the deep fixture, for `strace`.
-//! Both tests are ignored: run them by hand, see `.claude/perf-tree-walk.md`.
+//! Both tests are ignored: run them by hand, see `docs/engineering/perf-tree-walk.md`.
 
 #[path = "../benches/support/mod.rs"]
 mod support;
@@ -18,14 +18,14 @@ fn fixture_repo() -> FsCollectionRepo {
 
 /// Builds the deep collection `bench-0` in the folder named by `ROCKET_TREE_WALK_FIXTURE`.
 #[test]
-#[ignore = "builds the deep fixture; run by hand, see .claude/perf-tree-walk.md"]
+#[ignore = "builds the deep fixture; run by hand, see docs/engineering/perf-tree-walk.md"]
 fn build_deep_fixture() {
     support::populate_deep(&fixture_repo(), "bench-0");
 }
 
 /// One summaries load of the prebuilt fixture. This is the run that `strace` counts.
 #[test]
-#[ignore = "loads the deep fixture once; run by hand, see .claude/perf-tree-walk.md"]
+#[ignore = "loads the deep fixture once; run by hand, see docs/engineering/perf-tree-walk.md"]
 fn load_deep_fixture_once() {
     let collection = fixture_repo()
         .get_summaries("bench-0")

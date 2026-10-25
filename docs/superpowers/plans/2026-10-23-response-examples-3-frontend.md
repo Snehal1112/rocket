@@ -140,8 +140,8 @@ Expected: PASS.
 - Modify: `src/stores/pane-store.ts` (`openTryTab`, guard the save and close paths)
 - Modify: `src/components/examples/ExampleTabView.tsx` (the Try button)
 - Modify: the request save paths found with `git grep -n "saveRequest\|updateRequest(" -- src/lib/auto-save.ts src/stores/pane-store.ts src/components/request/RequestPanel.tsx`
-- Create: `.claude/response-examples.md`
-- Modify: `CLAUDE.md` (one link line), `.claude/roadmap.md` (mark the item shipped if one exists)
+- Create: `docs/features/response-examples.md`
+- Modify: `CLAUDE.md` (one link line), `docs/roadmaps/roadmap.md` (mark the item shipped if one exists)
 - Test: `src/lib/__tests__/example-to-request.test.ts`, `src/stores/__tests__/pane-store.try.test.ts`
 
 **Interfaces:**
@@ -167,7 +167,7 @@ Expected: PASS.
 Run: `yarn test example-to-request` and `yarn test pane-store.try`
 Expected: FAIL.
 
-- [ ] **Step 4: Implement `exampleToRequestState`, the `transient` flag and `openTryTab`.** Add `transient` guards at every save entry point found by the grep in Files (store `closeTab` save-before-close, auto-save, Ctrl+S handler, any "Save" button in `RequestPanel`). The Save button shows disabled with the title `Temporary tab: not saved`. Show a small `Badge` "Temporary" in the tab header or request bar. Whether a transient send is recorded in history is left as the existing send path does it (do not special-case); note the result in `.claude/response-examples.md`.
+- [ ] **Step 4: Implement `exampleToRequestState`, the `transient` flag and `openTryTab`.** Add `transient` guards at every save entry point found by the grep in Files (store `closeTab` save-before-close, auto-save, Ctrl+S handler, any "Save" button in `RequestPanel`). The Save button shows disabled with the title `Temporary tab: not saved`. Show a small `Badge` "Temporary" in the tab header or request bar. Whether a transient send is recorded in history is left as the existing send path does it (do not special-case); note the result in `docs/features/response-examples.md`.
 
 - [ ] **Step 5: Add the Try button** (`Button`, lucide `Play`, label `Try`) to the `ExampleTabView` top bar. It loads the parent request with `getRequest`, maps it with `mapApiRequestToState`, calls `exampleToRequestState`, then `openTryTab`.
 
@@ -176,6 +176,6 @@ Expected: FAIL.
 Run: `yarn test example-to-request`, `yarn test pane-store.try`, `yarn test ExampleTabView`, `yarn tsc --noEmit`, `yarn check`
 Expected: PASS.
 
-- [ ] **Step 7: Write `.claude/response-examples.md`** (short): how to save and view an example, the snapshot shape, the limits (512 KiB response body, 1 MiB per example, 120-character names), where secrets are masked (commit only) and that exports leave examples out, how Try works (`transient`), and the manual test list from the spec. Add one line to `CLAUDE.md` under the other `.claude/` pointers and update `.claude/roadmap.md` if it lists this item.
+- [ ] **Step 7: Write `docs/features/response-examples.md`** (short): how to save and view an example, the snapshot shape, the limits (512 KiB response body, 1 MiB per example, 120-character names), where secrets are masked (commit only) and that exports leave examples out, how Try works (`transient`), and the manual test list from the spec. Add one line to `CLAUDE.md` under the other `.claude/` pointers and update `docs/roadmaps/roadmap.md` if it lists this item.
 
 - [ ] **Step 8: Manual check in the real app** (`yarn tauri dev`, record the result in the doc): send a login request, save `200 OK`, see it nested in the sidebar, open it, press Try and send, rename and delete it, commit and confirm the token and refresh token read `[masked]` in the commit while the file on disk keeps them, export to Bruno and confirm examples are left out.

@@ -964,7 +964,7 @@ In `.claude/software-factory.md`, replace the line `Status: design only, nothing
 Status: built (plans 01 to 03 in `docs/superpowers/plans/2026-10-13-software-factory/`). Run the dashboard with `cargo run -j4 --manifest-path tools/factory-server/Cargo.toml -- --root "$PWD"` and use `/factory <feature>` in an interactive session. Pipeline from the user's chart (2026-10-12), fitted to Rocket's rules on 2026-10-13.
 ```
 
-In `CLAUDE.md`, add one line after the `See .claude/collection-trust.md ...` line in the rules section:
+In `CLAUDE.md`, add one line after the `See docs/features/collection-trust.md ...` line in the rules section:
 
 ```
 See `.claude/software-factory.md` for the software factory (`/factory` command, agents, live dashboard in `tools/factory-server/`).

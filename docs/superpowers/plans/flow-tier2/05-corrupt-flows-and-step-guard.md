@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (serde_yaml, tempfile for tests), Tauri IPC, React, TypeScript, TanStack Query, Vitest, Testing Library, Biome. Run with `cargo -j4` and `yarn`.
 
-**Spec:** `.claude/flow-roadmap.md` rows F-29 and F-30 (Tier 2). Phase 1 spec `docs/superpowers/specs/2026-09-27-flow-visual-workflow-builder-design.md` section 7 ("a `MAX_RUN_STEPS`-equivalent guard"). Task numbers restart at 1 in this plan.
+**Spec:** `docs/roadmaps/flow-roadmap.md` rows F-29 and F-30 (Tier 2). Phase 1 spec `docs/superpowers/specs/2026-09-27-flow-visual-workflow-builder-design.md` section 7 ("a `MAX_RUN_STEPS`-equivalent guard"). Task numbers restart at 1 in this plan.
 
 ## Global Constraints
 
@@ -872,7 +872,7 @@ Invoke the `dev-workflow-skills:1-git-commit` skill, then commit with paths: `sr
 
 **Files:**
 - Modify: `crates/rocket-app/src/flow_execution_service.rs` (constant and helper before `FlowExecutionService`, ~868; `load_ordered_nodes` ~942-951; tests next to `load_ordered_nodes_returns_dependency_order_for_a_valid_flow` ~3258)
-- Modify: `.claude/flow-roadmap.md` (rows F-29 and F-30 status)
+- Modify: `docs/roadmaps/flow-roadmap.md` (rows F-29 and F-30 status)
 
 **Interfaces:**
 - Produces: `pub const MAX_RUN_STEPS: usize = 10_000;` in `flow_execution_service.rs`, and a private `fn check_step_budget(flow_name: &str, node_count: usize, limit: usize) -> DomainResult<()>`. The limit is a parameter so a unit test can use a small one. The constant is also tested directly with a flow of `MAX_RUN_STEPS + 1` Input nodes, which is cheap (no edges, no I/O, refused before validation).
@@ -982,7 +982,7 @@ and in `load_ordered_nodes`, between the `get` and `validate`:
 
 Add one sentence to the `load_ordered_nodes` doc comment: "A flow with more than `MAX_RUN_STEPS` nodes is rejected too."
 
-`.claude/flow-roadmap.md`: set F-29 and F-30 to `done` with the date and commit hash placeholder-free wording: for F-30 write in the notes column "Node-count guard `MAX_RUN_STEPS` = 10000 in `load_ordered_nodes`. A per-step counter was not added: the loop visits each node once, so it could not trip." For F-29 write "list_entries, corrupt rows in sidebar and picker. Rename of a corrupt flow is disabled by design." If `.claude/flow-roadmap.md` is still untracked, add it with `git add` like any other path.
+`docs/roadmaps/flow-roadmap.md`: set F-29 and F-30 to `done` with the date and commit hash placeholder-free wording: for F-30 write in the notes column "Node-count guard `MAX_RUN_STEPS` = 10000 in `load_ordered_nodes`. A per-step counter was not added: the loop visits each node once, so it could not trip." For F-29 write "list_entries, corrupt rows in sidebar and picker. Rename of a corrupt flow is disabled by design." If `docs/roadmaps/flow-roadmap.md` is still untracked, add it with `git add` like any other path.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -992,7 +992,7 @@ Expected: all PASS. The 10_001-node tests build a vector of small nodes and fini
 - [ ] **Step 5: Commit**
 
 Invoke the `dev-workflow-skills:1-git-commit` skill, then:
-`git add crates/rocket-app/src/flow_execution_service.rs .claude/flow-roadmap.md && git commit --only -m "feat(flow): refuse runs over a node count limit" -- crates/rocket-app/src/flow_execution_service.rs .claude/flow-roadmap.md`
+`git add crates/rocket-app/src/flow_execution_service.rs docs/roadmaps/flow-roadmap.md && git commit --only -m "feat(flow): refuse runs over a node count limit" -- crates/rocket-app/src/flow_execution_service.rs docs/roadmaps/flow-roadmap.md`
 
 ---
 

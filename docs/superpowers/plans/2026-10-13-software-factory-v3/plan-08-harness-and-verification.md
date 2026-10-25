@@ -43,7 +43,7 @@
 | `tools/factory/crates/factory-cli/tests/e2e.rs` | 2 | New: scenario tests. |
 | `tools/factory/crates/factory-cli/src/bin/factory-shots.rs` | 3 | New: seed, serve, screenshot, exit 3 when no browser. |
 | `.claude/software-factory.md` | 2, 3 | Token baseline section, ruling, open items, dry-run recipe. |
-| `.claude/roadmap.md` | 3 | New row (next free R-id) and a decisions line. |
+| `docs/roadmaps/roadmap.md` | 3 | New row (next free R-id) and a decisions line. |
 
 ## v1 minors triage (E12)
 
@@ -722,7 +722,7 @@ Add any engine or core file you had to fix to both lists, in a separate `fix(fac
 - Create: `tools/factory/crates/factory-cli/src/bin/factory-shots.rs`
 - Modify: `tools/factory-server/static/board.js` and `tools/factory-server/tests/board.test.js` (only for the minors in step 6 that still fail)
 - Modify only if the screenshots show a real defect: `tools/factory-server/static/dashboard.css`
-- Modify: `.claude/software-factory.md`, `.claude/roadmap.md`
+- Modify: `.claude/software-factory.md`, `docs/roadmaps/roadmap.md`
 
 **Interfaces:**
 - Consumes: the demo seeder from plan 07 and the built `factory-server` binary with `--root` and `--port`, plus `/healthz`. Run `ls tools/factory-server/tests/` and read the seeder's header comment first. The constants `SEED_PROGRAM`, `SEED_ARGS` and `SERVER_BIN` below are the only lines to adapt.
@@ -1029,12 +1029,12 @@ Run this once after plans 01 to 08 are merged. It uses real agents, so it costs 
 5. Pass criteria (the spec's success check): the interactive session was the only place the user spent tokens by hand and sat idle while the driver worked, the driver built in a worktree, ran the checks, ran one reviewer, merged the reviewed sha and started plan 2, the dashboard showed live stages and per-job tokens, no stage needed manual repair, `git status` is clean in the main checkout, and the logged weighted total is well below 2.17M (aim under 1.1M for a comparable small feature).
 6. Clean up with `factory cleanup <id>` for each job and confirm `git branch --list 'factory/*'` shows nothing left.
 
-If any step needs a manual action, note the step and add a follow-up row to `.claude/roadmap.md`.
+If any step needs a manual action, note the step and add a follow-up row to `docs/roadmaps/roadmap.md`.
 ````
 
 - [ ] **Step 8: Roadmap entry**
 
-Read the last `R-` id in `.claude/roadmap.md` (R-59 when this plan was written; use the next free number, called `R-NN` below, and check `grep -n 'R-6' .claude/roadmap.md` first). Add this row after the last row of the quality and hygiene table that holds R-57 to R-59:
+Read the last `R-` id in `docs/roadmaps/roadmap.md` (R-59 when this plan was written; use the next free number, called `R-NN` below, and check `grep -n 'R-6' docs/roadmaps/roadmap.md` first). Add this row after the last row of the quality and hygiene table that holds R-57 to R-59:
 
 ```markdown
 | R-NN | Software factory v3 series (plans 01 to 08): Rust driver with `git2`, headless agents, checks before review, risk gate, budget, series, dashboard tokens, harness and verification | built on branch `worktree-software-factory`; dry run pending (user) | spec `docs/superpowers/specs/2026-10-13-software-factory-v3-rust-driver-design.md`, plans `docs/superpowers/plans/2026-10-13-software-factory-v3/`, design doc `.claude/software-factory.md` | Run the dry run recipe in `.claude/software-factory.md`, compare `factory tokens` with the job 001 baseline, then merge. Open follow-ups are in its open items list. |
@@ -1061,8 +1061,8 @@ Run, one per line, and put each result in the handoff:
 Invoke the skill `dev-workflow-skills:1-git-commit`, then:
 
 ```bash
-git add tools/factory/crates/factory-cli/src/bin/factory-shots.rs tools/factory/crates/factory-cli/Cargo.toml tools/factory-server/tests/board.test.js .claude/software-factory.md .claude/roadmap.md
-git commit --only -m "docs(factory): record the browser check, add the dry run recipe and roadmap entry" -- tools/factory/crates/factory-cli/src/bin/factory-shots.rs tools/factory/crates/factory-cli/Cargo.toml tools/factory-server/tests/board.test.js .claude/software-factory.md .claude/roadmap.md
+git add tools/factory/crates/factory-cli/src/bin/factory-shots.rs tools/factory/crates/factory-cli/Cargo.toml tools/factory-server/tests/board.test.js .claude/software-factory.md docs/roadmaps/roadmap.md
+git commit --only -m "docs(factory): record the browser check, add the dry run recipe and roadmap entry" -- tools/factory/crates/factory-cli/src/bin/factory-shots.rs tools/factory/crates/factory-cli/Cargo.toml tools/factory-server/tests/board.test.js .claude/software-factory.md docs/roadmaps/roadmap.md
 ```
 
 Add `tools/factory-server/static/board.js`, `tools/factory-server/static/dashboard.css` and `tools/factory/Cargo.lock` to both lists if you changed them.

@@ -119,7 +119,7 @@ Reuse the row construction of the existing `disabled_query_param_stays_disabled_
 **Files:**
 - Modify: `src/components/export/ExportCollectionDialog.tsx` (the `DialogDescription`, about lines 89-93)
 - Modify: `src/components/export/ExportCollectionDialog.test.tsx`
-- Modify: `.claude/collection-export.md` (only if it repeats the old sentence)
+- Modify: `docs/features/collection-export.md` (only if it repeats the old sentence)
 
 **Interfaces:**
 - No signature changes. Decision: the plan-1 review offered two fixes (exact text, or a wider scrub). This plan takes the text fix. A wider name-based scrub for params, other token headers and OAuth2 `additionalParameters` is tracked in the Minor GitHub issue for a separate decision.
@@ -130,7 +130,7 @@ Reuse the row construction of the existing `disabled_query_param_stays_disabled_
 
 - [ ] **Step 3: Run `yarn test ExportCollectionDialog`.** Expected: the new test fails.
 
-- [ ] **Step 4: Replace the description text** with: "Auth fields, secret variables, the Authorization, Proxy-Authorization, Cookie, Set-Cookie and X-Api-Key headers, and URL passwords are blanked. Variable references are kept. Other headers, query parameters, request bodies, scripts and descriptions are exported as written and are not scanned for secrets." Update `.claude/collection-export.md` if it repeats the old claim.
+- [ ] **Step 4: Replace the description text** with: "Auth fields, secret variables, the Authorization, Proxy-Authorization, Cookie, Set-Cookie and X-Api-Key headers, and URL passwords are blanked. Variable references are kept. Other headers, query parameters, request bodies, scripts and descriptions are exported as written and are not scanned for secrets." Update `docs/features/collection-export.md` if it repeats the old claim.
 
 - [ ] **Step 5: Run `yarn test ExportCollectionDialog`, `yarn tsc --noEmit` and `yarn check`.** Expected: all pass with no errors.
 

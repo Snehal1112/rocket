@@ -64,13 +64,13 @@
 ### Task 5: OAuth1 slot, report notes, environments, dialog and docs
 
 **Files:**
-- Modify: `crates/rocket-export/src/scrub.rs` (`scrub_auth` OAuth1 `access_token`), `crates/rocket-export/src/postman.rs` (`auth_value`), `crates/rocket-export/src/postman_env.rs`, `src/components/export/ExportCollectionDialog.tsx`, `src/components/export/ExportCollectionDialog.test.tsx`, `.claude/collection-export.md`, `crates/rocket-export/CLAUDE.md`
+- Modify: `crates/rocket-export/src/scrub.rs` (`scrub_auth` OAuth1 `access_token`), `crates/rocket-export/src/postman.rs` (`auth_value`), `crates/rocket-export/src/postman_env.rs`, `src/components/export/ExportCollectionDialog.tsx`, `src/components/export/ExportCollectionDialog.test.tsx`, `docs/features/collection-export.md`, `crates/rocket-export/CLAUDE.md`
 
 **Interfaces:**
 - Consumes: Task 4 helpers.
 - Produces: `scrub_auth` blanks OAuth1 `access_token` (a literal). `auth_value` emits the `Blanked` notes of `scrub_auth` only when the auth is exported, never for `Skipped` auths. `postman_environment` and `environment_notes` keep a lone `{{ref}}` in a secret variable, blank a hydrated literal, and blank a non-secret variable whose name matches the rule (note `Variable`, detail `<key> (by name)`).
 
-- [ ] **Step 1: 📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md` (environments section).** Then read `postman_env.rs:13-60` and its tests, `postman.rs:60-76` (`auth_value`), and the "Secret scrub" sections of `.claude/collection-export.md` and `crates/rocket-export/CLAUDE.md`.
+- [ ] **Step 1: 📖 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md` (environments section).** Then read `postman_env.rs:13-60` and its tests, `postman.rs:60-76` (`auth_value`), and the "Secret scrub" sections of `docs/features/collection-export.md` and `crates/rocket-export/CLAUDE.md`.
 
 - [ ] **Step 2: Write the failing tests.**
   - `oauth1_access_token_is_blanked` (typed scrub): OAuth1 with `access_token: Some("abc")`. Expect `None`/empty after scrub and one `Blanked` note.

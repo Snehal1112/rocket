@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (`rocket-flow`, `rocket-app`), React, TypeScript, Vitest, Biome. `cargo ... -j4`, `yarn`.
 
-**Spec:** `.claude/flow-roadmap.md` rows F-24 and F-25 (Tier 2). Engine facts: `crates/rocket-app/src/flow_auth.rs` (`FlowCredentials::apply_to_inherit`), `crates/rocket-app/src/flow_execution_service.rs` (~1629-1665, the Request arm), `crates/rocket-flow/src/validate.rs` V13, V14 and V15, `docs/superpowers/specs/opencollection-spec-reference.md` sections 3.1 and 6.1.
+**Spec:** `docs/roadmaps/flow-roadmap.md` rows F-24 and F-25 (Tier 2). Engine facts: `crates/rocket-app/src/flow_auth.rs` (`FlowCredentials::apply_to_inherit`), `crates/rocket-app/src/flow_execution_service.rs` (~1629-1665, the Request arm), `crates/rocket-flow/src/validate.rs` V13, V14 and V15, `docs/superpowers/specs/opencollection-spec-reference.md` sections 3.1 and 6.1.
 
 ## Global Constraints
 
@@ -1140,7 +1140,7 @@ Invoke the `dev-workflow-skills:1-git-commit` skill, then:
 - Test: `src/lib/__tests__/flow-issues.test.ts` (`computeFlowIssues: rules the backend owns` ~173-190)
 - Test: `src/components/flow/__tests__/FlowIssuesButton.test.tsx` (end of the describe)
 - Modify: `crates/rocket-flow/CLAUDE.md` (Lint tier section)
-- Modify: `.claude/flow-roadmap.md` (rows F-24 and F-25, follow-up F-122)
+- Modify: `docs/roadmaps/flow-roadmap.md` (rows F-24 and F-25, follow-up F-122)
 
 **Interfaces:**
 - Consumes: `BACKEND_LINT_CODES`, `mergeFlowIssues`, `toFlowIssue` (`src/lib/flow-lint.ts`), `computeFlowIssues` (`src/lib/flow-issues.ts`), `FlowIssuesButton`. There is no code-to-text map: the issue list shows `issue.message` as the backend sent it, and `useBackendFlowLints` passes every lint through `toFlowIssue`. So no mapping code is needed. `BACKEND_LINT_CODES` already holds `auth_no_effect`, `auth_wire_overrides_auth` and `callback_not_wired`, so these tests pin existing behaviour and are expected to pass on the first run.
@@ -1269,7 +1269,7 @@ Expected: all PASS on the first run, because these tests pin behaviour that alre
 
 `crates/rocket-flow/CLAUDE.md`, in the Lint tier section: add to the rules list "`auth_no_effect` (an Auth node with no `auth` wire that applies to no Request: not applying, or applying while every Request has an `auth` wire or explicit saved auth; a saved request the context cannot read counts as taking it), `auth_wire_overrides_auth` (an `auth` wire into a saved request whose own auth is explicit; the wire wins at run time and replaces it; one lint per wire, with `edge_id`), `callback_not_wired` (a saved request sends `{{callback.<name>}}` but has no path to the Wait named `<name>`, the V15 direction; inline requests stay with V15)". Replace the last sentence "No rule uses it yet (F-21, F-22)." with a sentence that lists the `LintContext` methods now in use: `saved_request_auth_is_explicit` and `saved_request_callbacks` (F-24, F-25), plus whatever Plan 1 added for F-21 and F-22. Add one line: "The app layer computes the saved-request facts in `rocket-app` `flow_lint_facts.rs`; effective auth is `runtime_auth` else `auth`, and disabled fields are not scanned."
 
-`.claude/flow-roadmap.md`: set F-24 and F-25 status to `done` and put the date, the commit hashes from Tasks 1 and 2, and these notes in the last column. F-24: "Codes `auth_no_effect`, `auth_wire_overrides_auth` in `lint.rs`; facts in `flow_lint_facts.rs`. The wire replaces the request's own auth (engine: wire wins). Unknown saved request never warns." F-25: "Code `callback_not_wired`. Saved requests only; inline stays V15. Run-start engine check not built (see Plan 2 open decisions)." In follow-up F-122 remove F-24 and F-25 from the "still open" list. Do not touch other rows.
+`docs/roadmaps/flow-roadmap.md`: set F-24 and F-25 status to `done` and put the date, the commit hashes from Tasks 1 and 2, and these notes in the last column. F-24: "Codes `auth_no_effect`, `auth_wire_overrides_auth` in `lint.rs`; facts in `flow_lint_facts.rs`. The wire replaces the request's own auth (engine: wire wins). Unknown saved request never warns." F-25: "Code `callback_not_wired`. Saved requests only; inline stays V15. Run-start engine check not built (see Plan 2 open decisions)." In follow-up F-122 remove F-24 and F-25 from the "still open" list. Do not touch other rows.
 
 - [ ] **Step 4: Run the gates**
 
@@ -1278,9 +1278,9 @@ Run: `yarn tsc --noEmit` and `yarn check`. Both must be clean. Docs need no gate
 - [ ] **Step 5: Commit**
 
 Invoke the `dev-workflow-skills:1-git-commit` skill, then:
-`git add src/lib/__tests__/flow-lint.test.ts src/lib/__tests__/flow-issues.test.ts src/components/flow/__tests__/FlowIssuesButton.test.tsx crates/rocket-flow/CLAUDE.md .claude/flow-roadmap.md && git commit --only -m "test(flow): pin the auth and callback lint codes on the client and document the rules" -- src/lib/__tests__/flow-lint.test.ts src/lib/__tests__/flow-issues.test.ts src/components/flow/__tests__/FlowIssuesButton.test.tsx crates/rocket-flow/CLAUDE.md .claude/flow-roadmap.md`
+`git add src/lib/__tests__/flow-lint.test.ts src/lib/__tests__/flow-issues.test.ts src/components/flow/__tests__/FlowIssuesButton.test.tsx crates/rocket-flow/CLAUDE.md docs/roadmaps/flow-roadmap.md && git commit --only -m "test(flow): pin the auth and callback lint codes on the client and document the rules" -- src/lib/__tests__/flow-lint.test.ts src/lib/__tests__/flow-issues.test.ts src/components/flow/__tests__/FlowIssuesButton.test.tsx crates/rocket-flow/CLAUDE.md docs/roadmaps/flow-roadmap.md`
 
-(`.claude/flow-roadmap.md` is untracked on `main` at the time of writing. If it is still untracked, leave it out of the `git add` and the pathspec and tell the user the roadmap edit stays in the working tree.)
+(`docs/roadmaps/flow-roadmap.md` is untracked on `main` at the time of writing. If it is still untracked, leave it out of the `git add` and the pathspec and tell the user the roadmap edit stays in the working tree.)
 
 ---
 

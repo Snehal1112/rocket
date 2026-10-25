@@ -10,7 +10,7 @@
 
 **Tech Stack:** React, TypeScript, `@xyflow/react` 12 (`MiniMap`, `Panel`, `useReactFlow().fitView`), `@dagrejs/dagre` (decision D2, needs the human's OK), Vitest and Testing Library, shadcn `Button` and `Input`, lucide-react, `sonner`.
 
-**Spec:** Roadmap item F-42 in `.claude/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P6) and `00-plan-index.md` (plan P6, decision D2).
+**Spec:** Roadmap item F-42 in `docs/roadmaps/flow-roadmap.md`. Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P6) and `00-plan-index.md` (plan P6, decision D2).
 
 **Depends on P4 for Task 3 only.** Used verbatim from P4: `FlowCanvas` prop `onNodesChange(nodes, options?)`, where a call without options is its own undo step; the `handleKeyDown` shape (`const key = e.key.toLowerCase()` then one `if (key === ...) { ...; return; }` branch per key); the `CANVAS_HINTS` array. Tasks 1 and 2 do not need P4. If P5 is merged first, its `if (e.shiftKey) return;` line sits after the P4 `y` branch; the new `f` branch goes before it.
 

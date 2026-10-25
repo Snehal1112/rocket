@@ -12,4 +12,4 @@ Saved request examples (`examples:` in a request `.yml`) can hold tokens and coo
 - The index copy is rewritten, so the working tree keeps the real values. After a commit, a masked file shows as modified in the git panel, because disk and HEAD differ. This is expected.
 - `CommitInfo.maskedFiles` lists the masked files. The git store shows a toast.
 - Not covered: `Bearer`/`Basic` values and PEM blocks inside free text (text, XML, HTML bodies), because the word pass splits on whitespace; secrets in non-secret-named keys whose values have no known shape, `http.auth.*` of the request itself, and multipart file parts.
-- Examples are kept by `save_request` (`fs_collection/requests.rs`). See `.claude/response-examples.md` (added with the example UI).
+- Examples are kept by `save_request` (`fs_collection/requests.rs`). See `docs/features/response-examples.md` (added with the example UI).

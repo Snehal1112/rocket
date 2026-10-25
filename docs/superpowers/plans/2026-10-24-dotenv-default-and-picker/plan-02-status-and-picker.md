@@ -116,6 +116,6 @@
 
 - [ ] **Step 4: Run to verify they pass:** the command above, `yarn tsc --noEmit`, `yarn check`. Expected: PASS.
 
-- [ ] **Step 5: Manual check** with `yarn tauri dev`: pick a `.env` inside and outside a collection folder, confirm the status line and that `{{process.env.NAME}}` resolves in a request. Record the result in `.claude/env-extends-dotenv-spec-notes.md`.
+- [ ] **Step 5: Manual check** with `yarn tauri dev`: pick a `.env` inside and outside a collection folder, confirm the status line and that `{{process.env.NAME}}` resolves in a request. Record the result in `docs/features/env-extends-dotenv-spec-notes.md`.
 
 - [ ] **Step 6: Commit** `feat(env): add a file picker for the .env path`.

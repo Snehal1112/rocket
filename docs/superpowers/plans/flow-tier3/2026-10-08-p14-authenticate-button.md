@@ -8,7 +8,7 @@
 
 **Tech Stack:** React, TypeScript, Zustand (`flow-auth-store`), Vitest and Testing Library, shadcn `Button` and `Badge`, lucide icons.
 
-**Spec:** Roadmap item F-47 in `.claude/flow-roadmap.md`. Flow auth spec: `docs/superpowers/specs/2026-10-02-flow-auth-node-design.md` (the Authenticate button, line 159). Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P14).
+**Spec:** Roadmap item F-47 in `docs/roadmaps/flow-roadmap.md`. Flow auth spec: `docs/superpowers/specs/2026-10-02-flow-auth-node-design.md` (the Authenticate button, line 159). Design notes: `docs/superpowers/plans/flow-tier3/01-design-notes.md` (section P14).
 
 **Decision assumed:** D4, interactive grants only. The button appears for authorization code and implicit grants. Client-credentials and password grants are fetched by the backend at run time and get no button. To include them later, drop the `isInteractiveGrant` check in `AuthNodeEditor` and let `authenticateAuthNode` call `oauth2GetToken` for them (a one-line change in the last branch of `authenticate`).
 

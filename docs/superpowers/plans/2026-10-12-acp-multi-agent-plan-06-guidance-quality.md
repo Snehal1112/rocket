@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (rocket-app, src-tauri), React + TypeScript, Monaco diff editor (already used), Vitest, Biome.
 
-**Spec:** `.claude/acp-multi-agent-support.md`; findings in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md` (section "Reasoning findings"). Independent of Plans 4 and 5 in code, but run after them.
+**Spec:** `docs/features/acp-multi-agent-support.md`; findings in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md` (section "Reasoning findings"). Independent of Plans 4 and 5 in code, but run after them.
 
 ## Global Constraints
 
@@ -455,8 +455,8 @@ Add `src/components/assistant/__tests__/AssistantProposalCard.test.tsx` if you e
 **Files:**
 - Modify: `crates/rocket-app/src/mcp_tool_service.rs` (the end of `WORKSPACE_ASSISTANT_INSTRUCTIONS` at line 110-121, tests)
 - Modify: `src/lib/assistant/slash-commands.ts`
-- Modify: `.claude/assistant-composer.md` (the line that lists the slash commands, if any)
-- Modify: `.claude/assistant-followups.md`
+- Modify: `docs/features/assistant-composer.md` (the line that lists the slash commands, if any)
+- Modify: `docs/features/assistant-followups.md`
 - Test: `crates/rocket-app/src/mcp_tool_service.rs`, `src/lib/assistant/__tests__/slash-commands.test.ts`
 
 **Interfaces:**
@@ -600,7 +600,7 @@ Expected: PASS. If a composer completion test lists the commands or counts them,
 
 - [ ] **Step 9: Update the docs**
 
-Run `grep -n "slash\|/doc\|five" .claude/assistant-composer.md`. In the line that lists the Rocket slash commands, add `/review` and `/howto` and change "five" to "seven". Append this section to `.claude/assistant-followups.md`:
+Run `grep -n "slash\|/doc\|five" docs/features/assistant-composer.md`. In the line that lists the Rocket slash commands, add `/review` and `/howto` and change "five" to "seven". Append this section to `docs/features/assistant-followups.md`:
 
 ```markdown
 ## Reasoning and guidance (2026-10-12)
@@ -623,8 +623,8 @@ Run `yarn tauri dev`, start the assistant in Edit mode on a request that has a w
 
 ```bash
 git add crates/rocket-app/src/mcp_tool_service.rs src/lib/assistant/slash-commands.ts \
-  src/lib/assistant/__tests__/slash-commands.test.ts .claude/assistant-composer.md \
-  .claude/assistant-followups.md
+  src/lib/assistant/__tests__/slash-commands.test.ts docs/features/assistant-composer.md \
+  docs/features/assistant-followups.md
 ```
 
 Then invoke the `dev-workflow-skills:1-git-commit` skill. Suggested subject: `feat(assistant): teach the agent to guide and correct, add /review and /howto`.

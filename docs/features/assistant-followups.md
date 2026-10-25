@@ -109,7 +109,7 @@ This page lists the decisions and follow-ups for the six workspace-assistant pla
 
 ## Multi-agent support (2026-10-12)
 
-Design and verified Gemini facts: `.claude/acp-multi-agent-support.md`. Plans: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
+Design and verified Gemini facts: `docs/features/acp-multi-agent-support.md`. Plans: `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md`.
 
 Open follow-ups:
 

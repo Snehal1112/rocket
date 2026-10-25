@@ -39,8 +39,8 @@ Built by `buildExampleSnapshot` (`src/lib/example-snapshot.ts`) from the request
 
 ## Secrets and export
 
-- The file on disk keeps real values. They are masked only in the git commit. See `.claude/example-masking.md`.
-- Exports to Bruno and Postman leave examples out. See `.claude/collection-export.md`.
+- The file on disk keeps real values. They are masked only in the git commit. See `docs/features/example-masking.md`.
+- Exports to Bruno and Postman leave examples out. See `docs/features/collection-export.md`.
 
 ## Try
 

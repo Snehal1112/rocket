@@ -636,7 +636,7 @@ Expected: PASS (the old tests and the 7 new ones).
 - Modify: `src-tauri/src/commands/agent_configs.rs`
 - Modify: `src-tauri/src/lib.rs`
 - Modify: `crates/rocket-acp/CLAUDE.md`
-- Modify: `.claude/assistant-followups.md`
+- Modify: `docs/features/assistant-followups.md`
 
 **Interfaces:**
 - Consumes: T2's `AgentConfigService` methods, `EnvReader`, `process_env_reader`.
@@ -730,6 +730,6 @@ Expected: PASS.
 
 - [ ] **Step 6: Docs.**
   - `crates/rocket-acp/CLAUDE.md`: `AgentConfig` holds `credential_source` and `source_env_var`; the key design point now covers all three sources (the value never lives on the struct); env names are validated; add the limit "the env source sees only what Rocket's process was started with".
-  - `.claude/assistant-followups.md`: add open items — stored conversations do not scrub agent credentials from the env or keychain sources (same as vault values); the commands run the keychain call on a runtime thread (no `spawn_blocking`); a token typed into a prompt is stored.
+  - `docs/features/assistant-followups.md`: add open items — stored conversations do not scrub agent credentials from the env or keychain sources (same as vault values); the commands run the keychain call on a runtime thread (no `spawn_blocking`); a token typed into a prompt is stored.
 
 - [ ] **Step 7: Commit** via the commit skill. Paths: the five files above. Message: `feat(assistant): add keychain credential commands`.

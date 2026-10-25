@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Prove, with tests, that the shipped Folder Settings feature keeps `folder.yml` strictly OpenCollection (so a Rocket collection still opens in Bruno), that a Bruno-authored `folder.yml` loads and survives Rocket saves, and that a request nested two folders deep really receives the merged headers, inherited auth and chained scripts. Then document the feature (spec reference, `.claude/folder-settings.md`, crate guides) and hand the user a manual verification checklist.
+**Goal:** Prove, with tests, that the shipped Folder Settings feature keeps `folder.yml` strictly OpenCollection (so a Rocket collection still opens in Bruno), that a Bruno-authored `folder.yml` loads and survives Rocket saves, and that a request nested two folders deep really receives the merged headers, inherited auth and chained scripts. Then document the feature (spec reference, `docs/features/folder-settings.md`, crate guides) and hand the user a manual verification checklist.
 
 **Architecture:** This is the closing plan, so it adds no feature code except one small compatibility fix that the new tests may expose in `rocket-infra` (a variable conversion helper). Task 1 extends the existing schema guard in `crates/rocket-infra/src/fs_collection/schema_shape_tests.rs` and adds Bruno-style fixtures. Task 2 adds one child test module to `rocket-app`'s `execution_service` that runs the real `FsCollectionRepo` and the real `ReqwestExecutor` against a wiremock server. Task 3 is documentation only.
 
@@ -925,7 +925,7 @@ Suggested subject: `test(app): run a nested request through the folder chain`.
 
 **Files:**
 - Modify: `docs/superpowers/specs/opencollection-spec-reference.md`
-- Create: `.claude/folder-settings.md`
+- Create: `docs/features/folder-settings.md`
 - Modify: `CLAUDE.md` (one line)
 - Modify: `crates/rocket-collection/CLAUDE.md`, `crates/rocket-infra/CLAUDE.md`
 
@@ -1055,9 +1055,9 @@ rg -n "fn merge_headers|fn merge_auth|fn inherited_headers|fn resolve_folder_aut
 
 Check each of these and correct the doc if the code disagrees: header names match exactly (no lowercasing in `merge_headers` or `inherited_headers`); `Auth::None` and `Auth::Inherit` on a request both take the parent's auth; a blank script is skipped in `chain_scripts`. If `inherited_headers` lowercases names or `chain_scripts` runs a collection script, change the sentence in 2d to match the code. Do not change the code in this plan.
 
-- [ ] **Step 4: Create `.claude/folder-settings.md`**
+- [ ] **Step 4: Create `docs/features/folder-settings.md`**
 
-Create `.claude/folder-settings.md` with exactly this content (fix any path that step 1 showed differently):
+Create `docs/features/folder-settings.md` with exactly this content (fix any path that step 1 showed differently):
 
 ```markdown
 # Folder settings
@@ -1101,14 +1101,14 @@ Design: `docs/superpowers/specs/2026-10-07-folder-settings-design.md`. Plans and
 In `CLAUDE.md`, replace
 
 ```markdown
-See `.claude/script-files.md` for shared .js script files and local require().
+See `docs/features/script-files.md` for shared .js script files and local require().
 ```
 
 with
 
 ```markdown
-See `.claude/script-files.md` for shared .js script files and local require().
-See `.claude/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
+See `docs/features/script-files.md` for shared .js script files and local require().
+See `docs/features/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
 ```
 
 - [ ] **Step 6: Update the crate guides**
@@ -1145,19 +1145,19 @@ In `crates/rocket-infra/CLAUDE.md`, replace
 with
 
 ```markdown
-**Folder settings.** `get_folder_settings`, `save_folder_settings` and `get_folder_chain_settings` read and write `folder.yml`'s `request.headers`, `request.auth`, `request.variables`, `request.scripts` (types `before-request`, `after-response`, `tests`) and `docs`. A save starts from the file as it is, so `request.metadata`, `request.settings`, `info.seq` and `hooks` scripts are kept, and an empty section is omitted. Folder variables go through `folder_oc_variables` (`fs_collection/variables.rs`): `CollectionVariable` has no description, so each entry keeps the existing description of the same name, and `initial` is left out when it equals `value`. `docs` is written as a plain string. A `folder.yml` that fails to parse is an error naming the folder during execution. The collection's script flow is read and written at `extensions.bruno.scripts.flow` in `opencollection.yml` by `fs_collection/settings.rs`, and every other `extensions` key survives a settings save. Bruno compatibility is guarded by `fs_collection/schema_shape_tests.rs` (see `.claude/folder-settings.md`).
+**Folder settings.** `get_folder_settings`, `save_folder_settings` and `get_folder_chain_settings` read and write `folder.yml`'s `request.headers`, `request.auth`, `request.variables`, `request.scripts` (types `before-request`, `after-response`, `tests`) and `docs`. A save starts from the file as it is, so `request.metadata`, `request.settings`, `info.seq` and `hooks` scripts are kept, and an empty section is omitted. Folder variables go through `folder_oc_variables` (`fs_collection/variables.rs`): `CollectionVariable` has no description, so each entry keeps the existing description of the same name, and `initial` is left out when it equals `value`. `docs` is written as a plain string. A `folder.yml` that fails to parse is an error naming the folder during execution. The collection's script flow is read and written at `extensions.bruno.scripts.flow` in `opencollection.yml` by `fs_collection/settings.rs`, and every other `extensions` key survives a settings save. Bruno compatibility is guarded by `fs_collection/schema_shape_tests.rs` (see `docs/features/folder-settings.md`).
 
 **UID storage.** UIDs are stored inside `opencollection.yml` and `folder.yml`.
 ```
 
-If `folder_oc_variables` was not needed in Task 1 (steps 8 and 9 skipped), delete the `folder_oc_variables` sentence from both `.claude/folder-settings.md` and the `rocket-infra` paragraph, and describe what plan 02 does instead.
+If `folder_oc_variables` was not needed in Task 1 (steps 8 and 9 skipped), delete the `folder_oc_variables` sentence from both `docs/features/folder-settings.md` and the `rocket-infra` paragraph, and describe what plan 02 does instead.
 
 - [ ] **Step 7: Check the docs**
 
-Run: `git diff --stat -- docs/superpowers/specs/opencollection-spec-reference.md CLAUDE.md crates/rocket-collection/CLAUDE.md crates/rocket-infra/CLAUDE.md` and `git status --short .claude/folder-settings.md`
+Run: `git diff --stat -- docs/superpowers/specs/opencollection-spec-reference.md CLAUDE.md crates/rocket-collection/CLAUDE.md crates/rocket-infra/CLAUDE.md` and `git status --short docs/features/folder-settings.md`
 Expected: five files changed or created, no source files. Confirm `CLAUDE.md` grew by one line.
 
-Run: `rg -n "TBD|TODO|XXX" .claude/folder-settings.md`
+Run: `rg -n "TBD|TODO|XXX" docs/features/folder-settings.md`
 Expected: no matches.
 
 - [ ] **Step 8: Commit**
@@ -1165,10 +1165,10 @@ Expected: no matches.
 Invoke the `dev-workflow-skills:1-git-commit` skill. Stage explicit paths only:
 
 ```bash
-git add docs/superpowers/specs/opencollection-spec-reference.md .claude/folder-settings.md \
+git add docs/superpowers/specs/opencollection-spec-reference.md docs/features/folder-settings.md \
   CLAUDE.md crates/rocket-collection/CLAUDE.md crates/rocket-infra/CLAUDE.md
 git commit --only -m "..." -- docs/superpowers/specs/opencollection-spec-reference.md \
-  .claude/folder-settings.md CLAUDE.md crates/rocket-collection/CLAUDE.md \
+  docs/features/folder-settings.md CLAUDE.md crates/rocket-collection/CLAUDE.md \
   crates/rocket-infra/CLAUDE.md
 ```
 

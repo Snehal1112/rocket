@@ -36,7 +36,7 @@ The final whole-branch review after Plan 02 runs on opus.
 - **Commits:** every commit through the `dev-workflow-skills:1-git-commit` skill, conventional format, explicit `git add <paths>` and `git commit --only -- <paths>`; never `git add -A`, `--all` or `.`; no bare `git stash`. Dispatched implementers get this rule in their prompt.
 - **OpenCollection:** `agent_configs.yml` is an app-level file in `~/.rocket-api`, not part of any collection, so the OpenCollection reference read step does not apply to these plans.
 - **Security rule for every task:** no credential value in an error message, a log line, an event, a `Debug` output, a test name or any value returned to the UI. Tests that check this use a recognizable fake value and assert it is absent.
-- **Docs:** tasks update `crates/rocket-acp/CLAUDE.md`, `crates/rocket-app/CLAUDE.md`, `.claude/assistant-followups.md`. Tasks do not edit the roadmap.
+- **Docs:** tasks update `crates/rocket-acp/CLAUDE.md`, `crates/rocket-app/CLAUDE.md`, `docs/features/assistant-followups.md`. Tasks do not edit the roadmap.
 
 ## Rulings (controller, 2026-10-11)
 

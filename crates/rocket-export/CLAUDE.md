@@ -1,6 +1,6 @@
 # rocket-export
 
-Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collection v2.1 document, plus a report of what changed on the way. No filesystem access: file reads sit behind the `CollectionFileSource` port, and `rocket-infra` implements it. Background and decisions: `.claude/collection-export.md`.
+Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collection v2.1 document, plus a report of what changed on the way. No filesystem access: file reads sit behind the `CollectionFileSource` port, and `rocket-infra` implements it. Background and decisions: `docs/features/collection-export.md`.
 
 ## Module map
 
@@ -55,7 +55,7 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 1. Check the Rocket name exists in `src/components/editor/rok-types.ts`.
 2. Add a row to `TABLE` in `scripts.rs` with `Call`, `EmptyCall` or `Prop`.
 3. Add a case to `translates_variable_and_response_calls` or a new test next to it.
-4. Update the table above and in `.claude/collection-export.md`.
+4. Update the table above and in `docs/features/collection-export.md`.
 
 ## Secret scrub
 

@@ -60,7 +60,7 @@ Measured on the same Linux machine on 2026-10-21 with the installed builds:
 | **Startup → window visible** | 0.43 s (blank) | ~3.5 s | **~1.0 s** |
 | **Startup → UI drawn** | ~10.4 s | ~4.2 s | **~2.2 s** |
 
-**How it was measured:** idle memory is PSS (proportional set size) summed across each app's full process tree, with no requests sent. PSS avoids double-counting pages shared between an app's own processes. The apps ran one after the other. Postman was already signed in. "Startup → UI drawn" is the first moment the app window shows real content, not just a blank window or a flat loading screen. Full method and per-run numbers are in [.claude/benchmarks.md](.claude/benchmarks.md).
+**How it was measured:** idle memory is PSS (proportional set size) summed across each app's full process tree, with no requests sent. PSS avoids double-counting pages shared between an app's own processes. The apps ran one after the other. Postman was already signed in. "Startup → UI drawn" is the first moment the app window shows real content, not just a blank window or a flat loading screen. Full method and per-run numbers are in [docs/engineering/benchmarks.md](docs/engineering/benchmarks.md).
 
 **Takeaways:**
 
