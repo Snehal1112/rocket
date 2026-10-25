@@ -5,27 +5,29 @@
 //! login response is kept and sent on the followed request. Matching and parsing live in
 //! `rocket_http::cookie`; this file only does the I/O.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use chrono::Utc;
 use reqwest::cookie::CookieStore;
 use reqwest::header::HeaderValue;
 use rocket_http::cookie::{cookie_header, cookies_for_request, parse_set_cookie, SetCookie};
-use rocket_http::{Cookie, CookieJar, CookieRepository};
+use rocket_http::{Cookie, CookieJar, CookieJarLock, CookieRepository};
 use rocket_shared::error::DomainResult;
 
 pub struct RepoCookieStore {
     repo: Arc<dyn CookieRepository>,
     /// Serializes read-modify-write cycles on the jar files.
-    write_lock: Mutex<()>,
+    lock: CookieJarLock,
 }
 
 impl RepoCookieStore {
     pub fn new(repo: Arc<dyn CookieRepository>) -> Self {
-        Self {
-            repo,
-            write_lock: Mutex::new(()),
-        }
+        Self::with_lock(repo, CookieJarLock::default())
+    }
+
+    /// Uses a lock shared with the other writers of the same jars.
+    pub fn with_lock(repo: Arc<dyn CookieRepository>, lock: CookieJarLock) -> Self {
+        Self { repo, lock }
     }
 
     fn store(repo: &dyn CookieRepository, cookie: Cookie) -> DomainResult<()> {
@@ -58,8 +60,7 @@ impl CookieStore for RepoCookieStore {
         let Some(host) = url.host_str() else {
             return;
         };
-        // The lock guards no data of its own, so a poisoned lock is safe to recover.
-        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self.lock.lock();
         // One workspace for the whole batch. A repository that follows the active
         // workspace is read at this moment, so a response that arrives after a
         // workspace switch stores its cookies in the new workspace.
@@ -105,8 +106,48 @@ mod tests {
     use crate::FsCookieRepo;
     use rocket_http::{Cookie, HttpExecutor, HttpRequest};
     use rocket_shared::types::HttpMethod;
+    use std::sync::Mutex;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn shared_lock_serializes_a_store_write_and_an_outside_writer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = rocket_http::CookieJarLock::default();
+        let make = || {
+            Arc::new(RepoCookieStore::with_lock(
+                Arc::new(FsCookieRepo::new(dir.path().to_path_buf())),
+                lock.clone(),
+            ))
+        };
+        let (a, b) = (make(), make());
+        let url = url::Url::parse("https://example.com/").expect("url");
+        let mut handles = Vec::new();
+        for i in 0..16 {
+            let store = if i % 2 == 0 {
+                Arc::clone(&a)
+            } else {
+                Arc::clone(&b)
+            };
+            let url = url.clone();
+            handles.push(std::thread::spawn(move || {
+                let value = HeaderValue::from_str(&format!("c{i}=v; Path=/")).expect("header");
+                store.set_cookies(&mut std::iter::once(&value), &url);
+            }));
+        }
+        for h in handles {
+            h.join().expect("thread");
+        }
+        let repo = FsCookieRepo::new(dir.path().to_path_buf());
+        let jars = repo.get_all().expect("jars");
+        let names: Vec<String> = jars
+            .iter()
+            .flat_map(|j| j.cookies.iter().map(|c| c.name.clone()))
+            .collect();
+        for i in 0..16 {
+            assert!(names.contains(&format!("c{i}")), "missing c{i}");
+        }
+    }
 
     fn repo() -> (tempfile::TempDir, Arc<FsCookieRepo>) {
         let dir = tempfile::tempdir().expect("tempdir");

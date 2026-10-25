@@ -1,6 +1,22 @@
+use std::sync::{Arc, Mutex, MutexGuard};
+
 use rocket_shared::error::DomainResult;
 
 use crate::cookie::CookieJar;
+
+/// One lock for every writer of the cookie jars.
+///
+/// A read-modify-write on a jar file must hold it, or two writers can lose an update.
+/// Clones share the same lock.
+#[derive(Clone, Default)]
+pub struct CookieJarLock(Arc<Mutex<()>>);
+
+impl CookieJarLock {
+    /// Takes the lock. The lock guards no data, so a poisoned lock is safe to recover.
+    pub fn lock(&self) -> MutexGuard<'_, ()> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
 
 pub trait CookieRepository: Send + Sync {
     fn get_all(&self) -> DomainResult<Vec<CookieJar>>;

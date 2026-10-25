@@ -1,4 +1,4 @@
-use rocket_http::{CookieJar, CookieRepository};
+use rocket_http::{CookieJar, CookieJarLock, CookieRepository};
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::EventPublisher;
 
@@ -6,11 +6,22 @@ pub struct CookieService {
     repo: Box<dyn CookieRepository>,
     #[allow(dead_code)]
     events: Box<dyn EventPublisher>,
+    lock: CookieJarLock,
 }
 
 impl CookieService {
     pub fn new(repo: Box<dyn CookieRepository>, events: Box<dyn EventPublisher>) -> Self {
-        Self { repo, events }
+        Self {
+            repo,
+            events,
+            lock: CookieJarLock::default(),
+        }
+    }
+
+    /// Uses a jar lock shared with the other writers.
+    pub fn with_lock(mut self, lock: CookieJarLock) -> Self {
+        self.lock = lock;
+        self
     }
 
     pub fn get_all(&self) -> DomainResult<Vec<CookieJar>> {
@@ -22,10 +33,12 @@ impl CookieService {
     }
 
     pub fn save(&self, jar: &CookieJar) -> DomainResult<()> {
+        let _guard = self.lock.lock();
         self.repo.save(jar)
     }
 
     pub fn clear(&self) -> DomainResult<()> {
+        let _guard = self.lock.lock();
         self.repo.clear()
     }
 }
@@ -85,6 +98,26 @@ mod tests {
             Box::new(MockCookieRepo::new()),
             Box::new(NullEventPublisher),
         )
+    }
+
+    #[test]
+    fn save_waits_for_the_shared_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let lock = rocket_http::CookieJarLock::default();
+        let svc = std::sync::Arc::new(make_service().with_lock(lock.clone()));
+        let guard = lock.lock();
+        let (tx, rx) = mpsc::channel();
+        let worker = std::sync::Arc::clone(&svc);
+        let handle = std::thread::spawn(move || {
+            worker.save(&CookieJar::new("example.com")).expect("save");
+            tx.send(()).expect("send");
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+        drop(guard);
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("save finishes");
+        handle.join().expect("thread");
     }
 
     #[test]

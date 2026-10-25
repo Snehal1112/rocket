@@ -477,6 +477,8 @@ pub struct RequestExecutionService {
     /// What the user allowed per collection on this computer. The default store allows
     /// nothing, so an unwired service runs every collection in Safe mode.
     trust_store: Arc<dyn rocket_collection::CollectionTrustStore>,
+    /// The lock every writer of the cookie jars takes.
+    cookie_lock: rocket_http::CookieJarLock,
 }
 
 impl RequestExecutionService {
@@ -508,6 +510,7 @@ impl RequestExecutionService {
             vault_connection_secret_store,
             vault_fetcher,
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
+            cookie_lock: rocket_http::CookieJarLock::default(),
         }
     }
 
@@ -540,6 +543,7 @@ impl RequestExecutionService {
             vault_connection_secret_store,
             vault_fetcher,
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
+            cookie_lock: rocket_http::CookieJarLock::default(),
         }
     }
 
@@ -550,6 +554,18 @@ impl RequestExecutionService {
     }
 
     /// Attach the trust store that decides which requested capabilities are granted.
+    /// Uses a jar lock shared with the other writers of the cookie jars.
+    pub fn with_cookie_lock(mut self, lock: rocket_http::CookieJarLock) -> Self {
+        self.cookie_lock = lock;
+        self
+    }
+
+    /// The lock every cookie jar writer takes.
+    #[allow(dead_code)]
+    pub(crate) fn cookie_lock(&self) -> &rocket_http::CookieJarLock {
+        &self.cookie_lock
+    }
+
     pub fn with_trust_store(
         mut self,
         store: Arc<dyn rocket_collection::CollectionTrustStore>,

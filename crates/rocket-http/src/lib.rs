@@ -25,7 +25,7 @@ pub mod wsse_sig;
 
 pub use aws_sig::{sign_request, AwsCredentials, SignedHeaders};
 pub use cookie::{Cookie, CookieJar};
-pub use cookie_repository::CookieRepository;
+pub use cookie_repository::{CookieJarLock, CookieRepository};
 pub use executor::HttpExecutor;
 pub use jwt::{decode_jwt, JwtClaims};
 pub use load_test::{

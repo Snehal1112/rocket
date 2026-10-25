@@ -100,6 +100,16 @@ impl ReqwestExecutor {
         self
     }
 
+    /// Like `with_cookie_repo`, with a jar lock shared with the other writers.
+    pub fn with_cookie_repo_and_lock(
+        mut self,
+        repo: Arc<dyn CookieRepository>,
+        lock: rocket_http::CookieJarLock,
+    ) -> Self {
+        self.cookie_store = Some(Arc::new(RepoCookieStore::with_lock(repo, lock)));
+        self
+    }
+
     /// Reads requests through `shared`, which the proxy service updates when settings change.
     pub fn with_proxy(mut self, shared: rocket_http::SharedProxy) -> Self {
         self.proxy = Some(shared);

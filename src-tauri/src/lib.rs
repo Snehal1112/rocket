@@ -462,12 +462,15 @@ pub fn run() {
                 ))),
                 Box::new(NullEventPublisher),
             );
+            // One lock for every writer of the cookie jars.
+            let cookie_lock = rocket_http::CookieJarLock::default();
             let cookie_svc = CookieService::new(
                 Box::new(rocket_infra::SharedPathCookieRepo::new(Arc::clone(
                     &active_workspace_path,
                 ))),
                 Box::new(NullEventPublisher),
-            );
+            )
+            .with_lock(cookie_lock.clone());
             // App-level proxy: the service validates and stores it, the executor reads it.
             let shared_proxy = rocket_http::new_shared_proxy();
             let proxy_svc = rocket_app::ProxySettingsService::new(
@@ -481,9 +484,12 @@ pub fn run() {
                 ReqwestExecutor::with_allowed_base(Arc::clone(&active_workspace_path))
                     // The jar is read on every request and pinned once per response, so
                     // a response that lands after a switch is stored in the new workspace.
-                    .with_cookie_repo(Arc::new(rocket_infra::SharedPathCookieRepo::new(
-                        Arc::clone(&active_workspace_path),
-                    )))
+                    .with_cookie_repo_and_lock(
+                        Arc::new(rocket_infra::SharedPathCookieRepo::new(Arc::clone(
+                            &active_workspace_path,
+                        ))),
+                        cookie_lock.clone(),
+                    )
                     .with_proxy(Arc::clone(&shared_proxy)),
             );
 
@@ -595,6 +601,7 @@ pub fn run() {
                 Arc::clone(&vault_fetcher),
             )
             .with_audit_actor(AuditActor::User)
+            .with_cookie_lock(cookie_lock.clone())
             .with_script_engine(Box::new(DenoScriptEngine::new()))
             .with_trust_store(Arc::clone(&trust_store))
             .with_collection_env_repo_factory(Box::new(
@@ -677,6 +684,7 @@ pub fn run() {
                     Arc::clone(&vault_fetcher),
                 )
                 .with_audit_actor(AuditActor::Agent)
+                .with_cookie_lock(cookie_lock.clone())
                 .with_script_engine(Box::new(DenoScriptEngine::new()))
                 .with_trust_store(Arc::clone(&trust_store))
                 .with_collection_env_repo_factory(Box::new(
