@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExampleTabView } from '@/components/examples/ExampleTabView';
 import type { CollectionChangedEvent, RequestExample } from '@/lib/tauri-api';
 import { listRequestExamples, onCollectionChanged } from '@/lib/tauri-api';
+import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { ExampleTab } from '@/types/pane-types';
 
@@ -66,6 +67,18 @@ describe('ExampleTabView', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Try' }));
     expect(openTryTab).toHaveBeenCalledWith('col', 'users.yml', full);
+  });
+
+  it('follows_the_request_layout_setting', async () => {
+    vi.mocked(listRequestExamples).mockResolvedValue([full]);
+    const { container } = render(<ExampleTabView tab={tab} />);
+    await screen.findByRole('region', { name: 'Request' });
+    expect(container.querySelector('.grid-rows-2')).not.toBeNull();
+
+    act(() => useLayoutStore.getState().setRequestLayout('side-by-side'));
+    expect(container.querySelector('.grid-cols-2')).not.toBeNull();
+    expect(container.querySelector('.grid-rows-2')).toBeNull();
+    act(() => useLayoutStore.getState().setRequestLayout('stacked'));
   });
 
   it('renders_request_and_response_panes', async () => {

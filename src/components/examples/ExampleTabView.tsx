@@ -17,6 +17,7 @@ import { METHOD_BADGE_COLOR, statusBadgeColor } from '@/lib/colors';
 import type { RequestExample } from '@/lib/tauri-api';
 import { listRequestExamples, onCollectionChanged } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { useLayoutStore } from '@/stores/layout-store';
 import { usePaneStore } from '@/stores/pane-store';
 import type { ExampleTab } from '@/types/pane-types';
 
@@ -144,6 +145,8 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
   const { collection, path } = tab.source;
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const openTryTab = usePaneStore((s) => s.openTryTab);
+  // Follow the same layout choice as the request tab.
+  const sideBySide = useLayoutStore((s) => s.requestLayout === 'side-by-side');
 
   const load = useCallback(async () => {
     try {
@@ -246,8 +249,14 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
         )}
       </div>
 
-      <div className='grid flex-1 min-h-0 grid-rows-2'>
-        <section aria-label='Request' className='flex min-h-0 flex-col border-b border-border/70'>
+      <div className={cn('grid flex-1 min-h-0', sideBySide ? 'grid-cols-2' : 'grid-rows-2')}>
+        <section
+          aria-label='Request'
+          className={cn(
+            'flex min-h-0 min-w-0 flex-col border-border/70',
+            sideBySide ? 'border-r' : 'border-b',
+          )}
+        >
           <div className='flex items-center gap-2 px-3 py-1.5 shrink-0'>
             {method && <span className='text-xs font-semibold'>{method}</span>}
             <span className='truncate font-mono text-xs'>{request?.url || 'No URL'}</span>
@@ -276,7 +285,7 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
           </Tabs>
         </section>
 
-        <section aria-label='Response' className='flex min-h-0 flex-col'>
+        <section aria-label='Response' className='flex min-h-0 min-w-0 flex-col'>
           <Tabs defaultValue='body' className='flex min-h-0 flex-1 flex-col px-3 pt-1.5'>
             <TabsList className='h-8 w-fit shrink-0'>
               <TabsTrigger value='body' className={PANEL_TAB_CLASS}>
