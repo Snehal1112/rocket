@@ -1,0 +1,33 @@
+# OpenAPI import and sync: plan index
+
+Spec: `docs/superpowers/specs/2026-10-25-openapi-import-and-sync-design.md`. Each plan holds at most three tasks. Plan files are written one at a time, just before they run, because each one names the real signatures left by the plan before it. Status here is the source of truth.
+
+Rules for every plan:
+- Tasks that touch `rocket-import`, `rocket-collection`, `rocket-infra` or collection files start with: "Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`."
+- Cargo commands use `-j4` and `-p <crate>`. Never `--workspace`.
+- shadcn/ui primitives and lucide icons only, narrow Zustand selectors, never `unwrap()` in production paths, camelCase renames on IPC DTOs only.
+- Commits go through `dev-workflow-skills:1-git-commit` with explicit paths, never `git add -A`.
+- Gates before a commit: `cargo check -j4` and targeted `cargo test -j4 -p <crate> <name>` for Rust, plus `yarn tsc --noEmit`, `yarn check` and targeted `yarn test` for TypeScript.
+
+## Series 1: import
+
+| ID | Plan | Tasks | Needs | Models | Status |
+|---|---|---|---|---|---|
+| P1 | `plan-01-parse-and-convert.md`: OpenAPI reader, request converter, layout and import service (pure, no network) | 1 reader and neutral model; 2 operation to request, naming, baseline hash; 3 tag and path layout, `import_openapi_text` | none | sonnet; opus reviews task 3 | written, not started |
+| P2 | GitHub URL normalizer, URL fetcher (trait in `rocket-app`, reqwest impl in `rocket-infra`), source and provenance sidecar | 1 `normalize_spec_url`; 2 fetcher with caps and redirect rules; 3 `openapi-source.yml` repo | P1 | sonnet | not written |
+| P3 | Import command and dialog | 1 `import_openapi` service method and Tauri command; 2 TS api and query; 3 dialog source (file or URL, layout choice) | P2 | sonnet | not written |
+
+## Series 2: sync (outline, each plan is written after the one before it is merged)
+
+| ID | Plan | Needs |
+|---|---|---|
+| P4 | Conditional fetch with ETag and body hash, token in the keychain, sync settings (interval, last check) | P2 |
+| P5 | Three-way diff and per-field merge engine (pure) | P1, P2 |
+| P6 | Apply approved changes with a staging area and recovery journal | P5 |
+| P7 | Scheduler: supervisor, intervals, jitter, backoff, launch catch-up, notice | P4 |
+| P8 | Spec sync tab: list and detail | P5, P6 |
+| P9 | Spec sync tab: skip, apply, Check now, interval settings, token field | P7, P8 |
+
+## Decisions log
+
+- Ruling (2026-10-25): the design is approved. Import ships before sync. Provenance lives in a sidecar file in the collection folder (`openapi-source.yml`), keyed by request `uid`, because `Request` has no extension slot.
