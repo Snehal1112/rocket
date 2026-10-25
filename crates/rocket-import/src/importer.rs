@@ -860,6 +860,11 @@ impl ImportService {
         Ok(report)
     }
 
+    /// The folder that holds this workspace's collections.
+    pub(crate) fn collections_root(&self) -> PathBuf {
+        self.workspace_path.join("collections")
+    }
+
     /// Import an OpenAPI 3.0, 3.1 or Swagger 2.0 document (JSON or YAML text) as a new
     /// collection, grouped into folders by tag or by URL path.
     ///

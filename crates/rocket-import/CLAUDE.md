@@ -149,6 +149,16 @@ Plan 2 of the OpenAPI series (`docs/superpowers/plans/2026-10-25-openapi-import-
 - `SpecFetcher` (port in `rocket-http`, `ReqwestSpecFetcher` in `rocket-infra`): https only, at most 5 redirects followed by hand, 30 s timeout, 25 MB cap enforced while reading, `If-None-Match` and `If-Modified-Since` supported. A redirect to `http` or to a loopback, private or link-local IP literal is refused (host names are not resolved, so DNS rebinding is not covered). The token is dropped on a redirect to another origin. Failures are `SpecFetchFailure` states (`NotFound`, `Unauthorized`, `RateLimited`, `TooLarge`, `NotHttps`, `TooManyRedirects`, `BlockedRedirect`, `Status`, `Network`). Not wired to a command yet.
 - `source_record(...) -> OpenApiSource` builds the record a collection keeps. `FsOpenApiSourceRepo` stores it at `<collection>/.rocket/openapi-source.yml` (snake_case keys, `atomic_write`). A dot folder is hidden from the collection loader and from the Bruno export. A corrupt file, or one with a higher `version`, is an error. The file holds the location, layout, spec hash, ETag, Last-Modified and one entry per request (key, uid, path, baseline hash). It never holds a token.
 
+### Importing from a file or a link
+
+Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, warnings }`.
+
+- `import_openapi_file(path, group_by, workspace_id)` checks the file length with `metadata` first (25 MB cap, `ImportError::SpecUnavailable`), then reads it. It writes no source file and `source_url` is `None`.
+- `import_openapi_url(fetcher, sources, link, group_by, workspace_id)` (async) runs `parse_spec_url`, `fetch_target(.., false)` (no token), the fetch, then `import_openapi_text`, then saves the source file. A failed fetch or a `NotModified` answer is `SpecUnavailable` and creates nothing; a body that is not a spec is `NotAnOpenApiSpec`.
+- A source file that cannot be saved is a warning ("Sync could not be set up"), never an error. A GitHub ref of 7 to 40 hex characters adds a warning that the commit never changes.
+- `NotFound` and `Unauthorized` share one message, because GitHub answers 404 for a private repository; it says private links are not supported yet.
+- `GroupBy::parse` accepts exactly `tags` and `paths`.
+
 ### Fixture Files
 
 Integration tests live in `tests/integration_test.rs` and use `tests/fixtures/my-api/`:

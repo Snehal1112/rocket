@@ -20,6 +20,15 @@ impl GroupBy {
             GroupBy::Paths => "paths",
         }
     }
+
+    /// Reads the stored name back. Only the exact names `tags` and `paths` are accepted.
+    pub fn parse(text: &str) -> Option<GroupBy> {
+        match text {
+            "tags" => Some(GroupBy::Tags),
+            "paths" => Some(GroupBy::Paths),
+            _ => None,
+        }
+    }
 }
 
 /// Folder name used for operations without a tag.

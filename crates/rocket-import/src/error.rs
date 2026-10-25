@@ -27,6 +27,9 @@ pub enum ImportError {
     #[error("not an OpenAPI or Swagger 2.0 document: {0}")]
     NotAnOpenApiSpec(String),
 
+    #[error("{0}")]
+    SpecUnavailable(String),
+
     #[error("JSON parse error in {path}: {message}")]
     JsonParseError {
         path: std::path::PathBuf,

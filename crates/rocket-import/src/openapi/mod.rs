@@ -1,3 +1,4 @@
+pub(crate) mod entry;
 pub(crate) mod layout;
 pub(crate) mod model;
 pub(crate) mod reader;
@@ -9,3 +10,4 @@ pub(crate) use model::{Operation, ParamLocation, Parameter, SecurityScheme, Secu
 pub(crate) use reader::parse_openapi;
 pub use source_record::source_record;
 pub use source_url::{fetch_target, parse_spec_url, FetchTarget};
+pub use entry::OpenApiImportResult;
