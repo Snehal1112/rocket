@@ -277,7 +277,7 @@ export function RequestNode({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className='group relative flex items-center'>
+        <div className='group relative flex items-start'>
           <TreeItem
             value={uid}
             active={active}
@@ -355,13 +355,13 @@ export function RequestNode({
             )}
           </TreeItem>
 
-          {/* "..." action menu, visible on hover. */}
+          {/* "..." action menu, visible on hover. It lines up with the request row (h-7), not its examples. */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type='button'
                 aria-label={`Actions for ${name}`}
-                className='sticky right-1 -ml-6 shrink-0 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
+                className='sticky right-1 -ml-6 mt-1 shrink-0 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
                 <MoreHorizontal aria-hidden='true' className='h-3 w-3' />
