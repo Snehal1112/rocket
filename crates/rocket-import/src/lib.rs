@@ -2,6 +2,7 @@ pub(crate) mod bru;
 pub(crate) mod converter;
 pub mod error;
 mod importer;
+pub(crate) mod openapi;
 pub(crate) mod postman;
 pub mod report;
 pub(crate) mod wsdl;

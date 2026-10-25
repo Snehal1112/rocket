@@ -1,0 +1,46 @@
+swagger: '2.0'
+info:
+  title: Orders
+  version: 1.2.0
+host: api.example.com
+basePath: /v1
+schemes: [https]
+consumes: [application/json]
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      tags: [Order Management]
+      parameters:
+        - $ref: '#/parameters/Page'
+      responses:
+        '200':
+          description: ok
+    post:
+      operationId: createOrder
+      summary: Create an order
+      tags: [Order Management]
+      parameters:
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/Order'
+      responses:
+        '201':
+          description: created
+parameters:
+  Page:
+    name: page
+    in: query
+    required: true
+    type: integer
+definitions:
+  Order:
+    type: object
+    properties:
+      sku: { type: string }
+securityDefinitions:
+  basicAuth:
+    type: basic

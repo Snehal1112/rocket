@@ -24,6 +24,9 @@ pub enum ImportError {
     #[error("not a Postman collection (missing schema.getpostman.com in info.schema): {0}")]
     NotAPostmanCollection(std::path::PathBuf),
 
+    #[error("not an OpenAPI or Swagger 2.0 document: {0}")]
+    NotAnOpenApiSpec(String),
+
     #[error("JSON parse error in {path}: {message}")]
     JsonParseError {
         path: std::path::PathBuf,

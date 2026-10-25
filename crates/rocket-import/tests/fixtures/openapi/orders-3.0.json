@@ -1,0 +1,54 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Orders", "version": "1.2.0" },
+  "servers": [{ "url": "https://api.example.com/v1" }],
+  "tags": [{ "name": "Order Management" }],
+  "paths": {
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "summary": "List orders",
+        "tags": ["Order Management"],
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "name": "status", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "ok" } }
+      },
+      "post": {
+        "operationId": "createOrder",
+        "summary": "Create an order",
+        "tags": ["Order Management"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "sku": { "type": "string" }, "qty": { "type": "integer" } } },
+              "example": { "sku": "A-1", "qty": 2 }
+            }
+          }
+        },
+        "responses": { "201": { "description": "created" } }
+      }
+    },
+    "/orders/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "operationId": "getOrder",
+        "summary": "Get one order",
+        "tags": ["Order Management"],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Page": { "name": "page", "in": "query", "required": true, "schema": { "type": "integer" }, "example": 1 }
+    },
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    }
+  }
+}
