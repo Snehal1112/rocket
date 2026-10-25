@@ -1,5 +1,14 @@
-import { Box, ExternalLink, FolderOpen, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  Box,
+  ExternalLink,
+  FolderOpen,
+  Globe,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+  Upload,
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
 import { RocketBook } from '@/components/illustrations';
 import { ImportCollectionDialog } from '@/components/import/ImportCollectionDialog';
@@ -20,6 +29,7 @@ import { collectionKeys, useCollections } from '@/lib/queries/collection-queries
 import { useGlobalEnvironments } from '@/lib/queries/environment-queries';
 import { useUpdateWorkspaceDescription, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getQueryClient } from '@/lib/query-client';
+import { formatRelativeTime } from '@/lib/relative-time';
 import {
   createCollection,
   deleteCollection,
@@ -33,6 +43,17 @@ import { WorkspaceCollectionsSkeleton } from './WorkspaceCollectionsSkeleton';
 
 interface WorkspaceOverviewTabProps {
   workspaceId: string;
+}
+
+function plural(n: number, singular: string, pluralForm: string): string {
+  return `${n} ${n === 1 ? singular : pluralForm}`;
+}
+
+/** The backend sends the folder's modified time as Unix seconds in a string. */
+function modifiedLabel(modifiedAt: string | undefined): string | null {
+  const seconds = Number(modifiedAt);
+  if (!modifiedAt || !Number.isFinite(seconds)) return null;
+  return `Modified ${formatRelativeTime(new Date(seconds * 1000).toISOString())}`;
 }
 
 export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps) {
@@ -54,6 +75,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     isError: collectionsFailed,
     refetch: refetchCollections,
   } = useCollections();
+  const collectionsRef = useRef<HTMLDivElement>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -124,6 +146,22 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
     }
   }
 
+  // Switch to the Environments tab of this workspace, the same way the title bar does.
+  function showEnvironments() {
+    const tabId = `workspace:${workspaceId}:environments`;
+    const activate = (node: ReturnType<typeof usePaneStore.getState>['root']): void => {
+      if (node.type === 'leaf') {
+        if (node.tabs.some((t) => t.id === tabId)) {
+          usePaneStore.getState().setActiveTab(tabId, node.groupId);
+        }
+      } else {
+        activate(node.children[0]);
+        activate(node.children[1]);
+      }
+    };
+    activate(usePaneStore.getState().root);
+  }
+
   const collectionCount = summaries.length;
 
   return (
@@ -138,8 +176,15 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
             </h2>
 
             {/* Stats */}
-            <div className='flex gap-8 pb-5 border-b border-border'>
-              <div className='flex flex-col gap-1'>
+            <div className='flex gap-3 pb-5 border-b border-border'>
+              <Button
+                variant='ghost'
+                className='h-auto flex-col items-start gap-1 px-3 py-2 -ml-3'
+                aria-label='Show collections'
+                onClick={() =>
+                  collectionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+              >
                 {collectionsPending ? (
                   <Skeleton className='h-9 w-8' />
                 ) : (
@@ -147,9 +192,17 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                     {collectionCount}
                   </span>
                 )}
-                <span className='text-xs text-muted-foreground'>Collections</span>
-              </div>
-              <div className='flex flex-col gap-1'>
+                <span className='flex items-center gap-1.5 text-xs font-normal text-muted-foreground'>
+                  <Box className='h-3 w-3' aria-hidden='true' />
+                  {collectionCount === 1 ? 'Collection' : 'Collections'}
+                </span>
+              </Button>
+              <Button
+                variant='ghost'
+                className='h-auto flex-col items-start gap-1 px-3 py-2'
+                aria-label='Show environments'
+                onClick={showEnvironments}
+              >
                 {environmentsPending ? (
                   <Skeleton className='h-9 w-8' />
                 ) : (
@@ -157,8 +210,11 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                     {globalEnvironments.length}
                   </span>
                 )}
-                <span className='text-xs text-muted-foreground'>Environments</span>
-              </div>
+                <span className='flex items-center gap-1.5 text-xs font-normal text-muted-foreground'>
+                  <Globe className='h-3 w-3' aria-hidden='true' />
+                  {globalEnvironments.length === 1 ? 'Environment' : 'Environments'}
+                </span>
+              </Button>
             </div>
 
             {/* Quick Actions */}
@@ -203,29 +259,24 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
               ) : (
                 <div className='flex flex-wrap gap-2'>
                   {summaries.length > 0 && (
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      className='text-xs h-8'
-                      onClick={() => setIsCreating(true)}
-                    >
+                    <Button size='sm' className='text-xs h-8' onClick={() => setIsCreating(true)}>
                       <Plus className='h-3.5 w-3.5 mr-1.5' />
                       Create Collection
                     </Button>
                   )}
                   <Button
-                    variant='outline'
+                    variant='ghost'
                     size='sm'
-                    className='text-xs h-8'
+                    className='text-xs h-8 text-muted-foreground hover:text-foreground'
                     onClick={handleLinkExternal}
                   >
                     <FolderOpen className='h-3.5 w-3.5 mr-1.5' />
                     Open Collection
                   </Button>
                   <Button
-                    variant='outline'
+                    variant='ghost'
                     size='sm'
-                    className='text-xs h-8'
+                    className='text-xs h-8 text-muted-foreground hover:text-foreground'
                     onClick={() => setImportDialogOpen(true)}
                   >
                     <Upload className='h-3.5 w-3.5 mr-1.5' />
@@ -236,7 +287,7 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
             </div>
 
             {/* Collections */}
-            <div>
+            <div ref={collectionsRef} className='scroll-mt-6'>
               <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3'>
                 Collections
               </p>
@@ -266,15 +317,20 @@ export function WorkspaceOverviewTab({ workspaceId }: WorkspaceOverviewTabProps)
                         <Box className='h-5 w-5 shrink-0' />
                         <div className='flex-1 min-w-0'>
                           <span className='text-sm font-medium truncate block'>{col.name}</span>
+                          <span className='text-xs text-foreground/70 truncate block'>
+                            {[
+                              plural(col.requestCount, 'request', 'requests'),
+                              modifiedLabel(col.modifiedAt),
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </span>
                           {col.path && (
                             <span className='text-xs text-muted-foreground truncate block'>
                               {col.path}
                             </span>
                           )}
                         </div>
-                        <span className='text-xs text-muted-foreground shrink-0'>
-                          {col.requestCount} req
-                        </span>
                         {col.refType === 'external' && (
                           <span className='shrink-0 rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'>
                             external
