@@ -82,13 +82,13 @@ impl<'a> ScriptCookies<'a> {
         pick: impl Fn(&Cookie) -> bool,
     ) -> DomainResult<usize> {
         self.locked(|repo| {
-            let jars = repo.get_all()?;
-            let doomed: Vec<Cookie> = matching_cookies(&jars, scope, now)
-                .into_iter()
-                .filter(|c| pick(c))
-                .collect();
             let mut removed = 0;
-            for mut jar in jars {
+            for mut jar in repo.get_all()? {
+                // Decide per jar so a match never leaks into another jar.
+                let doomed: Vec<Cookie> = matching_cookies(std::slice::from_ref(&jar), scope, now)
+                    .into_iter()
+                    .filter(|c| pick(c))
+                    .collect();
                 let before = jar.cookies.len();
                 jar.cookies.retain(|c| {
                     !doomed
@@ -272,24 +272,74 @@ mod tests {
 
     #[test]
     fn operations_hold_the_lock() {
-        let repo = MemRepo::default();
-        let lock = CookieJarLock::default();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let guard = lock.lock();
-        std::thread::scope(|t| {
-            t.spawn(|| {
-                let svc = ScriptCookies::new(&repo, &lock);
-                svc.upsert(&scope("https://a.example.com/"), &input("x", "1"), now())
-                    .expect("upsert");
-                tx.send(()).expect("send");
+        type Op = Box<dyn Fn(&ScriptCookies) + Send + Sync>;
+        let s = scope("https://a.example.com/");
+        let ops: Vec<(&str, Op)> = vec![
+            (
+                "find",
+                Box::new({
+                    let s = s.clone();
+                    move |svc| {
+                        svc.find(&s, now()).expect("find");
+                    }
+                }),
+            ),
+            (
+                "upsert",
+                Box::new({
+                    let s = s.clone();
+                    move |svc| {
+                        svc.upsert(&s, &input("x", "1"), now()).expect("upsert");
+                    }
+                }),
+            ),
+            (
+                "remove",
+                Box::new({
+                    let s = s.clone();
+                    move |svc| {
+                        svc.remove(&s, "x", now()).expect("remove");
+                    }
+                }),
+            ),
+            (
+                "clear_for_url",
+                Box::new({
+                    let s = s.clone();
+                    move |svc| {
+                        svc.clear_for_url(&s, now()).expect("clear_for_url");
+                    }
+                }),
+            ),
+            (
+                "clear_all",
+                Box::new(|svc| {
+                    svc.clear_all().expect("clear_all");
+                }),
+            ),
+        ];
+        for (name, op) in &ops {
+            let repo = MemRepo::default();
+            let lock = CookieJarLock::default();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let guard = lock.lock();
+            std::thread::scope(|t| {
+                t.spawn(|| {
+                    op(&ScriptCookies::new(&repo, &lock));
+                    tx.send(()).expect("send");
+                });
+                assert!(
+                    rx.recv_timeout(std::time::Duration::from_millis(200))
+                        .is_err(),
+                    "{name} did not wait for the lock"
+                );
+                drop(guard);
+                assert!(
+                    rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(),
+                    "{name} did not finish after the lock was released"
+                );
             });
-            assert!(rx
-                .recv_timeout(std::time::Duration::from_millis(200))
-                .is_err());
-            drop(guard);
-            assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok());
-        });
-        assert_eq!(count(&repo), 1);
+        }
     }
 
     #[test]
@@ -305,6 +355,67 @@ mod tests {
             .expect("upsert");
         assert_eq!(count(&pinned), 1);
         assert_eq!(count(&repo), 0);
+    }
+
+    /// Two jars that each hold a legacy cookie with an empty domain, same name and path.
+    fn legacy_repo() -> MemRepo {
+        let repo = MemRepo::default();
+        for host in ["a.test", "b.test"] {
+            let mut jar = CookieJar::new(host);
+            jar.cookies.push(Cookie {
+                name: "sid".into(),
+                value: "1".into(),
+                domain: String::new(),
+                path: "/".into(),
+                secure: false,
+                http_only: false,
+                expires: None,
+                same_site: None,
+            });
+            repo.save(&jar).expect("save");
+        }
+        repo
+    }
+
+    #[test]
+    fn remove_does_not_touch_empty_domain_cookies_in_other_jars() {
+        let repo = legacy_repo();
+        let lock = CookieJarLock::default();
+        let svc = ScriptCookies::new(&repo, &lock);
+        let removed = svc
+            .remove(&scope("http://a.test/"), "sid", now())
+            .expect("remove");
+        assert_eq!(removed, 1);
+        let b = repo.get_by_domain("b.test").expect("get").expect("jar");
+        assert_eq!(b.cookies.len(), 1);
+    }
+
+    #[test]
+    fn clear_for_url_does_not_touch_empty_domain_cookies_in_other_jars() {
+        let repo = legacy_repo();
+        let lock = CookieJarLock::default();
+        let svc = ScriptCookies::new(&repo, &lock);
+        let removed = svc
+            .clear_for_url(&scope("http://a.test/"), now())
+            .expect("clear");
+        assert_eq!(removed, 1);
+        let b = repo.get_by_domain("b.test").expect("get").expect("jar");
+        assert_eq!(b.cookies.len(), 1);
+    }
+
+    #[test]
+    fn upsert_with_the_same_name_on_another_path_keeps_both() {
+        let repo = MemRepo::default();
+        let lock = CookieJarLock::default();
+        let svc = ScriptCookies::new(&repo, &lock);
+        let s = scope("https://a.example.com/");
+        let mut one = input("sid", "1");
+        one.path = Some("/a".into());
+        let mut two = input("sid", "2");
+        two.path = Some("/b".into());
+        svc.upsert(&s, &one, now()).expect("one");
+        svc.upsert(&s, &two, now()).expect("two");
+        assert_eq!(count(&repo), 2);
     }
 
     #[test]
