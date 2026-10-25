@@ -125,6 +125,10 @@
     _cookieName(method, o.key);
     o.value = o.value === undefined || o.value === null ? '' : String(o.value);
     if (o.expires instanceof Date) o.expires = o.expires.toISOString();
+    if (typeof o.maxAge === 'number') {
+      if (!Number.isFinite(o.maxAge)) throw new TypeError('rok.cookies.' + method + ': maxAge must be a finite number');
+      o.maxAge = Math.trunc(o.maxAge);
+    }
     return o;
   }
 
@@ -164,11 +168,13 @@
 
   // All async methods are `async`, so an argument error rejects instead of throwing.
   function _cookieJar() {
-    const find = async (m, url) => (await _cookieCall(m, { op: 'find', url: _cookieUrl(m, url) })).cookies;
+    const find = async (m, url) => (_cookieHost(), await _cookieCall(m, { op: 'find', url: _cookieUrl(m, url) })).cookies;
     const set = async (m, url, input) => {
+      _cookieHost();
       await _cookieCall(m, { op: 'upsert', url: _cookieUrl(m, url), cookie: input });
     };
     const lookup = async (m, url, name) => {
+      _cookieHost();
       _cookieName(m, name);
       return (await find(m, url)).find((c) => c.key === name);
     };
@@ -180,19 +186,25 @@
         if (typeof callback !== 'function') return checked;
         return checked.then((yes) => callback(null, yes), (err) => callback(err, null));
       },
-      setCookie: async (url, a, b, c) => set('setCookie', url, _cookieInput('setCookie', a, b, c)),
+      setCookie: async (url, a, b, c) => {
+        _cookieHost();
+        return set('setCookie', url, _cookieInput('setCookie', a, b, c));
+      },
       setCookies: async (url, list) => {
+        _cookieHost();
         if (!Array.isArray(list)) throw new TypeError('rok.cookies.setCookies: cookies must be an array');
         const inputs = list.map((item) => _cookieInput('setCookies', item));
         for (const input of inputs) await set('setCookies', url, input);
       },
       deleteCookie: async (url, name) => {
+        _cookieHost();
         await _cookieCall('deleteCookie', { op: 'remove', url: _cookieUrl('deleteCookie', url), name: _cookieName('deleteCookie', name) });
       },
       deleteCookies: async (url) => {
+        _cookieHost();
         await _cookieCall('deleteCookies', { op: 'clearUrl', url: _cookieUrl('deleteCookies', url) });
       },
-      clear: async () => { await _cookieCall('clear', { op: 'clearAll' }); },
+      clear: async () => { _cookieHost(); await _cookieCall('clear', { op: 'clearAll' }); },
     };
   }
 

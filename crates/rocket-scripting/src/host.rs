@@ -106,8 +106,6 @@ pub enum HostCookieOp {
 pub enum HostCookieResult {
     /// The cookies now matching the URL.
     Cookies(Vec<CookieEntry>),
-    /// How many cookies the call changed.
-    Count(usize),
     /// The call has nothing to report.
     Done,
 }

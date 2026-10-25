@@ -42,7 +42,7 @@ mod folder_chain_e2e_tests;
 mod folder_var_script_tests;
 pub(crate) mod run_request;
 pub(crate) mod script_chain;
-// The script host calls this service from the next plan.
+// The cookie service behind `rok.cookies`.
 pub(crate) mod script_cookies;
 pub(crate) mod script_host;
 #[cfg(test)]

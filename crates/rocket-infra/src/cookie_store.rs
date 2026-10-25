@@ -96,7 +96,21 @@ impl CookieStore for RepoCookieStore {
         };
         let cookies =
             cookies_for_request(&jars, host, url.path(), url.scheme() == "https", Utc::now());
-        HeaderValue::from_str(&cookie_header(&cookies)?).ok()
+        if let Some(value) = cookie_header(&cookies).and_then(|h| HeaderValue::from_str(&h).ok()) {
+            return Some(value);
+        }
+        // One bad cookie must not hide the others, so keep only the pairs that fit a header.
+        let usable: Vec<Cookie> = cookies
+            .into_iter()
+            .filter(|c| {
+                let fits = HeaderValue::from_str(&format!("{}={}", c.name, c.value)).is_ok();
+                if !fits {
+                    tracing::warn!(cookie = %c.name, "skipping a cookie that cannot be sent");
+                }
+                fits
+            })
+            .collect();
+        HeaderValue::from_str(&cookie_header(&usable)?).ok()
     }
 }
 
@@ -362,5 +376,28 @@ mod tests {
         let kill = reqwest::header::HeaderValue::from_static("sid=; Path=/; Max-Age=0");
         store.set_cookies(&mut std::iter::once(&kill), &url);
         assert!(repo.get_all().expect("jars")[0].cookies.is_empty());
+    }
+
+    #[test]
+    fn a_cookie_that_cannot_be_a_header_is_skipped_and_the_rest_are_sent() {
+        let (_dir, repo) = repo();
+        let make = |name: &str, value: &str| Cookie {
+            name: name.into(),
+            value: value.into(),
+            domain: "h.test".into(),
+            path: "/".into(),
+            secure: false,
+            http_only: false,
+            expires: None,
+            same_site: None,
+        };
+        let mut jar = CookieJar::new("h.test");
+        jar.add(make("bad", "abc\n"));
+        jar.add(make("good", "1"));
+        repo.save(&jar).expect("save");
+        let store = RepoCookieStore::new(Arc::clone(&repo) as Arc<dyn CookieRepository>);
+        let url = reqwest::Url::parse("http://h.test/a").expect("url");
+        let header = store.cookies(&url).expect("a header");
+        assert_eq!(header.to_str().expect("text"), "good=1");
     }
 }

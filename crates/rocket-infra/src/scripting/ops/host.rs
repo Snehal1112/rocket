@@ -88,8 +88,7 @@ pub async fn op_rok_send_request(
 }
 
 /// rok.cookies and rok.cookies.jar() — one cookie call through the host. Takes a
-/// `HostCookieOp` as JSON and returns `{"cookies": [..]}`, `{"count": n}` or
-/// `{"done": true}`. Errors never carry cookie values.
+/// `HostCookieOp` as JSON and returns `{"cookies": [..]}` or `{"done": true}`. Errors never carry cookie values.
 #[op2]
 #[string]
 pub async fn op_rok_cookies(
@@ -113,7 +112,6 @@ pub async fn op_rok_cookies(
             serde_json::to_string(&serde_json::json!({ "cookies": cookies }))
                 .map_err(|e| ScriptHostError(format!("{API}: {e}")))
         }
-        Ok(HostCookieResult::Count(count)) => Ok(serde_json::json!({ "count": count }).to_string()),
         Ok(HostCookieResult::Done) => Ok(serde_json::json!({ "done": true }).to_string()),
         Err(error) => Err(host_error(&state, API, error)),
     }

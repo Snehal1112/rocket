@@ -4642,7 +4642,7 @@ mod cookie_tests {
     async fn cookie_values_with_special_characters_survive() {
         let host = FakeCookieHost::new();
         let code = r#"
-            const v = 'ev;il="x y"=é';
+            const v = 'ev=il "x y" é';
             await rok.cookies.upsert('s', v);
             console.log(rok.cookies.get('s') === v, rok.cookies.toObject().s === v);
         "#;
@@ -4656,16 +4656,41 @@ mod cookie_tests {
             console.log(rok.cookies.count(), rok.cookies.toString() === '');
             try { await rok.cookies.add('a', '1'); } catch (e) { console.log(e.message); }
             try { await rok.cookies.jar().getCookies('https://x.test'); } catch (e) { console.log(e.message); }
+            const jar = rok.cookies.jar();
+            for (const call of [
+                () => jar.getCookies(''),
+                () => jar.getCookie('https://x.test', ''),
+                () => jar.hasCookie(5, ''),
+                () => jar.setCookie('https://x.test', { value: '1' }),
+                () => jar.setCookies('https://x.test', 'nope'),
+                () => jar.deleteCookie('', ''),
+                () => jar.deleteCookies(''),
+            ]) {
+                try { await call(); } catch (e) { console.log(e.message); }
+            }
         "#;
         let out = run(ctx_with(code, vec![]), None).await;
-        assert_eq!(
-            out,
-            vec![
-                "0 true",
-                "rok.cookies is not available here",
-                "rok.cookies is not available here"
-            ]
-        );
+        let mut expected = vec!["0 true"];
+        expected.extend(std::iter::repeat("rok.cookies is not available here").take(9));
+        assert_eq!(out, expected);
+    }
+
+    #[tokio::test]
+    async fn a_fractional_max_age_is_truncated_and_a_non_finite_one_rejects() {
+        let host = FakeCookieHost::new();
+        let code = r#"
+            await rok.cookies.upsert('s', '1', { maxAge: 5400.5 });
+            try { await rok.cookies.upsert('t', '1', { maxAge: Infinity }); } catch (e) { console.log(e.message); }
+        "#;
+        let out = run(ctx_with(code, vec![]), Some(&host)).await;
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("maxAge must be a finite number"), "{out:?}");
+        let ops = host.ops();
+        assert_eq!(ops.len(), 1, "{ops:?}");
+        match &ops[0] {
+            HostCookieOp::Upsert { cookie, .. } => assert_eq!(cookie.max_age, Some(5400)),
+            other => panic!("unexpected op {other:?}"),
+        }
     }
 
     /// Host that counts how many cookie calls run at once.

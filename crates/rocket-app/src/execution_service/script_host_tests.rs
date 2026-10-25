@@ -1231,3 +1231,37 @@ async fn nested_run_request_sees_cookies_set_by_the_caller() {
         console(&out)
     );
 }
+
+#[tokio::test]
+async fn a_cookie_with_a_newline_is_rejected_and_the_good_cookie_is_still_sent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = server_with_main().await;
+    Mock::given(method("GET"))
+        .and(path("/second"))
+        .and(header("cookie", "good=1"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let script = format!(
+        "await rok.cookies.upsert('good', '1'); \
+         try {{ await rok.cookies.upsert('t', 'abc\\n'); console.log('no error'); }} \
+         catch (e) {{ console.log('caught', e.message); }} \
+         const r = await rok.sendRequest({{ url: '{}/second' }}); \
+         console.log('status', r.status);",
+        server.uri()
+    );
+    let out = svc
+        .execute(cookie_input(&server, &script, ""))
+        .await
+        .expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    let lines = console(&out);
+    let caught = lines
+        .iter()
+        .find(|l| l.starts_with("caught"))
+        .unwrap_or_else(|| panic!("no caught line: {lines:?}"));
+    assert!(!caught.contains("abc"), "{caught}");
+    assert!(lines.iter().any(|l| l == "status 200"), "{lines:?}");
+    assert_eq!(jar_pairs(dir.path()), vec!["good=1".to_string()]);
+}

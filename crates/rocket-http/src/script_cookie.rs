@@ -96,6 +96,14 @@ fn invalid(message: &str) -> DomainError {
     DomainError::InvalidInput(message.to_string())
 }
 
+/// The most bytes a cookie name and value may use together.
+const MAX_NAME_VALUE_BYTES: usize = 4096;
+
+/// True for a character of an RFC 7230 token: visible ASCII except separators.
+fn is_token_char(c: char) -> bool {
+    c.is_ascii_graphic() && !"\"(),/:;<=>?@[\\]{}".contains(c)
+}
+
 /// Builds the cookie a script asked for, scoped to `scope`.
 ///
 /// Without a `domain` the cookie is host-only on the URL host. A `domain` must cover the host.
@@ -108,6 +116,19 @@ pub fn build_cookie(
     let name = input.key.trim();
     if name.is_empty() {
         return Err(invalid("The cookie key cannot be empty"));
+    }
+    if !name.chars().all(is_token_char) {
+        return Err(invalid(
+            "The cookie key has a character that is not allowed",
+        ));
+    }
+    if input.value.chars().any(|c| c.is_control() || c == ';') {
+        return Err(invalid(
+            "The cookie value cannot contain a control character or a semicolon",
+        ));
+    }
+    if name.len() + input.value.len() > MAX_NAME_VALUE_BYTES {
+        return Err(invalid("The cookie key and value are too long"));
     }
     let host_prefixed = name.starts_with("__Host-");
     let is_ip = scope.host.parse::<IpAddr>().is_ok();
@@ -189,6 +210,90 @@ pub fn build_cookie(
 /// The unexpired cookies that match `scope`, longest path first.
 pub fn matching_cookies(jars: &[CookieJar], scope: &UrlScope, now: DateTime<Utc>) -> Vec<Cookie> {
     cookies_for_request(jars, &scope.host, &scope.path, scope.https, now)
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn now() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 10, 5, 12, 0, 0)
+            .single()
+            .expect("valid date")
+    }
+
+    fn scope() -> UrlScope {
+        UrlScope::parse("https://api.example.com/v1/items").expect("scope")
+    }
+
+    fn build(key: &str, value: &str) -> DomainResult<Cookie> {
+        let input = CookieInput {
+            key: key.into(),
+            value: value.into(),
+            ..Default::default()
+        };
+        build_cookie(&scope(), &input, now())
+    }
+
+    fn rejected(key: &str, value: &str) {
+        match build(key, value) {
+            Err(DomainError::InvalidInput(_)) => {}
+            other => panic!("expected InvalidInput for {key:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn value_rejects_control_characters_and_semicolon() {
+        for bad in [
+            "a\rb",
+            "a\nb",
+            "a\0b",
+            "a\x7fb",
+            "a\tb",
+            "abc\n",
+            "x; admin=1",
+        ] {
+            rejected("sid", bad);
+        }
+    }
+
+    #[test]
+    fn value_keeps_equals_space_quotes_and_non_ascii() {
+        let c = build("sid", "a=b \"c\" caf\u{e9}").expect("cookie");
+        assert_eq!(c.value, "a=b \"c\" caf\u{e9}");
+    }
+
+    #[test]
+    fn name_must_be_a_token() {
+        for bad in [
+            "a=b", "a;b", "a b", "a\nb", "a\tb", "a,b", "a(b", "a\"b", "a/b", "a[b", "a{b",
+            "a\x7fb",
+        ] {
+            rejected(bad, "1");
+        }
+        assert!(build("ok-name_1.x", "1").is_ok());
+    }
+
+    #[test]
+    fn name_plus_value_is_capped_at_4096_bytes() {
+        assert!(build("n", &"v".repeat(4095)).is_ok());
+        rejected("n", &"v".repeat(4096));
+    }
+
+    #[test]
+    fn errors_do_not_contain_the_value_or_an_invalid_name() {
+        let e = build("sid", "s3cr3t-token\n")
+            .expect_err("rejected")
+            .to_string();
+        assert!(!e.contains("s3cr3t"), "{e}");
+        let e = build("bad;name", "1").expect_err("rejected").to_string();
+        assert!(!e.contains("bad;name"), "{e}");
+        let e = build("n", &"s3cr3t".repeat(1000))
+            .expect_err("rejected")
+            .to_string();
+        assert!(!e.contains("s3cr3t"), "{e}");
+    }
 }
 
 #[cfg(test)]

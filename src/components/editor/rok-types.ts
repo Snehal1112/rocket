@@ -538,7 +538,7 @@ interface CookieEntry {
   httpOnly: boolean;
   /** RFC 3339 expiry time, or null for a session cookie. */
   expires: string | null;
-  /** Seconds until expiry, derived on read. Null for a session cookie. */
+  /** Seconds until expiry, derived on read. Null for a session cookie and for an expired one. */
   maxAge: number | null;
   sameSite: 'Strict' | 'Lax' | 'None' | null;
 }
@@ -553,7 +553,7 @@ interface CookieInput {
   httpOnly?: boolean;
   /** RFC 3339 time or a Date. A time in the past stores an already-expired cookie; use remove to delete. */
   expires?: string | Date;
-  /** Seconds. Zero or negative rejects. */
+  /** Seconds, whole numbers (a fraction is cut off). Zero or negative rejects. */
   maxAge?: number;
   /** Strict, Lax or None, case-insensitive. */
   sameSite?: string;
