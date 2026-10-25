@@ -43,7 +43,6 @@ mod folder_var_script_tests;
 pub(crate) mod run_request;
 pub(crate) mod script_chain;
 // The script host calls this service from the next plan.
-#[allow(dead_code)]
 pub(crate) mod script_cookies;
 pub(crate) mod script_host;
 #[cfg(test)]
@@ -450,8 +449,7 @@ pub struct RequestExecutionService {
     executor: Arc<dyn HttpExecutor>,
     history_repo: Box<dyn HistoryRepository>,
     collection_repo: Box<dyn CollectionRepository>,
-    // Reserved for automatic cookie persistence in future requests.
-    #[allow(dead_code)]
+    /// The cookie jars `rok.cookies` reads and writes.
     cookie_repo: Box<dyn CookieRepository>,
     events: Box<dyn EventPublisher>,
     audit: Arc<dyn SecurityAuditPublisher>,
@@ -563,7 +561,6 @@ impl RequestExecutionService {
     }
 
     /// The lock every cookie jar writer takes.
-    #[allow(dead_code)]
     pub(crate) fn cookie_lock(&self) -> &rocket_http::CookieJarLock {
         &self.cookie_lock
     }
@@ -1768,7 +1765,7 @@ impl RequestExecutionService {
     async fn run_script_phase(
         &self,
         script: &ChainedScript,
-        ctx: ScriptContext,
+        mut ctx: ScriptContext,
         host: &dyn ScriptHost,
         request_name: &str,
         phase: &str,
@@ -1778,6 +1775,23 @@ impl RequestExecutionService {
             Some(e) => e,
             None => return ScriptResult::default(),
         };
+        // A URL that does not parse, such as an unresolved template, gets no snapshot.
+        let url = ctx.request.url.clone();
+        if let Ok(scope) = rocket_http::UrlScope::parse(&url) {
+            let now = chrono::Utc::now();
+            let found = script_cookies::ScriptCookies::new(
+                self.cookie_repo.as_ref(),
+                &self.cookie_lock,
+            )
+            .find(&scope, now);
+            match found {
+                Ok(list) => {
+                    let entries = list.iter().map(|c| rocket_http::to_entry(c, now)).collect();
+                    ctx = ctx.with_cookies(url, entries);
+                }
+                Err(e) => tracing::warn!("could not read the cookies for a script: {e}"),
+            }
+        }
         // The engine does not mask uncaught error text, so mask it here.
         let secrets = ctx.variables.secret_values.clone();
         match engine.execute_with_host(ctx, host).await {

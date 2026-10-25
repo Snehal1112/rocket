@@ -10,15 +10,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rocket_http::{HttpRequest, HttpResponse, RequestOptions};
+use rocket_http::{to_entry, HttpRequest, HttpResponse, RequestOptions, UrlScope};
 use rocket_scripting::{
-    HostError, HostRequest, HostResponse, HostRunOutcome, HostRunRequest, HostScopes, ScriptHost,
+    HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
+    HostRunRequest, HostScopes, ScriptHost,
 };
 use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 
 use super::run_request::{
     check_run_chain, find_run_target, normalize_run_path, runtime_changes, RunTarget,
 };
+use super::script_cookies::ScriptCookies;
 use super::{
     body_mode_from_content_type, ExecuteRequestInput, RequestExecutionService, UnresolvedAlias,
 };
@@ -218,6 +220,46 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             scopes: Some(scopes),
             scopes_before: Some(before),
         })
+    }
+
+    async fn cookies(&self, op: HostCookieOp) -> Result<HostCookieResult, HostError> {
+        let cookies = ScriptCookies::new(self.svc.cookie_repo.as_ref(), self.svc.cookie_lock());
+        let failed = |e: rocket_shared::error::DomainError| HostError::Failed(e.to_string());
+        let scope = |url: &str| UrlScope::parse(url).map_err(failed);
+        let now = chrono::Utc::now();
+        // Write replies carry the fresh list, so the script's snapshot stays right.
+        let fresh = |scope: &UrlScope| -> Result<HostCookieResult, HostError> {
+            let list = cookies.find(scope, chrono::Utc::now()).map_err(failed)?;
+            Ok(HostCookieResult::Cookies(
+                list.iter()
+                    .map(|c| to_entry(c, chrono::Utc::now()))
+                    .collect(),
+            ))
+        };
+        match op {
+            HostCookieOp::Find { url } => fresh(&scope(&url)?),
+            // A past `expires` is stored as an already-expired cookie that never
+            // matches. It does not delete an existing cookie.
+            HostCookieOp::Upsert { url, cookie } => {
+                let scope = scope(&url)?;
+                cookies.upsert(&scope, &cookie, now).map_err(failed)?;
+                fresh(&scope)
+            }
+            HostCookieOp::Remove { url, name } => {
+                let scope = scope(&url)?;
+                cookies.remove(&scope, &name, now).map_err(failed)?;
+                fresh(&scope)
+            }
+            HostCookieOp::ClearUrl { url } => {
+                let scope = scope(&url)?;
+                cookies.clear_for_url(&scope, now).map_err(failed)?;
+                fresh(&scope)
+            }
+            HostCookieOp::ClearAll => {
+                cookies.clear_all().map_err(failed)?;
+                Ok(HostCookieResult::Done)
+            }
+        }
     }
 }
 

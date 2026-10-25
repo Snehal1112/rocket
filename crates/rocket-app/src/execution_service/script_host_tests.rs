@@ -972,3 +972,262 @@ async fn run_request_inherits_failed_aliases_two_levels_deep() {
         urls(&executor)
     );
 }
+
+// ── rok.cookies against a real jar ───────────────────────────────────────────
+
+use rocket_http::{CookieJarLock, CookieRepository};
+
+/// A service whose executor, service and test share one jar folder and one jar lock.
+fn cookie_service(dir: &std::path::Path, collection: Collection) -> RequestExecutionService {
+    let lock = CookieJarLock::default();
+    let repo: Arc<dyn CookieRepository> =
+        Arc::new(rocket_infra::FsCookieRepo::new(dir.to_path_buf()));
+    let executor =
+        rocket_infra::ReqwestExecutor::new().with_cookie_repo_and_lock(repo, lock.clone());
+    RequestExecutionService::new(
+        Box::new(NullEnvRepo),
+        Arc::new(executor),
+        Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+            collection,
+        ))),
+        Box::new(rocket_infra::FsCookieRepo::new(dir.to_path_buf())),
+        Box::new(NullEventPublisher),
+        Box::new(EmptySecretManagerRepo),
+        Arc::new(rocket_environment::NullSecretStore),
+        Arc::new(rocket_environment::NullVaultSecretFetcher),
+    )
+    .with_cookie_lock(lock)
+    .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
+}
+
+/// Every cookie in the jars under `dir`, as sorted `name=value` texts.
+fn jar_pairs(dir: &std::path::Path) -> Vec<String> {
+    let mut pairs: Vec<String> = rocket_infra::FsCookieRepo::new(dir.to_path_buf())
+        .get_all()
+        .expect("read jars")
+        .into_iter()
+        .flat_map(|j| j.cookies)
+        .map(|c| format!("{}={}", c.name, c.value))
+        .collect();
+    pairs.sort();
+    pairs
+}
+
+/// A GET send of `<server>/main` with `pre` and `post` scripts.
+fn cookie_input(server: &MockServer, pre: &str, post: &str) -> ExecuteRequestInput {
+    let mut req = input(&format!("{}/main", server.uri()));
+    req.method = HttpMethod::Get;
+    if !pre.is_empty() {
+        req.pre_request_script = Some(pre.to_string());
+    }
+    if !post.is_empty() {
+        req.post_response_script = Some(post.to_string());
+    }
+    req
+}
+
+#[tokio::test]
+async fn pre_request_script_cookie_is_sent_with_the_request() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/main"))
+        .and(header("cookie", "sid=abc"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let req = cookie_input(&server, "await rok.cookies.upsert('sid', 'abc');", "");
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(out.response.status, 200);
+}
+
+#[tokio::test]
+async fn set_cookie_from_the_response_is_visible_to_the_post_response_script() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/main"))
+        .respond_with(ResponseTemplate::new(200).insert_header("Set-Cookie", "tok=xyz; Path=/"))
+        .mount(&server)
+        .await;
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let req = cookie_input(&server, "", "console.log('tok', rok.cookies.get('tok'));");
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(
+        console(&out).iter().any(|l| l == "tok xyz"),
+        "{:?}",
+        console(&out)
+    );
+}
+
+#[tokio::test]
+async fn jar_reads_and_writes_cross_domains() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = server_with_main().await;
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let req = cookie_input(
+        &server,
+        "const jar = rok.cookies.jar(); \
+         await jar.setCookie('https://other.test/', 'k', 'v'); \
+         const c = await jar.getCookie('https://other.test/', 'k'); \
+         console.log('got', c.key, c.value, c.domain); \
+         console.log('own', rok.cookies.count());",
+        "",
+    );
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    let lines = console(&out);
+    assert!(lines.iter().any(|l| l == "got k v other.test"), "{lines:?}");
+    assert!(lines.iter().any(|l| l == "own 0"), "{lines:?}");
+    assert_eq!(jar_pairs(dir.path()), vec!["k=v".to_string()]);
+}
+
+#[tokio::test]
+async fn jar_clear_empties_the_whole_jar() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = server_with_main().await;
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let req = cookie_input(
+        &server,
+        "const jar = rok.cookies.jar(); \
+         await jar.setCookie('https://a.test/', 'a', '1'); \
+         await jar.setCookie('https://b.test/', 'b', '2'); \
+         await rok.cookies.upsert('c', '3'); \
+         await jar.clear(); \
+         console.log('left', rok.cookies.count());",
+        "",
+    );
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(
+        console(&out).iter().any(|l| l == "left 0"),
+        "{:?}",
+        console(&out)
+    );
+    assert!(jar_pairs(dir.path()).is_empty());
+}
+
+#[tokio::test]
+async fn host_cookie_error_does_not_leak_the_value() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = server_with_main().await;
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let req = cookie_input(
+        &server,
+        "try { await rok.cookies.upsert('__Host-sid', 'topsecretvalue99', { domain: 'example.com' }); } \
+         catch (e) { console.log('caught', e.message); }",
+        "",
+    );
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    let lines = console(&out);
+    let caught = lines
+        .iter()
+        .find(|l| l.starts_with("caught"))
+        .expect("caught line");
+    assert!(caught.contains("__Host-"), "{caught}");
+    assert!(!caught.contains("topsecretvalue99"), "{caught}");
+    assert!(jar_pairs(dir.path()).is_empty());
+}
+
+#[tokio::test]
+async fn cookies_are_unavailable_in_a_flow_transform_node() {
+    use rocket_scripting::{ScriptContext, ScriptEngine};
+    let engine = rocket_infra::scripting::DenoScriptEngine::new();
+    let ctx = ScriptContext::before_request(
+        "try { await rok.cookies.upsert('a', 'b'); } catch (e) { console.log(e.message); }".into(),
+        Default::default(),
+        HttpRequest::new(HttpMethod::Get, "https://example.com"),
+        None,
+        String::new(),
+        vec![],
+        vec![],
+    );
+    let result = engine.execute(ctx).await.expect("execute");
+    let lines: Vec<String> = result
+        .console_entries
+        .into_iter()
+        .map(|e| e.message)
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "rok.cookies is not available here"),
+        "{lines:?} {:?}",
+        result.error
+    );
+}
+
+#[tokio::test]
+async fn concurrent_script_and_request_writes_keep_all_cookies() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = MockServer::start().await;
+    for p in ["/main", "/side"] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(ResponseTemplate::new(200).insert_header("Set-Cookie", "srv=1; Path=/"))
+            .mount(&server)
+            .await;
+    }
+    let svc = cookie_service(dir.path(), Collection::new("api"));
+    let req = cookie_input(
+        &server,
+        &format!(
+            "const jobs = []; \
+             for (let i = 0; i < 20; i++) jobs.push(rok.cookies.upsert('c' + i, String(i))); \
+             jobs.push(rok.sendRequest({{ url: '{}/side' }})); \
+             await Promise.all(jobs);",
+            server.uri()
+        ),
+        "",
+    );
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(
+        jar_pairs(dir.path()).len(),
+        21,
+        "{:?}",
+        jar_pairs(dir.path())
+    );
+}
+
+#[tokio::test]
+async fn nested_run_request_sees_cookies_set_by_the_caller() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/child"))
+        .and(header("cookie", "sid=abc"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/main"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let mut collection = Collection::new("api");
+    let mut child = Request::new("Child", HttpMethod::Get, format!("{}/child", server.uri()));
+    child.file_name = Some("child.yml".to_string());
+    collection.root.add_request(child);
+    let svc = cookie_service(dir.path(), collection);
+    let mut req = cookie_input(
+        &server,
+        "await rok.cookies.upsert('sid', 'abc'); \
+         const r = await rok.runRequest('child'); \
+         console.log('child', r.status);",
+        "",
+    );
+    req.collection = Some("api".into());
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(
+        console(&out).iter().any(|l| l == "child 200"),
+        "{:?}",
+        console(&out)
+    );
+}
