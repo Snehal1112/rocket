@@ -75,4 +75,14 @@ describe('SaveExampleDialog', () => {
     expect(screen.getByText('First note.')).toBeTruthy();
     expect(screen.getByText('Second note.')).toBeTruthy();
   });
+
+  it('renders_every_note_once', () => {
+    renderDialog({
+      snapshot: {
+        ...snapshot,
+        notes: ['Unsaved note.', 'Disabled note.', 'Secrets note.'],
+      },
+    });
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+  });
 });

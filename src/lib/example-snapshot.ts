@@ -11,6 +11,8 @@ export interface ExampleSnapshot {
 /** A response body above this many UTF-8 bytes is not stored. */
 const MAX_RESPONSE_BODY = 512 * 1024;
 
+const SECRET_HEADER = /authorization|cookie|token|secret|password|api[-_]?key/i;
+
 const TEXT_BODY_MODES: RequestState['body']['mode'][] = ['json', 'text', 'xml', 'sparql'];
 
 function pairs(rows: KeyValueEntry[]): { name: string; value: string }[] {
@@ -45,8 +47,23 @@ function responseBodyType(response: ResponseState): string {
 export function buildExampleSnapshot(
   request: RequestState,
   response: ResponseState,
+  options: { unsavedChanges?: boolean } = {},
 ): ExampleSnapshot {
   const notes: string[] = [];
+  if (options.unsavedChanges) {
+    notes.push(
+      'The request has unsaved changes. The example uses them, and the request file is not saved.',
+    );
+  }
+  const skipped = [...request.queryParams, ...request.pathParams, ...request.headers].some(
+    (r) => !r.enabled,
+  );
+  if (skipped) notes.push('Disabled params and headers are not saved.');
+  // Only saved headers count: enabled request headers and all response headers.
+  const savedHeaders = [...request.headers.filter((h) => h.enabled), ...response.headers];
+  if (savedHeaders.some((h) => SECRET_HEADER.test(h.key))) {
+    notes.push('Secrets in headers and cookies are saved as written. Git commits mask them.');
+  }
 
   // The URL keeps its query string, as the saved request does.
   const params: NonNullable<ExampleRequestSnapshot['params']> = [

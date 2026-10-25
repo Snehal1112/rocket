@@ -295,8 +295,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   // The example snapshot is built from the request as it is now, edits included.
   const exampleSnapshot = useMemo(
-    () => (response ? buildExampleSnapshot(request, response) : null),
-    [request, response],
+    () =>
+      response ? buildExampleSnapshot(request, response, { unsavedChanges: tab.isDirty }) : null,
+    [request, response, tab.isDirty],
   );
   const disabledReason = saveExampleDisabledReason(tab, request, response);
 

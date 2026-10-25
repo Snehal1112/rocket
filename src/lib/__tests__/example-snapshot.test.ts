@@ -173,3 +173,92 @@ describe('saveExampleDisabledReason', () => {
     expect(saveExampleDisabledReason({ source }, request(), response())).toBeNull();
   });
 });
+
+describe('buildExampleSnapshot notes', () => {
+  const UNSAVED =
+    'The request has unsaved changes. The example uses them, and the request file is not saved.';
+  const DISABLED = 'Disabled params and headers are not saved.';
+  const SECRETS = 'Secrets in headers and cookies are saved as written. Git commits mask them.';
+
+  it('warns_about_unsaved_changes', () => {
+    expect(buildExampleSnapshot(request(), response(), { unsavedChanges: true }).notes).toEqual([
+      UNSAVED,
+    ]);
+    expect(buildExampleSnapshot(request(), response()).notes).toEqual([]);
+    expect(buildExampleSnapshot(request(), response(), { unsavedChanges: false }).notes).toEqual(
+      [],
+    );
+  });
+
+  it('notes_skipped_disabled_rows', () => {
+    const notes = (extra: Partial<RequestState>) =>
+      buildExampleSnapshot(request(extra), response()).notes;
+    expect(notes({ headers: [row('X-Off', '1', false)] })).toEqual([DISABLED]);
+    expect(notes({ queryParams: [row('q', '1', false)] })).toEqual([DISABLED]);
+    expect(notes({ pathParams: [row('id', '1', false)] })).toEqual([DISABLED]);
+    expect(notes({ headers: [row('X-On', '1')], queryParams: [row('q', '1')] })).toEqual([]);
+  });
+
+  it('notes_secret_looking_headers', () => {
+    const reqNotes = (name: string) =>
+      buildExampleSnapshot(request({ headers: [row(name, 'v')] }), response()).notes;
+    expect(reqNotes('X-Trace')).toEqual([]);
+    for (const name of ['Authorization', 'x-api-key', 'X-API-KEY', 'Cookie', 'COOKIE']) {
+      expect(reqNotes(name)).toEqual([SECRETS]);
+    }
+    const resp = buildExampleSnapshot(
+      request(),
+      response({ headers: [row('Set-Cookie', 'a=1')] }),
+    );
+    expect(resp.notes).toEqual([SECRETS]);
+    const both = buildExampleSnapshot(
+      request({ headers: [row('Cookie', 'a=1')] }),
+      response({ headers: [row('set-cookie', 'a=1')] }),
+    );
+    expect(both.notes).toEqual([SECRETS]);
+  });
+
+  it('ignores_secret_names_in_disabled_request_headers', () => {
+    const snap = buildExampleSnapshot(
+      request({ headers: [row('Authorization', 'x', false)] }),
+      response(),
+    );
+    expect(snap.notes).toEqual([DISABLED]);
+  });
+
+  it('a_dirty_option_alone_still_builds_the_same_request', () => {
+    const req = request({ url: '/a', headers: [row('X-On', '1')] });
+    const plain = buildExampleSnapshot(req, response());
+    const dirty = buildExampleSnapshot(req, response(), { unsavedChanges: true });
+    expect(dirty.request).toEqual(plain.request);
+    expect(dirty.response).toEqual(plain.response);
+  });
+
+  it('only_disabled_rows_still_builds_the_snapshot', () => {
+    const snap = buildExampleSnapshot(
+      request({ url: '/a', headers: [row('X-Off', '1', false)] }),
+      response(),
+    );
+    expect(snap.notes).toEqual([DISABLED]);
+    expect(snap.request.url).toBe('/a');
+    expect(snap.request.headers).toEqual([]);
+  });
+
+  it('all_notes_come_once_in_a_stable_order', () => {
+    const snap = buildExampleSnapshot(
+      request({
+        headers: [row('Authorization', 'x'), row('X-Off', '1', false)],
+        body: { mode: 'binary', content: '', formData: [] },
+      }),
+      response({ headers: [row('Set-Cookie', 'a=1')], isBinary: true }),
+      { unsavedChanges: true },
+    );
+    expect(snap.notes).toEqual([
+      UNSAVED,
+      DISABLED,
+      SECRETS,
+      'The request body is not saved because form-data and binary bodies are not supported.',
+      'The response body is not saved because it is binary or larger than 512 KB.',
+    ]);
+  });
+});
